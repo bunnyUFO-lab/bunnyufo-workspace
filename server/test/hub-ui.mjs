@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { solidPng } from '../../site/api/test/png.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -653,6 +654,63 @@ try {
     await talk.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]').value.includes('hello from the fake mic'));
     assert.equal(await talk.locator('.hub-bubble.user').count(), 0, 'The text is not sent by itself.');
 
+    step('chat pictures: attach, remove, attach again, send; Hermes sees an image part and the bubble shows the picture');
+    await go(talk, '#/~hub/chat');
+    await talk.locator('textarea[aria-label="Message"]').fill('');
+    const attach = talk.locator('.hub-attach');
+    await attach.waitFor();
+    assert.equal(await attach.getAttribute('aria-label'), 'Attach pictures');
+    const sendButton = talk.locator('.hub-compose button:has-text("Send")');
+    assert.equal(await sendButton.isDisabled(), true, 'Nothing to send yet.');
+    const probe = { name: 'probe.png', mimeType: 'image/png', buffer: solidPng(60, 40) };
+    await talk.locator('[data-attach-input]').setInputFiles(probe);
+    await talk.locator('.hub-tray-item img').waitFor();
+    assert.equal(await sendButton.isDisabled(), false, 'A picture alone can be sent.');
+    await talk.locator('button[aria-label="Remove picture 1"]').click();
+    assert.equal(await talk.locator('.hub-tray-item').count(), 0);
+    assert.equal(await sendButton.isDisabled(), true);
+    await talk.locator('[data-attach-input]').setInputFiles(probe);
+    await talk.locator('.hub-tray-item img').waitFor();
+    await sendButton.click();
+    await talk.locator('.hub-bubble.assistant', { hasText: 'Hello there' }).waitFor();
+    const seen = chatFixture.hermes.requests.at(-1).messages.at(-1).content;
+    assert.ok(Array.isArray(seen) && seen.some(part => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,')), 'Hermes saw an image part.');
+    await talk.locator('.hub-bubble.user img').waitFor();
+    assert.ok(await talk.locator('.hub-bubble.user img').first().evaluate(image => image.complete && image.naturalWidth > 0), 'The bubble shows the picture.');
+    assert.equal(await talk.locator('.hub-tray-item').count(), 0, 'The tray is empty after sending.');
+
+    step('chat pictures: pasting a picture into the message box puts it in the tray');
+    await go(talk, '#/~hub/chat');
+    await talk.locator('textarea[aria-label="Message"]').waitFor();
+    await talk.evaluate(async base64 => {
+      const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
+      document.querySelector('textarea[aria-label="Message"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+    }, solidPng(30, 30).toString('base64'));
+    await talk.locator('.hub-tray-item img').waitFor();
+
+    step('chat pictures: Hermes refusing them shows the error and puts the text and the thumbnail back');
+    const refusing = await startHubFixture({ hermes: true, hermesOptions: { refuseImages: true } });
+    try {
+      const refused = await context.newPage();
+      refused.setDefaultTimeout(15000);
+      refused.on('pageerror', error => { throw error; });
+      await refused.goto(refusing.url);
+      await refused.locator('[data-hub-link="chat"]').click();
+      await refused.locator('textarea[aria-label="Message"]').fill('what is this?');
+      await refused.locator('[data-attach-input]').setInputFiles(probe);
+      await refused.locator('.hub-tray-item img').waitFor();
+      await refused.locator('.hub-compose button:has-text("Send")').click();
+      await refused.locator('.hub-error', { hasText: 'Hermes could not take the picture' }).waitFor();
+      assert.equal(await refused.locator('textarea[aria-label="Message"]').inputValue(), 'what is this?');
+      assert.equal(await refused.locator('.hub-tray-item img').count(), 1, 'The thumbnail is back.');
+      assert.equal([...refusing.fake.objects.keys()].filter(key => key.includes('/chat/')).length, 0, 'Nothing was saved.');
+      await refused.close();
+    } finally {
+      await refusing.close();
+    }
+
     step('chat at phone width: the drawer opens and the message box and microphone fit');
     const small = await micBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, permissions: ['microphone'] });
     const phoneChat = await small.newPage();
@@ -672,6 +730,19 @@ try {
       assert.ok(where && where.x >= 0 && where.x + where.width <= 390 && where.y + where.height <= 844, `${selector} fits on screen.`);
     }
     await noSideways(phoneChat, 'Chat');
+    step('chat pictures at phone width: the compose row fits, buttons are 44 px, the tray wraps and holds four');
+    await phoneChat.locator('[data-attach-input]').setInputFiles([1, 2, 3, 4, 5].map(n => ({ name: `p${n}.png`, mimeType: 'image/png', buffer: solidPng(50 + n, 40) })));
+    await phoneChat.locator('.hub-tray-item').nth(3).waitFor();
+    await phoneChat.locator('.hub-tray-note', { hasText: 'at most 4' }).waitFor();
+    assert.equal(await phoneChat.locator('.hub-tray-item').count(), 4, 'A fifth picture is refused.');
+    for (const selector of ['.hub-attach', '.hub-tray-remove']) {
+      const where = await phoneChat.locator(selector).first().boundingBox();
+      assert.ok(where.width >= 44 && where.height >= 44, `${selector} is at least 44 px.`);
+    }
+    const row = await Promise.all(['.hub-attach', 'textarea[aria-label="Message"]', '.hub-mic', '.hub-compose .hub-btn'].map(selector => phoneChat.locator(selector).boundingBox()));
+    for (const where of row) assert.ok(where && where.x >= 0 && where.x + where.width <= 390, 'The compose row fits.');
+    assert.ok(row.every((where, at) => at === 0 || where.x >= row[at - 1].x + row[at - 1].width - 1), 'The row is in order, attach first.');
+    await noSideways(phoneChat, 'Chat with pictures');
     await small.close();
     await context.close();
   } finally {

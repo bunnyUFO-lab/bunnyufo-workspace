@@ -204,5 +204,6 @@ export const sessionUrl = (value: string | undefined): string | undefined => (va
 /** The desktop app's link to a session, and nothing else that starts with claude://. */
 export const appUrl = (value: string | undefined): string | undefined => (value && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(value) ? value : undefined)
 
-export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[] }
+export interface ChatImage { file: string; type: string; width: number; height: number }
+export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[]; images?: ChatImage[] }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number }
