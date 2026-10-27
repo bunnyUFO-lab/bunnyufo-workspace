@@ -367,3 +367,19 @@ test('end to end: a click through the real site API puts answer.json in the buck
     await fake.close();
   }
 });
+
+test('the compose file mounts the env file and nothing more of the site folder, so the bot cannot read api.env', async () => {
+  const compose = await readFile(fileURLToPath(new URL('../docker-compose.yml', import.meta.url)), 'utf8');
+  const lines = compose.split(/\r?\n/).filter(line => !line.trim().startsWith('#'));
+  const start = lines.findIndex(line => /^\s{4}volumes:\s*$/.test(line));
+  assert.ok(start >= 0, 'The service lists its volumes.');
+  const mounts = [];
+  for (const line of lines.slice(start + 1)) {
+    const item = /^\s{6}-\s+(\S+)\s*$/.exec(line);
+    if (!item) break;
+    mounts.push(item[1]);
+  }
+  assert.deepEqual(mounts, ['./:/app:ro', '${BUW_DOCS_ROOT:-/srv/buw-docs}/_app/asks-bot.env:/run/asks-bot.env:ro', 'asks-bot-state:/state']);
+  assert.match(compose, /BUW_ENV_FILE: \/run\/asks-bot\.env\s*$/m);
+  assert.ok(!/BUW_DOCS_ROOT:-\/srv\/buw-docs\}:/.test(compose.split('\n').filter(line => !line.trim().startsWith('#')).join('\n')), 'No mount of the whole site folder.');
+});

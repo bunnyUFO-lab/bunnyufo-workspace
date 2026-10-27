@@ -5,7 +5,10 @@
 # `docker compose up -d` here. The bot calls the site API on the Docker network and publishes no port.
 #
 # Its settings live one folder up, in $BUW_DOCS_ROOT/_app/asks-bot.env (root only, outside everything the
-# deploy rsyncs). Never in this repo:
+# deploy rsyncs), and that one file is all of the site folder the container sees: it is mounted at
+# /run/asks-bot.env, read-only. The site folder also holds api.env with the bucket keys, which the bot must
+# never be able to read. (A single-file mount follows the file it was made from: the deploy recreates the
+# container, so a rewritten env file is picked up by the next deploy.) Never in this repo:
 #   DISCORD_TOKEN=…   the bot token of the "Workspace Asks" application
 #   HUB_TOKEN=…       the narrow token (site/asks-bot/new-token.mjs); the API holds only its sha256
 #   OWNER_ID=…        the owner's Discord user id
@@ -20,13 +23,13 @@ services:
     working_dir: /app
     command: ["node", "main.mjs"]
     environment:
-      BUW_ENV_FILE: ${BUW_DOCS_ROOT:-/srv/buw-docs}/_app/asks-bot.env
+      BUW_ENV_FILE: /run/asks-bot.env
       HUB_URL: http://buw-site-api:8099
       STATE_DIR: /state
     volumes:
       - ./:/app:ro
-      # Only for the env file.
-      - ${BUW_DOCS_ROOT:-/srv/buw-docs}:${BUW_DOCS_ROOT:-/srv/buw-docs}:ro
+      # Only this file, never the folder around it (api.env sits there).
+      - ${BUW_DOCS_ROOT:-/srv/buw-docs}/_app/asks-bot.env:/run/asks-bot.env:ro
       - asks-bot-state:/state
     networks: [buw-docs_default]
     read_only: true

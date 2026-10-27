@@ -10,6 +10,7 @@
 # The bot's settings are NOT deployed from here: they live in $BUW_DOCS_ROOT/_app/asks-bot.env (root only),
 # written by scripts/gamedev-tools/asks-bot-env.sh in the homelab repo. Without that file this refuses to start
 # the bot. The site API must already know the bot's token (HUB_DISCORD_TOKEN_SHA256 in api.env).
+# The compose file mounts only that one env file into the container, never the folder that holds api.env.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 

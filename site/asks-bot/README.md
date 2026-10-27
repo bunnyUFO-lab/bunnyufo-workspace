@@ -17,7 +17,7 @@ require a passkey stay in the web app. The trust model, the kill switches and wh
 
 ## Settings
 
-From `BUW_ENV_FILE` (KEY=VALUE lines) and the environment. There is no default for `HUB_URL` or `SITE_URL`;
+From `BUW_ENV_FILE` (KEY=VALUE lines; the compose file mounts only `_app/asks-bot.env`, at `/run/asks-bot.env`, so the container never sees `api.env`) and the environment. There is no default for `HUB_URL` or `SITE_URL`;
 the bot refuses to start without them. It never logs a token or a user id.
 
 | Key | |

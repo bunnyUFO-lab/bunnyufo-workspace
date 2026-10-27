@@ -330,7 +330,7 @@ container beside the site API and calls it over the Docker network. Nothing here
   back and the server reads `ask.json` fresh. If the Ask changed since the message was posted (a relabelled option, a
   `requirePasskey` set later) the answer is a 409 and nothing is written. `answer.json` stays create-only, so a
   double click, a replay or a race with the web app keeps the first answer.
-- The bot raises an alarm when an Ask is answered `via: "discord"` with an interaction id it did not send.
+- The bot raises an alarm when an Ask is answered `via: "discord"` with an interaction id it did not send. The alarm only covers Asks the bot posted: a stolen token answering an Ask the bot never posted raises none.
 
 **Which Asks qualify.** `discordEligible()` in `site/api/hub-model.mjs` is the only place the rule lives: 2 to 5
 options, each with a label of 1 to 80 characters and no picture, no drawing, and `requirePasskey` is not `true`.
