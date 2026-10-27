@@ -40,6 +40,7 @@ async function setup() {
     `hermes=${sha('tok-hermes')}:read=*;write=inbox|assistant`,
     `deploy=${sha('tok-deploy')}:read=inbox;write=inbox`,
     `cloud=${sha('tok-cloud')}:read=*;write=inbox`,
+    `deleter=${sha('tok-deleter')}:read=*;write=inbox;delete=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
   const call = async (method, rawPath, { token = 'tok-all', body, query, base64, headers = {} } = {}) => {
@@ -204,9 +205,45 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
       assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: file }] } })).status, 403, `${file} by upload URL`);
     }
     assert.equal(fake.text('sections/inbox/asks/x-1/answer.json'), null);
-    assert.equal((await put('tok-cloud', 'asks/x-1/ask.json')).status, 200, 'Asks themselves are written by agents.');
+    assert.equal((await call('PUT', '/sections/inbox/files/asks/x-1/ask.json', { token: 'tok-cloud', body: Buffer.from('{}'), base64: true, headers: { 'If-None-Match': '*' } })).status, 200, 'Asks themselves are created by agents.');
     assert.equal((await put('tok-cloud', 'asks/x-1/pickup.json')).status, 200);
     assert.equal((await put('tok-all', 'asks/x-1/answer.json')).status, 200, 'The passphrase may.');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: ask.json is create-only for a limited token, and a limited deleter keeps off the Hub files', async () => {
+  const { fake, call } = await setup();
+  try {
+    const url = '/sections/inbox/files/asks/x-2/ask.json';
+    const put = (token, headers, text = '{"n":1}') => call('PUT', url, { token, body: Buffer.from(text), base64: true, headers });
+    assert.equal((await put('tok-cloud', {})).status, 403, 'No If-None-Match: refused.');
+    assert.equal((await put('tok-cloud', { 'If-Match': '"abc"' })).status, 403, 'If-Match is no way round it.');
+    assert.equal(fake.text('sections/inbox/asks/x-2/ask.json'), null);
+    assert.equal((await put('tok-cloud', { 'If-None-Match': '*' })).status, 200, 'The first put creates it.');
+    assert.equal((await put('tok-cloud', { 'If-None-Match': '*' }, '{"n":2}')).status, 412, 'A second put finds it there.');
+    assert.equal((await put('tok-hermes', {}, '{"n":3}')).status, 403);
+    assert.equal(fake.text('sections/inbox/asks/x-2/ask.json'), '{"n":1}');
+    const upload = await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: 'asks/x-2/ask.json' }] } });
+    assert.equal(upload.status, 403, 'A presigned URL cannot be create-only.');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: 'asks/x-2/option-a.png' }] } })).status, 200, 'Pictures still upload.');
+
+    // Deleting: a limited deleter may not remove asks, answers, snoozes or declines; anything else it may.
+    fake.seed('sections/inbox/asks/x-2/answer.json', '{}', 'application/json');
+    fake.seed('sections/inbox/events/e.json', '{}', 'application/json');
+    for (const file of ['asks/x-2/ask.json', 'asks/x-2/answer.json', 'asks/x-2/snooze.json', 'requests/r-2/declined.json']) {
+      assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-deleter' })).status, 403, file);
+    }
+    assert.ok(fake.text('sections/inbox/asks/x-2/ask.json') && fake.text('sections/inbox/asks/x-2/answer.json'));
+    assert.equal((await call('DELETE', '/sections/inbox/files/events/e.json', { token: 'tok-deleter' })).status, 200);
+
+    // The passphrase can still do all of it.
+    assert.equal((await put('tok-all', {}, '{"n":4}')).status, 200);
+    assert.equal(fake.text('sections/inbox/asks/x-2/ask.json'), '{"n":4}');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-all', body: { files: [{ path: 'asks/x-2/ask.json' }] } })).status, 200);
+    assert.equal((await call('DELETE', '/sections/inbox/files/asks/x-2/answer.json', { token: 'tok-all' })).status, 200);
+    assert.equal((await call('DELETE', url, { token: 'tok-all' })).status, 200);
   } finally {
     await fake.close();
   }

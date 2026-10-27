@@ -30,12 +30,15 @@ const entity = (id, title, steps) => ({
 });
 const many = entity('many-tabs', 'Many tabs', stepsOf(names));
 const few = entity('few-tabs', 'Few tabs', stepsOf(['One', 'Two', 'Three']));
+const long = entity('long-card', 'Long card', [{ name: 'Long page', path: '00.md' }]);
 const dir = path.join(base, 'ws');
 for (const card of [many, few]) {
   await mkdir(path.join(dir, card.folder), { recursive: true });
   for (const [i, step] of card.steps.entries()) await writeFile(path.join(dir, card.folder, step.path), `<h1>Tab ${String(i).padStart(2, '0')}</h1>`);
 }
-await writeFile(path.join(dir, 'workspace.json'), JSON.stringify({ entities: [many, few] }, null, 2));
+await mkdir(path.join(dir, long.folder), { recursive: true });
+await writeFile(path.join(dir, long.folder, '00.md'), Array.from({ length: 120 }, (_, i) => `Paragraph ${i} of a long page.`).join(String.fromCharCode(10, 10)));
+await writeFile(path.join(dir, 'workspace.json'), JSON.stringify({ entities: [many, few, long] }, null, 2));
 const repo = await mkdtemp(path.join(root, '.cache/tab-bar-ui-app-'));
 for (const d of ['workspace', 'inbox', 'projects']) await mkdir(path.join(repo, d), { recursive: true });
 await writeFile(path.join(repo, 'workspace/workspace.json'), JSON.stringify({ entities: [] }, null, 2));
@@ -191,7 +194,32 @@ try {
   await noSideways(page, '390 many');
   await phone2.close();
 
-  // 8.
+  // 8. A phone at the bottom of a long page: the header hides and shows with the scroll
+  // direction, and the page growing under it must not read as a scroll up (it would flip forever).
+  const reader = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  page = await reader.newPage();
+  page.setDefaultTimeout(10000);
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(service.urls.workspace + '#/long-card');
+  await page.locator('.markdown-reader').waitFor();
+  await page.waitForTimeout(500);
+  const scrollTo = y => page.evaluate(top => document.querySelector('.markdown-reader').scrollTo(0, top), y);
+  const max = () => page.evaluate(() => { const r = document.querySelector('.markdown-reader'); return r.scrollHeight - r.clientHeight; });
+  const hiddenNow = () => page.evaluate(() => document.documentElement.dataset.chromeHidden !== undefined);
+  // Read down to the bottom in flicks, up a little (the header shows), then down to the bottom again.
+  for (let y = 0; y < 6000; y += 150) { await scrollTo(y); await page.waitForTimeout(16); }
+  await page.waitForTimeout(300);
+  assert.equal(await hiddenNow(), true, 'reading down hides the header');
+  await scrollTo((await max()) - 40);
+  await page.waitForTimeout(300);
+  assert.equal(await hiddenNow(), false, 'a flick up shows the header');
+  for (let y = (await page.evaluate(() => document.querySelector('.markdown-reader').scrollTop)); y < 6000; y += 30) { await scrollTo(y); await page.waitForTimeout(16); }
+  const samples = [];
+  for (let i = 0; i < 40; i++) { samples.push(await page.evaluate(() => [document.documentElement.dataset.chromeHidden !== undefined, Math.round(document.querySelector('.topbar').getBoundingClientRect().top), Math.round(document.querySelector('.markdown-reader').scrollTop)].join())); await page.waitForTimeout(50); }
+  assert.equal(new Set(samples).size, 1, `the header and the scroll position hold still at the bottom (${[...new Set(samples)]})`);
+  await reader.close();
+
+  // 9.
   assert.deepEqual(errors, [], 'no page errors');
   console.log('tab-bar-ui: ok');
 } finally { await browser?.close(); await service.close(); }

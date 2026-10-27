@@ -1,0 +1,11 @@
+{
+  "name": "buw-asks-bot",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sends each simple Ask to the owner as a Discord DM with one button per option.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "discord.js": "14.27.0"
+  }
+}

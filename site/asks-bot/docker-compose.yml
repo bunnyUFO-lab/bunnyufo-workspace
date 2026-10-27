@@ -1,0 +1,45 @@
+# The Workspace Asks bot: DMs each simple Ask to the owner with one button per option.
+#
+# Deployed by site/deploy/publish-asks-bot.sh (dispatch only, never on a schedule), which copies this
+# folder to ${BUW_DOCS_ROOT:-/srv/buw-docs}/_app/asks-bot, installs discord.js there and runs
+# `docker compose up -d` here. The bot calls the site API on the Docker network and publishes no port.
+#
+# Its settings live one folder up, in $BUW_DOCS_ROOT/_app/asks-bot.env (root only, outside everything the
+# deploy rsyncs), and that one file is all of the site folder the container sees: it is mounted at
+# /run/asks-bot.env, read-only. The site folder also holds api.env with the bucket keys, which the bot must
+# never be able to read. (A single-file mount follows the file it was made from: the deploy recreates the
+# container, so a rewritten env file is picked up by the next deploy.) Never in this repo:
+#   DISCORD_TOKEN=…   the bot token of the "Workspace Asks" application
+#   HUB_TOKEN=…       the narrow token (site/asks-bot/new-token.mjs); the API holds only its sha256
+#   OWNER_ID=…        the owner's Discord user id
+#   SITE_URL=…        where the Hub is, for the "Open in the Hub" link
+#   POLL_SECONDS=60   optional;  BACKFILL=1  optional: also post Asks made before the first start
+# HUB_URL is below: the site API's container name, so the token never leaves this host.
+services:
+  asks-bot:
+    image: node:22-bookworm-slim
+    container_name: buw-asks-bot
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "main.mjs"]
+    environment:
+      BUW_ENV_FILE: /run/asks-bot.env
+      HUB_URL: http://buw-site-api:8099
+      STATE_DIR: /state
+    volumes:
+      - ./:/app:ro
+      # Only this file, never the folder around it (api.env sits there).
+      - ${BUW_DOCS_ROOT:-/srv/buw-docs}/_app/asks-bot.env:/run/asks-bot.env:ro
+      - asks-bot-state:/state
+    networks: [buw-docs_default]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  asks-bot-state:
+
+networks:
+  buw-docs_default:
+    external: true

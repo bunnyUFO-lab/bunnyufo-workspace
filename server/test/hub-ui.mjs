@@ -13,8 +13,9 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FIXTURE_ASK, askId, startHubFixture } from './hub-fixture.mjs';
+import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { solidPng } from '../../site/api/test/png.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -64,6 +65,7 @@ try {
   await go(page, '#/~hub/today');
   await page.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await page.locator('[data-hub-badge]').innerText(), '3');
+  assert.equal(await page.locator('[data-hub-nav] [data-section="hub"] .sidebar-count').count(), 0, 'The Hub heading carries no count: it only counted the rows below it.');
   assert.equal((await page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '3');
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
@@ -77,7 +79,15 @@ try {
   assert.equal(await reviewLink.innerText(), 'Open link', 'The fixture link is not on github.com.');
   assert.equal(await reviewLink.getAttribute('target'), '_blank');
   assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
-  assert.match(await page.locator('.hub-row', { hasText: 'Permission needed' }).innerText(), /Answer in the Claude app/);
+  const fixtureBlocked = page.locator('.hub-row', { hasText: 'Permission needed' });
+  assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^Open the Claude app on pc\.example\.test$/);
+  assert.equal(await fixtureBlocked.locator('a').count(), 0, 'No link: it is words, not a button.');
+  assert.equal(await fixtureBlocked.evaluate(node => node.tagName), 'DIV', 'The row is not a link either.');
+  assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
+  // One shared source: the sidebar's Inbox entry and the phone bar's badge say the same.
+  assert.equal(await page.locator('[data-hub-inbox-badge]').innerText(), '3');
+  assert.equal(await page.locator('[data-hub-inbox-badge]').getAttribute('title'), '3 waiting for you');
+  assert.equal(await page.locator('[data-hub-tab-badge]').textContent(), '3', 'The tab bar is hidden on desktop but holds the same count.');
 
   step('CUJ 1 without the drawing: pick B, write a note, send; the answer is in the bucket and the UI says Answered');
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).click();
@@ -288,7 +298,7 @@ try {
     assert.equal(await guest.locator('.hub-row', { hasText: 'A read-only question' }).count(), 1);
     assert.match(await guest.locator('.hub-banner').innerText(), /marking reviews done/);
     const readOnlyReview = guest.locator('.hub-row', { hasText: 'A read-only review' });
-    assert.equal(await readOnlyReview.locator('a').count(), 0, 'No link, so only Mark done.');
+    assert.equal(await readOnlyReview.locator('a.hub-btn').count(), 0, 'No link, so only Mark done.');
     const markDone = readOnlyReview.locator('button', { hasText: 'Mark done' });
     assert.equal(await markDone.getAttribute('aria-disabled'), 'true');
     await markDone.click({ force: true });
@@ -673,7 +683,7 @@ try {
   const bareRow = page.locator('.hub-row', { hasText: 'Bare review' });
   assert.equal(await reportRow.locator('a.hub-btn', { hasText: 'Open report' }).getAttribute('href'), 'https://example.test/section#/report');
   assert.equal(await reportRow.locator('a.hub-btn').count(), 1);
-  assert.equal(await bareRow.locator('a').count(), 0, 'A review with no link has no link button.');
+  assert.equal(await bareRow.locator('a.hub-btn').count(), 0, 'A review with no link has no link button.');
   assert.equal(await page.locator('.hub-row').count(), 3);
   assert.equal(await page.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
   assert.equal(await page.locator('[data-readonly-note]').count(), 0);
@@ -692,14 +702,46 @@ try {
   assert.ok(await bareRow.locator('button', { hasText: 'Mark done' }).isEnabled(), 'Mark done stays available after an error.');
   assert.equal(doneEvents().length, 0, 'The failed click wrote nothing.');
   await page.unroute('**/api/hub/reviews/*/done');
+  const badgeBefore = Number(await page.locator('[data-hub-inbox-badge]').innerText());
+  assert.equal(Number(await page.locator('[data-hub-tab-badge]').textContent()), badgeBefore, 'Both badges agree before.');
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
   await bareRow.waitFor({ state: 'detached' });
+  await page.waitForFunction(n => document.querySelector('[data-hub-inbox-badge]')?.textContent === String(n) && document.querySelector('[data-hub-tab-badge]')?.textContent === String(n) && document.querySelector('[data-hub-badge]')?.textContent === String(n), badgeBefore - 1, { timeout: 5000 });
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, bareFile);
   await page.reload();
   await page.locator('.hub-row', { hasText: 'Report-only review' }).waitFor();
   assert.equal(await page.locator('.hub-row', { hasText: 'Bare review' }).count(), 0, 'Still gone after a reload.');
   assert.equal(await page.locator('.hub-row').count(), 2);
+
+  step('blocked: a link opens the session, the desktop link sits beside it, no link says where to go, and a later event clears the row');
+  const LINKED = 'https://claude.ai/code/session_TESTabc123';
+  const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
+  fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 2 * 60000), session: 'sess-linked', title: 'Linked session needs permission', url: LINKED, appUrl: APP }));
+  await page.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  const linked = page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await linked.waitFor();
+  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 2);
+  assert.equal(await linked.locator('[data-link="session"]').getAttribute('href'), LINKED);
+  assert.equal(await linked.locator('[data-link="session"]').getAttribute('target'), '_blank');
+  assert.equal(await linked.locator('[data-link="app"]').getAttribute('href'), APP);
+  assert.equal(await linked.locator('[data-link="app"]').getAttribute('target'), null);
+  assert.equal(await linked.locator('[data-blocked-hint]').count(), 0, 'A linked row has no hint.');
+  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).locator('[data-link]').count(), 0);
+  await noSideways(page, 'Blocked');
+  await phone.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  const phoneLinked = phone.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await phoneLinked.waitFor();
+  const phoneBare = phone.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' });
+  await phoneBare.locator('[data-blocked-hint]').waitFor({ state: 'visible' });
+  assert.equal(await phoneLinked.locator('[data-link="session"]').isVisible(), true, 'The session button stays on a phone.');
+  assert.equal(await phoneLinked.locator('[data-link="app"]').isVisible(), false, 'The desktop link is not offered on a touch screen.');
+  await noSideways(phone, 'Blocked at phone width');
+  fixture.seed.event(eventJson({ kind: 'resumed', ts: new Date(), session: 'sess-linked', title: 'probe: back at work' }));
+  await page.reload();
+  await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).waitFor();
+  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' }).count(), 0, 'resumed clears it, even after a reload.');
+  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 1);
 
   // Part 4: Chat against the fake Hermes, and push-to-talk with a fake microphone.
   step('chat off: without Hermes there is no Chat row and the screen says so');
@@ -762,6 +804,63 @@ try {
     await talk.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]').value.includes('hello from the fake mic'));
     assert.equal(await talk.locator('.hub-bubble.user').count(), 0, 'The text is not sent by itself.');
 
+    step('chat pictures: attach, remove, attach again, send; Hermes sees an image part and the bubble shows the picture');
+    await go(talk, '#/~hub/chat');
+    await talk.locator('textarea[aria-label="Message"]').fill('');
+    const attach = talk.locator('.hub-attach');
+    await attach.waitFor();
+    assert.equal(await attach.getAttribute('aria-label'), 'Attach pictures');
+    const sendButton = talk.locator('.hub-compose button:has-text("Send")');
+    assert.equal(await sendButton.isDisabled(), true, 'Nothing to send yet.');
+    const probe = { name: 'probe.png', mimeType: 'image/png', buffer: solidPng(60, 40) };
+    await talk.locator('[data-attach-input]').setInputFiles(probe);
+    await talk.locator('.hub-tray-item img').waitFor();
+    assert.equal(await sendButton.isDisabled(), false, 'A picture alone can be sent.');
+    await talk.locator('button[aria-label="Remove picture 1"]').click();
+    assert.equal(await talk.locator('.hub-tray-item').count(), 0);
+    assert.equal(await sendButton.isDisabled(), true);
+    await talk.locator('[data-attach-input]').setInputFiles(probe);
+    await talk.locator('.hub-tray-item img').waitFor();
+    await sendButton.click();
+    await talk.locator('.hub-bubble.assistant', { hasText: 'Hello there' }).waitFor();
+    const seen = chatFixture.hermes.requests.at(-1).messages.at(-1).content;
+    assert.ok(Array.isArray(seen) && seen.some(part => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,')), 'Hermes saw an image part.');
+    await talk.locator('.hub-bubble.user img').waitFor();
+    assert.ok(await talk.locator('.hub-bubble.user img').first().evaluate(image => image.complete && image.naturalWidth > 0), 'The bubble shows the picture.');
+    assert.equal(await talk.locator('.hub-tray-item').count(), 0, 'The tray is empty after sending.');
+
+    step('chat pictures: pasting a picture into the message box puts it in the tray');
+    await go(talk, '#/~hub/chat');
+    await talk.locator('textarea[aria-label="Message"]').waitFor();
+    await talk.evaluate(async base64 => {
+      const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
+      document.querySelector('textarea[aria-label="Message"]').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+    }, solidPng(30, 30).toString('base64'));
+    await talk.locator('.hub-tray-item img').waitFor();
+
+    step('chat pictures: Hermes refusing them shows the error and puts the text and the thumbnail back');
+    const refusing = await startHubFixture({ hermes: true, hermesOptions: { refuseImages: true } });
+    try {
+      const refused = await context.newPage();
+      refused.setDefaultTimeout(15000);
+      refused.on('pageerror', error => { throw error; });
+      await refused.goto(refusing.url);
+      await refused.locator('[data-hub-link="chat"]').click();
+      await refused.locator('textarea[aria-label="Message"]').fill('what is this?');
+      await refused.locator('[data-attach-input]').setInputFiles(probe);
+      await refused.locator('.hub-tray-item img').waitFor();
+      await refused.locator('.hub-compose button:has-text("Send")').click();
+      await refused.locator('.hub-error', { hasText: 'Hermes could not take the picture' }).waitFor();
+      assert.equal(await refused.locator('textarea[aria-label="Message"]').inputValue(), 'what is this?');
+      assert.equal(await refused.locator('.hub-tray-item img').count(), 1, 'The thumbnail is back.');
+      assert.equal([...refusing.fake.objects.keys()].filter(key => key.includes('/chat/')).length, 0, 'Nothing was saved.');
+      await refused.close();
+    } finally {
+      await refusing.close();
+    }
+
     step('chat at phone width: the drawer opens and the message box and microphone fit');
     const small = await micBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, permissions: ['microphone'] });
     const phoneChat = await small.newPage();
@@ -781,11 +880,52 @@ try {
       assert.ok(where && where.x >= 0 && where.x + where.width <= 390 && where.y + where.height <= 844, `${selector} fits on screen.`);
     }
     await noSideways(phoneChat, 'Chat');
+    step('chat pictures at phone width: the compose row fits, buttons are 44 px, the tray wraps and holds four');
+    await phoneChat.locator('[data-attach-input]').setInputFiles([1, 2, 3, 4, 5].map(n => ({ name: `p${n}.png`, mimeType: 'image/png', buffer: solidPng(50 + n, 40) })));
+    await phoneChat.locator('.hub-tray-item').nth(3).waitFor();
+    await phoneChat.locator('.hub-tray-note', { hasText: 'at most 4' }).waitFor();
+    assert.equal(await phoneChat.locator('.hub-tray-item').count(), 4, 'A fifth picture is refused.');
+    for (const selector of ['.hub-attach', '.hub-tray-remove']) {
+      const where = await phoneChat.locator(selector).first().boundingBox();
+      assert.ok(where.width >= 44 && where.height >= 44, `${selector} is at least 44 px.`);
+    }
+    const row = await Promise.all(['.hub-attach', 'textarea[aria-label="Message"]', '.hub-mic', '.hub-compose .hub-btn'].map(selector => phoneChat.locator(selector).boundingBox()));
+    for (const where of row) assert.ok(where && where.x >= 0 && where.x + where.width <= 390, 'The compose row fits.');
+    assert.ok(row.every((where, at) => at === 0 || where.x >= row[at - 1].x + row[at - 1].width - 1), 'The row is in order, attach first.');
+    await noSideways(phoneChat, 'Chat with pictures');
     await small.close();
     await context.close();
   } finally {
     await micBrowser.close();
     await chatFixture.close();
+  }
+
+  step('Discord: an answer from a button says "via Discord", and an Ask that requires a passkey carries the tag');
+  const discordFixture = await startHubFixture({ discordAsks: true });
+  try {
+    for (const [width, height] of [[1280, 900], [390, 844]]) {
+      const view = await open({ width, height });
+      await view.goto(discordFixture.url);
+      await view.locator('.sidebar-list').waitFor();
+      await go(view, `#/~hub/ask/${DISCORD_ASK}`);
+      await view.locator('.hub-answer').waitFor();
+      const answered = await view.locator('.hub-answer').innerText();
+      assert.match(answered, /by owner via Discord/);
+      assert.match(answered, /A · Ship it/);
+      assert.equal(await view.locator('.hub-steps li.tag').count(), 0, 'This Ask does not require a passkey.');
+      await noSideways(view, `Discord answer at ${width}`);
+      await go(view, `#/~hub/ask/${PASSKEY_ASK}`);
+      await view.locator('.hub-steps li.tag', { hasText: 'Passkey only' }).waitFor();
+      assert.equal(await view.locator('.hub-answer').count(), 0);
+      await noSideways(view, `Passkey Ask at ${width}`);
+    }
+    const plain = await open({ width: 1280, height: 900 });
+    await plain.goto(fixture.url);
+    await go(plain, `#/~hub/ask/${FIXTURE_ASK}`);
+    await plain.locator('.hub-steps').waitFor();
+    assert.equal(await plain.locator('.hub-steps li.tag').count(), 0, 'An ordinary Ask has no tag.');
+  } finally {
+    await discordFixture.close();
   }
 
   console.log('hub-ui: parts 1 to 4 passed');
