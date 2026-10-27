@@ -319,6 +319,12 @@ try {
 
 
   // Part 2 (CUJ 2): the progress map on the fixture's Beads copy of the CUJ 2 project.
+  const wallTitle = 'Tune the wall slide friction curve across every surface type';
+  await page.route('**/api/hub/map/magic-loops', async route => {
+    const answer = await (await route.fetch()).json();
+    for (const m of answer.milestones) for (const f of m.features) for (const task of f.tasks) if (task.id === 'ml-wj-t2') task.title = wallTitle;
+    await route.fulfill({ json: answer });
+  });
   step('map: the header says how old the copy is, and it starts as one line of milestones');
   await go(page, '#/~hub/map/magic-loops');
   await page.locator('.hub-map-box svg').waitFor();
@@ -347,6 +353,14 @@ try {
   assert.ok(labelLengths.length > 0 && labelLengths.every(length => length <= 25), `Map task labels stay short (${labelLengths}).`);
   const tip = await page.locator('[data-node="ml-wj-t5"] > title').textContent();
   assert.ok(tip.includes('Wall-jump animation') && tip.includes('ml-wj-t5'), 'The node hover text has the title and the id.');
+  const longLines = await page.locator('[data-node="ml-wj-t2"] text.hub-map-label').allTextContents();
+  assert.equal(longLines.length, 2, 'A long title takes two label lines.');
+  assert.ok(longLines.every(line => line.length <= 24), `Both lines fit 24 characters (${longLines}).`);
+  assert.ok(longLines[1].endsWith('…'), 'The second line ends in an ellipsis.');
+  const longTip = await page.locator('[data-node="ml-wj-t2"] > title').textContent();
+  assert.ok(longTip.includes(wallTitle) && longTip.includes('ml-wj-t2'), 'The hover text keeps the full title and the id.');
+  assert.ok((await page.locator('[data-node="ml-wj-t2"]').getAttribute('aria-label')).startsWith(wallTitle), 'The aria-label keeps the full title.');
+  await page.unroute('**/api/hub/map/magic-loops');
 
   step('map: the sprint overlay adds one band for sprint-3 with 4 of 7');
   assert.equal(await page.locator('.hub-band').count(), 0);
