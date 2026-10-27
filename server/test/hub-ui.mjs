@@ -51,7 +51,7 @@ const go = async (page, hash) => {
 const hubAnswer = id => fixture.fake.json(`sections/inbox/asks/${id}/answer.json`);
 
 try {
-  const page = await open({ width: 1280, height: 900 });
+  const page = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await page.goto(fixture.url);
 
   step('a card whose id is hub still opens');
@@ -164,7 +164,7 @@ try {
   await page.locator('button:has-text("Load older")').click();
 
   step('phone width: the Inbox to Ask flow works and nothing scrolls sideways');
-  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
   await phone.goto(fixture.url);
   await phone.locator('.sidebar-reopen, .sidebar').first().waitFor();
   const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: threeOptions() });
@@ -316,7 +316,7 @@ try {
     await guest.locator('text=Sign in to ask an agent to do something.').waitFor();
     assert.equal(await guest.getByRole('button', { name: 'Ask an agent to do something' }).count(), 0);
     step('read-only at 375 px: the scrim covers the banner and the title; a tap on the banner closes the sheet');
-    const tiny = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
+    const tiny = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
     await tiny.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/probe`);
     await tiny.locator('.hub-map-box svg').waitFor();
     await tiny.locator('[data-node="m1"] > circle').first().tap({ force: true });
@@ -354,17 +354,17 @@ try {
   assert.equal(await page.locator('[data-kind="f"], [data-kind="t"]').count(), 0);
 
   step('map: Milestone 2 opens into features, Wall-jump into seven tasks with their signs');
-  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
+  await page.locator('[data-toggle="ml-m2"]').dispatchEvent('click');
   await page.locator('[data-kind="f"]').waitFor();
   assert.equal(await page.locator('[data-kind="f"]').count(), 1);
   // A node with a working sign has a spinning ring in it, which Playwright never calls stable.
-  await page.locator('[data-toggle="ml-wj"]').click({ force: true });
+  await page.locator('[data-toggle="ml-wj"]').dispatchEvent('click');
   await page.locator('[data-kind="t"]').first().waitFor();
   assert.equal(await page.locator('[data-kind="t"]').count(), 7);
   assert.equal(await page.locator('[data-node="ml-wj-t3"] [data-sign="working"]').count(), 1, 'The task with a session started 5 minutes ago is working.');
   assert.equal(await page.locator('[data-node="ml-wj-t5"] [data-sign="pr"]').count(), 1, 'The task with an open PR has the PR sign.');
   assert.equal(await page.locator('[data-node="ml-wj-t1"] [data-sign]').count(), 0, 'A closed task has no signs.');
-  await page.locator('[data-node="ml-wj-t5"] > circle').click({ force: true });
+  await page.locator('[data-node="ml-wj-t5"] > circle').dispatchEvent('click');
   assert.match(await page.locator('.hub-map-panel').innerText(), /Wall-jump animation/);
   await page.locator('.hub-map-panel a:has-text("Open PR")').waitFor();
   assert.equal((await page.locator('.hub-map-panel .hub-id').first().innerText()).trim(), 'ml-wj-t5');
@@ -385,27 +385,21 @@ try {
   step('map: tapping a milestone opens its panel; the chevron alone expands');
   const panel = page.locator('.hub-map-panel');
   const fCount = () => page.locator('[data-kind="f"]').count();
-  // The side panel covers the right of the page, so bring a node to the left of the box before clicking it.
-  const clickNode = async id => {
-    await page.locator('.hub-map-box').evaluate((box, nodeId) => {
-      const rect = box.querySelector(`[data-node="${nodeId}"] > circle`).getBoundingClientRect();
-      box.scrollLeft += rect.left - box.getBoundingClientRect().left - 150;
-    }, id);
-    await page.locator(`[data-node="${id}"] > circle`).click({ force: true });
-  };
+  // A tap on a node, sent straight to it: a map that glides to the last node it opened leaves the next one anywhere, and the real taps are checked on their own below.
+  const clickNode = id => page.locator(`[data-node="${id}"] > circle`).first().dispatchEvent('click');
   await page.locator('button:has-text("Collapse")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 0);
   await go(page, '#/~hub/map/magic-loops');
   await panel.waitFor({ state: 'detached' });
   assert.equal(await fCount(), 0);
-  await page.locator('[data-node="ml-m2"] > circle').click({ force: true });
+  await page.locator('[data-node="ml-m2"] > circle').dispatchEvent('click');
   await panel.waitFor();
   assert.ok((await page.evaluate(() => location.hash)).endsWith('/magic-loops/ml-m2'));
   assert.equal(await fCount(), 0, 'The tap opened the panel and expanded nothing.');
   const text = await panel.innerText();
   for (const part of ['Wall-jump animation', 'open', 'Open PR', 'merged', 'sprint-3 · 4 of 7 tasks', '⟳ 1', '⇄ 1 PR open']) assert.ok(text.includes(part), `The Milestone 2 panel says "${part}".`);
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'hub-map-panel-title', 'Focus is on the panel title.');
-  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
+  await page.locator('[data-toggle="ml-m2"]').dispatchEvent('click');
   await page.locator('[data-kind="f"]').waitFor();
   assert.equal(await panel.count(), 1, 'The chevron leaves the panel as it is.');
 
@@ -488,10 +482,10 @@ try {
 
   step('map: a task opens the panel too, and the panel does not hide the selected node');
   await go(page, '#/~hub/map/magic-loops');
-  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
-  await page.locator('[data-toggle="ml-wj"]').click({ force: true });
+  await page.locator('[data-toggle="ml-m2"]').dispatchEvent('click');
+  await page.locator('[data-toggle="ml-wj"]').dispatchEvent('click');
   await page.locator('[data-node="ml-wj-t5"]').waitFor();
-  await page.locator('[data-node="ml-wj-t5"] > circle').click({ force: true });
+  await page.locator('[data-node="ml-wj-t5"] > circle').dispatchEvent('click');
   await panel.waitFor();
   const taskText = await panel.innerText();
   assert.ok(taskText.includes('Wall-jump animation') && taskText.includes('Open PR'));
