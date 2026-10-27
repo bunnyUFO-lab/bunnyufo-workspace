@@ -45,13 +45,13 @@ export function jpegSize(buffer) {
 /**
  * The index just past the first end-of-image marker in scan data from `from`. A stuffed FF 00 and
  * the restart markers FF D0 to D7 are not it. Everything after it (a second picture, with its own
- * EXIF) is cut. The end of the buffer when there is no marker.
+ * EXIF) is cut. -1 when there is no marker (the picture is refused).
  */
 function scanEnd(buffer, from) {
   for (let at = from; at + 1 < buffer.length; at += 1) {
     if (buffer[at] === 0xff && buffer[at + 1] === 0xd9) return at + 2;
   }
-  return buffer.length;
+  return -1;
 }
 
 /**
@@ -71,7 +71,12 @@ export function stripJpeg(buffer) {
     if (at + 4 > buffer.length) return null;
     const length = buffer.readUInt16BE(at + 2);
     if (length < 2 || at + 2 + length > buffer.length) return null;
-    if (marker === 0xda) { parts.push(buffer.subarray(at, scanEnd(buffer, at + 2 + length))); return Buffer.concat(parts); }
+    if (marker === 0xda) {
+      const end = scanEnd(buffer, at + 2 + length);
+      if (end < 0) return null;
+      parts.push(buffer.subarray(at, end));
+      return Buffer.concat(parts);
+    }
     const dropped = marker === 0xe1 || (marker >= 0xe3 && marker <= 0xed) || marker === 0xef || marker === 0xfe;
     if (!dropped) parts.push(buffer.subarray(at, at + 2 + length));
     at += 2 + length;

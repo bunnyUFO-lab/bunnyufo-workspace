@@ -46,3 +46,9 @@ test('stripJpeg cuts a second picture appended after the first end-of-image mark
   const kept = stripJpeg(stuffed);
   assert.equal(kept.length, stuffed.length - 'Exif GPS'.length, 'Only what follows the real end marker is cut.');
 });
+
+test('a JPEG with no end-of-image marker after the scan is refused, so trailing bytes cannot ride along', () => {
+  const open = Buffer.concat([jpeg(20, 10, { exif: false }).subarray(0, -2), Buffer.from('Exif GPS 51.5N')]);
+  assert.equal(stripJpeg(open), null);
+  assert.throws(() => checkChatImages([{ type: 'image/jpeg', data: open.toString('base64') }], fail), { status: 400, message: 'That picture is damaged.' });
+});
