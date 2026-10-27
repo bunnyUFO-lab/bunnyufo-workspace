@@ -197,12 +197,6 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
         <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
       </div>
       {sprints && model.sprints.length === 0 && <p className="hub-muted" data-no-sprints>No sprints in this Beads copy yet. Tasks labelled <code>sprint:&lt;name&gt;</code> show here as bands.</p>}
-      {hint && (
-        <p className="hub-muted hub-map-hint" data-hint>
-          <span>Drag to move · pinch<span className="hub-hint-mouse"> or Ctrl + scroll</span> to zoom · tap for details</span>
-          <button type="button" className="hub-map-hint-x" aria-label="Hide the hint" onClick={dismissHint}>×</button>
-        </p>
-      )}
       <div className="hub-map-box" ref={box} tabIndex={0} role="group" aria-label="Progress map. Arrow keys move it, plus and minus zoom.">
         <div className="hub-map-stage" ref={stage}>
           <svg ref={svg} role="presentation">
@@ -282,6 +276,12 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
             </g>
           </svg>
         </div>
+        {hint && (
+          <p className="hub-muted hub-map-hint" data-hint>
+              <span>Drag to move · pinch<span className="hub-hint-mouse"> or Ctrl + scroll</span> to zoom · tap for details</span>
+              <button type="button" className="hub-map-hint-x" aria-label="Hide the hint" onClick={dismissHint}>×</button>
+            </p>
+        )}
       </div>
       {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} onOpen={openPanel} />}
       <div className="hub-legend" aria-label="Legend">

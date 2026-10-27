@@ -160,9 +160,9 @@
 .hub-map-controls .hub-btn { flex: none; white-space: nowrap; }
 .hub-map-zoom { display: none; }
 @media (hover: hover) and (pointer: fine) { .hub-map-zoom { display: inline-flex; } }
-.hub-map-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 0.75rem; }
+.hub-map-hint { position: absolute; left: 8px; right: 8px; bottom: 6px; z-index: 1; display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 0 0 10px; border-radius: var(--radius-pill); background: var(--surface-solid); font-size: 0.75rem; cursor: default; }
 .hub-map-hint > span { flex: 1; min-width: 0; }
-.hub-map-hint-x { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--text-dim); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.hub-map-hint-x { flex: none; width: 24px; height: 20px; border: 0; border-radius: 50%; background: none; color: var(--text-dim); font-size: 1.1rem; line-height: 1; cursor: pointer; }
 .hub-map-hint-x:hover { background: var(--surface-2); }
 .hub-hint-mouse { display: none; }
 @media (hover: hover) and (pointer: fine) { .hub-hint-mouse { display: inline; } }

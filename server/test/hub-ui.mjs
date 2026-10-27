@@ -457,22 +457,15 @@ try {
   await page.locator('[data-kind="f"]').waitFor();
   assert.equal(await panel.count(), 0, 'Space on the chevron opened no panel.');
 
-  step('map: a node under the side panel is scrolled out from under it');
+  step('map: after a tap, the node is inside the free part of the box, clear of the side panel');
   await page.locator('button:has-text("Expand all")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
-  const under = await page.locator('.hub-map-box').evaluate(box => {
-    const rect = box.querySelector('[data-node="ml-m3"] > circle').getBoundingClientRect();
-    const panelLeft = innerWidth - 48 - Math.min(380, innerWidth * 0.4);
-    box.scrollLeft += rect.left - (panelLeft + 120);
-    const after = box.querySelector('[data-node="ml-m3"] > circle').getBoundingClientRect();
-    return { right: after.right, panelLeft };
-  });
-  assert.ok(under.right > under.panelLeft, `The node starts under the panel's area (${under.right} <= ${under.panelLeft}).`);
   await go(page, '#/~hub/map/magic-loops/ml-m3');
   await panel.waitFor();
-  await page.waitForTimeout(300);
-  const [cleared, side] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox()]);
-  assert.ok(cleared.x + cleared.width <= side.x, `The panel opening scrolled the node clear (${cleared.x + cleared.width} > ${side.x}).`);
+  await page.waitForTimeout(400);
+  const [cleared, side, frame] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox(), page.locator('.hub-map-box').boundingBox()]);
+  assert.ok(cleared.x + cleared.width <= side.x, `The node is clear of the panel (${cleared.x + cleared.width} > ${side.x}).`);
+  assert.ok(cleared.x >= frame.x && cleared.y >= frame.y && cleared.y + cleared.height <= frame.y + frame.height, 'The node is inside the box.');
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
   await page.locator('button:has-text("Collapse")').click();
@@ -547,28 +540,153 @@ try {
   await page.locator('button:has-text("Expand all")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
 
-  step('map: Ctrl + wheel zooms where you point');
+  const viewOf = async target => (await target.locator('.hub-map-box').getAttribute('data-view')).split(',').map(Number);
+  const centreOf = async locator => { const rect = await locator.boundingBox(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; };
+
+  step('map: Ctrl + wheel zooms the picture where you point, without drawing it again');
   await page.locator('button:has-text("Collapse")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
-  const boxRect = await page.locator('.hub-map-box').boundingBox();
-  await page.mouse.move(boxRect.x + 200, boxRect.y + 200);
+  await page.locator('button:has-text("Fit")').click();
+  const dot = page.locator('[data-node="ml-m2"] > circle').first();
+  await dot.evaluate(element => { element.__probe = 1; });
+  const before = await centreOf(dot);
+  const k0 = (await viewOf(page))[2];
+  await page.mouse.move(before.x, before.y);
   await page.keyboard.down('Control');
-  await page.mouse.wheel(0, -200);
+  await page.mouse.wheel(0, -300);
   await page.keyboard.up('Control');
-  await page.locator('[data-kind="f"]').first().waitFor();
+  await page.waitForTimeout(300);
+  const after = await centreOf(dot);
+  assert.ok((await viewOf(page))[2] > k0 * 1.3, 'The scale grew.');
+  assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 3, `The milestone stayed under the pointer (${before.x},${before.y} to ${after.x},${after.y}).`);
+  assert.equal(await dot.evaluate(element => element.__probe), 1, 'The same element: nothing was drawn again.');
+  assert.equal(await page.locator('[data-kind="f"]').count(), 0, 'Zooming expanded nothing.');
+  await page.locator('button:has-text("Fit")').click();
+
+  step('map: dragging empty space pans the map and opens nothing');
+  const frameBox = await page.locator('.hub-map-box').boundingBox();
+  const startView = await viewOf(page);
+  await page.mouse.move(frameBox.x + 30, frameBox.y + frameBox.height - 14);
+  await page.mouse.down();
+  await page.mouse.move(frameBox.x + 150, frameBox.y + frameBox.height - 14, { steps: 10 });
+  await page.mouse.up();
+  const dragged = await viewOf(page);
+  assert.ok(Math.abs(dragged[0] - startView[0] - 120) <= 10, `The map moved by the drag (${dragged[0] - startView[0]}).`);
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/map/magic-loops');
+  assert.equal(await panel.count(), 0, 'A drag opens no panel.');
+  await page.mouse.move(frameBox.x + 200, frameBox.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(frameBox.x + 260, frameBox.y + 60, { steps: 6 });
+  await page.mouse.up();
+  assert.equal(await panel.count(), 0, 'A drag that starts on a node opens nothing either (the click is swallowed).');
+  await page.locator('button:has-text("Fit")').click();
+
+  step('map: a real tap on a milestone opens it, and it glides clear of the panel');
+  const tapAt = await centreOf(page.locator('[data-node="ml-m2"] > circle').first());
+  await page.mouse.click(tapAt.x, tapAt.y);
+  await panel.waitFor();
+  await page.waitForTimeout(400);
+  assert.ok((await page.evaluate(() => location.hash)).endsWith('/magic-loops/ml-m2'));
+  const [tapped, sideAfter] = await Promise.all([centreOf(page.locator('[data-node="ml-m2"] > circle').first()), panel.boundingBox()]);
+  assert.ok(tapped.x < sideAfter.x && tapped.x > frameBox.x, `The tapped node is in the free part (${tapped.x} vs panel at ${sideAfter.x}).`);
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+
+  step('map: Fit shows the whole expanded map; Now centres the now marker');
+  await page.locator('button:has-text("Expand all")').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
+  await page.locator('button:has-text("Fit")').click();
+  const fitted = await page.evaluate(() => {
+    const frame = document.querySelector('.hub-map-box').getBoundingClientRect();
+    const picture = document.querySelector('.hub-map-box svg').getBoundingClientRect();
+    return { left: picture.left - frame.left, top: picture.top - frame.top, right: frame.right - picture.right, bottom: frame.bottom - picture.bottom };
+  });
+  for (const [side, gap] of Object.entries(fitted)) assert.ok(gap >= -2, `Fit leaves the ${side} edge inside the box (${gap}).`);
+  await page.locator('button:has-text("Now")').click();
+  const now = await centreOf(page.locator('.hub-map-now'));
+  const frameNow = await page.locator('.hub-map-box').boundingBox();
+  assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - (frameNow.y + frameNow.height / 2)) < 3, 'Now is in the middle of the box.');
+  await page.locator('button:has-text("Collapse")').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
+
+  step('map: with nothing done, "now" is not under the milestone');
+  await go(page, '#/~hub/map/nosprint');
+  await page.locator('.hub-map-box svg').waitFor();
+  const [nowDot, onlyOne] = await Promise.all([centreOf(page.locator('.hub-map-now')), centreOf(page.locator('[data-node="ns-m1"] > circle').first())]);
+  assert.ok(Math.hypot(nowDot.x - onlyOne.x, nowDot.y - onlyOne.y) > 26, 'Now sits beside the milestone, not on it.');
+
+  step('map: the panel lists what needs you for its tasks, and nothing for a milestone with none');
+  const wanted = fixture.seed.event(eventJson({ kind: 'ready-for-review', project: 'magic-loops', bead: 'ml-wj-t5', title: 'Wall-jump animation is ready for review', url: 'https://example.test/pr/12' }));
+  await go(page, '#/~hub/map/magic-loops/ml-m2');
+  await panel.waitFor();
+  await panel.locator('h4', { hasText: 'Needs you' }).waitFor();
+  await panel.locator('.hub-row', { hasText: 'Wall-jump animation is ready for review' }).waitFor();
+  assert.equal(await panel.locator('.hub-row a.hub-btn').getAttribute('href'), 'https://example.test/pr/12', 'The row links to the pull request.');
+  await go(page, '#/~hub/map/magic-loops/ml-m3');
+  await page.waitForFunction(() => document.querySelector('.hub-map-panel h3')?.textContent.includes('Milestone 3'));
+  await page.waitForTimeout(500);
+  assert.equal(await panel.locator('h4', { hasText: 'Needs you' }).count(), 0, 'No heading when nothing needs you for the milestone.');
+  for (const key of [...fixture.fake.objects.keys()]) if (key.endsWith(`/${wanted}`)) fixture.fake.objects.delete(key); // later steps count the fixture's own reviews
+  await go(page, '#/~hub/map/magic-loops');
+  await panel.waitFor({ state: 'detached' });
 
   step('map: a project with Asks and events but no Beads copy says so');
   await go(page, '#/~hub/map/probe');
   await page.locator('.hub-empty', { hasText: 'No Beads copy yet' }).waitFor();
   assert.equal(await page.locator('.hub-map-box').count(), 0);
 
-  step('map at phone width: the box scrolls sideways, the page does not, and a tap opens a milestone');
+  step('map at phone width: header in three rows, one-line hint, a drag moves it, a pinch zooms it');
   await go(phone, '#/~hub/map/magic-loops');
   await phone.locator('.hub-map-box svg').waitFor();
   await phone.waitForTimeout(300);
-  const sizes = await phone.locator('.hub-map-box').evaluate(element => ({ scroll: element.scrollWidth, client: element.clientWidth }));
-  assert.ok(sizes.scroll > sizes.client, 'The map is wider than the screen and scrolls inside its box.');
+  const wide = await phone.evaluate(() => ({ picture: document.querySelector('.hub-map-box svg').getBoundingClientRect().width / (Number(document.querySelector('.hub-map-box').dataset.view.split(',')[2]) || 1), frame: document.querySelector('.hub-map-box').clientWidth }));
+  assert.ok(wide.picture > wide.frame, 'The map is wider than the screen.');
   await noSideways(phone, 'Progress map');
+  const tops = await phone.evaluate(() => ({
+    chips: [...document.querySelectorAll('.hub-chips a')].map(item => Math.round(item.getBoundingClientRect().top)),
+    bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
+    hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
+  }));
+  assert.ok(tops.chips.length > 1 && new Set(tops.chips).size === 1, `The project chips share one row (${tops.chips}).`);
+  assert.ok(tops.bar.length >= 5 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
+  assert.ok(tops.hint > 0 && tops.hint < 22, `The hint is one line (${tops.hint}).`);
+  const phoneBox = await phone.locator('.hub-map-box').boundingBox();
+  const startAt = await viewOf(phone);
+  await phone.mouse.move(phoneBox.x + 20, phoneBox.y + phoneBox.height - 12);
+  await phone.mouse.down();
+  await phone.mouse.move(phoneBox.x + 80, phoneBox.y + phoneBox.height - 12, { steps: 6 });
+  await phone.mouse.up();
+  assert.ok((await viewOf(phone))[0] !== startAt[0], 'A drag moved the map.');
+  assert.equal(await phone.locator('[data-hint]').count(), 0, 'The hint is gone after the first drag.');
+  await phone.reload();
+  await phone.locator('.hub-map-box svg').waitFor();
+  assert.equal(await phone.locator('[data-hint]').count(), 0, 'And it stays gone after a reload.');
+  await phone.locator('button:has-text("Fit")').tap();
+  const probeDot = phone.locator('[data-node="ml-m2"] > circle').first();
+  await probeDot.evaluate(element => { element.__probe = 1; });
+  const pinchFrom = await viewOf(phone);
+  const cdp = await phone.context().newCDPSession(phone);
+  const mid = { x: phoneBox.x + phoneBox.width / 2, y: phoneBox.y + phoneBox.height / 2 };
+  const touch = gap => [{ x: mid.x - gap, y: mid.y, id: 0 }, { x: mid.x + gap, y: mid.y, id: 1 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch(20) });
+  for (let step = 1; step <= 8; step += 1) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: touch(20 + step * 8) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await phone.waitForTimeout(200);
+  assert.ok((await viewOf(phone))[2] > pinchFrom[2] * 1.5, `The pinch grew the scale (${pinchFrom[2]} to ${(await viewOf(phone))[2]}).`);
+  assert.equal(await probeDot.evaluate(element => element.__probe), 1, 'A pinch draws nothing again.');
+  await phone.locator('button:has-text("Fit")').tap();
+  await phone.waitForTimeout(100);
+  await go(phone, '#/~hub/map/nosprint');
+  await phone.locator('.hub-map-box svg').waitFor();
+  const small = await phone.evaluate(() => {
+    const frame = document.querySelector('.hub-map-box').getBoundingClientRect();
+    const picture = document.querySelector('.hub-map-box svg').getBoundingClientRect();
+    return { height: frame.height, inside: picture.left >= frame.left - 2 && picture.right <= frame.right + 2 && picture.top >= frame.top - 2 && picture.bottom <= frame.bottom + 2 };
+  });
+  assert.ok(small.height <= 260 && small.inside, `One milestone gets a small box that holds it (${small.height}).`);
+  await go(phone, '#/~hub/map/magic-loops');
+  await phone.locator('[data-node="ml-m2"]').waitFor();
+  await phone.waitForTimeout(200);
   await phone.locator('[data-toggle="ml-m2"]').tap({ force: true });
   await phone.locator('[data-kind="f"]').waitFor();
   assert.equal(await phone.locator('.hub-map-panel').count(), 0, 'The chevron opens no panel.');
