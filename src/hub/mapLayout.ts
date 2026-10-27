@@ -53,10 +53,9 @@ const marksOf = (signsList: Sign[][]): Marks => ({
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length - 1)}…` : text)
 
 /**
- * @param open     ids of the milestones and features that are open
- * @param boxWidth the visible width of the box the map scrolls in; the map is at least that wide
+ * @param open ids of the milestones and features that are open
  */
-export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, boxWidth: number, showSprints: boolean): Layout {
+export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSprints: boolean): Layout {
   let x = 120
   const nodes: MapNode[] = []
   const branches: Branch[] = []
@@ -100,7 +99,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, boxWidt
     }
     x += span
   })
-  const width = Math.max(x + 40, boxWidth)
+  const width = x + 40
   const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')))
   let nowX = width - 40
   if (firstOpen >= 0) {
@@ -110,6 +109,9 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, boxWidt
     const here = milestoneX.get(milestone.id) ?? 0
     const next = model.milestones[firstOpen + 1] ? milestoneX.get(model.milestones[firstOpen + 1].id) ?? width - 40 : width - 40
     nowX = here + fraction * (next - here) * 0.6
+    // "Now" is a landmark: it never sits under the milestone's circle.
+    const radius = open.has(milestone.id) ? 15 : 26
+    if (Math.abs(nowX - here) <= radius + 8) nowX = here + radius + 12
   }
   const bands: Band[] = []
   if (showSprints) {

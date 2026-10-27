@@ -132,20 +132,56 @@
   .hub-row.review .hub-row-actions { flex-basis: 100%; justify-content: flex-start; }
 }
 
-/* The progress map: an SVG in a box that scrolls sideways, so the page itself never does. */
-.hub-map-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-.hub-map-hint { margin: 0 0 8px; }
-.hub-map-box {
-  overflow-x: auto; overflow-y: hidden; max-width: 100%;
-  touch-action: pan-x pan-y;
-  background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-lg);
+/* The progress map: an SVG on a stage inside a box. Drag, pinch and wheel move the stage by a CSS
+   transform (usePanZoom), so the page itself never scrolls sideways and nothing is laid out per frame. */
+.hub-chips-wrap { position: relative; max-width: 100%; margin: 0 0 12px; }
+.hub-chips-wrap > .hub-chips { margin: 0; }
+.hub-chips.one-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.hub-chips.one-row .hub-chip { flex: none; white-space: nowrap; }
+.hub-chips-wrap[data-overflow~="start"] > .hub-chips {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+  mask-image: linear-gradient(to right, transparent, #000 28px);
 }
-.hub-map-box svg { display: block; }
+.hub-chips-wrap[data-overflow~="end"] > .hub-chips {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 28px);
+  mask-image: linear-gradient(to left, transparent, #000 28px);
+}
+.hub-chips-wrap[data-overflow~="start"][data-overflow~="end"] > .hub-chips {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+.hub-map-controls { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; overflow-x: auto; scrollbar-width: none; }
+.hub-map-controls .hub-btn { flex: none; white-space: nowrap; }
+.hub-map-zoom { display: none; }
+@media (hover: hover) and (pointer: fine) { .hub-map-zoom { display: inline-flex; } }
+.hub-map-hint { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 0.75rem; }
+.hub-map-hint > span { flex: 1; min-width: 0; }
+.hub-map-hint-x { flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--text-dim); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.hub-map-hint-x:hover { background: var(--surface-2); }
+.hub-hint-mouse { display: none; }
+@media (hover: hover) and (pointer: fine) { .hub-hint-mouse { display: inline; } }
+.hub-map-box {
+  position: relative; overflow: hidden; max-width: 100%; min-height: 200px;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;
+  background-color: var(--surface-1); background-image: radial-gradient(var(--hairline) 1px, transparent 1px); background-size: 24px 24px;
+  border: 1px solid var(--hairline); border-radius: var(--radius-lg);
+}
+.hub-map-box:active { cursor: grabbing; }
+.hub-map-box:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-map-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.hub-map-stage.moving { will-change: transform; }
+.hub-map-stage.glide { transition: transform 240ms cubic-bezier(.2, .7, .2, 1); will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .hub-map-stage.glide { transition: none; } }
+.hub-map-stage svg { display: block; }
 .hub-map-spine { stroke: var(--hairline-strong); }
 .hub-map-spine-done { stroke: var(--pink); opacity: 0.85; }
 .hub-map-tip { fill: var(--hairline-strong); }
-.hub-map-now { fill: var(--text-bright); }
-.hub-map-now-text, .hub-map-count { fill: var(--text-bright); }
+.hub-map-nowg { pointer-events: none; }
+.hub-map-now { fill: #fff; }
+.hub-map-now-ring { fill: none; stroke: var(--pink); stroke-width: 2; }
+.hub-map-now-pill { fill: var(--pink-dim); }
+.hub-map-now-text { fill: var(--pink-bright); }
+.hub-map-count { fill: var(--text-bright); }
 .hub-map-title { fill: var(--text-bright); }
 .hub-map-label { fill: var(--text); }
 .hub-map-label.dim { fill: var(--text-dim); }
@@ -167,8 +203,8 @@
   box-sizing: border-box; overflow-y: auto; padding: 14px 16px 20px; color: var(--text);
   background: var(--surface-solid); border: 0; border-left: 1px solid var(--hairline-strong); box-shadow: var(--shadow-2); z-index: 40;
 }
-/* The local app's tool rail is 48 px wide at the right; the panel sits beside it. Room to scroll the last nodes out from under the panel; the box keeps its width, so the map does not re-lay out. */
-@media (min-width: 641px) { .hub-map-box.has-panel { padding-right: min(380px, 40vw); } :root:has(.files-container) { --hub-rail: 48px; } }
+/* The local app's tool rail is 48 px wide at the right; the panel sits beside it. */
+@media (min-width: 641px) { :root:has(.files-container) { --hub-rail: 48px; } }
 .hub-map-panel:not([open]) { display: none; }
 .hub-map-panel h3 { color: var(--text-bright); margin: 0; font-size: 1rem; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; outline: none; }
 .hub-map-panel h4 { margin: 16px 0 6px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
