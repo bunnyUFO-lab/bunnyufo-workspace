@@ -196,8 +196,23 @@
 .hub-created-title { flex: 1; min-width: 0; font-size: 0.82rem; overflow-wrap: anywhere; }
 .hub-compose { display: flex; gap: 8px; align-items: flex-end; }
 .hub-compose textarea { flex: 1; min-width: 0; background: var(--surface-solid); color: var(--text); border: 1px solid var(--hairline-strong); border-radius: var(--radius); padding: 8px 10px; font: inherit; font-size: 0.9rem; resize: none; }
-.hub-mic { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: var(--surface-2); font-size: 1.15rem; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.hub-mic, .hub-attach { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: var(--surface-2); font-size: 1.15rem; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.hub-attach { display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--text); }
+.hub-attach:disabled { opacity: 0.5; cursor: default; }
 .hub-mic.on { background: var(--red-dim); border-color: var(--red); }
+/* Pictures in a message (ws-b1z.7): the tray above the compose row, the grid in a bubble, the drop outline. */
+.hub-chat-main.hub-drop { outline: 2px dashed var(--pink); outline-offset: -4px; border-radius: var(--radius-lg); }
+.hub-tray { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 8px; }
+.hub-tray-item { position: relative; width: 64px; height: 64px; }
+.hub-tray-item img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--hairline-strong); display: block; }
+.hub-tray-remove { position: absolute; top: -8px; right: -8px; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.hub-tray-remove span { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-solid); border: 1px solid var(--hairline-strong); color: var(--text); font-size: 1rem; line-height: 20px; text-align: center; }
+.hub-tray-note { font-size: 0.8rem; flex-basis: 100%; }
+.hub-tray-warn { color: var(--red); }
+.hub-bubble-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.hub-bubble-images:first-child { margin-top: 0; }
+.hub-bubble-image { display: block; max-height: 200px; max-width: 100%; border-radius: var(--radius); object-fit: cover; }
+.hub-image-open { display: block; max-width: 100%; }
 .hub-listening { color: var(--red); font-size: 0.82rem; margin: 6px 0; }
 .hub-aloud { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
@@ -206,6 +221,10 @@
   .hub-chat-toggle { display: inline-flex; }
   .hub-chat-list { display: none; position: absolute; z-index: 5; top: 52px; left: 0; right: 0; max-height: 65%; padding: 10px; background: var(--surface-solid); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
   .hub-chat.drawer .hub-chat-list { display: flex; }
+  .hub-tray { gap: 16px; }
+  .hub-tray-remove { top: -16px; right: -16px; width: 44px; height: 44px; }
+  .hub-bubble-images > * { flex: 1 1 calc(50% - 3px); min-width: 0; }
+  .hub-bubble-images .hub-bubble-image { width: 100%; height: 120px; max-height: 200px; }
 }
 
 /* The review row's way in, and the review view (ws-b1z.9). */
