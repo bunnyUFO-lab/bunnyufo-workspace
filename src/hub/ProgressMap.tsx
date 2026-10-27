@@ -222,7 +222,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
       </div>
       {sprints && model.sprints.length === 0 && <p className="hub-muted" data-no-sprints>No sprints in this Beads copy yet. Tasks labelled <code>sprint:&lt;name&gt;</code> show here as bands.</p>}
       <p className="hub-muted hub-map-hint">Tap a milestone for its details, ▸ to open it · pinch, or Ctrl + scroll, to zoom where you point</p>
-      <div className="hub-map-box" ref={box} data-width={layout.width} tabIndex={-1}>
+      <div className={`hub-map-box${shownId ? ' has-panel' : ''}`} ref={box} data-width={layout.width} tabIndex={-1}>
         <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="group" aria-label="Progress map">
           <defs>
             <marker id="hub-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" className="hub-map-tip" /></marker>
