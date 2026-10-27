@@ -38,6 +38,13 @@ const noSideways = async (page, what) => {
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
   assert.ok(widths.hub <= widths.hubInner, `${what}: the Hub scrolls sideways (${widths.hub} > ${widths.hubInner}).`);
 };
+/** A note or error sits under the row's title, and the title keeps at least 40% of the row. */
+const noteUnderTitle = async (row, selector, what) => {
+  const [title, whole, note] = await Promise.all([row.locator('.hub-row-title').boundingBox(), row.boundingBox(), row.locator(selector).boundingBox()]);
+  assert.ok(note, `${what}: the note is on screen.`);
+  assert.ok(note.y >= title.y + title.height - 1, `${what}: the note sits under the title (${note.y} < ${title.y + title.height}).`);
+  assert.ok(title.width >= whole.width * 0.4, `${what}: the title keeps its width (${title.width} of ${whole.width}).`);
+};
 const go = async (page, hash) => {
   await page.evaluate(value => { location.hash = value; }, hash);
 };
@@ -259,6 +266,15 @@ try {
     await markDone.click({ force: true });
     await readOnlyReview.locator('[data-readonly-note]').waitFor();
     assert.match(await readOnlyReview.locator('[data-readonly-note]').innerText(), /Sign in to mark this done/);
+    for (const [width, height] of [[1280, 800], [800, 600], [390, 844]]) {
+      await guest.setViewportSize({ width, height });
+      await guest.waitForTimeout(150);
+      await markDone.click({ force: true });
+      await readOnlyReview.locator('[data-readonly-note]').waitFor();
+      await noteUnderTitle(readOnlyReview, '[data-readonly-note]', `read-only at ${width} px`);
+      if (width === 390) await noSideways(guest, 'read-only review at 390 px');
+    }
+    await guest.setViewportSize({ width: 1200, height: 800 });
     assert.equal(await guest.locator('.hub-error').count(), 0, 'Nothing was sent.');
     await guest.evaluate(() => { location.hash = '#/~hub/ask/20261026-probe-x-a1b2'; });
     await guest.locator('.hub-option').waitFor();
@@ -468,6 +484,16 @@ try {
   await phone.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
   assert.equal(await phone.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'The buttons stay on a phone.');
   await noSideways(phone, 'Reviews at phone width');
+  const plainTitle = await bareRow.locator('.hub-row-title').boundingBox();
+  const plainButton = await bareRow.locator('button', { hasText: 'Mark done' }).boundingBox();
+  assert.ok(plainButton.y < plainTitle.y + plainTitle.height && plainButton.y + plainButton.height > plainTitle.y, 'Without a note the button sits beside the title.');
+  await page.route('**/api/hub/reviews/*/done', route => route.fulfill({ status: 500, body: '{"error":"Test failure"}', contentType: 'application/json' }), { times: 1 });
+  await bareRow.locator('button', { hasText: 'Mark done' }).click();
+  await bareRow.locator('.hub-error', { hasText: 'Test failure' }).waitFor();
+  await noteUnderTitle(bareRow, '.hub-error', 'a failed Mark done');
+  assert.ok(await bareRow.locator('button', { hasText: 'Mark done' }).isEnabled(), 'Mark done stays available after an error.');
+  assert.equal(doneEvents().length, 0, 'The failed click wrote nothing.');
+  await page.unroute('**/api/hub/reviews/*/done');
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
   await bareRow.waitFor({ state: 'detached' });
   assert.equal(doneEvents().length, 1);
