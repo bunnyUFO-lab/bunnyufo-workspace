@@ -73,7 +73,8 @@
 .card-inline-form input { width: 160px; padding: 5px 8px; }
 .card-inline-form button { padding: 4px 9px; }
 .card-inline-form .card-form-error { flex-basis: 100%; }
-.step-tab.step-tab-add { min-width: 30px; padding-inline: 8px; color: var(--text-dim); }
+.step-tabs > .card-inline-form { flex-shrink: 0; }
+.step-tab.step-tab-add { flex-shrink: 0; min-width: 30px; padding-inline: 8px; color: var(--text-dim); }
 
 /* The edit form drops under the breadcrumb (the title itself clips, so it cannot hold it), over
    the page below: the bar sits above the content while it is open (and only then, so an
