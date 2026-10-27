@@ -58,9 +58,9 @@ function RequestForm({ project }: { project: string }) {
 function Card({ task, tag }: { task: MapTask; tag?: string }) {
   return (
     <div className="hub-ticket" data-task={task.id}>
-      <div className="hub-ticket-id">{task.id}</div>
       <div className="hub-ticket-title">{task.title}</div>
-      <div className="hub-ticket-signs">
+      <div className="hub-ticket-meta">
+        <span className="hub-id">{task.id}</span>
         {tag && <span className="hub-pill amber">{tag}</span>}
         {task.signs.map(sign => <span key={sign} className="hub-sign" title={SIGN_LABEL[sign]} aria-label={SIGN_LABEL[sign]}>{SIGN_GLYPH[sign]}</span>)}
       </div>

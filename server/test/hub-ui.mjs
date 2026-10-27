@@ -124,6 +124,18 @@ try {
   await go(page, '#/~hub/board/magic-loops');
   await page.locator('.hub-board').waitFor();
   assert.ok(await page.locator('.hub-column').count() === 4);
+
+  step('Board cards lead with the title; the id is a small selectable line after it');
+  const [mapAnswer] = await Promise.all([page.waitForResponse(response => response.url().includes('/api/hub/map/magic-loops')), page.reload()]);
+  const boardMap = await mapAnswer.json();
+  await page.locator('.hub-board').waitFor();
+  const titleById = new Map(boardMap.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).map(task => [task.id, task.title]));
+  const firstCard = page.locator('.hub-ticket').first();
+  const firstId = await firstCard.getAttribute('data-task');
+  assert.equal(await firstCard.locator(':scope > *').first().getAttribute('class'), 'hub-ticket-title', 'The title is the first line of a card.');
+  assert.equal((await firstCard.locator('.hub-ticket-title').innerText()).trim(), titleById.get(firstId));
+  assert.notEqual(titleById.get(firstId), firstId, 'The title is not the id.');
+  assert.equal((await firstCard.locator('.hub-id').innerText()).trim(), firstId);
   await page.locator('button:has-text("Ask an agent to do something")').click();
   await page.locator('.hub-field textarea').fill('Add wall-slide dust particles');
   await page.locator('button:has-text("Send")').last().click();
@@ -171,6 +183,22 @@ try {
   await noSideways(phone, 'Ask');
   const boxes = await phone.locator('.hub-option').evaluateAll(list => list.map(item => item.getBoundingClientRect().top));
   assert.ok(boxes[1] > boxes[0] && boxes[2] > boxes[1], 'The options stack on a phone.');
+
+  step('phone width: a very long title wraps on the Board and nothing scrolls sideways');
+  const longTitle = `${'Alpha beta gamma delta '.repeat(4)}${'x'.repeat(60)} tail`.slice(0, 160);
+  await phone.route('**/api/hub/map/magic-loops', async route => {
+    const answer = await (await route.fetch()).json();
+    for (const m of answer.milestones) for (const f of m.features) for (const task of f.tasks) task.title = longTitle;
+    await route.fulfill({ json: answer });
+  });
+  await go(phone, '#/~hub/board/magic-loops');
+  await phone.locator('.hub-ticket').first().waitFor();
+  await phone.waitForTimeout(250);
+  await noSideways(phone, 'Board with a long title');
+  const longBox = await phone.locator('.hub-ticket').first().evaluate(card => ({ title: card.querySelector('.hub-ticket-title').getBoundingClientRect().width, card: card.getBoundingClientRect().width, text: card.querySelector('.hub-ticket-title').textContent }));
+  assert.equal(longBox.text, longTitle, 'The Board never clips a title.');
+  assert.ok(longBox.title <= longBox.card, 'The title is no wider than its card.');
+  await phone.unroute('**/api/hub/map/magic-loops');
 
   step('phone tab bar: Inbox, Map and Cards are one tap away with the menu shut; no bar over a card or on desktop');
   const tabs = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -313,6 +341,12 @@ try {
   await page.locator('[data-node="ml-wj-t5"] > circle').click({ force: true });
   assert.match(await page.locator('.hub-map-detail').innerText(), /Wall-jump animation/);
   await page.locator('.hub-map-detail a:has-text("Open PR")').waitFor();
+  assert.equal((await page.locator('.hub-map-detail .hub-id').innerText()).trim(), 'ml-wj-t5');
+  assert.match(await page.locator('.hub-map-detail-title').innerText(), /^Wall-jump animation/, 'The details lead with the title.');
+  const labelLengths = await page.locator('[data-kind="t"] text.hub-map-label').evaluateAll(list => list.map(item => item.textContent.length));
+  assert.ok(labelLengths.length > 0 && labelLengths.every(length => length <= 25), `Map task labels stay short (${labelLengths}).`);
+  const tip = await page.locator('[data-node="ml-wj-t5"] > title').textContent();
+  assert.ok(tip.includes('Wall-jump animation') && tip.includes('ml-wj-t5'), 'The node hover text has the title and the id.');
 
   step('map: the sprint overlay adds one band for sprint-3 with 4 of 7');
   assert.equal(await page.locator('.hub-band').count(), 0);

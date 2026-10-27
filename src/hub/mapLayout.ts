@@ -32,11 +32,12 @@ export interface Layout {
   bands: Band[]
 }
 
-/** Task titles wrap at 24 characters, at the last space before that. */
+/** Task titles wrap at 24 characters, at the last space before that: at most two lines; the second ends in … when it would run past 24 characters. */
 export function wrap(title: string): string[] {
   if (title.length <= 24) return [title]
   const cut = title.lastIndexOf(' ', 24)
-  return cut > 0 ? [title.slice(0, cut), title.slice(cut + 1)] : [title.slice(0, 24), title.slice(24)]
+  const [first, second] = cut > 0 ? [title.slice(0, cut), title.slice(cut + 1)] : [title.slice(0, 24), title.slice(24)]
+  return [first, second.length > 24 ? `${second.slice(0, 23)}…` : second]
 }
 
 const marksOf = (signsList: Sign[][]): Marks => ({

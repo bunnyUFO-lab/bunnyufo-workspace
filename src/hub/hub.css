@@ -116,9 +116,9 @@
 .hub-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; max-width: 100%; }
 .hub-column { scroll-snap-align: start; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: 10px; min-width: 0; }
 .hub-ticket { background: var(--surface-solid); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px; }
-.hub-ticket-id { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); overflow-wrap: anywhere; }
-.hub-ticket-title { font-size: 0.85rem; overflow-wrap: anywhere; }
-.hub-ticket-signs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.hub-id { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); overflow-wrap: anywhere; user-select: all; }
+.hub-ticket-title { font-size: 0.85rem; font-weight: 500; margin-bottom: 4px; overflow-wrap: anywhere; }
+.hub-ticket-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
 .hub-sign { font-size: 0.8rem; color: var(--text-dim); }
 
 @media (max-width: 720px) {
