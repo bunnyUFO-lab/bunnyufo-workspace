@@ -13,6 +13,8 @@ export interface Item {
   state?: string
   bead?: string
   url?: string
+  /** The desktop app's link to the session (claude://…); only works on the PC that runs the app. */
+  appUrl?: string
   card?: string
   host?: string
   session?: string
@@ -21,7 +23,7 @@ export interface Item {
 }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed'
 export interface HubEvent {
   ts: string
   kind: EventKind
@@ -33,6 +35,7 @@ export interface HubEvent {
   source: string
   title: string
   url?: string
+  appUrl?: string
   card?: string
   review?: string
   summary?: string
@@ -162,6 +165,12 @@ export function copyAge(minutes: number): string {
 
 /** A link from an event or item is shown only when it is plain http(s): the text came from an agent. */
 export const safeUrl = (value: string | undefined): string | undefined => (value && /^https?:\/\//i.test(value) ? value : undefined)
+
+/** A blocked session's web link: https, and never the bare https://claude.ai/code, which opens a new chat. */
+export const sessionUrl = (value: string | undefined): string | undefined => (value && /^https:\/\//i.test(value) && !/^https:\/\/claude\.ai\/code\/?$/i.test(value.trim()) ? value : undefined)
+
+/** The desktop app's link to a session, and nothing else that starts with claude://. */
+export const appUrl = (value: string | undefined): string | undefined => (value && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(value) ? value : undefined)
 
 export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[] }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number }

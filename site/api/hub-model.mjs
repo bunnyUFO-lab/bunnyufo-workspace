@@ -8,7 +8,6 @@ export const PROJECT_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const WHEN = ['next-sprint', 'nightly', 'record'];
 export const DAY = 24 * 60 * 60 * 1000;
 export const WINDOW_DAYS = 7;
-export const REVIEW_URL_FALLBACK = 'https://claude.ai/code';
 
 export const validId = value => typeof value === 'string' && value.length <= 120 && ID_RE.test(value);
 export const validDrawingId = value => typeof value === 'string' && DRAWING_ID_RE.test(value);
@@ -101,6 +100,15 @@ const time = ts => {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(11, 16);
 };
 
+/** The bare `https://claude.ai/code` opens a new, empty chat, so it is no link to a session. */
+export const isBareClaudeCode = url => /^https:\/\/claude\.ai\/code\/?$/i.test(String(url ?? '').trim());
+
+/** A blocked session's web link: https, and not the bare one. Anything else is no link. */
+export const blockedSessionUrl = url => (typeof url === 'string' && /^https:\/\//i.test(url) && !isBareClaudeCode(url) ? url : undefined);
+
+/** The desktop app's link to a session: exactly `claude://claude.ai/epitaxy/local_<uuid>`. */
+export const blockedAppUrl = url => (typeof url === 'string' && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(url) ? url : undefined);
+
 const eventItem = (kind, event, extra = {}) => ({
   kind, id: event.file, project: event.project, title: event.title, at: event.ts,
   ...(event.bead ? { bead: event.bead } : {}), ...(event.url ? { url: event.url } : {}),
@@ -113,7 +121,10 @@ const eventItem = (kind, event, extra = {}) => ({
  * Reviews, blocked sessions and running sessions from a window of events (any order).
  * - review: `ready-for-review` with no later `pr-merged` for the same bead (the same url when
  *   there is no bead), and that no `review-done` event names (its `review` is the review's file name);
- * - blocked: `blocked` with no later `session-ended` or `session-started` for the same session;
+ * - blocked: `blocked` with no later event of any kind from the same session (a `resumed`, a
+ *   `session-ended`, a newer `blocked`, anything that carries the session). A `blocked` with no
+ *   session stays until the window drops it. Only a real session link (`url`, not the bare
+ *   https://claude.ai/code) and a desktop link (`appUrl`) are kept;
  * - running: `session-started` with no later `session-ended` for the same session.
  */
 export function deriveEventItems(events) {
@@ -128,8 +139,10 @@ export function deriveEventItems(events) {
       const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
       if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event));
     } else if (event.kind === 'blocked') {
-      const resolved = !!event.session && after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
-      if (!resolved) blocked.push(eventItem('blocked', event, { id: event.session || event.file, url: event.url || REVIEW_URL_FALLBACK }));
+      const resolved = !!event.session && after(event, other => other.session === event.session);
+      if (resolved) continue;
+      const appUrl = blockedAppUrl(event.appUrl);
+      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, ...(appUrl ? { appUrl } : {}) }));
     } else if (event.kind === 'session-started' && event.session) {
       const ended = after(event, other => other.session === event.session && other.kind === 'session-ended');
       if (!ended) running.push(eventItem('session', event, { id: event.session, title: `${event.project || 'session'} · running since ${time(event.ts)}` }));

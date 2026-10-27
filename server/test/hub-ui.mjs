@@ -64,6 +64,7 @@ try {
   await go(page, '#/~hub/today');
   await page.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await page.locator('[data-hub-badge]').innerText(), '3');
+  assert.equal(await page.locator('[data-hub-nav] [data-section="hub"] .sidebar-count').count(), 0, 'The Hub heading carries no count: it only counted the rows below it.');
   assert.equal((await page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '3');
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
@@ -77,7 +78,15 @@ try {
   assert.equal(await reviewLink.innerText(), 'Open link', 'The fixture link is not on github.com.');
   assert.equal(await reviewLink.getAttribute('target'), '_blank');
   assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
-  assert.match(await page.locator('.hub-row', { hasText: 'Permission needed' }).innerText(), /Answer in the Claude app/);
+  const fixtureBlocked = page.locator('.hub-row', { hasText: 'Permission needed' });
+  assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^Open the Claude app on pc\.example\.test$/);
+  assert.equal(await fixtureBlocked.locator('a').count(), 0, 'No link: it is words, not a button.');
+  assert.equal(await fixtureBlocked.evaluate(node => node.tagName), 'DIV', 'The row is not a link either.');
+  assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
+  // One shared source: the sidebar's Inbox entry and the phone bar's badge say the same.
+  assert.equal(await page.locator('[data-hub-inbox-badge]').innerText(), '3');
+  assert.equal(await page.locator('[data-hub-inbox-badge]').getAttribute('title'), '3 waiting for you');
+  assert.equal(await page.locator('[data-hub-tab-badge]').textContent(), '3', 'The tab bar is hidden on desktop but holds the same count.');
 
   step('CUJ 1 without the drawing: pick B, write a note, send; the answer is in the bucket and the UI says Answered');
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).click();
@@ -494,14 +503,46 @@ try {
   assert.ok(await bareRow.locator('button', { hasText: 'Mark done' }).isEnabled(), 'Mark done stays available after an error.');
   assert.equal(doneEvents().length, 0, 'The failed click wrote nothing.');
   await page.unroute('**/api/hub/reviews/*/done');
+  const badgeBefore = Number(await page.locator('[data-hub-inbox-badge]').innerText());
+  assert.equal(Number(await page.locator('[data-hub-tab-badge]').textContent()), badgeBefore, 'Both badges agree before.');
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
   await bareRow.waitFor({ state: 'detached' });
+  await page.waitForFunction(n => document.querySelector('[data-hub-inbox-badge]')?.textContent === String(n) && document.querySelector('[data-hub-tab-badge]')?.textContent === String(n) && document.querySelector('[data-hub-badge]')?.textContent === String(n), badgeBefore - 1, { timeout: 5000 });
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, bareFile);
   await page.reload();
   await page.locator('.hub-row', { hasText: 'Report-only review' }).waitFor();
   assert.equal(await page.locator('.hub-row', { hasText: 'Bare review' }).count(), 0, 'Still gone after a reload.');
   assert.equal(await page.locator('.hub-row').count(), 2);
+
+  step('blocked: a link opens the session, the desktop link sits beside it, no link says where to go, and a later event clears the row');
+  const LINKED = 'https://claude.ai/code/session_TESTabc123';
+  const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
+  fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 2 * 60000), session: 'sess-linked', title: 'Linked session needs permission', url: LINKED, appUrl: APP }));
+  await page.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  const linked = page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await linked.waitFor();
+  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 2);
+  assert.equal(await linked.locator('[data-link="session"]').getAttribute('href'), LINKED);
+  assert.equal(await linked.locator('[data-link="session"]').getAttribute('target'), '_blank');
+  assert.equal(await linked.locator('[data-link="app"]').getAttribute('href'), APP);
+  assert.equal(await linked.locator('[data-link="app"]').getAttribute('target'), null);
+  assert.equal(await linked.locator('[data-blocked-hint]').count(), 0, 'A linked row has no hint.');
+  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).locator('[data-link]').count(), 0);
+  await noSideways(page, 'Blocked');
+  await phone.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  const phoneLinked = phone.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await phoneLinked.waitFor();
+  const phoneBare = phone.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' });
+  await phoneBare.locator('[data-blocked-hint]').waitFor({ state: 'visible' });
+  assert.equal(await phoneLinked.locator('[data-link="session"]').isVisible(), true, 'The session button stays on a phone.');
+  assert.equal(await phoneLinked.locator('[data-link="app"]').isVisible(), false, 'The desktop link is not offered on a touch screen.');
+  await noSideways(phone, 'Blocked at phone width');
+  fixture.seed.event(eventJson({ kind: 'resumed', ts: new Date(), session: 'sess-linked', title: 'probe: back at work' }));
+  await page.reload();
+  await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).waitFor();
+  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' }).count(), 0, 'resumed clears it, even after a reload.');
+  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 1);
 
   // Part 4: Chat against the fake Hermes, and push-to-talk with a fake microphone.
   step('chat off: without Hermes there is no Chat row and the screen says so');

@@ -89,7 +89,8 @@ function Heading({
   move,
 }: {
   label: string
-  count: number
+  /** Left out where a number would only count the rows below (the Hub group). */
+  count?: number
   open: boolean
   onToggle: () => void
   /** The search box's arrow keys are on this heading: Space folds or opens it. */
@@ -114,7 +115,7 @@ function Heading({
       <span className="sidebar-label">
         <span className="sidebar-caret" aria-hidden="true">{open ? '▾' : '▸'}</span> {label}
       </span>
-      <span className="sidebar-count">{count}</span>
+      {count !== undefined && <span className="sidebar-count">{count}</span>}
     </button>
   )
 }
@@ -125,13 +126,14 @@ function HubNav({ screen, needsYou }: { screen: HubScreen | null; needsYou: numb
   const shown = hubRows(host)
   return (
     <div className="sidebar-hub" data-hub-nav>
-      <Heading label="Hub" count={shown.length} open={!isClosed('hub')} onToggle={() => toggle('hub')} id="hub" />
+      <Heading label="Hub" open={!isClosed('hub')} onToggle={() => toggle('hub')} id="hub" />
       {!isClosed('hub') && shown.map(([key, label, icon]) => (
         <div className="sidebar-row" key={key}>
           <a href={hubHash(key)} className={`sidebar-item${screen === key ? ' active' : ''}`} aria-current={screen === key ? 'page' : undefined} data-hub-link={key}>
             <span className="item-icon" aria-hidden="true">{icon}</span>
             <span className="item-text">{label}</span>
             {key === 'today' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-badge>{needsYou}</span>}
+            {key === 'inbox' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Inbox, ${needsYou} waiting for you`}>{needsYou}</span>}
           </a>
         </div>
       ))}
