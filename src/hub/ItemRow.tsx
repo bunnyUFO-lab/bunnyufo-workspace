@@ -37,7 +37,7 @@ export function ReviewActions({ item, onDone, links = true }: { item: Item; onDo
       <span className="hub-row-actions">
         {links && url && <a className="hub-btn" href={url} target="_blank" rel="noopener noreferrer">{isGithub(url) ? 'Review on GitHub' : 'Open link'}</a>}
         {links && card && <a className="hub-btn" href={card} target="_blank" rel="noopener noreferrer">Open report</a>}
-        <button type="button" className="hub-btn pri" disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>
+        <button type="button" className="hub-btn pri" title="Hide from Needs you. Does not approve or merge." disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>
       </span>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {note && <p className="hub-muted" data-readonly-note>Sign in to mark this done.</p>}
@@ -53,7 +53,7 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
       <span className="hub-dot p" aria-hidden="true" />
       <a className="hub-row-text" href={reviewHash(item.id)} data-review-open>
         <span className="hub-row-title">{item.title}</span>
-        <span className="hub-row-meta">{meta} <span aria-hidden="true">›</span></span>
+        <span className="hub-row-meta">{meta} <span className="hub-row-cue" aria-hidden="true">›</span></span>
       </a>
       <ReviewActions item={item} onDone={() => setHidden(true)} />
     </div>

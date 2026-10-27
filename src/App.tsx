@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -548,7 +548,7 @@ export default function App() {
     <TodayContext.Provider value={host.hub ? today : null}>
     <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`} data-entity={route.id}>
       <Sidebar
-        hubScreen={host.hub ? route.hub?.screen ?? null : null}
+        hubScreen={host.hub ? navScreen(route.hub?.screen) : null}
         hubNeedsYou={needsYou}
         canWrite={canWrite}
         dragItem={drag.item}
@@ -673,7 +673,7 @@ export default function App() {
           )}
         </div>
       </main>
-      {host.hub && !entity && <HubTabs screen={route.hub?.screen ?? null} needsYou={needsYou} onHome={goHome} />}
+      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} />}
     </div>
     </TodayContext.Provider>
   )

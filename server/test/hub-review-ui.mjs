@@ -57,6 +57,7 @@ try {
     },
   }));
   const oldFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 4 * 60000), title: 'Old probe', summary: 'Only a title and a summary.' }));
+  const partFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Part probe', extra: { verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green.' }] } }));
   const doneEvents = () => [...fixture.fake.objects.keys()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
 
   const page = await open({ width: 1280, height: 800 });
@@ -100,6 +101,26 @@ try {
   assert.equal(await view.locator('[data-section="try"] a', { hasText: 'Open the build' }).getAttribute('target'), '_blank');
   await noSideways(page, 'review view at 1280 px');
 
+  step('a review has a top link to the Inbox, a hint on Mark done, and the row button says what it does');
+  assert.equal(await page.locator('[data-legacy]').count(), 0, 'A review with fields is not old.');
+  assert.equal(await view.locator('[data-done-hint]').isVisible(), true);
+  await page.locator('[data-back-top]').waitFor();
+  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/inbox');
+  assert.equal(await page.locator('[data-hub-link="inbox"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Inbox current.');
+  await go(page, `#/~hub/review/${partFile}`);
+  await page.locator('[data-section="status"]').waitFor();
+  assert.equal(await page.locator('[data-legacy]').count(), 0, 'Verdicts only: not old.');
+  await page.getByText('No screenshots came with this item.').waitFor();
+  await go(page, '#/~hub/inbox/reviews');
+  assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('button', { hasText: 'Mark done' }).getAttribute('title'), 'Hide from Needs you. Does not approve or merge.');
+  await go(page, `#/~hub/review/${file}`);
+  await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
+  for (const [w, h] of [[800, 600], [1280, 800]]) {
+    await page.setViewportSize({ width: w, height: h });
+    const top = await page.locator('[data-back-top]').boundingBox();
+    assert.ok(top && top.y >= 0 && top.y + top.height <= h, `The top link is in the first viewport at ${w} px.`);
+  }
+
   step('reading a file: Brief opens in place with its image, focus on the reader title, the reader beside the sections');
   await view.locator('[data-file="briefs/x-1.md"]').click();
   await page.getByRole('heading', { name: 'Brief heading' }).waitFor();
@@ -138,14 +159,17 @@ try {
   await go(page, '#/~hub/inbox/reviews');
   await page.locator('.hub-row', { hasText: 'Old probe' }).locator('[data-review-open]').click();
   await page.locator('.hub-review h2', { hasText: 'Old probe' }).waitFor();
-  for (const line of [
-    'No test or review results came with this item.', 'No pull request link came with this item.', 'No screenshots came with this item.',
-    'No brief or reports came with this item.', 'No deployed build yet. The stack deploys after it merges.',
-  ]) await page.getByText(line).waitFor();
-  assert.equal(await page.getByText('QA did not run for this item.').count(), 0, 'Without verdicts there is nothing to say about QA.');
+  await page.locator('[data-legacy]').waitFor();
+  for (const gone of ['[data-section="status"]', '[data-section="shots"]', '[data-section="files"]', '[data-section="try"]']) assert.equal(await page.locator(gone).count(), 0, `${gone} is replaced by the one note.`);
+  assert.equal(await page.getByText(/^No (test or review|screenshots|brief or reports|deployed build)/).count(), 0, 'The flat empty lines are gone.');
+  await page.getByText('No pull request link came with this item.').waitFor();
+  assert.equal(await page.locator('[data-legacy]').count(), 1);
+  assert.equal(await page.locator('[data-done-hint]').isVisible(), true, 'Says what Mark done means.');
+  assert.match(await page.locator('[data-done-hint]').innerText(), /does not approve or merge/);
   await page.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('[data-done]', { hasText: 'Marked done. It is gone from Needs you.' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Mark done' }).count(), 0);
+  assert.equal(await page.locator('[data-done-hint]').count(), 0, 'The hint goes with the button.');
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, oldFile);
   await go(page, '#/~hub/inbox/reviews');
@@ -161,6 +185,8 @@ try {
   await phone.goto(`${fixture.url}#/~hub/review/${file}`);
   await phone.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
   await phone.waitForFunction(() => [...document.querySelectorAll('[data-pair] img')].every(image => image.complete));
+  assert.equal(await phone.locator('[data-hub-tab="inbox"]').getAttribute('aria-current'), 'page', 'Inbox is the current tab on a review.');
+  assert.equal(await phone.locator('[data-hub-tab="more"].active').count(), 0, 'More is not active.');
   await noSideways(phone, 'review view at 390 px');
   const wide = await phone.evaluate(() => [...document.querySelectorAll('.hub-review img')].filter(image => image.getBoundingClientRect().right > innerWidth + 0.5).length);
   assert.equal(wide, 0, 'No image is wider than the screen.');

@@ -54,6 +54,9 @@ export function reviewHash(id: string, file?: string): string {
   return file ? `${base}/${file.split('/').map(encodeURIComponent).join('/')}` : base
 }
 
+/** The screen the Hub's navigation marks as current: an Ask or a review is opened from the Inbox, so the Inbox stays lit. */
+export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' ? 'inbox' : screen ?? null)
+
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>
     typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < count

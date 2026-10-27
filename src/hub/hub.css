@@ -244,3 +244,7 @@ a.hub-row-text:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .hub-review-grid { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
   .hub-review-reader { position: sticky; top: 0; max-height: calc(100dvh - var(--topbar-h, 56px) - 32px); overflow: auto; }
 }
+
+/* A stronger cue on the review row: the arrow in the title's colour, and the title underlined on hover, focus and press. */
+a.hub-row-text .hub-row-cue { color: var(--text-bright); font-weight: 700; }
+a.hub-row-text:focus-visible .hub-row-title, a.hub-row-text:active .hub-row-title { text-decoration: underline; }

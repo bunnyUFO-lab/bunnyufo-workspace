@@ -128,11 +128,14 @@ export default function ReviewView({ route }: { route: string }) {
   const prs = detail.prs?.length ? detail.prs : detail.url ? [detail.url] : []
   const files = detail.cardFiles ?? []
   const folder = file && file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
+  // An event from before reviews carried links and results: one note instead of four empty sections.
+  const legacy = !detail.prs?.length && !detail.cardDir && !files.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
   const cardLink = detail.card && <a className="hub-btn" href={detail.card} target="_blank" rel="noopener noreferrer">Open the card</a>
 
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
       <div className="hub-review-head">
+        <p><a className="hub-btn" href={hubHash('inbox')} data-back-top>‹ Inbox</a></p>
         <div className="hub-top">
           <h2>{detail.title}</h2>
           <span>
@@ -145,7 +148,13 @@ export default function ReviewView({ route }: { route: string }) {
       </div>
       <div className="hub-review-grid">
         <div className="hub-review-side">
-          <section className="hub-panel" data-section="status" aria-label="Status">
+          {legacy && (
+            <section className="hub-panel" aria-label="Older review">
+              <p className="hub-muted" data-legacy>This review was posted before reviews carried their links and test results. The summary above is what came with it.</p>
+              {cardLink && <p>{cardLink}</p>}
+            </section>
+          )}
+          {!legacy && <section className="hub-panel" data-section="status" aria-label="Status">
             <h3>Status</h3>
             {verdicts.length === 0 && <p className="hub-muted">No test or review results came with this item.</p>}
             {verdicts.map(verdict => (
@@ -155,7 +164,7 @@ export default function ReviewView({ route }: { route: string }) {
               </p>
             ))}
             {verdicts.length > 0 && !verdicts.some(verdict => verdict.leg === 'qa') && <p className="hub-muted">QA did not run for this item.</p>}
-          </section>
+          </section>}
           <section className="hub-panel" data-section="prs" aria-label="Pull requests">
             <h3>Pull requests</h3>
             {prs.length === 0 && <p className="hub-muted">No pull request link came with this item.</p>}
@@ -163,11 +172,11 @@ export default function ReviewView({ route }: { route: string }) {
               {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer">{prLabel(url)}</a>)}
             </div>
           </section>
-          <section className="hub-panel" data-section="shots" aria-label="Screenshots">
+          {!legacy && <section className="hub-panel" data-section="shots" aria-label="Screenshots">
             <h3>Screenshots</h3>
             {detail.screenshots?.length ? <Shots pairs={detail.screenshots} /> : <p className="hub-muted">No screenshots came with this item.</p>}
-          </section>
-          <section className="hub-panel" data-section="files" aria-label="Files on the card">
+          </section>}
+          {!legacy && <section className="hub-panel" data-section="files" aria-label="Files on the card">
             <h3>Files on the card</h3>
             {files.length === 0 && <p className="hub-muted">No brief or reports came with this item.</p>}
             <div className="hub-review-files">
@@ -178,19 +187,24 @@ export default function ReviewView({ route }: { route: string }) {
               ))}
             </div>
             {cardLink && <p>{cardLink}</p>}
-          </section>
-          <section className="hub-panel" data-section="try" aria-label="Try it">
+          </section>}
+          {!legacy && <section className="hub-panel" data-section="try" aria-label="Try it">
             <h3>Try it</h3>
             {detail.deployUrl
               ? <p><a className="hub-btn" href={detail.deployUrl} target="_blank" rel="noopener noreferrer">Open the build</a></p>
               : <p className="hub-muted">No deployed build yet. The stack deploys after it merges.</p>}
-          </section>
+          </section>}
           <section className="hub-panel" aria-label="Mark done">
             {justDone
               ? <p data-done>Marked done. It is gone from Needs you.</p>
               : detail.done
                 ? <p data-done>Marked done {ago(detail.doneAt ?? detail.at)}{detail.doneBy ? ` by ${detail.doneBy}` : ''}</p>
-                : <ReviewActions item={item} links={false} onDone={() => setJustDone(true)} />}
+                : (
+                  <>
+                    <p className="hub-muted" data-done-hint>Mark done hides this review from Needs you. It does not approve or merge anything.</p>
+                    <ReviewActions item={item} links={false} onDone={() => setJustDone(true)} />
+                  </>
+                )}
           </section>
         </div>
         <section className="hub-panel hub-review-reader" aria-label="File">
