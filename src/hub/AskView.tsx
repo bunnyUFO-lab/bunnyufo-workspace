@@ -29,7 +29,7 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
   const option = optionList(ask)?.find(item => item.id === answer.choice)
   return (
     <section className="hub-panel hub-answer" aria-label="The answer">
-      <h3>Answer <span>by {text(answer.by) || 'someone'}, {when(answer.at)}</span></h3>
+      <h3>Answer <span>by {text(answer.by) || 'someone'}{answer.via === 'discord' ? ' via Discord' : ''}, {when(answer.at)}</span></h3>
       {answer.choice && <p><b>{option ? `${option.id} · ${text(option.label)}` : text(answer.choice)}</b></p>}
       {typeof answer.note === 'string' && answer.note && <p className="hub-note-text">{answer.note}</p>}
       {answer.drawing && <HubImage className="hub-drawing" path={`asks/${ask.id}/${answer.drawing.png}`} alt="The drawing sent with the answer" />}
@@ -106,6 +106,7 @@ export default function AskView({ id }: { id: string }) {
         {STEPS.map(([key, label], index) => (
           <li key={key} className={index < stepIndex ? 'past' : index === stepIndex ? 'on' : ''} aria-current={index === stepIndex ? 'step' : undefined}>{label}</li>
         ))}
+        {ask.requirePasskey === true && <li className="tag" title="This Ask is answered in the Hub with a passkey, never from Discord">Passkey only</li>}
         {SIDE[ask.state] && <li className="side on">{SIDE[ask.state]}{ask.state === 'snoozed' && ask.snoozedUntil ? ` until ${when(ask.snoozedUntil)}` : ''}</li>}
       </ol>
       <section className="hub-panel">

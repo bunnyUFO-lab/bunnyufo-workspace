@@ -74,6 +74,7 @@
 .hub-steps li { padding: 4px 12px; border-radius: var(--radius-pill); background: var(--surface-1); border: 1px solid var(--hairline); font-size: 0.75rem; color: var(--text-muted); }
 .hub-steps li.past { color: var(--green); }
 .hub-steps li.on { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }
+.hub-steps li.tag { border-style: dashed; font-size: 0.7rem; }
 .hub-steps li.side.on { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
 
 .hub-md { font-size: 0.88rem; line-height: 1.55; overflow-wrap: anywhere; }

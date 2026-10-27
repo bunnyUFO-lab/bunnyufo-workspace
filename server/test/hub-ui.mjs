@@ -13,7 +13,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FIXTURE_ASK, askId, startHubFixture } from './hub-fixture.mjs';
+import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -629,6 +629,34 @@ try {
   } finally {
     await micBrowser.close();
     await chatFixture.close();
+  }
+
+  step('Discord: an answer from a button says "via Discord", and an Ask that requires a passkey carries the tag');
+  const discordFixture = await startHubFixture({ discordAsks: true });
+  try {
+    for (const [width, height] of [[1280, 900], [390, 844]]) {
+      const view = await open({ width, height });
+      await view.goto(discordFixture.url);
+      await view.locator('.sidebar-list').waitFor();
+      await go(view, `#/~hub/ask/${DISCORD_ASK}`);
+      await view.locator('.hub-answer').waitFor();
+      const answered = await view.locator('.hub-answer').innerText();
+      assert.match(answered, /by owner via Discord/);
+      assert.match(answered, /A · Ship it/);
+      assert.equal(await view.locator('.hub-steps li.tag').count(), 0, 'This Ask does not require a passkey.');
+      await noSideways(view, `Discord answer at ${width}`);
+      await go(view, `#/~hub/ask/${PASSKEY_ASK}`);
+      await view.locator('.hub-steps li.tag', { hasText: 'Passkey only' }).waitFor();
+      assert.equal(await view.locator('.hub-answer').count(), 0);
+      await noSideways(view, `Passkey Ask at ${width}`);
+    }
+    const plain = await open({ width: 1280, height: 900 });
+    await plain.goto(fixture.url);
+    await go(plain, `#/~hub/ask/${FIXTURE_ASK}`);
+    await plain.locator('.hub-steps').waitFor();
+    assert.equal(await plain.locator('.hub-steps li.tag').count(), 0, 'An ordinary Ask has no tag.');
+  } finally {
+    await discordFixture.close();
   }
 
   console.log('hub-ui: parts 1 to 4 passed');
