@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askState, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
 import { askJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -628,4 +628,35 @@ test('no Hub list repeats a key: not in Needs you, any Inbox filter, or the runn
     }
     assert.equal(today.needsYou.filter(item => item.kind === 'blocked' && item.id === 'sess-a').length, 1);
   } finally { await close(); }
+});
+
+test('discordEligible: a simple Ask passes, and each way out of the rule fails with its reason', () => {
+  const base = { id: '20261027-probe-simple-a1b2', question: 'Ship it?', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowNote: true, allowDrawing: false };
+  assert.deepEqual(discordEligible(base), { ok: true });
+  assert.deepEqual(discordEligible({ ...base, options: ['a', 'b', 'c'].map(id => ({ id, label: `Option ${id}` })), allowNote: true }), { ok: true }, 'Three options with a note.');
+  assert.equal(discordEligible({ ...base, options: Array.from({ length: 5 }, (_, n) => ({ id: `o${n}`, label: 'x' })) }).ok, true, 'Five is the most.');
+  const no = (what, ask) => { const result = discordEligible(ask); assert.equal(result.ok, false, what); assert.ok(result.reason, `${what} says why`); };
+  no('one option', { ...base, options: [{ id: 'A', label: 'Yes' }] });
+  no('no options', { ...base, options: undefined });
+  no('six options', { ...base, options: Array.from({ length: 6 }, (_, n) => ({ id: `o${n}`, label: 'x' })) });
+  no('an option image', { ...base, options: [{ id: 'A', label: 'Yes', image: 'a.png' }, base.options[1]] });
+  no('an empty label', { ...base, options: [{ id: 'A', label: '' }, base.options[1]] });
+  no('a blank label', { ...base, options: [{ id: 'A', label: '   ' }, base.options[1]] });
+  no('a label of 81 characters', { ...base, options: [{ id: 'A', label: 'x'.repeat(81) }, base.options[1]] });
+  assert.equal(discordEligible({ ...base, options: [{ id: 'A', label: 'x'.repeat(80) }, base.options[1]] }).ok, true, '80 is allowed.');
+  no('a missing option id', { ...base, options: [{ label: 'Yes' }, base.options[1]] });
+  no('two options with one id', { ...base, options: [{ id: 'A', label: 'Yes' }, { id: 'A', label: 'No' }] });
+  no('drawing allowed', { ...base, allowDrawing: true });
+  no('requirePasskey', { ...base, requirePasskey: true });
+  no('a custom id over 100 characters', { ...base, options: [{ id: 'o'.repeat(90), label: 'Yes' }, base.options[1]] });
+  assert.equal(discordEligible({ ...base, requirePasskey: false }).ok, true, 'false is the same as missing.');
+  no('not an Ask', null);
+});
+
+test('askRev: the same bytes give the same 16 hex characters, and one byte changes it', () => {
+  const text = '{"question":"Ship it?"}\n';
+  assert.match(askRev(text), /^[0-9a-f]{16}$/);
+  assert.equal(askRev(text), askRev(text));
+  assert.equal(askRev(text), askRev(Buffer.from(text)));
+  assert.notEqual(askRev(text), askRev('{"question":"Ship it!"}\n'));
 });
