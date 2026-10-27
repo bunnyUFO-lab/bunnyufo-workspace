@@ -52,3 +52,11 @@ test('a JPEG with no end-of-image marker after the scan is refused, so trailing 
   assert.equal(stripJpeg(open), null);
   assert.throws(() => checkChatImages([{ type: 'image/jpeg', data: open.toString('base64') }], fail), { status: 400, message: 'That picture is damaged.' });
 });
+
+test('a JPEG whose scan runs into a second picture before any end marker is refused', () => {
+  const unfinished = jpeg(20, 10, { exif: false }).subarray(0, -2);
+  const smuggled = Buffer.concat([unfinished, jpeg(20, 10, { exif: true })]);
+  assert.ok(smuggled.includes('GPS'));
+  assert.equal(stripJpeg(smuggled), null);
+  assert.throws(() => checkChatImages([{ type: 'image/jpeg', data: smuggled.toString('base64') }], fail), { status: 400, message: 'That picture is damaged.' });
+});

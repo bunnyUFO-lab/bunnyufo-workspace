@@ -45,11 +45,12 @@ export function jpegSize(buffer) {
 /**
  * The index just past the first end-of-image marker in scan data from `from`. A stuffed FF 00 and
  * the restart markers FF D0 to D7 are not it. Everything after it (a second picture, with its own
- * EXIF) is cut. -1 when there is no marker (the picture is refused).
+ * EXIF) is cut. -1 when there is no marker, or a start-of-image marker (a second picture) comes first: the picture is refused.
  */
 function scanEnd(buffer, from) {
   for (let at = from; at + 1 < buffer.length; at += 1) {
     if (buffer[at] === 0xff && buffer[at + 1] === 0xd9) return at + 2;
+    if (buffer[at] === 0xff && buffer[at + 1] === 0xd8) return -1;
   }
   return -1;
 }
