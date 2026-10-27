@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react'
-import type { MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
+import type { Item, MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
 import { safeUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import ItemRow from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
+import { useHubData } from './useHub'
 import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, prsOf, sprintLines, tasksOf, type Found, type PrRow } from './mapState'
 
 /** The signs in the legend's order, with the short word the panel counts them under. */
@@ -65,6 +67,8 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
   const dialog = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const found = find(model, nodeId)
+  // What waits on you for this node's tasks (open Asks, reviews, blocked sessions), once per panel.
+  const { data: inbox } = useHubData<{ items: Item[] }>('/inbox?filter=needs-you')
 
   useEffect(() => {
     const element = dialog.current
@@ -86,6 +90,16 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
   const sprints = sprintLines(model, found)
   const prs = prsOf(tasks)
   const noun = found.kind === 'm' ? 'milestone' : 'feature'
+  const ids = new Set(tasks.map(task => task.id))
+  const mine = (inbox?.items ?? []).filter(item => item.bead && ids.has(item.bead))
+  const elsewhere = (inbox?.items ?? []).filter(item => item.project === model.project && !(item.bead && ids.has(item.bead))).length
+  const needsYou = mine.length > 0 && (
+    <>
+      <h4>Needs you</h4>
+      {mine.map(item => <ItemRow key={`${item.kind}-${item.id}`} item={item} />)}
+    </>
+  )
+  const more = elsewhere > 0 && <p className="hub-muted"><a href={hubHash('inbox')}>{elsewhere} more for this project in Inbox</a></p>
 
   let body
   if (found.kind === 't') {
@@ -100,6 +114,8 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
         {task.deps.length > 0 && <p className="hub-muted">Needs first: {task.deps.map(nameOf).join(', ')}</p>}
         {unlocks.length > 0 && <p className="hub-muted">Unlocks: {unlocks.join(', ')}</p>}
         {task.sprints.length > 0 && <p className="hub-muted">Sprint: {task.sprints.join(', ')}</p>}
+        {needsYou}
+        {more}
         <h4>Pull requests</h4>
         <PrList rows={prs} showTask={false} />
         {task.state === 'you' && <div className="hub-actions start"><a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('inbox')}>Open in Inbox</a></div>}
@@ -113,6 +129,8 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
         {sprints.length ? <ul className="hub-map-panel-list plain">{sprints.map(line => <li key={line}>{line}</li>)}</ul> : <p className="hub-muted">Not in a sprint.</p>}
         <h4>Signs</h4>
         {counts.length ? <ul className="hub-map-panel-list plain">{counts.map(item => <li key={item.sign}><span aria-hidden="true">{SIGN_GLYPH[item.sign]}</span> {item.count} {item.word}</li>)}</ul> : <p className="hub-muted">No sessions, PRs or deploys yet.</p>}
+        {needsYou}
+        {more}
         <h4>Pull requests</h4>
         <PrList rows={prs} showTask />
         <h4>Tasks</h4>
