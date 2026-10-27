@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { addSection, openForEditing, updateCard } from '../lib/cards'
 import type { SectionKind } from '../lib/cards'
@@ -7,8 +7,10 @@ import './cards.css'
 const message = (problem: unknown) => problem instanceof Error ? problem.message : String(problem)
 
 /** The "+" after a card's tabs: name a new Markdown section or drawing, and it opens in the editor. */
-export function AddSection({ card, onStep }: { card: WorkspaceCard; onStep: (id: string, index: number) => void }) {
+export function AddSection({ card, onStep, onNaming }: { card: WorkspaceCard; onStep: (id: string, index: number) => void; onNaming?: () => void }) {
   const [naming, setNaming] = useState(false)
+  // The tab bar re-measures its overflow when the button turns into the form and back.
+  useEffect(() => { onNaming?.() }, [naming]) // eslint-disable-line react-hooks/exhaustive-deps
   const [name, setName] = useState('')
   const [kind, setKind] = useState<SectionKind>('markdown')
   const [busy, setBusy] = useState(false)

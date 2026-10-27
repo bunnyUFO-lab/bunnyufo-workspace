@@ -717,21 +717,57 @@ button:focus-visible {
   max-width: 100%;
 }
 
+/* One row at every width. Tabs past an edge scroll sideways; the wrapper's data-overflow names the
+   edges where some are hidden and the mask fades the tabs there (no color, so both themes and the
+   glass topbar work). */
+.step-tabs-wrap { flex: 1 1 auto; min-width: 0; position: relative; max-width: 100%; }
 .step-tabs {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 2px;
   padding: 2px;
   background: var(--surface-1);
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.step-tabs-wrap[data-overflow~="start"] > .step-tabs {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+.step-tabs-wrap[data-overflow~="end"] > .step-tabs {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 28px);
+  mask-image: linear-gradient(to left, transparent, #000 28px);
+}
+.step-tabs-wrap[data-overflow~="start"][data-overflow~="end"] > .step-tabs {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+/* Arrows are for a mouse, which cannot scroll sideways; touch swipes, and the keyboard has ← →. */
+.step-tabs-arrow { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .step-tabs-arrow {
+    display: flex; align-items: center; justify-content: center;
+    position: absolute; top: 0; bottom: 0; width: 24px; padding: 0;
+    border: 0; background: none; color: var(--text-dim);
+    font: inherit; font-size: 1rem; line-height: 1; cursor: pointer; z-index: 1;
+  }
+  .step-tabs-arrow[data-edge="start"] { left: 0; }
+  .step-tabs-arrow[data-edge="end"] { right: 0; }
+  .step-tabs-arrow:hover { color: var(--text); }
 }
 .step-tabs::-webkit-scrollbar { display: none; }
 .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs){align-items:flex-start;gap:10px 20px}
 .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .breadcrumb{width:100%;min-height:24px}
 .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .topbar-right{width:100%;margin:0;align-items:flex-start}
-.app-layout:not([data-entity="my-dream-game"]) .step-tabs{flex:1;background:transparent;border:0;gap:5px;padding:0}
+.app-layout:not([data-entity="my-dream-game"]) .step-tabs-wrap{flex:1 1 auto}
+.app-layout:not([data-entity="my-dream-game"]) .step-tabs{background:transparent;border:0;gap:5px;padding:0}
 .app-layout:not([data-entity="my-dream-game"]) .step-tab{border:1px solid #ffffff0c;padding:6px 10px;color:#a59dab;border-radius:7px}
 .app-layout:not([data-entity="my-dream-game"]) .step-tab.active{border-color:#f0a0b036;color:#f7bbca;background:#f0a0b012}
 
@@ -744,8 +780,10 @@ button:focus-visible {
   font-size: 0.74rem;
   color: var(--text-muted);
   cursor: pointer;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-align: left;
   max-width: 36ch;
   line-height: 1.45;
@@ -761,6 +799,7 @@ button:focus-visible {
 }
 
 .open-ext {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1684,8 +1723,9 @@ button.open-ext {
 
 /* ── A phone ──────────────────────────────────────────────────────────────────
    No tool column (local.css), a header that slides away while you read down
-   the page and back when you scroll up (lib/chrome), and the card's tabs on one
-   row that scrolls sideways instead of stacking into three. */
+   the page and back when you scroll up (lib/chrome). The header is at most two
+   rows here, as everywhere: the breadcrumb, then the card's tabs (one row that
+   scrolls sideways, see .step-tabs). */
 @media (max-width: 640px) {
   .app-layout .sidebar { inset: 0; width: 100%; }
   .topbar {
@@ -1704,13 +1744,6 @@ button.open-ext {
   /* The project is one tap away in the menu; the card's title needs the width. */
   .breadcrumb .crumb-sep + .crumb-link, .breadcrumb .crumb-sep + .crumb-link + .crumb-sep { display: none; }
   .crumb-link { white-space: nowrap; }
-  .step-tabs, .app-layout:not([data-entity="my-dream-game"]) .step-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    min-width: 0;
-  }
-  .step-tab { white-space: nowrap; max-width: none; flex-shrink: 0; }
   .sidebar-reopen { transition: transform 0.25s var(--ease), opacity 0.25s var(--ease); }
   html[data-chrome-hidden] .sidebar-reopen { transform: translateY(-64px); opacity: 0; pointer-events: none; }
 }

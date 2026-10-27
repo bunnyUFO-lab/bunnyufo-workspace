@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { cardFile } from '../local/client'
 import { host } from '../lib/host'
@@ -24,18 +24,92 @@ const GithubMark = () => (
   </svg>
 )
 
+const FADE = 28
+
+/** Which edges of the tab bar have tabs scrolled out of sight: '', 'start', 'end' or 'start end'. */
+function useTabOverflow(list: React.RefObject<HTMLDivElement | null>, deps: unknown[]) {
+  const [overflow, setOverflow] = useState('')
+  useEffect(() => {
+    const el = list.current
+    if (!el) return
+    // A string, so React skips the render when nothing changed: scrolling is not a render per frame.
+    const measure = () => {
+      const edges = []
+      if (el.scrollLeft > 1) edges.push('start')
+      if (el.scrollLeft + el.clientWidth < el.scrollWidth - 1) edges.push('end')
+      setOverflow(edges.join(' '))
+    }
+    el.addEventListener('scroll', measure, { passive: true })
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    for (const child of el.children) observer.observe(child)
+    // Also after a render that changed the tabs (a card, a step count, the active tab, the add form).
+    const frame = requestAnimationFrame(measure)
+    return () => { el.removeEventListener('scroll', measure); observer.disconnect(); cancelAnimationFrame(frame) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+  return overflow
+}
+
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, showProject, liveAppUrl }: TopbarProps) {
   const [copied, setCopied] = useState(false)
-  // Its own height, which a phone needs to slide it out of view (global.css): it wraps to two rows
-  // or three depending on the card's tabs, so no fixed number would do.
+  // Its own height, which a phone needs to slide it out of view (global.css): at most two rows
+  // (the breadcrumb, then the tabs), but the breadcrumb and the inline forms can change that.
   const bar = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = bar.current
     if (!el) return
     const observer = new ResizeObserver(() => el.style.setProperty('--topbar-height', `${el.offsetHeight}px`))
     observer.observe(el)
+    for (const child of el.children) observer.observe(child)
     return () => observer.disconnect()
   }, [])
+  const tabs = useRef<HTMLDivElement>(null)
+  const [adding, setAdding] = useState(0)
+  const overflow = useTabOverflow(tabs, [entity?.id, entity?.steps.length, stepIndex, adding])
+  // Bring the active tab inside the visible part of the bar, clear of the fade and the arrows.
+  // Computed by hand: scrollIntoView would also move the page. Opening a card jumps; changing tab slides.
+  const shownCard = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const list = tabs.current
+    const tab = list?.querySelector<HTMLElement>('.step-tab.active')
+    if (!list || !tab) return
+    const first = shownCard.current !== (entity?.id ?? null)
+    shownCard.current = entity?.id ?? null
+    const reveal = (behavior: ScrollBehavior) => {
+      const left = tab.offsetLeft - FADE
+      const right = tab.offsetLeft + tab.offsetWidth + FADE
+      let target = list.scrollLeft
+      const max = list.scrollWidth - list.clientWidth
+      if (left < list.scrollLeft) target = Math.max(0, left)
+      else if (right > list.scrollLeft + list.clientWidth) target = Math.min(max, right - list.clientWidth)
+      // Next to an end (only the add button can follow the last tab), go all the way: a few pixels
+      // short would leave a fade over nothing.
+      if (tab.offsetLeft <= FADE) target = 0
+      else if (tab.offsetLeft + tab.offsetWidth >= list.scrollWidth - 2 * FADE) target = max
+      if (Math.abs(target - list.scrollLeft) >= 1) list.scrollTo({ left: target, behavior })
+    }
+    reveal(first || reducedMotion() ? 'auto' : 'smooth')
+    // The bar can still be settling (the menu sliding, fonts arriving): keep the tab in view as it resizes.
+    // Only a real change of size re-reveals (the bar, or the tabs inside it): the observer's first
+    // callback arrives at once and would cut the smooth slide short.
+    let width = list.clientWidth
+    let content = list.scrollWidth
+    const observer = new ResizeObserver(() => {
+      if (list.clientWidth === width && list.scrollWidth === content) return
+      width = list.clientWidth
+      content = list.scrollWidth
+      reveal('auto')
+    })
+    observer.observe(list)
+    for (const child of list.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [entity?.id, stepIndex])
+  const scrollTabs = (direction: 1 | -1) => tabs.current?.scrollBy({
+    left: direction * tabs.current.clientWidth * 0.8, behavior: reducedMotion() ? 'auto' : 'smooth',
+  })
   const file = entity?.steps[stepIndex]?.path ?? ''
   const source = entity && file ? repoFileUrl(entity, file) : null
   const localPath = host.files && entity && file ? cardFile(entity, file) : null
@@ -89,20 +163,28 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
       {entity && (
         <div className="topbar-right">
           {entity.steps.length > 0 && (
-            <div className="step-tabs" role="tablist">
-              {entity.steps.map((s, i) => (
-                <button
-                  key={i}
-                  role="tab"
-                  aria-selected={i === stepIndex}
-                  className={`step-tab${i === stepIndex ? ' active' : ''}`}
-                  onClick={() => onStep(entity.id, i)}
-                  title={s.name}
-                >
-                  {s.name}
-                </button>
-              ))}
-              {editable && <AddSection key={entity.id} card={entity} onStep={onStep} />}
+            <div className="step-tabs-wrap" data-overflow={overflow}>
+              <div className="step-tabs" role="tablist" ref={tabs}>
+                {entity.steps.map((s, i) => (
+                  <button
+                    key={i}
+                    role="tab"
+                    aria-selected={i === stepIndex}
+                    className={`step-tab${i === stepIndex ? ' active' : ''}`}
+                    onClick={() => onStep(entity.id, i)}
+                    title={s.name}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+                {editable && <AddSection key={entity.id} card={entity} onStep={onStep} onNaming={() => setAdding(n => n + 1)} />}
+              </div>
+              {overflow.includes('start') && (
+                <button type="button" className="step-tabs-arrow" data-edge="start" tabIndex={-1} aria-hidden="true" onClick={() => scrollTabs(-1)}>‹</button>
+              )}
+              {overflow.includes('end') && (
+                <button type="button" className="step-tabs-arrow" data-edge="end" tabIndex={-1} aria-hidden="true" onClick={() => scrollTabs(1)}>›</button>
+              )}
             </div>
           )}
           {liveAppUrl && (
