@@ -75,6 +75,12 @@ const cue = page => page.evaluate(() => {
     .map(a => a.dataset.edge);
   return { overflow: wrap?.dataset.overflow, mask: style.maskImage || style.webkitMaskImage || 'none', arrows };
 });
+// The round buttons beside the tabs keep their size however many tabs there are.
+const buttonsKeepSize = async (page, label) => {
+  const widths = await page.$$eval('.open-ext', els => els.map(el => Math.round(el.getBoundingClientRect().width)));
+  assert.ok(widths.length > 0, `${label}: the round buttons render`);
+  assert.deepEqual(widths.filter(w => w !== 28), [], `${label}: every round button stays 28 px wide (${widths})`);
+};
 const scrollLeft = page => page.$eval('.step-tabs', el => el.scrollLeft);
 // Smooth scrolling takes a moment: wait until two reads in a row agree.
 const settled = async page => {
@@ -124,9 +130,18 @@ try {
   assert.notEqual(c.mask, 'none', 'the fade is drawn');
   assert.deepEqual(c.arrows, ['start'], 'only the start arrow shows');
   await noSideways(page, '1280 many');
+  await buttonsKeepSize(page, '1280 many');
 
   // 2. Arrow right wraps to the first tab.
-  await page.keyboard.press('ArrowRight');
+  const slide = await page.evaluate(() => new Promise(resolve => {
+    const list = document.querySelector('.step-tabs');
+    const seen = [];
+    const t0 = performance.now();
+    const tick = () => { seen.push(Math.round(list.scrollLeft)); if (performance.now() - t0 < 600) requestAnimationFrame(tick); else resolve(seen); };
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    requestAnimationFrame(tick);
+  }));
+  assert.ok(new Set(slide.filter(v => v > 0)).size > 2, `changing tab slides instead of jumping (${[...new Set(slide)]})`);
   await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Overview');
   assert.equal(await settled(page), 0, 'scrolled back to the start');
   await activeInView(page, 'wrapped to first');
@@ -160,6 +175,7 @@ try {
   await oneRow(page, '375 many');
   await activeInView(page, '375 last tab');
   await noSideways(page, '375 many');
+  await buttonsKeepSize(page, '375 many');
   c = await cue(page);
   assert.notEqual(c.mask, 'none', '375: the fade is drawn');
   assert.deepEqual(c.arrows, [], '375: no arrows on touch');

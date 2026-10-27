@@ -93,7 +93,16 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
     }
     reveal(first || reducedMotion() ? 'auto' : 'smooth')
     // The bar can still be settling (the menu sliding, fonts arriving): keep the tab in view as it resizes.
-    const observer = new ResizeObserver(() => reveal('auto'))
+    // Only a real change of size re-reveals (the bar, or the tabs inside it): the observer's first
+    // callback arrives at once and would cut the smooth slide short.
+    let width = list.clientWidth
+    let content = list.scrollWidth
+    const observer = new ResizeObserver(() => {
+      if (list.clientWidth === width && list.scrollWidth === content) return
+      width = list.clientWidth
+      content = list.scrollWidth
+      reveal('auto')
+    })
     observer.observe(list)
     for (const child of list.children) observer.observe(child)
     return () => observer.disconnect()
