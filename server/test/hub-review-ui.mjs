@@ -203,6 +203,8 @@ try {
   assert.equal(await page.locator('[data-sprint-card]').first().innerText(), 'Sprint card: Hubdemo sprint');
   assert.equal(await page.locator('.hub-md a', { hasText: 'qa/nothing.md' }).count(), 0, 'A file that does not exist stays plain text.');
   const cited = page.locator('.hub-md a', { hasText: 'reviews/x-1-qa.md' });
+  const look = await page.locator('.hub-review-head .hub-md').evaluate(node => ({ body: getComputedStyle(node).color, link: getComputedStyle(node.querySelector('a')).color, line: getComputedStyle(node.querySelector('a')).textDecorationLine }));
+  assert.ok(look.link !== look.body && look.line.includes('underline'), `A summary link looks like a link (${JSON.stringify(look)}).`);
   assert.equal(await cited.getAttribute('href'), `#/~hub/review/${linksFile}/reviews/x-1-qa.md`);
   await cited.click();
   await page.getByRole('heading', { name: 'Old QA triage heading' }).waitFor();
