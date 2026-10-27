@@ -242,6 +242,7 @@ a.hub-row-text:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 }
 @media (min-width: 1001px) {
   .hub-review-grid { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+  .hub-review-grid[data-solo] { grid-template-columns: minmax(0, 1fr); }
   .hub-review-reader { position: sticky; top: 0; max-height: calc(100dvh - var(--topbar-h, 56px) - 32px); overflow: auto; }
 }
 

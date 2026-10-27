@@ -146,7 +146,7 @@ export default function ReviewView({ route }: { route: string }) {
         <p className="hub-muted">Posted {ago(detail.at)}{detail.host ? ` from ${detail.host}` : ''}.</p>
         {detail.summary && <Md text={detail.summary} />}
       </div>
-      <div className="hub-review-grid">
+      <div className="hub-review-grid" data-solo={files.length || file ? undefined : 'true'}>
         <div className="hub-review-side">
           {legacy && (
             <section className="hub-panel" aria-label="Older review">
@@ -207,7 +207,7 @@ export default function ReviewView({ route }: { route: string }) {
                 )}
           </section>
         </div>
-        <section className="hub-panel hub-review-reader" aria-label="File">
+        {(files.length > 0 || file) && <section className="hub-panel hub-review-reader" aria-label="File">
           {file ? (
             <>
               <button type="button" className="hub-btn hub-review-back" onClick={close}>‹ Back to the review</button>
@@ -223,7 +223,7 @@ export default function ReviewView({ route }: { route: string }) {
               )}
             </>
           ) : <p className="hub-muted">Pick a file to read it here.</p>}
-        </section>
+        </section>}
       </div>
       <p><a className="hub-btn" href={hubHash('inbox')}>Back to the Inbox</a></p>
     </div>
