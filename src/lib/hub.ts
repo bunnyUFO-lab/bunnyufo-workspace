@@ -20,6 +20,8 @@ export interface Item {
   session?: string
   summary?: string
   by?: string
+  /** A blocked row's event file, which Mark done names. */
+  file?: string
 }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
@@ -51,6 +53,14 @@ export interface HubEvent {
 export interface Verdict { leg: 'smoke' | 'review' | 'qa'; result: 'pass' | 'fail' | 'noted'; text: string }
 export interface ReviewFile { path: string; label: string }
 export interface ShotPair { label: string; before?: string; after?: string; other?: string }
+/** What the server found for an old review that carried no card: the sprint card by its title, and the files the summary cites that exist. */
+export interface InferredCard {
+  card: { id: string; title: string }
+  section: string
+  cardDir: string
+  cardFiles: ReviewFile[]
+  repo?: string
+}
 /** GET /api/hub/reviews/:id: the server has checked every link and path in it. */
 export interface ReviewDetail {
   id: string
@@ -68,6 +78,7 @@ export interface ReviewDetail {
   screenshots?: ShotPair[]
   deployUrl?: string
   verdicts?: Verdict[]
+  inferred?: InferredCard
   done: boolean
   doneAt?: string
   doneBy?: string

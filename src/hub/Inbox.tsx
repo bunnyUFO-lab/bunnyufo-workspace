@@ -1,5 +1,7 @@
 import type { Item } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import { useState } from 'react'
+import { takeFlash } from './flash'
 import ItemRow from './ItemRow'
 import { useHubData } from './useHub'
 
@@ -13,6 +15,7 @@ const FILTERS: [string, string, string][] = [
 ]
 
 export default function Inbox({ filter }: { filter?: string }) {
+  const [flash] = useState(takeFlash)
   const active = FILTERS.find(([key]) => key === filter) ?? FILTERS[0]
   const { data, error, loading } = useHubData<{ items: Item[] }>(`/inbox?filter=${active[0]}`)
   return (
@@ -24,6 +27,7 @@ export default function Inbox({ filter }: { filter?: string }) {
         ))}
       </div>
       <section className="hub-panel">
+        {flash && <p className="hub-muted" role="status" data-marked-done>{flash}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {data ? (data.items.length ? data.items.map(item => <ItemRow key={`${item.kind}-${item.id}`} item={item} />) : <p className="hub-empty">{active[2]}</p>) : !error && loading && <p className="hub-empty">Loading…</p>}
       </section>
