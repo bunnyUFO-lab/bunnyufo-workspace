@@ -110,9 +110,11 @@ export interface HubProject { id: string; name: string; beads: boolean; pushedAt
 
 export type TaskState = 'done' | 'doing' | 'you' | 'next' | 'later'
 export type Sign = 'working' | 'idle' | 'new' | 'pr' | 'ci-failed' | 'review' | 'deployed'
+/** One pull request of a task: `prUrl` is only the open one; this keeps merged ones too. */
+export interface MapPr { url?: string; state: 'open' | 'merged'; at: string }
 export interface MapTask {
   id: string; title: string; state: TaskState; status: string; signs: Sign[]; sprints: string[]
-  deps: string[]; ask?: string; prUrl?: string; closedAt?: string
+  deps: string[]; ask?: string; prUrl?: string; prs?: MapPr[]; closedAt?: string
 }
 export interface MapFeature { id: string; title: string; state: TaskState; tasks: MapTask[] }
 export interface MapMilestone { id: string; title: string; state: TaskState; features: MapFeature[] }

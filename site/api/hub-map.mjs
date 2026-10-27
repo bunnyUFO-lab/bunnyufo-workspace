@@ -112,18 +112,30 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     if (ci?.kind === 'ci-failed') signs.push('ci-failed');
     if (open('ready-for-review')) signs.push('review');
     if (list.some(event => event.kind === 'deployed')) signs.push('deployed');
-    return { signs, prUrl };
+    // Every PR the bead had, open or merged, in the order they opened. Entries without a url are kept so they still count.
+    const prs = [];
+    for (const event of list) {
+      if (event.kind === 'pr-opened') prs.push({ ...(event.url ? { url: event.url } : {}), state: 'open', at: event.ts });
+      else if (event.kind === 'pr-merged') {
+        const same = event.url ? prs.find(entry => entry.url === event.url) : null;
+        const targets = event.url ? (same ? [same] : []) : prs.filter(entry => entry.state === 'open');
+        for (const entry of targets) { entry.state = 'merged'; entry.at = event.ts; }
+        if (!targets.length) prs.push({ ...(event.url ? { url: event.url } : {}), state: 'merged', at: event.ts });
+      }
+    }
+    return { signs, prUrl, prs };
   };
 
   const toTask = issue => {
     const state = taskState(issue);
-    const { signs, prUrl } = signsOf(issue, state);
+    const { signs, prUrl, prs } = signsOf(issue, state);
     return {
       id: issue.id, title: issue.title ?? issue.id, state, status: issue.status ?? 'open', signs,
       sprints: (issue.labels ?? []).filter(label => label.startsWith('sprint:')).map(label => label.slice(7)),
       deps: blockers(issue).filter(id => byId.has(id)),
       ...(asksByBead.has(issue.id) ? { ask: asksByBead.get(issue.id) } : {}),
       ...(prUrl ? { prUrl } : {}),
+      ...(prs.length ? { prs } : {}),
       ...(issue.closed_at ? { closedAt: issue.closed_at } : {}),
       createdAt: issue.created_at,
     };

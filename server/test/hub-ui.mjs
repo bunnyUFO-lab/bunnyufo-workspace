@@ -325,6 +325,27 @@ try {
     await guest.evaluate(() => { location.hash = '#/~hub/board/probe'; });
     await guest.locator('text=Sign in to ask an agent to do something.').waitFor();
     assert.equal(await guest.getByRole('button', { name: 'Ask an agent to do something' }).count(), 0);
+    step('read-only at 375 px: the scrim covers the banner and the title; a tap on the banner closes the sheet');
+    const tiny = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
+    await tiny.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/probe`);
+    await tiny.locator('.hub-map-box svg').waitFor();
+    await tiny.locator('[data-node="m1"] > circle').first().tap({ force: true });
+    await tiny.locator('.hub-map-panel').waitFor();
+    const top = (await tiny.locator('.hub-map-panel').boundingBox()).y;
+    const hits = await tiny.evaluate(() => ['.hub-banner', '.hub h2'].map(selector => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + Math.min(rect.height / 2, 20);
+      return { selector, y, hit: document.elementFromPoint(x, y)?.className };
+    }));
+    for (const { selector, y, hit } of hits) {
+      if (y < top - 2) assert.equal(hit, 'hub-map-scrim', `${selector} is under the scrim, not under ${hit}.`);
+    }
+    assert.ok(hits[0].y < top - 2, 'The banner is above the sheet, so the check ran.');
+    await tiny.touchscreen.tap(187, hits[0].y);
+    await tiny.locator('.hub-map-panel').waitFor({ state: 'detached' });
+    assert.equal(await tiny.evaluate(() => location.hash), '#/~hub/map/probe');
+    assert.equal(await tiny.locator('.hub-map-panel').count(), 0, 'No other node opened.');
   } finally { stub.close(); }
 
 
@@ -343,22 +364,21 @@ try {
   assert.equal(await page.locator('[data-kind="f"], [data-kind="t"]').count(), 0);
 
   step('map: Milestone 2 opens into features, Wall-jump into seven tasks with their signs');
-  await page.locator('[data-node="ml-m2"] > circle').click({ force: true });
+  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
   await page.locator('[data-kind="f"]').waitFor();
   assert.equal(await page.locator('[data-kind="f"]').count(), 1);
   // A node with a working sign has a spinning ring in it, which Playwright never calls stable.
-  await page.locator('[data-node="ml-wj"] > circle').click({ force: true });
+  await page.locator('[data-toggle="ml-wj"]').click({ force: true });
   await page.locator('[data-kind="t"]').first().waitFor();
   assert.equal(await page.locator('[data-kind="t"]').count(), 7);
   assert.equal(await page.locator('[data-node="ml-wj-t3"] [data-sign="working"]').count(), 1, 'The task with a session started 5 minutes ago is working.');
   assert.equal(await page.locator('[data-node="ml-wj-t5"] [data-sign="pr"]').count(), 1, 'The task with an open PR has the PR sign.');
   assert.equal(await page.locator('[data-node="ml-wj-t1"] [data-sign]').count(), 0, 'A closed task has no signs.');
-  assert.match(await page.locator('.hub-map-detail').innerText(), /1 PR open/, 'One open PR reads "1 PR open", not "1 PRs open".');
   await page.locator('[data-node="ml-wj-t5"] > circle').click({ force: true });
-  assert.match(await page.locator('.hub-map-detail').innerText(), /Wall-jump animation/);
-  await page.locator('.hub-map-detail a:has-text("Open PR")').waitFor();
-  assert.equal((await page.locator('.hub-map-detail .hub-id').innerText()).trim(), 'ml-wj-t5');
-  assert.match(await page.locator('.hub-map-detail-title').innerText(), /^Wall-jump animation/, 'The details lead with the title.');
+  assert.match(await page.locator('.hub-map-panel').innerText(), /Wall-jump animation/);
+  await page.locator('.hub-map-panel a:has-text("Open PR")').waitFor();
+  assert.equal((await page.locator('.hub-map-panel .hub-id').first().innerText()).trim(), 'ml-wj-t5');
+  assert.match(await page.locator('.hub-map-panel h3').innerText(), /^Wall-jump animation/, 'The details lead with the title.');
   const labelLengths = await page.locator('[data-kind="t"] text.hub-map-label').evaluateAll(list => list.map(item => item.textContent.length));
   assert.ok(labelLengths.length > 0 && labelLengths.every(length => length <= 25), `Map task labels stay short (${labelLengths}).`);
   const tip = await page.locator('[data-node="ml-wj-t5"] > title').textContent();
@@ -371,6 +391,128 @@ try {
   assert.ok(longTip.includes(wallTitle) && longTip.includes('ml-wj-t2'), 'The hover text keeps the full title and the id.');
   assert.ok((await page.locator('[data-node="ml-wj-t2"]').getAttribute('aria-label')).startsWith(wallTitle), 'The aria-label keeps the full title.');
   await page.unroute('**/api/hub/map/magic-loops');
+
+  step('map: tapping a milestone opens its panel; the chevron alone expands');
+  const panel = page.locator('.hub-map-panel');
+  const fCount = () => page.locator('[data-kind="f"]').count();
+  // The side panel covers the right of the page, so bring a node to the left of the box before clicking it.
+  const clickNode = async id => {
+    await page.locator('.hub-map-box').evaluate((box, nodeId) => {
+      const rect = box.querySelector(`[data-node="${nodeId}"] > circle`).getBoundingClientRect();
+      box.scrollLeft += rect.left - box.getBoundingClientRect().left - 150;
+    }, id);
+    await page.locator(`[data-node="${id}"] > circle`).click({ force: true });
+  };
+  await page.locator('button:has-text("Collapse")').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 0);
+  await go(page, '#/~hub/map/magic-loops');
+  await panel.waitFor({ state: 'detached' });
+  assert.equal(await fCount(), 0);
+  await page.locator('[data-node="ml-m2"] > circle').click({ force: true });
+  await panel.waitFor();
+  assert.ok((await page.evaluate(() => location.hash)).endsWith('/magic-loops/ml-m2'));
+  assert.equal(await fCount(), 0, 'The tap opened the panel and expanded nothing.');
+  const text = await panel.innerText();
+  for (const part of ['Wall-jump animation', 'open', 'Open PR', 'merged', 'sprint-3 · 4 of 7 tasks', '⟳ 1', '⇄ 1 PR open']) assert.ok(text.includes(part), `The Milestone 2 panel says "${part}".`);
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'hub-map-panel-title', 'Focus is on the panel title.');
+  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
+  await page.locator('[data-kind="f"]').waitFor();
+  assert.equal(await panel.count(), 1, 'The chevron leaves the panel as it is.');
+
+  step('map: switching and closing');
+  await clickNode('ml-m3');
+  await page.waitForFunction(() => document.querySelector('.hub-map-panel h3')?.textContent.includes('Milestone 3'));
+  const m3 = await panel.innerText();
+  assert.ok(m3.includes('No pull requests yet.') && m3.includes('Not in a sprint.'), 'Milestone 3 has the empty lines.');
+  assert.equal(await fCount(), 1, 'A hash change between two map addresses keeps what is expanded.');
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/map/magic-loops');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-node') === 'ml-m3');
+  await clickNode('ml-m3');
+  await panel.waitFor();
+  await page.locator('button[aria-label="Close details"]').click();
+  await panel.waitFor({ state: 'detached' });
+
+  step('map: a task row in the panel switches it to that task');
+  await go(page, '#/~hub/map/magic-loops/ml-m2');
+  await panel.waitFor();
+  await panel.getByRole('button', { name: 'Wall-jump animation' }).click();
+  await page.waitForFunction(() => location.hash.endsWith('/ml-wj-t5') && document.activeElement?.id === 'hub-map-panel-title' && document.activeElement.textContent === 'Wall-jump animation');
+  await page.goBack();
+  await panel.waitFor({ state: 'detached' });
+
+  step('map: loose tasks sit under "Not in a feature"');
+  await go(page, '#/~hub/map/nosprint/ns-m1');
+  await panel.waitFor();
+  const loose = await panel.innerText();
+  assert.ok(loose.includes('Not in a feature') && !loose.includes('other tasks'), 'The loose group has its own name.');
+  await go(page, '#/~hub/map/magic-loops');
+  await page.locator('[data-node="ml-m3"]').waitFor();
+  await panel.waitFor({ state: 'detached' });
+
+  step('map: Enter on a node opens its panel, Space on its chevron expands');
+  await page.locator('[data-node="ml-m3"]').focus();
+  await page.keyboard.press('Enter');
+  await panel.waitFor();
+  assert.equal(await fCount(), 0, 'Enter opened the panel and expanded nothing.');
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  await page.locator('[data-toggle="ml-m3"]').focus();
+  await page.keyboard.press('Space');
+  await page.locator('[data-kind="f"]').waitFor();
+  assert.equal(await panel.count(), 0, 'Space on the chevron opened no panel.');
+
+  step('map: a node under the side panel is scrolled out from under it');
+  await page.locator('button:has-text("Expand all")').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-kind="t"]').length === 9);
+  const under = await page.locator('.hub-map-box').evaluate(box => {
+    const rect = box.querySelector('[data-node="ml-m3"] > circle').getBoundingClientRect();
+    const panelLeft = innerWidth - 48 - Math.min(380, innerWidth * 0.4);
+    box.scrollLeft += rect.left - (panelLeft + 120);
+    const after = box.querySelector('[data-node="ml-m3"] > circle').getBoundingClientRect();
+    return { right: after.right, panelLeft };
+  });
+  assert.ok(under.right > under.panelLeft, `The node starts under the panel's area (${under.right} <= ${under.panelLeft}).`);
+  await go(page, '#/~hub/map/magic-loops/ml-m3');
+  await panel.waitFor();
+  await page.waitForTimeout(300);
+  const [cleared, side] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox()]);
+  assert.ok(cleared.x + cleared.width <= side.x, `The panel opening scrolled the node clear (${cleared.x + cleared.width} > ${side.x}).`);
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  await page.locator('button:has-text("Collapse")').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
+
+  step('map: a deep link opens the panel; Back closes it');
+  await go(page, '#/~hub/map/magic-loops/ml-m2');
+  await panel.waitFor();
+  await clickNode('ml-m3');
+  await page.waitForFunction(() => document.querySelector('.hub-map-panel h3')?.textContent.includes('Milestone 3'));
+  await page.goBack();
+  await panel.waitFor({ state: 'detached' });
+  await go(page, '#/~hub/map/magic-loops/nope');
+  await page.locator('.hub-map-box svg').waitFor();
+  assert.equal(await panel.count(), 0, 'An unknown id opens nothing.');
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/map/magic-loops/nope');
+
+  step('map: a task opens the panel too, and the panel does not hide the selected node');
+  await go(page, '#/~hub/map/magic-loops');
+  await page.locator('[data-toggle="ml-m2"]').click({ force: true });
+  await page.locator('[data-toggle="ml-wj"]').click({ force: true });
+  await page.locator('[data-node="ml-wj-t5"]').waitFor();
+  await page.locator('[data-node="ml-wj-t5"] > circle').click({ force: true });
+  await panel.waitFor();
+  const taskText = await panel.innerText();
+  assert.ok(taskText.includes('Wall-jump animation') && taskText.includes('Open PR'));
+  await page.locator('button:has-text("Expand all")').click();
+  await clickNode('ml-m3');
+  await page.waitForFunction(() => document.querySelector('.hub-map-panel h3')?.textContent.includes('Milestone 3'));
+  await page.waitForTimeout(200);
+  const [nodeBox, panelBox] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox()]);
+  assert.ok(nodeBox.x + nodeBox.width <= panelBox.x, `The panel leaves the selected node in view (${nodeBox.x + nodeBox.width} > ${panelBox.x}).`);
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
 
   step('map: the sprint overlay adds one band for sprint-3 with 4 of 7');
   assert.equal(await page.locator('.hub-band').count(), 0);
@@ -433,9 +575,23 @@ try {
   const sizes = await phone.locator('.hub-map-box').evaluate(element => ({ scroll: element.scrollWidth, client: element.clientWidth }));
   assert.ok(sizes.scroll > sizes.client, 'The map is wider than the screen and scrolls inside its box.');
   await noSideways(phone, 'Progress map');
-  await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
+  await phone.locator('[data-toggle="ml-m2"]').tap({ force: true });
   await phone.locator('[data-kind="f"]').waitFor();
+  assert.equal(await phone.locator('.hub-map-panel').count(), 0, 'The chevron opens no panel.');
   await noSideways(phone, 'Progress map, opened');
+  const sheet = phone.locator('.hub-map-panel');
+  await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
+  await sheet.waitFor();
+  const sheetBox = await sheet.boundingBox();
+  assert.ok(sheetBox.y >= 844 * 0.25 - 1 && sheetBox.y + sheetBox.height >= 843, `The sheet sits at the bottom (${sheetBox.y}, ${sheetBox.height}).`);
+  await noSideways(phone, 'Progress map with the sheet');
+  await phone.touchscreen.tap(195, 40);
+  await sheet.waitFor({ state: 'detached' });
+  await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
+  await sheet.waitFor();
+  await phone.goBack();
+  await sheet.waitFor({ state: 'detached' });
+  await noSideways(phone, 'Progress map after the sheet');
 
 
   // Part 3: ✎ on an Ask's options, and Sketch.
