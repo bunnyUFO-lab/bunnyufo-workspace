@@ -1,0 +1,5 @@
+# Just the Docs build output and caches (npm run docs / docs:build)
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/

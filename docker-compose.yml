@@ -1,0 +1,33 @@
+# bunnyUFO Workspace in a browser, on this machine.
+#
+#   WORKSPACE=C:/Users/<you>/Workspace/buw-workspaces/<name> docker compose up -d
+#   http://127.0.0.1:8300
+#
+# Published on 127.0.0.1 only, so it is reachable from this machine and nothing else — the
+# same reach as a local app. Putting it on the LAN or a public name means an
+# authenticating proxy in front (Authelia does this for the other apps); the
+# service's own token is a per-launch secret, not a login.
+name: bunnyufo-workspace
+
+services:
+  workspace:
+    build: .
+    # The port is fixed here, unlike the shell's random one, because a browser bookmark
+    # needs it to stay the same.
+    ports:
+      - "127.0.0.1:8300:8300"     # the app
+      - "127.0.0.1:8301:8301"     # card files (images, reports, models)
+    environment:
+      BUW_PUBLIC_ORIGIN: ${BUW_PUBLIC_ORIGIN:-http://127.0.0.1:8300}
+      BUW_CONTENT_ORIGIN: ${BUW_CONTENT_ORIGIN:-http://127.0.0.1:8301}
+      BUW_CARD_API: ${BUW_CARD_API:-}
+    volumes:
+      # The cards. One workspace per container: point WORKSPACE at the folder with
+      # workspace.json in it.
+      - ${WORKSPACE:-./workspace}:/workspace
+      # Settings and the workspace registry, so they survive a rebuild.
+      - workspace-state:/state
+    restart: unless-stopped
+
+volumes:
+  workspace-state:

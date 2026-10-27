@@ -1,0 +1,21 @@
+# Local Just the Docs server for workspace/ without installing Ruby:
+#   npm run docs        → http://localhost:4000 (live reload; BUW_DOCS_PORT changes the port)
+#   npm run docs:build  → one build into workspace/_site
+# Gems are cached in the buw-docs-gems volume; the site is built inside the container.
+name: buw-docs
+services:
+  docs:
+    image: ruby:3.3
+    working_dir: /site
+    volumes:
+      - .:/site
+      - gems:/usr/local/bundle
+    ports:
+      - "${BUW_DOCS_PORT:-4000}:4000"
+      - "35729:35729"
+    command: >
+      sh -c "bundle install --quiet &&
+             bundle exec jekyll serve --host 0.0.0.0 --livereload --force_polling --destination /tmp/_site"
+volumes:
+  gems:
+    name: buw-docs-gems

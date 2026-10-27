@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-buw-report="document">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sample HTML card</title>
+  <link rel="stylesheet" href="../_shared/report.css">
+  <link rel="stylesheet" href="../_shared/examples.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Sample · HTML card</p>
+  <h1>Sample HTML card</h1>
+  <p class="lead">A styled page for visual reports and media: graphics, effects, 3D and video.
+    It links the shared report stylesheet, so it follows the Workspace theme.</p>
+
+  <div class="stats">
+    <div><strong>1</strong><small>self-contained page</small></div>
+    <div><strong>2</strong><small>shared stylesheets</small></div>
+    <div><strong>0</strong><small>build steps</small></div>
+  </div>
+
+  <section class="buw-card">
+    <div class="card-header"><span class="card-num">01</span><span class="card-title">How it is built</span></div>
+    <ul class="checklist">
+      <li>Put <code>data-buw-report="document"</code> on the root element.</li>
+      <li>Link <code>../_shared/report.css</code>, and <code>../_shared/report.js</code> for tabs, image zoom or downloads.</li>
+      <li>Keep media beside the page and use relative paths.</li>
+    </ul>
+  </section>
+
+  <div class="callout">Your own cards live in a separate workspace folder, not in this repository.
+    See <code>docs/workspaces.md</code>.</div>
+</main>
+</body>
+</html>

@@ -1,0 +1,174 @@
+/* Making and editing cards by hand: the board's "New card", a card's "+" tab and its title pencil. */
+.card-new-button {
+  margin-left: auto;
+  align-self: center;
+  padding: 7px 14px;
+  border: 1px solid var(--pink);
+  border-radius: 9px;
+  background: var(--pink-dim);
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.card-new-button:hover { filter: brightness(1.15); }
+
+.card-form { display: grid; gap: 8px; font-size: 0.78rem; color: var(--text-dim); }
+.card-form label { display: grid; gap: 4px; }
+.card-form small { color: var(--text-muted); font-size: 0.7rem; }
+.card-form input,
+.card-form select {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.card-form input:focus-visible,
+.card-form select:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
+.card-form button {
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.card-form button[type="submit"] { border-color: var(--pink); background: var(--pink-dim); }
+.card-form button:disabled { opacity: 0.45; cursor: default; }
+.card-form-actions { display: flex; gap: 8px; }
+.card-form-error { margin: 0; color: var(--red); font-size: 0.75rem; }
+
+.card-new-form {
+  margin: 14px 0 6px;
+  padding: 14px 16px 16px;
+  max-width: 560px;
+  gap: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: 0 10px 28px #0006;
+}
+.card-new-form input { padding: 9px 11px; color-scheme: dark; }
+.card-new-head { display: flex; align-items: center; justify-content: space-between; }
+.card-new-head h2 { margin: 0; font-size: 0.66rem; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; color: var(--text-muted); }
+.card-form .card-new-close { padding: 2px 7px; border-color: transparent; background: none; color: var(--text-muted); }
+.card-form .card-new-close:hover { color: var(--text); }
+.card-form .card-new-title { font-family: var(--font-display); font-size: 1.02rem; color: var(--text-bright); }
+.card-new-projects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.card-new-label { margin-right: 4px; font-size: 0.66rem; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-muted); }
+.card-form .card-new-project { padding: 4px 11px; border-radius: 999px; background: var(--surface-1); color: var(--text-dim); font-size: 0.74rem; }
+.card-form .card-new-project:hover:not(:disabled) { color: var(--text); border-color: rgba(187, 150, 240, 0.55); }
+.card-form .card-new-project[aria-checked="true"] { border-color: var(--pink); background: var(--pink-dim); color: var(--text-bright); }
+.card-new-form .card-form-actions { justify-content: flex-end; align-items: center; margin-top: 2px; }
+.card-new-form .card-form-actions .card-form-error { margin-right: auto; }
+
+/* A section's name, typed where its tab will be. */
+.card-inline-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.card-inline-form input { width: 160px; padding: 5px 8px; }
+.card-inline-form button { padding: 4px 9px; }
+.card-inline-form .card-form-error { flex-basis: 100%; }
+.step-tab.step-tab-add { min-width: 30px; padding-inline: 8px; color: var(--text-dim); }
+
+/* The edit form drops under the breadcrumb (the title itself clips, so it cannot hold it), over
+   the page below: the bar sits above the content while it is open (and only then, so an
+   overlaying menu stays on top the rest of the time). */
+.topbar:has(.card-edit-form) { position: relative; z-index: 20; }
+.breadcrumb { position: relative; z-index: 2; }
+.crumb-edit {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.crumb-edit:hover { color: var(--text); background: var(--surface-2); }
+
+.card-edit-form {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(420px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: 0 12px 36px #0006;
+}
+
+/* A save refused because the section changed elsewhere: what to do about it. */
+.document-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--red);
+  border-radius: 9px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+.document-conflict button {
+  padding: 4px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .card-new-button { margin: 10px 0 0; }
+  .card-inline-form input { width: 120px; }
+}
+
+/* A new section is Markdown or a drawing. */
+.kind-picker { display: inline-flex; border: 1px solid var(--hairline); border-radius: 7px; overflow: hidden; }
+.card-form .kind-picker button { border: 0; border-radius: 0; background: var(--surface-1); color: var(--text-dim); padding: 4px 10px; }
+.card-form .kind-picker button.on { background: var(--pink-dim); color: var(--text-bright); }
+
+/* A drawing: its picture with a toolbar, and the full-screen editor over everything (the
+   topbar, the sidebar and the write-error bar all sit below 2000). */
+.drawing-section nav { align-items: center; flex-wrap: wrap; row-gap: 8px; }
+.drawing-section nav > span { margin-right: auto; font-weight: 600; }
+.drawing-section nav button { padding: 3px 10px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
+.drawing-section nav small { color: var(--text-dim); }
+.drawing-viewer { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; width: 100%; }
+.drawing-editor { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; background: #101115; color: var(--text); }
+.drawing-canvas { position: relative; flex: 1; min-height: 0; }
+.drawing-canvas > .excalidraw { height: 100%; }
+.drawing-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--hairline); background: #16171c; }
+.drawing-bar strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
+.drawing-state { font-size: 0.74rem; color: var(--text-dim); white-space: nowrap; }
+.drawing-state.dirty { color: var(--amber, #e0a33a); }
+.drawing-bar-actions { display: flex; gap: 6px; }
+.drawing-bar button, .drawing-notice button { padding: 5px 12px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.78rem; cursor: pointer; }
+.drawing-bar button.primary { border-color: var(--pink); background: var(--pink-dim); }
+.drawing-bar button:disabled { opacity: 0.45; cursor: default; }
+.drawing-notice { margin: 0; border-radius: 0; background: #1b1416; }
+.drawing-error { padding: 8px 12px; color: var(--red); font-size: 0.78rem; }
+@media (max-width: 640px) {
+  .drawing-bar { gap: 6px; padding: 6px 8px; }
+  .drawing-bar strong { display: none; }
+  .drawing-state { flex: 1; }
+  .drawing-bar button { padding: 5px 9px; }
+}
+
+/* ✎ Annotate: on a picture in a page (always there on touch screens, on hover or focus elsewhere), and beside Open original. */
+.annotatable { position: relative; display: inline-block; max-width: 100%; }
+.annotate-badge { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; padding: 0; border: 1px solid var(--hairline); border-radius: 999px; background: #16171cd9; color: var(--text); font: inherit; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.annotatable:hover .annotate-badge, .annotate-badge:focus-visible, .annotate-badge:disabled { opacity: 1; }
+@media (hover: none) { .annotate-badge { opacity: 1; } }
+.annotate-error { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: 6px; background: #1b1416; color: var(--red); }
+.report-image nav .report-annotate { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }

@@ -1,0 +1,32 @@
+# Checks every pull request and every push to main, on GitHub-hosted runners with no secrets.
+# Deploys are not here: they run from a private repository on the owner's own runner
+# (site/deploy/*.sh), so no code from a pull request ever runs on the home server.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:template
+      - run: npm run build
+
+      - name: No workflow may run on a self-hosted runner
+        run: '! grep -rnE "runs-on:.*self-host[e]d" .github/workflows'

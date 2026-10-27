@@ -1,0 +1,1782 @@
+/* Luminous Indigo — global styles. All values come from tokens.css. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+html { background: #101115; color-scheme: dark; }
+* { scrollbar-width: thin; scrollbar-color: #514c59 #111217; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Aura — soft pink/purple pools of light behind everything */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(520px 420px at 12% -4%, rgba(240, 160, 176, 0.08), transparent 65%),
+    radial-gradient(720px 560px at 96% 104%, rgba(183, 148, 244, 0.065), transparent 65%),
+    radial-gradient(900px 500px at 55% 120%, rgba(240, 160, 176, 0.03), transparent 70%);
+}
+
+/* Grain — barely-there film noise so the dark fields don't band */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+a { color: var(--pink); text-decoration: none; }
+
+::selection { background: rgba(240, 160, 176, 0.3); }
+
+a:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ─── Layout ─── */
+.app-layout {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+}
+
+.boot {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The address named a workspace this site does not serve (see components/UnknownSite). */
+.site-missing {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.site-missing-box {
+  max-width: 44ch;
+}
+
+.site-missing-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-glass);
+  backdrop-filter: blur(14px);
+  border-right: 1px solid var(--hairline);
+  overflow: hidden;
+  transition: margin-left 0.32s var(--ease);
+}
+
+/* ─── Collapsible sidebar (clean screen for recording) ─── */
+.app-layout.sidebar-collapsed .sidebar {
+  margin-left: calc(-1 * var(--sidebar-w));
+}
+
+/* Keep the embedded game wiki responsive when its two reader frames resize. */
+.app-layout[data-entity="my-dream-game"] > .sidebar {
+  transition: none;
+  backdrop-filter: none;
+}
+
+/* the ‹ button that hides the menu (lives in the brand row) */
+.sidebar-collapse {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+.sidebar-collapse:hover {
+  background: var(--surface-2);
+  color: var(--text-bright);
+  border-color: rgba(240, 160, 176, 0.45);
+}
+
+/* ── A narrow screen gets the menu whole ──────────────────────────────────────
+   Beside the content, the menu costs 300px. On a phone that left about eighty
+   pixels for a card, which set its title one letter per line. Below the width
+   where a page still reads comfortably next to it — the menu plus a 660px
+   column — the menu stops taking a column and covers the screen instead, and
+   a card opened from it closes the menu behind you (see App). */
+@media (max-width: 960px) {
+  .app-layout .sidebar {
+    position: fixed;
+    /* The tool rail (48px, see local.css) keeps its column; the menu covers the rest. */
+    inset: 0 48px 0 0;
+    width: calc(100% - 48px);
+    height: 100%;
+    z-index: 60;
+    margin-left: 0;
+    border-right: none;
+    visibility: visible;
+    transform: translateX(0);
+    transition: transform 0.28s var(--ease);
+  }
+  .app-layout.sidebar-collapsed .sidebar {
+    margin-left: 0;
+    transform: translateX(-100%);
+  }
+  /* Room for the floating button that brings it back, and for a thumb to reach it. */
+  .sidebar-reopen { top: 10px; left: 12px; }
+  .app-layout.sidebar-collapsed .topbar { padding-left: 64px; }
+  /* The whole width is the menu's, so its own rows can breathe. */
+  .sidebar-item { padding-top: 10px; padding-bottom: 10px; }
+  .sidebar-collapse { width: 34px; height: 34px; }
+}
+
+/* the floating gamepad button that brings the menu back — only when collapsed */
+.sidebar-reopen {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 40;
+  width: 40px;
+  height: 40px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: transparent;
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.sidebar-reopen:hover {
+  opacity: 1;
+  transform: scale(1.08);
+  box-shadow: var(--glow-pink);
+}
+.app-layout.sidebar-collapsed .sidebar-reopen {
+  display: flex;
+}
+/* shift the topbar content clear of the floating gamepad button while collapsed */
+.app-layout.sidebar-collapsed .topbar {
+  padding-left: 62px;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand-sub {
+  font-size: 0.6rem;
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Search */
+.sidebar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 12px 12px 4px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+
+.sidebar-search input {
+  width: 100%;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 7px 28px 7px 30px;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.sidebar-search input::placeholder { color: var(--text-muted); }
+.sidebar-search input:focus {
+  outline: none;
+  border-color: rgba(240, 160, 176, 0.45);
+  background: var(--surface-2);
+  box-shadow: var(--glow-pink);
+}
+
+.search-clear {
+  position: absolute;
+  right: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+}
+.search-clear:hover { color: var(--text); }
+
+/* Project filter — every project's cards are listed at once; these chips narrow it. */
+.project-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 10px 12px 2px;
+}
+
+.project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3.5px 10px;
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+.project-chip:hover { color: var(--text); border-color: rgba(240, 160, 176, 0.45); }
+.project-chip.active {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: rgba(187, 150, 240, 0.55);
+}
+/* The workspace agents and new cards write to: a quiet mark, not a second selection. */
+.project-chip.writing::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--purple);
+}
+.project-chip-count {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+.project-chip.active .project-chip-count { opacity: 1; }
+/* The number key that picks the chip (App binds 0 and 1-9). There are no number keys on a phone. */
+.project-chip-key {
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+@media (hover: none), (max-width: 960px) { .project-chip-key { display: none; } }
+
+.home .project-filter { padding: 0 0 18px; }
+.home .project-chip { font-size: 0.74rem; padding: 5px 13px; }
+
+/* Entity list */
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px 12px;
+}
+
+.sidebar-section {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 14px 6px 6px;
+}
+
+/* The heading is a button that folds its section away, and has to stop looking like one: full
+   width so the whole row is the target, and none of the browser's own button chrome. */
+.sidebar-section-toggle {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-section-toggle:hover .sidebar-label,
+.sidebar-section-toggle:focus-visible .sidebar-label { color: var(--text); }
+.sidebar-section-toggle .sidebar-count { margin-left: auto; }
+/* Its own size, so a folded section does not shift the label a pixel sideways. */
+.sidebar-caret {
+  display: inline-block;
+  width: 9px;
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
+.sidebar-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+  color: var(--text-muted);
+}
+
+.sidebar-count {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  margin-bottom: 1px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.sidebar-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+/* Where the search box's arrow keys are: a ring, so it reads apart from the open card. */
+.sidebar-item.cursor,
+.sidebar-section-toggle.cursor {
+  outline: 1px solid var(--pink, #f0a0b0);
+  outline-offset: -1px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.sidebar-section-toggle.cursor .sidebar-label { color: var(--text); }
+.sidebar-item.active {
+  background:
+    linear-gradient(var(--surface-3), var(--surface-2)) padding-box,
+    var(--edge) border-box;
+  color: var(--text-bright);
+  box-shadow: var(--glow-pink);
+}
+
+.sidebar-item.pinned {
+  box-shadow: inset 2px 0 0 var(--amber);
+  background: rgba(234, 181, 110, 0.04);
+}
+.sidebar-item.pinned:hover { background: rgba(234, 181, 110, 0.09); }
+.sidebar-item.pinned.active {
+  background:
+    linear-gradient(var(--surface-3), var(--surface-2)) padding-box,
+    var(--edge-amber) border-box;
+  box-shadow: var(--glow-amber);
+}
+
+.item-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.item-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status dots */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.status-dot.active {
+  background: var(--purple);
+  box-shadow: 0 0 8px rgba(183, 148, 244, 0.6);
+}
+.status-dot.done { background: var(--green); }
+.status-dot.archived { background: var(--text-muted); }
+
+/* Pinning by drag: the list you can drop onto is outlined while a card is in the air, and
+   lights up under the pointer. The card's pin button does the same job without a mouse. */
+.drop-zone {
+  border: 1px dashed rgba(234, 181, 110, 0.35);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+.drop-zone.over {
+  border-color: var(--amber);
+  background: var(--amber-dim);
+}
+/* The sections below the pins are where a pin is dropped to come off the list, so the area
+   keeps a target's worth of height even when the filter leaves nothing in it. */
+.sidebar-groups { min-height: 72px; }
+/* The line showing where a dragged pin would land. */
+.sidebar-row.drop-before { box-shadow: inset 0 2px 0 var(--amber); }
+.sidebar-row.drop-after { box-shadow: inset 0 -2px 0 var(--amber); }
+
+/* Rearranging by drag: the same amber line, on whichever edge the card, chip or heading would land.
+   Chips and grid cards sit side by side, so theirs is a vertical line. */
+.sidebar-section-toggle.drop-before,
+.section-toggle.drop-before { box-shadow: inset 0 2px 0 var(--amber); }
+.sidebar-section-toggle.drop-after,
+.section-toggle.drop-after { box-shadow: inset 0 -2px 0 var(--amber); }
+.project-chip.drop-before,
+.buw-card.drop-before { box-shadow: inset 3px 0 0 var(--amber); }
+.project-chip.drop-after,
+.buw-card.drop-after { box-shadow: inset -3px 0 0 var(--amber); }
+/* A press on these starts a drag, so a slow one must not select the label. */
+.project-chip,
+.sidebar-section-toggle,
+.section-toggle { user-select: none; }
+
+/* Keyboard focus in the menu (J/K, ↑/↓, Tab) looks like the search box's cursor: one ring. */
+.sidebar-item:focus-visible,
+.sidebar-section-toggle:focus-visible {
+  outline: 1px solid var(--pink, #f0a0b0);
+  outline-offset: -1px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* A list row: the link, and the button that puts that card away without going to the grid. */
+.sidebar-row { display: flex; align-items: center; }
+.sidebar-row > .sidebar-item { flex: 1; min-width: 0; }
+.sidebar-item-archive {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.sidebar-row:hover .sidebar-item-archive,
+.sidebar-item-archive:focus-visible { opacity: 1; border-color: var(--hairline); }
+/* The pin button is the archive button's neighbour; pinned, it is amber and stays lit. */
+.sidebar-item-pin { margin-right: 0; }
+.sidebar-item-pin svg { display: block; }
+.sidebar-item-pin:hover { color: var(--amber); }
+.sidebar-item-pin.on { color: var(--amber); opacity: 1; }
+.sidebar-drop-hint {
+  padding: 10px;
+  font-size: 0.72rem;
+  color: var(--amber);
+  text-align: center;
+}
+
+/* It sits between the list and the footer now, outside the scroll, so it is on screen
+   whatever the list is doing. The band around it is the drop target: it keeps its size while
+   a card hovers, because a target that grows under the pointer moves itself out from under it. */
+.sidebar-archive-drop { flex-shrink: 0; margin: 0 2px 2px; }
+.sidebar-archive-drop.drop-zone { padding: 0; }
+.sidebar-archive-hint {
+  display: block;
+  width: calc(100% - 4px);
+  margin: 0 2px;
+  padding: 10px 10px 8px;
+  border-top: 1px dashed var(--hairline);
+  font-size: 0.72rem;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+
+.sidebar-empty {
+  padding: 20px 10px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(110, 231, 160, 0.5);
+}
+.sync-dot.offline {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(232, 112, 112, 0.5);
+}
+
+/* ─── Main column ─── */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  min-height: var(--topbar-h);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--topbar-glass);
+  backdrop-filter: blur(14px);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  min-width: 0;
+}
+
+.crumb-link {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-sm);
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.crumb-link:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
+.crumb-sep { color: var(--text-muted); font-size: 0.7rem; }
+
+/* The way back to the cards, where the eye already is when a card is open. */
+.crumb-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 0;
+  padding: 3px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--text);
+}
+/* Inside .topbar-tools, which already sits at the far right: a second auto margin here would
+   split the free space and park the tools in the middle. */
+.crumb-keys { margin-left: 0; font-size: 0.9rem; }
+.topbar-tools .crumb-keys { margin-left: 0; }
+
+/* The Ctrl+H sheet. */
+.shortcuts {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  margin: auto;
+  padding: 18px 22px 22px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  /* The surface tokens are translucent tints; a sheet over the page needs a solid one. */
+  background: var(--bg);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.5);
+  color: var(--text);
+}
+.shortcuts::backdrop { background: rgb(0 0 0 / 0.55); }
+.shortcuts-head { display: flex; align-items: center; justify-content: space-between; }
+.shortcuts-head h2 { margin: 0; font-size: 1.05rem; }
+.shortcuts-head button {
+  background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer;
+}
+.shortcuts h3 {
+  margin: 18px 0 6px;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.shortcuts dl { margin: 0; }
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(130px, auto) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 0.85rem;
+}
+.shortcut-row dt { white-space: nowrap; color: var(--text-muted); }
+.shortcut-row dd { margin: 0; color: var(--text-dim); }
+.shortcuts kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 6px;
+  margin: 0 2px;
+  border: 1px solid var(--hairline);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 600 0.75rem/1.4 ui-monospace, monospace;
+  text-align: center;
+}
+
+.crumb-current {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.step-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  max-width: 100%;
+}
+.step-tabs::-webkit-scrollbar { display: none; }
+.app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs){align-items:flex-start;gap:10px 20px}
+.app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .breadcrumb{width:100%;min-height:24px}
+.app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .topbar-right{width:100%;margin:0;align-items:flex-start}
+.app-layout:not([data-entity="my-dream-game"]) .step-tabs{flex:1;background:transparent;border:0;gap:5px;padding:0}
+.app-layout:not([data-entity="my-dream-game"]) .step-tab{border:1px solid #ffffff0c;padding:6px 10px;color:#a59dab;border-radius:7px}
+.app-layout:not([data-entity="my-dream-game"]) .step-tab.active{border-color:#f0a0b036;color:#f7bbca;background:#f0a0b012}
+
+.step-tab {
+  padding: 4px 12px;
+  border: none;
+  background: none;
+  border-radius: calc(var(--radius) - 3px);
+  font-family: inherit;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  max-width: 36ch;
+  line-height: 1.45;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.step-tab:hover {
+  color: var(--text-dim);
+  background: var(--surface-2);
+}
+.step-tab.active {
+  background: var(--pink-dim);
+  color: var(--pink-bright);
+}
+
+.open-ext {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+button.open-ext {
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+.open-ext svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  display: block;
+}
+.open-ext:hover {
+  color: var(--pink);
+  border-color: rgba(240, 160, 176, 0.4);
+  box-shadow: var(--glow-pink);
+}
+
+/* ─── Content / report iframe ─── */
+.content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #101115;
+}
+
+/* .markdown-reader scrolls itself, but it is a flex child of this block parent, so `flex: 1` does
+   nothing: without a height of its own it grows to the whole document and .content clips the rest,
+   leaving a long card page unscrollable. Reports are sized by .report-document instead. */
+.content > .markdown-reader {
+  height: 100%;
+}
+
+.report-document { position: relative; height: 100%; min-height: 0; background: #101115; }
+.report-error { padding: 32px; max-width: 760px; line-height: 1.7; }
+.report-error-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.report-error-actions button { padding: 8px 14px; border: 1px solid #ffffff25; border-radius: 6px; background: #24212a; color: #f4eaf0; cursor: pointer; }
+.report-error details { color: #aaa2b2; }
+.report-error pre { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; }
+.report-document > .report-loading { position: absolute; inset: 0; background: #101115; }
+.report-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #101115;
+  color-scheme: dark;
+  visibility: hidden;
+  opacity: 0;
+}
+.report-frame.loaded { visibility: visible; opacity: 1; }
+
+/* A step with `url`: a live web app with a slim toolbar. */
+.web-view { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101115; }
+.web-view-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 7px 14px; border-bottom: 1px solid #ffffff14; background: #15151b; font-size: 12px; line-height: 1.4; }
+.web-view-bar strong { font-weight: 600; color: #e9e4ff; }
+.web-view-bar code { color: #a596ee; }
+.web-view-down { color: #f0a36b; }
+.web-view-spacer { flex: 1; }
+.web-view-bar button, .web-view-bar a { padding: 4px 10px; border: 1px solid #a596ee40; border-radius: 7px; background: transparent; color: #d9d2f5; font: inherit; text-decoration: none; cursor: pointer; }
+.web-view-bar button[aria-pressed="true"] { background: #a596ee22; }
+.web-view > iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: #101115; }
+.web-view > .report-document, .web-view > .markdown-reader { flex: 1; min-height: 0; overflow: auto; }
+
+/* ─── Home (витрина) ─── */
+.home {
+  height: 100%;
+  overflow-y: auto;
+  padding: 36px 36px 72px;
+}
+
+.home-hero {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-bottom: 8px;
+}
+
+.home-title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 550;
+  font-size: 2.15rem;
+  letter-spacing: 0.2px;
+  color: var(--text-bright);
+}
+
+.home-sub {
+  margin-top: 5px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.home-sub b { color: var(--text); font-weight: 600; }
+.home-offline { color: var(--red); }
+
+.home-filter {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.home-filter-clear {
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.home-filter-clear:hover, .home-filter-clear:focus-visible { color: var(--text); }
+
+.home-section { margin-top: 30px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.section-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.section-count { font-size: 0.66rem; color: var(--text-muted); }
+
+/* The grid's archive heading: the same rule as the sidebar's — the whole row opens it. */
+.section-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.section-toggle:hover .section-title,
+.section-toggle:focus-visible .section-title { color: var(--text); }
+.section-caret { display: inline-block; width: 10px; opacity: 0.8; }
+/* The archive chip sits at the end of the project row, a step apart: it filters by state, not
+   by project, and composes with whichever project is picked. A hairline sets it off and its
+   pressed state is amber, so "All" pressed and "Archive" pressed are never the same kind of choice. */
+.project-filter-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0 4px;
+  background: var(--hairline);
+}
+.project-chip.archive-chip.active,
+.project-chip.recent-chip.active {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: var(--amber);
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+}
+
+.home-empty {
+  margin-top: 64px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ─── BuwCard — the design-system card ─── */
+.buw-card {
+  position: relative;
+  display: block;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(160deg, rgba(24, 24, 30, 0.82), rgba(15, 15, 19, 0.82)) padding-box,
+    var(--edge-soft) border-box;
+  box-shadow: var(--shadow-1);
+  backdrop-filter: blur(10px);
+  text-decoration: none;
+  color: inherit;
+  transition: transform var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease),
+    background var(--t-med) var(--ease);
+}
+.buw-card:hover,
+.buw-card:has(.card-link:focus-visible) {
+  transform: translateY(-2px);
+  background:
+    linear-gradient(160deg, rgba(28, 28, 35, 0.88), rgba(17, 17, 22, 0.88)) padding-box,
+    var(--edge) border-box;
+  box-shadow: var(--shadow-2), var(--glow-pink);
+}
+.buw-card:has(.card-link:focus-visible) {
+  box-shadow: var(--shadow-2), var(--glow-pink), var(--focus-ring);
+}
+
+.buw-card.pinned,
+.buw-card.pinned:hover,
+.buw-card.pinned:has(.card-link:focus-visible) {
+  background:
+    linear-gradient(160deg, rgba(26, 24, 20, 0.85), rgba(16, 15, 12, 0.85)) padding-box,
+    var(--edge-amber) border-box;
+}
+.buw-card.pinned:hover { box-shadow: var(--shadow-2), var(--glow-amber); }
+
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 15px 16px 13px;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  row-gap: 6px;
+}
+/* The dot and the card's buttons keep to the right, and wrap to a second line rather than
+   sliding out of the card: a long project name used to push the archive button out of sight,
+   which is most of why nobody could find it. */
+.card-top .status-dot { margin-left: auto; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2.5px 9px;
+  font-size: 0.64rem;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+}
+.chip-pin {
+  color: var(--amber);
+  border-color: rgba(234, 181, 110, 0.35);
+  background: var(--amber-dim);
+}
+/* Which project a card belongs to, when the grid mixes them. Clicking it filters to that project. */
+.chip-project {
+  font-family: inherit;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  text-transform: none;
+  letter-spacing: 0.2px;
+}
+.chip-project:hover { color: var(--text); border-color: rgba(187, 150, 240, 0.55); }
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 560;
+  letter-spacing: 0.1px;
+  line-height: 1.3;
+  color: var(--text-bright);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The card is a plain element and its title is the link, stretched over the whole
+   surface so that the archive button can sit above it and still take its own click. */
+.card-link { color: inherit; text-decoration: none; }
+.card-link::after { content: ''; position: absolute; inset: 0; }
+
+/* Pin and archive. They sit above the title's stretched link (z-index), and they are
+   legible without hovering: a control nobody can see is a control nobody has. */
+.card-action {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+  padding: 2.5px 9px;
+  font-family: inherit;
+  font-size: 0.64rem;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity var(--t-med) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+.buw-card:hover .card-action,
+.card-action:focus-visible { opacity: 1; }
+.card-action:disabled { cursor: progress; color: var(--text-muted); opacity: 0.5; }
+.card-archive:hover { color: var(--pink); border-color: rgba(240, 160, 176, 0.35); }
+.card-pin:hover { color: var(--amber); border-color: rgba(234, 181, 110, 0.35); }
+.card-pin.on {
+  color: var(--amber);
+  border-color: rgba(234, 181, 110, 0.35);
+  background: var(--amber-dim);
+  opacity: 1;
+}
+
+.chip-archived {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.card-project-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.card-project-icon { display: block; object-fit: contain; flex: 0 0 48px; }
+.card-emoji { display: block; flex: 0 0 auto; font-size: 30px; line-height: 1; }
+
+/* The icon doubles as the picker's button. Above the stretched link like the pin button, and
+   quiet until hovered: a card with no icon of its own shows its category's, faded. */
+.card-icon-button {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+}
+.card-icon-button:hover,
+.card-icon-button:focus-visible,
+.card-icon-button[aria-expanded='true'] { border-color: var(--hairline); background: var(--surface-2); }
+.card-icon-button.empty .card-emoji { opacity: 0.35; font-size: 24px; }
+.card-icon-button.empty:hover .card-emoji { opacity: 0.9; }
+
+.icon-picker {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 296px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 0.45);
+}
+/* Only while the picker is open: a positioned title row would shrink the card-link's stretched
+   ::after to that row and leave the rest of the card unclickable. */
+.card-project-title:has(.icon-picker) { position: relative; }
+/* The picker hangs below its card; lift the card so the next row does not paint over it. */
+.entity-card.picking { z-index: 20; }
+.icon-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.icon-picker-grid button {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+}
+.icon-picker-grid button:hover,
+.icon-picker-grid button:focus-visible { background: var(--surface-2); }
+.icon-picker-grid button.on { border-color: var(--pink, #f0a0b0); }
+.icon-picker-own { display: flex; gap: 6px; margin-top: 8px; }
+.icon-picker-own input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+}
+.icon-picker-own button,
+.icon-picker-reset {
+  padding: 5px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.icon-picker-reset { width: 100%; margin-top: 6px; }
+.icon-picker-reset .icon-picker-reset-icon { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.icon-picker-reset .card-project-icon { width: 18px; height: 18px; flex-basis: auto; }
+.icon-picker-reset .card-emoji { font-size: 16px; }
+.item-icon img { display: block; object-fit: contain; }
+
+.card-desc {
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.card-open {
+  margin-left: auto;
+  color: var(--pink);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+}
+.buw-card:hover .card-open,
+.buw-card:has(.card-link:focus-visible) .card-open {
+  opacity: 1;
+  transform: none;
+}
+
+/* ─── bunnyUFO Workspace logo container ─── */
+.brand-logo { flex-shrink: 0; }
+
+/* ─── Scrollbars ─── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: #111217; }
+::-webkit-scrollbar-thumb {
+  background: #514c59;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: #6d6678; }
+
+/* ─── Reduced motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .buw-card:hover { transform: none; }
+}
+
+/* ─── 3D comparison step (Compare3D) ───────────────────────────────────────
+   Filming surface: two panes, one toolbar, nothing else. Uses the Indigo tokens
+   so it reads as part of the workspace rather than a bolted-on tool. */
+
+.c3d {
+  height: 100%;
+  display: flex;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+/* Centred column with gutters: the panes must not run to the screen edges —
+   the recording frame is narrower than the monitor. */
+.c3d-inner {
+  position: relative; /* containing block for the reference-image overlay */
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  /* Tight bottom padding: the per-test note used to sit under the panes and is
+     gone, so the models get the height instead. The note still shows on hover
+     over the test dropdown. */
+  padding: 14px 24px 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.c3d-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  margin-bottom: 12px;
+}
+
+.c3d-tests { display: flex; align-items: center; gap: 6px; }
+
+.c3d-select {
+  min-width: 260px;
+  max-width: 420px;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--pink-dim);
+  color: var(--pink-bright);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  appearance: none;
+  text-overflow: ellipsis;
+}
+.c3d-select:hover { border-color: rgba(240, 160, 176, 0.4); }
+.c3d-select:focus-visible { outline: 1px solid var(--pink); outline-offset: 1px; }
+/* The open list is drawn by the OS, not by us. It ignores background on
+   `option` and inherits the closed control's colour, which gave pale pink on
+   white. `color-scheme: dark` is what actually makes the native popup dark;
+   the explicit hexes below are deliberate rather than vars, because the popup
+   is painted outside the page and cannot be trusted with custom properties. */
+.c3d-select { color-scheme: dark; }
+.c3d-select option {
+  background-color: #1f1f22;
+  color: #e8e8e8;
+}
+.c3d-select option:checked { color: var(--pink-bright); }
+
+.c3d-step {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.c3d-step:hover { color: var(--text); background: var(--surface-2); }
+
+/* Recording aids: an embargoed name is shown as a blurred cover label, and the
+   reference image can be thrown up over the panes without leaving the card. */
+.c3d-pane-redact { display: inline-flex; align-items: center; gap: 8px; }
+
+.c3d-eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface-1);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.c3d-eye:hover { color: var(--text-bright); border-color: var(--text-muted); }
+
+.c3d-pane-name-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: filter var(--t-fast) var(--ease);
+}
+/* Blurred until clicked. The text under the blur is the cover name, so even a
+   screenshot that is sharpened back gives nothing away. */
+.c3d-pane-name-btn.redacted {
+  filter: blur(5px);
+  color: var(--text-bright);
+  user-select: none;
+}
+.c3d-pane-name-btn.redacted:hover { filter: blur(3.5px); }
+.c3d-pane-name-btn:focus-visible { outline: 1px solid var(--pink); outline-offset: 3px; }
+
+.c3d-input {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(16, 16, 18, 0.92);
+  border-radius: var(--radius-lg);
+  cursor: zoom-out;
+}
+.c3d-input img {
+  max-width: min(74%, 700px);
+  max-height: 78%;
+  object-fit: contain;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+}
+.c3d-input-cap {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.c3d-count {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.c3d-modes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.c3d-mode {
+  padding: 5px 12px;
+  border: none;
+  background: none;
+  border-radius: calc(var(--radius) - 3px);
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.c3d-mode:hover { color: var(--text-dim); background: var(--surface-2); }
+.c3d-mode.active { background: var(--surface-3); color: var(--text-bright); }
+
+.c3d-tools { margin-left: auto; display: flex; gap: 6px; }
+
+.c3d-toggle {
+  padding: 5px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+.c3d-toggle:hover { color: var(--text-dim); background: var(--surface-2); }
+.c3d-toggle.on {
+  color: var(--green);
+  border-color: rgba(110, 231, 160, 0.4);
+  background: var(--green-dim);
+}
+
+.c3d-panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.c3d-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.c3d-pane-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.c3d-pane-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.c3d-pane-name {
+  font-family: var(--font-display);
+  /* Sized to be readable in a recording, not just on the desk. */
+  font-size: 1.25rem;
+  color: var(--text-bright);
+}
+.c3d-pane-sub { font-size: 0.72rem; color: var(--text-muted); }
+.c3d-pane-stats {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.c3d-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+
+/* Grid + vignette behind a transparent canvas — gives the model a floor to read
+   against without putting real geometry in the scene. */
+.c3d-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse 70% 70% at 50% 45%, rgba(10, 10, 12, 0.94) 15%, rgba(10, 10, 12, 0.55) 60%, transparent 100%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 44px 44px, 44px 44px;
+  pointer-events: none;
+}
+
+.c3d-canvas { position: absolute; inset: 0; }
+.c3d-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
+
+.c3d-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(6, 6, 8, 0.72);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.c3d-overlay-error {
+  color: var(--red);
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 0 24px;
+  text-align: center;
+}
+.c3d-overlay-error span { color: var(--text-muted); font-size: 0.7rem; word-break: break-word; }
+
+.c3d-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--pink);
+  animation: c3d-spin 0.8s linear infinite;
+}
+@keyframes c3d-spin { to { transform: rotate(360deg); } }
+
+.c3d-boot {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-deep);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+.c3d-boot-error strong { color: var(--red); }
+.c3d-boot-error code { font-family: var(--font-mono); font-size: 0.7rem; }
+
+/* Quad share next to the poly counts. Green when the file declares
+   FB_ngon_encoding, amber when it is read off index order without one. */
+.c3d-quads {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(234, 181, 110, 0.35);
+  background: var(--amber-dim);
+  color: var(--amber);
+  white-space: nowrap;
+}
+.c3d-quads.trusted {
+  border-color: rgba(110, 231, 160, 0.35);
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+/* Workspace switcher under the logo (local app) */
+.sidebar-brand { position: relative; }
+.workspace-switcher-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.6rem;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+}
+.workspace-switcher-button:hover, .workspace-switcher-button[aria-expanded="true"] { color: var(--text); }
+.workspace-switcher-button:focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
+.workspace-switcher { position: relative; }
+.workspace-switcher-crumb .workspace-switcher-button {
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+  padding: 3px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+.workspace-menu {
+  position: fixed;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-solid);
+  box-shadow: 0 12px 30px #0008;
+}
+.workspace-menu-title { margin: 0 2px 4px; font-size: 0.62rem; letter-spacing: 1.6px; text-transform: uppercase; color: var(--text-muted); }
+.workspace-menu > button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.workspace-menu > button:hover:not(:disabled) { background: var(--surface-2); }
+.workspace-menu > button[aria-checked="true"] { border-color: var(--pink); background: var(--pink-dim); cursor: default; }
+.workspace-menu > button:disabled:not([aria-checked="true"]) { opacity: 0.5; cursor: default; }
+.workspace-menu-name { font-size: 0.82rem; }
+.workspace-menu small { font-size: 0.66rem; color: var(--text-muted); overflow-wrap: anywhere; }
+/* Starting or adding a workspace sits under the list, apart from it. */
+.workspace-menu-actions { display: flex; gap: 6px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--hairline); }
+.workspace-menu-new {
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.workspace-menu-new:first-child { border-color: var(--pink); background: var(--pink-dim); color: var(--text-bright); }
+.workspace-menu-new:hover { color: var(--text); filter: brightness(1.12); }
+.workspace-menu-add { display: grid; gap: 6px; margin-top: 4px; }
+.workspace-menu-add input { min-width: 0; padding: 7px 8px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-1); color: var(--text); font: inherit; font-size: 0.75rem; }
+.workspace-menu-add span { display: flex; gap: 6px; }
+.workspace-menu-add button { padding: 5px 10px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.75rem; cursor: pointer; }
+.workspace-menu-add button[type="submit"] { border-color: var(--pink); background: var(--pink-dim); }
+.workspace-menu-add button:disabled { opacity: 0.45; cursor: default; }
+.workspace-menu-note { margin: 2px; font-size: 0.7rem; color: var(--text-muted); }
+.workspace-menu-error { margin: 4px 2px 0; font-size: 0.72rem; color: var(--red); }
+
+/* A pin, an archive or a save that could not be written: the one error bar, drawn by the shell
+   over everything in .workspace-surface (a bar inside App would sit under the file preview). */
+.write-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  z-index: 50;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--amber, #e0a33a);
+  border-radius: var(--radius-sm, 8px);
+  background: color-mix(in srgb, var(--amber, #e0a33a) 10%, transparent);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.write-error span { flex: 1; }
+.write-error button {
+  border: none;
+  background: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* ── A phone ──────────────────────────────────────────────────────────────────
+   No tool column (local.css), a header that slides away while you read down
+   the page and back when you scroll up (lib/chrome), and the card's tabs on one
+   row that scrolls sideways instead of stacking into three. */
+@media (max-width: 640px) {
+  .app-layout .sidebar { inset: 0; width: 100%; }
+  .topbar {
+    padding: 10px 14px;
+    gap: 8px;
+    transition: margin-top 0.25s var(--ease);
+  }
+  html[data-chrome-hidden] .topbar { margin-top: calc(-1 * var(--topbar-height, 0px)); }
+  /* Room on the first row for the round buttons in both corners: the menu's and the tools'. */
+  .app-layout.sidebar-collapsed .topbar { padding-left: 14px; }
+  .breadcrumb { min-height: 40px; padding-right: 50px; }
+  .app-layout.sidebar-collapsed .breadcrumb { padding-left: 50px; }
+  .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) { gap: 8px; }
+  .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .breadcrumb { min-height: 40px; }
+  .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .topbar-right { align-items: center; }
+  /* The project is one tap away in the menu; the card's title needs the width. */
+  .breadcrumb .crumb-sep + .crumb-link, .breadcrumb .crumb-sep + .crumb-link + .crumb-sep { display: none; }
+  .crumb-link { white-space: nowrap; }
+  .step-tabs, .app-layout:not([data-entity="my-dream-game"]) .step-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    min-width: 0;
+  }
+  .step-tab { white-space: nowrap; max-width: none; flex-shrink: 0; }
+  .sidebar-reopen { transition: transform 0.25s var(--ease), opacity 0.25s var(--ease); }
+  html[data-chrome-hidden] .sidebar-reopen { transform: translateY(-64px); opacity: 0; pointer-events: none; }
+}
+
+/* ── The Hub's tab bar (a phone only) ─────────────────────────────────────────
+   The Hub group lives in the menu, which a phone keeps shut. This bar puts Today, Inbox, Map,
+   Activity (Chat where it is set up) and the cards one tap away. App leaves it out while a card
+   is open, where the reader needs the height. It stays put when the header slides away. */
+.hub-tabs { display: none; }
+@media (max-width: 640px) {
+  .hub-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    display: flex;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--hairline-strong);
+    background: var(--surface-solid);
+  }
+  .hub-tab {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--text-dim);
+    font-size: 11px;
+    text-decoration: none;
+  }
+  button.hub-tab { border: 0; background: none; font: inherit; font-size: 11px; cursor: pointer; }
+  .hub-more {
+    position: absolute;
+    right: 8px;
+    bottom: calc(100% + 6px);
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 10px;
+    background: var(--surface-solid);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+  }
+  .hub-more a { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--text); text-decoration: none; font-size: 15px; }
+  .hub-more a.active { color: var(--pink); }
+  .hub-tab.active { color: var(--pink); }  .hub-tab-icon { font-size: 18px; line-height: 1; }
+  .hub-tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-tab-badge {
+    position: absolute;
+    top: 6px;
+    left: calc(50% + 6px);
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--pink);
+    color: var(--surface-solid);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+  }
+  .app-layout:has(.hub-tabs) .content { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+}

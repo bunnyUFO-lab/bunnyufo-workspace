@@ -1,0 +1,44 @@
+# Just the Docs site for the Workspace cards. Serve it with `npm run docs`
+# (Docker, http://localhost:4000). Navigation front matter and the home and
+# category pages come from workspace.json via `npm run docs:sync`.
+title: bunnyUFO Workspace
+description: Cards, research and asset notes from the bunnyUFO Workspace.
+theme: just-the-docs
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+back_to_top: true
+back_to_top_text: Back to top
+footer_content: Edit pages in the Workspace app or any editor; card order and titles come from workspace.json.
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+
+# The theme's stylesheets still use Sass functions that Dart Sass deprecates.
+sass:
+  quiet_deps: true
+  silence_deprecations: [import, global-builtin, color-functions, slash-div]
+
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: false
+
+# BEGIN docs-sync: generated from workspace.json by `npm run docs:sync`; do not edit by hand
+exclude:
+  - "Gemfile"
+  - "Gemfile.lock"
+  - "docker-compose.yml"
+  - "workspace.json"
+  - "README.md"
+  - "vendor"
+  - ".jekyll-cache"
+  - "_site"
+# END docs-sync
+
+# _shared holds report.css/report.js used by HTML card pages; Jekyll skips _folders by default.
+include:
+  - "_shared"

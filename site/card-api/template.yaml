@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  bunnyUFO Workspace card API - read and publish cards in the cards bucket from anywhere, with one
+  passphrase. The function can reach sections/* in that one bucket and nothing else.
+  Deploy with deploy.sh in this folder (see README.md).
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: The cards bucket made by tools/workspace/setup-bucket.sh (name only, no s3://).
+  BucketRegion:
+    Type: String
+    Default: us-east-1
+    Description: The bucket's region. Deploy the stack there too.
+  Passphrase:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: >
+      The one password agents use (BUW_CARDS_PASSWORD). Pick something memorable but long,
+      such as four random words. Given once at the first deploy; later deploys keep it.
+  DomainName:
+    Type: String
+    Description: The API's address, such as api.workspaces.example.net. deploy.sh reads it from ~/.buw/deploy.json.
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: The Route 53 zone that holds DomainName (deploy.sh looks it up).
+  TokenHashes:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >
+      Optional extra tokens, comma-separated name=<sha256 of token>[:scope] entries, for a token
+      limited to some sections or verbs, or revocable on its own. The scope is nothing (every
+      verb on every section), section|section (every verb on those sections), or rights such as
+      read=*;write=inbox|assistant (read, write, delete; each on * or on some sections; a verb not
+      listed is not allowed). Most setups leave this empty.
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >
+      The pages allowed to call the API from a browser (CORS), such as https://workspaces.example.net.
+      Empty sends no CORS headers. A deploy that leaves it out resets it to empty, so deploy.sh always passes it.
+  RateLimit:
+    Type: Number
+    Default: 10
+    Description: Steady requests per second the API accepts before it answers 429.
+  BurstLimit:
+    Type: Number
+    Default: 20
+    Description: Requests the API accepts in a burst.
+
+Conditions:
+  HasOrigins: !Not [!Equals [!Join [',', !Ref AllowedOrigins], '']]
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      # CloudFormation adds the validation record to the zone itself.
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  CardApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: bunnyUFO Workspace card API
+      Domain:
+        DomainName: !Ref DomainName
+        CertificateArn: !Ref Certificate
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref RateLimit
+        ThrottlingBurstLimit: !Ref BurstLimit
+      # Card pages on the site call the API from the browser (workspace/_shared/card-data.js). API
+      # Gateway answers the preflight and adds the headers; the passphrase still guards every route.
+      CorsConfiguration: !If
+        - HasOrigins
+        - AllowOrigins: !Ref AllowedOrigins
+          AllowMethods: [GET, PUT, OPTIONS]
+          AllowHeaders: [authorization, content-type]
+          ExposeHeaders: [etag]
+          MaxAge: 600
+        - !Ref AWS::NoValue
+
+  CardApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /buw/${AWS::StackName}
+      RetentionInDays: 30
+
+  CardApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: bunnyUFO Workspace card API
+      # site/ rather than site/card-api/: the handler imports the S3 client from ../api/s3.mjs.
+      # No npm install and no build step - every import is Node's own.
+      CodeUri: ../
+      Handler: card-api/handler.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 15
+      LoggingConfig:
+        LogGroup: !Ref CardApiLogs
+      Environment:
+        Variables:
+          BUW_S3_BUCKET: !Ref BucketName
+          BUW_S3_REGION: !Ref BucketRegion
+          BUW_S3_PREFIX: sections
+          BUW_CARD_PASSPHRASE: !Ref Passphrase
+          BUW_CARD_TOKENS: !Ref TokenHashes
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: ListSections
+              Effect: Allow
+              Action: s3:ListBucket
+              Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}
+              Condition:
+                StringLike:
+                  s3:prefix: ['sections/', 'sections/*']
+            - Sid: CardFiles
+              Effect: Allow
+              Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+              Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/sections/*
+            # Versioning is the safety net: this role can delete a card (a delete marker) but never
+            # erase its history or switch versioning off.
+            - Sid: NoHistoryLoss
+              Effect: Deny
+              Action: [s3:DeleteObjectVersion, s3:PutBucketVersioning, s3:PutLifecycleConfiguration]
+              Resource:
+                - !Sub arn:${AWS::Partition}:s3:::${BucketName}
+                - !Sub arn:${AWS::Partition}:s3:::${BucketName}/*
+      Events:
+        Everything:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CardApi
+
+Outputs:
+  ApiUrl:
+    Description: The address the scripts use by default.
+    Value: !Sub https://${DomainName}
+  ExecuteApiUrl:
+    Description: The same API at its AWS address, for checking the domain.
+    Value: !Sub https://${CardApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  LogGroup:
+    Description: Where the function logs.
+    Value: !Ref CardApiLogs

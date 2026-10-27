@@ -1,0 +1,9 @@
+source "https://rubygems.org"
+
+# Just the Docs site for workspace/; runs in Docker (see docker-compose.yml).
+gem "jekyll", "~> 4.3"
+gem "just-the-docs", "~> 0.10"
+
+group :jekyll_plugins do
+  gem "jekyll-relative-links", "~> 0.7"
+end

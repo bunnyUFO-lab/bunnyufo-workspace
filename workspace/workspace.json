@@ -1,0 +1,30 @@
+{
+  "entities": [
+    {
+      "id": "sample-markdown",
+      "title": "Sample Markdown card",
+      "description": "The format of a text-first card: one Markdown file per tab.",
+      "type": "group",
+      "category": "samples",
+      "created": "2026-10-21",
+      "updated": "2026-10-21",
+      "folder": "sample-markdown",
+      "steps": [{ "name": "Overview", "path": "index.md" }],
+      "pinned": false,
+      "sample": true
+    },
+    {
+      "id": "sample-html",
+      "title": "Sample HTML card",
+      "description": "The format of a styled HTML card that follows the Workspace theme.",
+      "type": "group",
+      "category": "samples",
+      "created": "2026-10-21",
+      "updated": "2026-10-21",
+      "folder": "sample-html",
+      "steps": [{ "name": "Report", "path": "report.html" }],
+      "pinned": false,
+      "sample": true
+    }
+  ]
+}

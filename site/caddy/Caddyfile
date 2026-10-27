@@ -1,0 +1,87 @@
+# The Workspace site, shown with the Workspace app's own UI (browser mode).
+#
+# One port, one app, every section. The app asks for /sites.json to learn what this site serves, and the
+# first path segment picks one: /magic-loops, /bunnylink. Each section's files come from its own base
+# under /w/, which is what lets a single copy of the app show any of them, with a switcher in the top bar.
+#
+# $BUW_DOCS_ROOT/_app/ui  the app's built UI, published by site/deploy/publish-ui.sh
+#                         ($BUW_DOCS_ROOT is /srv/buw-docs unless Caddy's environment says otherwise)
+# buw-site-api:8099       the data service ($BUW_DOCS_ROOT/_app/api): it streams every section out of
+#                         the cards bucket and keeps pins, archives and tags in state.json there. The
+#                         bucket and its key are in $BUW_DOCS_ROOT/_app/api.env, root-only.
+#
+# Nothing under $BUW_DOCS_ROOT/<id>/ is read any more: cards reach the site by `npm run publish`
+# uploading them to the bucket, and the service serves the bucket. Adding a section: publish it,
+# or start it from the site's switcher. No change here.
+# Writes (anything but GET, HEAD, OPTIONS) are accepted only from the proxy that does the login
+# (NPM_IP, set in this container's environment); anyone else on the LAN gets read-only. With no
+# NPM_IP the address is 127.0.0.1, so every write from the LAN is refused: it fails closed. The
+# peer is matched with remote_ip, the TCP address, never X-Forwarded-For, which any client can set.
+# Remote-User is stripped from every request not from that proxy, so it cannot be forged from the LAN.
+# Reached from outside behind an authenticating proxy; the compose file this runs under lives in
+# the Caddy stack's folder on the server (CADDY_DIR in site/deploy/publish-site-api.sh).
+#
+# This file is deployed by site/deploy/publish-site-api.sh: validated, copied to
+# $CADDY_DIR/Caddyfile, and Caddy restarted when it changed.
+{
+	admin off
+	auto_https off
+}
+
+# Refuses a write that did not come from the login proxy. It lives inside each proxying handle because Caddy
+# runs `handle` before a top-level `respond`, so a top-level rule would never fire for these paths.
+(npm_only_writes) {
+	@outsideWrite {
+		not remote_ip {$NPM_IP:127.0.0.1}
+		not method GET HEAD OPTIONS
+	}
+	respond @outsideWrite "Read-only here: writes go through the signed-in address." 403
+}
+
+:4000 {
+	# Access log, so a request that never arrives can be told apart from one that was
+	# refused here. Goes to the container's stdout: `docker logs buw-docs-caddy-1`.
+	log {
+		output stdout
+		format console
+	}
+
+	header Cache-Control "no-cache"
+
+	# Only the login proxy may say who is signed in.
+	@notProxy not remote_ip {$NPM_IP:127.0.0.1}
+	request_header @notProxy -Remote-User
+
+	# Cards are changed through this: pin, archive, tag, and starting a section. They are written
+	# to state.json in the bucket, so the change is there for every device at once.
+	handle /api/* {
+		import npm_only_writes
+		reverse_proxy buw-site-api:8099
+	}
+
+	# Which sections this site serves: every sections/<id>/workspace.json the bucket holds.
+	handle /sites.json {
+		import npm_only_writes
+		reverse_proxy buw-site-api:8099
+	}
+
+	# Each section's own files, streamed from the bucket: /w/<id>/<anything>.
+	# The app builds these URLs from sites.json, so a new section needs no rule here.
+	handle /w/* {
+		import npm_only_writes
+		reverse_proxy buw-site-api:8099
+	}
+
+	# The phone app's manifest. Caddy has no type for .webmanifest of its own. (sw.js needs nothing
+	# here: it is a file, so try_files below serves it as JavaScript, and the header above applies.)
+	@manifest path /manifest.webmanifest
+	header @manifest Content-Type "application/manifest+json"
+
+	# The app itself, for every other path. try_files keeps /magic-loops and /bunnylink working on a
+	# reload: they are the app's own addresses, not files.
+	handle {
+		root * {$BUW_DOCS_ROOT:/srv/buw-docs}/_app/ui
+		try_files {path} /index.html
+		file_server
+	}
+}

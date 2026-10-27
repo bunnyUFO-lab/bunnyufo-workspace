@@ -1,0 +1,6 @@
+// Pixel art stays crisp: images inside tables (sprite galleries) are scaled up without smoothing.
+.main-content table img {
+  width: 128px;
+  max-width: 100%;
+  image-rendering: pixelated;
+}

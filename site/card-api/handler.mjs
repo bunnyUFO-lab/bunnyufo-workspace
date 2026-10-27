@@ -1,0 +1,413 @@
+// The card API: read and write workspace cards in the cards bucket from anywhere, with a token.
+//
+// It runs in AWS Lambda behind an API Gateway HTTP API (template.yaml), so a session on any machine
+// can fetch or publish a card without AWS credentials and without a way into the home server. The
+// function's role reaches `sections/*` in the cards bucket and nothing else: not state.json, not
+// another bucket. Callers send `Authorization: Bearer <passphrase>`: the one password the site's owner
+// set at deploy (BUW_CARD_PASSPHRASE). Optional extra tokens, each limited to some sections or to some
+// verbs on them, are held as SHA-256 hashes (BUW_CARD_TOKENS; see parseTokens for the grammar).
+//
+//   GET    /sections                                 the sections this token may use
+//   GET    /sections/{section}                       its name and card list
+//   GET    /sections/{section}/cards/{card}          the card's entry and files, each with a short-lived download URL
+//   PUT    /sections/{section}/cards/{card}          add or update the card's entry in workspace.json (body: the entity)
+//   GET    /sections/{section}/files?prefix=<p>      the files under a prefix (path, size, etag, lastModified), 1000 at most
+//   GET    /sections/{section}/files/{folder}/{path} one file, up to 4 MB
+//   PUT    /sections/{section}/files/{folder}/{path} upload one file, up to 4 MB (the body is the file);
+//                                                    If-None-Match: * creates only, If-Match: "<etag>" replaces only that version
+//   DELETE /sections/{section}/files/{folder}/{path} remove one file
+//   POST   /sections/{section}/uploads               upload URLs for bigger files (body: { files: [{ path }] })
+//   GET    /resolve?ref=<site link | section/card | name>   which card a link or a name means
+//   GET    /cards.mjs                                the client (cards.mjs beside this file), with no token:
+//                                                    it is code and holds nothing, and a session needs it first
+//
+// Files go up first and the entry last, so a card is never listed before its files are there. The
+// entry is written with If-Match on the ETag it read, so two writers never drop each other's card.
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { contentTypeOf, createBucket } from '../api/s3.mjs';
+
+const CLIENT = new URL('./cards.mjs', import.meta.url);
+
+export const MAX_INLINE = 4 * 1024 * 1024; // a Lambda payload is 6 MB, and base64 adds a third
+export const MAX_FILE = 50 * 1024 * 1024; // the same limit `npm run publish` keeps
+const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
+const SECTION_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const URL_TTL = 900;
+const MAX_LISTED = 1000;
+
+class HttpError extends Error {
+  constructor(status, message, extra = {}) {
+    super(message);
+    this.status = status;
+    this.extra = extra;
+  }
+}
+
+const sha256 = text => createHash('sha256').update(text).digest('hex');
+
+const VERBS = ['read', 'write', 'delete'];
+
+/**
+ * A token's scope, the part after the colon:
+ *   (none)                         every verb on every section
+ *   `a|b`                          every verb, on those sections only
+ *   `read=*;write=inbox|assistant` the listed verbs only, each on `*` (every section) or some sections
+ * Returns { read, write, delete }, each `null` (every section) or a Set of section ids (empty: none).
+ */
+export function parseScope(scope) {
+  const text = String(scope ?? '');
+  if (!text) return { read: null, write: null, delete: null };
+  if (!text.includes('=')) {
+    if (!/^[\w-]+(\|[\w-]+)*$/.test(text)) throw new Error('not a section list');
+    return Object.fromEntries(VERBS.map(verb => [verb, new Set(text.split('|'))]));
+  }
+  const rights = Object.fromEntries(VERBS.map(verb => [verb, new Set()]));
+  const seen = new Set();
+  for (const part of text.split(';')) {
+    const match = /^(read|write|delete)=(\*|[a-z0-9-]+(?:\|[a-z0-9-]+)*)$/.exec(part);
+    if (!match) throw new Error(`not a right: ${part}`);
+    if (seen.has(match[1])) throw new Error(`${match[1]} is listed twice`);
+    seen.add(match[1]);
+    rights[match[1]] = match[2] === '*' ? null : new Set(match[2].split('|'));
+  }
+  return rights;
+}
+
+/**
+ * "laptop=<sha256>, cloud=<sha256>:magic-loops|bunnylink, hermes=<sha256>:read=*;write=inbox"
+ * → [{ name, hash, rights: { read, write, delete } }]. Without a scope a token may do everything.
+ * A bad entry throws with its name only, never its hash.
+ */
+export function parseTokens(value) {
+  return String(value ?? '').split(',').map(item => item.trim()).filter(Boolean).map(item => {
+    const match = /^([\w.-]+)=([0-9a-f]{64})(?::([\w|*=;-]+))?$/i.exec(item);
+    let rights;
+    try {
+      if (!match) throw new Error('form');
+      rights = parseScope(match[3]);
+    } catch {
+      throw new Error(`BUW_CARD_TOKENS has an entry that is not name=<sha256>[:section|section | :read=*;write=a|b]: ${item.split('=')[0]}`);
+    }
+    return { name: match[1], hash: match[2].toLowerCase(), rights };
+  });
+}
+
+const EVERYTHING = Object.freeze({ read: null, write: null, delete: null });
+
+/** A path inside a section: forward slashes, a card folder and at least one file below it. */
+export function cardPath(value) {
+  const parts = String(value ?? '').split('/').filter(Boolean);
+  if (parts.length < 2 || parts.some(part => part === '.' || part === '..' || part.startsWith('.'))) return null;
+  if (parts[0].startsWith('_')) return null; // _shared and the like belong to the whole section
+  return parts.join('/');
+}
+
+/**
+ * What a reference names: a site link (https://…/<section>#/<card>, or a /w/<section>/<folder>/
+ * file link), "section/card", or a bare card id or title.
+ */
+export function parseRef(ref) {
+  const text = String(ref ?? '').trim();
+  if (/^https?:\/\//i.test(text)) {
+    const url = new URL(text);
+    const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    if (segments[0] === 'w' && segments[1]) return { section: segments[1], folder: segments[2] ?? null, card: null };
+    const card = decodeURIComponent(url.hash.replace(/^#\/?/, '').split('/')[0] || '') || null;
+    return { section: segments[0] ?? null, card, folder: null };
+  }
+  const slash = text.indexOf('/');
+  if (slash > 0) return { section: text.slice(0, slash), card: text.slice(slash + 1), folder: null };
+  return { section: null, card: text || null, folder: null };
+}
+
+const summary = entity => ({
+  id: entity.id,
+  title: entity.title,
+  description: entity.description,
+  category: entity.category,
+  folder: entity.folder,
+  status: entity.status,
+  updated: entity.updated ?? entity.created,
+});
+
+/**
+ * @param bucket an s3.mjs bucket
+ * @param tokens parseTokens() output
+ * @param prefix where the sections are in the bucket
+ */
+export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = URL_TTL, today = () => new Date().toISOString().slice(0, 10) }) {
+  const keyOf = (section, rest) => `${prefix}/${section}/${rest}`;
+
+  function authenticate(headers) {
+    const match = /^Bearer\s+(\S.*?)\s*$/i.exec(headers.authorization ?? ''); // a passphrase may have spaces
+    if (!match) throw new HttpError(401, 'Send Authorization: Bearer <token>.');
+    const hash = Buffer.from(sha256(match[1]), 'hex');
+    const found = tokens.find(token => timingSafeEqual(Buffer.from(token.hash, 'hex'), hash));
+    if (!found) throw new HttpError(401, 'That token is not known here.');
+    return found;
+  }
+
+  const can = (caller, verb, section) => caller.rights[verb] === null || caller.rights[verb].has(section);
+
+  async function section(caller, id, verb) {
+    if (!SECTION_ID.test(id ?? '')) throw new HttpError(400, 'A section id is lower-case letters, digits and dashes.');
+    if (!can(caller, verb, id)) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
+    const got = await bucket.getJson(keyOf(id, 'workspace.json'));
+    if (!Array.isArray(got?.value?.entities)) throw new HttpError(404, `No section "${id}".`);
+    return { id, registry: got.value, etag: got.etag };
+  }
+
+  async function sectionIds(caller) {
+    const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
+    return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
+  }
+
+  /** In the inbox, answers, snoozes and declines are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const ownerOnly = (caller, sectionId, file) => {
+    if (sectionId === 'inbox' && caller.rights.write !== null && /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json)$/i.test(file)) {
+      throw new HttpError(403, 'Only the Hub writes answers.');
+    }
+  };
+
+  const findEntity = (registry, ref) => registry.entities.find(item => item?.id === ref) ?? registry.entities.find(item => item?.folder === ref);
+
+  async function cardFiles(sectionId, folder) {
+    const base = keyOf(sectionId, `${folder}/`);
+    const { objects } = await bucket.list(base);
+    return objects.map(object => ({ path: object.key.slice(keyOf(sectionId, '').length), size: object.size, etag: object.etag, lastModified: object.lastModified }));
+  }
+
+  const routes = {
+    async listSections(caller) {
+      const ids = await sectionIds(caller);
+      const sections = await Promise.all(ids.map(async id => {
+        const got = await bucket.getJson(keyOf(id, 'workspace.json')).catch(() => null);
+        if (!Array.isArray(got?.value?.entities)) return null;
+        return { id, name: got.value.name || id, cards: got.value.entities.length };
+      }));
+      return { sections: sections.filter(Boolean) };
+    },
+
+    async getSection(caller, id) {
+      const { registry } = await section(caller, id, 'read');
+      return { id, name: registry.name || id, cards: registry.entities.map(summary) };
+    },
+
+    async getCard(caller, sectionId, ref) {
+      const { registry } = await section(caller, sectionId, 'read');
+      const entity = findEntity(registry, ref);
+      if (!entity) throw new HttpError(404, `No card "${ref}" in ${sectionId}.`);
+      const files = await cardFiles(sectionId, entity.folder);
+      const withUrls = await Promise.all(files.map(async file => ({ ...file, url: await bucket.presign('GET', keyOf(sectionId, file.path), { expires: urlTtl }) })));
+      return { section: sectionId, entity, files: withUrls, urlsExpireIn: urlTtl };
+    },
+
+    async putCard(caller, sectionId, id, entity) {
+      if (!entity || typeof entity !== 'object' || Array.isArray(entity)) throw new HttpError(400, 'Send the card entry as a JSON object.');
+      if (entity.id !== id) throw new HttpError(400, `The entry's id must be "${id}", the id in the path.`);
+      if (typeof entity.title !== 'string' || !entity.title.trim()) throw new HttpError(400, 'The entry needs a title.');
+      if (!Array.isArray(entity.steps)) throw new HttpError(400, 'The entry needs a steps array.');
+      if (typeof entity.folder !== 'string' || !cardPath(`${entity.folder}/x`) || entity.folder.includes('/')) {
+        throw new HttpError(400, 'The entry needs a folder: one name, not starting with "_" or ".".');
+      }
+      if (sectionId === 'inbox' && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
+      await section(caller, sectionId, 'write');
+      const files = await cardFiles(sectionId, entity.folder);
+      if (!files.length) throw new HttpError(409, `${entity.folder}/ has no files yet: upload them first, then add the card.`);
+      const refused = files.filter(file => SECRET.test(file.path) || file.size > MAX_FILE).map(file => file.path);
+      if (refused.length) throw new HttpError(422, 'Some files look like secrets or are over 50 MB; delete them first.', { files: refused });
+
+      const stored = { ...entity, updated: entity.updated ?? today() };
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const { registry, etag } = await section(caller, sectionId, 'write');
+        const clash = registry.entities.find(item => item?.folder === entity.folder && item?.id !== id);
+        if (clash) throw new HttpError(409, `Folder ${entity.folder} already belongs to card "${clash.id}".`);
+        const index = registry.entities.findIndex(item => item?.id === id);
+        const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
+        try {
+          await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities }, { ifMatch: etag });
+          return { section: sectionId, entity: stored, created: index < 0 };
+        } catch (error) {
+          if (error.status !== 412) throw error;
+        }
+      }
+      throw new HttpError(409, 'The card list kept changing under this write; try again.');
+    },
+
+    async listFiles(caller, sectionId, prefixValue) {
+      const wanted = String(prefixValue ?? '');
+      if (/^[/_.]/.test(wanted) || wanted.split('/').some(part => part === '..' || part === '.') || /[\\\0]/.test(wanted)) {
+        throw new HttpError(400, 'prefix is empty or a relative path: no "..", and not starting with "/", "_" or ".".');
+      }
+      await section(caller, sectionId, 'read');
+      const base = keyOf(sectionId, '');
+      const { objects } = await bucket.list(keyOf(sectionId, wanted));
+      const files = objects
+        .map(object => ({ path: object.key.slice(base.length), size: object.size, etag: object.etag, lastModified: object.lastModified }))
+        .filter(file => cardPath(file.path) && !SECRET.test(file.path))
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return { files: files.slice(0, MAX_LISTED), truncated: files.length > MAX_LISTED };
+    },
+
+    async getFile(caller, sectionId, file) {
+      await section(caller, sectionId, 'read');
+      const key = keyOf(sectionId, file);
+      let head;
+      try {
+        head = await bucket.head(key);
+      } catch (error) {
+        if (error.status === 404) throw new HttpError(404, `No file ${file} in ${sectionId}.`);
+        throw error;
+      }
+      if (head.size > MAX_INLINE) {
+        throw new HttpError(413, 'Too big to send through the API; download it from url.', { url: await bucket.presign('GET', key, { expires: urlTtl }) });
+      }
+      const got = await bucket.get(key);
+      const body = Buffer.from(await new Response(got.body).arrayBuffer());
+      return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag };
+    },
+
+    async putFile(caller, sectionId, file, body, contentType, { ifNoneMatch, ifMatch } = {}) {
+      if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
+      if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
+      await section(caller, sectionId, 'write');
+      ownerOnly(caller, sectionId, file);
+      let put;
+      try {
+        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch });
+      } catch (error) {
+        if (error.status === 412) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
+        throw error;
+      }
+      return { path: file, size: body.length, etag: put.etag };
+    },
+
+    async deleteFile(caller, sectionId, file) {
+      await section(caller, sectionId, 'delete');
+      await bucket.del(keyOf(sectionId, file));
+      return { path: file, deleted: true };
+    },
+
+    async uploads(caller, sectionId, request) {
+      const files = Array.isArray(request?.files) ? request.files : null;
+      if (!files?.length || files.length > 50) throw new HttpError(400, 'Send { files: [{ path }] }, 1 to 50 of them.');
+      await section(caller, sectionId, 'write');
+      const uploads = await Promise.all(files.map(async item => {
+        const file = cardPath(item?.path);
+        if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
+        if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
+        ownerOnly(caller, sectionId, file);
+        return { path: file, method: 'PUT', url: await bucket.presign('PUT', keyOf(sectionId, file), { expires: urlTtl }) };
+      }));
+      return { uploads, urlsExpireIn: urlTtl, maxBytes: MAX_FILE };
+    },
+
+    async resolve(caller, ref) {
+      const wanted = parseRef(ref);
+      if (!wanted.card && !wanted.folder) throw new HttpError(400, 'Send ?ref= a site link, section/card, or a card id or title.');
+      const ids = wanted.section ? [wanted.section] : await sectionIds(caller);
+      const needle = (wanted.card ?? '').toLowerCase();
+      const matches = [];
+      for (const id of ids) {
+        const { registry } = await section(caller, id, 'read').catch(error => {
+          if (wanted.section) throw error;
+          return { registry: { entities: [] } };
+        });
+        for (const entity of registry.entities) {
+          if (!entity) continue;
+          const hit = wanted.folder
+            ? entity.folder === wanted.folder
+            : entity.id === wanted.card || entity.folder === wanted.card || entity.title?.toLowerCase() === needle;
+          if (hit) matches.push({ section: id, ...summary(entity) });
+        }
+      }
+      if (!matches.length) throw new HttpError(404, `Nothing matches "${ref}".`);
+      return { matches };
+    },
+  };
+
+  return async function handle(event) {
+    const method = event.requestContext?.http?.method ?? 'GET';
+    const segments = (event.rawPath ?? '/').split('/').filter(Boolean).map(decodeURIComponent);
+    const headers = Object.fromEntries(Object.entries(event.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
+    const raw = () => (event.body == null ? Buffer.alloc(0) : Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8'));
+    const json = () => {
+      try {
+        return JSON.parse(raw().toString('utf8') || '{}');
+      } catch {
+        throw new HttpError(400, 'Expected a JSON body.');
+      }
+    };
+    try {
+      // A browser's CORS preflight carries no credentials. The catch-all route sends it here, so answer
+      // it before authenticating; API Gateway adds the CORS headers from the template.
+      if (method === 'OPTIONS') return { statusCode: 204, headers: { 'cache-control': 'no-store' }, body: '' };
+      if (event.rawPath === '/cards.mjs' && ['GET', 'HEAD'].includes(method)) {
+        // The client learns its own address from the host that served it, so a session that fetches it
+        // from the API needs no setup. With no host to go by, it is served unchanged.
+        let body = await readFile(CLIENT, 'utf8');
+        const domain = event.requestContext?.domainName || headers.host;
+        if (domain && /^[a-z0-9.:-]+$/i.test(domain)) body = body.replace("const SERVED_API = '';", () => `const SERVED_API = ${JSON.stringify(`https://${domain}`)};`);
+        return { statusCode: 200, headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }, body };
+      }
+      const caller = authenticate(headers);
+      const [root, sectionId, kind, ...rest] = segments;
+      let result;
+      if (root === 'resolve' && segments.length === 1 && method === 'GET') {
+        result = await routes.resolve(caller, event.queryStringParameters?.ref);
+      } else if (root === 'sections' && !sectionId && method === 'GET') {
+        result = await routes.listSections(caller);
+      } else if (root === 'sections' && sectionId && !kind && method === 'GET') {
+        result = await routes.getSection(caller, sectionId);
+      } else if (root === 'sections' && kind === 'cards' && rest.length === 1 && method === 'GET') {
+        result = await routes.getCard(caller, sectionId, rest[0]);
+      } else if (root === 'sections' && kind === 'cards' && rest.length === 1 && method === 'PUT') {
+        result = await routes.putCard(caller, sectionId, rest[0], json());
+      } else if (root === 'sections' && kind === 'uploads' && !rest.length && method === 'POST') {
+        result = await routes.uploads(caller, sectionId, json());
+      } else if (root === 'sections' && kind === 'files' && !rest.length && method === 'GET') {
+        result = await routes.listFiles(caller, sectionId, event.queryStringParameters?.prefix);
+      } else if (root === 'sections' && kind === 'files' && ['GET', 'PUT', 'DELETE'].includes(method)) {
+        const file = cardPath(rest.join('/'));
+        if (!file) throw new HttpError(400, 'A file path is <card folder>/<file>, not starting with "_" or ".".');
+        if (method === 'GET') result = await routes.getFile(caller, sectionId, file);
+        if (method === 'PUT') result = await routes.putFile(caller, sectionId, file, raw(), headers['content-type'], {
+          ifNoneMatch: headers['if-none-match'] === '*' ? '*' : undefined,
+          ifMatch: headers['if-match']?.replace(/^W\//, '').replace(/^"|"$/g, '') || undefined,
+        });
+        if (method === 'DELETE') result = await routes.deleteFile(caller, sectionId, file);
+      } else {
+        throw new HttpError(404, `No route ${method} ${event.rawPath}.`);
+      }
+      if (result?.raw) {
+        return {
+          statusCode: 200,
+          headers: { 'content-type': result.contentType, etag: `"${result.etag}"`, 'cache-control': 'no-store' },
+          body: result.raw.toString('base64'),
+          isBase64Encoded: true,
+        };
+      }
+      return { statusCode: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(result) };
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : error.status === 404 ? 404 : 500;
+      if (status === 500) console.error(error);
+      const message = status === 500 ? 'Something went wrong; see the function log.' : error.message;
+      return { statusCode: status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify({ error: message, ...(error.extra ?? {}) }) };
+    }
+  };
+}
+
+let ready;
+/** Lambda's entry point: configuration from the environment the template sets. */
+export async function handler(event) {
+  ready ??= createCardApi({
+    bucket: createBucket({ bucket: process.env.BUW_S3_BUCKET, region: process.env.BUW_S3_REGION, endpoint: process.env.BUW_S3_ENDPOINT || undefined }),
+    tokens: [
+      ...(process.env.BUW_CARD_PASSPHRASE ? [{ name: 'passphrase', hash: sha256(process.env.BUW_CARD_PASSPHRASE), rights: EVERYTHING }] : []),
+      ...parseTokens(process.env.BUW_CARD_TOKENS),
+    ],
+    prefix: process.env.BUW_S3_PREFIX || 'sections',
+  });
+  return ready(event);
+}
