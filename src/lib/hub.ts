@@ -40,6 +40,37 @@ export interface HubEvent {
   review?: string
   summary?: string
   file: string
+  prs?: string[]
+  cardDir?: string
+  cardFiles?: string[]
+  screenshots?: string[]
+  deployUrl?: string
+  verdicts?: Verdict[]
+}
+
+export interface Verdict { leg: 'smoke' | 'review' | 'qa'; result: 'pass' | 'fail' | 'noted'; text: string }
+export interface ReviewFile { path: string; label: string }
+export interface ShotPair { label: string; before?: string; after?: string; other?: string }
+/** GET /api/hub/reviews/:id: the server has checked every link and path in it. */
+export interface ReviewDetail {
+  id: string
+  title: string
+  at: string
+  summary?: string
+  project?: string
+  host?: string
+  source?: string
+  url?: string
+  card?: string
+  prs?: string[]
+  cardDir?: string
+  cardFiles?: ReviewFile[]
+  screenshots?: ShotPair[]
+  deployUrl?: string
+  verdicts?: Verdict[]
+  done: boolean
+  doneAt?: string
+  doneBy?: string
 }
 
 export interface Today {

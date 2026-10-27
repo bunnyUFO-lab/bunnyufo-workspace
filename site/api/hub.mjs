@@ -14,7 +14,7 @@ import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
   DAY, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, INBOX_FILTERS, monthPrefixes, newDrawingId,
-  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -341,6 +341,16 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     throw fail('Could not find a free name; try again.', 409);
   }
 
+  /** One review's detail, from the ready-for-review event in the last seven days. */
+  async function reviewDetailFor(id, at) {
+    const missing = () => fail('This review is not in the last 7 days.', 404);
+    if (!REVIEW_FILE_RE.test(id)) throw missing();
+    const { events } = await loadEvents(at);
+    const detail = reviewDetail(events, id);
+    if (!detail) throw missing();
+    return detail;
+  }
+
   async function createRequest(data, user, at) {
     if (!validProject(data.project)) throw fail('Name the project (lower-case letters, digits and dashes).');
     const text = typeof data.text === 'string' ? data.text.trim() : '';
@@ -497,6 +507,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
             reply({ items: buildInbox({ filter, asks: asks.map(row => row.item), requests, events: window.events, now: at }) });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
+            reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
           } else if (route === '/hub/events') {
             const floor = at.getTime() - WINDOW_DAYS * DAY;
             const wanted = sendTime(query.get('since'))?.getTime() ?? at.getTime() - DAY;

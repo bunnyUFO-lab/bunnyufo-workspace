@@ -1746,7 +1746,7 @@ button.open-ext {
     font-size: 11px;
     text-decoration: none;
   }
-  button.hub-tab { border: 0; background: none; font: inherit; font-size: 11px; cursor: pointer; }
+  button.hub-tab { border: 0; background: none; font: inherit; font-size: 11px; color: var(--text-dim); cursor: pointer; }
   .hub-more {
     position: absolute;
     right: 8px;

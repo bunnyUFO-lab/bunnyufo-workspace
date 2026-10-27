@@ -207,3 +207,45 @@
   .hub-chat-list { display: none; position: absolute; z-index: 5; top: 52px; left: 0; right: 0; max-height: 65%; padding: 10px; background: var(--surface-solid); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
   .hub-chat.drawer .hub-chat-list { display: flex; }
 }
+
+/* The review row's way in, and the review view (ws-b1z.9). */
+a.hub-row-text { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
+a.hub-row-text:hover .hub-row-title { text-decoration: underline; }
+a.hub-row-text:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.hub-review-head { margin-bottom: 12px; }
+.hub-review-head .hub-md { margin-top: 8px; overflow-wrap: anywhere; }
+.hub-review-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.hub-review-side, .hub-review-reader { min-width: 0; }
+.hub-review-line { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.hub-review-line .hub-dot { align-self: center; }
+.hub-review-links, .hub-review-files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.hub-review-file { flex-direction: column; align-items: flex-start; gap: 0; text-align: left; }
+.hub-review-file small { font-size: 0.66rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.hub-review-file[aria-current="true"] { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }
+.hub-review-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.hub-review-shot { margin: 0; min-width: 0; }
+.hub-review-shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
+.hub-review-shot figcaption { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; overflow-wrap: anywhere; }
+.hub-review-reader { overflow-wrap: anywhere; }
+.hub-review-reader h3:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-review-reader .buw-markdown { max-width: 100%; overflow-x: auto; }
+.hub-review-reader .buw-markdown img { max-width: 100%; height: auto; }
+.hub-review-back { display: none; }
+
+@media (max-width: 640px) {
+  .hub-review-pair { grid-template-columns: minmax(0, 1fr); }
+  .hub-review-reader { display: none; }
+  .hub-review[data-open] .hub-review-reader { display: block; }
+  .hub-review[data-open] .hub-review-head, .hub-review[data-open] .hub-review-side { display: none; }
+  .hub-review-back { display: inline-flex; position: sticky; top: 0; z-index: 2; margin-bottom: 8px; }
+}
+@media (min-width: 1001px) {
+  .hub-review-grid { grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+  .hub-review-grid[data-solo] { grid-template-columns: minmax(0, 1fr); }
+  .hub-review-reader { position: sticky; top: 0; max-height: calc(100dvh - var(--topbar-h, 56px) - 32px); overflow: auto; }
+}
+
+/* A stronger cue on the review row: the arrow in the title's colour, and the title underlined on hover, focus and press. */
+a.hub-row-text .hub-row-cue { color: var(--text-bright); font-weight: 700; }
+a.hub-row-text:focus-visible .hub-row-title, a.hub-row-text:active .hub-row-title { text-decoration: underline; }
