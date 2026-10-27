@@ -45,6 +45,9 @@ const pinRank = (e: WorkspaceCard) =>
 const sortPins = (cards: WorkspaceCard[]) =>
   cards.filter(e => e.pinned).sort((a, b) => pinRank(a) - pinRank(b) || byFreshness(a, b))
 
+/** A Hub screen is remounted when its address changes, except the map's panel: `map/<project>/<node>` keeps the map, with what is expanded, alive. */
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+
 export default function App() {
   const { data, offline, lastSync } = useWorkspace()
   // Pin, reorder and archive are offered wherever something can write them: the local
@@ -613,7 +616,7 @@ export default function App() {
 
         <div className="content">
           {route.hub && host.hub ? (
-            <ReportBoundary key={JSON.stringify(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
+            <ReportBoundary key={hubKey(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
               <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><HubScreen route={route.hub} /></Suspense>
             </ReportBoundary>
           ) : (

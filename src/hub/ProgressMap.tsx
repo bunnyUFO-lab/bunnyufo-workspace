@@ -1,22 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { MapTask, ProgressMap as MapModel, TaskState } from '../lib/hub'
-import { copyAge, safeUrl } from '../lib/hub'
-import { hubHash } from '../lib/route'
+import type { ProgressMap as MapModel, TaskState } from '../lib/hub'
+import { copyAge } from '../lib/hub'
+import { hubHash, mapHash } from '../lib/route'
 import { TS, layoutMap, type FeatureNode, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
+import MapPanel from './MapPanel'
 import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
+import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { useHubData } from './useHub'
 import { useProject } from './useProject'
-
-const STATE_COLOR: Record<TaskState, string> = { done: 'var(--green)', doing: 'var(--pink)', you: 'var(--amber)', next: 'var(--blue)', later: 'var(--text-muted)' }
-const STATE_LABEL: Record<TaskState, string> = { done: 'done', doing: 'in progress', you: 'needs you', next: 'next up', later: 'later' }
-const SIGN_WORDS = { working: 'an agent is working on it now', idle: 'a session worked on it and is now idle', new: 'brand new, not started' } as const
 
 const WHEEL_STEP = 140
 const PINCH_STEP = 70
 
-export default function ProgressMap({ project: wanted }: { project?: string }) {
+/** The screen's id is `<project>[/<node>]`: the project alone decides what is fetched and drawn, so opening a panel never reloads the map. Project and bead ids have no `/`. */
+const splitId = (id?: string): [string | undefined, string | undefined] => {
+  const at = id ? id.indexOf('/') : -1
+  return at < 0 ? [id, undefined] : [id?.slice(0, at), id?.slice(at + 1) || undefined]
+}
+
+export default function ProgressMap({ project: routeId }: { project?: string }) {
+  const [wanted, nodeId] = splitId(routeId)
   const { list, project, loading: listing } = useProject(wanted)
   const { data: model, error, loading: mapping } = useHubData<MapModel>(project ? `/map/${encodeURIComponent(project)}` : null)
   return (
@@ -31,18 +36,19 @@ export default function ProgressMap({ project: wanted }: { project?: string }) {
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
-      {model?.meta && project && <MapView key={project} model={model} />}
+      {model?.meta && project && <MapView key={project} model={model} project={project} nodeId={nodeId} />}
     </>
   )
 }
 
-function MapView({ model }: { model: MapModel }) {
+function MapView({ model, project, nodeId }: { model: MapModel; project: string; nodeId?: string }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const [sprints, setSprints] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
   const [boxWidth, setBoxWidth] = useState(640)
   const box = useRef<HTMLDivElement>(null)
   const pendingScroll = useRef<string | null>(null)
+  const pushed = useRef(false)
+  const lastShown = useRef<string | null>(null)
   const wheel = useRef(0)
   const pinch = useRef<number | null>(null)
 
@@ -59,19 +65,70 @@ function MapView({ model }: { model: MapModel }) {
   const layout = useMemo(() => layoutMap(model, open, boxWidth, sprints), [model, open, boxWidth, sprints])
   const byId = useMemo(() => new Map(layout.nodes.map(node => [node.id, node])), [layout])
 
-  // Keep the node you opened in the middle of the box.
+  // The panel the model has for the address; an id the model does not know opens nothing and leaves the address alone.
+  const shownId = nodeId && find(model, nodeId) ? nodeId : null
+
+  /** The width of the box the side panel covers on a desktop; none on a phone, where the sheet is below. */
+  const covered = () => {
+    const element = box.current
+    const panel = document.getElementById('hub-map-panel')
+    if (!element || !panel || !window.matchMedia('(min-width: 641px)').matches) return 0
+    return Math.max(0, element.getBoundingClientRect().right - panel.getBoundingClientRect().left)
+  }
+  const centre = (id: string) => {
+    const element = box.current
+    const node = byId.get(id)
+    if (!element || !node) return
+    // An opened feature is centred on its tasks, not on the dot at the end of its branch.
+    const tasks = node.kind === 'f' && node.open ? node.total : 0
+    element.scrollLeft = Math.max(0, node.x - (tasks * TS) / 2 - (element.clientWidth - covered()) / 2)
+  }
+
+  // Keep the node you opened in the middle of the part of the box the panel leaves free.
   useEffect(() => {
     const id = pendingScroll.current
-    const element = box.current
-    if (!id || !element) return
-    const node = byId.get(id)
-    if (node) {
-      // An opened feature is centred on its tasks, not on the dot at the end of its branch.
-      const tasks = node.kind === 'f' && node.open ? node.total : 0
-      element.scrollLeft = Math.max(0, node.x - (tasks * TS) / 2 - element.clientWidth / 2)
-    }
+    if (!id) return
+    centre(id)
     pendingScroll.current = null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [byId])
+
+  // A node that ends up under the side panel is scrolled out from under it, once per opening.
+  const scrolledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!shownId) { scrolledFor.current = null; return }
+    if (scrolledFor.current === shownId) return
+    scrolledFor.current = shownId
+    const element = box.current
+    const node = byId.get(shownId)
+    const hidden = covered()
+    if (!element || !node || !hidden) return
+    const free = element.clientWidth - hidden
+    const screenX = node.x - element.scrollLeft
+    if (screenX > free - 40 || screenX < 0) centre(shownId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownId, byId])
+
+  // Whatever closes the panel (the button, Escape, Back), focus goes back to the node that opened it.
+  useEffect(() => {
+    if (shownId) { lastShown.current = shownId; return }
+    pushed.current = false
+    const id = lastShown.current
+    lastShown.current = null
+    if (!id) return
+    const target = box.current?.querySelector<SVGElement>(`[data-node="${CSS.escape(id)}"]`) ?? box.current
+    target?.focus({ preventScroll: true })
+  }, [shownId])
+
+  const openPanel = useCallback((id: string) => {
+    if (id === shownId) return
+    if (shownId) { window.location.replace(mapHash(project, id)); return }
+    pushed.current = true
+    window.location.assign(mapHash(project, id))
+  }, [project, shownId])
+  const closePanel = useCallback(() => {
+    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(mapHash(project))
+  }, [project])
 
   const focus = (id: string) => { pendingScroll.current = id }
 
@@ -87,12 +144,8 @@ function MapView({ model }: { model: MapModel }) {
     setOpen(next)
   }, [open, model])
 
-  const press = (node: MapNode) => {
-    setSelected(node.id)
-    if (node.kind !== 't') toggle(node)
-  }
-  const onKey = (node: MapNode) => (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); press(node) }
+  const onKey = (event: KeyboardEvent, act: () => void) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); act() }
   }
 
   // Zoom is opening or closing around the point you zoom at.
@@ -158,22 +211,18 @@ function MapView({ model }: { model: MapModel }) {
   const center = () => (box.current ? box.current.scrollLeft + box.current.clientWidth / 2 : 0)
   const expandAll = () => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)])))
 
-  const node = selected ? byId.get(selected) ?? null : null
-  const allTasks = model.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks))
-  const titleOf = (id: string) => allTasks.find(task => task.id === id)?.title ?? id
-
   return (
     <>
       <div className="hub-map-controls">
         <button type="button" className="hub-btn" onClick={() => zoomAt(-1, center())} aria-label="Zoom out">－</button>
         <button type="button" className="hub-btn" onClick={() => zoomAt(1, center())} aria-label="Zoom in">＋</button>
         <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
-        <button type="button" className="hub-btn" onClick={() => { setOpen(new Set()); setSelected(null) }}>Collapse</button>
+        <button type="button" className="hub-btn" onClick={() => setOpen(new Set())}>Collapse</button>
         <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => { if (!sprints && model.sprints[0]) pendingScroll.current = model.sprints[0].milestones[0]?.id ?? null; setSprints(value => !value) }}>Sprints</button>
       </div>
       {sprints && model.sprints.length === 0 && <p className="hub-muted" data-no-sprints>No sprints in this Beads copy yet. Tasks labelled <code>sprint:&lt;name&gt;</code> show here as bands.</p>}
-      <p className="hub-muted hub-map-hint">Tap a milestone or feature to open it · pinch, or Ctrl + scroll, to zoom where you point</p>
-      <div className="hub-map-box" ref={box} data-width={layout.width}>
+      <p className="hub-muted hub-map-hint">Tap a milestone for its details, ▸ to open it · pinch, or Ctrl + scroll, to zoom where you point</p>
+      <div className="hub-map-box" ref={box} data-width={layout.width} tabIndex={-1}>
         <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="group" aria-label="Progress map">
           <defs>
             <marker id="hub-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" className="hub-map-tip" /></marker>
@@ -189,10 +238,11 @@ function MapView({ model }: { model: MapModel }) {
             const color = STATE_COLOR[task.state]
             const ty = task.up ? task.y - 22 : task.y + 32
             return (
-              <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className="hub-map-node"
-                aria-label={`${task.title}, ${STATE_LABEL[task.state]}`} aria-pressed={selected === task.id} onClick={() => press(task)} onKeyDown={onKey(task)}>
+              <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className={`hub-map-node${shownId === task.id ? ' selected' : ''}`}
+                aria-label={`${task.title}, ${STATE_LABEL[task.state]}`} aria-pressed={shownId === task.id} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(task.id)} onKeyDown={event => onKey(event, () => openPanel(task.id))}>
                 <title>{nodeTip(task.title, task.id)}</title>
                 <circle cx={task.x} cy={task.y} r="8" strokeWidth="2.5" style={{ stroke: color, fill: task.state === 'done' || task.state === 'you' ? color : 'var(--surface-solid)' }} />
+                {shownId === task.id && <circle cx={task.x} cy={task.y} r="13" className="hub-map-ring" />}
                 <MapSigns signs={task.signs} x={task.x + 13} y={task.y - 11} />
                 {task.lines.map((line, k) => (
                   <text key={k} x={task.x} y={task.up ? ty - (task.lines.length - 1 - k) * 12 : ty + k * 12} fontSize="10.5" textAnchor="middle" className={task.state === 'later' ? 'hub-map-label dim' : 'hub-map-label'}>{line}</text>
@@ -204,27 +254,35 @@ function MapView({ model }: { model: MapModel }) {
             const radius = 22
             const cx = feature.x + radius
             return (
-              <g key={feature.id} data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className="hub-map-node"
-                aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.done} of ${feature.total} done`} aria-expanded={feature.open} onClick={() => press(feature)} onKeyDown={onKey(feature)}>
+              <Fragment key={feature.id}>
+              <g data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className={`hub-map-node${shownId === feature.id ? ' selected' : ''}`}
+                aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.done} of ${feature.total} done`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(feature.id)} onKeyDown={event => onKey(event, () => openPanel(feature.id))}>
                 <title>{nodeTip(feature.title, feature.id)}</title>
                 <circle cx={cx} cy={feature.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
+                {shownId === feature.id && <circle cx={cx} cy={feature.y} r={radius + 5} className="hub-map-ring" />}
                 <text x={cx} y={feature.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.done}/{feature.total}</text>
                 <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.y - radius + 2} />
-                <text x={feature.open ? cx + radius + 8 : feature.labelX} y={feature.open ? feature.y + 4 : feature.y + (feature.side < 0 ? -10 : 18)} fontSize="12" fontWeight="600" className="hub-map-title">{feature.title} {feature.open ? '▾' : '▸'}</text>
+                <text x={feature.open ? cx + radius + 8 : feature.labelX} y={feature.open ? feature.y + 4 : feature.y + (feature.side < 0 ? -10 : 18)} fontSize="12" fontWeight="600" className="hub-map-title">{feature.title}</text>
               </g>
+              <Chevron id={feature.id} title={feature.title} open={feature.open} x={cx} y={feature.y + feature.side * (radius + 16)} onToggle={() => toggle(feature)} />
+              </Fragment>
             )
           })}
           {layout.nodes.filter((item): item is MilestoneNode => item.kind === 'm').map(milestone => {
             const radius = milestone.open ? 15 : 26
             return (
-              <g key={milestone.id} data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className="hub-map-node"
-                aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.done} of ${milestone.total} done`} aria-expanded={milestone.open} onClick={() => press(milestone)} onKeyDown={onKey(milestone)}>
+              <Fragment key={milestone.id}>
+              <g data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className={`hub-map-node${shownId === milestone.id ? ' selected' : ''}`}
+                aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.done} of ${milestone.total} done`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(milestone.id)} onKeyDown={event => onKey(event, () => openPanel(milestone.id))}>
                 <title>{nodeTip(milestone.title, milestone.id)}</title>
                 <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" style={{ stroke: milestone.col, fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
+                {shownId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 6} className="hub-map-ring" />}
                 {!milestone.open && <text x={milestone.x} y={milestone.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.done}/{milestone.total}</text>}
                 <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
-                <text x={milestone.x} y={milestone.y + (milestone.open ? 34 : milestone.index % 2 ? 48 : -38)} fontSize="12" textAnchor="middle" fontWeight="700" style={{ fill: milestone.col }}>{milestone.title} {milestone.open ? '▾' : '▸'}</text>
+                <text x={milestone.x} y={milestone.y + (milestone.open ? 34 : milestone.index % 2 ? 48 : -38)} fontSize="12" textAnchor="middle" fontWeight="700" style={{ fill: milestone.col }}>{milestone.title}</text>
               </g>
+              <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.x - radius - 16} y={milestone.y} onToggle={() => toggle(milestone)} />
+              </Fragment>
             )
           })}
           {layout.bands.map(band => (
@@ -236,10 +294,7 @@ function MapView({ model }: { model: MapModel }) {
           ))}
         </svg>
       </div>
-      <section className="hub-panel hub-map-detail" aria-live="polite" aria-label="Details">
-        {!node && <p className="hub-empty">Select a node for its details.</p>}
-        {node && <Detail node={node} model={model} titleOf={titleOf} allTasks={allTasks} />}
-      </section>
+      {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} />}
       <div className="hub-legend" aria-label="Legend">
         {(Object.keys(STATE_LABEL) as TaskState[]).map(state => <span key={state}><i style={{ background: STATE_COLOR[state] }} />{STATE_LABEL[state]}</span>)}
         {(['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed'] as const).map(sign => <span key={sign}><b>{SIGN_GLYPH[sign]}</b>{SIGN_LABEL[sign]}</span>)}
@@ -251,34 +306,14 @@ function MapView({ model }: { model: MapModel }) {
 /** Hover text for a map node: the full title, then the id unless it is a synthetic group (its id has a ~). */
 const nodeTip = (title: string, id: string) => (id.includes('~') ? title : `${title} · ${id}`)
 
-function Detail({ node, model, titleOf, allTasks }: { node: MapNode; model: MapModel; titleOf: (id: string) => string; allTasks: MapTask[] }) {
-  if (node.kind === 't') {
-    const task = allTasks.find(item => item.id === node.id)
-    if (!task) return null
-    const unlocks = allTasks.filter(other => other.deps.includes(task.id)).map(other => other.title)
-    const words = task.signs.map(sign => (sign in SIGN_WORDS ? SIGN_WORDS[sign as keyof typeof SIGN_WORDS] : SIGN_LABEL[sign].toLowerCase()))
-    const pr = safeUrl(task.prUrl)
-    return (
-      <>
-        <div className="hub-map-detail-title">{task.title} · <span style={{ color: STATE_COLOR[task.state] }}>{STATE_LABEL[task.state]}</span></div>
-        <div className="hub-muted"><span className="hub-id">{task.id}</span>{words.length ? ` · ${words.join(' · ')}` : ''}</div>
-        {task.deps.length > 0 && <div className="hub-muted">Needs first: {task.deps.map(titleOf).join(', ')}</div>}
-        {unlocks.length > 0 && <div className="hub-muted">Unlocks: {unlocks.join(', ')}</div>}
-        <div className="hub-actions start">
-          {task.state === 'you' && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('inbox')}>Open in Inbox</a>}
-          {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer">Open PR</a>}
-        </div>
-      </>
-    )
-  }
-  const tasks = node.kind === 'm'
-    ? model.milestones.find(item => item.id === node.id)?.features.flatMap(feature => feature.tasks) ?? []
-    : model.milestones.flatMap(milestone => milestone.features).find(item => item.id === node.id)?.tasks ?? []
-  const count = (sign: string) => tasks.filter(task => task.signs.some(item => item === sign)).length
+/** The button that opens or closes a milestone or feature, beside its node: a node's tap shows details instead. A transparent ring makes the touch target about 40 px. */
+function Chevron({ id, title, open, x, y, onToggle }: { id: string; title: string; open: boolean; x: number; y: number; onToggle: () => void }) {
   return (
-    <>
-      <div className="hub-map-detail-title">{node.title} · <span style={{ color: STATE_COLOR[node.state] }}>{STATE_LABEL[node.state]}</span></div>
-      <div className="hub-muted">{node.done} of {node.total} tasks done · {count('working')} working · {count('idle')} idle · {count('new')} not started · {count('pr')} {count('pr') === 1 ? 'PR' : 'PRs'} open</div>
-    </>
+    <g role="button" tabIndex={0} data-toggle={id} className="hub-map-chev" aria-expanded={open} aria-label={`${open ? 'Close' : 'Open'} ${title}`}
+      onClick={onToggle} onKeyDown={(event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle() } }}>
+      <circle cx={x} cy={y} r="20" className="hub-map-chev-hit" />
+      <circle cx={x} cy={y} r="11" strokeWidth="1.5" className="hub-map-chev-ring" />
+      <text x={x} y={y + 4} fontSize="12" textAnchor="middle" className="hub-map-chev-glyph">{open ? '▾' : '▸'}</text>
+    </g>
   )
 }
