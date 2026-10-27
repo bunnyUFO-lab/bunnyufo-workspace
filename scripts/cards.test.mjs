@@ -98,6 +98,18 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`event (${via}): review-done carries the file of the review it clears`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      const done = await cli(via, 'event', 'review-done', '--title', 'Done: x', '--review', '120000-pc-000001.json');
+      assert.equal(done.code, 0, done.stderr);
+      const [key] = keys(`events/${today()}/`);
+      const event = fake.json(key);
+      assert.equal(event.kind, 'review-done');
+      assert.equal(event.review, '120000-pc-000001.json');
+    } finally { await close(); }
+  });
+
   test(`ask (${via}): create, list, answer by hand, list --answered, pickup, second pickup exits 3`, async () => {
     const { fake, cli, keys, dir, close } = await setup();
     try {

@@ -14,7 +14,7 @@ import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
   DAY, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, INBOX_FILTERS, monthPrefixes, newDrawingId,
-  newRequestId, requestItem, requestState, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -317,6 +317,30 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     return { status: 200, body: { state: 'cancelled' } };
   }
 
+  /** Hide one review in Needs you by writing a `review-done` event that names it; a second call writes nothing. */
+  async function markReviewDone(id, user, at) {
+    const missing = () => fail('No such review.', 404);
+    if (!REVIEW_FILE_RE.test(id)) throw missing();
+    const { events } = await loadEvents(at);
+    const review = events.find(event => event.kind === 'ready-for-review' && event.file === id);
+    if (!review) throw missing();
+    if (events.some(event => event.kind === 'review-done' && event.review === id)) return { status: 200, body: { state: 'done' } };
+    const body = `${JSON.stringify(reviewDone({ review: id, event: review, user, at }), null, 2)}
+`;
+    const stamp = at.toISOString();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      const name = `${stamp.slice(11, 19).replace(/:/g, '')}-hub-${randomId(4)}.json`;
+      try {
+        await putCreateOnly(`events/${stamp.slice(0, 10)}/${name}`, body, 'application/json', clash);
+        return { status: 201, body: { state: 'done' } };
+      } catch (error) {
+        if (error !== clash || attempt === 2) throw error;
+      }
+    }
+    throw fail('Could not find a free name; try again.', 409);
+  }
+
   async function createRequest(data, user, at) {
     if (!validProject(data.project)) throw fail('Name the project (lower-case letters, digits and dashes).');
     const text = typeof data.text === 'string' ? data.text.trim() : '';
@@ -519,6 +543,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
           if (match[2] === 'answer') send(await answerAsk(id, raw, user, at));
           else if (match[2] === 'snooze') send(await snoozeAsk(id, raw, user, at));
           else send(await cancelAsk(id, user, at));
+        } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {
+          send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if (route === '/hub/requests') {
           send(await createRequest(raw, user, at));
         } else if (route === '/hub/drawings') {

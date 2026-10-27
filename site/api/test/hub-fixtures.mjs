@@ -25,11 +25,11 @@ export function requestJson({ id, project = 'probe', text = 'Add a wall-jump tut
 }
 
 let counter = 0;
-export function eventJson({ kind, ts = new Date(), project = 'probe', bead, session, host = 'pc.example.test', title, url, summary, ask, source = 'test' } = {}) {
+export function eventJson({ kind, ts = new Date(), project = 'probe', bead, session, host = 'pc.example.test', title, url, summary, ask, source = 'test', card, review } = {}) {
   counter += 1;
   return {
     ts: iso(ts), kind, project, ...(bead ? { bead } : {}), ...(ask ? { ask } : {}), ...(session ? { session } : {}),
-    host, source, title: title ?? `${kind} ${counter}`, ...(url ? { url } : {}), ...(summary ? { summary } : {}),
+    host, source, title: title ?? `${kind} ${counter}`, ...(url ? { url } : {}), ...(card ? { card } : {}), ...(review ? { review } : {}), ...(summary ? { summary } : {}),
   };
 }
 
@@ -95,7 +95,9 @@ export function seeder(fake, prefix = INBOX) {
     event(event, at = new Date(event.ts)) {
       const day = at.toISOString().slice(0, 10);
       counter += 1;
-      put(`events/${day}/${at.toISOString().slice(11, 19).replace(/:/g, '')}-pc-${String(counter).padStart(6, '0')}.json`, event);
+      const file = `${at.toISOString().slice(11, 19).replace(/:/g, '')}-pc-${String(counter).padStart(6, '0')}.json`;
+      put(`events/${day}/${file}`, event);
+      return file;
     },
     beads(project, issues, meta) {
       put(`beads/${project}.jsonl`, jsonl(issues), 'application/x-ndjson');

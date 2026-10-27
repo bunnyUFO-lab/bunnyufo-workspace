@@ -104,6 +104,7 @@ const time = ts => {
 const eventItem = (kind, event, extra = {}) => ({
   kind, id: event.file, project: event.project, title: event.title, at: event.ts,
   ...(event.bead ? { bead: event.bead } : {}), ...(event.url ? { url: event.url } : {}),
+  ...(typeof event.card === 'string' && event.card ? { card: event.card } : {}),
   ...(event.host ? { host: event.host } : {}), ...(event.session ? { session: event.session } : {}),
   ...(event.summary ? { summary: event.summary } : {}), ...extra,
 });
@@ -111,20 +112,21 @@ const eventItem = (kind, event, extra = {}) => ({
 /**
  * Reviews, blocked sessions and running sessions from a window of events (any order).
  * - review: `ready-for-review` with no later `pr-merged` for the same bead (the same url when
- *   there is no bead);
+ *   there is no bead), and that no `review-done` event names (its `review` is the review's file name);
  * - blocked: `blocked` with no later `session-ended` or `session-started` for the same session;
  * - running: `session-started` with no later `session-ended` for the same session.
  */
 export function deriveEventItems(events) {
   const ordered = chronological(events);
   const after = (event, test) => ordered.some(other => byTime(event, other) < 0 && test(other));
+  const done = new Set(ordered.filter(event => event.kind === 'review-done' && typeof event.review === 'string').map(event => event.review));
   const reviews = [];
   const blocked = [];
   const running = [];
   for (const event of ordered) {
     if (event.kind === 'ready-for-review') {
       const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
-      if (!merged) reviews.push(eventItem('review', event));
+      if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event));
     } else if (event.kind === 'blocked') {
       const resolved = !!event.session && after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
       if (!resolved) blocked.push(eventItem('blocked', event, { id: event.session || event.file, url: event.url || REVIEW_URL_FALLBACK }));
@@ -150,6 +152,17 @@ export function buildToday({ asks, events, now }) {
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),
+  };
+}
+
+export const REVIEW_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$/;
+
+/** The `review-done` event that hides one review. `review` is the file name of the `ready-for-review` event, which is `event`. */
+export function reviewDone({ review, event, user, at }) {
+  return {
+    ts: at.toISOString(), kind: 'review-done', review, title: `Done: ${clip(event.title)}`,
+    ...(event.project ? { project: event.project } : {}), ...(event.bead ? { bead: event.bead } : {}),
+    host: 'hub', source: 'hub', by: user || 'local',
   };
 }
 

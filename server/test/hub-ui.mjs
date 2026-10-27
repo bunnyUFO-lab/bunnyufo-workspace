@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_ASK, askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -66,7 +66,10 @@ try {
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).waitFor();
   assert.equal(await page.locator('.hub-row').count(), 3, 'The Ask, the review and the blocked session.');
   const review = page.locator('.hub-row', { hasText: 'PR ready for review' });
-  assert.equal(await review.getAttribute('target'), '_blank');
+  const reviewLink = review.locator('a.hub-btn');
+  assert.equal(await reviewLink.innerText(), 'Open link', 'The fixture link is not on github.com.');
+  assert.equal(await reviewLink.getAttribute('target'), '_blank');
+  assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
   assert.match(await page.locator('.hub-row', { hasText: 'Permission needed' }).innerText(), /Answer in the Claude app/);
 
   step('CUJ 1 without the drawing: pick B, write a note, send; the answer is in the bucket and the UI says Answered');
@@ -225,7 +228,7 @@ try {
     '/api/card-state': { cards: {} },
     '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
     '/w/one/workspace.json': { entities: [] },
-    '/api/hub/today': { counts: { needsYou: 1, running: 0, recent: 0, alerts: 0 }, needsYou: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }], running: [], recent: [], alerts: [], at: new Date().toISOString() },
+    '/api/hub/today': { counts: { needsYou: 2, running: 0, recent: 0, alerts: 0 }, needsYou: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }, { kind: 'review', id: '120000-pc-000001.json', title: 'A read-only review', at: new Date().toISOString(), project: 'probe' }], running: [], recent: [], alerts: [], at: new Date().toISOString() },
     '/api/hub/projects': { projects: [{ id: 'probe', name: 'Probe', beads: true }] },
     '/api/hub/map/probe': { project: 'probe', meta: { count: 1, pushedAt: new Date().toISOString() }, ageMinutes: 5, sprints: [], milestones: [{ id: 'm1', title: 'M1', state: 'next', features: [{ id: 'f1', title: 'F1', state: 'next', tasks: [{ id: 'bd-1', title: 'A task', state: 'next', status: 'open', signs: [], sprints: [], deps: [] }] }] }] },
     '/api/hub/asks/20261026-probe-x-a1b2': { id: '20261026-probe-x-a1b2', project: 'probe', createdAt: new Date().toISOString(), expiresAt: new Date().toISOString(), from: { host: 'h', tool: 'claude-code' }, question: 'A read-only question', options: [{ id: 'A', label: 'one' }], allowNote: true, allowDrawing: true, state: 'open', files: ['ask.json'] },
@@ -248,6 +251,15 @@ try {
     assert.match(await guest.locator('.hub-banner a').getAttribute('href'), /^https:\/\/site\.example\.test/);
     assert.match(await guest.locator('.hub-banner').innerText(), /need you to be signed in/);
     assert.equal(await guest.locator('.hub-row', { hasText: 'A read-only question' }).count(), 1);
+    assert.match(await guest.locator('.hub-banner').innerText(), /marking reviews done/);
+    const readOnlyReview = guest.locator('.hub-row', { hasText: 'A read-only review' });
+    assert.equal(await readOnlyReview.locator('a').count(), 0, 'No link, so only Mark done.');
+    const markDone = readOnlyReview.locator('button', { hasText: 'Mark done' });
+    assert.equal(await markDone.getAttribute('aria-disabled'), 'true');
+    await markDone.click({ force: true });
+    await readOnlyReview.locator('[data-readonly-note]').waitFor();
+    assert.match(await readOnlyReview.locator('[data-readonly-note]').innerText(), /Sign in to mark this done/);
+    assert.equal(await guest.locator('.hub-error').count(), 0, 'Nothing was sent.');
     await guest.evaluate(() => { location.hash = '#/~hub/ask/20261026-probe-x-a1b2'; });
     await guest.locator('.hub-option').waitFor();
     assert.equal(await guest.locator('button:has-text("Send answer"), button:has-text("Snooze"), .hub-field textarea').count(), 0);
@@ -436,6 +448,34 @@ try {
   step('phone width with touch: the same Ask answer with a drawing, no page errors');
   await sendWithDrawing(phone, askJson({ id: askId('touch', 'e5f6'), now: new Date(), options: threeOptions() }));
 
+  step('reviews: Open report only with a report link, Mark done always, one click clears the row for good');
+  const reviewsIn = () => fixture.fake.objects.keys();
+  const doneEvents = () => [...reviewsIn()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
+  fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Report-only review', card: 'https://example.test/section#/report' }));
+  const bareFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Bare review' }));
+  await page.goto(`${fixture.url}#/~hub/inbox/reviews`);
+  await page.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
+  const reportRow = page.locator('.hub-row', { hasText: 'Report-only review' });
+  const bareRow = page.locator('.hub-row', { hasText: 'Bare review' });
+  assert.equal(await reportRow.locator('a.hub-btn', { hasText: 'Open report' }).getAttribute('href'), 'https://example.test/section#/report');
+  assert.equal(await reportRow.locator('a.hub-btn').count(), 1);
+  assert.equal(await bareRow.locator('a').count(), 0, 'A review with no link has no link button.');
+  assert.equal(await page.locator('.hub-row').count(), 3);
+  assert.equal(await page.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
+  assert.equal(await page.locator('[data-readonly-note]').count(), 0);
+  await noSideways(page, 'Reviews');
+  await phone.goto(`${fixture.url}#/~hub/inbox/reviews`);
+  await phone.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
+  assert.equal(await phone.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'The buttons stay on a phone.');
+  await noSideways(phone, 'Reviews at phone width');
+  await bareRow.locator('button', { hasText: 'Mark done' }).click();
+  await bareRow.waitFor({ state: 'detached' });
+  assert.equal(doneEvents().length, 1);
+  assert.equal(doneEvents()[0].review, bareFile);
+  await page.reload();
+  await page.locator('.hub-row', { hasText: 'Report-only review' }).waitFor();
+  assert.equal(await page.locator('.hub-row', { hasText: 'Bare review' }).count(), 0, 'Still gone after a reload.');
+  assert.equal(await page.locator('.hub-row').count(), 2);
 
   // Part 4: Chat against the fake Hermes, and push-to-talk with a fake microphone.
   step('chat off: without Hermes there is no Chat row and the screen says so');
