@@ -141,9 +141,9 @@ export function deriveEventItems(events) {
       if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event));
     } else if (event.kind === 'blocked') {
       const resolved = !!event.session && after(event, other => other.session === event.session);
-      if (resolved) continue;
+      if (resolved || done.has(event.file)) continue;
       const appUrl = blockedAppUrl(event.appUrl);
-      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, ...(appUrl ? { appUrl } : {}) }));
+      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, file: event.file, ...(appUrl ? { appUrl } : {}) }));
     } else if (event.kind === 'session-started' && event.session) {
       // A later start from the same session replaces this one: a session runs once, whatever restarted it.
       const ended = after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
@@ -172,7 +172,7 @@ export function buildToday({ asks, events, now }) {
 
 export const REVIEW_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$/;
 
-/** The `review-done` event that hides one review. `review` is the file name of the `ready-for-review` event, which is `event`. */
+/** The `review-done` event that hides one review or one blocked row. `review` is the file name of the `ready-for-review` or `blocked` event, which is `event`. */
 export function reviewDone({ review, event, user, at }) {
   return {
     ts: at.toISOString(), kind: 'review-done', review, title: `Done: ${clip(event.title)}`,
@@ -259,7 +259,7 @@ const httpsUrl = value => (typeof value === 'string' && value.length <= 2000 && 
 /** A screenshot must come from GitHub's raw host: an agent's event must not make the owner's browser fetch from anywhere else. */
 const rawImageUrl = value => (httpsUrl(value) && /^https:\/\/raw\.githubusercontent\.com\//i.test(value) ? value : undefined);
 const PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
-const CARD_DIR_RE = /^[a-z0-9][a-z0-9-]{0,63}\/[A-Za-z0-9][\w.-]{0,119}$/;
+export const CARD_DIR_RE = /^[a-z0-9][a-z0-9-]{0,63}\/[A-Za-z0-9][\w.-]{0,119}$/;
 const CARD_FILE_RE = /^(?:[A-Za-z0-9][\w.-]*\/){1,3}[A-Za-z0-9][\w.-]*\.md$/;
 const VERDICT_LEGS = ['smoke', 'review', 'qa'];
 const VERDICT_RESULTS = ['pass', 'fail', 'noted'];
@@ -336,3 +336,46 @@ export function reviewDetail(events, id) {
     ...(done ? { doneAt: done.ts, ...(typeof done.by === 'string' ? { doneBy: clip(done.by, 80) } : {}) } : {}),
   };
 }
+
+// Old reviews carry no links. The card they belong to is found from the title, and the files it
+// cites from the summary; the server checks every path, as for a review that carries its own.
+
+const SLUG_TITLE_RE = /^([a-z][a-z0-9-]{1,63}):/;
+const SPRINT_WORDS_RE = /\s+(sprint|report)$/i;
+const plainTitle = value => { let text = String(value ?? '').trim().toLowerCase(); while (SPRINT_WORDS_RE.test(text)) text = text.replace(SPRINT_WORDS_RE, ''); return text; };
+
+/** The run name a title starts with (`hub-polish: x` → `hub-polish`), or undefined. */
+export const titleRun = title => SLUG_TITLE_RE.exec(String(title ?? ''))?.[1];
+
+/** The lead phrase of a title: the text before the first `(` or `:`, minus a trailing "sprint" or "report"; undefined under three words. */
+export function titleLead(title) {
+  const lead = plainTitle(String(title ?? '').split(/[(:]/)[0]);
+  return lead.split(/\s+/).filter(Boolean).length >= 3 ? lead : undefined;
+}
+
+/**
+ * The one card a review belongs to, or null. `cards` is `[{ section, id, title, folder }]`.
+ * First rule: the title starts with `<run>:` and exactly one card id contains the run.
+ * Second rule: exactly one card title starts with the title's lead phrase.
+ */
+export function findSprintCard(title, cards) {
+  const run = titleRun(title);
+  const byRun = run ? cards.filter(card => card.id.includes(run)) : [];
+  if (byRun.length === 1) return byRun[0];
+  const lead = titleLead(title);
+  const byTitle = lead ? cards.filter(card => plainTitle(card.title).startsWith(lead)) : [];
+  return byTitle.length === 1 ? byTitle[0] : null;
+}
+
+/** The card files a summary names (`briefs/x.md`, `qa/y.md`, any `folder/name.md`), in order, without repeats, none through `..`. */
+export function summaryFilePaths(summary) {
+  const found = [];
+  for (const match of String(summary ?? '').matchAll(/(?<![\w./-])(?:[\w.-]+\/){1,3}[\w.-]+\.md(?![\w-])/g)) {
+    const path = match[0];
+    if (path.length <= 200 && CARD_FILE_RE.test(path) && !path.split('/').some(part => part.startsWith('.')) && !found.includes(path)) found.push(path);
+  }
+  return found.slice(0, 12);
+}
+
+/** `owner/repo` from a section's `tracked.repo`, or undefined. */
+export const trackedRepo = value => (typeof value === 'string' && /^[\w.-]+\/[\w.-]+$/.test(value) ? value : undefined);

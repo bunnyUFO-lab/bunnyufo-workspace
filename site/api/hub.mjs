@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, DAY, discordEligible, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, INBOX_FILTERS, monthPrefixes, newDrawingId,
+  askRev, DAY, discordEligible, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -397,11 +397,11 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
   }
 
   /** Hide one review in Needs you by writing a `review-done` event that names it; a second call writes nothing. */
-  async function markReviewDone(id, user, at) {
-    const missing = () => fail('No such review.', 404);
+  async function markReviewDone(id, user, at, kind = 'ready-for-review') {
+    const missing = () => fail(kind === 'blocked' ? 'No such blocked session.' : 'No such review.', 404);
     if (!REVIEW_FILE_RE.test(id)) throw missing();
     const { events } = await loadEvents(at);
-    const review = events.find(event => event.kind === 'ready-for-review' && event.file === id);
+    const review = events.find(event => event.kind === kind && event.file === id);
     if (!review) throw missing();
     if (events.some(event => event.kind === 'review-done' && event.review === id)) return { status: 200, body: { state: 'done' } };
     const body = `${JSON.stringify(reviewDone({ review: id, event: review, user, at }), null, 2)}
@@ -427,7 +427,41 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     const { events } = await loadEvents(at);
     const detail = reviewDetail(events, id);
     if (!detail) throw missing();
+    if (!detail.card) {
+      const inferred = await inferCard(detail).catch(() => null);
+      if (inferred) detail.inferred = inferred;
+    }
     return detail;
+  }
+
+  /** Every card of every card section: `sections/<id>/workspace.json` entities, with the section's tracked repo. */
+  async function allCards() {
+    const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
+    const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && id !== 'inbox');
+    const lists = await pool(6, sections, async section => {
+      const got = await bucket.getJson(`${prefix}/${section}/workspace.json`).catch(() => null);
+      const entities = got?.value?.entities;
+      if (!Array.isArray(entities)) return [];
+      const repo = trackedRepo(got.value.tracked?.repo);
+      return entities
+        .filter(entity => entity && typeof entity.id === 'string' && typeof entity.title === 'string')
+        .map(entity => ({ section, id: entity.id, title: entity.title, folder: typeof entity.folder === 'string' ? entity.folder : entity.id, repo }));
+    });
+    return lists.flat();
+  }
+
+  /** The sprint card an old review belongs to, found from its title; its files are the ones the summary names that exist. */
+  async function inferCard(detail) {
+    const card = findSprintCard(detail.title, await allCards());
+    if (!card) return null;
+    const cardDir = `${card.section}/${card.folder}`;
+    if (!CARD_DIR_RE.test(cardDir) || cardDir.includes('..')) return null;
+    const cardFiles = [];
+    for (const path of summaryFilePaths(detail.summary)) {
+      try { await bucket.head(`${prefix}/${cardDir}/${path}`); } catch (error) { if (error.status === 404) continue; throw error; }
+      cardFiles.push({ path, label: fileLabel(path) });
+    }
+    return { card: { id: card.id, title: card.title }, section: card.section, cardDir, cardFiles, ...(card.repo ? { repo: card.repo } : {}) };
   }
 
   async function createRequest(data, user, at) {
@@ -665,6 +699,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
           else send(await cancelAsk(id, user, at));
         } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
+        } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
+          send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
         } else if (route === '/hub/requests') {
           send(await createRequest(raw, user, at));
         } else if (route === '/hub/drawings') {
