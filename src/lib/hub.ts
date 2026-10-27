@@ -83,7 +83,7 @@ export interface Today {
 }
 
 export interface AskOption { id: string; label: string; image?: string }
-export interface AskAnswer { at: string; by: string; choice?: string; note?: string; drawing?: { excalidraw: string; png: string } }
+export interface AskAnswer { at: string; by: string; via?: string; choice?: string; note?: string; drawing?: { excalidraw: string; png: string } }
 export type AskState = 'open' | 'snoozed' | 'answered' | 'picked-up' | 'cancelled' | 'expired'
 export interface Ask {
   id: string
@@ -96,6 +96,7 @@ export interface Ask {
   context?: string
   options?: AskOption[]
   allowNote: boolean
+  requirePasskey?: boolean
   allowDrawing: boolean
   state: AskState
   snoozedUntil?: string

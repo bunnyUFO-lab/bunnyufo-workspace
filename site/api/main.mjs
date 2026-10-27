@@ -15,6 +15,8 @@
 //                           forwards that header; Caddy strips it from anyone but NPM.
 //   HUB                     `1` turns on the Hub routes (/api/hub/…): Asks, requests, events, the progress map.
 //                           Reads are open on the LAN, writes need Remote-User like every other write.
+//   HUB_DISCORD_TOKEN_SHA256, HUB_DISCORD_OWNER_ID   turn on the Asks bot's two routes (/api/hub/discord/…): the sha256 of its bearer token
+//                           and the owner's Discord user id. Without both, those routes answer 404 to everyone (the kill switch).
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
 //   STT_URL, STT_API_KEY, STT_MODEL            push-to-talk (an OpenAI-compatible …/audio/transcriptions)
 //                           Chat and speech stay off, and hidden in the UI, until their keys are here.
