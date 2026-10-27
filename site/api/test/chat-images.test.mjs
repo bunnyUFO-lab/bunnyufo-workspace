@@ -34,3 +34,15 @@ test('checkChatImages returns stripped buffers and refuses what it should', () =
   assert.throws(() => checkChatImages([{ type: 'image/webp', data: 'AAAA' }], fail), { status: 415 });
   assert.throws(() => checkChatImages([{ type: 'image/png', data: 'AAAA' }], fail), { status: 415 });
 });
+
+test('stripJpeg cuts a second picture appended after the first end-of-image marker, and keeps stuffed FF 00 bytes', () => {
+  const first = jpeg(20, 10, { exif: false });
+  const appended = Buffer.concat([first, jpeg(20, 10, { exif: true })]);
+  assert.ok(appended.includes('GPS'));
+  const stripped = stripJpeg(appended);
+  assert.ok(!stripped.includes('Exif') && !stripped.includes('GPS'));
+  assert.equal(stripped.length, first.length);
+  const stuffed = Buffer.concat([first.subarray(0, -2), Buffer.from([0xff, 0x00, 0xd9, 0xff, 0xd9]), Buffer.from('Exif GPS')]);
+  const kept = stripJpeg(stuffed);
+  assert.equal(kept.length, stuffed.length - 'Exif GPS'.length, 'Only what follows the real end marker is cut.');
+});
