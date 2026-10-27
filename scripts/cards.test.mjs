@@ -110,6 +110,16 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`event (${via}): resumed is a kind`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      const resumed = await cli(via, 'event', 'resumed', '--title', 'probe: back at work');
+      assert.equal(resumed.code, 0, resumed.stderr);
+      const [key] = keys(`events/${today()}/`);
+      assert.equal(fake.json(key).kind, 'resumed');
+    } finally { await close(); }
+  });
+
   test(`ask (${via}): create, list, answer by hand, list --answered, pickup, second pickup exits 3`, async () => {
     const { fake, cli, keys, dir, close } = await setup();
     try {

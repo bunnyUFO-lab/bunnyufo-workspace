@@ -297,6 +297,12 @@ user (`Remote-User`), like every other write.
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copy, and the progress map built from it |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
 
+A blocked session stays in Needs you until any later event from the same session arrives (a
+`resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts
+`resumed` when a blocked session moves on. A `blocked` event may carry `url` (a Remote Control link
+into the session; the bare `https://claude.ai/code` counts as no link) and `appUrl` (the desktop
+app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to open the Claude app.
+
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,

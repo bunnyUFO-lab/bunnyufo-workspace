@@ -344,7 +344,7 @@ async function put(folder, section, id, dryRun) {
 // The inbox: events, Asks, requests and Beads copies, all files in the hidden `inbox` section.
 // ---------------------------------------------------------------------------------------------
 
-const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done'];
+const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed'];
 const WHEN = ['next-sprint', 'nightly', 'record'];
 // The handler's filter on file names; checked here too, so a bad name fails before it is sent.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;

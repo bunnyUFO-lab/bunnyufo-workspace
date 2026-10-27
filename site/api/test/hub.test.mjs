@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askState } from '../hub-model.mjs';
+import { askState, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
 import { askJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -228,7 +228,7 @@ test('Today and the Inbox: needs you, running and recent come from a seven-day w
     let today = (await get('/hub/today')).body;
     assert.equal(today.counts.needsYou, 3);
     assert.deepEqual(today.needsYou.map(item => item.kind), ['ask', 'review', 'blocked']);
-    assert.equal(today.needsYou[2].url, 'https://claude.ai/code');
+    assert.equal(today.needsYou[2].url, undefined, 'A blocked item with no link has none; the bare claude.ai/code is gone.');
     assert.equal(today.needsYou[1].url, 'https://example.test/pr/2');
     assert.deepEqual(today.running.map(item => item.id), ['sess-old']);
     assert.match(today.running[0].title, /running since \d\d:\d\d$/);
@@ -246,6 +246,73 @@ test('Today and the Inbox: needs you, running and recent come from a seven-day w
     assert.ok(events.events.some(event => event.title === 'Three days ago'));
     assert.equal(events.truncated, false);
     assert.equal((await get('/hub/events?project=nothing')).body.events.length, 0);
+  } finally { await close(); }
+});
+
+test("a blocked item clears on its own session's next event, not another's", async () => {
+  const { fake, seed, get, close } = await fixture();
+  const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
+  const LINK = 'https://claude.ai/code/session_TESTabc123';
+  const blocked = async hub => (await hub('/hub/inbox?filter=blocked')).body.items;
+  const check = async hub => {
+    const items = await blocked(hub);
+    const by = session => items.filter(item => item.session === session);
+    return { items, by };
+  };
+  try {
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 25), session: 'sess-b', title: 'B started' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 20), session: 'sess-a', title: 'A needs a permission', url: LINK, appUrl: APP }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 18), session: 'sess-b', title: 'B needs a permission', url: 'https://claude.ai/code' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 'sess-c', title: 'C first' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 8), session: 'sess-c', title: 'C again' }));
+    let { items, by } = await check(get);
+    assert.equal(items.length, 3);
+    assert.equal(by('sess-a')[0].url, LINK);
+    assert.equal(by('sess-a')[0].appUrl, APP);
+    assert.equal(by('sess-b')[0].url, undefined, 'The bare link is no link, and the earlier session-started does not clear it.');
+    assert.equal(by('sess-b')[0].appUrl, undefined);
+    assert.equal(by('sess-c').length, 1);
+    assert.equal(by('sess-c')[0].title, 'C again');
+    assert.equal(new Set(items.map(item => item.id)).size, 3, 'One id per session.');
+
+    seed.event(eventJson({ kind: 'resumed', ts: minutesAgo(NOW, 10), session: 'sess-a', title: 'A is back at work' }));
+    seed.event(eventJson({ kind: 'alert', ts: minutesAgo(NOW, 9), session: 'sess-x', title: 'Another session speaks' }));
+    ({ items, by } = await check(get));
+    assert.deepEqual(items.map(item => item.session).sort(), ['sess-b', 'sess-c']);
+
+    seed.event(eventJson({ kind: 'pr-opened', ts: minutesAgo(NOW, 5), session: 'sess-b', title: 'B opens a pull request' }));
+    ({ items } = await check(get));
+    assert.deepEqual(items.map(item => item.session), ['sess-c'], 'Any kind of later event clears it.');
+
+    // A new Hub on the same bucket has no cache to lean on: the state is in the files.
+    const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true }) });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const fresh = async route => ({ body: await (await fetch(`http://127.0.0.1:${server.address().port}/api${route}`)).json() });
+      assert.deepEqual((await blocked(fresh)).map(item => item.session), ['sess-c']);
+    } finally { server.close(); }
+  } finally { await close(); }
+});
+
+test('a blocked item passes on only a real session link and an app link of the exact form', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const OK_APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000002';
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 's1', title: 'Evil app link', appUrl: 'claude://evil/x', url: 'http://claude.ai/code/session_TESTabc123' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 29), session: 's2', title: 'Script link', appUrl: 'javascript:alert(1)', url: 'https://claude.ai/code/' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 28), session: 's3', title: 'Good links', appUrl: OK_APP, url: 'https://claude.ai/code/session_TESTabc123' }));
+    const items = (await get('/hub/inbox?filter=blocked')).body.items;
+    const by = session => items.find(item => item.session === session);
+    assert.equal(items.length, 3);
+    for (const session of ['s1', 's2']) {
+      assert.equal(by(session).url, undefined, session);
+      assert.equal(by(session).appUrl, undefined, session);
+    }
+    assert.equal(by('s3').url, 'https://claude.ai/code/session_TESTabc123');
+    assert.equal(by('s3').appUrl, OK_APP);
+    assert.equal(isBareClaudeCode('https://claude.ai/code'), true);
+    assert.equal(isBareClaudeCode('https://claude.ai/code/'), true);
+    assert.equal(isBareClaudeCode('https://claude.ai/code/session_TESTabc123'), false);
   } finally { await close(); }
 });
 
