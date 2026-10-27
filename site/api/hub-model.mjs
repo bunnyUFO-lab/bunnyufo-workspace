@@ -214,3 +214,87 @@ export function checkAnswer(ask, data) {
   const has = value => value !== undefined && value !== null && value !== '';
   if (!has(choice) && !has(note) && !has(drawing)) throw fail('Choose an option, write a note or draw something.');
 }
+
+// A review's detail: what a `ready-for-review` event carries, checked field by field, because an
+// agent wrote it. A bad entry is dropped and never passed on.
+
+const httpUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https?:\/\//i.test(value) ? value : undefined);
+const httpsUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https:\/\//i.test(value) ? value : undefined);
+const PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+const CARD_DIR_RE = /^[a-z0-9][a-z0-9-]{0,63}\/[A-Za-z0-9][\w.-]{0,119}$/;
+const CARD_FILE_RE = /^(?:[A-Za-z0-9][\w.-]*\/){1,3}[A-Za-z0-9][\w.-]*\.md$/;
+const VERDICT_LEGS = ['smoke', 'review', 'qa'];
+const VERDICT_RESULTS = ['pass', 'fail', 'noted'];
+
+/** The label of a card file by its first folder: briefs/ → Brief, reviews/ → Review (QA triage when the name has -qa), qa/ → QA report, builds/ → Build report. */
+export function fileLabel(path) {
+  const parts = String(path).split('/');
+  const name = parts[parts.length - 1];
+  switch (parts[0]) {
+    case 'briefs': return 'Brief';
+    case 'reviews': return name.includes('-qa') ? 'QA triage' : 'Review';
+    case 'qa': return 'QA report';
+    case 'builds': return 'Build report';
+    default: return name;
+  }
+}
+
+/**
+ * Screenshot urls grouped into before/after pairs. The words `before` and `after` come out of the
+ * file name (whole words between `-` or `_`, anywhere in it) and what is left names the pair. An
+ * image with neither word is `other`. Order of first appearance is kept.
+ * → [{ label, before?, after?, other? }]
+ */
+export function screenshotPairs(urls) {
+  const pairs = [];
+  for (const url of urls) {
+    let name = '';
+    try { name = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? ''); } catch { name = String(url).split('/').pop() ?? ''; }
+    const words = name.replace(/\.[A-Za-z0-9]+$/, '').split(/[-_]+/).filter(Boolean);
+    const rest = words.filter(word => !/^(before|after)$/i.test(word));
+    const slot = words.some(word => /^before$/i.test(word)) ? 'before' : words.some(word => /^after$/i.test(word)) ? 'after' : 'other';
+    const label = rest.join(' ');
+    const found = pairs.find(pair => pair.label === label && !(slot in pair));
+    if (found) found[slot] = url;
+    else pairs.push({ label, [slot]: url });
+  }
+  return pairs;
+}
+
+/** The detail of one `ready-for-review` event, or null when no such event is in `events` (any order). */
+export function reviewDetail(events, id) {
+  const event = events.find(candidate => candidate.kind === 'ready-for-review' && candidate.file === id);
+  if (!event) return null;
+  const text = (value, length) => (typeof value === 'string' && value.trim() ? clip(value, length) : undefined);
+  const url = httpUrl(event.url);
+  const card = httpUrl(event.card);
+  const prs = (Array.isArray(event.prs) ? event.prs : []).filter(value => typeof value === 'string' && PR_RE.test(value)).slice(0, 10);
+  const cardDir = typeof event.cardDir === 'string' && CARD_DIR_RE.test(event.cardDir) && !event.cardDir.includes('..') ? event.cardDir : undefined;
+  const cardFiles = cardDir
+    ? (Array.isArray(event.cardFiles) ? event.cardFiles : [])
+      .filter(path => typeof path === 'string' && path.length <= 200 && CARD_FILE_RE.test(path) && !path.split('/').includes('..'))
+      .slice(0, 12).map(path => ({ path, label: fileLabel(path) }))
+    : [];
+  const shots = (Array.isArray(event.screenshots) ? event.screenshots : []).map(httpsUrl).filter(Boolean).slice(0, 12);
+  const deployUrl = httpsUrl(event.deployUrl);
+  const verdicts = (Array.isArray(event.verdicts) ? event.verdicts : [])
+    .filter(verdict => verdict && typeof verdict === 'object' && VERDICT_LEGS.includes(verdict.leg) && VERDICT_RESULTS.includes(verdict.result) && typeof verdict.text === 'string')
+    .slice(0, 3).map(verdict => ({ leg: verdict.leg, result: verdict.result, text: String(verdict.text).slice(0, 300) }));
+  const done = events.find(candidate => candidate.kind === 'review-done' && candidate.review === id);
+  const summary = typeof event.summary === 'string' && event.summary.trim() ? event.summary.slice(0, 4000) : undefined;
+  return {
+    id, title: text(event.title, 200) ?? 'Review', at: event.ts,
+    ...(summary ? { summary } : {}),
+    ...(text(event.project, 80) ? { project: text(event.project, 80) } : {}),
+    ...(text(event.host, 80) ? { host: text(event.host, 80) } : {}),
+    ...(text(event.source, 80) ? { source: text(event.source, 80) } : {}),
+    ...(url ? { url } : {}), ...(card ? { card } : {}),
+    ...(prs.length ? { prs } : {}),
+    ...(cardDir ? { cardDir } : {}), ...(cardFiles.length ? { cardFiles } : {}),
+    ...(shots.length ? { screenshots: screenshotPairs(shots) } : {}),
+    ...(deployUrl ? { deployUrl } : {}),
+    ...(verdicts.length ? { verdicts } : {}),
+    done: !!done,
+    ...(done ? { doneAt: done.ts, ...(typeof done.by === 'string' ? { doneBy: clip(done.by, 80) } : {}) } : {}),
+  };
+}

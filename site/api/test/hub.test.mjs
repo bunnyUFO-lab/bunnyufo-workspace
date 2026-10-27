@@ -537,3 +537,68 @@ test('GET /hub/file serves only asks, requests and drawings, with their content 
     assert.equal((await image.arrayBuffer()).byteLength > 24, true);
   } finally { await close(); }
 });
+
+test("a review's detail carries its checked links", async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const shot = name => `https://raw.githubusercontent.com/example/app/pr-assets/ws-1/${name}`;
+    const file = seed.event(eventJson({
+      kind: 'ready-for-review', ts: minutesAgo(NOW, 30), title: 'Detail probe', summary: 'Two pull requests.', url: 'https://example.test/pr/1', card: 'https://example.test/one#/card',
+      extra: {
+        prs: ['https://github.com/example/app/pull/3', 'https://github.com/example/app/issues/4', 'https://example.test/pull/5'],
+        cardDir: 'one/sprint-card',
+        cardFiles: ['briefs/x-1.md', 'reviews/x-1-qa.md', 'reviews/x-1.md', 'qa/report.md', 'builds/b.md', 'notes/other.md', '../x.md', 'briefs/../../x.md', 'a.md', 'briefs/x.html'],
+        screenshots: [shot('before-board-phone.png'), shot('after-board-phone.png'), shot('x-desktop-before.png'), shot('x-desktop-after.png'), 'http://example.test/a.png', 'javascript:alert(1)', shot('single.png')],
+        deployUrl: 'http://example.test',
+        verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green' }, { leg: 'deploy', result: 'pass', text: 'x' }, { leg: 'review', result: 'maybe', text: 'x' }, { leg: 'qa', result: 'noted', text: 'y'.repeat(400) }],
+      },
+    }));
+    const badDir = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'Bad dir', extra: { cardDir: '../x', cardFiles: ['briefs/x.md'] } }));
+    const old = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 10), title: 'Old one', url: '', card: '' }));
+
+    const answer = await get(`/hub/reviews/${file}`);
+    assert.equal(answer.status, 200);
+    const detail = answer.body;
+    assert.equal(detail.id, file);
+    assert.equal(detail.title, 'Detail probe');
+    assert.equal(detail.summary, 'Two pull requests.');
+    assert.equal(detail.project, 'probe');
+    assert.equal(detail.host, 'pc.example.test');
+    assert.equal(detail.url, 'https://example.test/pr/1');
+    assert.equal(detail.card, 'https://example.test/one#/card');
+    assert.deepEqual(detail.prs, ['https://github.com/example/app/pull/3']);
+    assert.equal(detail.cardDir, 'one/sprint-card');
+    assert.deepEqual(detail.cardFiles, [
+      { path: 'briefs/x-1.md', label: 'Brief' }, { path: 'reviews/x-1-qa.md', label: 'QA triage' }, { path: 'reviews/x-1.md', label: 'Review' },
+      { path: 'qa/report.md', label: 'QA report' }, { path: 'builds/b.md', label: 'Build report' }, { path: 'notes/other.md', label: 'other.md' },
+    ]);
+    assert.deepEqual(detail.screenshots, [
+      { label: 'board phone', before: shot('before-board-phone.png'), after: shot('after-board-phone.png') },
+      { label: 'x desktop', before: shot('x-desktop-before.png'), after: shot('x-desktop-after.png') },
+      { label: 'single', other: shot('single.png') },
+    ]);
+    assert.equal(detail.deployUrl, undefined);
+    assert.deepEqual(detail.verdicts.map(verdict => [verdict.leg, verdict.result, verdict.text.length]), [['smoke', 'pass', 5], ['qa', 'noted', 300]]);
+    assert.equal(detail.done, false);
+
+    const second = (await get(`/hub/reviews/${badDir}`)).body;
+    assert.equal(second.cardDir, undefined);
+    assert.equal(second.cardFiles, undefined);
+
+    const plain = (await get(`/hub/reviews/${old}`)).body;
+    assert.deepEqual(Object.keys(plain).sort(), ['at', 'done', 'host', 'id', 'project', 'source', 'title']);
+
+    assert.equal((await post(`/hub/reviews/${file}/done`)).status, 201);
+    const after = await get(`/hub/reviews/${file}`);
+    assert.equal(after.status, 200);
+    assert.equal(after.body.done, true);
+    assert.equal(after.body.doneBy, 'owner');
+    assert.ok(after.body.doneAt);
+
+    assert.equal((await get('/hub/reviews/20990101-nothing.json')).status, 404);
+    assert.equal((await get('/hub/reviews/a%2Fb.json')).status, 404);
+    const doneEvent = (await get('/hub/events?since=2000-01-01')).body.events.find(event => event.kind === 'review-done');
+    assert.equal((await get(`/hub/reviews/${doneEvent.file}`)).status, 404);
+    assert.equal((await get('/hub/reviews/20990101-nothing.json')).body.error, 'This review is not in the last 7 days.');
+  } finally { await close(); }
+});
