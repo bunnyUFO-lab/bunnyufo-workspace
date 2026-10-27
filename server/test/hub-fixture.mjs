@@ -15,10 +15,14 @@ import { askJson, beadsIssue, cujTwo, eventJson, minutesAgo, seeder, threeOption
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
 
+/** The two Asks `discordAsks` seeds: one answered from Discord, one that only a passkey may answer. */
+export const DISCORD_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-ship-the-build-d1d1`;
+export const PASSKEY_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-merge-the-stack-p2p2`;
+
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -52,6 +56,14 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     const { issues, events } = cujTwo({ now });
     seed.beads('magic-loops', issues, { pushedAt: minutesAgo(now, 20).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/magic-loops' });
     for (const event of events) seed.event(event);
+    if (discordAsks) {
+      // Made-up ids throughout. The first Ask was answered by a click in Discord; the second has no buttons there.
+      const yesNo = [{ id: 'A', label: 'Ship it' }, { id: 'B', label: 'Hold off' }];
+      seed.ask(askJson({ id: DISCORD_ASK, now: minutesAgo(now, 40), question: 'Ship the build to the preview?', options: yesNo, allowDrawing: false }), {
+        files: { 'answer.json': { at: minutesAgo(now, 5).toISOString(), by: 'owner', via: 'discord', choice: 'A', rev: '0123456789abcdef', discord: { interaction: '200000000000000001', message: '300000000000000001' } } },
+      });
+      seed.ask({ ...askJson({ id: PASSKEY_ASK, now: minutesAgo(now, 8), question: 'Merge the stack once you are happy?', options: [{ id: 'A', label: 'Merge' }, { id: 'B', label: 'Not yet' }], allowDrawing: false }), requirePasskey: true });
+    }
     // A Beads copy with no sprint:<name> labels at all, for the Sprints toggle's "none yet" note.
     const bare = [
       beadsIssue({ id: 'ns-m1', title: 'Only milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
@@ -76,7 +88,7 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
 }
 
 if (process.argv.includes('--serve')) {
-  const fixture = await startHubFixture({ hermes: !process.argv.includes('--no-hermes') });
+  const fixture = await startHubFixture({ hermes: !process.argv.includes('--no-hermes'), discordAsks: true });
   console.log(fixture.url);
   console.log(`Ask: ${fixture.origin}/#/~hub/ask/${FIXTURE_ASK}`);
   process.on('SIGINT', () => fixture.close().finally(() => process.exit(0)));

@@ -1,6 +1,7 @@
 // The Hub's rules, with no I/O: Ask state, what Today and the Inbox show, ids and slugs, and the
 // checks on what a request carries. hub.mjs reads the bucket and calls these; the tests call them
 // directly. Everything is a function of its arguments (the clock included).
+import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
 export const DRAWING_ID_RE = /^\d{8}-[a-z0-9]{6}$/;
@@ -214,6 +215,40 @@ export function checkAnswer(ask, data) {
   }
   const has = value => value !== undefined && value !== null && value !== '';
   if (!has(choice) && !has(note) && !has(drawing)) throw fail('Choose an option, write a note or draw something.');
+}
+
+// --- Discord buttons ---
+
+export const DISCORD_MAX_OPTIONS = 5;
+const DISCORD_LABEL_MAX = 80;
+const DISCORD_CUSTOM_ID_MAX = 100;
+
+/** The Ask as it was posted: the sha256 of the bytes of ask.json, cut to 16 hex characters. */
+export const askRev = text => createHash('sha256').update(typeof text === 'string' ? Buffer.from(text, 'utf8') : text).digest('hex').slice(0, 16);
+
+/**
+ * Whether an Ask may be answered with a Discord button. The only place the rule lives; the bot asks the
+ * server and never decides on its own.
+ * → { ok: true } | { ok: false, reason }
+ */
+export function discordEligible(ask) {
+  const no = reason => ({ ok: false, reason });
+  if (!ask || typeof ask !== 'object') return no('not an Ask');
+  if (ask.requirePasskey === true) return no('This Ask requires a passkey.');
+  if (ask.allowDrawing === true) return no('This Ask takes a drawing.');
+  const options = ask.options;
+  if (!Array.isArray(options) || options.length < 2 || options.length > DISCORD_MAX_OPTIONS) return no(`Buttons need 2 to ${DISCORD_MAX_OPTIONS} options.`);
+  const seen = new Set();
+  for (const option of options) {
+    if (!option || typeof option !== 'object') return no('An option is not an object.');
+    if (typeof option.id !== 'string' || !option.id) return no('An option has no id.');
+    if (seen.has(option.id)) return no('Two options share an id.');
+    seen.add(option.id);
+    if (typeof option.label !== 'string' || !option.label.trim() || option.label.length < 1 || option.label.length > DISCORD_LABEL_MAX) return no(`A button label is 1 to ${DISCORD_LABEL_MAX} characters.`);
+    if (option.image !== undefined && option.image !== null) return no('An option with a picture stays in the Hub.');
+    if (`a:${ask.id}:${option.id}`.length > DISCORD_CUSTOM_ID_MAX) return no('An option id is too long for a button.');
+  }
+  return { ok: true };
 }
 
 // A review's detail: what a `ready-for-review` event carries, checked field by field, because an
