@@ -297,6 +297,10 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copy, and the progress map built from it |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
+| `GET /api/hub/chat`, `/chat/:id` | The newest 30 conversations, and one conversation's lines. Chat needs `HERMES_URL` and `HERMES_API_KEY`, and a signed-in user where writes need `Remote-User` (503 when off, 401 without a user) |
+| `GET /api/hub/chat/:id/images/:file` | A picture sent in a conversation, behind the same chat gate (not `/hub/file`). `Cache-Control: private`, `nosniff`, sandboxed |
+| `POST /api/hub/chat` | `{ conversation?, text, images? }`; the reply streams back as server-sent events (`delta`, `created`, `done` with the saved user line, `error`). `images` is up to 4 `{ type: 'image/jpeg' \| 'image/png', data: <base64> }`, each at most 1.5 MB decoded, 5 MB together, 1 to 2048 px a side; the bytes are checked, metadata (EXIF, GPS) is stripped, and `text` may be empty with a picture. They reach Hermes as `image_url` data URLs and are stored beside the conversation as `chat/<id>/<file>`. If Hermes refuses them: 422, nothing saved. The body limit is 7 MB |
+| `POST /api/hub/transcribe` | Push-to-talk: audio (webm, ogg, mp4 or mpeg, at most 2 MB) in, `{ text }` out, through `STT_URL` |
 
 A blocked session stays in Needs you until any later event from the same session arrives (a
 `resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts
