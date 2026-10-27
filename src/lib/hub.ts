@@ -13,6 +13,7 @@ export interface Item {
   state?: string
   bead?: string
   url?: string
+  card?: string
   host?: string
   session?: string
   summary?: string
@@ -20,7 +21,7 @@ export interface Item {
 }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done'
 export interface HubEvent {
   ts: string
   kind: EventKind
@@ -32,6 +33,8 @@ export interface HubEvent {
   source: string
   title: string
   url?: string
+  card?: string
+  review?: string
   summary?: string
   file: string
 }

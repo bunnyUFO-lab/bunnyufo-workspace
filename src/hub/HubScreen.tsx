@@ -17,7 +17,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
     <div className="hub" data-screen={route.screen}>
       {!host.write && (
         <div className="hub-banner" role="note">
-          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, Sketch and sending requests to agents need you to be signed in.`} />
+          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
         </div>
       )}
       {route.screen === 'today' && <Today />}

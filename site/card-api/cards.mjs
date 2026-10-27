@@ -32,7 +32,7 @@
 // The hidden `inbox` section holds what agents and the Hub pass to each other (all files, written
 // create-only unless said). Every command works over both ways in; `--via` picks one.
 //
-//   cards event <kind> --title <t> [--project <p> --bead <b> --ask <id> --url <u> --summary <s> --source <s>]
+//   cards event <kind> --title <t> [--project <p> --bead <b> --ask <id> --review <file> --url <u> --summary <s> --source <s>]
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
 //   cards ask create --project <p> [--bead <b>] --file ask.json [--image <file>]...
@@ -344,7 +344,7 @@ async function put(folder, section, id, dryRun) {
 // The inbox: events, Asks, requests and Beads copies, all files in the hidden `inbox` section.
 // ---------------------------------------------------------------------------------------------
 
-const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert'];
+const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done'];
 const WHEN = ['next-sprint', 'nightly', 'record'];
 // The handler's filter on file names; checked here too, so a bad name fails before it is sent.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -546,6 +546,7 @@ function buildEvent(flags) {
     ...(flags.project ? { project: flags.project } : {}),
     ...(flags.bead ? { bead: flags.bead } : {}),
     ...(flags.ask ? { ask: flags.ask } : {}),
+    ...(flags.review ? { review: String(flags.review) } : {}),
     ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}),
     host, source: flags.source || 'cli', title: String(flags.title),
     ...(flags.url ? { url: flags.url } : {}),

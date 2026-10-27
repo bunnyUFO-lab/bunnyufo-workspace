@@ -58,6 +58,10 @@
 .hub-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .hub-row-title { font-size: 0.88rem; overflow-wrap: anywhere; }
 .hub-row-meta, .hub-row-time { font-size: 0.72rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.hub-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.hub-row.review { flex-wrap: wrap; }
+.hub-row.review .hub-row-text { flex: 1 1 12rem; }
+.hub-row.review > p { flex-basis: 100%; margin: 0; padding-left: 19px; }
 .hub-row .hub-btn { flex: none; font-size: 0.75rem; min-height: 30px; }
 .hub-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--text-muted); }
 .hub-dot.p { background: var(--pink); }
@@ -124,7 +128,8 @@
 }
 @media (max-width: 520px) {
   .hub-options { grid-template-columns: 1fr; }
-  .hub-row .hub-btn { display: none; }
+  .hub-row > .hub-btn { display: none; }
+  .hub-row.review .hub-row-actions { flex-basis: 100%; justify-content: flex-start; }
 }
 
 /* The progress map: an SVG in a box that scrolls sideways, so the page itself never does. */

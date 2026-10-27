@@ -319,6 +319,58 @@ test('drawings: a draft is created, listed, read, replaced on its etag and refus
   } finally { await close(); }
 });
 
+test('a review leaves Needs you once it is marked done, and stays gone', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const withUrl = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 30), title: 'Has a link', url: 'https://example.test/pr/9' }));
+    const withCard = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'Has a report', card: 'https://example.test/section#/card' }));
+    const bare = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 10), title: 'Has nothing' }));
+    const reviews = async () => (await get('/hub/today')).body.needsYou.filter(item => item.kind === 'review');
+    const before = await reviews();
+    assert.deepEqual(before.map(item => item.id).sort(), [bare, withCard, withUrl].sort());
+    assert.equal(before.find(item => item.id === withCard).card, 'https://example.test/section#/card');
+    assert.equal(before.find(item => item.id === withUrl).card, undefined);
+    const doneKeys = () => fake.log.filter(entry => entry.method === 'PUT').map(entry => entry.key);
+    fake.log.length = 0;
+
+    const first = await post(`/hub/reviews/${withCard}/done`);
+    assert.equal(first.status, 201);
+    assert.deepEqual(first.body, { state: 'done' });
+    const written = doneKeys();
+    assert.equal(written.length, 1);
+    assert.match(written[0], /^sections\/inbox\/events\/\d{4}-\d\d-\d\d\/\d{6}-hub-[a-z0-9]{4}\.json$/);
+    const event = fake.json(written[0]);
+    assert.equal(event.kind, 'review-done');
+    assert.equal(event.review, withCard);
+    assert.equal(event.title, 'Done: Has a report');
+    assert.equal(event.by, 'owner');
+    assert.equal(event.source, 'hub');
+
+    assert.deepEqual((await reviews()).map(item => item.id).sort(), [bare, withUrl].sort());
+    assert.deepEqual((await get('/hub/inbox?filter=reviews')).body.items.map(item => item.id).sort(), [bare, withUrl].sort());
+    assert.equal((await get('/hub/today')).body.counts.needsYou, 2);
+    // A new Hub on the same bucket has no cache to lean on.
+    const other = createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true });
+    const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: other });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const fresh = await (await fetch(`http://127.0.0.1:${server.address().port}/api/hub/inbox?filter=reviews`)).json();
+      assert.deepEqual(fresh.items.map(item => item.id).sort(), [bare, withUrl].sort());
+    } finally { server.close(); }
+
+    fake.log.length = 0;
+    const again = await post(`/hub/reviews/${withCard}/done`);
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.body, { state: 'done' });
+    assert.deepEqual(doneKeys(), [], 'A second click writes nothing.');
+
+    for (const bad of ['20990101-nothing.json', '..%2Fx.json', 'a%2Fb.json', '.hidden.json', 'no-extension']) {
+      assert.equal((await post(`/hub/reviews/${bad}/done`)).status, 404, bad);
+    }
+    assert.deepEqual(doneKeys(), []);
+  } finally { await close(); }
+});
+
 test('no Hub write lands outside sections/inbox/, and inboxKey refuses what it should', async () => {
   const { fake, seed, post, close } = await fixture();
   try {
@@ -334,11 +386,13 @@ test('no Hub write lands outside sections/inbox/, and inboxKey refuses what it s
     await post(`/hub/asks/${ask2.id}/snooze`, {});
     await post(`/hub/asks/${ask2.id}/snooze`, {});
     await post(`/hub/asks/${ask3.id}/cancel`, {});
+    const review = seed.event(eventJson({ kind: 'ready-for-review', title: 'Review' }));
+    await post(`/hub/reviews/${review}/done`);
     await post('/hub/requests', { project: 'probe', text: 'hello', when: 'nightly', drawing: { scene: scene(), png: picture } });
     const draft = (await post('/hub/drawings', { scene: scene(), png: picture })).body;
     await post(`/hub/drawings/${draft.id}`, { scene: scene(), png: picture, base: draft.etag });
     const writes = fake.log.filter(entry => entry.method === 'PUT' || entry.method === 'DELETE');
-    assert.ok(writes.length >= 9);
+    assert.ok(writes.length >= 10);
     assert.deepEqual(writes.filter(entry => !entry.key.startsWith('sections/inbox/')), []);
     assert.equal(writes.filter(entry => entry.method === 'DELETE').length, 0);
 
@@ -355,6 +409,7 @@ test('access: reads are open, writes need a signed-in user, capabilities say hub
     seed.ask(askJson({ id: id('access'), now: NOW }));
     assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', when: 'nightly' }, {})).status, 401);
     assert.equal((await call('POST', `/hub/asks/${id('access')}/cancel`, {})).status, 401);
+    assert.equal((await call('POST', '/hub/reviews/120000-pc-000001.json/done', {})).status, 401);
     assert.equal((await get('/hub/today')).status, 200);
     const open = await (await call('GET', '/capabilities')).json();
     assert.equal(open.hub, true);

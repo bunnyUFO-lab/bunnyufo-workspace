@@ -292,6 +292,7 @@ user (`Remote-User`), like every other write.
 |---|---|
 | `GET /api/hub/today`, `/inbox?filter=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first) |
+| `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copy, and the progress map built from it |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
