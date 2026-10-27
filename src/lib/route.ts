@@ -44,6 +44,12 @@ export function hubHash(screen: HubScreen, id?: string): string {
   return id ? `#/~hub/${screen}/${encodeURIComponent(id)}` : `#/~hub/${screen}`
 }
 
+/** `#/~hub/map/<project>[/<node>]`: the map, and with a node its details panel open. */
+export function mapHash(project: string, node?: string): string {
+  const base = `#/~hub/map/${encodeURIComponent(project)}`
+  return node ? `${base}/${encodeURIComponent(node)}` : base
+}
+
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>
     typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < count

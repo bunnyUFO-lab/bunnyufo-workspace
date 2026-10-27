@@ -52,6 +52,9 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     const { issues, events } = cujTwo({ now });
     seed.beads('magic-loops', issues, { pushedAt: minutesAgo(now, 20).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/magic-loops' });
     for (const event of events) seed.event(event);
+    // One merged PR on a closed task, 29 to 30 hours old: outside Today's 24-hour window, so its counts hold still.
+    seed.event(eventJson({ kind: 'pr-opened', ts: minutesAgo(now, 30 * 60), project: 'magic-loops', bead: 'ml-wj-t1', url: 'https://example.test/pr/9', title: 'Detect wall contact: PR opened' }));
+    seed.event(eventJson({ kind: 'pr-merged', ts: minutesAgo(now, 29 * 60), project: 'magic-loops', bead: 'ml-wj-t1', url: 'https://example.test/pr/9', title: 'Detect wall contact: PR merged' }));
     // A Beads copy with no sprint:<name> labels at all, for the Sprints toggle's "none yet" note.
     const bare = [
       beadsIssue({ id: 'ns-m1', title: 'Only milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),

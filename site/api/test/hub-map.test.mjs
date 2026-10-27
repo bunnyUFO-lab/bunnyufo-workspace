@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMap, orderSiblings, roll } from '../hub-map.mjs';
-import { beadsIssue as issue, cujTwo, eventJson, minutesAgo } from './hub-fixtures.mjs';
+import { beadsIssue as issue, cujTwo, eventJson, iso, minutesAgo } from './hub-fixtures.mjs';
 
 const NOW = new Date('2026-10-26T12:00:00Z');
 const build = (issues, extra = {}) => buildMap({ project: 'p', issues, now: NOW, ...extra });
@@ -126,6 +126,31 @@ test('signs: working, idle, new, PR, CI, review and deployed, from the events th
   assert.deepEqual(signs('review'), ['review']);
   assert.deepEqual(signs('deployed'), ['deployed']);
   assert.deepEqual(signs('done-idle'), [], 'A closed task gets no session sign.');
+});
+
+test('prs: every pull request a task had, open or merged, and none when there is none', () => {
+  const issues = [
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    ...['open', 'same', 'bare', 'none', 'closed'].map(id => issue({ id, parent: 'f', status: id === 'closed' ? 'closed' : 'open' })),
+  ];
+  const at = minutes => minutesAgo(NOW, minutes);
+  const events = [
+    eventJson({ kind: 'pr-opened', ts: at(30), bead: 'open', url: 'https://example.test/pr/1' }),
+    eventJson({ kind: 'pr-opened', ts: at(50), bead: 'same', url: 'https://example.test/pr/2' }), eventJson({ kind: 'pr-merged', ts: at(40), bead: 'same', url: 'https://example.test/pr/2' }),
+    eventJson({ kind: 'pr-opened', ts: at(30), bead: 'bare' }), eventJson({ kind: 'pr-merged', ts: at(20), bead: 'bare' }),
+    eventJson({ kind: 'pr-opened', ts: at(60), bead: 'closed', url: 'https://example.test/pr/3' }), eventJson({ kind: 'pr-merged', ts: at(55), bead: 'closed', url: 'https://example.test/pr/3' }),
+  ];
+  const map = build(issues, { events });
+  const prs = id => task(map, id).prs;
+  assert.deepEqual(prs('open')?.map(({ url, state }) => ({ url, state })), [{ url: 'https://example.test/pr/1', state: 'open' }]);
+  assert.equal(task(map, 'open').prUrl, 'https://example.test/pr/1', 'prUrl still means the open one.');
+  assert.deepEqual(prs('same')?.map(({ url, state }) => ({ url, state })), [{ url: 'https://example.test/pr/2', state: 'merged' }]);
+  assert.equal(prs('same')[0].at, iso(at(40)), 'The entry carries the latest event.');
+  assert.equal(prs('bare').length, 1);
+  assert.equal(prs('bare')[0].state, 'merged');
+  assert.equal('url' in prs('bare')[0], false);
+  assert.equal('prs' in task(map, 'none'), false);
+  assert.equal(task(map, 'closed').prs[0].state, 'merged', 'A closed task keeps its PRs.');
 });
 
 test('the CUJ 2 copy: Milestone 2 has seven tasks, four on sprint-3, and the signs from its events', () => {
