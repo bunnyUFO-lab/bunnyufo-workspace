@@ -294,7 +294,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
           ))}
         </svg>
       </div>
-      {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} />}
+      {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} onOpen={openPanel} />}
       <div className="hub-legend" aria-label="Legend">
         {(Object.keys(STATE_LABEL) as TaskState[]).map(state => <span key={state}><i style={{ background: STATE_COLOR[state] }} />{STATE_LABEL[state]}</span>)}
         {(['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed'] as const).map(sign => <span key={sign}><b>{SIGN_GLYPH[sign]}</b>{SIGN_LABEL[sign]}</span>)}

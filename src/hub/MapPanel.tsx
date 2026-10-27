@@ -40,13 +40,13 @@ function PrList({ rows, showTask }: { rows: PrRow[]; showTask: boolean }) {
   )
 }
 
-function TaskRows({ tasks }: { tasks: MapTask[] }) {
+function TaskRows({ tasks, onOpen }: { tasks: MapTask[]; onOpen: (id: string) => void }) {
   return (
     <ul className="hub-map-panel-list">
       {tasks.map(task => (
         <li key={task.id} className={task.state === 'done' || task.state === 'later' ? 'dim' : undefined} data-state={task.state}>
           <i className="hub-map-panel-dot" style={{ background: STATE_COLOR[task.state] }} title={STATE_LABEL[task.state]} />
-          <span className="hub-map-panel-row-title">{task.title}</span>
+          <button type="button" className="hub-map-panel-link hub-map-panel-row-title" onClick={() => onOpen(task.id)}>{task.title}</button>
           <span className="hub-id">{task.id}</span>
           <SignGlyphs signs={task.signs} />
           {task.state === 'you' && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('inbox')}>Open in Inbox</a>}
@@ -61,7 +61,7 @@ function TaskRows({ tasks }: { tasks: MapTask[] }) {
  * phone (hub.css). A non-modal dialog, so the map behind it stays usable and App's Escape, which
  * leaves an open dialog alone, does not also fire. It only reads and links; the model decides what it shows.
  */
-export default function MapPanel({ model, nodeId, onClose }: { model: MapModel; nodeId: string; onClose: () => void }) {
+export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: MapModel; nodeId: string; onClose: () => void; onOpen: (id: string) => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const found = find(model, nodeId)
@@ -120,11 +120,11 @@ export default function MapPanel({ model, nodeId, onClose }: { model: MapModel; 
         {found.kind === 'm'
           ? found.milestone.features.filter(feature => feature.tasks.length).map(feature => (
             <section key={feature.id} className="hub-map-panel-group">
-              <h5>{feature.title}</h5>
-              <TaskRows tasks={feature.tasks} />
+              <h5>{feature.id.endsWith('~other') ? 'Not in a feature' : feature.title}</h5>
+              <TaskRows tasks={feature.tasks} onOpen={onOpen} />
             </section>
           ))
-          : tasks.length > 0 && <TaskRows tasks={tasks} />}
+          : tasks.length > 0 && <TaskRows tasks={tasks} onOpen={onOpen} />}
       </>
     )
   }

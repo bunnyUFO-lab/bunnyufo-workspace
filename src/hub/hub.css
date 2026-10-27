@@ -170,7 +170,7 @@
 /* The local app's tool rail is 48 px wide at the right; the panel sits beside it. Room to scroll the last nodes out from under the panel; the box keeps its width, so the map does not re-lay out. */
 @media (min-width: 641px) { .hub-map-box.has-panel { padding-right: min(380px, 40vw); } :root:has(.files-container) { --hub-rail: 48px; } }
 .hub-map-panel:not([open]) { display: none; }
-.hub-map-panel h3 { margin: 0; font-size: 1rem; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; outline: none; }
+.hub-map-panel h3 { color: var(--text-bright); margin: 0; font-size: 1rem; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; outline: none; }
 .hub-map-panel h4 { margin: 16px 0 6px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
 .hub-map-panel h5 { margin: 10px 0 4px; font-size: 0.82rem; overflow-wrap: anywhere; }
 .hub-map-panel p { margin: 0 0 6px; font-size: 0.85rem; }
@@ -184,6 +184,9 @@
 .hub-map-panel-list.plain li { display: block; padding: 2px 0; border: 0; }
 .hub-map-panel-list li.dim { opacity: 0.6; }
 .hub-map-panel-row-title { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.hub-map-panel-link { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.hub-map-panel-link:hover { text-decoration: underline; }
+.hub-map-panel-link:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; border-radius: 3px; }
 .hub-map-panel-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .hub-map-panel-pr { color: var(--text-dim); }
 .hub-map-panel-pr[data-pr-state="open"] { color: var(--amber); }
