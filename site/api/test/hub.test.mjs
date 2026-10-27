@@ -602,3 +602,30 @@ test("a review's detail carries its checked links", async () => {
     assert.equal((await get('/hub/reviews/20990101-nothing.json')).body.error, 'This review is not in the last 7 days.');
   } finally { await close(); }
 });
+
+test('no Hub list repeats a key: not in Needs you, any Inbox filter, or the running sessions', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const same = minutesAgo(NOW, 30);
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 40), session: 'sess-a', title: 'First prompt' }));
+    seed.event(eventJson({ kind: 'blocked', ts: same, session: 'sess-a', title: 'Second prompt' }));
+    seed.event(eventJson({ kind: 'blocked', ts: same, session: 'sess-a', title: 'Third prompt, same second' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 25), session: 'sess-b', title: 'Blocked, then it started again' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 20), session: 'sess-b', title: 'b started' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 15), title: 'No session one' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 15), title: 'No session two' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 50), session: 'sess-c', title: 'c started' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 10), session: 'sess-c', title: 'c started again, never ended' }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 9), title: 'Review one' }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 8), title: 'Review two' }));
+    const repeated = (items, key) => { const keys = items.map(key); return keys.filter((value, index) => keys.indexOf(value) !== index); };
+    const kindId = item => `${item.kind}-${item.id}`;
+    const today = (await get('/hub/today')).body;
+    assert.deepEqual(repeated(today.needsYou, kindId), [], 'Needs you');
+    assert.deepEqual(repeated(today.running, item => item.id), [], 'running');
+    for (const filter of ['needs-you', 'asks', 'reviews', 'requests', 'blocked', 'answered']) {
+      assert.deepEqual(repeated((await get(`/hub/inbox?filter=${filter}`)).body.items, kindId), [], filter);
+    }
+    assert.equal(today.needsYou.filter(item => item.kind === 'blocked' && item.id === 'sess-a').length, 1);
+  } finally { await close(); }
+});

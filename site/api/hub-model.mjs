@@ -125,7 +125,7 @@ const eventItem = (kind, event, extra = {}) => ({
  *   `session-ended`, a newer `blocked`, anything that carries the session). A `blocked` with no
  *   session stays until the window drops it. Only a real session link (`url`, not the bare
  *   https://claude.ai/code) and a desktop link (`appUrl`) are kept;
- * - running: `session-started` with no later `session-ended` for the same session.
+ * - running: `session-started` with no later `session-ended` or newer `session-started` for the same session.
  */
 export function deriveEventItems(events) {
   const ordered = chronological(events);
@@ -144,7 +144,8 @@ export function deriveEventItems(events) {
       const appUrl = blockedAppUrl(event.appUrl);
       blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, ...(appUrl ? { appUrl } : {}) }));
     } else if (event.kind === 'session-started' && event.session) {
-      const ended = after(event, other => other.session === event.session && other.kind === 'session-ended');
+      // A later start from the same session replaces this one: a session runs once, whatever restarted it.
+      const ended = after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
       if (!ended) running.push(eventItem('session', event, { id: event.session, title: `${event.project || 'session'} · running since ${time(event.ts)}` }));
     }
   }
