@@ -548,7 +548,7 @@ test("a review's detail carries its checked links", async () => {
         prs: ['https://github.com/example/app/pull/3', 'https://github.com/example/app/issues/4', 'https://example.test/pull/5'],
         cardDir: 'one/sprint-card',
         cardFiles: ['briefs/x-1.md', 'reviews/x-1-qa.md', 'reviews/x-1.md', 'qa/report.md', 'builds/b.md', 'notes/other.md', '../x.md', 'briefs/../../x.md', 'a.md', 'briefs/x.html'],
-        screenshots: [shot('before-board-phone.png'), shot('after-board-phone.png'), shot('x-desktop-before.png'), shot('x-desktop-after.png'), 'http://example.test/a.png', 'javascript:alert(1)', shot('single.png')],
+        screenshots: [shot('before-board-phone.png'), shot('after-board-phone.png'), shot('x-desktop-before.png'), shot('x-desktop-after.png'), 'http://example.test/a.png', 'javascript:alert(1)', 'https://example.test/other-host.png', 'https://raw.githubusercontent.com.example.test/x.png', shot('single.png')],
         deployUrl: 'http://example.test',
         verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green' }, { leg: 'deploy', result: 'pass', text: 'x' }, { leg: 'review', result: 'maybe', text: 'x' }, { leg: 'qa', result: 'noted', text: 'y'.repeat(400) }],
       },

@@ -220,6 +220,8 @@ export function checkAnswer(ask, data) {
 
 const httpUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https?:\/\//i.test(value) ? value : undefined);
 const httpsUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https:\/\//i.test(value) ? value : undefined);
+/** A screenshot must come from GitHub's raw host: an agent's event must not make the owner's browser fetch from anywhere else. */
+const rawImageUrl = value => (httpsUrl(value) && /^https:\/\/raw\.githubusercontent\.com\//i.test(value) ? value : undefined);
 const PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
 const CARD_DIR_RE = /^[a-z0-9][a-z0-9-]{0,63}\/[A-Za-z0-9][\w.-]{0,119}$/;
 const CARD_FILE_RE = /^(?:[A-Za-z0-9][\w.-]*\/){1,3}[A-Za-z0-9][\w.-]*\.md$/;
@@ -275,7 +277,7 @@ export function reviewDetail(events, id) {
       .filter(path => typeof path === 'string' && path.length <= 200 && CARD_FILE_RE.test(path) && !path.split('/').includes('..'))
       .slice(0, 12).map(path => ({ path, label: fileLabel(path) }))
     : [];
-  const shots = (Array.isArray(event.screenshots) ? event.screenshots : []).map(httpsUrl).filter(Boolean).slice(0, 12);
+  const shots = (Array.isArray(event.screenshots) ? event.screenshots : []).map(rawImageUrl).filter(Boolean).slice(0, 12);
   const deployUrl = httpsUrl(event.deployUrl);
   const verdicts = (Array.isArray(event.verdicts) ? event.verdicts : [])
     .filter(verdict => verdict && typeof verdict === 'object' && VERDICT_LEGS.includes(verdict.leg) && VERDICT_RESULTS.includes(verdict.result) && typeof verdict.text === 'string')
