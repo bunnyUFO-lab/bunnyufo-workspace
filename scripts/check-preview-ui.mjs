@@ -18,7 +18,8 @@ const card = {
   id: 'preview-fixture', title: 'Preview fixture', description: 'One card with a report and a Markdown page.',
   type: 'group', category: 'dev', created: '2026-10-09', updated: '2026-10-09', folder: 'preview-fixture',
   steps: [{ name: 'Report', path: 'report.html' }, { name: 'Notes', path: 'notes.md' }],
-  status: 'active', pinned: false, defaultStep: 0,
+  // A sample card stays live whatever today's date is, so the check never depends on the clock.
+  status: 'active', pinned: false, sample: true, defaultStep: 0,
 };
 const swatch = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%23ee3377'/%3E%3C/svg%3E";
 await mkdir(path.join(fixture, card.folder), { recursive: true });
@@ -143,25 +144,20 @@ try {
   assert.ok(scrolling.scrollTop > 0, 'a long Markdown page must scroll');
   await longPage.close();
 
-  // The home hero: the greeting on a wide screen, the wordmark beside the logo on a phone.
-  const greetingText = /What are we building|Good (morning|evening)|midnight oil/;
-  const phoneHome = await (await browser.newContext({ viewport: { width: 375, height: 812 } })).newPage();
-  await noApi(phoneHome);
-  phoneHome.setDefaultTimeout(15000);
-  await phoneHome.goto(url);
-  await phoneHome.locator('.home-hero canvas').waitFor();
-  assert.equal(await phoneHome.locator('.home-hero').getByText(greetingText).count(), 0, 'a phone shows the wordmark, not the greeting');
-  assert.equal(await phoneHome.locator('.home-hero .home-sub').count(), 1, 'the stats line stays');
-  await phoneHome.close();
-  const wideHome = await browser.newPage();
-  await noApi(wideHome);
-  wideHome.setDefaultTimeout(15000);
-  await wideHome.setViewportSize({ width: 1280, height: 800 });
-  await wideHome.goto(url);
-  await wideHome.locator('.home-hero h1.home-title').waitFor();
-  assert.match(await wideHome.locator('.home-hero h1.home-title').innerText(), greetingText);
-  assert.equal(await wideHome.locator('.home-hero canvas').count(), 0, 'a wide screen has no wordmark in the hero');
-  await wideHome.close();
+  // The home hero shows the logo and the wordmark at every width.
+  for (const viewport of [{ width: 375, height: 812 }, { width: 1280, height: 800 }]) {
+    const context = await browser.newContext({ viewport });
+    const home = await context.newPage();
+    await noApi(home);
+    home.setDefaultTimeout(15000);
+    await home.goto(url);
+    await home.locator('.home-hero canvas').waitFor();
+    const where = `at ${viewport.width}px`;
+    assert.equal(await home.locator('.home-hero').getByRole('heading', { level: 1, name: 'bunnyUFO Workspace', exact: true }).count(), 1, `the hero heading ${where}`);
+    assert.equal(await home.locator('.home-hero canvas').count(), 1, `the wordmark canvas ${where}`);
+    assert.equal(await home.locator('.home-hero .home-sub').count(), 1, `the stats line ${where}`);
+    await context.close();
+  }
 
   // The shared stylesheet must still style the app's image dialog after bundling.
   await page.getByRole('img', { name: 'Reference', exact: true }).click();
