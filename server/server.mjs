@@ -375,7 +375,7 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
       // so http: joins https: for frames and their reachability check. Reports stay on files.origin.
       await serveFile(request, response, file, info, {
         'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-        'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: ${files.origin}; media-src 'self' blob: ${files.origin}; connect-src 'self' ${wsOrigin} ${files.origin} http: https:; frame-src ${files.origin} http: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
+        'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: ${files.origin} https://raw.githubusercontent.com; media-src 'self' blob: ${files.origin}; connect-src 'self' ${wsOrigin} ${files.origin} http: https:; frame-src ${files.origin} http: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`,
       });
     } catch (error) { if (!response.headersSent) json(response, error.status || 400, { error: publicError(error), ...(error.current !== undefined ? { current: error.current } : {}) }); }
   });

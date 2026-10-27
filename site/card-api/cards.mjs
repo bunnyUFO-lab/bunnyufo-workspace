@@ -35,12 +35,16 @@
 //   cards event <kind> --title <t> [--project <p> --bead <b> --ask <id> --review <file> --url <u> --summary <s> --source <s>]
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
-//   cards ask create --project <p> [--bead <b>] --file ask.json [--image <file>]...
+//   cards ask create --project <p> [--bead <b>] --file ask.json [--image <file>]... [--require-passkey]
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
 //        link to the Ask (`siteUrl` in hub.json or BUW_SITE_URL). A failed post is spooled for hub-hooks to
 //        replay and never changes the exit code; the webhook address is never printed or stored.
+//        A simple multiple-choice Ask (2 to 5 options, no pictures, no drawing) also gets Discord buttons once the
+//        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where a
+//        passkey signs the answer: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
+//        Never put a secret in an Ask: its question and option labels can reach Discord.
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
 //   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json
 //   cards ask pickup <id> | cards ask cancel <id>                     exit 3 when someone else already did
@@ -344,7 +348,7 @@ async function put(folder, section, id, dryRun) {
 // The inbox: events, Asks, requests and Beads copies, all files in the hidden `inbox` section.
 // ---------------------------------------------------------------------------------------------
 
-const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done'];
+const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed'];
 const WHEN = ['next-sprint', 'nightly', 'record'];
 // The handler's filter on file names; checked here too, so a bad name fails before it is sent.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -633,6 +637,7 @@ function askFromFile(raw, flags, id) {
     ...(raw.options ? { options: raw.options } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
+    ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
   };
   return ask;
 }
@@ -654,6 +659,7 @@ function validateAsk(ask, imageNames) {
       }
     }
   }
+  if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
   if (typeof ask.allowNote !== 'boolean' || typeof ask.allowDrawing !== 'boolean') problems.push('allowNote and allowDrawing are true or false');
   if (problems.length) throw new Error(`ask.json is not valid: ${problems.join('; ')}.`);
 }
@@ -696,7 +702,7 @@ async function pingNeedsYou(ask, id) {
 }
 
 async function askCreate(flags) {
-  if (!flags.project || !flags.file) throw new Error('Usage: ask create --project <p> [--bead <b>] --file ask.json [--image <file>]...');
+  if (!flags.project || !flags.file) throw new Error('Usage: ask create --project <p> [--bead <b>] --file ask.json [--image <file>]... [--require-passkey]');
   const raw = JSON.parse(await readFile(flags.file, 'utf8'));
   const id = newId(flags.project, raw.question);
   const ask = askFromFile(raw, flags, id);
@@ -817,7 +823,7 @@ async function beadsPush(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'all']);
+const BOOLEAN_FLAGS = new Set(['answered', 'open', 'all', 'require-passkey']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {

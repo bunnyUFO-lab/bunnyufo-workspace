@@ -25,11 +25,11 @@ export function requestJson({ id, project = 'probe', text = 'Add a wall-jump tut
 }
 
 let counter = 0;
-export function eventJson({ kind, ts = new Date(), project = 'probe', bead, session, host = 'pc.example.test', title, url, summary, ask, source = 'test', card, review } = {}) {
+export function eventJson({ kind, ts = new Date(), project = 'probe', bead, session, host = 'pc.example.test', title, url, appUrl, summary, ask, source = 'test', card, review, extra = {} } = {}) {
   counter += 1;
   return {
     ts: iso(ts), kind, project, ...(bead ? { bead } : {}), ...(ask ? { ask } : {}), ...(session ? { session } : {}),
-    host, source, title: title ?? `${kind} ${counter}`, ...(url ? { url } : {}), ...(card ? { card } : {}), ...(review ? { review } : {}), ...(summary ? { summary } : {}),
+    host, source, title: title ?? `${kind} ${counter}`, ...(url ? { url } : {}), ...(appUrl ? { appUrl } : {}), ...(card ? { card } : {}), ...(review ? { review } : {}), ...(summary ? { summary } : {}), ...extra,
   };
 }
 

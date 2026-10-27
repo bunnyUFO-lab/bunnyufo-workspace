@@ -11,10 +11,15 @@
 //
 // The Hub sends no system message (Hermes owns its prompt) and sends the history as `messages`.
 // Keys are never logged, stored or echoed.
+import { Readable } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
+import { IMAGE_FILE, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 
+const MB = 1024 * 1024;
 const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
 const MAX_FILE = 1024 * 1024;
+const HISTORY_IMAGE_BUDGET = 6 * MB;
+const NO_PICTURE = '[An earlier picture is not included.]';
 const TOTAL_MS = 120_000;
 const IDLE_MS = 60_000;
 const KEEPALIVE_MS = 15_000;
@@ -43,7 +48,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       let info = titles.get(object.etag);
       if (!info) {
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);
-        info = { title: clip(lines.find(line => line.role === 'user')?.text, 60) || 'New chat', count: lines.length };
+        const first = lines.find(line => line.role === 'user');
+        info = { title: clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
@@ -77,10 +83,40 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     return items;
   }
 
+  /** The bytes of a stored picture, or null when it is gone. */
+  async function readImage(id, file) {
+    try {
+      const object = await bucket.get(key(`chat/${id}/${file}`));
+      return Buffer.from(await new Response(object.body).arrayBuffer());
+    } catch { return null; }
+  }
+
+  /**
+   * The history as Hermes's messages. Pictures of earlier turns go back as data URLs, newest first,
+   * until the budget is spent; the rest, and any that cannot be read, become a note.
+   */
+  async function historyMessages(id, lines, spent) {
+    let left = HISTORY_IMAGE_BUDGET - spent;
+    const messages = lines.map(line => ({ role: line.role, content: line.text }));
+    for (let at = lines.length - 1; at >= 0; at -= 1) {
+      const pictures = lines[at].role === 'user' && Array.isArray(lines[at].images) ? lines[at].images.filter(image => IMAGE_FILE.test(String(image?.file))) : [];
+      if (!pictures.length) continue;
+      const parts = lines[at].text ? [{ type: 'text', text: lines[at].text }] : [];
+      for (const image of pictures) {
+        const bytes = left > 0 ? await readImage(id, image.file) : null;
+        if (bytes && bytes.length <= left) { left -= bytes.length; parts.push({ type: 'image_url', image_url: { url: toDataUrl(typeOfFile(image.file), bytes) } }); }
+        else parts.push({ type: 'text', text: NO_PICTURE });
+      }
+      messages[at].content = parts;
+    }
+    return messages;
+  }
+
   async function relay(request, response, user) {
-    const data = await readJson(request, 64 * 1024);
+    const data = await readJson(request, 7 * MB);
     const text = typeof data.text === 'string' ? data.text.trim() : '';
-    if (!text || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
+    const pictures = checkChatImages(data.images, fail);
+    if ((!text && !pictures.length) || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
     let id = data.conversation;
     let history = [];
     if (id !== undefined && id !== null && id !== '') {
@@ -92,7 +128,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     } else {
       id = `${day8(now())}-${randomId(6)}`;
     }
-    const messages = [...history.slice(-20).map(line => ({ role: line.role, content: line.text })), { role: 'user', content: text }];
+    const current = pictures.length
+      ? [...(text ? [{ type: 'text', text }] : []), ...pictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))]
+      : text;
+    const spent = pictures.reduce((sum, picture) => sum + picture.buffer.length, 0);
+    const messages = [...await historyMessages(id, history.slice(-20), spent), { role: 'user', content: current }];
+    const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
     const started = Date.now();
 
     const abort = new AbortController();
@@ -117,7 +158,13 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     }
     if (!upstream.ok || !upstream.body) {
       finish();
+      let refusal = null;
+      if (hasImages && [400, 413, 415].includes(upstream.status)) {
+        const answer = await upstream.json().catch(() => null);
+        refusal = clip(answer?.error?.message ?? (typeof answer?.error === 'string' ? answer.error : ''), 200);
+      }
       await upstream.body?.cancel?.().catch(() => {});
+      if (hasImages && [400, 413, 415].includes(upstream.status)) throw fail(`Hermes could not take the picture: ${refusal || `it answered ${upstream.status}`}`, 422);
       throw fail(`Hermes did not answer (${upstream.status}).`, 502);
     }
 
@@ -170,14 +217,45 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
     const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(created.length ? { created } : {}) };
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}) };
     try {
-      await append(id, [{ role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}) }, ...(failure && !reply ? [] : [assistant])]);
+      // The pictures first, so a line never points at a missing file.
+      if (pictures.length) {
+        userLine.images = [];
+        for (const picture of pictures) {
+          const file = `${randomId(10)}.${picture.ext}`;
+          await bucket.put(key(`chat/${id}/${file}`), picture.buffer, { contentType: picture.type, ifNoneMatch: '*' });
+          userLine.images.push({ file, type: picture.type, width: picture.width, height: picture.height });
+        }
+      }
+      await append(id, [userLine, ...(failure && !reply ? [] : [assistant])]);
     } catch (error) {
       failure ??= 'The reply could not be saved.';
     }
     if (failure) emit('error', { error: failure });
-    else emit('done', { conversation: id });
+    else emit('done', { conversation: id, user: userLine });
     response.end();
+  }
+
+  async function serveImage(response, id, file) {
+    if (!CHAT_ID.test(id) || !IMAGE_FILE.test(file)) throw fail('Not found', 404);
+    let object;
+    try {
+      object = await bucket.get(key(`chat/${id}/${file}`));
+    } catch (error) {
+      throw error.status === 404 ? fail('Not found', 404) : error;
+    }
+    response.writeHead(200, {
+      'Content-Type': typeOfFile(file),
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
+      ...(object.etag ? { ETag: `"${object.etag}"` } : {}),
+      ...(object.size ? { 'Content-Length': object.size } : {}),
+    });
+    if (!object.body) return response.end();
+    Readable.fromWeb(object.body).pipe(response);
+    return undefined;
   }
 
   async function transcribe(request) {
@@ -218,6 +296,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         if (!got) throw fail('No such conversation.', 404);
         return json(response, 200, { id: match[1], messages: parse(got.text) });
       }
+      if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/images\/([^/]+)$/.exec(route))) return serveImage(response, match[1], match[2]);
       if (method === 'POST' && route === '/hub/chat') return relay(request, response, user);
       if (method === 'POST' && speech) return json(response, 200, await transcribe(request));
       throw fail('Not found', 404);

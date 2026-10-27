@@ -221,6 +221,15 @@ export function createSiteApi({
       const route = url.pathname.replace(/^\/api(?=\/|$)/, '');
       const reading = request.method === 'GET' || request.method === 'HEAD';
       const signedIn = String(request.headers['remote-user'] ?? '').trim() !== '';
+
+      // The Asks bot's two routes carry a bearer token, not Remote-User, so they come before the sign-in
+      // check. Whatever they are sent, they end here: nothing falls through to a route that could read the header.
+      if (route === '/hub/discord' || route.startsWith('/hub/discord/')) {
+        if (hub) await hub.handleDiscord({ request, response, method: request.method, route });
+        else json(response, 404, { error: 'Not found' });
+        return;
+      }
+
       if (requireRemoteUser && !reading && !signedIn) {
         return json(response, 401, { error: 'Writes need a signed-in user (Remote-User).' });
       }

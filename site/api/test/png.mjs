@@ -12,15 +12,42 @@ export const png = (width, height, extra = 0) => {
   return Buffer.concat([head, Buffer.alloc(extra, 7)]);
 };
 
-/** A whole PNG a browser can decode: solid grey (`shade`), `width` x `height`. */
-export const solidPng = (width, height, shade = 0x90) => {
-  const chunk = (type, data) => {
-    const head = Buffer.alloc(8); head.writeUInt32BE(data.length); head.write(type, 4, 'ascii');
-    const tail = Buffer.alloc(4); tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])));
-    return Buffer.concat([head, data, tail]);
-  };
+const chunk = (type, data) => {
+  const head = Buffer.alloc(8); head.writeUInt32BE(data.length); head.write(type, 4, 'ascii');
+  const tail = Buffer.alloc(4); tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])));
+  return Buffer.concat([head, data, tail]);
+};
+
+/**
+ * A whole PNG a browser can decode: solid grey (`shade`), `width` x `height`. `extra` is a list of
+ * [type, Buffer] chunks put before the image data (a tEXt chunk, or a private chunk to pad the size).
+ */
+export const solidPng = (width, height, shade = 0x90, extra = []) => {
   const header = Buffer.alloc(13); header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2;
   const rows = Buffer.alloc((width * 3 + 1) * height, shade);
   for (let y = 0; y < height; y++) rows[y * (width * 3 + 1)] = 0;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), ...extra.map(([type, data]) => chunk(type, data)), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+};
+
+/** A PNG with a tEXt chunk, and `pad` bytes in a private chunk the server keeps. */
+export const textPng = (width, height, { text = 'Author\x00someone', pad = 0 } = {}) =>
+  solidPng(width, height, 0x90, [['tEXt', Buffer.from(text, 'latin1')], ...(pad ? [['bnYu', Buffer.alloc(pad, 5)]] : [])]);
+
+/**
+ * A JPEG with the right structure but no real picture: SOI, JFIF, optionally an EXIF APP1 holding
+ * a GPS marker string, SOF0 with the size, SOS, a few bytes, EOI. `pad` makes it bigger (in a COM-free
+ * way: it sits in the scan data).
+ */
+export const jpeg = (width, height, { exif = true, pad = 0 } = {}) => {
+  const segment = (marker, body) => { const head = Buffer.from([0xff, marker, 0, 0]); head.writeUInt16BE(body.length + 2, 2); return Buffer.concat([head, body]); };
+  const frame = Buffer.alloc(15); frame[0] = 8; frame.writeUInt16BE(height, 1); frame.writeUInt16BE(width, 3); frame[5] = 3;
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    segment(0xe0, Buffer.from('JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00', 'latin1')),
+    ...(exif ? [segment(0xe1, Buffer.from('Exif\x00\x00GPS 51.5N 0.1W', 'latin1')), segment(0xfe, Buffer.from('a comment'))] : []),
+    segment(0xc0, frame),
+    segment(0xda, Buffer.from([3, 1, 0, 2, 0x11, 3, 0x11, 0, 0x3f, 0])),
+    Buffer.alloc(8 + pad, 0x11),
+    Buffer.from([0xff, 0xd9]),
+  ]);
 };

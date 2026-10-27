@@ -164,9 +164,27 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   }
 
   /** In the inbox, answers, snoozes and declines are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json)$/i;
+  const ASK_FILE = /^asks\/(?:[^/]+\/)*ask\.json$/i;
   const ownerOnly = (caller, sectionId, file) => {
-    if (sectionId === 'inbox' && caller.rights.write !== null && /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json)$/i.test(file)) {
+    if (sectionId === 'inbox' && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
+    }
+  };
+  /**
+   * An Ask is written once. A limited writer may create ask.json (If-None-Match: *) and never replace it, so what the
+   * owner was shown, and what the Discord buttons were built from, cannot be rewritten by an agent. A presigned upload
+   * URL cannot enforce create-only, so it is refused for ask.json too.
+   */
+  const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
+    if (sectionId === 'inbox' && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
+      throw new HttpError(403, 'ask.json is create-only.');
+    }
+  };
+  /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
+  const hubFilesStay = (caller, sectionId, file) => {
+    if (sectionId === 'inbox' && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file))) {
+      throw new HttpError(403, 'Only the Hub removes asks and answers.');
     }
   };
 
@@ -273,6 +291,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
       await section(caller, sectionId, 'write');
       ownerOnly(caller, sectionId, file);
+      askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       let put;
       try {
         put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch });
@@ -285,6 +304,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
     async deleteFile(caller, sectionId, file) {
       await section(caller, sectionId, 'delete');
+      hubFilesStay(caller, sectionId, file);
       await bucket.del(keyOf(sectionId, file));
       return { path: file, deleted: true };
     },
@@ -298,6 +318,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        askCreateOnly(caller, sectionId, file, { upload: true });
         return { path: file, method: 'PUT', url: await bucket.presign('PUT', keyOf(sectionId, file), { expires: urlTtl }) };
       }));
       return { uploads, urlsExpireIn: urlTtl, maxBytes: MAX_FILE };

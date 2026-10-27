@@ -9,12 +9,13 @@
 // State is derived, never stored: an Ask's state is which files exist next to it, and Today and
 // the Inbox are computed from a seven-day window of event files. Event files, ask.json and
 // request.json are create-only and so never change; they are cached by key.
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  DAY, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, INBOX_FILTERS, monthPrefixes, newDrawingId,
-  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  askRev, DAY, discordEligible, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, INBOX_FILTERS, monthPrefixes, newDrawingId,
+  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -99,7 +100,7 @@ const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(v
  * @param enabled  `HUB=1` on the site, bucket-and-not-`HUB=0` on the local service
  * @param env      the merged environment (the chat routes read HERMES_* and STT_* from it)
  */
-export function createHub({ bucket = null, prefix = 'sections', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date() } = {}) {
+export function createHub({ bucket = null, prefix = 'sections', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log } = {}) {
   const on = !!enabled && !!bucket;
   const key = rel => inboxKey(rel, prefix);
   const cache = new Map();
@@ -258,11 +259,25 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     }
   }
 
-  async function answerAsk(id, data, user, at, response) {
-    if (await exists(`asks/${id}/answer.json`)) {
-      const existing = await fresh(`asks/${id}/answer.json`);
-      throw fail('This Ask is already answered.', 409, { answer: existing?.value ?? null });
+  /** The 409 for an Ask that already has its answer.json, carrying the answer that won. */
+  async function alreadyAnswered(id) {
+    const existing = await fresh(`asks/${id}/answer.json`);
+    return fail('This Ask is already answered.', 409, { answer: existing?.value ?? null });
+  }
+
+  /** The one create-only write of answer.json, for the web and for Discord: the first writer wins, a later one gets 409. */
+  async function writeAnswer(id, answer) {
+    try {
+      await bucket.put(key(`asks/${id}/answer.json`), `${JSON.stringify(answer, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
+    } catch (error) {
+      if (error.status !== 412) throw error;
+      throw await alreadyAnswered(id);
     }
+    cache.delete(key(`asks/${id}/answer.json`));
+  }
+
+  async function answerAsk(id, data, user, at, response) {
+    if (await exists(`asks/${id}/answer.json`)) throw await alreadyAnswered(id);
     const { ask, names } = await askFolder(id);
     const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
     const { state } = askState(names, ask, at, snooze);
@@ -280,16 +295,80 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
       await putDrawingFile(id, 'answer.png', checked.pngBuffer, 'image/png');
       answer.drawing = { excalidraw: 'answer.excalidraw', png: 'answer.png' };
     }
-    try {
-      await bucket.put(key(`asks/${id}/answer.json`), `${JSON.stringify(answer, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
-    } catch (error) {
-      if (error.status !== 412) throw error;
-      const existing = await fresh(`asks/${id}/answer.json`);
-      throw fail('This Ask is already answered.', 409, { answer: existing?.value ?? null });
-    }
-    cache.delete(key(`asks/${id}/answer.json`));
+    await writeAnswer(id, answer);
     return { status: 201, body: { state: 'answered', answer } };
   }
+
+  // --- Discord: the bot's two routes (see docs/workspaces.md, "Answers from Discord") ---
+
+  const changedAsk = () => fail('This Ask changed since it was posted.', 409);
+
+  /** An Ask read for Discord: ask.json straight from the bucket, never from the cache, with its rev. */
+  async function askForDiscord(id, at) {
+    if (!validId(id)) throw fail('No such Ask.', 404);
+    const { objects } = await bucket.list(key(`asks/${id}`) + '/');
+    const names = new Set(objects.map(object => object.key.split('/').pop()));
+    if (!names.has('ask.json')) throw fail('No such Ask.', 404);
+    const got = await bucket.getText(key(`asks/${id}/ask.json`));
+    if (!got) throw fail('No such Ask.', 404);
+    let ask = null;
+    try { ask = JSON.parse(got.text); } catch { /* not JSON: refused below */ }
+    if (!ask || typeof ask !== 'object' || Array.isArray(ask) || typeof ask.question !== 'string') throw fail('No such Ask.', 404);
+    ask = { ...ask, id };
+    const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
+    return { ask, names, rev: askRev(got.text), state: askState(names, ask, at, snooze).state };
+  }
+
+  /** The open Asks that may have buttons, each with the rev of the ask.json it was read from. */
+  async function discordList(at) {
+    const folders = await listFolders('asks', at);
+    const candidates = [...folders].filter(([id, names]) => validId(id) && names.has('ask.json')
+      && !['cancel.json', 'pickup.json', 'answer.json'].some(name => names.has(name)));
+    const rows = await pool(POOL, candidates, async ([id]) => {
+      const row = await askForDiscord(id, at).catch(error => { if (error.status === 404) return null; throw error; });
+      if (!row || row.state !== 'open' || !discordEligible(row.ask).ok) return null;
+      const { ask } = row;
+      return {
+        id, project: typeof ask.project === 'string' ? ask.project : '', question: ask.question,
+        options: ask.options.map(option => ({ id: option.id, label: option.label })),
+        requirePasskey: ask.requirePasskey === true,
+        createdAt: typeof ask.createdAt === 'string' ? ask.createdAt : '', expiresAt: typeof ask.expiresAt === 'string' ? ask.expiresAt : '',
+        rev: row.rev,
+      };
+    });
+    return { asks: rows.filter(Boolean).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1)) };
+  }
+
+  const DISCORD_KEYS = ['ask', 'choice', 'interaction', 'message', 'rev', 'user'];
+  const SNOWFLAKE = /^\d{17,20}$/;
+
+  /** One click: the owner's choice on one Ask that still is the Ask the bot showed. */
+  async function discordAnswer(raw, ownerId, at) {
+    if (!raw || Object.keys(raw).sort().join() !== DISCORD_KEYS.join()) throw fail(`Send exactly these keys: ${DISCORD_KEYS.join(', ')}.`);
+    const { ask: id, choice, rev, user, interaction, message } = raw;
+    if ([id, choice, rev, user].some(value => typeof value !== 'string' || !value)) throw fail('ask, choice, rev and user are text.');
+    if (!SNOWFLAKE.test(String(interaction)) || !SNOWFLAKE.test(String(message))) throw fail('interaction and message are Discord ids.');
+    if (user !== ownerId) throw fail('Only the owner can answer.', 403);
+    const row = await askForDiscord(id, at);
+    if (row.rev !== rev) throw changedAsk();
+    const eligible = discordEligible(row.ask);
+    if (!eligible.ok) throw fail(`This Ask is answered in the Hub. ${eligible.reason}`, 403);
+    if (row.names.has('answer.json')) throw await alreadyAnswered(id);
+    if (!canAnswer(row.state)) {
+      throw fail(row.state === 'expired' ? `This Ask is expired: it ran out at ${row.ask.expiresAt}.` : `This Ask is ${row.state.replace('-', ' ')}.`, 409);
+    }
+    checkAnswer(row.ask, { choice });
+    const answer = { at: at.toISOString(), by: 'owner', via: 'discord', choice, rev, discord: { interaction, message } };
+    await writeAnswer(id, answer);
+    log(`[hub] discord answer ${id} ${choice} interaction=${interaction}`);
+    return { status: 201, body: { state: 'answered', answer } };
+  }
+
+  const bearerMatches = (headers, hex) => {
+    const match = /^Bearer\s+(\S+)\s*$/i.exec(String(headers.authorization ?? ''));
+    if (!match) return false;
+    return timingSafeEqual(createHash('sha256').update(match[1]).digest(), Buffer.from(hex, 'hex'));
+  };
 
   async function snoozeAsk(id, data, user, at) {
     const { ask, names } = await askFolder(id);
@@ -339,6 +418,16 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
       }
     }
     throw fail('Could not find a free name; try again.', 409);
+  }
+
+  /** One review's detail, from the ready-for-review event in the last seven days. */
+  async function reviewDetailFor(id, at) {
+    const missing = () => fail('This review is not in the last 7 days.', 404);
+    if (!REVIEW_FILE_RE.test(id)) throw missing();
+    const { events } = await loadEvents(at);
+    const detail = reviewDetail(events, id);
+    if (!detail) throw missing();
+    return detail;
   }
 
   async function createRequest(data, user, at) {
@@ -476,6 +565,35 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       return { hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }) };
     },
+    /**
+     * `/hub/discord/*`, for the Asks bot: exactly `GET /hub/discord/asks` and `POST /hub/discord/answer`, each with a
+     * bearer token whose sha256 is HUB_DISCORD_TOKEN_SHA256. Always ends the request. Without that key and
+     * HUB_DISCORD_OWNER_ID in the environment (the kill switch) it answers 404 to everyone. It reads no Remote-User.
+     */
+    async handleDiscord({ request, response, method, route, headers = request.headers }) {
+      try {
+        const hex = String(env.HUB_DISCORD_TOKEN_SHA256 ?? '').trim();
+        const ownerId = String(env.HUB_DISCORD_OWNER_ID ?? '').trim();
+        if (!on || !/^[0-9a-f]{64}$/i.test(hex) || !SNOWFLAKE.test(ownerId)) throw fail('Not found', 404);
+        const listing = method === 'GET' && route === '/hub/discord/asks';
+        const answering = method === 'POST' && route === '/hub/discord/answer';
+        if (!listing && !answering) throw fail('Not found', 404);
+        if (!bearerMatches(headers, hex)) throw fail('Send Authorization: Bearer <token>.', 401);
+        const at = now();
+        if (listing) json(response, 200, await discordList(at));
+        else {
+          const raw = await readJson(request, 4096);
+          const done = await discordAnswer(raw, ownerId, at);
+          json(response, done.status, done.body);
+        }
+      } catch (error) {
+        if (response.headersSent) { response.end(); return true; }
+        const unreachable = error instanceof S3Error || error instanceof TypeError;
+        const status = unreachable ? 502 : error.status || 400;
+        json(response, status, { error: unreachable ? `The inbox did not answer: ${error.message}` : error.message, ...(error.extra ?? {}) });
+      }
+      return true;
+    },
     async handle({ request, response, method, route, query = new URLSearchParams(), user = null, requireRemoteUser = false }) {
       if (!String(route).startsWith('/hub/')) return false;
       try {
@@ -497,6 +615,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
             reply({ items: buildInbox({ filter, asks: asks.map(row => row.item), requests, events: window.events, now: at }) });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
+            reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
           } else if (route === '/hub/events') {
             const floor = at.getTime() - WINDOW_DAYS * DAY;
             const wanted = sendTime(query.get('since'))?.getTime() ?? at.getTime() - DAY;

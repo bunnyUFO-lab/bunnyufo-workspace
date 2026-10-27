@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askState } from '../hub-model.mjs';
+import { askRev, askState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
 import { askJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -228,7 +228,7 @@ test('Today and the Inbox: needs you, running and recent come from a seven-day w
     let today = (await get('/hub/today')).body;
     assert.equal(today.counts.needsYou, 3);
     assert.deepEqual(today.needsYou.map(item => item.kind), ['ask', 'review', 'blocked']);
-    assert.equal(today.needsYou[2].url, 'https://claude.ai/code');
+    assert.equal(today.needsYou[2].url, undefined, 'A blocked item with no link has none; the bare claude.ai/code is gone.');
     assert.equal(today.needsYou[1].url, 'https://example.test/pr/2');
     assert.deepEqual(today.running.map(item => item.id), ['sess-old']);
     assert.match(today.running[0].title, /running since \d\d:\d\d$/);
@@ -246,6 +246,73 @@ test('Today and the Inbox: needs you, running and recent come from a seven-day w
     assert.ok(events.events.some(event => event.title === 'Three days ago'));
     assert.equal(events.truncated, false);
     assert.equal((await get('/hub/events?project=nothing')).body.events.length, 0);
+  } finally { await close(); }
+});
+
+test("a blocked item clears on its own session's next event, not another's", async () => {
+  const { fake, seed, get, close } = await fixture();
+  const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
+  const LINK = 'https://claude.ai/code/session_TESTabc123';
+  const blocked = async hub => (await hub('/hub/inbox?filter=blocked')).body.items;
+  const check = async hub => {
+    const items = await blocked(hub);
+    const by = session => items.filter(item => item.session === session);
+    return { items, by };
+  };
+  try {
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 25), session: 'sess-b', title: 'B started' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 20), session: 'sess-a', title: 'A needs a permission', url: LINK, appUrl: APP }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 18), session: 'sess-b', title: 'B needs a permission', url: 'https://claude.ai/code' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 'sess-c', title: 'C first' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 8), session: 'sess-c', title: 'C again' }));
+    let { items, by } = await check(get);
+    assert.equal(items.length, 3);
+    assert.equal(by('sess-a')[0].url, LINK);
+    assert.equal(by('sess-a')[0].appUrl, APP);
+    assert.equal(by('sess-b')[0].url, undefined, 'The bare link is no link, and the earlier session-started does not clear it.');
+    assert.equal(by('sess-b')[0].appUrl, undefined);
+    assert.equal(by('sess-c').length, 1);
+    assert.equal(by('sess-c')[0].title, 'C again');
+    assert.equal(new Set(items.map(item => item.id)).size, 3, 'One id per session.');
+
+    seed.event(eventJson({ kind: 'resumed', ts: minutesAgo(NOW, 10), session: 'sess-a', title: 'A is back at work' }));
+    seed.event(eventJson({ kind: 'alert', ts: minutesAgo(NOW, 9), session: 'sess-x', title: 'Another session speaks' }));
+    ({ items, by } = await check(get));
+    assert.deepEqual(items.map(item => item.session).sort(), ['sess-b', 'sess-c']);
+
+    seed.event(eventJson({ kind: 'pr-opened', ts: minutesAgo(NOW, 5), session: 'sess-b', title: 'B opens a pull request' }));
+    ({ items } = await check(get));
+    assert.deepEqual(items.map(item => item.session), ['sess-c'], 'Any kind of later event clears it.');
+
+    // A new Hub on the same bucket has no cache to lean on: the state is in the files.
+    const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true }) });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const fresh = async route => ({ body: await (await fetch(`http://127.0.0.1:${server.address().port}/api${route}`)).json() });
+      assert.deepEqual((await blocked(fresh)).map(item => item.session), ['sess-c']);
+    } finally { server.close(); }
+  } finally { await close(); }
+});
+
+test('a blocked item passes on only a real session link and an app link of the exact form', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const OK_APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000002';
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 's1', title: 'Evil app link', appUrl: 'claude://evil/x', url: 'http://claude.ai/code/session_TESTabc123' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 29), session: 's2', title: 'Script link', appUrl: 'javascript:alert(1)', url: 'https://claude.ai/code/' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 28), session: 's3', title: 'Good links', appUrl: OK_APP, url: 'https://claude.ai/code/session_TESTabc123' }));
+    const items = (await get('/hub/inbox?filter=blocked')).body.items;
+    const by = session => items.find(item => item.session === session);
+    assert.equal(items.length, 3);
+    for (const session of ['s1', 's2']) {
+      assert.equal(by(session).url, undefined, session);
+      assert.equal(by(session).appUrl, undefined, session);
+    }
+    assert.equal(by('s3').url, 'https://claude.ai/code/session_TESTabc123');
+    assert.equal(by('s3').appUrl, OK_APP);
+    assert.equal(isBareClaudeCode('https://claude.ai/code'), true);
+    assert.equal(isBareClaudeCode('https://claude.ai/code/'), true);
+    assert.equal(isBareClaudeCode('https://claude.ai/code/session_TESTabc123'), false);
   } finally { await close(); }
 });
 
@@ -469,4 +536,127 @@ test('GET /hub/file serves only asks, requests and drawings, with their content 
     assert.equal(image.headers.get('cache-control'), 'private, max-age=300');
     assert.equal((await image.arrayBuffer()).byteLength > 24, true);
   } finally { await close(); }
+});
+
+test("a review's detail carries its checked links", async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const shot = name => `https://raw.githubusercontent.com/example/app/pr-assets/ws-1/${name}`;
+    const file = seed.event(eventJson({
+      kind: 'ready-for-review', ts: minutesAgo(NOW, 30), title: 'Detail probe', summary: 'Two pull requests.', url: 'https://example.test/pr/1', card: 'https://example.test/one#/card',
+      extra: {
+        prs: ['https://github.com/example/app/pull/3', 'https://github.com/example/app/issues/4', 'https://example.test/pull/5'],
+        cardDir: 'one/sprint-card',
+        cardFiles: ['briefs/x-1.md', 'reviews/x-1-qa.md', 'reviews/x-1.md', 'qa/report.md', 'builds/b.md', 'notes/other.md', '../x.md', 'briefs/../../x.md', 'a.md', 'briefs/x.html'],
+        screenshots: [shot('before-board-phone.png'), shot('after-board-phone.png'), shot('x-desktop-before.png'), shot('x-desktop-after.png'), 'http://example.test/a.png', 'javascript:alert(1)', 'https://example.test/other-host.png', 'https://raw.githubusercontent.com.example.test/x.png', shot('single.png')],
+        deployUrl: 'http://example.test',
+        verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green' }, { leg: 'deploy', result: 'pass', text: 'x' }, { leg: 'review', result: 'maybe', text: 'x' }, { leg: 'qa', result: 'noted', text: 'y'.repeat(400) }],
+      },
+    }));
+    const badDir = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'Bad dir', extra: { cardDir: '../x', cardFiles: ['briefs/x.md'] } }));
+    const old = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 10), title: 'Old one', url: '', card: '' }));
+
+    const answer = await get(`/hub/reviews/${file}`);
+    assert.equal(answer.status, 200);
+    const detail = answer.body;
+    assert.equal(detail.id, file);
+    assert.equal(detail.title, 'Detail probe');
+    assert.equal(detail.summary, 'Two pull requests.');
+    assert.equal(detail.project, 'probe');
+    assert.equal(detail.host, 'pc.example.test');
+    assert.equal(detail.url, 'https://example.test/pr/1');
+    assert.equal(detail.card, 'https://example.test/one#/card');
+    assert.deepEqual(detail.prs, ['https://github.com/example/app/pull/3']);
+    assert.equal(detail.cardDir, 'one/sprint-card');
+    assert.deepEqual(detail.cardFiles, [
+      { path: 'briefs/x-1.md', label: 'Brief' }, { path: 'reviews/x-1-qa.md', label: 'QA triage' }, { path: 'reviews/x-1.md', label: 'Review' },
+      { path: 'qa/report.md', label: 'QA report' }, { path: 'builds/b.md', label: 'Build report' }, { path: 'notes/other.md', label: 'other.md' },
+    ]);
+    assert.deepEqual(detail.screenshots, [
+      { label: 'board phone', before: shot('before-board-phone.png'), after: shot('after-board-phone.png') },
+      { label: 'x desktop', before: shot('x-desktop-before.png'), after: shot('x-desktop-after.png') },
+      { label: 'single', other: shot('single.png') },
+    ]);
+    assert.equal(detail.deployUrl, undefined);
+    assert.deepEqual(detail.verdicts.map(verdict => [verdict.leg, verdict.result, verdict.text.length]), [['smoke', 'pass', 5], ['qa', 'noted', 300]]);
+    assert.equal(detail.done, false);
+
+    const second = (await get(`/hub/reviews/${badDir}`)).body;
+    assert.equal(second.cardDir, undefined);
+    assert.equal(second.cardFiles, undefined);
+
+    const plain = (await get(`/hub/reviews/${old}`)).body;
+    assert.deepEqual(Object.keys(plain).sort(), ['at', 'done', 'host', 'id', 'project', 'source', 'title']);
+
+    assert.equal((await post(`/hub/reviews/${file}/done`)).status, 201);
+    const after = await get(`/hub/reviews/${file}`);
+    assert.equal(after.status, 200);
+    assert.equal(after.body.done, true);
+    assert.equal(after.body.doneBy, 'owner');
+    assert.ok(after.body.doneAt);
+
+    assert.equal((await get('/hub/reviews/20990101-nothing.json')).status, 404);
+    assert.equal((await get('/hub/reviews/a%2Fb.json')).status, 404);
+    const doneEvent = (await get('/hub/events?since=2000-01-01')).body.events.find(event => event.kind === 'review-done');
+    assert.equal((await get(`/hub/reviews/${doneEvent.file}`)).status, 404);
+    assert.equal((await get('/hub/reviews/20990101-nothing.json')).body.error, 'This review is not in the last 7 days.');
+  } finally { await close(); }
+});
+
+test('no Hub list repeats a key: not in Needs you, any Inbox filter, or the running sessions', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const same = minutesAgo(NOW, 30);
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 40), session: 'sess-a', title: 'First prompt' }));
+    seed.event(eventJson({ kind: 'blocked', ts: same, session: 'sess-a', title: 'Second prompt' }));
+    seed.event(eventJson({ kind: 'blocked', ts: same, session: 'sess-a', title: 'Third prompt, same second' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 25), session: 'sess-b', title: 'Blocked, then it started again' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 20), session: 'sess-b', title: 'b started' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 15), title: 'No session one' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 15), title: 'No session two' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 50), session: 'sess-c', title: 'c started' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 10), session: 'sess-c', title: 'c started again, never ended' }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 9), title: 'Review one' }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 8), title: 'Review two' }));
+    const repeated = (items, key) => { const keys = items.map(key); return keys.filter((value, index) => keys.indexOf(value) !== index); };
+    const kindId = item => `${item.kind}-${item.id}`;
+    const today = (await get('/hub/today')).body;
+    assert.deepEqual(repeated(today.needsYou, kindId), [], 'Needs you');
+    assert.deepEqual(repeated(today.running, item => item.id), [], 'running');
+    for (const filter of ['needs-you', 'asks', 'reviews', 'requests', 'blocked', 'answered']) {
+      assert.deepEqual(repeated((await get(`/hub/inbox?filter=${filter}`)).body.items, kindId), [], filter);
+    }
+    assert.equal(today.needsYou.filter(item => item.kind === 'blocked' && item.id === 'sess-a').length, 1);
+  } finally { await close(); }
+});
+
+test('discordEligible: a simple Ask passes, and each way out of the rule fails with its reason', () => {
+  const base = { id: '20261027-probe-simple-a1b2', question: 'Ship it?', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowNote: true, allowDrawing: false };
+  assert.deepEqual(discordEligible(base), { ok: true });
+  assert.deepEqual(discordEligible({ ...base, options: ['a', 'b', 'c'].map(id => ({ id, label: `Option ${id}` })), allowNote: true }), { ok: true }, 'Three options with a note.');
+  assert.equal(discordEligible({ ...base, options: Array.from({ length: 5 }, (_, n) => ({ id: `o${n}`, label: 'x' })) }).ok, true, 'Five is the most.');
+  const no = (what, ask) => { const result = discordEligible(ask); assert.equal(result.ok, false, what); assert.ok(result.reason, `${what} says why`); };
+  no('one option', { ...base, options: [{ id: 'A', label: 'Yes' }] });
+  no('no options', { ...base, options: undefined });
+  no('six options', { ...base, options: Array.from({ length: 6 }, (_, n) => ({ id: `o${n}`, label: 'x' })) });
+  no('an option image', { ...base, options: [{ id: 'A', label: 'Yes', image: 'a.png' }, base.options[1]] });
+  no('an empty label', { ...base, options: [{ id: 'A', label: '' }, base.options[1]] });
+  no('a blank label', { ...base, options: [{ id: 'A', label: '   ' }, base.options[1]] });
+  no('a label of 81 characters', { ...base, options: [{ id: 'A', label: 'x'.repeat(81) }, base.options[1]] });
+  assert.equal(discordEligible({ ...base, options: [{ id: 'A', label: 'x'.repeat(80) }, base.options[1]] }).ok, true, '80 is allowed.');
+  no('a missing option id', { ...base, options: [{ label: 'Yes' }, base.options[1]] });
+  no('two options with one id', { ...base, options: [{ id: 'A', label: 'Yes' }, { id: 'A', label: 'No' }] });
+  no('drawing allowed', { ...base, allowDrawing: true });
+  no('requirePasskey', { ...base, requirePasskey: true });
+  no('a custom id over 100 characters', { ...base, options: [{ id: 'o'.repeat(90), label: 'Yes' }, base.options[1]] });
+  assert.equal(discordEligible({ ...base, requirePasskey: false }).ok, true, 'false is the same as missing.');
+  no('not an Ask', null);
+});
+
+test('askRev: the same bytes give the same 16 hex characters, and one byte changes it', () => {
+  const text = '{"question":"Ship it?"}\n';
+  assert.match(askRev(text), /^[0-9a-f]{16}$/);
+  assert.equal(askRev(text), askRev(text));
+  assert.equal(askRev(text), askRev(Buffer.from(text)));
+  assert.notEqual(askRev(text), askRev('{"question":"Ship it!"}\n'));
 });

@@ -1,6 +1,7 @@
 // The Hub's rules, with no I/O: Ask state, what Today and the Inbox show, ids and slugs, and the
 // checks on what a request carries. hub.mjs reads the bucket and calls these; the tests call them
 // directly. Everything is a function of its arguments (the clock included).
+import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
 export const DRAWING_ID_RE = /^\d{8}-[a-z0-9]{6}$/;
@@ -8,7 +9,6 @@ export const PROJECT_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const WHEN = ['next-sprint', 'nightly', 'record'];
 export const DAY = 24 * 60 * 60 * 1000;
 export const WINDOW_DAYS = 7;
-export const REVIEW_URL_FALLBACK = 'https://claude.ai/code';
 
 export const validId = value => typeof value === 'string' && value.length <= 120 && ID_RE.test(value);
 export const validDrawingId = value => typeof value === 'string' && DRAWING_ID_RE.test(value);
@@ -101,6 +101,15 @@ const time = ts => {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(11, 16);
 };
 
+/** The bare `https://claude.ai/code` opens a new, empty chat, so it is no link to a session. */
+export const isBareClaudeCode = url => /^https:\/\/claude\.ai\/code\/?$/i.test(String(url ?? '').trim());
+
+/** A blocked session's web link: https, and not the bare one. Anything else is no link. */
+export const blockedSessionUrl = url => (typeof url === 'string' && /^https:\/\//i.test(url) && !isBareClaudeCode(url) ? url : undefined);
+
+/** The desktop app's link to a session: exactly `claude://claude.ai/epitaxy/local_<uuid>`. */
+export const blockedAppUrl = url => (typeof url === 'string' && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(url) ? url : undefined);
+
 const eventItem = (kind, event, extra = {}) => ({
   kind, id: event.file, project: event.project, title: event.title, at: event.ts,
   ...(event.bead ? { bead: event.bead } : {}), ...(event.url ? { url: event.url } : {}),
@@ -113,8 +122,11 @@ const eventItem = (kind, event, extra = {}) => ({
  * Reviews, blocked sessions and running sessions from a window of events (any order).
  * - review: `ready-for-review` with no later `pr-merged` for the same bead (the same url when
  *   there is no bead), and that no `review-done` event names (its `review` is the review's file name);
- * - blocked: `blocked` with no later `session-ended` or `session-started` for the same session;
- * - running: `session-started` with no later `session-ended` for the same session.
+ * - blocked: `blocked` with no later event of any kind from the same session (a `resumed`, a
+ *   `session-ended`, a newer `blocked`, anything that carries the session). A `blocked` with no
+ *   session stays until the window drops it. Only a real session link (`url`, not the bare
+ *   https://claude.ai/code) and a desktop link (`appUrl`) are kept;
+ * - running: `session-started` with no later `session-ended` or newer `session-started` for the same session.
  */
 export function deriveEventItems(events) {
   const ordered = chronological(events);
@@ -128,10 +140,13 @@ export function deriveEventItems(events) {
       const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
       if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event));
     } else if (event.kind === 'blocked') {
-      const resolved = !!event.session && after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
-      if (!resolved) blocked.push(eventItem('blocked', event, { id: event.session || event.file, url: event.url || REVIEW_URL_FALLBACK }));
+      const resolved = !!event.session && after(event, other => other.session === event.session);
+      if (resolved) continue;
+      const appUrl = blockedAppUrl(event.appUrl);
+      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, ...(appUrl ? { appUrl } : {}) }));
     } else if (event.kind === 'session-started' && event.session) {
-      const ended = after(event, other => other.session === event.session && other.kind === 'session-ended');
+      // A later start from the same session replaces this one: a session runs once, whatever restarted it.
+      const ended = after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
       if (!ended) running.push(eventItem('session', event, { id: event.session, title: `${event.project || 'session'} · running since ${time(event.ts)}` }));
     }
   }
@@ -200,4 +215,124 @@ export function checkAnswer(ask, data) {
   }
   const has = value => value !== undefined && value !== null && value !== '';
   if (!has(choice) && !has(note) && !has(drawing)) throw fail('Choose an option, write a note or draw something.');
+}
+
+// --- Discord buttons ---
+
+export const DISCORD_MAX_OPTIONS = 5;
+const DISCORD_LABEL_MAX = 80;
+const DISCORD_CUSTOM_ID_MAX = 100;
+
+/** The Ask as it was posted: the sha256 of the bytes of ask.json, cut to 16 hex characters. */
+export const askRev = text => createHash('sha256').update(typeof text === 'string' ? Buffer.from(text, 'utf8') : text).digest('hex').slice(0, 16);
+
+/**
+ * Whether an Ask may be answered with a Discord button. The only place the rule lives; the bot asks the
+ * server and never decides on its own.
+ * → { ok: true } | { ok: false, reason }
+ */
+export function discordEligible(ask) {
+  const no = reason => ({ ok: false, reason });
+  if (!ask || typeof ask !== 'object') return no('not an Ask');
+  if (ask.requirePasskey === true) return no('This Ask requires a passkey.');
+  if (ask.allowDrawing === true) return no('This Ask takes a drawing.');
+  const options = ask.options;
+  if (!Array.isArray(options) || options.length < 2 || options.length > DISCORD_MAX_OPTIONS) return no(`Buttons need 2 to ${DISCORD_MAX_OPTIONS} options.`);
+  const seen = new Set();
+  for (const option of options) {
+    if (!option || typeof option !== 'object') return no('An option is not an object.');
+    if (typeof option.id !== 'string' || !option.id) return no('An option has no id.');
+    if (seen.has(option.id)) return no('Two options share an id.');
+    seen.add(option.id);
+    if (typeof option.label !== 'string' || !option.label.trim() || option.label.length < 1 || option.label.length > DISCORD_LABEL_MAX) return no(`A button label is 1 to ${DISCORD_LABEL_MAX} characters.`);
+    if (option.image !== undefined && option.image !== null) return no('An option with a picture stays in the Hub.');
+    if (`a:${ask.id}:${option.id}`.length > DISCORD_CUSTOM_ID_MAX) return no('An option id is too long for a button.');
+  }
+  return { ok: true };
+}
+
+// A review's detail: what a `ready-for-review` event carries, checked field by field, because an
+// agent wrote it. A bad entry is dropped and never passed on.
+
+const httpUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https?:\/\//i.test(value) ? value : undefined);
+const httpsUrl = value => (typeof value === 'string' && value.length <= 2000 && /^https:\/\//i.test(value) ? value : undefined);
+/** A screenshot must come from GitHub's raw host: an agent's event must not make the owner's browser fetch from anywhere else. */
+const rawImageUrl = value => (httpsUrl(value) && /^https:\/\/raw\.githubusercontent\.com\//i.test(value) ? value : undefined);
+const PR_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+const CARD_DIR_RE = /^[a-z0-9][a-z0-9-]{0,63}\/[A-Za-z0-9][\w.-]{0,119}$/;
+const CARD_FILE_RE = /^(?:[A-Za-z0-9][\w.-]*\/){1,3}[A-Za-z0-9][\w.-]*\.md$/;
+const VERDICT_LEGS = ['smoke', 'review', 'qa'];
+const VERDICT_RESULTS = ['pass', 'fail', 'noted'];
+
+/** The label of a card file by its first folder: briefs/ → Brief, reviews/ → Review (QA triage when the name has -qa), qa/ → QA report, builds/ → Build report. */
+export function fileLabel(path) {
+  const parts = String(path).split('/');
+  const name = parts[parts.length - 1];
+  switch (parts[0]) {
+    case 'briefs': return 'Brief';
+    case 'reviews': return name.includes('-qa') ? 'QA triage' : 'Review';
+    case 'qa': return 'QA report';
+    case 'builds': return 'Build report';
+    default: return name;
+  }
+}
+
+/**
+ * Screenshot urls grouped into before/after pairs. The words `before` and `after` come out of the
+ * file name (whole words between `-` or `_`, anywhere in it) and what is left names the pair. An
+ * image with neither word is `other`. Order of first appearance is kept.
+ * → [{ label, before?, after?, other? }]
+ */
+export function screenshotPairs(urls) {
+  const pairs = [];
+  for (const url of urls) {
+    let name = '';
+    try { name = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? ''); } catch { name = String(url).split('/').pop() ?? ''; }
+    const words = name.replace(/\.[A-Za-z0-9]+$/, '').split(/[-_]+/).filter(Boolean);
+    const rest = words.filter(word => !/^(before|after)$/i.test(word));
+    const slot = words.some(word => /^before$/i.test(word)) ? 'before' : words.some(word => /^after$/i.test(word)) ? 'after' : 'other';
+    const label = rest.join(' ');
+    const found = pairs.find(pair => pair.label === label && !(slot in pair));
+    if (found) found[slot] = url;
+    else pairs.push({ label, [slot]: url });
+  }
+  return pairs;
+}
+
+/** The detail of one `ready-for-review` event, or null when no such event is in `events` (any order). */
+export function reviewDetail(events, id) {
+  const event = events.find(candidate => candidate.kind === 'ready-for-review' && candidate.file === id);
+  if (!event) return null;
+  const text = (value, length) => (typeof value === 'string' && value.trim() ? clip(value, length) : undefined);
+  const url = httpUrl(event.url);
+  const card = httpUrl(event.card);
+  const prs = (Array.isArray(event.prs) ? event.prs : []).filter(value => typeof value === 'string' && PR_RE.test(value)).slice(0, 10);
+  const cardDir = typeof event.cardDir === 'string' && CARD_DIR_RE.test(event.cardDir) && !event.cardDir.includes('..') ? event.cardDir : undefined;
+  const cardFiles = cardDir
+    ? (Array.isArray(event.cardFiles) ? event.cardFiles : [])
+      .filter(path => typeof path === 'string' && path.length <= 200 && CARD_FILE_RE.test(path) && !path.split('/').includes('..'))
+      .slice(0, 12).map(path => ({ path, label: fileLabel(path) }))
+    : [];
+  const shots = (Array.isArray(event.screenshots) ? event.screenshots : []).map(rawImageUrl).filter(Boolean).slice(0, 12);
+  const deployUrl = httpsUrl(event.deployUrl);
+  const verdicts = (Array.isArray(event.verdicts) ? event.verdicts : [])
+    .filter(verdict => verdict && typeof verdict === 'object' && VERDICT_LEGS.includes(verdict.leg) && VERDICT_RESULTS.includes(verdict.result) && typeof verdict.text === 'string')
+    .slice(0, 3).map(verdict => ({ leg: verdict.leg, result: verdict.result, text: String(verdict.text).slice(0, 300) }));
+  const done = events.find(candidate => candidate.kind === 'review-done' && candidate.review === id);
+  const summary = typeof event.summary === 'string' && event.summary.trim() ? event.summary.slice(0, 4000) : undefined;
+  return {
+    id, title: text(event.title, 200) ?? 'Review', at: event.ts,
+    ...(summary ? { summary } : {}),
+    ...(text(event.project, 80) ? { project: text(event.project, 80) } : {}),
+    ...(text(event.host, 80) ? { host: text(event.host, 80) } : {}),
+    ...(text(event.source, 80) ? { source: text(event.source, 80) } : {}),
+    ...(url ? { url } : {}), ...(card ? { card } : {}),
+    ...(prs.length ? { prs } : {}),
+    ...(cardDir ? { cardDir } : {}), ...(cardFiles.length ? { cardFiles } : {}),
+    ...(shots.length ? { screenshots: screenshotPairs(shots) } : {}),
+    ...(deployUrl ? { deployUrl } : {}),
+    ...(verdicts.length ? { verdicts } : {}),
+    done: !!done,
+    ...(done ? { doneAt: done.ts, ...(typeof done.by === 'string' ? { doneBy: clip(done.by, 80) } : {}) } : {}),
+  };
 }
