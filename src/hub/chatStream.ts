@@ -1,11 +1,11 @@
-import type { Item } from '../lib/hub'
+import type { ChatLine, Item } from '../lib/hub'
 import { HubError } from '../lib/hub'
 import { authHeaders } from '../local/client'
 
 export interface ChatHandlers {
   onDelta: (text: string) => void
   onCreated: (items: Item[]) => void
-  onDone: (conversation: string) => void
+  onDone: (conversation: string, user?: ChatLine) => void
   onError: (message: string) => void
 }
 
@@ -14,7 +14,7 @@ export interface ChatHandlers {
  * response body itself and parses its `event:` and `data:` blocks. Throws a HubError, before
  * anything streams, when the server refuses (a 502 from Hermes, a 503 when chat is not set up).
  */
-export async function streamChat(body: { conversation?: string; text: string }, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
+export async function streamChat(body: { conversation?: string; text: string; images?: { type: string; data: string }[] }, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
   const response = await fetch('/api/hub/chat', {
     method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   })
@@ -37,7 +37,7 @@ export async function streamChat(body: { conversation?: string; text: string }, 
     try { value = JSON.parse(data.join('\n')) as Record<string, unknown> } catch { return }
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
-    else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation)
+    else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined)
     else if (event === 'error') handlers.onError(typeof value.error === 'string' ? value.error : 'The reply stopped.')
   }
   for (;;) {

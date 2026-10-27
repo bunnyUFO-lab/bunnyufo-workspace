@@ -5,6 +5,7 @@ import Activity from './Activity'
 import AskView from './AskView'
 import Board from './Board'
 import Md from './Md'
+import ReviewView from './ReviewView'
 import Chat from './Chat'
 import Inbox from './Inbox'
 import Sketch from './Sketch'
@@ -23,6 +24,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'today' && <Today />}
       {route.screen === 'inbox' && <Inbox filter={route.id} />}
       {route.screen === 'ask' && (route.id ? <AskView key={route.id} id={route.id} /> : <Inbox filter="asks" />)}
+      {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Inbox filter="reviews" />)}
       {route.screen === 'board' && <Board project={route.id} />}
       {route.screen === 'activity' && <Activity filter={route.id} />}
       {route.screen === 'map' && <ProgressMap project={route.id} />}

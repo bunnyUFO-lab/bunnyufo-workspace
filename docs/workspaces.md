@@ -293,14 +293,74 @@ user (`Remote-User`), like every other write.
 | `GET /api/hub/today`, `/inbox?filter=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
+| `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copy, and the progress map built from it |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
+| `GET /api/hub/discord/asks`, `POST /api/hub/discord/answer` | The Asks bot only, with its own bearer token and no `Remote-User` (see Answers from Discord) |
+| `GET /api/hub/chat`, `/chat/:id` | The newest 30 conversations, and one conversation's lines. Chat needs `HERMES_URL` and `HERMES_API_KEY`, and a signed-in user where writes need `Remote-User` (503 when off, 401 without a user) |
+| `GET /api/hub/chat/:id/images/:file` | A picture sent in a conversation, behind the same chat gate (not `/hub/file`). `Cache-Control: private`, `nosniff`, sandboxed |
+| `POST /api/hub/chat` | `{ conversation?, text, images? }`; the reply streams back as server-sent events (`delta`, `created`, `done` with the saved user line, `error`). `images` is up to 4 `{ type: 'image/jpeg' \| 'image/png', data: <base64> }`, each at most 1.5 MB decoded, 5 MB together, 1 to 2048 px a side; the bytes are checked, metadata (EXIF, GPS) is stripped, and `text` may be empty with a picture. They reach Hermes as `image_url` data URLs and are stored beside the conversation as `chat/<id>/<file>`. If Hermes refuses them: 422, nothing saved. The body limit is 7 MB |
+| `POST /api/hub/transcribe` | Push-to-talk: audio (webm, ogg, mp4 or mpeg, at most 2 MB) in, `{ text }` out, through `STT_URL` |
+
+A blocked session stays in Needs you until any later event from the same session arrives (a
+`resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts
+`resumed` when a blocked session moves on. A `blocked` event may carry `url` (a Remote Control link
+into the session; the bare `https://claude.ai/code` counts as no link) and `appUrl` (the desktop
+app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to open the Claude app.
+
+A `ready-for-review` event may also carry `prs` (GitHub pull request links), `cardDir` (`<section>/<card folder>`), `cardFiles` (`.md` paths inside that folder, such as `briefs/x.md`), `screenshots` (https image links), `deployUrl` (an https build link) and `verdicts` (`{ leg: smoke|review|qa, result: pass|fail|noted, text }`, at most three). The review view (`#/~hub/review/<file>`) checks each field again, shows what is there and an empty line for what is not, and reads the card files from the site's `/w/<cardDir>/<path>`. On the local service, which has no `/w/` route, a file shows as not here and the view offers the card instead.
+
+### Answers from Discord
+
+A simple multiple-choice Ask also arrives as a Discord direct message with one button per option, and a
+click records the choice in `answer.json` with `via: "discord"`. The Hub then shows "via Discord". Notes,
+drawings and Asks that require a passkey stay in the web app. The bot is `site/asks-bot/`; it runs as a
+container beside the site API and calls it over the Docker network. Nothing here is on by default: both
+`HUB_DISCORD_TOKEN_SHA256` and `HUB_DISCORD_OWNER_ID` must be in `api.env`, or the two routes answer 404.
+
+**Trust model.**
+
+- Discord interactions that reach the bot over the gateway are not signed, so the server cannot prove that a
+  click happened. It trusts whoever holds the narrow bot token. The token lives only on the server that
+  already holds the bucket keys.
+- The token opens exactly two routes: list the open Asks that qualify (each with a `rev`), and record one
+  `choice` on one open Ask that qualifies, as the owner, once. It writes nothing else: every other route ignores
+  `Authorization`, and with `REQUIRE_REMOTE_USER=1` their writes still get 401. A passkey session cannot use these
+  two routes either.
+- The bot sets the `user` field of a click, and the server compares it with `HUB_DISCORD_OWNER_ID`. That check
+  catches a bug in the bot, not a thief who holds the token.
+- Each listed Ask carries a `rev`, the first 16 hex characters of the sha256 of its `ask.json`. The click sends it
+  back and the server reads `ask.json` fresh. If the Ask changed since the message was posted (a relabelled option, a
+  `requirePasskey` set later) the answer is a 409 and nothing is written. `answer.json` stays create-only, so a
+  double click, a replay or a race with the web app keeps the first answer.
+- The bot raises an alarm when an Ask is answered `via: "discord"` with an interaction id it did not send. The alarm only covers Asks the bot posted: a stolen token answering an Ask the bot never posted raises none.
+
+**Which Asks qualify.** `discordEligible()` in `site/api/hub-model.mjs` is the only place the rule lives: 2 to 5
+options, each with a label of 1 to 80 characters and no picture, no drawing, and `requirePasskey` is not `true`.
+
+**Requiring a passkey.** An Ask opts out with `"requirePasskey": true` in `ask.json`, or `cards ask create
+--require-passkey`. Set it on every Ask that approves a merge, a deploy, spending, a deletion or secrets. A writer
+that forgets the flag fails open, so the bot is not started until the skills and the assistant set it. The Hub marks
+such an Ask "Passkey only". The card API makes `ask.json` create-only for limited tokens (a replace, an upload URL or a
+delete is refused), so an agent cannot rewrite an Ask after the owner was shown it; limited tokens also cannot delete
+Hub answer files.
+
+**Data leaves for Discord.** An Ask's question and option labels reach Discord's servers. Do not put secrets in an Ask.
+
+**Kill switches, in this order.**
+
+1. Stops a stolen bot token: remove `HUB_DISCORD_TOKEN_SHA256` and `HUB_DISCORD_OWNER_ID` from `api.env` and restart the
+   site API (the homelab repo has a script for it, `asks-bot-env.sh --off`). Both routes then answer 404 to everyone.
+2. Stops the bot: `docker compose down` in the bot's folder on the server.
+3. Reset the bot token in the Discord Developer Portal and make a new narrow token with `node site/asks-bot/new-token.mjs`.
+
+Reverting this feature leaves every existing `answer.json` valid; without the label code the Hub shows those answers as "by owner".
 
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,
-and for chat `HERMES_URL`, `HERMES_API_KEY`, `HERMES_MODEL`, `STT_URL`, `STT_API_KEY`, `STT_MODEL`.
+`HUB_DISCORD_TOKEN_SHA256` and `HUB_DISCORD_OWNER_ID` for the Asks bot, and for chat `HERMES_URL`, `HERMES_API_KEY`, `HERMES_MODEL`, `STT_URL`, `STT_API_KEY`, `STT_MODEL`.
 
 ## Making a new workspace
 

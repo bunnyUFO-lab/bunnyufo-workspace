@@ -110,6 +110,16 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`event (${via}): resumed is a kind`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      const resumed = await cli(via, 'event', 'resumed', '--title', 'probe: back at work');
+      assert.equal(resumed.code, 0, resumed.stderr);
+      const [key] = keys(`events/${today()}/`);
+      assert.equal(fake.json(key).kind, 'resumed');
+    } finally { await close(); }
+  });
+
   test(`ask (${via}): create, list, answer by hand, list --answered, pickup, second pickup exits 3`, async () => {
     const { fake, cli, keys, dir, close } = await setup();
     try {
@@ -363,4 +373,34 @@ test('without a webhook nothing is posted and nothing is spooled', async () => {
     assert.equal(hook.posts.length, 0);
     await assert.rejects(readFile(spool, 'utf8'), /ENOENT/);
   } finally { await hook.close(); await close(); }
+});
+
+test('ask create: --require-passkey and the JSON field both set requirePasskey; a value that is not a boolean is refused', async () => {
+  const { fake, cli, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'ask.json');
+    const made = async (extra, ...flags) => {
+      await writeFile(file, JSON.stringify({ question: 'Merge the stack?', options: [{ id: 'y', label: 'Yes' }, { id: 'n', label: 'No' }], ...extra }));
+      return cli('api', 'ask', 'create', '--project', 'probe', '--file', file, ...flags);
+    };
+    const stored = result => fake.json(`sections/inbox/asks/${result.stdout.trim().split('\n').at(-1)}/ask.json`);
+
+    const byFlag = await made({}, '--require-passkey');
+    assert.equal(byFlag.code, 0, byFlag.stderr);
+    assert.equal(stored(byFlag).requirePasskey, true);
+
+    const byField = await made({ requirePasskey: true });
+    assert.equal(byField.code, 0, byField.stderr);
+    assert.equal(stored(byField).requirePasskey, true);
+
+    const plain = await made({});
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.ok(!('requirePasskey' in stored(plain)), 'Without it the field is not written.');
+
+    const bad = await made({ requirePasskey: 'yes' });
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /requirePasskey is true or false/);
+    const flagWins = await made({ requirePasskey: false }, '--require-passkey');
+    assert.equal(stored(flagWins).requirePasskey, true, 'The flag wins over the field.');
+  } finally { await close(); }
 });

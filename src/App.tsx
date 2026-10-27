@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -45,8 +45,8 @@ const pinRank = (e: WorkspaceCard) =>
 const sortPins = (cards: WorkspaceCard[]) =>
   cards.filter(e => e.pinned).sort((a, b) => pinRank(a) - pinRank(b) || byFreshness(a, b))
 
-/** A Hub screen is remounted when its address changes, except the map's panel: `map/<project>/<node>` keeps the map, with what is expanded, alive. */
-const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+/** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. */
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
 export default function App() {
   const { data, offline, lastSync } = useWorkspace()
@@ -551,7 +551,7 @@ export default function App() {
     <TodayContext.Provider value={host.hub ? today : null}>
     <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`} data-entity={route.id}>
       <Sidebar
-        hubScreen={host.hub ? route.hub?.screen ?? null : null}
+        hubScreen={host.hub ? navScreen(route.hub?.screen) : null}
         hubNeedsYou={needsYou}
         canWrite={canWrite}
         dragItem={drag.item}
@@ -676,7 +676,7 @@ export default function App() {
           )}
         </div>
       </main>
-      {host.hub && !entity && <HubTabs screen={route.hub?.screen ?? null} needsYou={needsYou} onHome={goHome} />}
+      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} />}
     </div>
     </TodayContext.Provider>
   )

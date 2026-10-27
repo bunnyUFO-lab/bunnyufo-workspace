@@ -30,14 +30,22 @@ export function useAutoHideHeader(page: string) {
 
   useEffect(() => {
     const followed = new WeakSet<Document>()
-    const last = new WeakMap<Element, number>()
+    const last = new WeakMap<Element, { top: number; max: number }>()
     const scrolled = (el: Element | null) => {
       if (!el || !isPhone()) return
       const top = el.scrollTop
-      const before = last.get(el)
-      last.set(el, top)
+      const max = el.scrollHeight - el.clientHeight
+      const prev = last.get(el)
+      // Rubber-banding past either end is not a direction.
+      if (top < 0 || top > max) return
+      last.set(el, { top, max })
       // A table scrolled sideways fires here too, with no vertical change.
-      if (before === undefined || top === before) return
+      if (!prev || top === prev.top) return
+      // Hiding the header gives the page its height, so at the bottom the browser pulls the scroll
+      // position up by the header's height: that is the page changing, not a scroll up. Reading it
+      // as one would show the header again, and flip it forever.
+      if (top >= max - 1 && max < prev.max) return
+      const before = prev.top
       if (top <= STEP) setHiddenOn(null)
       else if (top - before > STEP) setHiddenOn(current.current)
       else if (before - top > STEP) setHiddenOn(null)
