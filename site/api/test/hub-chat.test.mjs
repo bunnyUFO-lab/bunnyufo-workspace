@@ -10,6 +10,7 @@ import { createHub } from '../hub.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { startFakeHermes } from './fake-hermes.mjs';
 import { requestJson } from './hub-fixtures.mjs';
+import { jpeg, solidPng, textPng } from './png.mjs';
 
 async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-chat-'));
@@ -115,7 +116,8 @@ test('configuration: unset URL → chat false and 503; a failing Hermes → 502 
     const anonymous = await (await broken.call('GET', '/capabilities', undefined, {})).json();
     assert.deepEqual([anonymous.hub, anonymous.chat, anonymous.transcribe], [true, false, false]);
     assert.equal((await broken.call('POST', '/hub/chat', { text: '' })).status, 400);
-    assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(70 * 1024) })).status, 413);
+    assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(70 * 1024) })).status, 400, 'Long text is refused by length.');
+    assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(7.5 * 1024 * 1024) })).status, 413);
   } finally { await broken.close(); }
 });
 
@@ -163,5 +165,114 @@ test('the chat routes write only under sections/inbox/chat/', async () => {
     const writes = fake.log.filter(entry => entry.method === 'PUT' || entry.method === 'DELETE');
     assert.ok(writes.length >= 1);
     assert.deepEqual(writes.filter(entry => !entry.key.startsWith('sections/inbox/chat/')), []);
+  } finally { await close(); }
+});
+
+const b64 = buffer => buffer.toString('base64');
+const picture = (buffer, type) => ({ type, data: b64(buffer) });
+const objectsUnder = (fake, conversation) => [...fake.objects.keys()].filter(name => name.startsWith(`sections/inbox/chat/${conversation}/`));
+
+test('pictures: both reach Hermes as data URLs without metadata, are stored, saved on the line and sent back in done', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const png = textPng(40, 30);
+    const jpg = jpeg(64, 48);
+    const result = await chat(call, { text: 'What is this?', images: [picture(png, 'image/png'), picture(jpg, 'image/jpeg')] });
+    assert.equal(result.status, 200);
+    const done = result.events.at(-1);
+    const content = upstream.requests[0].messages.at(-1).content;
+    assert.deepEqual(content.map(part => part.type), ['text', 'image_url', 'image_url']);
+    assert.match(content[1].image_url.url, /^data:image\/png;base64,/);
+    assert.match(content[2].image_url.url, /^data:image\/jpeg;base64,/);
+    const sentJpeg = Buffer.from(content[2].image_url.url.split(',')[1], 'base64');
+    const sentPng = Buffer.from(content[1].image_url.url.split(',')[1], 'base64');
+    assert.ok(!sentJpeg.includes('Exif') && !sentJpeg.includes('GPS'));
+    assert.ok(!sentPng.includes('tEXt'));
+    const stored = objectsUnder(fake, done.data.conversation);
+    assert.equal(stored.length, 2);
+    for (const name of stored) assert.match(name.split('/').pop(), /^[a-z0-9]{10}\.(jpg|png)$/);
+    const savedJpeg = fake.objects.get(stored.find(name => name.endsWith('.jpg'))).body;
+    const savedPng = fake.objects.get(stored.find(name => name.endsWith('.png'))).body;
+    assert.ok(!savedJpeg.includes('Exif') && !savedJpeg.includes('GPS') && !savedPng.includes('tEXt'));
+    assert.deepEqual(savedPng.subarray(16, 24), png.subarray(16, 24), 'Same size.');
+    assert.equal(savedJpeg.readUInt16BE(savedJpeg.indexOf(Buffer.from([0xff, 0xc0])) + 7), 64);
+    const line = lines(fake, done.data.conversation)[0];
+    assert.deepEqual(line.images.map(image => [image.type, image.width, image.height]), [['image/png', 40, 30], ['image/jpeg', 64, 48]]);
+    assert.deepEqual(done.data.user, line);
+  } finally { await close(); }
+});
+
+test('pictures are served with the chat gate, nosniff and the right type; odd names are 404', async () => {
+  const { fake, call, close } = await fixture();
+  try {
+    const result = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    const id = result.events.at(-1).data.conversation;
+    const file = result.events.at(-1).data.user.images[0].file;
+    const got = await call('GET', `/hub/chat/${id}/images/${file}`);
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get('content-type'), 'image/png');
+    assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(got.headers.get('cache-control'), /immutable/);
+    assert.deepEqual(Buffer.from(await got.arrayBuffer()), fake.objects.get(`sections/inbox/chat/${id}/${file}`).body);
+    assert.equal((await call('GET', `/hub/chat/${id}/images/${file}`, undefined, {})).status, 401);
+    assert.equal((await call('GET', `/hub/chat/${id}/images/aaaaaaaaaa.png`)).status, 404);
+    assert.equal((await call('GET', `/hub/chat/${id}/images/..%2Fx.png`)).status, 404);
+    assert.equal((await call('GET', `/hub/chat/${id}/images/%2e%2e`)).status, 404);
+    assert.equal((await call('GET', `/hub/chat/${id}/images/${file.replace('.png', '.gif')}`)).status, 404);
+    assert.equal((await call('GET', `/hub/chat/nope/images/${file}`)).status, 404);
+  } finally { await close(); }
+});
+
+test('picture limits: count, size, total, type and dimensions; a picture alone is a message titled Picture', async () => {
+  const { call, close } = await fixture();
+  try {
+    const small = picture(solidPng(4, 4), 'image/png');
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [small, small, small, small, small] })).status, 400);
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [picture(textPng(10, 10, { pad: 1.6 * 1024 * 1024 }), 'image/png')] })).status, 413);
+    const big = picture(textPng(10, 10, { pad: 1.4 * 1024 * 1024 }), 'image/png');
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [big, big, big, big] })).status, 413);
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [{ type: 'image/gif', data: b64(Buffer.from('GIF89a......')) }] })).status, 415);
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [{ type: 'image/png', data: b64(jpeg(5, 5)) }] })).status, 415, 'Bytes must match the type.');
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [picture(jpeg(3000, 10), 'image/jpeg')] })).status, 400);
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [picture(solidPng(10, 2049), 'image/png')] })).status, 400);
+    assert.equal((await call('POST', '/hub/chat', { text: '', images: [] })).status, 400);
+    const only = await chat(call, { text: '', images: [small] });
+    assert.equal(only.status, 200);
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.equal(listed.conversations[0].title, 'Picture');
+  } finally { await close(); }
+});
+
+test('the next turn sends the earlier picture back; over the 6 MB budget the oldest become a note', async () => {
+  const { upstream, call, close } = await fixture();
+  try {
+    const first = await chat(call, { text: 'one', images: [picture(solidPng(6, 6), 'image/png')] });
+    const id = first.events.at(-1).data.conversation;
+    await chat(call, { conversation: id, text: 'two' });
+    const content = upstream.requests[1].messages[0].content;
+    assert.deepEqual(content.map(part => part.type), ['text', 'image_url']);
+    assert.match(content[1].image_url.url, /^data:image\/png;base64,/);
+
+    const heavy = picture(textPng(10, 10, { pad: 1.4 * 1024 * 1024 }), 'image/png');
+    const other = await chat(call, { text: 'a', images: [heavy] });
+    const big = other.events.at(-1).data.conversation;
+    for (const word of ['b', 'c', 'd', 'e']) await chat(call, { conversation: big, text: word, images: [heavy] });
+    const parts = upstream.requests.at(-1).messages.flatMap(message => (Array.isArray(message.content) ? message.content : []));
+    const sent = parts.filter(part => part.type === 'image_url').length;
+    const notes = parts.filter(part => part.type === 'text' && part.text === '[An earlier picture is not included.]').length;
+    assert.equal(sent, 4, 'The current picture and three earlier ones fit in 6 MB.');
+    assert.equal(notes, 1, 'The oldest becomes a note.');
+    assert.equal(upstream.requests.at(-1).messages[0].content.some(part => part.text === '[An earlier picture is not included.]'), true);
+  } finally { await close(); }
+});
+
+test('when Hermes refuses the pictures the answer is 422 and nothing is written', async () => {
+  const { fake, call, close } = await fixture({ hermes: { refuseImages: true } });
+  try {
+    const answer = await chat(call, { text: 'see', images: [picture(solidPng(5, 5), 'image/png')] });
+    assert.equal(answer.status, 422);
+    assert.equal(answer.body.error, 'Hermes could not take the picture: This model does not accept images.');
+    assert.deepEqual([...fake.objects.keys()].filter(name => name.includes('/chat/')), []);
+    assert.equal((await chat(call, { text: 'plain' })).status, 200, 'Text-only turns still work.');
   } finally { await close(); }
 });
