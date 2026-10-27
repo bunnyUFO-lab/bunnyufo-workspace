@@ -191,6 +191,7 @@ function MapView({ model }: { model: MapModel }) {
             return (
               <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className="hub-map-node"
                 aria-label={`${task.title}, ${STATE_LABEL[task.state]}`} aria-pressed={selected === task.id} onClick={() => press(task)} onKeyDown={onKey(task)}>
+                <title>{nodeTip(task.title, task.id)}</title>
                 <circle cx={task.x} cy={task.y} r="8" strokeWidth="2.5" style={{ stroke: color, fill: task.state === 'done' || task.state === 'you' ? color : 'var(--surface-solid)' }} />
                 <MapSigns signs={task.signs} x={task.x + 13} y={task.y - 11} />
                 {task.lines.map((line, k) => (
@@ -205,6 +206,7 @@ function MapView({ model }: { model: MapModel }) {
             return (
               <g key={feature.id} data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className="hub-map-node"
                 aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.done} of ${feature.total} done`} aria-expanded={feature.open} onClick={() => press(feature)} onKeyDown={onKey(feature)}>
+                <title>{nodeTip(feature.title, feature.id)}</title>
                 <circle cx={cx} cy={feature.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
                 <text x={cx} y={feature.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.done}/{feature.total}</text>
                 <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.y - radius + 2} />
@@ -217,6 +219,7 @@ function MapView({ model }: { model: MapModel }) {
             return (
               <g key={milestone.id} data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className="hub-map-node"
                 aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.done} of ${milestone.total} done`} aria-expanded={milestone.open} onClick={() => press(milestone)} onKeyDown={onKey(milestone)}>
+                <title>{nodeTip(milestone.title, milestone.id)}</title>
                 <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" style={{ stroke: milestone.col, fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
                 {!milestone.open && <text x={milestone.x} y={milestone.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.done}/{milestone.total}</text>}
                 <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
@@ -245,6 +248,9 @@ function MapView({ model }: { model: MapModel }) {
   )
 }
 
+/** Hover text for a map node: the full title, then the id unless it is a synthetic group (its id has a ~). */
+const nodeTip = (title: string, id: string) => (id.includes('~') ? title : `${title} · ${id}`)
+
 function Detail({ node, model, titleOf, allTasks }: { node: MapNode; model: MapModel; titleOf: (id: string) => string; allTasks: MapTask[] }) {
   if (node.kind === 't') {
     const task = allTasks.find(item => item.id === node.id)
@@ -255,7 +261,7 @@ function Detail({ node, model, titleOf, allTasks }: { node: MapNode; model: MapM
     return (
       <>
         <div className="hub-map-detail-title">{task.title} · <span style={{ color: STATE_COLOR[task.state] }}>{STATE_LABEL[task.state]}</span></div>
-        <div className="hub-muted">{task.id}{words.length ? ` · ${words.join(' · ')}` : ''}</div>
+        <div className="hub-muted"><span className="hub-id">{task.id}</span>{words.length ? ` · ${words.join(' · ')}` : ''}</div>
         {task.deps.length > 0 && <div className="hub-muted">Needs first: {task.deps.map(titleOf).join(', ')}</div>}
         {unlocks.length > 0 && <div className="hub-muted">Unlocks: {unlocks.join(', ')}</div>}
         <div className="hub-actions start">
