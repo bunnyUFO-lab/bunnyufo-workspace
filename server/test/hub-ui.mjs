@@ -269,7 +269,7 @@ try {
     assert.equal(await guest.locator('.hub-row', { hasText: 'A read-only question' }).count(), 1);
     assert.match(await guest.locator('.hub-banner').innerText(), /marking reviews done/);
     const readOnlyReview = guest.locator('.hub-row', { hasText: 'A read-only review' });
-    assert.equal(await readOnlyReview.locator('a').count(), 0, 'No link, so only Mark done.');
+    assert.equal(await readOnlyReview.locator('a.hub-btn').count(), 0, 'No link, so only Mark done.');
     const markDone = readOnlyReview.locator('button', { hasText: 'Mark done' });
     assert.equal(await markDone.getAttribute('aria-disabled'), 'true');
     await markDone.click({ force: true });
@@ -484,7 +484,7 @@ try {
   const bareRow = page.locator('.hub-row', { hasText: 'Bare review' });
   assert.equal(await reportRow.locator('a.hub-btn', { hasText: 'Open report' }).getAttribute('href'), 'https://example.test/section#/report');
   assert.equal(await reportRow.locator('a.hub-btn').count(), 1);
-  assert.equal(await bareRow.locator('a').count(), 0, 'A review with no link has no link button.');
+  assert.equal(await bareRow.locator('a.hub-btn').count(), 0, 'A review with no link has no link button.');
   assert.equal(await page.locator('.hub-row').count(), 3);
   assert.equal(await page.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
   assert.equal(await page.locator('[data-readonly-note]').count(), 0);

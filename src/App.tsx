@@ -613,7 +613,7 @@ export default function App() {
 
         <div className="content">
           {route.hub && host.hub ? (
-            <ReportBoundary key={JSON.stringify(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
+            <ReportBoundary key={route.hub.screen === 'review' ? `review/${(route.hub.id ?? '').split('/')[0]}` : JSON.stringify(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
               <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><HubScreen route={route.hub} /></Suspense>
             </ReportBoundary>
           ) : (
