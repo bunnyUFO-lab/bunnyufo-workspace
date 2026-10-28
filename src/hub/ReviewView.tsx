@@ -134,10 +134,11 @@ export default function ReviewView({ route }: { route: string }) {
   const prs = detail.prs?.length ? detail.prs : foundPrs ? linked.prs : detail.url ? [detail.url] : []
   const folder = file && file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
   // An event from before reviews carried links and results: one note instead of four empty sections.
-  const legacy = !detail.prs?.length && !cardDir && !files.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
+  const legacy = !detail.prs?.length && !detail.cardDir && !detail.cardFiles?.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
   const cardLink = detail.card && <a className="hub-btn" href={detail.card} target="_blank" rel="noopener noreferrer">Open the card</a>
   const sprintCard = inferred && <a className="hub-btn" href={`/${encodeURIComponent(inferred.section)}${entityHash(inferred.card.id)}`} target="_blank" rel="noopener noreferrer" data-sprint-card>Sprint card: {inferred.card.title}</a>
   const found = inferred || foundPrs
+  const showFiles = !legacy || files.length > 0
 
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
@@ -160,7 +161,7 @@ export default function ReviewView({ route }: { route: string }) {
               <p className="hub-muted" data-legacy>{found
                 ? 'This review was posted before reviews carried their links and test results. The links here were found from the text of the summary.'
                 : 'This review was posted before reviews carried their links and test results. The summary above is what came with it.'}</p>
-              {(cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
+              {!showFiles && (cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
             </section>
           )}
           {!legacy && <section className="hub-panel" data-section="status" aria-label="Status">
@@ -186,7 +187,7 @@ export default function ReviewView({ route }: { route: string }) {
             <h3>Screenshots</h3>
             {detail.screenshots?.length ? <Shots pairs={detail.screenshots} /> : <p className="hub-muted">No screenshots came with this item.</p>}
           </section>}
-          {!legacy && <section className="hub-panel" data-section="files" aria-label="Files on the card">
+          {showFiles && <section className="hub-panel" data-section="files" aria-label="Files on the card">
             <h3>Files on the card</h3>
             {files.length === 0 && <p className="hub-muted">No brief or reports came with this item.</p>}
             <div className="hub-review-files">

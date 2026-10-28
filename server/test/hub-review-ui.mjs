@@ -197,7 +197,9 @@ try {
   const prLinks = page.locator('[data-section="prs"] a');
   assert.deepEqual(await prLinks.evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['https://github.com/example/probe-app/pull/2', 'https://github.com/example/workspace-skills/pull/26']);
   assert.equal(await page.locator('[data-found]').count(), 1, 'Says they were found in the summary.');
-  assert.match(await page.locator('[data-legacy], .hub-review-side').first().innerText(), /found from the text|Found in the summary/);
+  assert.match(await page.locator('[data-legacy]').innerText(), /found from the text/, 'The old-review note says where the links came from.');
+  for (const name of ['status', 'shots', 'try']) assert.equal(await page.locator(`[data-section="${name}"]`).count(), 0, `The empty ${name} panel stays hidden.`);
+  assert.equal(await page.locator('[data-section="files"] [data-file="reviews/x-1-qa.md"]').count(), 1, 'The inferred file is listed.');
   assert.equal(await page.locator('.hub-md a[href="https://github.com/example/probe-app/pull/2"]').count(), 1, 'PR #2 is a link in the summary.');
   assert.equal(await page.locator('.hub-md a[href="https://github.com/example/workspace-skills/pull/26"]').count(), 1);
   assert.equal(await page.locator('[data-sprint-card]').first().innerText(), 'Sprint card: Hubdemo sprint');
