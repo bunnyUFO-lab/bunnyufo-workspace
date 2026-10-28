@@ -1,0 +1,24 @@
+#!/bin/sh
+# Blocks a push to the public remote when the commits being pushed match ~/.buw/leak-patterns.txt.
+# Matched text is never printed. Pushes to the private remote are not checked.
+remote="$1"
+case "$remote" in private) exit 0 ;; esac
+hooks="$(cd "$(dirname "$0")" && pwd)"
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue          # deleting a ref: nothing is sent
+  if [ "$remote_sha" = "$zero" ]; then
+    base="$(git rev-parse --verify -q "refs/remotes/$remote/main")" || base=""
+    range="${base:+$base..}$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  node "$hooks/check-leaks.mjs" --root "$PWD" --history "$range" >/dev/null 2>&1
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "pre-push: BLOCKED. $local_ref has commits that match the leak patterns (check exit $rc). Nothing was pushed." >&2
+    echo "pre-push: run: node scripts/check-leaks.mjs --history \"$range\" --show   (prints the matches)" >&2
+    exit 1
+  fi
+done
+exit 0
