@@ -1,3 +1,14 @@
+/* Shared report theme: the app says light or dark in ?buw-theme= and later in buw:theme messages from its frame.
+   A page that sets data-buw-theme="custom" keeps its own colours. */
+(() => {
+  const root = document.documentElement;
+  if (root.dataset.buwThemeListening) return;
+  root.dataset.buwThemeListening = 'true';
+  const custom = root.dataset.buwTheme === 'custom';
+  const set = theme => { if (!custom && (theme === 'dark' || theme === 'light')) root.dataset.buwTheme = theme; };
+  try { set(new URLSearchParams(location.search).get('buw-theme')); } catch { /* No query: the page keeps its own theme. */ }
+  window.addEventListener('message', event => { if (event.source === parent && event.data?.type === 'buw:theme') set(event.data.theme); });
+})();
 /* Shared report image viewer: no dependencies, network calls or content rewriting. */
 (() => {
   if (window.__buwReportViewer) return;
