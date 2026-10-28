@@ -275,7 +275,8 @@ export default function App() {
   }, [workspaces, goHome])
 
   useEffect(() => {
-    document.title = entity ? `bunnyUFO Workspace — ${entity.title}` : 'bunnyUFO Workspace'
+    const title = entity ? `bunnyUFO Workspace — ${entity.title}` : 'bunnyUFO Workspace'
+    document.title = host.dev ? `[dev] ${title}` : title
   }, [entity])
 
   // The open card decides the project. A pin crosses the filter, so a card opened from the
@@ -549,6 +550,13 @@ export default function App() {
 
   return (
     <TodayContext.Provider value={host.hub ? today : null}>
+    {host.dev && (
+      <div className="dev-banner" data-dev-banner role="status">
+        Development copy · {host.dev.branch ?? 'no branch deployed yet'}
+        {host.dev.sha ? ` · ${host.dev.sha.slice(0, 7)}` : ''}
+        {host.dev.pr ? ` · PR #${host.dev.pr}` : ''}
+      </div>
+    )}
     <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`} data-entity={route.id}>
       <Sidebar
         onHome={goHome}

@@ -58,6 +58,25 @@ button:focus-visible {
   height: 100%;
 }
 
+/* The development copy's strip above everything; the layout gives up its height. */
+.dev-banner {
+  position: relative;
+  z-index: 2;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  background: var(--amber);
+  color: #1b1307;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dev-banner + .app-layout { height: calc(100% - 28px); }
+
 .boot {
   position: relative;
   z-index: 1;

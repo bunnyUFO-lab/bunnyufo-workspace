@@ -280,6 +280,33 @@ Locally, `npm run dev` proxies `/api`, `/sites.json` and `/w` to `127.0.0.1:8099
 with the aws CLI's default profile) gives the preview exactly what the published site shows,
 controls included.
 
+### Development copy
+
+A second, separate copy of the site runs a branch of this repository, so a change can be tried on the
+real cards before it merges. It is its own stack, never a path on the real site: its own Caddy, its own
+site-API container, its own site folder, and its own key, which can write only what is listed below.
+It reads every real card section.
+
+The same code serves both; these settings make the difference (all optional, and with none set the
+service is the real one):
+
+| Setting | Where | Real value | Development copy |
+|---|---|---|---|
+| `HUB_INBOX` | site API | `inbox` | `inbox-dev`. The Hub reads and writes this section only. It must be `inbox` or `inbox-<name>`, or the service refuses to start. |
+| `BUW_STATE_KEY` | site API | `state.json` | `dev-state.json`: pins, archives and tags stay out of the real state. |
+| `BUW_DEV` | site API | unset | `1`. Writes to a card section are refused (403) unless its id starts with `dev-`, and `/api/capabilities` reports `dev: { branch, sha, pr, at }`, read from the `.deployed-ref` file the deploy leaves beside `server.mjs`. The app shows a banner and prefixes its title with `[dev]`. |
+| `BUW_INBOX_SECTION` | `cards` client | `inbox` | `inbox-dev`. Without an explicit `BUW_DISCORD_NEEDS_YOU`, no ping is sent, so a test item never sends a link to the real site to a phone. |
+| `BUW_SITE_API` | Caddy | `buw-site-api:8099` | the dev container's name and port. |
+| `BUW_COMPOSE_PROJECT`, `BUW_SITE_API_CONTAINER`, `BUW_DOCKER_NETWORK` | `publish-site-api.sh`, compose | `api`, `buw-site-api`, `buw-docs_default` | names of their own. Both stacks deploy from a folder called `api`, so without a project name compose would see one project and replace the real container. |
+
+The card API accepts `inbox-dev` beside `inbox` with the same rules (answers and snoozes stay the
+Hub's). Widening it needs `site/card-api/deploy.sh` once, from the PC.
+
+Deploy a branch with the `publish-dev.yml` workflow of the deploy repository:
+`gh workflow run publish-dev.yml -R <owner>/<deploy repo> -f branch=<branch>`. The copy's address is
+`devUrl` in `~/.buw/hub.json`. Stacked pull requests each branch from the one below; deploy the tip of
+the stack there before asking for review.
+
 ## The Hub
 
 `HUB=1` in the site API's `api.env` turns on the Hub: `/api/hub/…` routes over the `inbox`
