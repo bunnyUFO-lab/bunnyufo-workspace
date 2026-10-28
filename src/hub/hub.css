@@ -260,6 +260,11 @@
 .hub-sketches { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
 .hub-sketch { display: flex; flex-direction: column; gap: 6px; padding: 8px; text-decoration: none; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-lg); }
 .hub-sketch:hover { background: var(--surface-2); }
+/* Delete sits on the tile's corner, outside the link, so a tap on it never opens the sketch. */
+.hub-sketch-tile { position: relative; display: flex; flex-direction: column; }
+.hub-sketch-tile .hub-sketch { flex: 1; }
+.hub-sketch-delete { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: var(--surface-solid); color: var(--text-dim); font-size: 0.8rem; cursor: pointer; }
+.hub-sketch-delete:hover, .hub-sketch-delete:focus-visible { border-color: var(--red); color: var(--red); }
 .hub-sketch-big { max-height: 360px; aspect-ratio: auto; background: #fff; }
 .hub-row-button { width: 100%; background: none; border: 0; border-top: 1px solid var(--hairline); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 

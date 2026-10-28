@@ -347,6 +347,8 @@ test('projects, Beads and the map', async () => {
     seed.put('beads/magic-loops.meta.json', meta);
     for (const event of events) seed.event(event);
     seed.ask(askJson({ id: id('mapask', 'm111'), now: NOW, project: 'probe' }));
+    // A session's worktree folder reported as a project is not one.
+    seed.ask(askJson({ id: id('wtask', 'w111'), now: NOW, project: 'kind-poincare-019351' }));
     const projects = (await get('/hub/projects')).body.projects;
     assert.deepEqual(projects.map(item => [item.id, item.name, item.beads]), [['magic-loops', 'Magic Loops', true], ['probe', 'Probe', false]]);
     assert.ok(projects[0].pushedAt);
@@ -383,6 +385,24 @@ test('drawings: a draft is created, listed, read, replaced on its etag and refus
     assert.equal(stale.body.current.text, second);
     assert.equal((await post(`/hub/drawings/${draft}`, { scene: 'nope', png: 'x', base: saved.body.etag })).status, 400);
     assert.equal((await post('/hub/drawings/20260101-zzzzzz', { scene: first, png: png(10, 10).toString('base64'), base: 'x' })).status, 404);
+  } finally { await close(); }
+});
+
+test('drawings: deleting one hides it from the list, a read and a save, and keeps its files', async () => {
+  const { fake, post, get, close } = await fixture();
+  try {
+    const kept = (await post('/hub/drawings', { scene: scene([{ type: 'rectangle', id: 'k' }]), png: png(10, 10).toString('base64') })).body.id;
+    const draft = (await post('/hub/drawings', { scene: scene([{ type: 'rectangle', id: 'a' }]), png: png(10, 10).toString('base64') })).body;
+    const removed = await post(`/hub/drawings/${draft.id}/delete`, {});
+    assert.equal(removed.status, 200);
+    assert.deepEqual(removed.body, { deleted: draft.id });
+    assert.deepEqual((await get('/hub/drawings')).body.drawings.map(item => item.id), [kept], 'Only the other sketch is listed.');
+    assert.equal((await get(`/hub/drawings/${draft.id}`)).status, 404);
+    assert.equal((await post(`/hub/drawings/${draft.id}`, { scene: scene([]), png: png(10, 10).toString('base64'), base: draft.etag })).status, 404);
+    assert.ok(fake.objects.has(`sections/inbox/drawings/${draft.id}/drawing.excalidraw`), 'Nothing is removed from the bucket.');
+    assert.ok(fake.objects.has(`sections/inbox/drawings/${draft.id}/deleted.json`));
+    assert.equal((await post(`/hub/drawings/${draft.id}/delete`, {})).status, 200, 'A second delete is the same answer.');
+    assert.equal((await post('/hub/drawings/20260101-zzzzzz/delete', {})).status, 404);
   } finally { await close(); }
 });
 

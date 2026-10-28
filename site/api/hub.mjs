@@ -597,6 +597,13 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     throw fail('Could not find a free id; try again.', 409);
   }
 
+  /**
+   * A Claude Code session's worktree folder (adjective-name-<6 hex>, or a task slug and 6 hex). The
+   * session hooks named a project after its folder when the repository's CLAUDE.md had no Beads
+   * project line, so those names are not projects: they stay out of the list unless one has a Beads copy.
+   */
+  const WORKTREE_NAME = /-[0-9a-f]{6}$/;
+
   async function projects(at) {
     const found = new Map();
     const add = (id, patch = {}) => {
@@ -614,7 +621,7 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     for (const row of checklists) add(row.checklist.project);
     for (const item of requests) add(item.project);
     for (const event of window.events) add(event.project);
-    return [...found.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+    return [...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)).sort((a, b) => (a.id < b.id ? -1 : 1));
   }
 
   async function serveFile(response, rel) {
@@ -646,12 +653,13 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     for (const object of objects) {
       const [id, file] = object.key.slice(folder('drawings').length).split('/');
       if (!validDrawingId(id)) continue;
-      const row = found.get(id) ?? { id, updated: '', hasPng: false };
+      const row = found.get(id) ?? { id, updated: '', hasPng: false, deleted: false };
       if (file === 'drawing.excalidraw') row.updated = object.lastModified ? new Date(object.lastModified).toISOString() : row.updated;
       if (file === 'drawing.png') row.hasPng = true;
+      if (file === 'deleted.json') row.deleted = true;
       found.set(id, row);
     }
-    return [...found.values()].filter(row => row.updated).sort((a, b) => (a.updated < b.updated ? 1 : -1)).slice(0, 20);
+    return [...found.values()].filter(row => row.updated && !row.deleted).map(({ deleted, ...row }) => row).sort((a, b) => (a.updated < b.updated ? 1 : -1)).slice(0, 20);
   }
 
   async function saveDrawingNew(data, at) {
@@ -669,8 +677,23 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     throw fail('Could not find a free id; try again.', 409);
   }
 
+  /**
+   * Deleting a sketch writes deleted.json beside it, once: the list, a read and a save then act as if it
+   * were gone, and nothing is removed from the bucket. Requests and answers keep the copy they were sent with.
+   */
+  const isDeleted = id => exists(`drawings/${id}/deleted.json`);
+  async function deleteDrawing(id, user, at) {
+    if (!validDrawingId(id) || !(await exists(`drawings/${id}/drawing.excalidraw`))) throw fail('No such drawing.', 404);
+    try {
+      await bucket.put(key(`drawings/${id}/deleted.json`), `${JSON.stringify({ at: at.toISOString(), by: user || 'local' }, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
+    } catch (error) {
+      if (error.status !== 412) throw error; // deleted already: the same answer
+    }
+    return { status: 200, body: { deleted: id } };
+  }
+
   async function saveDrawingOld(id, data) {
-    if (!validDrawingId(id)) throw fail('No such drawing.', 404);
+    if (!validDrawingId(id) || await isDeleted(id)) throw fail('No such drawing.', 404);
     const checked = checkDrawing({ scene: data.scene, png: data.png });
     const rel = `drawings/${id}/drawing.excalidraw`;
     const current = await fresh(rel);
@@ -790,7 +813,7 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
           } else if (route === '/hub/drawings') {
             reply({ drawings: await drawingList() });
           } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
-            if (!validDrawingId(match[1])) throw fail('No such drawing.', 404);
+            if (!validDrawingId(match[1]) || await isDeleted(match[1])) throw fail('No such drawing.', 404);
             const got = await fresh(`drawings/${match[1]}/drawing.excalidraw`);
             if (!got) throw fail('No such drawing.', 404);
             reply({ text: got.text, etag: got.etag });
@@ -820,6 +843,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
           send(await createRequest(raw, user, at));
         } else if (route === '/hub/drawings') {
           send(await saveDrawingNew(raw, at));
+        } else if ((match = /^\/hub\/drawings\/([^/]+)\/delete$/.exec(route))) {
+          send(await deleteDrawing(match[1], user, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
           send(await saveDrawingOld(match[1], raw));
         } else {
