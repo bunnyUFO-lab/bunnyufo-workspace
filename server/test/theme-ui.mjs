@@ -29,6 +29,8 @@ try {
   await page.locator('.report-document[aria-busy=false]').waitFor();
   const report = () => page.frameLocator('iframe.report-frame');
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark');
+  assert.match(await page.locator('body').evaluate(node => getComputedStyle(node).fontFamily), /^Geist,/);
+  assert.equal(await page.locator('body').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(10, 11, 13)');
   const mountId = await report().locator('html').evaluate(() => window.mountId);
   await report().getByRole('textbox', { name: 'Keep my draft' }).fill('Keep this edit');
   await report().locator('body').evaluate(() => scrollTo(0, 400));

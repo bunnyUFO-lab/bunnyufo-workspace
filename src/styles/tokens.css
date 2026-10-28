@@ -1,76 +1,88 @@
 /* ────────────────────────────────────────────────────────────────
-   bunnyUFO Workspace design system — “Luminous Indigo” tokens
-   Dark glass over near-black, pink→purple gradient edges,
-   Fraunces display serif + Inter body. Single source of truth —
-   mirrored for generated reports in scripts/shared/report_style.py.
+   bunnyUFO Workspace design system — mission-control tokens.
+   Flat near-black ground, hairline edges, one blue accent, Geist.
+   The mission-control palette, re-typed from the palette the owner
+   chose; no code copied. Old token names stay and take the new
+   values; the new names sit beside them. Cards keep their own look.
    ──────────────────────────────────────────────────────────────── */
+
 :root {
   color-scheme: dark;
 
-  /* ── Surfaces ── */
-  --bg: #0a0a0c;
-  --bg-deep: #060608;
-  --surface-1: rgba(255, 255, 255, 0.03);
-  --surface-2: rgba(255, 255, 255, 0.055);
-  --surface-3: rgba(255, 255, 255, 0.09);
-  --surface-solid: #131316;
-  --sidebar-glass: #0c0c0f;
-  --topbar-glass: rgba(10, 10, 12, 0.65);
+  /* ── Mission-control palette ── */
+  --ground: #0a0b0d;
+  --s1: #101113;
+  --s2: #16181b;
+  --s3: #1e2024;
+  --line: rgba(255, 255, 255, 0.08);
+  --line2: rgba(255, 255, 255, 0.13);
+  --t1: #e7e8ea;
+  --t2: #a0a3a8;
+  --t3: #6b6e74;
+  --t4: #4b4e54;
+  --accent: #6ea8fe;
+  --st-working: #5cb8ff;
+  --st-needs: #f5c451;
+  --st-failed: #f28b82;
+  --st-done: #5fd0a0;
+  --st-idle: #6b6e74;
+  --font: 'Geist', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Geist Mono', 'Cascadia Code', Consolas, monospace;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --r1: 8px;
+  --r2: 12px;
+  --r3: 16px;
+
+  /* ── Surfaces (old names, new values) ── */
+  --bg: var(--ground);
+  --bg-deep: #07080a;
+  --surface-1: rgba(255, 255, 255, 0.02);
+  --surface-2: rgba(255, 255, 255, 0.035);
+  --surface-3: rgba(255, 255, 255, 0.06);
+  --surface-solid: var(--s1);
+  --sidebar-glass: #0c0d0f;
+  --topbar-glass: color-mix(in srgb, var(--s1) 94%, transparent);
 
   /* ── Ink ── */
-  --text: #ececf1;
+  --text: var(--t1);
   --text-bright: #ffffff;
-  --text-dim: #9a9aa6;
-  --text-muted: #5c5c68;
+  --text-dim: var(--t2);
+  --text-muted: var(--t3);
 
-  /* ── Brand ── */
-  --pink: #f0a0b0;
-  --pink-bright: #ffc2cf;
-  --purple: #b794f4;
-  --green: #6ee7a0;
-  --amber: #eab56e;
-  --blue: #7eb8ff;
-  --red: #e87070;
+  /* ── Brand: one accent, state colours ── */
+  --pink: var(--accent);
+  --pink-bright: color-mix(in srgb, var(--accent) 88%, white);
+  --purple: var(--accent);
+  --blue: var(--accent);
+  --green: var(--st-done);
+  --amber: var(--st-needs);
+  --red: var(--st-failed);
 
-  --pink-dim: rgba(240, 160, 176, 0.14);
-  --purple-dim: rgba(183, 148, 244, 0.14);
-  --green-dim: rgba(110, 231, 160, 0.13);
-  --amber-dim: rgba(234, 181, 110, 0.13);
-  --red-dim: rgba(232, 112, 112, 0.13);
+  --pink-dim: color-mix(in srgb, var(--accent) 12%, transparent);
+  --purple-dim: color-mix(in srgb, var(--accent) 12%, transparent);
+  --green-dim: color-mix(in srgb, var(--st-done) 12%, transparent);
+  --amber-dim: color-mix(in srgb, var(--st-needs) 12%, transparent);
+  --red-dim: color-mix(in srgb, var(--st-failed) 12%, transparent);
 
-  /* ── Hairlines & gradient edges ── */
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.13);
-  --edge: linear-gradient(
-    135deg,
-    rgba(240, 160, 176, 0.38),
-    rgba(183, 148, 244, 0.22) 45%,
-    rgba(255, 255, 255, 0.07) 80%
-  );
-  --edge-soft: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.13),
-    rgba(255, 255, 255, 0.05)
-  );
-  --edge-amber: linear-gradient(
-    135deg,
-    rgba(234, 181, 110, 0.5),
-    rgba(240, 160, 176, 0.2) 60%,
-    rgba(255, 255, 255, 0.06)
-  );
+  /* ── Hairlines (flat, no gradient edges) ── */
+  --hairline: var(--line);
+  --hairline-strong: var(--line2);
+  --edge: linear-gradient(var(--line), var(--line));
+  --edge-soft: linear-gradient(var(--line), var(--line));
+  --edge-amber: linear-gradient(var(--line), var(--line));
 
   /* ── Depth & glow ── */
   --shadow-1: 0 2px 10px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 6px 24px rgba(0, 0, 0, 0.45);
-  --glow-pink: 0 0 28px rgba(240, 160, 176, 0.14);
-  --glow-pink-strong: 0 0 36px rgba(240, 160, 176, 0.22);
-  --glow-amber: 0 0 24px rgba(234, 181, 110, 0.12);
-  --focus-ring: 0 0 0 2px rgba(240, 160, 176, 0.55);
+  --glow-pink: none;
+  --glow-pink-strong: none;
+  --glow-amber: none;
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
 
   /* ── Type ── */
-  --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --font-body: var(--font);
+  --font-display: var(--font);
+  --font-mono: var(--mono);
 
   /* ── Shape ── */
   --radius-sm: 7px;
@@ -83,7 +95,7 @@
   --topbar-h: 52px;
 
   /* ── Motion ── */
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease: var(--ease-out);
   --t-fast: 120ms;
-  --t-med: 220ms;
+  --t-med: 200ms;
 }
