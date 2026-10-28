@@ -1,0 +1,6 @@
+:root { color-scheme: light dark; }
+@font-face { font-family: ProbeFont; src: url(font.ttf); }
+body { font: 16px sans-serif; background: #fff; color: #111; }
+@media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } }
+.styled { border: 3px solid rgb(0, 128, 0); padding: 4px; }
+.fonted { font-family: ProbeFont, monospace; }

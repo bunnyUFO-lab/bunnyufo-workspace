@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CSP probe</title>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="probe.css">
+</head><body>
+<h1>CSP probe</h1>
+<p class="styled">Styled text (green border when probe.css applied).</p>
+<p><img id="img" src="pic.png" width="40" height="40" alt="probe"></p>
+<p class="fonted">Font probe text</p>
+<p><a id="dl" href="data.json" download="data.json">download data.json</a></p>
+<iframe id="frame" src="inner.html" width="300" height="60" title="inner"></iframe>
+<form id="getform" action="form" method="get"><input name="q" value="x"><button>get form</button></form>
+<form id="postform" action="/api/echo" method="post"><input name="q" value="x"><button>post form</button></form>
+<pre id="out">running</pre>
+<script src="probe.js"></script>
+</body></html>
