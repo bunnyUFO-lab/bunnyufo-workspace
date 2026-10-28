@@ -14,7 +14,7 @@
 .today .hub-kpis { gap: 16px; margin-bottom: 16px; }
 .today .hub-kpi { gap: 0; padding: 18px; background: var(--s1); border-color: var(--line); border-radius: var(--r3); transition: border-color 0.2s, transform 0.2s; }
 .today .hub-kpi:hover { background: var(--s1); border-color: var(--line2); transform: translateY(-2px); }
-.kpi-label { display: flex; align-items: center; justify-content: space-between; font: 600 11px var(--font); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); }
+.kpi-label { gap: 8px; display: flex; align-items: center; justify-content: space-between; font: 600 11px var(--font); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); }
 .today .hub-kpi-v { font: 600 30px/1.1 var(--mono); letter-spacing: -0.03em; margin-top: 10px; font-variant-numeric: tabular-nums; color: var(--t1); }
 .kpi-sub { font-size: 12px; color: var(--t3); margin-top: 6px; }
 
@@ -55,5 +55,7 @@
 @media (max-width: 760px) {
   .today-cols { grid-template-columns: minmax(0, 1fr); }
   .today .hub-kpis { gap: 10px; }
+  .today .hub-kpi { padding: 14px; }
+  .kpi-label { gap: 8px; letter-spacing: 0.1em; }
   .hub .today-head h2 { font-size: 28px; }
 }

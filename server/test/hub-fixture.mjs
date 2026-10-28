@@ -26,7 +26,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, secondSection = false } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -74,6 +74,12 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     // One merged PR on a closed task, 29 to 30 hours old: outside Today's 24-hour window, so its counts hold still.
     seed.event(eventJson({ kind: 'pr-opened', ts: minutesAgo(now, 30 * 60), project: 'magic-loops', bead: 'ml-wj-t1', url: 'https://example.test/pr/9', title: 'Detect wall contact: PR opened' }));
     seed.event(eventJson({ kind: 'pr-merged', ts: minutesAgo(now, 29 * 60), project: 'magic-loops', bead: 'ml-wj-t1', url: 'https://example.test/pr/9', title: 'Detect wall contact: PR merged' }));
+    if (busyToday) {
+      // Off by default, other tests count 3: two more blocked sessions (5 need you, Today shows 3) and one alert.
+      seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 25), session: 'sess-blocked-2', title: 'Permission needed: run lint' }));
+      seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 35), session: 'sess-blocked-3', title: 'Permission needed: run build' }));
+      seed.event(eventJson({ kind: 'alert', ts: minutesAgo(now, 15), title: 'Nightly brief failed', summary: 'The upstream answered 529.' }));
+    }
     if (discordAsks) {
       // Made-up ids throughout. The first Ask was answered by a click in Discord; the second has no buttons there.
       const yesNo = [{ id: 'A', label: 'Ship it' }, { id: 'B', label: 'Hold off' }];
