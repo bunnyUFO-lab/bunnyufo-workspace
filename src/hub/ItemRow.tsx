@@ -13,34 +13,48 @@ const KIND_LABEL: Record<string, string> = { ask: 'Ask', request: 'Request', rev
 
 const isGithub = (url: string) => { try { return new URL(url).hostname === 'github.com' } catch { return false } }
 
-/** The buttons of a review row: a link to the pull request, a link to the report, and Mark done. Each shows only when it can work. */
-export function ReviewActions({ item, onDone, links = true }: { item: Item; onDone: () => void; links?: boolean }) {
+/** Mark done for a review or a blocked row: a create-only write that hides it from Needs you. A read-only copy gets the sign-in note instead. */
+function useMarkDone(item: Item, onDone: () => void) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [note, setNote] = useState(false)
-  const url = safeUrl(item.url)
-  const card = safeUrl(item.card)
   async function done() {
     if (!host.write) { setNote(true); return }
     setBusy(true)
     setError('')
     try {
-      await hubPost(`/reviews/${encodeURIComponent(item.id)}/done`)
+      const id = encodeURIComponent(item.kind === 'blocked' ? item.file ?? item.id : item.id)
+      await hubPost(`/${item.kind === 'blocked' ? 'blocked' : 'reviews'}/${id}/done`)
       onDone()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not mark this done.')
       setBusy(false)
     }
   }
+  return {
+    button: <button type="button" className="hub-btn pri" title="Hide from Needs you. Does not approve or merge." disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>,
+    notes: (
+      <>
+        {error && <p className="hub-error" role="alert">{error}</p>}
+        {note && <p className="hub-muted" data-readonly-note>Sign in to mark this done.</p>}
+      </>
+    ),
+  }
+}
+
+/** The buttons of a review row: a link to the pull request, a link to the report, and Mark done. Each shows only when it can work. */
+export function ReviewActions({ item, onDone, links = true }: { item: Item; onDone: () => void; links?: boolean }) {
+  const url = safeUrl(item.url)
+  const card = safeUrl(item.card)
+  const { button, notes } = useMarkDone(item, onDone)
   return (
     <>
       <span className="hub-row-actions">
         {links && url && <a className="hub-btn" href={url} target="_blank" rel="noopener noreferrer">{isGithub(url) ? 'Review on GitHub' : 'Open link'}</a>}
         {links && card && <a className="hub-btn" href={card} target="_blank" rel="noopener noreferrer">Open report</a>}
-        <button type="button" className="hub-btn pri" title="Hide from Needs you. Does not approve or merge." disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>
+        {button}
       </span>
-      {error && <p className="hub-error" role="alert">{error}</p>}
-      {note && <p className="hub-muted" data-readonly-note>Sign in to mark this done.</p>}
+      {notes}
     </>
   )
 }
@@ -62,8 +76,11 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
 
 /** A blocked session: a button into the session when there is a real link, the desktop app's link where there is a desktop, and plain words otherwise. */
 function BlockedRow({ item, meta }: { item: Item; meta: string }) {
+  const [hidden, setHidden] = useState(false)
   const link = sessionUrl(item.url)
   const desk = appUrl(item.appUrl)
+  const { button, notes } = useMarkDone(item, () => setHidden(true))
+  if (hidden) return null
   return (
     <div className="hub-row" data-blocked>
       <span className="hub-dot y" aria-hidden="true" />
@@ -75,7 +92,9 @@ function BlockedRow({ item, meta }: { item: Item; meta: string }) {
         {link && <a className="hub-btn pri" href={link} target="_blank" rel="noopener noreferrer" data-link="session">Open the session</a>}
         {desk && <a className="hub-btn hub-desk" href={desk} data-link="app">Open in the desktop app</a>}
         {!link && <span className="hub-muted" data-blocked-hint>{item.host ? `Open the Claude app on ${item.host}` : 'Open the Claude app'}</span>}
+        {item.file && button}
       </span>
+      {item.file && notes}
     </div>
   )
 }

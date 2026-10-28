@@ -43,6 +43,9 @@ const stubWorld = async page => {
 };
 
 try {
+  const seedSection = (id, entities, tracked) => fixture.fake.seed(`sections/${id}/workspace.json`, JSON.stringify({ name: id, ...(tracked ? { tracked } : {}), entities }), 'application/json');
+  seedSection('two', [{ id: 'hubdemo-sprint', title: 'Hubdemo sprint', folder: 'sprint-card' }], { repo: 'example/probe-app' });
+  fixture.fake.seed('sections/two/sprint-card/reviews/x-1-qa.md', '# Old QA triage heading', 'text/markdown');
   const shot = name => `https://raw.githubusercontent.com/example/app/pr-assets/ws-b1z.9/${name}`;
   const file = fixture.seed.event(eventJson({
     kind: 'ready-for-review', ts: new Date(Date.now() - 5 * 60000), title: 'Detail probe', summary: 'Two pull requests, **both** green.',
@@ -168,10 +171,11 @@ try {
   assert.equal(await page.locator('[data-legacy]').count(), 1);
   assert.equal(await page.locator('[data-done-hint]').isVisible(), true, 'Says what Mark done means.');
   assert.match(await page.locator('[data-done-hint]').innerText(), /does not approve or merge/);
+  const before = await page.evaluate(() => history.length);
   await page.getByRole('button', { name: 'Mark done' }).click();
-  await page.locator('[data-done]', { hasText: 'Marked done. It is gone from Needs you.' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Mark done' }).count(), 0);
-  assert.equal(await page.locator('[data-done-hint]').count(), 0, 'The hint goes with the button.');
+  await page.locator('[data-marked-done]', { hasText: 'Marked done.' }).waitFor();
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/inbox', 'Mark done goes back to the Inbox.');
+  assert.equal(await page.evaluate(() => history.length), before, 'It replaced the entry; Back does not reopen the review.');
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, oldFile);
   await go(page, '#/~hub/inbox/reviews');
@@ -180,6 +184,49 @@ try {
   await go(page, `#/~hub/review/${oldFile}`);
   await page.locator('[data-done]', { hasText: /Marked done .* by local/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Mark done' }).count(), 0);
+
+  step('an old event with no links: the summary yields the pull requests, the file and the sprint card');
+  const linksFile = fixture.seed.event(eventJson({
+    kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'hubdemo: first item', project: 'wrong-project',
+    summary: 'Built. PR #2 + workspace-skills#26, see reviews/x-1-qa.md and qa/nothing.md.',
+  }));
+  const quiet = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'unknown: first item', summary: 'PR #2 + workspace-skills#26, see reviews/x-1-qa.md.' }));
+  await page.route('**/w/two/sprint-card/reviews/x-1-qa.md', route => route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Old QA triage heading' }));
+  await go(page, `#/~hub/review/${linksFile}`);
+  await page.locator('.hub-review h2', { hasText: 'hubdemo: first item' }).waitFor();
+  const prLinks = page.locator('[data-section="prs"] a');
+  assert.deepEqual(await prLinks.evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['https://github.com/example/probe-app/pull/2', 'https://github.com/example/workspace-skills/pull/26']);
+  assert.equal(await page.locator('[data-found]').count(), 1, 'Says they were found in the summary.');
+  assert.match(await page.locator('[data-legacy]').innerText(), /found from the text/, 'The old-review note says where the links came from.');
+  for (const name of ['status', 'shots', 'try']) assert.equal(await page.locator(`[data-section="${name}"]`).count(), 0, `The empty ${name} panel stays hidden.`);
+  assert.equal(await page.locator('[data-section="files"] [data-file="reviews/x-1-qa.md"]').count(), 1, 'The inferred file is listed.');
+  assert.equal(await page.locator('.hub-md a[href="https://github.com/example/probe-app/pull/2"]').count(), 1, 'PR #2 is a link in the summary.');
+  assert.equal(await page.locator('.hub-md a[href="https://github.com/example/workspace-skills/pull/26"]').count(), 1);
+  assert.equal(await page.locator('[data-sprint-card]').first().innerText(), 'Sprint card: Hubdemo sprint');
+  assert.equal(await page.locator('.hub-md a', { hasText: 'qa/nothing.md' }).count(), 0, 'A file that does not exist stays plain text.');
+  const cited = page.locator('.hub-md a', { hasText: 'reviews/x-1-qa.md' });
+  const look = await page.locator('.hub-review-head .hub-md').evaluate(node => ({ body: getComputedStyle(node).color, link: getComputedStyle(node.querySelector('a')).color, line: getComputedStyle(node.querySelector('a')).textDecorationLine }));
+  assert.ok(look.link !== look.body && look.line.includes('underline'), `A summary link looks like a link (${JSON.stringify(look)}).`);
+  assert.equal(await cited.getAttribute('href'), `#/~hub/review/${linksFile}/reviews/x-1-qa.md`);
+  await cited.click();
+  await page.getByRole('heading', { name: 'Old QA triage heading' }).waitFor();
+  await go(page, `#/~hub/review/${quiet}`);
+  await page.locator('.hub-review h2', { hasText: 'unknown: first item' }).waitFor();
+  assert.equal(await page.locator('[data-section="prs"] a').count(), 0, 'No card and no known repo: nothing to link.');
+  assert.equal(await page.locator('[data-sprint-card]').count(), 0);
+
+  step('a blocked row has Mark done: it hides the row for good');
+  const blockedFile = fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 60000), session: 'sess-stale-ui', title: 'Stale blocked session' }));
+  await go(page, '#/~hub/inbox/blocked');
+  const stale = page.locator('.hub-row[data-blocked]', { hasText: 'Stale blocked session' });
+  await stale.waitFor();
+  await stale.locator('button', { hasText: 'Mark done' }).click();
+  await stale.waitFor({ state: 'detached' });
+  assert.equal(doneEvents().filter(event => event.review === blockedFile).length, 1);
+  await page.reload();
+  await page.locator('.hub-chips').waitFor();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Stale blocked session' }).count(), 0, 'Still hidden after a reload.');
 
   step('phone: no sideways scroll at 390 and 375 px, the reader replaces the sections, Back returns focus to the file');
   const phone = await open({ width: 390, height: 844 });

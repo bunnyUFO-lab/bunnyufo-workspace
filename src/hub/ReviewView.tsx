@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { Item, ReviewDetail, ShotPair, Verdict } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { MarkdownView } from '../components/MarkdownDocument'
-import { hubHash, reviewHash } from '../lib/route'
+import { entityHash, hubHash, reviewHash } from '../lib/route'
+import { setFlash } from './flash'
+import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
 import Md from './Md'
 import { useHubData } from './useHub'
@@ -82,14 +84,16 @@ export default function ReviewView({ route }: { route: string }) {
   const id = slash < 0 ? route : route.slice(0, slash)
   const file = slash < 0 ? undefined : route.slice(slash + 1) || undefined
   const { data: detail, error } = useHubData<ReviewDetail>(`/reviews/${encodeURIComponent(id)}`)
-  const [justDone, setJustDone] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const title = useRef<HTMLHeadingElement>(null)
   const pushes = useRef(0)
   const previous = useRef<string | undefined>(undefined)
 
-  const listed = detail?.cardFiles?.find(entry => entry.path === file)
-  const content = useCardFile(listed ? detail?.cardDir : undefined, listed?.path)
+  const inferred = detail?.inferred
+  const cardDir = detail?.cardDir ?? inferred?.cardDir
+  const files = detail?.cardFiles ?? inferred?.cardFiles ?? []
+  const listed = files.find(entry => entry.path === file)
+  const content = useCardFile(listed ? cardDir : undefined, listed?.path)
   const loadedDetail = !!detail
 
   useEffect(() => {
@@ -125,12 +129,16 @@ export default function ReviewView({ route }: { route: string }) {
   }
   const item: Item = { kind: 'review', id, title: detail.title, at: detail.at, ...(detail.url ? { url: detail.url } : {}), ...(detail.card ? { card: detail.card } : {}) }
   const verdicts = detail.verdicts ?? []
-  const prs = detail.prs?.length ? detail.prs : detail.url ? [detail.url] : []
-  const files = detail.cardFiles ?? []
+  const linked = linkSummary(detail.summary ?? '', { repo: inferred?.repo, prs: detail.prs ?? [], id, files: files.map(entry => entry.path) })
+  const foundPrs = !detail.prs?.length && linked.prs.length > 0
+  const prs = detail.prs?.length ? detail.prs : foundPrs ? linked.prs : detail.url ? [detail.url] : []
   const folder = file && file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
   // An event from before reviews carried links and results: one note instead of four empty sections.
-  const legacy = !detail.prs?.length && !detail.cardDir && !files.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
+  const legacy = !detail.prs?.length && !detail.cardDir && !detail.cardFiles?.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
   const cardLink = detail.card && <a className="hub-btn" href={detail.card} target="_blank" rel="noopener noreferrer">Open the card</a>
+  const sprintCard = inferred && <a className="hub-btn" href={`/${encodeURIComponent(inferred.section)}${entityHash(inferred.card.id)}`} target="_blank" rel="noopener noreferrer" data-sprint-card>Sprint card: {inferred.card.title}</a>
+  const found = inferred || foundPrs
+  const showFiles = !legacy || files.length > 0
 
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
@@ -144,14 +152,16 @@ export default function ReviewView({ route }: { route: string }) {
           </span>
         </div>
         <p className="hub-muted">Posted {ago(detail.at)}{detail.host ? ` from ${detail.host}` : ''}.</p>
-        {detail.summary && <Md text={detail.summary} />}
+        {detail.summary && <Md text={linked.text} />}
       </div>
       <div className="hub-review-grid" data-solo={files.length || file ? undefined : 'true'}>
         <div className="hub-review-side">
           {legacy && (
             <section className="hub-panel" aria-label="Older review">
-              <p className="hub-muted" data-legacy>This review was posted before reviews carried their links and test results. The summary above is what came with it.</p>
-              {cardLink && <p>{cardLink}</p>}
+              <p className="hub-muted" data-legacy>{found
+                ? 'This review was posted before reviews carried their links and test results. The links here were found from the text of the summary.'
+                : 'This review was posted before reviews carried their links and test results. The summary above is what came with it.'}</p>
+              {!showFiles && (cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
             </section>
           )}
           {!legacy && <section className="hub-panel" data-section="status" aria-label="Status">
@@ -168,6 +178,7 @@ export default function ReviewView({ route }: { route: string }) {
           <section className="hub-panel" data-section="prs" aria-label="Pull requests">
             <h3>Pull requests</h3>
             {prs.length === 0 && <p className="hub-muted">No pull request link came with this item.</p>}
+            {foundPrs && <p className="hub-muted" data-found>Found in the summary.</p>}
             <div className="hub-review-links">
               {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer">{prLabel(url)}</a>)}
             </div>
@@ -176,7 +187,7 @@ export default function ReviewView({ route }: { route: string }) {
             <h3>Screenshots</h3>
             {detail.screenshots?.length ? <Shots pairs={detail.screenshots} /> : <p className="hub-muted">No screenshots came with this item.</p>}
           </section>}
-          {!legacy && <section className="hub-panel" data-section="files" aria-label="Files on the card">
+          {showFiles && <section className="hub-panel" data-section="files" aria-label="Files on the card">
             <h3>Files on the card</h3>
             {files.length === 0 && <p className="hub-muted">No brief or reports came with this item.</p>}
             <div className="hub-review-files">
@@ -186,7 +197,7 @@ export default function ReviewView({ route }: { route: string }) {
                 </button>
               ))}
             </div>
-            {cardLink && <p>{cardLink}</p>}
+            {(cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
           </section>}
           {!legacy && <section className="hub-panel" data-section="try" aria-label="Try it">
             <h3>Try it</h3>
@@ -195,14 +206,12 @@ export default function ReviewView({ route }: { route: string }) {
               : <p className="hub-muted">No deployed build yet. The stack deploys after it merges.</p>}
           </section>}
           <section className="hub-panel" aria-label="Mark done">
-            {justDone
-              ? <p data-done>Marked done. It is gone from Needs you.</p>
-              : detail.done
+            {detail.done
                 ? <p data-done>Marked done {ago(detail.doneAt ?? detail.at)}{detail.doneBy ? ` by ${detail.doneBy}` : ''}</p>
                 : (
                   <>
                     <p className="hub-muted" data-done-hint>Mark done hides this review from Needs you. It does not approve or merge anything.</p>
-                    <ReviewActions item={item} links={false} onDone={() => setJustDone(true)} />
+                    <ReviewActions item={item} links={false} onDone={() => { setFlash('Marked done. It is gone from Needs you.'); window.location.replace(hubHash('inbox')) }} />
                   </>
                 )}
           </section>
@@ -214,7 +223,7 @@ export default function ReviewView({ route }: { route: string }) {
               <h3 tabIndex={-1} ref={title}>{listed?.label ?? 'File'} <span>{file}</span></h3>
               {!listed && <p className="hub-muted" data-file-missing>This file is not listed for this review.</p>}
               {listed && content.state === 'loading' && <p className="hub-muted">Loading…</p>}
-              {listed && content.state === 'ok' && <MarkdownView text={content.text} baseUrl={cardPath(detail.cardDir ?? '', folder)} />}
+              {listed && content.state === 'ok' && <MarkdownView text={content.text} baseUrl={cardPath(cardDir ?? '', folder)} />}
               {listed && content.state === 'missing' && (
                 <>
                   <p className="hub-muted" data-file-missing>This file is not on the site yet. The card may not be published.</p>

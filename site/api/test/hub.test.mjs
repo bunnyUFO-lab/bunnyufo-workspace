@@ -660,3 +660,79 @@ test('askRev: the same bytes give the same 16 hex characters, and one byte chang
   assert.equal(askRev(text), askRev(Buffer.from(text)));
   assert.notEqual(askRev(text), askRev('{"question":"Ship it!"}\n'));
 });
+
+/** Two card sections for the inference tests: made-up cards, files and repos. */
+function seedCardSections(fake) {
+  const section = (id, entities, tracked) => fake.seed(`sections/${id}/workspace.json`, JSON.stringify({ name: id, ...(tracked ? { tracked } : {}), entities }), 'application/json');
+  section('alpha', [
+    { id: 'rocket-sprint', title: 'Rocket sprint', folder: '2026-10-01_rocket-sprint' },
+    { id: 'garden-sprint-one', title: 'Garden sprint one', folder: 'garden-1' },
+    { id: 'garden-sprint-two', title: 'Garden sprint two', folder: 'garden-2' },
+  ], { repo: 'example/alpha-app' });
+  section('beta', [{ id: 'kite-rollout', title: 'AI kite rollout sprint', folder: 'kite' }, { id: 'kite-extra', title: 'AI kite rollout report', folder: 'kite-extra' }]);
+  section('gamma', [{ id: 'moon-plan', title: 'Moon base design sprint', folder: 'moon' }]);
+  for (const file of ['briefs/b.md', 'reviews/r.md', 'qa/q.md']) fake.seed(`sections/alpha/2026-10-01_rocket-sprint/${file}`, '# x\n', 'text/markdown');
+}
+
+test('an old review finds its sprint card from the title and the files from the summary', async () => {
+  const { fake, seed, get, close } = await fixture();
+  try {
+    seedCardSections(fake);
+    const review = (title, summary, extra) => seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 5), title, summary, ...(extra ? { extra } : {}) }));
+    const hit = review('rocket: first item', 'PR #2 + other#26. See reviews/r.md, qa/q.md, briefs/gone.md and ../../etc/passwd.md, briefs/../../x.md and a/b/c/d/e.md.');
+    const none = review('nothing: x', 'reviews/r.md');
+    const two = review('garden: x', 'reviews/r.md');
+    const own = review('rocket: own card', 'reviews/r.md', {});
+    const withCard = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 4), title: 'rocket: has a card', summary: 'reviews/r.md', card: 'https://example.test/a#/rocket-sprint' }));
+
+    const found = (await get(`/hub/reviews/${hit}`)).body.inferred;
+    assert.deepEqual(found.card, { id: 'rocket-sprint', title: 'Rocket sprint' });
+    assert.equal(found.section, 'alpha');
+    assert.equal(found.cardDir, 'alpha/2026-10-01_rocket-sprint');
+    assert.equal(found.repo, 'example/alpha-app');
+    assert.deepEqual(found.cardFiles, [{ path: 'reviews/r.md', label: 'Review' }, { path: 'qa/q.md', label: 'QA report' }], 'Missing files, traversal and deep paths are dropped.');
+    assert.equal((await get(`/hub/reviews/${none}`)).body.inferred, undefined, 'No card matches.');
+    assert.equal((await get(`/hub/reviews/${two}`)).body.inferred, undefined, 'Two cards match.');
+    assert.ok((await get(`/hub/reviews/${own}`)).body.inferred);
+    assert.equal((await get(`/hub/reviews/${withCard}`)).body.inferred, undefined, 'An event with its own card is left alone.');
+  } finally { await close(); }
+});
+
+test('with no run prefix, the title\'s lead phrase finds the card; a miss finds none', async () => {
+  const { fake, seed, get, close } = await fixture();
+  try {
+    seedCardSections(fake);
+    const at = minutesAgo(NOW, 5);
+    const ok = seed.event(eventJson({ kind: 'ready-for-review', ts: at, title: 'AI kite rollout (design v2, S1–S5 + release): sprint report', summary: 'x' }));
+    const ambiguous = seed.event(eventJson({ kind: 'ready-for-review', ts: at, title: 'AI kite rollout: sprint report', summary: 'x' }));
+    const miss = seed.event(eventJson({ kind: 'ready-for-review', ts: at, title: 'Quiet harbour (v2): sprint report', summary: 'x' }));
+    const short = seed.event(eventJson({ kind: 'ready-for-review', ts: at, title: 'Moon base (v2): report', summary: 'x' }));
+    const moon = seed.event(eventJson({ kind: 'ready-for-review', ts: at, title: 'Moon base design (v2): sprint report', summary: 'x' }));
+    // "AI kite rollout" starts two card titles ("... sprint" and "... report"), so it is ambiguous.
+    assert.equal((await get(`/hub/reviews/${ok}`)).body.inferred, undefined);
+    assert.equal((await get(`/hub/reviews/${ambiguous}`)).body.inferred, undefined);
+    assert.equal((await get(`/hub/reviews/${miss}`)).body.inferred, undefined);
+    assert.equal((await get(`/hub/reviews/${short}`)).body.inferred, undefined, 'Under three words.');
+    const hit = (await get(`/hub/reviews/${moon}`)).body.inferred;
+    assert.equal(hit.card.id, 'moon-plan');
+    assert.equal(hit.repo, undefined);
+  } finally { await close(); }
+});
+
+test('a blocked row can be marked done: create-only, and it stays hidden', async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const stale = seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 'sess-stale', title: 'Stale permission' }));
+    const review = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'A review' }));
+    const items = async () => (await get('/hub/inbox?filter=blocked')).body.items;
+    assert.equal((await items())[0].file, stale);
+    assert.equal((await post(`/hub/blocked/${review}/done`)).status, 404, 'A review is not a blocked row.');
+    assert.equal((await post(`/hub/reviews/${stale}/done`)).status, 404, 'A blocked row is not a review.');
+    assert.equal((await post(`/hub/blocked/${stale}/done`)).status, 201);
+    assert.equal((await post(`/hub/blocked/${stale}/done`)).status, 200, 'The second call writes nothing.');
+    assert.deepEqual(await items(), []);
+    assert.equal((await get('/hub/today')).body.needsYou.some(item => item.kind === 'blocked'), false);
+    assert.equal((await post('/hub/blocked/a%2Fb.json/done')).status, 404);
+    assert.equal((await post(`/hub/blocked/${stale}/done`, {}, {})).status, 401, 'Read-only copies cannot write.');
+  } finally { await close(); }
+});
