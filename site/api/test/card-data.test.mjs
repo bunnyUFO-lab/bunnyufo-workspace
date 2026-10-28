@@ -361,17 +361,20 @@ test('attach: only the bridged frame, from its own origin, is answered, and the 
     assert.equal(sent[0].message.ok, true);
     assert.deepEqual(sent[0].message.result.card, 'sounds');
 
-    // The frame went somewhere else while a call was out: nothing is sent to the new window.
+    // The frame went somewhere else while a call was out: the reply goes to the window that asked, with the card's
+    // origin as its target (a browser drops it if that window has moved to another origin), never to the new window.
     fire({ data: { type: 'buw:bridge', v: 1, id: 'slow', op: 'responses.get', doc: 'listen-v2' }, source: contentWindow, origin: CONTENT });
     frame.contentWindow = otherWindow;
     await sleep(200);
-    assert.equal(sent.length, 1);
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].other, undefined);
+    assert.equal(sent[1].target, CONTENT);
     frame.contentWindow = contentWindow;
 
     detach();
     assert.equal(listeners.size, 0);
     fire({ data: { ...hello, id: 'late' }, source: contentWindow, origin: CONTENT });
     await sleep(50);
-    assert.equal(sent.length, 1, 'detached');
+    assert.equal(sent.length, 2, 'detached');
   } finally { await close(); }
 });
