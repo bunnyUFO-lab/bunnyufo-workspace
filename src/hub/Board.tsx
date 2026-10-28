@@ -84,11 +84,11 @@ export default function Board({ project: wanted }: { project?: string }) {
   return (
     <>
       <div className="hub-top">
-        <h2>Board{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
+        <h2>Work{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
         {map.data?.ageMinutes != null && <span className="hub-muted">Beads copy from {copyAge(map.data.ageMinutes)}</span>}
       </div>
       <div className="hub-chips" aria-label="Project">
-        {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('board', item.id)}>{item.name}</a>)}
+        {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
       </div>
       {project && host.write && <RequestForm project={project} />}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}

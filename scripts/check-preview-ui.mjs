@@ -92,8 +92,8 @@ try {
       }
       steps++;
     }
-    // With a card open the first crumb is the way back, labelled "← Cards" (the arrow is aria-hidden).
-    await page.getByRole('button', { name: 'Cards', exact: true }).click();
+    // With a card open the first crumb is the way back, labelled "← Cards" (a link) (the arrow is aria-hidden).
+    await page.getByRole('link', { name: 'Cards', exact: true }).click();
     await page.locator('.entity-card').first().waitFor();
   }
   assert.deepEqual(errors, []);
@@ -203,7 +203,7 @@ try {
   await failed.goto(url);
   await failed.locator('.entity-card').first().click();
   await failed.getByRole('alert').waitFor();
-  assert.equal(await failed.getByRole('button', { name: 'Cards', exact: true }).count(), 1);
+  assert.equal(await failed.getByRole('link', { name: 'Cards', exact: true }).count(), 1);
   await failed.getByRole('button', { name: 'Back to Workspace', exact: true }).click();
   await failed.locator('.entity-card').first().waitFor();
   await failed.locator('.entity-card').first().click();

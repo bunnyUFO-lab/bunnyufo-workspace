@@ -29,7 +29,7 @@ export interface HostCapabilities {
   live: boolean
   /** Where the open project lives: in the path (needs an SPA fallback) or remembered. */
   routes: 'path' | 'hash'
-  /** The Hub (Today, Inbox, Ask, progress map, Board, Activity, Sketch) is on at this host. */
+  /** The Hub (Today, Needs you, Ask, Roadmap, Work, Activity, Sketch) is on at this host. */
   hub: boolean
   /** The Hub's chat with the assistant is set up and this visitor may use it. */
   chat: boolean

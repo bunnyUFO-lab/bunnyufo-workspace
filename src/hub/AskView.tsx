@@ -185,7 +185,7 @@ export default function AskView({ id }: { id: string }) {
       )}
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
-      <p><a className="hub-btn" href={hubHash('inbox', 'asks')}>Back to the Inbox</a></p>
+      <p><a className="hub-btn" href={hubHash('needs', 'asks')}>Back to Needs you</a></p>
     </>
   )
 }

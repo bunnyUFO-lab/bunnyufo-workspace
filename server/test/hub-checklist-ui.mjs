@@ -47,7 +47,7 @@ const waitProgress = (page, text) => page.waitForFunction(value => document.quer
 
 try {
   const page = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'] });
-  await page.goto(`${fixture.url}#/~hub/inbox`);
+  await page.goto(`${fixture.url}#/~hub/needs`);
   await page.locator('[data-hub-tab-badge]').waitFor();
 
   step('the To do tab is second, lists the open list first with "1 of 4", and the Inbox badge counts it');
@@ -160,8 +160,8 @@ try {
   await tall(page.locator('[data-submit]'), 'Submit with open');
   await noSideways(page, 'the Submit warning');
   await page.locator('[data-submit]').tap();
-  await page.locator('.hub[data-screen="inbox"]').waitFor();
-  assert.equal(await page.evaluate(() => location.hash), '#/~hub/inbox');
+  await page.locator('.hub[data-screen="needs"]').waitFor();
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/needs');
   await page.locator('[data-marked-done]', { hasText: 'Submitted. The agent sees it at its next session.' }).waitFor();
   const submit = fixture.fake.json(`${prefix}submit.json`);
   assert.deepEqual({ note: submit.note, done: submit.done, open: submit.open, by: submit.by }, { note: 'Skipped the DMs.', done: ['01', '02'], open: ['03', '04'], by: 'local' });

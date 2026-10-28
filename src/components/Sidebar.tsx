@@ -124,10 +124,10 @@ function Heading({
 
 /**
  * The Hub: where the things that need you are. Its own block above the search box, as buttons two
- * to a row, so it does not read as more cards; the Inbox count is the phone's pink badge. Only where
+ * to a row, so it does not read as more cards; the Needs you count is the phone's pink badge. Only where
  * the host has a Hub.
  */
-function HubNav({ screen, needsYou }: { screen: HubScreen | null; needsYou: number }) {
+function HubNav({ screen, needsYou, library, onHome }: { screen: HubScreen | null; needsYou: number; library: boolean; onHome: () => void }) {
   const shown = hubRows(host)
   return (
     <nav className="sidebar-hub" data-hub-nav aria-label="Hub">
@@ -136,9 +136,13 @@ function HubNav({ screen, needsYou }: { screen: HubScreen | null; needsYou: numb
           <span className="hub-link-icon" aria-hidden="true">{icon}</span>
           <span className="hub-link-text">{HUB_SHORT[key] ?? label}</span>
           {key === 'today' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-badge>{needsYou}</span>}
-          {key === 'inbox' && needsYou > 0 && <span className="hub-inbox-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Inbox, ${needsYou} waiting for you`}>{needsYou}</span>}
+          {key === 'needs' && needsYou > 0 && <span className="hub-inbox-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Needs you, ${needsYou} waiting for you`}>{needsYou}</span>}
         </a>
       ))}
+      <a {...homeLink(onHome)} className={`hub-link${library ? ' active' : ''}`} aria-current={library ? 'page' : undefined} title="Library" data-hub-link="library">
+        <span className="hub-link-icon" aria-hidden="true">▤</span>
+        <span className="hub-link-text">Library</span>
+      </a>
     </nav>
   )
 }
@@ -451,7 +455,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} />}
+      {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} library={!hubScreen && activeId === null} onHome={onHome} />}
 
       <div className="sidebar-search">
         <span className="search-icon" aria-hidden="true">

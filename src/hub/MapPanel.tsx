@@ -51,7 +51,7 @@ function TaskRows({ tasks, onOpen }: { tasks: MapTask[]; onOpen: (id: string) =>
           <button type="button" className="hub-map-panel-link hub-map-panel-row-title" onClick={() => onOpen(task.id)}>{task.title}</button>
           <span className="hub-id">{task.id}</span>
           <SignGlyphs signs={task.signs} />
-          {task.state === 'you' && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('inbox')}>Open in Inbox</a>}
+          {task.state === 'you' && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs')}>Open in Needs you</a>}
         </li>
       ))}
     </ul>
@@ -99,7 +99,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
       {mine.map(item => <ItemRow key={`${item.kind}-${item.id}`} item={item} />)}
     </>
   )
-  const more = elsewhere > 0 && <p className="hub-muted"><a href={hubHash('inbox')}>{elsewhere} more for this project in Inbox</a></p>
+  const more = elsewhere > 0 && <p className="hub-muted"><a href={hubHash('needs')}>{elsewhere} more for this project in Needs you</a></p>
 
   let body
   if (found.kind === 't') {
@@ -118,7 +118,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
         {more}
         <h4>Pull requests</h4>
         <PrList rows={prs} showTask={false} />
-        {task.state === 'you' && <div className="hub-actions start"><a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('inbox')}>Open in Inbox</a></div>}
+        {task.state === 'you' && <div className="hub-actions start"><a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs')}>Open in Needs you</a></div>}
       </>
     )
   } else {

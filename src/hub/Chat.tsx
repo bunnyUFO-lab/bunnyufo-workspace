@@ -27,7 +27,7 @@ function Created({ items }: { items: Item[] }) {
         <div className="hub-created-card" key={`${item.kind}-${item.id}`} data-created={item.kind}>
           <span className="hub-pill">{item.kind}</span>
           <span className="hub-created-title">{item.title}</span>
-          <a className="hub-btn" href={item.kind === 'ask' ? hubHash('ask', item.id) : hubHash('inbox', 'requests')}>Open</a>
+          <a className="hub-btn" href={item.kind === 'ask' ? hubHash('ask', item.id) : hubHash('needs', 'requests')}>Open</a>
         </div>
       ))}
     </div>

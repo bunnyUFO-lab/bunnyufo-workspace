@@ -70,8 +70,8 @@ try {
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
   await noSideways(page, 'Today');
-  await page.locator('[data-hub-link="inbox"]').click();
-  await page.locator('.hub[data-screen="inbox"]').waitFor();
+  await page.locator('[data-hub-link="needs"]').click();
+  await page.locator('.hub[data-screen="needs"]').waitFor();
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).waitFor();
   assert.equal(await page.locator('.hub-row').count(), 3, 'The Ask, the review and the blocked session.');
   const review = page.locator('.hub-row', { hasText: 'PR ready for review' });
@@ -123,7 +123,7 @@ try {
   await page.locator('.hub-muted', { hasText: 'From an unknown sender' }).waitFor();
   await page.locator('.sidebar').first().waitFor();
   await page.route('**/api/hub/inbox*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [null] }) }));
-  await go(page, '#/~hub/inbox');
+  await go(page, '#/~hub/needs');
   await page.locator('.report-error', { hasText: 'This Hub screen could not be shown' }).waitFor();
   assert.ok(await page.locator('.sidebar').first().isVisible(), 'The sidebar survives a broken Hub screen.');
   await page.unroute('**/api/hub/inbox*');
@@ -131,7 +131,7 @@ try {
   await page.locator('.report-error').waitFor({ state: 'detached' });
 
   step('CUJ 5: a request from the Board lands in the bucket as next-sprint');
-  await go(page, '#/~hub/board/magic-loops');
+  await go(page, '#/~hub/work/magic-loops');
   await page.locator('.hub-board').waitFor();
   assert.ok(await page.locator('.hub-column').count() === 4);
 
@@ -157,8 +157,8 @@ try {
 
   step('Board shows Loading before its columns, and never Nothing here before the map arrives');
   await page.route('**/api/hub/map/*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
-  await go(page, '#/~hub/board/probe');
-  await go(page, '#/~hub/board/magic-loops');
+  await go(page, '#/~hub/work/probe');
+  await go(page, '#/~hub/work/magic-loops');
   await page.locator('.hub-empty', { hasText: 'Loading…' }).waitFor();
   assert.equal(await page.locator('.hub-empty', { hasText: 'Nothing here' }).count(), 0, 'Nothing here before the data arrived.');
   await page.locator('.hub-board').waitFor();
@@ -173,19 +173,19 @@ try {
   await page.locator('.hub-row', { hasText: 'Deployed the WebGL preview' }).waitFor();
   await page.locator('button:has-text("Load older")').click();
 
-  step('phone width: the Inbox to Ask flow works and nothing scrolls sideways');
+  step('phone width: Needs you to Ask flow works and nothing scrolls sideways');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
   await phone.goto(fixture.url);
   await phone.locator('.sidebar-reopen, .sidebar').first().waitFor();
   const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: threeOptions() });
   fixture.seed.ask(phoneAsk);
-  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/inbox', '.hub-panel'], ['#/~hub/board/magic-loops', '.hub-board'], ['#/~hub/activity', '.hub-chips']]) {
+  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.hub-panel'], ['#/~hub/work/magic-loops', '.hub-board'], ['#/~hub/activity', '.hub-chips']]) {
     await go(phone, hash);
     await phone.locator(`.hub ${selector}`).first().waitFor();
     await phone.waitForTimeout(250);
     await noSideways(phone, hash);
   }
-  await go(phone, '#/~hub/inbox');
+  await go(phone, '#/~hub/needs');
   await phone.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).first().waitFor();
   await phone.locator('.hub-row[href*="/ask/"]').first().click();
   await phone.locator('.hub-option').first().waitFor();
@@ -201,7 +201,7 @@ try {
     for (const m of answer.milestones) for (const f of m.features) for (const task of f.tasks) task.title = longTitle;
     await route.fulfill({ json: answer });
   });
-  await go(phone, '#/~hub/board/magic-loops');
+  await go(phone, '#/~hub/work/magic-loops');
   await phone.locator('.hub-ticket').first().waitFor();
   await phone.waitForTimeout(250);
   await noSideways(phone, 'Board with a long title');
@@ -210,7 +210,7 @@ try {
   assert.ok(longBox.title <= longBox.card, 'The title is no wider than its card.');
   await phone.unroute('**/api/hub/map/magic-loops');
 
-  step('phone tab bar: Inbox, Map and Cards are one tap away with the menu shut; no bar over a card or on desktop');
+  step('phone tab bar: Today, Needs you, Work, More and Search; Library is under More with the menu shut; no bar over a card or on desktop');
   const tabs = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await tabs.goto(`${fixture.url}#/`);
   await tabs.locator('nav.hub-tabs').waitFor();
@@ -219,13 +219,15 @@ try {
   // 3 seeded, plus the phone Ask added above.
   assert.equal(await tabs.locator('[data-hub-tab-badge]').innerText(), '4');
   assert.equal(await tabs.locator('[data-hub-tab="chat"]').count(), 0, 'No Chat tab without Hermes.');
-  assert.equal(await tabs.locator('[data-hub-tab="cards"][aria-current="page"]').count(), 1, 'Cards is the active tab on Home.');
+  assert.deepEqual(await tabs.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'more', 'search']);
+  assert.equal(await tabs.locator('[data-hub-tab="more"]').getAttribute('class').then(c => c.includes('active')), true, 'More is the active tab on Home, where the Library lives.');
+  assert.equal(await tabs.locator('[data-hub-tab="cards"]').count(), 0, 'No Cards tab any more.');
   await noSideways(tabs, 'Home with the tab bar');
-  await tabs.locator('[data-hub-tab="inbox"]').tap();
-  await tabs.locator('.hub[data-screen="inbox"]').waitFor();
-  assert.equal(await tabs.evaluate(() => location.hash), '#/~hub/inbox');
+  await tabs.locator('[data-hub-tab="needs"]').tap();
+  await tabs.locator('.hub[data-screen="needs"]').waitFor();
+  assert.equal(await tabs.evaluate(() => location.hash), '#/~hub/needs');
   assert.equal(await tabs.locator('.app-layout.sidebar-collapsed').count(), 1, 'The menu was never opened.');
-  assert.equal(await tabs.locator('[data-hub-tab="inbox"]').getAttribute('aria-current'), 'page');
+  assert.equal(await tabs.locator('[data-hub-tab="needs"]').getAttribute('aria-current'), 'page');
   // A write refreshes the count at once: no reload, no waiting for the 60 s poll.
   await tabs.locator('.hub-row[href*="/ask/"]').first().tap();
   await tabs.locator('.hub-option').first().waitFor();
@@ -236,26 +238,47 @@ try {
   assert.equal(await tabs.locator('[data-hub-badge]').count() ? await tabs.locator('[data-hub-badge]').innerText() : '3', '3', 'The sidebar count follows too.');
   // Later steps need an open Ask again.
   fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: threeOptions() }));
-  await tabs.locator('[data-hub-tab="inbox"]').tap();
-  await tabs.locator('.hub[data-screen="inbox"]').waitFor();
-  // Board, Activity (and Sketch with writes) are under More; the bar stays at six or fewer.
-  assert.ok(await tabs.locator('nav.hub-tabs .hub-tab').count() <= 6, 'No more than six items in the bar.');
+  await tabs.locator('[data-hub-tab="needs"]').tap();
+  await tabs.locator('.hub[data-screen="needs"]').waitFor();
+  // Library first, then Roadmap, Activity (and Sketch with writes) under More; the bar stays at five.
+  assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 5, 'Five items in the bar.');
   await tabs.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['board', 'activity', 'sketch']);
-  await tabs.locator('[data-hub-more="board"]').tap();
-  await tabs.locator('.hub[data-screen="board"]').waitFor();
+  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'map', 'activity', 'sketch']);
+  await tabs.locator('[data-hub-more="map"]').tap();
+  await tabs.locator('.hub[data-screen="map"]').waitFor();
   assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a choice.');
   assert.equal(await tabs.locator('[data-hub-tab="more"]').getAttribute('class').then(c => c.includes('active')), true);
-  await noSideways(tabs, 'Board with the tab bar');
-  await tabs.locator('[data-hub-tab="map"]').tap();
-  await tabs.locator('.hub[data-screen="map"]').waitFor();
-  await tabs.locator('[data-hub-tab="cards"]').tap();
+  await noSideways(tabs, 'Roadmap with the tab bar');
+  await tabs.locator('[data-hub-tab="work"]').tap();
+  await tabs.locator('.hub[data-screen="work"]').waitFor();
+  await tabs.locator('[data-hub-tab="more"]').tap();
+  await tabs.locator('[data-hub-more="library"]').tap();
   await tabs.locator('.entity-card, .home-grid, [data-home]').first().waitFor();
   assert.equal(await tabs.locator('.hub').count(), 0);
+  await tabs.locator('[data-hub-tab="search"]').tap();
+  await tabs.waitForFunction(() => document.activeElement?.closest('.sidebar-search'), null, { timeout: 5000 });
+  assert.equal(await tabs.locator('.app-layout.sidebar-collapsed').count(), 0, 'Search opens the menu and focuses its field.');
   await go(tabs, '#/hub');
   await tabs.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
   assert.equal(await tabs.locator('nav.hub-tabs').count(), 0, 'No tab bar while a card is open.');
   assert.equal(await page.locator('nav.hub-tabs').isVisible(), false, 'No tab bar on desktop.');
+
+  step('old links: #/~hub/inbox/asks lands on needs/asks with Asks selected, board lands on Work, an Ask link is untouched');
+  const old = await open({ width: 1280, height: 800 });
+  await old.goto(`${fixture.url}#/~hub/inbox/asks`);
+  await old.locator('.hub[data-screen="needs"]').waitFor();
+  assert.equal(await old.evaluate(() => location.hash), '#/~hub/needs/asks', 'The address shows the new name.');
+  assert.equal(await old.locator('.hub-chip.on').innerText(), 'Asks');
+  assert.equal(await old.locator('.hub h2').first().innerText(), 'Needs you');
+  await go(old, '#/~hub/board');
+  await old.locator('.hub[data-screen="work"]').waitFor();
+  assert.equal(await old.evaluate(() => location.hash), '#/~hub/work');
+  assert.match(await old.locator('.hub h2').first().innerText(), /^Work/);
+  await go(old, '#/~hub/roadmap/magic-loops');
+  await old.locator('.hub[data-screen="map"]').waitFor();
+  assert.equal(await old.evaluate(() => location.hash), '#/~hub/map/magic-loops');
+  assert.equal(await old.locator('[data-hub-link="library"]').count(), 1, 'The sidebar has a Library row.');
+  await old.close();
 
   step('one /api/hub/today request per poll, not one from the menu and one from Today');
   const poll = await open({ width: 1280, height: 800 });
@@ -322,7 +345,7 @@ try {
     await guest.locator('[data-option="A"] .hub-option-pick').click({ force: true });
     assert.equal(await guest.locator('[data-option="A"] .hub-option-pick').getAttribute('aria-checked'), 'false');
     assert.equal(await guest.locator('.hub-error').count(), 0);
-    await guest.evaluate(() => { location.hash = '#/~hub/board/probe'; });
+    await guest.evaluate(() => { location.hash = '#/~hub/work/probe'; });
     await guest.locator('text=Sign in to ask an agent to do something.').waitFor();
     assert.equal(await guest.getByRole('button', { name: 'Ask an agent to do something' }).count(), 0);
     step('read-only at 375 px: the scrim covers the banner and the title; a tap on the banner closes the sheet');
@@ -360,7 +383,7 @@ try {
   await go(page, '#/~hub/map/magic-loops');
   await page.locator('.hub-map-box svg').waitFor();
   assert.equal(await page.locator('.hub-top').count(), 0, 'No header row: the map takes the room.');
-  assert.match(await page.locator('.hub h2.hub-sr').textContent(), /^Progress map · /);
+  assert.match(await page.locator('.hub h2.hub-sr').textContent(), /^Roadmap · /);
   const srBox = await page.locator('.hub h2.hub-sr').boundingBox();
   assert.ok(!srBox || (srBox.width <= 1 && srBox.height <= 1), 'The title is visually hidden.');
   assert.equal(await page.locator('.hub-legend').count(), 0, 'The Key is shut.');
@@ -1050,7 +1073,7 @@ try {
   const doneEvents = () => [...reviewsIn()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
   fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Report-only review', card: 'https://example.test/section#/report' }));
   const bareFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Bare review' }));
-  await page.goto(`${fixture.url}#/~hub/inbox/reviews`);
+  await page.goto(`${fixture.url}#/~hub/needs/reviews`);
   await page.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
   const reportRow = page.locator('.hub-row', { hasText: 'Report-only review' });
   const bareRow = page.locator('.hub-row', { hasText: 'Bare review' });
@@ -1061,7 +1084,7 @@ try {
   assert.equal(await page.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
   assert.equal(await page.locator('[data-readonly-note]').count(), 0);
   await noSideways(page, 'Reviews');
-  await phone.goto(`${fixture.url}#/~hub/inbox/reviews`);
+  await phone.goto(`${fixture.url}#/~hub/needs/reviews`);
   await phone.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
   assert.equal(await phone.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'The buttons stay on a phone.');
   await noSideways(phone, 'Reviews at phone width');
@@ -1091,7 +1114,7 @@ try {
   const LINKED = 'https://claude.ai/code/session_TESTabc123';
   const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
   fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 2 * 60000), session: 'sess-linked', title: 'Linked session needs permission', url: LINKED, appUrl: APP }));
-  await page.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  await page.goto(`${fixture.url}#/~hub/needs/blocked`);
   const linked = page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
   await linked.waitFor();
   assert.equal(await page.locator('.hub-row[data-blocked]').count(), 2);
@@ -1102,7 +1125,7 @@ try {
   assert.equal(await linked.locator('[data-blocked-hint]').count(), 0, 'A linked row has no hint.');
   assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).locator('[data-link]').count(), 0);
   await noSideways(page, 'Blocked');
-  await phone.goto(`${fixture.url}#/~hub/inbox/blocked`);
+  await phone.goto(`${fixture.url}#/~hub/needs/blocked`);
   const phoneLinked = phone.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
   await phoneLinked.waitFor();
   const phoneBare = phone.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' });
@@ -1154,13 +1177,13 @@ try {
     assert.equal(chatFixture.fake.text(saved[0]).trim().split('\n').length, 2);
     assert.match(talk.url(), /#\/~hub\/chat\/\d{8}-[a-z0-9]{6}$/, 'The address names the conversation.');
 
-    step('chat: something Hermes filed shows as a card, and Open lands on Inbox / Requests');
+    step('chat: something Hermes filed shows as a card, and Open lands on Needs you / Requests');
     await talk.locator('textarea[aria-label="Message"]').fill('Please file a request for me');
     await talk.locator('button:has-text("Send")').click();
     await talk.locator('[data-created="request"]').waitFor();
     await talk.locator('[data-created="request"] a:has-text("Open")').click();
-    await talk.locator('.hub[data-screen="inbox"]').waitFor();
-    assert.match(talk.url(), /#\/~hub\/inbox\/requests$/);
+    await talk.locator('.hub[data-screen="needs"]').waitFor();
+    assert.match(talk.url(), /#\/~hub\/needs\/requests$/);
     await talk.locator('.hub-row', { hasText: 'Hermes filed this request' }).waitFor();
 
     step('push-to-talk: holding the microphone for about a second puts the text in the box, unsent');
