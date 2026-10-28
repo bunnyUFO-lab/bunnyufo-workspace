@@ -19,21 +19,39 @@ export interface PanZoom {
   fit: (animate?: boolean) => void
   zoomBy: (factor: number, animate?: boolean) => void
   box: () => Size
+  /** If a pinch is under way, make the fingers' current positions and the current view its baseline again. Call it after the view was moved by something else (a relayout). */
+  rebase: () => void
+}
+
+/** What a user zoom reports, at most once per animation frame: which way the scale went, where the pointer was (box px) and the new scale. */
+export interface ZoomReport { dir: 1 | -1; at: { x: number; y: number }; k: number }
+export interface PanZoomOptions {
+  /** Called when a drag, pinch or zoom by the user starts. */
+  onGesture?: () => void
+  /** Called after a zoom by the user (wheel, pinch, the buttons and keys), once per frame at most. Not for Fit, Now or glides. */
+  onZoom?: (zoom: ZoomReport) => void
+  /** Fit and the first view may enlarge the content up to this scale (default 1). */
+  fitMax?: number
 }
 
 /**
  * Pan and zoom for a box holding a stage, by a CSS transform on the stage: drag, pinch, wheel and
  * keys write the transform inside one animation frame and never touch React state, so nothing is
  * laid out again while your finger moves. The view lives in a ref; the box's `data-view` shows it.
- * `onGesture` is called when a drag, pinch or zoom by the user starts.
  */
-export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObject<HTMLDivElement | null>, onGesture?: () => void): PanZoom {
+export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObject<HTMLDivElement | null>, options: PanZoomOptions = {}): PanZoom {
   const view = useRef<View>({ x: 0, y: 0, k: 1 })
   const content = useRef<Size>({ w: 0, h: 0 })
   const frame = useRef(0)
   const timer = useRef(0)
-  const gesture = useRef(onGesture)
-  gesture.current = onGesture
+  const gesture = useRef(options.onGesture)
+  gesture.current = options.onGesture
+  const zoomed = useRef(options.onZoom)
+  zoomed.current = options.onZoom
+  const fitMax = options.fitMax ?? 1
+  /** The latest user zoom since the last paint: the pointer, and the scale before the first of them. */
+  const pending = useRef<{ at: { x: number; y: number }; k0: number } | null>(null)
+  const rebaser = useRef<() => void>(() => {})
 
   const size = useCallback((): Size => ({ w: box.current?.clientWidth ?? 0, h: box.current?.clientHeight ?? 0 }), [box])
   const limits = useCallback(() => limitsFor(content.current, size()), [size])
@@ -46,7 +64,13 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
     if (!el || !st) return
     st.style.transform = viewString(view.current)
     el.dataset.view = dataView(view.current)
+    const zoom = pending.current
+    pending.current = null
+    if (zoom && view.current.k !== zoom.k0) zoomed.current?.({ dir: view.current.k > zoom.k0 ? 1 : -1, at: zoom.at, k: view.current.k })
   }, [box, stage])
+  const noteZoom = useCallback((at: { x: number; y: number }, k0: number) => {
+    pending.current = { at, k0: pending.current?.k0 ?? k0 }
+  }, [])
   const paintNow = useCallback(() => { cancelAnimationFrame(frame.current); paint() }, [paint])
   const schedule = useCallback(() => { if (!frame.current) frame.current = requestAnimationFrame(paint) }, [paint])
   const endGlide = useCallback(() => { window.clearTimeout(timer.current); stage.current?.classList.remove('glide') }, [stage])
@@ -66,14 +90,17 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
     current: () => ({ ...view.current }),
     setContent: next => { content.current = next },
     go,
-    fit: (animate = true) => go(fitView(content.current, size()), animate),
+    fit: (animate = true) => go(fitView(content.current, size(), fitMax), animate),
     zoomBy: (factor, animate = true) => {
       const { w, h } = size()
-      go(zoomAround(view.current, { x: w / 2, y: h / 2 }, factor, limits()), animate)
+      const at = { x: w / 2, y: h / 2 }
+      noteZoom(at, view.current.k)
+      go(zoomAround(view.current, at, factor, limits()), animate)
       gesture.current?.()
     },
     box: size,
-  }), [go, size, limits])
+    rebase: () => rebaser.current(),
+  }), [go, size, limits, fitMax, noteZoom])
 
   useEffect(() => {
     const el = box.current
@@ -122,9 +149,16 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
       const { view0, mid0, d0 } = pinch
       const { kMin, kMax } = limits()
       const k = clamp(view0.k * (d / d0), kMin, kMax)
+      noteZoom(mid, view.current.k)
       // The content point that was under the fingers stays under them, wherever they have moved.
       view.current = settle({ k, x: mid.x - ((mid0.x - view0.x) / view0.k) * k, y: mid.y - ((mid0.y - view0.y) / view0.k) * k })
       schedule()
+    }
+
+    rebaser.current = () => {
+      if (!pinch || pointers.size < 2) return
+      const { d, mid } = pair()
+      pinch = { d0: d, mid0: mid, view0: { ...view.current } }
     }
 
     const onDown = (event: PointerEvent) => {
@@ -211,17 +245,20 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
 
     const onWheel = (event: WheelEvent) => {
       const lines = event.deltaMode === 1 ? 16 : 1
-      if (event.ctrlKey || event.metaKey || event.altKey) {
-        event.preventDefault()
-        cancelGlide()
+      if (!event.deltaX && !event.deltaY) return
+      event.preventDefault()
+      cancelGlide()
+      const sideways = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      if (!(event.ctrlKey || event.metaKey || event.altKey) && (sideways || event.shiftKey)) {
+        // A sideways swipe, or Shift + the wheel (which some browsers turn into a sideways delta, some not), pans.
+        view.current = settle({ ...view.current, x: view.current.x - (sideways ? event.deltaX : event.deltaY) * lines })
+      } else {
+        // A vertical wheel or two-finger scroll zooms where the pointer is, and so does a pinch on a trackpad (Ctrl + wheel).
         stopInertia()
-        view.current = settle(zoomAround(view.current, local(event.clientX, event.clientY), Math.exp(-event.deltaY * lines * 0.0015), limits()))
-      } else if (event.deltaX && Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-        // Sideways swipes pan; a vertical wheel is left to the page.
-        event.preventDefault()
-        cancelGlide()
-        view.current = settle({ ...view.current, x: view.current.x - event.deltaX * lines })
-      } else return
+        const at = local(event.clientX, event.clientY)
+        noteZoom(at, view.current.k)
+        view.current = settle(zoomAround(view.current, at, Math.exp(-event.deltaY * lines * 0.0015), limits()))
+      }
       moving(true)
       announce()
       schedule()
@@ -274,7 +311,7 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
       cancelAnimationFrame(inertia)
       window.clearTimeout(wheelTimer)
     }
-  }, [box, stage, api, go, limits, settle, paint, paintNow, schedule, endGlide])
+  }, [box, stage, api, go, limits, settle, paint, paintNow, schedule, endGlide, noteZoom])
 
   return api
 }
