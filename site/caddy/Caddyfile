@@ -27,7 +27,7 @@
 # cannot read the app's storage, and a write it sends to the app carries the wrong Origin and is refused. The
 # session cookie still reaches it (same site), so its images, styles and scripts load behind the sign-in.
 #   - On the content host Caddy serves only /w/*, each response with the sandbox CSP below, and 404s the rest.
-#   - On the app host, a /w/* page opened in its own tab (Sec-Fetch-Dest: document) is sent on to the content
+#   - On the app host, a /w/* page loaded as a document, frame or embed (Sec-Fetch-Dest) is sent on to the content
 #     host. Frames are pointed at the content host by the app itself (`contentOrigin` in /api/capabilities).
 #   - With BUW_CONTENT_HOST unset nothing changes: no redirect, and the placeholder host below matches nothing.
 #
@@ -75,13 +75,15 @@
 		}
 	}
 
-	# A card opened in its own tab on the app host moves to the content host, when there is one.
+	# A card page loaded on the app host (own tab, or any frame or embed) moves to the content host, when there is one,
+	# so a page an agent wrote cannot run on the app's origin by being framed from the content host.
 	@cardTab {
 		expression `"{$BUW_CONTENT_HOST:}" != ""`
 		path /w/*
-		header Sec-Fetch-Dest document
+		header_regexp Sec-Fetch-Dest ^(document|iframe|frame|object|embed)$
 	}
 	handle @cardTab {
+
 		redir https://{$BUW_CONTENT_HOST:}{uri} 302
 	}
 
