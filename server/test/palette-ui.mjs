@@ -6,7 +6,7 @@ import { startHubFixture } from './hub-fixture.mjs';
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
-const fixture = await startHubFixture();
+const fixture = await startHubFixture({ secondSection: true });
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -78,6 +78,24 @@ try {
   await page.keyboard.press('Enter');
   await page.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
 
+  step('a card in another section is found too; the open section comes first');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('zebra');
+  const other = dialog.locator('[role="option"]', { hasText: 'Zebra crossing' });
+  await other.first().waitFor();
+  assert.match(await other.first().innerText(), /Two/, 'The hint names its section.');
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('a');
+  const cardTitles = await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^cards$/i }) }).locator('.pal-i-label').allInnerTexts();
+  assert.ok(cardTitles.includes('The hub card') && cardTitles.includes('Zebra crossing'), `Both cards match "a" (${cardTitles}).`);
+  assert.ok(cardTitles.indexOf('The hub card') < cardTitles.indexOf('Zebra crossing'), 'The open section comes first.');
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+
   step('Ctrl+K works from inside a text field, and Esc closes it and gives the focus back');
   const search = page.locator('.sidebar-search input');
   await search.focus();
@@ -128,7 +146,8 @@ try {
   assert.ok(box.x >= 0 && box.x + box.width <= 375, `The palette fits the screen (${box.x}, ${box.width}).`);
   const row = await phone.locator('.pal-i').first().boundingBox();
   assert.ok(row.height >= 44, `Rows are at least 44 px tall (${row.height}).`);
-  await phone.locator('dialog.pal input').fill('work');
+  assert.ok(await phone.locator('dialog.pal input').evaluate(el => el === document.activeElement), 'The field has focus on open at 375 px, before anything is typed.');
+  await phone.keyboard.type('work');
   await phone.locator('.pal-i', { hasText: 'Work' }).first().tap();
   await phone.locator('.hub[data-screen="work"]').waitFor();
 

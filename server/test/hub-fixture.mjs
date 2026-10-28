@@ -26,7 +26,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, secondSection = false } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -48,6 +48,17 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   const registryFile = path.join(base, 'registry/workspaces.json');
   await mkdir(path.dirname(registryFile), { recursive: true });
   await addWorkspace({ registryFile, path: dir, name: 'One', bucket: `s3://${fake.bucket}/sections/one`, activate: true });
+  if (secondSection) {
+    // A second, inactive section with one card, for tests of what spans sections.
+    const other = path.join(base, 'two');
+    await mkdir(path.join(other, 'zebra'), { recursive: true });
+    await writeFile(path.join(other, 'zebra', 'index.md'), '# Zebra crossing\n\nA card in the second section.\n');
+    await writeFile(path.join(other, 'workspace.json'), JSON.stringify({ entities: [{
+      id: 'zebra', folder: 'zebra', title: 'Zebra crossing', description: 'A card.', category: 'test', created: today, updated: today, status: 'active',
+      steps: [{ name: 'Notes', path: 'index.md' }],
+    }] }, null, 2));
+    await addWorkspace({ registryFile, path: other, name: 'Two', bucket: `s3://${fake.bucket}/sections/two` });
+  }
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
 
   const seed = seeder(fake);

@@ -15,6 +15,8 @@ interface Row {
   icon: string
   /** A hash to go to; a row with none runs `run`. */
   hash?: string
+  /** Listed before the rest of its group, whatever the match: a card of the open section. */
+  first?: boolean
   run?: () => void
 }
 
@@ -40,7 +42,7 @@ function matchRank(row: Pick<Row, 'group' | 'label'>, words: string[]): number |
 }
 
 export default function CommandPalette({ cards, items, waiting, onHome, onClose }: {
-  /** The open section's cards. */
+  /** Every card. Those of the open section (`workspace.active`) are listed first. */
   cards: WorkspaceCard[]
   /** The open items from the Hub's Today. */
   items: Item[]
@@ -92,11 +94,13 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
       group: 'Needs you', label: item.title, icon: '✉', hash: itemHash(item), hint: item.project,
     })) : []
     const maps: Row[] = host.hub ? projects.map(project => ({ group: 'Roadmaps', label: project.name || project.id, icon: '◈', hash: mapHash(project.id) })) : []
-    const found: Row[] = cards.map(card => ({ group: 'Cards', label: card.title, icon: '▢', hash: entityHash(card.id), hint: card.category }))
+    // With more than one section, the hint names the card's section; with one, its category.
+    const sections = new Set(cards.map(card => card.workspace.id)).size > 1
+    const found: Row[] = cards.map(card => ({ group: 'Cards', label: card.title, icon: '▢', hash: entityHash(card.id), hint: sections ? card.workspace.name : card.category, first: card.workspace.active }))
     const pick = (all: Row[], limit: number) => all
       .map((row, index) => ({ row, index, rank: matchRank(row, words) }))
       .filter((entry): entry is { row: Row; index: number; rank: number } => entry.rank !== null)
-      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .sort((a, b) => Number(!a.row.first) - Number(!b.row.first) || a.rank - b.rank || a.index - b.index)
       .slice(0, limit)
       .map(entry => entry.row)
     // An empty query shows where to go and what waits; Roadmaps and Cards need a word.

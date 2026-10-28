@@ -132,11 +132,8 @@ export default function App() {
   const open = cards.filter(e => e.id === route.id)
   const entity = open.find(e => e.workspace.active) ?? open[0] ?? null
 
-  // The palette finds the cards of the open section; a host with no active section offers them all.
-  const paletteCards = useMemo(() => {
-    const mine = cards.filter(card => card.workspace.active)
-    return mine.length ? mine : cards
-  }, [cards])
+  // The palette finds every card; it ranks the open section's first (CommandPalette reads `workspace.active`).
+  const paletteCards = cards
 
   const stepIndex = entity
     ? resolveStep(entity.steps.length, route.step, entity.defaultStep)
