@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type IframeHTMLAttributes } from 'react'
 import { useWorkspaceTheme } from '../lib/workspace-theme'
 import { reportThemeCSS } from '../../server/report-theme.mjs'
+import { attachCardBridge } from '../lib/card-bridge.mjs'
+import { host } from '../lib/host'
+import { api } from '../local/client'
 
-type Props = Omit<IframeHTMLAttributes<HTMLIFrameElement>, 'src' | 'onLoad'> & { url: string; onLoad?: () => void }
+/** The card a framed page belongs to: the one card the page may save for, through the app. */
+type Props = Omit<IframeHTMLAttributes<HTMLIFrameElement>, 'src' | 'onLoad'> & { url: string; onLoad?: () => void; bridge?: { workspace: string; id: string } }
 
-function ThemedFrame({ url, onLoad, ...props }: Props) {
+function ThemedFrame({ url, onLoad, bridge, ...props }: Props) {
   const { resolved } = useWorkspaceTheme()
   const frame = useRef<HTMLIFrameElement>(null)
   // A targeted postMessage to a frame that has not loaded yet is still about:blank, and warns.
@@ -36,6 +40,14 @@ function ThemedFrame({ url, onLoad, ...props }: Props) {
     element.contentWindow?.postMessage({ type: 'buw:theme', theme: resolved }, new URL(url, location.href).origin)
   }, [resolved, url])
   useEffect(() => { if (loaded.current) applyTheme() }, [applyTheme])
+  // The card page saves through this app by postMessage: it holds no credential of its own. Detaching on
+  // cleanup keeps StrictMode's second mount from leaving two listeners.
+  const workspace = bridge?.workspace, id = bridge?.id
+  useEffect(() => {
+    const element = frame.current
+    if (!element || !workspace || !id) return
+    return attachCardBridge(element, { workspace, id }, { origin: new URL(src).origin, enabled: () => host.cards && !host.saves, call: api })
+  }, [workspace, id, src])
   return <iframe {...props} ref={frame} src={src} onLoad={() => { loaded.current = true; applyTheme(); onLoad?.() }} />
 }
 
