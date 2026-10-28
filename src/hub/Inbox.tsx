@@ -7,6 +7,7 @@ import { useHubData } from './useHub'
 
 const FILTERS: [string, string, string][] = [
   ['needs-you', 'Needs you', 'Nothing needs you right now.'],
+  ['todo', 'To do', 'No checklists. When an agent needs you to do a set of steps, it posts one here.'],
   ['asks', 'Asks', 'No Asks yet. An agent that needs a decision posts one here.'],
   ['reviews', 'Reviews', 'No pull request is waiting for review.'],
   ['requests', 'Requests', 'No requests. Ask an agent to do something from the Board.'],

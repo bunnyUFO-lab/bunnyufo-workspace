@@ -3,7 +3,7 @@
 // code runs against the published site and the local app.
 import { authHeaders } from '../local/client'
 
-export type ItemKind = 'ask' | 'request' | 'review' | 'blocked' | 'session'
+export type ItemKind = 'ask' | 'checklist' | 'request' | 'review' | 'blocked' | 'session'
 export interface Item {
   kind: ItemKind
   id: string
@@ -22,16 +22,20 @@ export interface Item {
   by?: string
   /** A blocked row's event file, which Mark done names. */
   file?: string
+  /** A checklist row: items ticked and items in all. */
+  done?: number
+  total?: number
 }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted'
 export interface HubEvent {
   ts: string
   kind: EventKind
   project?: string
   bead?: string
   ask?: string
+  checklist?: string
   session?: string
   host: string
   source: string
@@ -113,6 +117,37 @@ export interface Ask {
   snoozedUntil?: string
   answer?: AskAnswer
   pickup?: { at: string; host: string; session?: string; bead?: string }
+  cancel?: { at: string; by: string }
+  files: string[]
+}
+
+export interface ChecklistItem {
+  id: string
+  text: string
+  group?: string
+  guide?: string
+  link?: string
+  done: boolean
+  /** When the winning tick or untick was written. */
+  at?: string
+}
+export type ChecklistState = 'open' | 'submitted' | 'picked-up' | 'cancelled'
+/** GET /api/hub/checklists/:id: the list as the agent wrote it, with each item's state from the mark files. */
+export interface Checklist {
+  id: string
+  project: string
+  createdAt: string
+  from?: { host?: string; tool?: string; session?: string }
+  bead?: string
+  title: string
+  context?: string
+  card?: string
+  state: ChecklistState
+  done: number
+  total: number
+  items: ChecklistItem[]
+  submit?: { at: string; by: string; note?: string; done: string[]; open: string[] }
+  pickup?: { at: string; host: string; session?: string }
   cancel?: { at: string; by: string }
   files: string[]
 }

@@ -61,6 +61,7 @@ try {
   }));
   const oldFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 4 * 60000), title: 'Old probe', summary: 'Only a title and a summary.' }));
   const partFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Part probe', extra: { verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green.' }] } }));
+  const cardLinkFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Card link probe', url: 'https://example.test/one#/sprint-card' }));
   const doneEvents = () => [...fixture.fake.objects.keys()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
 
   const page = await open({ width: 1280, height: 800 });
@@ -254,6 +255,26 @@ try {
   await phone.setViewportSize({ width: 375, height: 812 });
   await phone.waitForTimeout(150);
   await noSideways(phone, 'review view at 375 px');
+
+  step('a review whose url is a card link: Open card in the head, nothing under Pull requests, no "posted before" note');
+  await go(page, '#/~hub/inbox/reviews');
+  assert.equal(await page.locator('.hub-row', { hasText: 'Card link probe' }).locator('a.hub-btn').innerText(), 'Open card');
+  assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('a.hub-btn', { hasText: 'Open link' }).innerText(), 'Open link', 'A link that is no card keeps its label.');
+  await go(page, `#/~hub/review/${cardLinkFile}`);
+  await page.locator('.hub-review h2', { hasText: 'Card link probe' }).waitFor();
+  const linkHead = page.locator('.hub-review-head [data-link-head]');
+  assert.equal(await linkHead.innerText(), 'Open card');
+  assert.equal(await linkHead.getAttribute('href'), 'https://example.test/one#/sprint-card');
+  assert.equal(await page.locator('[data-section="prs"] a').count(), 0, 'The card link is no pull request.');
+  assert.match(await page.locator('[data-section="prs"]').innerText(), /No pull request link came with this item\./);
+  assert.equal(await page.getByText('posted before').count(), 0);
+  assert.equal((await page.locator('[data-legacy]').innerText()).trim(), 'No links or test results came with this review.');
+  await go(page, `#/~hub/review/${oldFile}`);
+  await page.locator('.hub-review h2', { hasText: 'Old probe' }).waitFor();
+  assert.equal(await page.locator('[data-link-head]').count(), 0, 'No url, no button.');
+  await go(page, `#/~hub/review/${file}`);
+  await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
+  assert.equal(await page.locator('.hub-review-head [data-link-head]').innerText(), 'Open link', 'A page that is not a card is "Open link".');
 
   step('read-only: Mark done shows the sign-in note and sends nothing');
   const dist = path.join(root, 'dist');

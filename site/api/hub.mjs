@@ -3,7 +3,7 @@
 // service mount the same code over their own bucket client, so a phone and the PC see one inbox.
 //
 // Every key this module touches is built by `inboxKey`, which is the whole write boundary: it
-// refuses anything outside the six folders the Hub owns, anything with `..` or a hidden segment,
+// refuses anything outside the seven folders the Hub owns, anything with `..` or a hidden segment,
 // and anything that looks like a secret. The routes are documented in docs/workspaces.md.
 //
 // State is derived, never stored: an Ask's state is which files exist next to it, and Today and
@@ -14,13 +14,13 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, DAY, discordEligible, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
+  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 
-const FOLDERS = ['asks', 'requests', 'events', 'beads', 'drawings', 'chat'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -92,6 +92,7 @@ async function readJson(request, limit) {
   }
 }
 
+const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(value).getTime()) ? new Date(value) : null);
 
 /**
@@ -140,8 +141,10 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     for (const month of monthPrefixes(at)) {
       const { objects } = await bucket.list(key(`${root}/${month}`));
       for (const object of objects) {
-        const [id, file] = object.key.slice(folder(root).length).split('/');
-        if (!id || !file) continue;
+        const parts = object.key.slice(folder(root).length).split('/');
+        // Exactly <id>/<file>: a deeper key (<id>/x/submit.json) is no file of the folder, whatever its last segment says.
+        if (parts.length !== 2 || !parts[0] || !parts[1]) continue;
+        const [id, file] = parts;
         if (!found.has(id)) found.set(id, new Set());
         found.get(id).add(file);
       }
@@ -158,6 +161,24 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
       const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
       const state = askState(names, ask, at, snooze);
       return { ask: { ...ask, id }, names, state, item: askItem({ ...ask, id }, state) };
+    });
+    return rows.filter(Boolean);
+  }
+
+  /** The file names directly in `<root>/<id>/`: keys one level deeper do not count. */
+  const directNames = (objects, base) => new Set(objects.map(object => object.key.slice(base.length)).filter(name => name && !name.includes('/')));
+
+  /** A stored list must be valid, with its items numbered 01.. in order, or it is treated as missing: it is an agent's file. */
+  const validChecklist = value => !!value && typeof value === 'object' && checkChecklist(value).length === 0
+    && value.items.every((item, index) => item.id === String(index + 1).padStart(2, '0'));
+
+  async function loadChecklists(at) {
+    const folders = await listFolders('checklists', at);
+    const rows = await pool(POOL, [...folders], async ([id, names]) => {
+      if (!names.has('checklist.json') || !validId(id)) return null;
+      const checklist = await cached(`checklists/${id}/checklist.json`);
+      if (!validChecklist(checklist)) return null;
+      return { checklist: { ...checklist, id }, names, item: checklistItem({ ...checklist, id }, names) };
     });
     return rows.filter(Boolean);
   }
@@ -214,8 +235,9 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
 
   async function askFolder(id) {
     if (!validId(id)) throw fail('No such Ask.', 404);
-    const { objects } = await bucket.list(key(`asks/${id}`) + '/');
-    const names = new Set(objects.map(object => object.key.split('/').pop()));
+    const base = key(`asks/${id}`) + '/';
+    const { objects } = await bucket.list(base);
+    const names = directNames(objects, base);
     if (!names.has('ask.json')) throw fail('No such Ask.', 404);
     const ask = await cached(`asks/${id}/ask.json`);
     if (!ask) throw fail('No such Ask.', 404);
@@ -233,6 +255,104 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       files: [...names].sort(),
     };
+  }
+
+  async function checklistFolder(id) {
+    if (!validId(id)) throw fail('No such checklist.', 404);
+    const base = key(`checklists/${id}`) + '/';
+    const { objects } = await bucket.list(base);
+    const names = directNames(objects, base);
+    if (!names.has('checklist.json')) throw fail('No such checklist.', 404);
+    const checklist = await cached(`checklists/${id}/checklist.json`);
+    if (!validChecklist(checklist)) throw fail('No such checklist.', 404);
+    return { checklist: { ...checklist, id }, names };
+  }
+
+  async function checklistDetail(id) {
+    const { checklist, names } = await checklistFolder(id);
+    const state = checklistState(names);
+    const { done, total, marks } = checklistProgress(checklist, names);
+    const read = async name => (names.has(name) ? cached(`checklists/${id}/${name}`) : undefined);
+    const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
+    return {
+      ...checklist, state, done, total,
+      items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
+      ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
+      files: [...names].sort(),
+    };
+  }
+
+  /** Tick or untick one item: one create-only mark file, and nothing at all when the item already is as asked. */
+  async function markChecklistItem(id, item, data, user, at) {
+    if (typeof data.done !== 'boolean') throw fail('Send { "done": true } or { "done": false }.');
+    const { checklist, names } = await checklistFolder(id);
+    const state = checklistState(names);
+    if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    if (!checklist.items.some(candidate => candidate.id === item)) throw fail('No such item.', 404);
+    if (!!checklistProgress(checklist, names).marks.get(item)?.done !== data.done) {
+      const body = `${JSON.stringify({ item, done: data.done, at: at.toISOString(), by: user || 'local' }, null, 2)}\n`;
+      for (let attempt = 0; ; attempt += 1) {
+        const clash = fail('Could not find a free name; try again.', 409);
+        try {
+          await putCreateOnly(`checklists/${id}/${data.done ? 'tick' : 'untick'}-${item}-${markStamp(at)}-${randomId(4)}.json`, body, 'application/json', clash);
+          break;
+        } catch (error) {
+          if (error !== clash || attempt >= 2) throw error;
+        }
+      }
+    }
+    return { status: 200, body: await checklistDetail(id) };
+  }
+
+  /** Send the list back: submit.json create-only, then the `checklist-submitted` event. A lost event is logged and does not undo the submit. */
+  async function submitChecklist(id, data, user, at) {
+    const { checklist, names } = await checklistFolder(id);
+    const state = checklistState(names);
+    const existing = async () => (await fresh(`checklists/${id}/submit.json`))?.value ?? null;
+    if (state === 'cancelled') throw fail('The agent withdrew this checklist.', 409);
+    if (state !== 'open') throw fail('This checklist is already submitted.', 409, { submit: await existing() });
+    const note = data.note;
+    if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > CHECKLIST_LIMITS.note)) throw fail(`A note is text of at most ${CHECKLIST_LIMITS.note} characters.`);
+    const { done: doneCount, total, marks } = checklistProgress(checklist, names);
+    const ids = checklist.items.map(item => item.id);
+    const submit = {
+      at: at.toISOString(), by: user || 'local',
+      ...(typeof note === 'string' && note.trim() ? { note: note.trim() } : {}),
+      done: ids.filter(item => marks.get(item)?.done), open: ids.filter(item => !marks.get(item)?.done),
+    };
+    try {
+      await bucket.put(key(`checklists/${id}/submit.json`), `${JSON.stringify(submit, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
+    } catch (error) {
+      if (error.status !== 412) throw error;
+      throw fail('This checklist is already submitted.', 409, { submit: await existing() });
+    }
+    cache.delete(key(`checklists/${id}/submit.json`));
+    const event = {
+      ts: at.toISOString(), kind: 'checklist-submitted', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user || 'local',
+      title: `Submitted: ${clip(checklist.title, 80)}`, summary: `${doneCount} of ${total} done`,
+    };
+    try {
+      await putHubEvent(event, at);
+    } catch (error) {
+      log(`[hub] checklist ${id} was submitted but its event was not written: ${error.message}`);
+    }
+    return { status: 201, body: { state: 'submitted', submit } };
+  }
+
+  /** A create-only event file written by the Hub: `events/<day>/<hhmmss>-hub-<rand4>.json`, a new name on a clash, three tries. */
+  async function putHubEvent(event, at) {
+    const body = `${JSON.stringify(event, null, 2)}\n`;
+    const stamp = at.toISOString();
+    for (let attempt = 0; ; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      const name = `${stamp.slice(11, 19).replace(/:/g, '')}-hub-${randomId(4)}.json`;
+      try {
+        await putCreateOnly(`events/${stamp.slice(0, 10)}/${name}`, body, 'application/json', clash);
+        return;
+      } catch (error) {
+        if (error !== clash || attempt >= 2) throw error;
+      }
+    }
   }
 
   async function putCreateOnly(rel, body, contentType, conflict) {
@@ -404,20 +524,8 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     const review = events.find(event => event.kind === kind && event.file === id);
     if (!review) throw missing();
     if (events.some(event => event.kind === 'review-done' && event.review === id)) return { status: 200, body: { state: 'done' } };
-    const body = `${JSON.stringify(reviewDone({ review: id, event: review, user, at }), null, 2)}
-`;
-    const stamp = at.toISOString();
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const clash = fail('Could not find a free name; try again.', 409);
-      const name = `${stamp.slice(11, 19).replace(/:/g, '')}-hub-${randomId(4)}.json`;
-      try {
-        await putCreateOnly(`events/${stamp.slice(0, 10)}/${name}`, body, 'application/json', clash);
-        return { status: 201, body: { state: 'done' } };
-      } catch (error) {
-        if (error !== clash || attempt === 2) throw error;
-      }
-    }
-    throw fail('Could not find a free name; try again.', 409);
+    await putHubEvent(reviewDone({ review: id, event: review, user, at }), at);
+    return { status: 201, body: { state: 'done' } };
   }
 
   /** One review's detail, from the ready-for-review event in the last seven days. */
@@ -501,8 +609,9 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
       const meta = (await fresh(`beads/${id}.meta.json`))?.value;
       add(id, { beads: true, ...(meta?.pushedAt ? { pushedAt: meta.pushedAt } : {}) });
     });
-    const [asks, requests, window] = await Promise.all([loadAsks(at), loadRequests(at), loadEvents(at)]);
+    const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
     for (const row of asks) add(row.ask.project);
+    for (const row of checklists) add(row.checklist.project);
     for (const item of requests) add(item.project);
     for (const event of window.events) add(event.project);
     return [...found.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -641,14 +750,16 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
 
         if (method === 'GET') {
           if (route === '/hub/today') {
-            const [asks, window] = await Promise.all([loadAsks(at), loadEvents(at)]);
-            reply(buildToday({ asks: asks.map(row => row.item), events: window.events, now: at }));
+            const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
+            reply(buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), events: window.events, now: at }));
           } else if (route === '/hub/inbox') {
             const filter = INBOX_FILTERS.includes(query.get('filter')) ? query.get('filter') : 'needs-you';
-            const [asks, requests, window] = await Promise.all([loadAsks(at), loadRequests(at), loadEvents(at)]);
-            reply({ items: buildInbox({ filter, asks: asks.map(row => row.item), requests, events: window.events, now: at }) });
+            const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
+            reply({ items: buildInbox({ filter, asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, events: window.events, now: at }) });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/checklists\/([^/]+)$/.exec(route))) {
+            reply(await checklistDetail(decodeURIComponent(match[1])));
           } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
           } else if (route === '/hub/events') {
@@ -697,6 +808,10 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
           if (match[2] === 'answer') send(await answerAsk(id, raw, user, at));
           else if (match[2] === 'snooze') send(await snoozeAsk(id, raw, user, at));
           else send(await cancelAsk(id, user, at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/items\/(\d{2})$/.exec(route))) {
+          send(await markChecklistItem(decodeURIComponent(match[1]), match[2], raw, user, at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/submit$/.exec(route))) {
+          send(await submitChecklist(decodeURIComponent(match[1]), raw, user, at));
         } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {

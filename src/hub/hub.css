@@ -354,3 +354,44 @@ a.hub-row-text:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 /* A stronger cue on the review row: the arrow in the title's colour, and the title underlined on hover, focus and press. */
 a.hub-row-text .hub-row-cue { color: var(--text-bright); font-weight: 700; }
 a.hub-row-text:focus-visible .hub-row-title, a.hub-row-text:active .hub-row-title { text-decoration: underline; }
+
+/* Checklists: a list of steps ticked one at a time. Each item has two tap targets, a 48 px box and the text. */
+.hub-cl { max-width: 46rem; }
+.hub-cl > .hub-md { margin: 0 0 10px; }
+.hub-cl-count { margin: 0 0 6px; font-size: 0.9rem; color: var(--text-bright); }
+.hub-cl-bar { height: 8px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; margin-bottom: 8px; }
+.hub-cl-bar > span { display: block; height: 100%; background: var(--pink); border-radius: var(--radius-pill); transition: width 0.15s; }
+.hub-cl-group { margin: 14px 0 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+.hub-cl-item { border-top: 1px solid var(--hairline); min-width: 0; }
+.hub-cl-group + .hub-cl-line { border-top: 0; }
+.hub-cl-line { display: flex; align-items: stretch; gap: 4px; min-height: 52px; }
+.hub-cl-box {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; align-self: center;
+  width: 48px; height: 48px; padding: 0; background: none; border: 0; color: var(--text-bright); cursor: pointer; border-radius: var(--radius);
+}
+.hub-cl-box > span { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 2px solid var(--hairline-strong); border-radius: 7px; background: var(--surface-solid); font-size: 1rem; line-height: 1; }
+.hub-cl-box[aria-checked="true"] > span { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }
+.hub-cl-box:disabled { cursor: default; }
+.hub-cl-box:focus-visible, .hub-cl-text:focus-visible, .hub-copy:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-cl-text {
+  flex: 1; min-width: 0; min-height: 48px; display: flex; flex-direction: column; justify-content: center; gap: 1px; align-self: center;
+  padding: 6px 28px 6px 4px; position: relative; background: none; border: 0; color: inherit; font: inherit; text-align: left; border-radius: var(--radius);
+}
+button.hub-cl-text { cursor: pointer; }
+.hub-cl-text.plain { cursor: pointer; }
+.hub-cl-title { font-size: 0.92rem; overflow-wrap: anywhere; }
+.hub-cl-meta { font-size: 0.72rem; color: var(--text-dim); }
+.hub-cl-chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--text-dim); }
+.hub-cl-item[data-done] .hub-cl-title { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--hairline-strong); }
+.hub-cl-more { margin: 0 0 10px 52px; padding: 2px 0 4px; min-width: 0; }
+.hub-cl-more .hub-btn { min-height: 44px; }
+.hub-cl-item > .hub-error { margin: 0 0 8px 52px; }
+.hub-cl-submit .hub-field textarea { min-height: 4.5rem; }
+.hub-cl-warn { background: var(--amber-dim); color: var(--amber); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.88rem; margin: 8px 0; }
+.hub-cl-send { min-height: 48px; min-width: 9rem; }
+.hub-cl .hub-btn { min-height: 44px; }
+
+/* A fenced block with a Copy button (Md with copy). */
+.hub-code { position: relative; margin: 8px 0; min-width: 0; }
+.hub-code pre { margin: 0 0 6px; }
+.hub-copy { min-height: 44px; min-width: 44px; font-size: 0.8rem; }

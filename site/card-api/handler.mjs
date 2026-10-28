@@ -163,9 +163,9 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, answers, snoozes and declines are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json)$/i;
-  const ASK_FILE = /^asks\/(?:[^/]+\/)*ask\.json$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks and submissions are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json)|checklists\/[^/]+\/[^/]+\/.*)$/i;
+  const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist)\.json$/i;
   const ownerOnly = (caller, sectionId, file) => {
     if (sectionId === 'inbox' && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
@@ -178,13 +178,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    */
   const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (sectionId === 'inbox' && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'ask.json is create-only.');
+      throw new HttpError(403, 'ask.json and checklist.json are create-only.');
     }
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
     if (sectionId === 'inbox' && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file))) {
-      throw new HttpError(403, 'Only the Hub removes asks and answers.');
+      throw new HttpError(403, 'Only the Hub removes asks, answers, checklists and ticks.');
     }
   };
 

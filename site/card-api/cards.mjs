@@ -48,6 +48,17 @@
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
 //   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json
 //   cards ask pickup <id> | cards ask cancel <id>                     exit 3 when someone else already did
+//   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]
+//        put a checklist for the owner to tick off in the Hub (a list of steps, each with an optional guide) and post a
+//        checklist-created event; prints its id, then pings #needs-you like an Ask. The Hub writes ticks and the submission
+//        (owner-only files); nothing is ever overwritten. --file takes the checklist.json shape without id, project,
+//        createdAt, from and the item ids (the CLI adds them): title, context?, card?, items[{ text, group?, guide?, link? }].
+//   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
+//   cards checklist get <id> [--json]                                      progress, the items, submit.json
+//   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
+//        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
+//   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
+//   cards checklist cancel <id>     exit 3 when already cancelled or submitted
 //   cards request list [--project <p>] [--open]
 //   cards request take <id> --bead <b>                                exit 3 when already taken
 //   cards request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]
@@ -69,7 +80,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | request list|take|create | beads push --project <p>';
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create | beads push --project <p>';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** The cards bucket this machine knows of: BUW_S3_BUCKET, else the first one the registry names. */
@@ -348,7 +359,7 @@ async function put(folder, section, id, dryRun) {
 // The inbox: events, Asks, requests and Beads copies, all files in the hidden `inbox` section.
 // ---------------------------------------------------------------------------------------------
 
-const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed'];
+const EVENT_KINDS = ['session-started', 'session-ended', 'blocked', 'ready-for-review', 'pr-opened', 'pr-merged', 'ci-failed', 'ci-passed', 'deployed', 'ask-created', 'alert', 'review-done', 'resumed', 'checklist-created', 'checklist-submitted'];
 const WHEN = ['next-sprint', 'nightly', 'record'];
 // The handler's filter on file names; checked here too, so a bad name fails before it is sent.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -550,6 +561,7 @@ function buildEvent(flags) {
     ...(flags.project ? { project: flags.project } : {}),
     ...(flags.bead ? { bead: flags.bead } : {}),
     ...(flags.ask ? { ask: flags.ask } : {}),
+    ...(flags.checklist ? { checklist: String(flags.checklist) } : {}),
     ...(flags.review ? { review: String(flags.review) } : {}),
     ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}),
     host, source: flags.source || 'cli', title: String(flags.title),
@@ -561,16 +573,16 @@ function buildEvent(flags) {
 }
 
 /** Post an event; when the API cannot be reached, keep it in the spool and say so. Never throws for that. */
-async function postEvent(flags) {
+async function postEvent(flags, { out = console.log } = {}) {
   const { event, file } = buildEvent(flags);
   const body = `${JSON.stringify(event, null, 2)}\n`;
   const result = await putInbox(file, body, { createOnly: true });
   if (result.state === 'transient') {
     await spool({ path: file, body });
-    console.log(`spooled ${file} (${result.reason}); it is sent with the next inbox command`);
+    out(`spooled ${file} (${result.reason}); it is sent with the next inbox command`);
     return file;
   }
-  console.log(file);
+  out(file);
   return file;
 }
 
@@ -680,15 +692,16 @@ async function needsYouWebhook(hub) {
 const titleOf = id => String(id).split('-').filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
 
 /**
- * Tell the owner an Ask is waiting. Silent without a webhook; on a failed post the message is kept in
- * the shared spool for hub-hooks to replay (no address in it), and the exit code is never touched.
+ * Tell the owner an Ask or a checklist is waiting: `path` is the Hub link after the site's address. Silent without a
+ * webhook; on a failed post the message is kept in the shared spool for hub-hooks to replay (no address in it), and
+ * the exit code is never touched.
  */
-async function pingNeedsYou(ask, id) {
+async function pingNeedsYou({ project, text, path: link }) {
   const hub = await hubConfig();
   const webhook = await needsYouWebhook(hub);
   if (!webhook) return;
   const site = String(hub?.siteUrl || process.env.BUW_SITE_URL || '').replace(/\/+$/, '');
-  const content = [`**Agent needs you · ${titleOf(ask.project)}**`, clip(ask.question, 200), ...(site ? [`${site}/#/~hub/ask/${id}`] : [])].join('\n');
+  const content = [`**Agent needs you · ${titleOf(project)}**`, clip(text, 200), ...(site ? [`${site}${link}`] : [])].join('\n');
   const body = JSON.stringify({ content, allowed_mentions: { parse: [] } });
   try {
     const response = await fetch(webhook, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(5000) });
@@ -721,7 +734,7 @@ async function askCreate(flags) {
   for (const upload of uploads) await mustPut(upload.file, upload.body, { createOnly: true, contentType: upload.contentType });
   if (await mustPut(askFile, `${JSON.stringify(ask, null, 2)}\n`, { createOnly: true }) === 'exists') throw new Error(`${askFile} already exists; run it again.`);
   await postEvent({ kind: 'ask-created', title: clip(ask.question, 80), project: ask.project, bead: ask.bead, ask: id, source: 'cards', summary: 'A question is waiting for an answer.' }).catch(error => console.error(`(ask-created event skipped: ${error.message})`));
-  await pingNeedsYou(ask, id).catch(() => {});
+  await pingNeedsYou({ project: ask.project, text: ask.question, path: `/#/~hub/ask/${id}` }).catch(() => {});
   console.log(id);
 }
 
@@ -768,6 +781,197 @@ async function claim(folder, id, file, body) {
 }
 
 const pickupBody = flags => ({ at: isoNow(), ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}), host: hostName(), ...(flags.bead ? { bead: flags.bead } : {}) });
+
+// --- Checklists: a list of steps for the owner, ticked one at a time in the Hub ---
+// checklists/<id>/: checklist.json (this command), tick-/untick-<item>-<stamp>-<rand4>.json and submit.json (the Hub only),
+// pickup.json and cancel.json (this command). The state is read from the file names alone.
+
+const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
+const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024 };
+
+/** cancel.json → cancelled, pickup.json → picked-up, submit.json → submitted, else open. */
+const checklistState = names => (names.has('cancel.json') ? 'cancelled' : names.has('pickup.json') ? 'picked-up' : names.has('submit.json') ? 'submitted' : 'open');
+
+/** The winning mark per item: the greatest stamp in the file name, the greater rand4 on a tie. → Map<item, { done, at }> */
+function checklistMarks(names) {
+  const best = new Map();
+  for (const name of names) {
+    const match = CHECKLIST_MARK_RE.exec(name);
+    if (!match) continue;
+    const [, action, item, time, tail] = match;
+    const key = `${time}-${tail}`;
+    if (!best.has(item) || key > best.get(item).key) {
+      best.set(item, { key, done: action === 'tick', at: `${time.slice(0, 4)}-${time.slice(4, 6)}-${time.slice(6, 8)}T${time.slice(9, 11)}:${time.slice(11, 13)}:${time.slice(13, 15)}.${time.slice(15, 18)}Z` });
+    }
+  }
+  return new Map([...best].map(([item, { done, at }]) => [item, { done, at }]));
+}
+
+/** The problems with a checklist input (the shape of checklist.json without id, project, createdAt, from and item ids). */
+function validateChecklist(raw) {
+  const L = CHECKLIST_LIMITS;
+  const problems = [];
+  const text = (value, max) => typeof value === 'string' && value.trim().length >= 1 && value.length <= max;
+  const optional = (value, max) => value === undefined || (typeof value === 'string' && value.length <= max);
+  const link = value => typeof value === 'string' && value.length <= L.link && /^https?:\/\//i.test(value);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return ['the file is not an object'];
+  if (!text(raw.title, L.title)) problems.push(`title is 1 to ${L.title} characters`);
+  if (!optional(raw.context, L.context)) problems.push(`context is at most ${L.context} characters`);
+  if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
+  if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > L.items) problems.push(`items is a list of 1 to ${L.items}`);
+  else {
+    raw.items.forEach((item, index) => {
+      const at = `item ${index + 1}`;
+      if (!item || typeof item !== 'object' || Array.isArray(item)) { problems.push(`${at} is not an object`); return; }
+      if (!text(item.text, L.text)) problems.push(`${at}: text is 1 to ${L.text} characters`);
+      if (!optional(item.group, L.group)) problems.push(`${at}: group is at most ${L.group} characters`);
+      if (!optional(item.guide, L.guide)) problems.push(`${at}: guide is at most ${L.guide} characters`);
+      if (item.link !== undefined && !link(item.link)) problems.push(`${at}: link is an http:// or https:// link of at most 2000 characters`);
+    });
+  }
+  return problems;
+}
+
+/** The checklist.json to write: the input plus id, project, createdAt and from, with positional item ids. */
+function checklistFromInput(raw, flags, id) {
+  const card = flags.card || raw.card;
+  const bead = flags.bead || raw.bead;
+  return {
+    id, project: flags.project, createdAt: isoNow(),
+    from: { host: hostName(), tool: flags.tool || 'claude-code', ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) },
+    ...(bead ? { bead } : {}),
+    title: raw.title.trim(),
+    ...(raw.context ? { context: raw.context } : {}),
+    ...(card ? { card } : {}),
+    items: raw.items.map((item, index) => ({
+      id: String(index + 1).padStart(2, '0'), text: item.text.trim(),
+      ...(item.group ? { group: item.group } : {}), ...(item.guide ? { guide: item.guide } : {}), ...(item.link ? { link: item.link } : {}),
+    })),
+  };
+}
+
+/** The names of the files in one checklist's folder; throws when there are none. */
+async function checklistNames(id) {
+  const names = (await listInbox(`checklists/${id}/`)).map(file => file.split('/').slice(2).join('/'));
+  if (!names.includes('checklist.json')) throw new Error(`No checklist ${id}.`);
+  return new Set(names);
+}
+
+/** Everything `get` shows: the list, its state, progress and the Hub's and the agent's files. */
+async function checklistRead(id) {
+  const names = await checklistNames(id);
+  const checklist = await readJson(inboxPath('checklists', id, 'checklist.json'));
+  if (!checklist || !Array.isArray(checklist.items)) throw new Error(`checklists/${id}/checklist.json is not a checklist.`);
+  const marks = checklistMarks(names);
+  const items = checklist.items.map(item => ({ id: item.id, text: item.text, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) }));
+  const read = async name => (names.has(name) ? readJson(inboxPath('checklists', id, name)) : undefined);
+  const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
+  return {
+    checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items,
+    ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
+  };
+}
+
+const minute = iso => `${iso.slice(0, 10)} ${iso.slice(11, 16)}Z`;
+
+function printChecklist(view, asJson) {
+  if (asJson) { console.log(JSON.stringify(view, null, 2)); return; }
+  const { checklist, state, done, total, items } = view;
+  console.log([checklist.id, state, `${done} of ${total} done`, checklist.project].join('\t'));
+  console.log(checklist.title);
+  for (const item of items) console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
+  for (const name of ['submit', 'pickup', 'cancel']) if (view[name]) console.log(`== ${name}.json\n${JSON.stringify(view[name], null, 2)}`);
+}
+
+async function checklistCreate(flags) {
+  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]';
+  if (!flags.project || (!flags.file && !flags.title)) throw new Error(usage);
+  if (flags.file && (flags.title || flags.item)) throw new Error(`Give --file, or --title with --item, not both. ${usage}`);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is lower-case letters, digits and dashes');
+  const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { title: flags.title, items: (flags.item ?? []).map(text => ({ text })) };
+  const problems = validateChecklist(raw);
+  if (flags.card !== undefined && !/^https?:\/\//i.test(flags.card)) problems.push('--card is an http:// or https:// link');
+  if (problems.length) throw new Error(`checklist.json is not valid: ${problems.join('; ')}.`);
+  const id = newId(flags.project, raw.title);
+  const checklist = checklistFromInput(raw, flags, id);
+  const body = `${JSON.stringify(checklist, null, 2)}\n`;
+  if (Buffer.byteLength(body) > CHECKLIST_LIMITS.file) throw new Error('checklist.json is not valid: the file is over 256 KB.');
+  const file = inboxPath('checklists', id, 'checklist.json');
+  if (await mustPut(file, body, { createOnly: true }) === 'exists') throw new Error(`${file} already exists; run it again.`);
+  const steps = checklist.items.length;
+  await postEvent({ kind: 'checklist-created', title: clip(checklist.title, 80), project: checklist.project, bead: checklist.bead, checklist: id, source: 'cards', summary: `${steps} steps for you.` }, { out: console.error }).catch(error => console.error(`(checklist-created event skipped: ${error.message})`));
+  await pingNeedsYou({ project: checklist.project, text: `${checklist.title} (${steps} steps)`, path: `/#/~hub/checklist/${id}` }).catch(() => {});
+  console.log(id);
+}
+
+async function checklistList(flags) {
+  const folders = await listFolders('checklists', flags.all);
+  const wanted = flags.project ? new RegExp(`^\\d{8}-${flags.project.toLowerCase().replace(/[^a-z0-9-]/g, '')}-`) : null;
+  const ids = [...folders.keys()].filter(id => folders.get(id).has('checklist.json') && (!wanted || wanted.test(id))).sort();
+  const rows = await mapLimit(ids, 8, async id => {
+    const names = folders.get(id);
+    const state = checklistState(names);
+    if ((flags.open && state !== 'open') || (flags.submitted && state !== 'submitted')) return null;
+    const checklist = await readJson(inboxPath('checklists', id, 'checklist.json'));
+    if (!checklist || !Array.isArray(checklist.items)) return null;
+    const marks = checklistMarks(names);
+    const done = checklist.items.filter(item => marks.get(item.id)?.done).length;
+    return { id, state, done, total: checklist.items.length, project: checklist.project ?? '', title: clip(checklist.title, 80) };
+  });
+  for (const row of rows) if (row && (!flags.project || row.project === flags.project)) console.log([row.id, row.state, `${row.done}/${row.total}`, row.project, row.title].join('\t'));
+}
+
+async function checklistGet(id, flags) {
+  printChecklist(await checklistRead(idSafe(id)), flags.json);
+}
+
+/** Wait for the owner to submit. Exit 0 on submit (prints what `get` prints), 3 on cancel, 4 on timeout (prints the progress). */
+async function checklistWait(id, flags) {
+  id = idSafe(id);
+  const minutes = flags.timeout === undefined ? 30 : Number(flags.timeout);
+  const seconds = flags.every === undefined ? 20 : Number(flags.every);
+  if (!(minutes > 0) || minutes > 240) throw new Error('--timeout is a number of minutes above 0 and at most 240.');
+  if (!(seconds >= 5)) throw new Error('--every is a number of seconds, at least 5.');
+  const deadline = Date.now() + minutes * 60_000;
+  for (let first = true; ; first = false) {
+    let view;
+    try {
+      view = await checklistRead(id);
+    } catch (error) {
+      if (first || /^No checklist/.test(error.message)) throw error;
+      console.error(`(poll failed, trying again: ${error.message})`);
+    }
+    if (view) {
+      if (view.state === 'cancelled') { printChecklist(view, flags.json); throw new Exit(3); }
+      if (view.state === 'submitted' || view.state === 'picked-up') { printChecklist(view, flags.json); return; }
+      if (Date.now() >= deadline) {
+        console.log(`${view.checklist.id}\t${view.state}\t${view.done} of ${view.total} done\t${view.checklist.project}\t(timed out after ${minutes} min)`);
+        throw new Exit(4);
+      }
+    } else if (Date.now() >= deadline) {
+      throw new Exit(4);
+    }
+    await delay(Math.max(0, Math.min(seconds * 1000, deadline - Date.now())));
+  }
+}
+
+/** The agent has read the submission and acted on it: exit 2 when it was not submitted, 3 when already picked up. */
+async function checklistPickup(id) {
+  id = idSafe(id);
+  const names = await checklistNames(id);
+  const state = checklistState(names);
+  if (state === 'picked-up') { console.error(`checklists/${id} was picked up already.`); throw new Exit(3); }
+  if (state !== 'submitted') { console.error(`checklists/${id} is ${state}, not submitted: nothing to pick up.`); throw new Exit(2); }
+  return claim('checklists', id, 'pickup.json', { at: isoNow(), host: hostName(), ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) });
+}
+
+/** Withdraw a list that is still open: exit 3 when it was cancelled or submitted already. */
+async function checklistCancel(id) {
+  id = idSafe(id);
+  const state = checklistState(await checklistNames(id));
+  if (state !== 'open') { console.error(`checklists/${id} is ${state}, so it cannot be cancelled.`); throw new Exit(3); }
+  return claim('checklists', id, 'cancel.json', { at: isoNow(), by: hostName() });
+}
 
 // --- requests ---
 
@@ -823,7 +1027,7 @@ async function beadsPush(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'all', 'require-passkey']);
+const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -835,6 +1039,7 @@ function parseFlags(args) {
     if (value === undefined || value.startsWith('--')) throw new Error(`--${name} needs a value.`);
     at += 1;
     if (name === 'image') (flags.image ??= []).push(value);
+    else if (name === 'item') (flags.item ??= []).push(value);
     else flags[name] = value;
   }
   return flags;
@@ -850,6 +1055,12 @@ async function inbox(command, args) {
   if (command === 'ask' && sub === 'get' && id) return askGet(id);
   if (command === 'ask' && sub === 'pickup' && id) return claim('asks', idSafe(id), 'pickup.json', pickupBody(flags));
   if (command === 'ask' && sub === 'cancel' && id) return claim('asks', idSafe(id), 'cancel.json', { at: isoNow(), by: hostName() });
+  if (command === 'checklist' && sub === 'create') return checklistCreate(flags);
+  if (command === 'checklist' && sub === 'list') return checklistList(flags);
+  if (command === 'checklist' && sub === 'get' && id) return checklistGet(id, flags);
+  if (command === 'checklist' && sub === 'wait' && id) return checklistWait(id, flags);
+  if (command === 'checklist' && sub === 'pickup' && id) return checklistPickup(id);
+  if (command === 'checklist' && sub === 'cancel' && id) return checklistCancel(id);
   if (command === 'request' && sub === 'list') return requestList(flags);
   if (command === 'request' && sub === 'create') return requestCreate(flags);
   if (command === 'request' && sub === 'take' && id) {
@@ -864,7 +1075,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'ask', 'request', 'beads'].includes(first)) {
+  if (['event', 'ask', 'checklist', 'request', 'beads'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;

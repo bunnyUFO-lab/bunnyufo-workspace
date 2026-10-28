@@ -249,6 +249,65 @@ test('inbox: ask.json is create-only for a limited token, and a limited deleter 
   }
 });
 
+test('inbox: a checklist is written once by an agent; ticks and the submission are the Hub\'s, and a limited deleter keeps off all of it', async () => {
+  const { fake, call } = await setup();
+  try {
+    const folder = 'checklists/20261027-probe-x-a1b2';
+    const put = (token, file, headers = {}, text = '{}') => call('PUT', `/sections/inbox/files/${folder}/${file}`, { token, body: Buffer.from(text), base64: true, headers });
+    const owned = ['tick-01-20261027T143012123Z-a1b2.json', 'untick-01-20261027T143012123Z-a1b2.json', 'submit.json'];
+    for (const file of owned) {
+      for (const token of ['tok-cloud', 'tok-hermes']) {
+        const refused = await put(token, file, { 'If-None-Match': '*' });
+        assert.equal(refused.status, 403, `${token} ${file}`);
+      }
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${folder}/${file}` }] } })).status, 403, `${file} by upload URL`);
+      assert.equal(fake.text(`sections/inbox/${folder}/${file}`), null);
+    }
+    // checklist.json: create-only for a limited writer, with If-None-Match: * and never by upload URL.
+    assert.equal((await put('tok-cloud', 'checklist.json')).status, 403, 'No If-None-Match: refused.');
+    assert.equal((await put('tok-cloud', 'checklist.json', { 'If-Match': '"abc"' })).status, 403, 'If-Match is no way round it.');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${folder}/checklist.json` }] } })).status, 403);
+    assert.equal(fake.text(`sections/inbox/${folder}/checklist.json`), null);
+    assert.equal((await put('tok-cloud', 'checklist.json', { 'If-None-Match': '*' }, '{"n":1}')).status, 200, 'An agent creates the list.');
+    assert.equal((await put('tok-cloud', 'checklist.json', { 'If-None-Match': '*' }, '{"n":2}')).status, 412, 'A second put finds it there.');
+    assert.equal(fake.text(`sections/inbox/${folder}/checklist.json`), '{"n":1}');
+    assert.equal((await put('tok-cloud', 'pickup.json')).status, 200, 'pickup.json is the agent\'s.');
+    assert.equal((await put('tok-cloud', 'cancel.json')).status, 200, 'cancel.json is the agent\'s.');
+
+    // The Hub's own writes (the passphrase) go through, and a limited deleter cannot remove any Hub file.
+    for (const file of owned) assert.equal((await put('tok-all', file)).status, 200, `the passphrase writes ${file}`);
+    for (const file of [...owned, 'checklist.json']) {
+      assert.equal((await call('DELETE', `/sections/inbox/files/${folder}/${file}`, { token: 'tok-deleter' })).status, 403, file);
+      assert.ok(fake.text(`sections/inbox/${folder}/${file}`), `${file} is still there`);
+    }
+    assert.equal((await call('DELETE', `/sections/inbox/files/${folder}/pickup.json`, { token: 'tok-deleter' })).status, 200, 'The rest may go.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${folder}/submit.json`, { token: 'tok-all' })).status, 200);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: nothing nested below a checklist folder can be written or deleted by a limited token', async () => {
+  const { fake, call } = await setup();
+  try {
+    const folder = 'checklists/20261027-probe-x-a1b2';
+    const files = ['x/submit.json', 'x/tick-01-29991231T235959999Z-zzzz.json', 'x/untick-01-29991231T235959999Z-zzzz.json', 'x/y/submit.json', 'x/checklist.json', 'x/pickup.json', 'submit.json/x', 'tick-01-29991231T235959999Z-zzzz.json/x'];
+    for (const file of files) {
+      for (const token of ['tok-cloud', 'tok-hermes']) {
+        const refused = await call('PUT', `/sections/inbox/files/${folder}/${file}`, { token, body: Buffer.from('{}'), base64: true, headers: { 'If-None-Match': '*' } });
+        assert.equal(refused.status, 403, `${token} ${file}`);
+      }
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${folder}/${file}` }] } })).status, 403, `${file} by upload URL`);
+      assert.equal(fake.text(`sections/inbox/${folder}/${file}`), null);
+      fake.seed(`sections/inbox/${folder}/${file}`, '{}', 'application/json');
+      assert.equal((await call('DELETE', `/sections/inbox/files/${folder}/${file}`, { token: 'tok-deleter' })).status, 403, `delete ${file}`);
+      assert.equal((await call('PUT', `/sections/inbox/files/${folder}/${file}`, { token: 'tok-all', body: Buffer.from('{}'), base64: true })).status, 200, `the passphrase writes ${file}`);
+    }
+  } finally {
+    await fake.close();
+  }
+});
+
 test('listing: files under a prefix, sorted, capped at 1000 with truncated, and only for a reader', async () => {
   const { fake, call } = await setup();
   try {

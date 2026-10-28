@@ -2,7 +2,7 @@
 // fake Hermes, and the local service over both. The UI tests start it; run directly with --serve it
 // prints the address and stays up, for screenshots and for a reviewer to look at.
 //
-//   node server/test/hub-fixture.mjs --serve [--no-hermes]
+//   node server/test/hub-fixture.mjs --serve [--no-hermes] [--checklists]
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
-import { askJson, beadsIssue, cujTwo, eventJson, minutesAgo, seeder, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, seeder, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
@@ -19,10 +19,14 @@ export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g
 export const DISCORD_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-ship-the-build-d1d1`;
 export const PASSKEY_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-merge-the-stack-p2p2`;
 
+/** The two checklists `checklists: true` seeds: an open one with one of four items ticked, and one the owner already submitted. */
+export const FIXTURE_CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-finish-the-discord-bot-setup-c1c1`;
+export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-update-the-router-settings-d2d2`;
+
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -76,6 +80,17 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     seed.beads('nosprint', bare, { pushedAt: minutesAgo(now, 10).toISOString(), host: 'pc.example.test', count: bare.length, repo: 'example/nosprint' });
   }
 
+  if (checklists) {
+    // Off by default: one open list is one more in Needs you, and the other tests count 3.
+    seed.checklist(checklistJson({ id: FIXTURE_CHECKLIST, now: minutesAgo(now, 40) }), [{ item: '01', at: minutesAgo(now, 25) }]);
+    const submitted = checklistJson({
+      id: SUBMITTED_CHECKLIST, now: minutesAgo(now, 180), title: 'Update the router settings', context: 'Two settings that only the router admin page can change.',
+      items: [{ text: 'Reserve the address for the server', group: 'Router' }, { text: 'Turn off remote administration', group: 'Router', guide: 'Open **Administration** and switch it off.' }, { text: 'Reboot the router', group: 'After' }],
+    });
+    seed.checklist(submitted, [{ item: '01', at: minutesAgo(now, 150) }, { item: '02', at: minutesAgo(now, 140) }]);
+    seed.submit(submitted.id, { at: minutesAgo(now, 5).toISOString(), note: 'Left the reboot for tonight.', done: ['01', '02'], open: ['03'] });
+  }
+
   const service = await createService({
     repo, uiDir: process.env.BUW_FIXTURE_DIST || path.join(root, 'dist'), registryFile,
     bucketOptions: { endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' },
@@ -91,9 +106,10 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
 }
 
 if (process.argv.includes('--serve')) {
-  const fixture = await startHubFixture({ hermes: !process.argv.includes('--no-hermes'), discordAsks: true });
+  const fixture = await startHubFixture({ hermes: !process.argv.includes('--no-hermes'), discordAsks: true, checklists: process.argv.includes('--checklists') });
   console.log(fixture.url);
   console.log(`Ask: ${fixture.origin}/#/~hub/ask/${FIXTURE_ASK}`);
+  if (process.argv.includes('--checklists')) console.log(`Checklist: ${fixture.origin}/#/~hub/checklist/${FIXTURE_CHECKLIST}`);
   process.on('SIGINT', () => fixture.close().finally(() => process.exit(0)));
   setInterval(() => {}, 1 << 30);
 }
