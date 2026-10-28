@@ -131,17 +131,22 @@ npm run cards -- ask create --project <p> [--bead <b>] --file ask.json [--image 
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
 npm run cards -- ask get <id>
 npm run cards -- ask pickup <id>      # also: ask cancel <id>; exit 3 if someone already did
+npm run cards -- checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]   # prints the id; pings #needs-you
+npm run cards -- checklist list [--project <p>] [--open | --submitted] [--all]   # id, state, done/total, project, title
+npm run cards -- checklist get <id> [--json]
+npm run cards -- checklist wait <id> [--timeout <min, 30, max 240>] [--every <s, 20, min 5>]   # 0 on submit, 3 on cancel, 4 on timeout
+npm run cards -- checklist pickup <id>   # exit 2 when not submitted, 3 when already picked up; also: checklist cancel <id> (3 when cancelled or submitted)
 npm run cards -- request list [--project <p>] [--open]
 npm run cards -- request take <id> --bead <b>      # exit 3 if taken
 npm run cards -- request create --project <p> --text <t> [--when next-sprint|nightly|record]
 npm run cards -- beads push --project <p> [--from <file.jsonl>]   # default: `bd export`
 ```
 
-**The #needs-you ping.** After `ask create` the CLI posts one message to a Discord webhook when it
+**The #needs-you ping.** After `ask create` or `checklist create` the CLI posts one message to a Discord webhook when it
 finds one, looking in this order: `BUW_DISCORD_NEEDS_YOU`, `discord.needsYou` in `~/.buw/hub.json`,
 the file `~/.buw/secrets/discord-webhook-needs-you`. The message is `Agent needs you · <Project>`, the
-question (200 characters) and, with `siteUrl` in `hub.json` or `BUW_SITE_URL`, a link to
-`<siteUrl>/#/~hub/ask/<id>`; no mentions. With no webhook nothing happens. If the post fails (5 s
+question or the checklist's title and step count (200 characters) and, with `siteUrl` in `hub.json` or `BUW_SITE_URL`, a link to
+`<siteUrl>/#/~hub/ask/<id>` (`…/checklist/<id>` for a list); no mentions. With no webhook nothing happens. If the post fails (5 s
 timeout) the message is appended to the shared spool as a `discord` line for the hub-hooks mod to
 replay; the address is never stored, and the exit code stays 0.
 
@@ -189,9 +194,10 @@ Every route but `GET /cards.mjs` (the client, which holds nothing secret) needs
 | `GET /resolve?ref=…` | which card a site link, `section/card`, id or title names |
 
 What it refuses:
-- in the `inbox` section, `asks/*/answer.*`, `asks/*/snooze.json` and `requests/*/declined.json`
-  from any token whose `write` right is limited: only the Hub (through the site API) or the
-  passphrase writes answers
+- in the `inbox` section, `asks/*/answer.*`, `asks/*/snooze.json`, `requests/*/declined.json` and, in
+  `checklists/*/`, the `tick-*` and `untick-*` files and `submit.json`, from any token whose `write` right is limited: only the Hub (through the site API) or the
+  passphrase writes answers. `ask.json` and `checklist.json` are create-only for such a token
+  (`If-None-Match: *`, never an upload URL), and it cannot delete any of these files
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB

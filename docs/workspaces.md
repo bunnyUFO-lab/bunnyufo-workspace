@@ -292,6 +292,9 @@ user (`Remote-User`), like every other write.
 |---|---|
 | `GET /api/hub/today`, `/inbox?filter=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first) |
+| `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder |
+| `POST /api/hub/checklists/:id/items/:item` | `{ done: boolean }`: tick or untick one item. Writes one create-only `tick-` or `untick-` file; nothing when the item already is as asked; 409 unless the list is `open`. Answers with the fresh detail |
+| `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
@@ -310,6 +313,34 @@ into the session; the bare `https://claude.ai/code` counts as no link) and `appU
 app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to open the Claude app.
 
 A `ready-for-review` event may also carry `prs` (GitHub pull request links), `cardDir` (`<section>/<card folder>`), `cardFiles` (`.md` paths inside that folder, such as `briefs/x.md`), `screenshots` (https image links), `deployUrl` (an https build link) and `verdicts` (`{ leg: smoke|review|qa, result: pass|fail|noted, text }`, at most three). The review view (`#/~hub/review/<file>`) checks each field again, shows what is there and an empty line for what is not, and reads the card files from the site's `/w/<cardDir>/<path>`. On the local service, which has no `/w/` route, a file shows as not here and the view offers the card instead.
+
+### Checklists
+
+A checklist is a set of steps only the owner can do, posted by an agent (`cards checklist create`) and ticked one at a
+time on the phone: Inbox, **To do**, open the list, expand a step to read its guide (Markdown, commands with a Copy
+button, links), tick it, and press **Submit** when done. Everything is under `sections/inbox/checklists/<id>/` and is
+written create-only; nothing is ever overwritten or deleted. `<id>` has the Ask shape
+(`<yyyymmdd>-<project>-<slug>-<rand4>`).
+
+| File | Writer | Meaning |
+|---|---|---|
+| `checklist.json` | agent | The list (title, `context?`, `card?`, `bead?`, `from`, `items`: `{ id: "01"…"50", text, group?, guide?, link? }`). Written once. Limits: 1 to 50 items; text 200, group 80, guide and context 4000 characters; links are `http(s)`; 256 KB |
+| `tick-<item>-<stamp>-<rand4>.json`, `untick-…` | Hub only | The owner ticked or unticked item `<item>` at `<stamp>` (UTC with milliseconds, `20261027T143012123Z`, the Hub's clock). Body `{ item, done, at, by }` |
+| `submit.json` | Hub only | `{ at, by, note?, done: [ids], open: [ids] }` |
+| `pickup.json` | agent | The agent read the submission and acted on it (`{ at, host, session? }`) |
+| `cancel.json` | agent | The agent withdrew the list (`{ at, by }`) |
+
+State comes from file names alone, so a folder listing is enough. The list's state, first match winning: `cancel.json`
+is `cancelled`, `pickup.json` is `picked-up`, `submit.json` is `submitted`, else `open`. An item is done when its
+mark file with the greatest stamp in the name (the greater `<rand4>` on a tie; never S3's `LastModified`) is a `tick`.
+Progress is the done items over `items.length`. An `open` list is in Needs you even when every item is ticked, because
+Submit is the hand-back; the Inbox's **To do** filter lists every list but the cancelled ones, open first. Ticking
+after Submit is refused (409), so the agent acts on what was submitted. A list is found while its id falls in this
+month or the last, like an Ask.
+
+Two events go to the Activity feed: `checklist-created` (from the CLI) and `checklist-submitted` (from the Hub, after
+`submit.json`). Nothing derives a checklist's state from events. The card API refuses ticks, unticks and `submit.json`
+from a limited token (they are the Hub's) and lets one create `checklist.json` only with `If-None-Match: *`.
 
 ### Answers from Discord
 
