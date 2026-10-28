@@ -9,6 +9,8 @@
 #   BUW_S3_REGION=us-east-1
 #   AWS_ACCESS_KEY_ID=…        a key limited to that bucket (tools/workspace/setup-bucket.sh)
 #   AWS_SECRET_ACCESS_KEY=…
+#   BUW_SITE_URL=…             the public address people sign in at; its origin is the only one a write may come from
+#   BUW_SITE_ORIGINS=…         optional comma list of origins instead (https://a.example,https://b.example); with sign-in on and neither set, every write is refused
 #   REQUIRE_REMOTE_USER=1      writes need the Remote-User header NPM sets after the passkey check
 #   HERMES_URL=…, HERMES_API_KEY=…, STT_URL=…, STT_API_KEY=…   chat and push-to-talk (optional)
 #   HUB_INBOX=inbox-dev, BUW_STATE_KEY=dev-state.json, BUW_DEV=1   the development copy's settings (see docs/workspaces.md)

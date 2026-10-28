@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createSiteApi, allowedOriginsFrom } from '../server.mjs';
+import { createSiteApi, allowedOriginsFrom, writeOriginsFor } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -110,7 +110,7 @@ test('with no allowed origin and sign-in required, every write is off', async ()
   try {
     const refused = await send('/workspace/pin', { headers: { ...user, ...json, Origin: SITE } });
     assert.equal(refused.status, 403);
-    assert.equal(refused.body.error, 'BUW_SITE_URL is not set, so writes are off.');
+    assert.match(refused.body.error, /no allowed origin is configured/i);
   } finally { await close(); }
 });
 
@@ -129,4 +129,15 @@ test('allowed origins come from BUW_SITE_ORIGINS, else the origin of BUW_SITE_UR
   assert.deepEqual(allowedOriginsFrom({ origins: 'https://a.example, https://b.example:8443/', siteUrl: SITE }), ['https://a.example', 'https://b.example:8443']);
   assert.deepEqual(allowedOriginsFrom({ siteUrl: 'not a url' }), []);
   assert.deepEqual(allowedOriginsFrom({}), []);
+});
+
+test('main.mjs options: sign-in off and nothing set passes null, so a local run is not refused', async () => {
+  assert.equal(writeOriginsFor({}), null);
+  assert.equal(writeOriginsFor({ siteUrl: 'not a url' }), null);
+  assert.deepEqual(writeOriginsFor({ requireRemoteUser: true }), [], 'Sign-in on and nothing set fails closed.');
+  assert.deepEqual(writeOriginsFor({ siteUrl: SITE }), [SITE], 'An origin set locally is enforced.');
+  assert.deepEqual(writeOriginsFor({ requireRemoteUser: true, siteUrl: SITE }), [SITE]);
+
+  const local = await fixture({ requireRemoteUser: false, allowedOrigins: writeOriginsFor({}) });
+  try { assert.equal((await local.send('/workspace/pin', { headers: { ...json, Origin: 'http://localhost:5173' } })).status, 200); } finally { await local.close(); }
 });

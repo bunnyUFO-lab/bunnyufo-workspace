@@ -31,7 +31,7 @@
 // With no bucket at all the service answers /api/capabilities with write: false and a reason,
 // and serves nothing — there is nothing to serve.
 import { readFileSync } from 'node:fs';
-import { createSiteApi, allowedOriginsFrom } from './server.mjs';
+import { createSiteApi, writeOriginsFor } from './server.mjs';
 import { createHub } from './hub.mjs';
 import { createBucket } from './s3.mjs';
 
@@ -66,7 +66,7 @@ const bucket = name
 const requireRemoteUser = env.REQUIRE_REMOTE_USER === '1';
 const prefix = env.BUW_S3_PREFIX || 'sections';
 const siteUrl = env.BUW_SITE_URL || '';
-const allowedOrigins = allowedOriginsFrom({ origins: env.BUW_SITE_ORIGINS, siteUrl })
+const allowedOrigins = writeOriginsFor({ requireRemoteUser, origins: env.BUW_SITE_ORIGINS, siteUrl })
 const cardApi = env.BUW_CARD_API || '';
 const inbox = env.HUB_INBOX || 'inbox';
 if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) {
@@ -79,6 +79,8 @@ const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox });
 const server = bucket
   ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, allowedOrigins, cardApi, stateKey, dev })
   : createSiteApi({ requireRemoteUser, siteUrl, allowedOrigins, cardApi });
+if (allowedOrigins?.length) console.log(`[site-api] writes allowed from ${allowedOrigins.join(', ')}`);
+else if (allowedOrigins) console.warn('[site-api] WARNING: no allowed origin (BUW_SITE_URL or BUW_SITE_ORIGINS is missing or malformed), so every write is refused');
 server.listen(port, '0.0.0.0', () => {
   console.log(`[site-api] ${bucket ? `s3://${name}/${env.BUW_S3_PREFIX || 'sections'}` : 'no bucket (read-only, nothing to serve)'} on :${port}${requireRemoteUser ? ', writes need Remote-User' : ''}`);
 });

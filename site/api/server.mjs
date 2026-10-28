@@ -109,6 +109,15 @@ export function allowedOriginsFrom({ origins = '', siteUrl = '' } = {}) {
   return (list.length ? list : [siteUrl]).map(originOf).filter(o => o && o !== 'null');
 }
 
+/**
+ * What main.mjs passes as `allowedOrigins`: the list when sign-in is required or an origin was configured,
+ * else null, so a local run with neither set (the dev proxy keeps the browser's own Origin) is not refused.
+ */
+export function writeOriginsFor({ requireRemoteUser = false, origins = '', siteUrl = '' } = {}) {
+  const list = allowedOriginsFrom({ origins, siteUrl });
+  return requireRemoteUser || list.length ? list : null;
+}
+
 export function createSiteApi({
   bucket = null,
   prefix = 'sections',
@@ -284,7 +293,7 @@ export function createSiteApi({
       // another origin (or an opaque one), and a form post from anywhere sends text or form types.
       if (!reading && request.method !== 'OPTIONS' && (requireRemoteUser || allowedOrigins)) {
         const origins = allowedOrigins ?? [];
-        if (!origins.length) return json(response, 403, { error: 'BUW_SITE_URL is not set, so writes are off.' });
+        if (!origins.length) return json(response, 403, { error: 'No allowed origin is configured (BUW_SITE_URL or BUW_SITE_ORIGINS is missing or malformed), so writes are off.' });
         if (!origins.includes(String(request.headers.origin ?? ''))) {
           return json(response, 403, { error: "Writes come only from this site's own pages." });
         }
