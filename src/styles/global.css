@@ -335,6 +335,49 @@ button:focus-visible {
 .home .project-filter { padding: 0 0 18px; }
 .home .project-chip { font-size: 0.74rem; padding: 5px 13px; }
 
+/* The Hub: buttons two to a row above the search box, set apart from the cards below by a line,
+   so its rows do not read as more cards. The Inbox count is the phone tab bar's pink badge. */
+.sidebar-hub {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 12px 12px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.hub-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.hub-link:hover,
+.hub-link:focus-visible { border-color: var(--hairline-strong); color: var(--text); }
+.hub-link.active { border-color: var(--pink); color: var(--text-bright); box-shadow: var(--glow-pink); }
+.hub-link-icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.85rem; }
+.hub-link-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-link .hub-badge { margin-left: auto; }
+.hub-inbox-badge {
+  margin-left: auto;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--pink);
+  color: var(--surface-solid);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
 /* Entity list */
 .sidebar-list {
   flex: 1;

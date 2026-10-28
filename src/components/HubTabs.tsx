@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
 import { host } from '../lib/host'
-import { hubRows } from '../lib/hubNav'
+import { HUB_SHORT, hubRows } from '../lib/hubNav'
 import { hubHash, type HubScreen } from '../lib/route'
 
 /** The tabs the phone's bar shows, six at most with Cards and More. The rest of the Hub (Board, Activity, Sketch) is under More. */
 const TABS: HubScreen[] = ['today', 'inbox', 'map', 'chat']
-const SHORT: Partial<Record<HubScreen, string>> = { map: 'Map' }
 
 /**
  * The Hub on a phone: a bottom bar, one tap from Home and from any Hub screen, so the menu does not
@@ -32,7 +31,7 @@ export default function HubTabs({ screen, needsYou, onHome }: { screen: HubScree
       {rows.map(([key, label, icon]) => (
         <a key={key} href={hubHash(key)} className={`hub-tab${screen === key ? ' active' : ''}`} aria-current={screen === key ? 'page' : undefined} data-hub-tab={key}>
           <span className="hub-tab-icon" aria-hidden="true">{icon}</span>
-          <span className="hub-tab-label">{SHORT[key] ?? label}</span>
+          <span className="hub-tab-label">{HUB_SHORT[key] ?? label}</span>
           {key === 'inbox' && needsYou > 0 && <span className="hub-tab-badge" data-hub-tab-badge>{needsYou}</span>}
         </a>
       ))}

@@ -1,6 +1,9 @@
 import type { HostCapabilities } from './host'
 import type { HubScreen } from './route'
 
+/** Shorter labels where a row is narrow: the phone's tab bar and the sidebar's two-column Hub. */
+export const HUB_SHORT: Partial<Record<HubScreen, string>> = { map: 'Map' }
+
 /**
  * The Hub's rows, in order: [screen, label, icon]. The sidebar's Hub group and the phone's tab bar
  * both read this, so the two cannot drift. Sketch needs writes and Chat needs the assistant.

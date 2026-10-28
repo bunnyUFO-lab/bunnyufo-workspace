@@ -5,7 +5,7 @@ import type { DragItem, DropTarget } from '../lib/drag'
 import { cardKey } from '../lib/order'
 import { entityHash, hubHash, type HubScreen } from '../lib/route'
 import { host } from '../lib/host'
-import { hubRows } from '../lib/hubNav'
+import { HUB_SHORT, hubRows } from '../lib/hubNav'
 import { categoryIcon, groupIcon } from '../lib/categories'
 import { useCollapsedSections } from '../lib/collapse'
 import { cardUrl } from '../local/client'
@@ -120,24 +120,24 @@ function Heading({
   )
 }
 
-/** The Hub's group: where the things that need you are. Only where the host has a Hub. */
+/**
+ * The Hub: where the things that need you are. Its own block above the search box, as buttons two
+ * to a row, so it does not read as more cards; the Inbox count is the phone's pink badge. Only where
+ * the host has a Hub.
+ */
 function HubNav({ screen, needsYou }: { screen: HubScreen | null; needsYou: number }) {
-  const { isClosed, toggle } = useCollapsedSections()
   const shown = hubRows(host)
   return (
-    <div className="sidebar-hub" data-hub-nav>
-      <Heading label="Hub" open={!isClosed('hub')} onToggle={() => toggle('hub')} id="hub" />
-      {!isClosed('hub') && shown.map(([key, label, icon]) => (
-        <div className="sidebar-row" key={key}>
-          <a href={hubHash(key)} className={`sidebar-item${screen === key ? ' active' : ''}`} aria-current={screen === key ? 'page' : undefined} data-hub-link={key}>
-            <span className="item-icon" aria-hidden="true">{icon}</span>
-            <span className="item-text">{label}</span>
-            {key === 'today' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-badge>{needsYou}</span>}
-            {key === 'inbox' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Inbox, ${needsYou} waiting for you`}>{needsYou}</span>}
-          </a>
-        </div>
+    <nav className="sidebar-hub" data-hub-nav aria-label="Hub">
+      {shown.map(([key, label, icon]) => (
+        <a key={key} href={hubHash(key)} className={`hub-link${screen === key ? ' active' : ''}`} aria-current={screen === key ? 'page' : undefined} title={label} data-hub-link={key}>
+          <span className="hub-link-icon" aria-hidden="true">{icon}</span>
+          <span className="hub-link-text">{HUB_SHORT[key] ?? label}</span>
+          {key === 'today' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-badge>{needsYou}</span>}
+          {key === 'inbox' && needsYou > 0 && <span className="hub-inbox-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Inbox, ${needsYou} waiting for you`}>{needsYou}</span>}
+        </a>
       ))}
-    </div>
+    </nav>
   )
 }
 
@@ -444,6 +444,8 @@ export default function Sidebar({
         </button>
       </div>
 
+      {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} />}
+
       <div className="sidebar-search">
         <span className="search-icon" aria-hidden="true">
           {'⌕'}
@@ -475,7 +477,6 @@ export default function Sidebar({
       />
 
       <nav className="sidebar-list" ref={listRef}>
-        {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} />}
         {showPinned && (
           <div {...zone('pin', 'sidebar-pins')}>
             <Heading
