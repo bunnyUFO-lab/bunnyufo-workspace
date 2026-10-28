@@ -4,16 +4,18 @@ export interface View { x: number; y: number; k: number }
 export interface Size { w: number; h: number }
 export interface Limits { kMin: number; kMax: number }
 
-export const K_MAX = 2.5
+export const K_MAX = 4
+/** The map's first view and Fit may enlarge a small map up to this scale. */
+export const FIT_MAX = 2
 /** How much of the content must stay inside the box on each axis, so it can never be lost off screen. */
 export const KEEP = 80
 
 export const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value))
 
-/** The scale that shows all of the content in the box, never enlarging past 1. */
-export function fitScale(content: Size, box: Size): number {
+/** The scale that shows all of the content in the box, never enlarging past `max` (1 unless told otherwise). */
+export function fitScale(content: Size, box: Size, max = 1): number {
   if (!content.w || !content.h || !box.w || !box.h) return 1
-  return Math.min(box.w / content.w, box.h / content.h, 1)
+  return Math.min(box.w / content.w, box.h / content.h, max)
 }
 
 /** You can zoom out a little past "everything visible", but never to a speck. */
@@ -22,8 +24,8 @@ export function limitsFor(content: Size, box: Size): Limits {
 }
 
 /** All of the content, centred in the box. */
-export function fitView(content: Size, box: Size): View {
-  const k = fitScale(content, box)
+export function fitView(content: Size, box: Size, max = 1): View {
+  const k = fitScale(content, box, max)
   return { k, x: (box.w - content.w * k) / 2, y: (box.h - content.h * k) / 2 }
 }
 

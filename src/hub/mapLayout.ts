@@ -16,13 +16,18 @@ export interface Marks { working: boolean; idle: boolean; prs: number; review: n
 
 interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number }
 export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean }
-export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; labelX: number }
+export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; labelX: number; elbowX: number }
 export interface TaskNode extends Base { kind: 't'; milestone: string; feature: string; side: 1 | -1; slot: number; signs: Sign[]; lines: string[]; up: boolean }
 export type MapNode = MilestoneNode | FeatureNode | TaskNode
 
 export interface Branch { id: string; milestone: string; x0: number; y0: number; x1: number; y1: number; x2: number; col: string; lit: boolean }
 export interface Band { name: string; x1: number; x2: number; y: number; col: string; parts: string }
+/** The stretch of the layout axis a milestone owns: from the middle of the gap before it to the middle of the gap after it. The first slot runs on to -Infinity, the last to Infinity. */
+export interface Slot { id: string; from: number; to: number }
 export interface Layout {
+  /** The axis the spine runs along. */
+  axis: 'x'
+  slots: Slot[]
   width: number
   height: number
   spineY: number
@@ -82,7 +87,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const state = feature.state
         branches.push({ id: feature.id, milestone: milestone.id, x0: bx, y0: SPINE_Y, x1: bx + BR, y1: by, x2: ex, col, lit: state !== 'later' })
         nodes.push({
-          kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen, labelX: bx + BR + 6,
+          kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen, labelX: bx + BR + 6, elbowX: bx + BR,
           done: feature.tasks.filter(task => task.state === 'done').length, total: feature.tasks.length, marks: marksOf(feature.tasks.map(task => task.signs)),
         })
         if (featureOpen) {
@@ -128,5 +133,11 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
       bands.push({ name: sprint.name, x1: left, x2: Math.max(Math.max(...xs) + 30, left + needed), y: SPINE_Y + 70 + k * 30, col: SPRINT_COLORS[k % SPRINT_COLORS.length], parts })
     })
   }
-  return { width, height: HEIGHT, spineY: SPINE_Y, nowX, nodes, branches, bands }
+  const starts = model.milestones.map(milestone => milestoneX.get(milestone.id) ?? 0)
+  const slots = model.milestones.map((milestone, index): Slot => ({
+    id: milestone.id,
+    from: index === 0 ? -Infinity : starts[index] - 40,
+    to: index === starts.length - 1 ? Infinity : starts[index + 1] - 40,
+  }))
+  return { axis: 'x', slots, width, height: HEIGHT, spineY: SPINE_Y, nowX, nodes, branches, bands }
 }
