@@ -4,6 +4,7 @@ import { host } from '../lib/host'
 import Activity from './Activity'
 import AskView from './AskView'
 import Board from './Board'
+import ChecklistView from './ChecklistView'
 import Md from './Md'
 import ReviewView from './ReviewView'
 import Chat from './Chat'
@@ -18,12 +19,13 @@ export default function HubScreen({ route }: { route: HubRoute }) {
     <div className="hub" data-screen={route.screen}>
       {!host.write && (
         <div className="hub-banner" role="note">
-          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
+          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, ticking checklists, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
         </div>
       )}
       {route.screen === 'today' && <Today />}
       {route.screen === 'inbox' && <Inbox filter={route.id} />}
       {route.screen === 'ask' && (route.id ? <AskView key={route.id} id={route.id} /> : <Inbox filter="asks" />)}
+      {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Inbox filter="todo" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Inbox filter="reviews" />)}
       {route.screen === 'board' && <Board project={route.id} />}
       {route.screen === 'activity' && <Activity filter={route.id} />}

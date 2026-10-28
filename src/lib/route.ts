@@ -1,7 +1,7 @@
 // Hash routing: #/<entityId>/<stepIndex>. Step -1 uses the card's default.
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 
-export const HUB_SCREENS = ['today', 'inbox', 'ask', 'review', 'map', 'board', 'activity', 'sketch', 'chat'] as const
+export const HUB_SCREENS = ['today', 'inbox', 'ask', 'checklist', 'review', 'map', 'board', 'activity', 'sketch', 'chat'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */
@@ -60,8 +60,8 @@ export function reviewHash(id: string, file?: string): string {
   return file ? `${base}/${file.split('/').map(encodeURIComponent).join('/')}` : base
 }
 
-/** The screen the Hub's navigation marks as current: an Ask or a review is opened from the Inbox, so the Inbox stays lit. */
-export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' ? 'inbox' : screen ?? null)
+/** The screen the Hub's navigation marks as current: an Ask or a review is opened from the Inbox, so the Inbox stays lit. A checklist is the same. */
+export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' ? 'inbox' : screen ?? null)
 
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>
