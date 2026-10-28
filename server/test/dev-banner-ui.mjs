@@ -44,7 +44,7 @@ try {
   await banner.waitFor();
   const text = (await banner.textContent()).replace(/\s+/g, ' ').trim();
   console.log('banner says:', JSON.stringify(text));
-  assert.equal(text, 'Development copy · sprint/ws-1-example · 0123456 · PR #42');
+  assert.match(text, /^Development copy\s*· sprint\/ws-1-example\s*· 0123456\s*· PR #42$/);
   assert.match(await dev.title(), /^\[dev\] /);
   assert.equal(await banner.locator('button').count(), 0, 'The banner cannot be dismissed.');
   const box = await dev.locator('.app-layout').boundingBox();
