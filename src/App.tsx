@@ -13,6 +13,7 @@ import Topbar from './components/Topbar'
 import HomeGrid from './components/HomeGrid'
 import ReportBoundary from './components/ReportBoundary'
 import Shortcuts from './components/Shortcuts'
+import CommandPalette from './components/CommandPalette'
 import { host } from './lib/host'
 import type { Today } from './lib/hub'
 import { TodayContext, useHubData } from './hub/useHub'
@@ -131,6 +132,12 @@ export default function App() {
   const open = cards.filter(e => e.id === route.id)
   const entity = open.find(e => e.workspace.active) ?? open[0] ?? null
 
+  // The palette finds the cards of the open section; a host with no active section offers them all.
+  const paletteCards = useMemo(() => {
+    const mine = cards.filter(card => card.workspace.active)
+    return mine.length ? mine : cards
+  }, [cards])
+
   const stepIndex = entity
     ? resolveStep(entity.steps.length, route.step, entity.defaultStep)
     : -1
@@ -161,6 +168,7 @@ export default function App() {
   // drift. Ctrl+W is not on it: the browser keeps that one (close tab) and never lets a page
   // have it, so Esc is the way back to the cards.
   const [showKeys, setShowKeys] = useState(false)
+  const [showPalette, setShowPalette] = useState(false)
   // The rail (outside this tree) has the Shortcuts button, and tells the app the way it tells it
   // about changed cards: a window event.
   useEffect(() => {
@@ -190,7 +198,11 @@ export default function App() {
       const ctrl = ev.ctrlKey || ev.metaKey
       const key = ev.key.toLowerCase()
       if (ctrl && !ev.altKey) {
-        if (ev.shiftKey && key === 'f') {
+        if (!ev.shiftKey && key === 'k' && !ev.defaultPrevented) {
+          // Works while typing, like Ctrl+Shift+F. Toggles: the same key shuts it.
+          ev.preventDefault()
+          setShowPalette(v => !v)
+        } else if (ev.shiftKey && key === 'f') {
           ev.preventDefault()
           setCollapsed(false)
           // The menu slides in; focus once it is there, or the browser scrolls to a hidden field.
@@ -605,6 +617,7 @@ export default function App() {
         offline={offline}
         lastSync={lastSync}
         onCollapse={() => setCollapsed(true)}
+        onPalette={() => setShowPalette(true)}
       />
 
       <button
@@ -619,6 +632,15 @@ export default function App() {
       </button>
 
       {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
+      {showPalette && (
+        <CommandPalette
+          cards={paletteCards}
+          items={today.data?.needsYou ?? []}
+          waiting={needsYou}
+          onHome={goHome}
+          onClose={() => setShowPalette(false)}
+        />
+      )}
 
       <main className="main">
         <Topbar
@@ -693,7 +715,7 @@ export default function App() {
           )}
         </div>
       </main>
-      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} onSearch={() => { setCollapsed(false); window.setTimeout(() => searchRef.current?.focus(), 0) }} />}
+      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} onSearch={() => setShowPalette(true)} />}
     </div>
     </TodayContext.Provider>
   )

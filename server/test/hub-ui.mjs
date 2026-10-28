@@ -265,8 +265,10 @@ try {
   await tabs.locator('.entity-card, .home-grid, [data-home]').first().waitFor();
   assert.equal(await tabs.locator('.hub').count(), 0);
   await tabs.locator('[data-hub-tab="search"]').tap();
-  await tabs.waitForFunction(() => document.activeElement?.closest('.sidebar-search'), null, { timeout: 5000 });
-  assert.equal(await tabs.locator('.app-layout.sidebar-collapsed').count(), 0, 'Search opens the menu and focuses its field.');
+  await tabs.locator('dialog.pal input').waitFor();
+  assert.ok(await tabs.locator('dialog.pal input').evaluate(el => el === document.activeElement), 'Search opens the palette and focuses its field.');
+  await tabs.keyboard.press('Escape');
+  await tabs.locator('dialog.pal').waitFor({ state: 'detached' });
   await go(tabs, '#/hub');
   await tabs.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
   assert.equal(await tabs.locator('nav.hub-tabs').count(), 0, 'No tab bar while a card is open.');
