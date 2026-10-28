@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { host } from '../lib/host'
 import { HUB_SHORT, hubRows } from '../lib/hubNav'
-import { hubHash, type HubScreen } from '../lib/route'
+import { homeLink, hubHash, type HubScreen } from '../lib/route'
 
 /** The tabs the phone's bar shows, six at most with Cards and More. The rest of the Hub (Board, Activity, Sketch) is under More. */
 const TABS: HubScreen[] = ['today', 'inbox', 'map', 'chat']
@@ -36,11 +36,10 @@ export default function HubTabs({ screen, needsYou, onHome }: { screen: HubScree
         </a>
       ))}
       <a
-        href={window.location.pathname + window.location.search}
+        {...homeLink(onHome)}
         className={`hub-tab${screen === null ? ' active' : ''}`}
         aria-current={screen === null ? 'page' : undefined}
         data-hub-tab="cards"
-        onClick={event => { event.preventDefault(); onHome() }}
       >
         <span className="hub-tab-icon" aria-hidden="true">▤</span>
         <span className="hub-tab-label">Cards</span>

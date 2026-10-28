@@ -551,6 +551,7 @@ export default function App() {
     <TodayContext.Provider value={host.hub ? today : null}>
     <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`} data-entity={route.id}>
       <Sidebar
+        onHome={goHome}
         hubScreen={host.hub ? navScreen(route.hub?.screen) : null}
         hubNeedsYou={needsYou}
         canWrite={canWrite}

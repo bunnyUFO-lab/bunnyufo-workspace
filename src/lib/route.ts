@@ -1,5 +1,6 @@
 // Hash routing: #/<entityId>/<stepIndex>. Step -1 uses the card's default.
 // Plain <a href> hash links do the navigation; App listens to hashchange.
+import type { MouseEvent as ReactMouseEvent } from 'react'
 
 export const HUB_SCREENS = ['today', 'inbox', 'ask', 'checklist', 'review', 'map', 'board', 'activity', 'sketch', 'chat'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
@@ -67,4 +68,22 @@ export function resolveStep(count: number, requested: number, preferred?: number
   const valid = (value: number | undefined): value is number =>
     typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < count
   return valid(requested) ? requested : valid(preferred) ? preferred : count - 1
+}
+
+/** The cards' home: this section's page with no hash. */
+export const homeHref = () => window.location.pathname + window.location.search
+
+/**
+ * A real link to the cards' home: a plain click goes there in place (onHome); Ctrl, Cmd, Shift or a
+ * middle click is left to the browser, which opens it in a new tab or window.
+ */
+export function homeLink(onHome: () => void) {
+  return {
+    href: homeHref(),
+    onClick: (event: ReactMouseEvent) => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+      event.preventDefault()
+      onHome()
+    },
+  }
 }

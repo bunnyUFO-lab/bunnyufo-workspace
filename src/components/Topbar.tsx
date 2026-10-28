@@ -5,6 +5,7 @@ import { host } from '../lib/host'
 import { publishedCardUrl, repoFileUrl } from '../lib/links'
 import { AddSection, EditCard } from './CardEdits'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
+import { homeLink } from '../lib/route'
 
 interface TopbarProps {
   entity: WorkspaceCard | null
@@ -108,13 +109,14 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
     <div className="topbar" ref={bar}>
       <nav className="breadcrumb" aria-label="Breadcrumb">
         {/* With a card open the first crumb is a plain way back, not just a word in a path. */}
-        <button
+        <a
           className={`crumb-link${entity ? ' crumb-back' : ''}`}
-          onClick={onHome}
-          title={entity ? 'Back to the cards ( Esc )' : undefined}
+          {...homeLink(onHome)}
+          title={entity ? 'Back to the cards ( Esc )' : 'Home'}
+          data-home-link="crumb"
         >
           {entity ? <><span aria-hidden="true">←</span> Cards</> : 'Workspace'}
-        </button>
+        </a>
         {entity && showProject && (
           <>
             <span className="crumb-sep">/</span>

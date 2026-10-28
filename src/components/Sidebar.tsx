@@ -3,7 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import type { CardWorkspace, WorkspaceCard } from '../types'
 import type { DragItem, DropTarget } from '../lib/drag'
 import { cardKey } from '../lib/order'
-import { entityHash, hubHash, type HubScreen } from '../lib/route'
+import { entityHash, homeLink, hubHash, type HubScreen } from '../lib/route'
 import { host } from '../lib/host'
 import { HUB_SHORT, hubRows } from '../lib/hubNav'
 import { categoryIcon, groupIcon } from '../lib/categories'
@@ -44,6 +44,8 @@ interface SidebarProps {
   offline: boolean
   lastSync: Date | null
   onCollapse: () => void
+  /** Back to the cards: the logo and the name are links to it. */
+  onHome: () => void
   /** Pin, unpin and archive write card state: only where something can (the local service, a site's write API). */
   canWrite?: boolean
   /** What is being dragged right now, or null: a card, a project or a section heading. */
@@ -252,6 +254,7 @@ export default function Sidebar({
   offline,
   lastSync,
   onCollapse,
+  onHome,
   canWrite = false,
   dragItem,
   dragOver,
@@ -429,9 +432,13 @@ export default function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <BrandLogo size={54} animated={activeId !== 'my-dream-game'} />
+        <a className="brand-home" {...homeLink(onHome)} title="Home" aria-label="Home" data-home-link="logo">
+          <BrandLogo size={54} animated={activeId !== 'my-dream-game'} />
+        </a>
         <div className="brand-text">
-          <BuwText height={26} animated={activeId !== 'my-dream-game'} />
+          <a className="brand-home" {...homeLink(onHome)} title="Home" tabIndex={-1} aria-hidden="true" data-home-link="name">
+            <BuwText height={26} animated={activeId !== 'my-dream-game'} />
+          </a>
           <WorkspaceSwitcher />
         </div>
         <button

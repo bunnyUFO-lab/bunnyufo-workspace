@@ -212,6 +212,10 @@ button:focus-visible {
   border-bottom: 1px solid var(--hairline);
 }
 
+/* The logo and the name are links home; they keep their own look. */
+.brand-home { display: flex; color: inherit; text-decoration: none; border-radius: var(--radius); }
+.brand-home:focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
+
 .brand-text {
   display: flex;
   flex-direction: column;
@@ -668,6 +672,7 @@ button:focus-visible {
   border-radius: var(--radius-sm);
   transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
+a.crumb-link { text-decoration: none; }
 .crumb-link:hover {
   color: var(--text);
   background: var(--surface-1);
