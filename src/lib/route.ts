@@ -75,7 +75,7 @@ export function reviewHash(id: string, file?: string): string {
   return file ? `${base}/${file.split('/').map(encodeURIComponent).join('/')}` : base
 }
 
-/** The screen the Hub's navigation marks as current: an Ask or a review is opened from the Inbox, so Needs you stays lit. A checklist is the same. */
+/** The screen the Hub's navigation marks as current: an Ask or a review is opened from Needs you, so Needs you stays lit. A checklist is the same. */
 export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' ? 'needs' : screen ?? null)
 
 export function resolveStep(count: number, requested: number, preferred?: number): number {

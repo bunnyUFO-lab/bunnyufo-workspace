@@ -88,8 +88,8 @@ try {
 
   await startSearch('Bravo');
   await openCard('bravo');
-  await page.getByRole('link', { name: /Cards/ }).click();
-  await assertBoardWhole('← Cards');
+  await page.getByRole('link', { name: /Library/ }).click();
+  await assertBoardWhole('← Library');
 
   // With a search running and the box blurred, Esc on the board clears it; so does the Clear link.
   await startSearch('Bravo');
@@ -179,7 +179,7 @@ try {
   await page.reload();
   // The app may reopen the card last read (then the board is one click back) or land on the board.
   await page.locator('.home .entity-card, .crumb-back').first().waitFor();
-  if (await page.locator('.crumb-back').count()) await page.getByRole('link', { name: /Cards/ }).click();
+  if (await page.locator('.crumb-back').count()) await page.getByRole('link', { name: /Library/ }).click();
   await page.locator('.home .entity-card').first().waitFor();
   assert.equal(await recentOn(), true, 'Recent survives a reload');
   assert.equal(await page.locator('.home .home-section').count(), 1);

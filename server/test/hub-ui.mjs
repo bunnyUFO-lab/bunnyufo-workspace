@@ -4,8 +4,8 @@
 // Part 2 (CUJ 2): the progress map at desktop and phone width.
 // Part 4: Chat and push-to-talk against a fake Hermes.
 // Part 3: ✎ on Ask options (CUJ 1 with a drawing) and Sketch.
-// Part 1: a card called "hub" still opens; Today, Inbox and Ask at desktop and phone width; CUJ 1
-// (answer an Ask, seen as Answered, then Picked up); the 409 path; CUJ 5 (a request from the Board);
+// Part 1: a card called "hub" still opens; Today, Needs you and Ask at desktop and phone width; CUJ 1
+// (answer an Ask, seen as Answered, then Picked up); the 409 path; CUJ 5 (a request from Work);
 // and the read-only banner against a stand-in for the signed-out site.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -61,7 +61,7 @@ try {
   await page.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
   assert.equal(await page.locator('.hub').count(), 0, '#/hub is a card, not the Hub.');
 
-  step('desktop: the sidebar has the Hub group with a badge of 3, Today counts 3 and 1, Inbox lists the Ask');
+  step('desktop: the sidebar has the Hub group with a badge of 3, Today counts 3 and 1, Needs you lists the Ask');
   await go(page, '#/~hub/today');
   await page.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await page.locator('[data-hub-badge]').innerText(), '3');
@@ -84,7 +84,7 @@ try {
   assert.equal(await fixtureBlocked.locator('a').count(), 0, 'No link: it is words, not a button.');
   assert.equal(await fixtureBlocked.evaluate(node => node.tagName), 'DIV', 'The row is not a link either.');
   assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
-  // One shared source: the sidebar's Inbox entry and the phone bar's badge say the same.
+  // One shared source: the sidebar's Needs you entry and the phone bar's badge say the same.
   assert.equal(await page.locator('[data-hub-inbox-badge]').innerText(), '3');
   assert.equal(await page.locator('[data-hub-inbox-badge]').getAttribute('title'), '3 waiting for you');
   assert.equal(await page.locator('[data-hub-tab-badge]').textContent(), '3', 'The tab bar is hidden on desktop but holds the same count.');
@@ -130,12 +130,12 @@ try {
   await page.locator('.report-error button:has-text("Back to Workspace")').click();
   await page.locator('.report-error').waitFor({ state: 'detached' });
 
-  step('CUJ 5: a request from the Board lands in the bucket as next-sprint');
+  step('CUJ 5: a request from Work lands in the bucket as next-sprint');
   await go(page, '#/~hub/work/magic-loops');
   await page.locator('.hub-board').waitFor();
   assert.ok(await page.locator('.hub-column').count() === 4);
 
-  step('Board cards lead with the title; the id is a small selectable line after it');
+  step('Work cards lead with the title; the id is a small selectable line after it');
   const [mapAnswer] = await Promise.all([page.waitForResponse(response => response.url().includes('/api/hub/map/magic-loops')), page.reload()]);
   const boardMap = await mapAnswer.json();
   await page.locator('.hub-board').waitFor();
@@ -155,7 +155,7 @@ try {
   const request = fixture.fake.json(requests[0]);
   assert.deepEqual([request.project, request.when, request.text], ['magic-loops', 'next-sprint', 'Add wall-slide dust particles']);
 
-  step('Board shows Loading before its columns, and never Nothing here before the map arrives');
+  step('Work shows Loading before its columns, and never Nothing here before the map arrives');
   await page.route('**/api/hub/map/*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
   await go(page, '#/~hub/work/probe');
   await go(page, '#/~hub/work/magic-loops');
@@ -194,7 +194,7 @@ try {
   const boxes = await phone.locator('.hub-option').evaluateAll(list => list.map(item => item.getBoundingClientRect().top));
   assert.ok(boxes[1] > boxes[0] && boxes[2] > boxes[1], 'The options stack on a phone.');
 
-  step('phone width: a very long title wraps on the Board and nothing scrolls sideways');
+  step('phone width: a very long title wraps on Work and nothing scrolls sideways');
   const longTitle = `${'Alpha beta gamma delta '.repeat(4)}${'x'.repeat(60)} tail`.slice(0, 160);
   await phone.route('**/api/hub/map/magic-loops', async route => {
     const answer = await (await route.fetch()).json();
@@ -204,9 +204,9 @@ try {
   await go(phone, '#/~hub/work/magic-loops');
   await phone.locator('.hub-ticket').first().waitFor();
   await phone.waitForTimeout(250);
-  await noSideways(phone, 'Board with a long title');
+  await noSideways(phone, 'Work with a long title');
   const longBox = await phone.locator('.hub-ticket').first().evaluate(card => ({ title: card.querySelector('.hub-ticket-title').getBoundingClientRect().width, card: card.getBoundingClientRect().width, text: card.querySelector('.hub-ticket-title').textContent }));
-  assert.equal(longBox.text, longTitle, 'The Board never clips a title.');
+  assert.equal(longBox.text, longTitle, 'Work never clips a title.');
   assert.ok(longBox.title <= longBox.card, 'The title is no wider than its card.');
   await phone.unroute('**/api/hub/map/magic-loops');
 
@@ -263,7 +263,7 @@ try {
   assert.equal(await tabs.locator('nav.hub-tabs').count(), 0, 'No tab bar while a card is open.');
   assert.equal(await page.locator('nav.hub-tabs').isVisible(), false, 'No tab bar on desktop.');
 
-  step('old links: #/~hub/inbox/asks lands on needs/asks with Asks selected, board lands on Work, an Ask link is untouched');
+  step('old links: #/~hub/inbox/asks lands on needs/asks with Asks selected, board lands on Work, roadmap on the Roadmap; an Ask link keeps its address');
   const old = await open({ width: 1280, height: 800 });
   await old.goto(`${fixture.url}#/~hub/inbox/asks`);
   await old.locator('.hub[data-screen="needs"]').waitFor();
@@ -277,6 +277,9 @@ try {
   await go(old, '#/~hub/roadmap/magic-loops');
   await old.locator('.hub[data-screen="map"]').waitFor();
   assert.equal(await old.evaluate(() => location.hash), '#/~hub/map/magic-loops');
+  await go(old, `#/~hub/ask/${FIXTURE_ASK}`);
+  await old.locator('.hub[data-screen="ask"]').waitFor();
+  assert.equal(await old.evaluate(() => location.hash), `#/~hub/ask/${FIXTURE_ASK}`, 'An Ask link is not rewritten.');
   assert.equal(await old.locator('[data-hub-link="library"]').count(), 1, 'The sidebar has a Library row.');
   await old.close();
 

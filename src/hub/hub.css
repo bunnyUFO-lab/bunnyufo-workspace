@@ -1,4 +1,4 @@
-/* The Hub: Today, Inbox, Ask, Board, Activity (and the screens after them). Colours come from the
+/* The Hub: Today, Needs you, Ask, Work, Activity (and the screens after them). Colours come from the
    tokens in styles/tokens.css. Phone first: one column, and the page never scrolls sideways. */
 .hub {
   height: 100%;

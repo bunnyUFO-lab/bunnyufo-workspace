@@ -1,5 +1,5 @@
 // Run after npm run build. A checklist (#/~hub/checklist/<id>) through a real browser on a phone (390 x 844, touch), over
-// the fixture service with its two checklists: the To do tab and the Inbox badge, the guide that starts open, 44 px tap
+// the fixture service with its two checklists: the To do tab and the Needs you badge, the guide that starts open, 44 px tap
 // targets, Copy, ticks that show at once and survive a reload, an untick, a failed tick, Submit with its one warning,
 // the submitted list, and the read-only host. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
@@ -50,7 +50,7 @@ try {
   await page.goto(`${fixture.url}#/~hub/needs`);
   await page.locator('[data-hub-tab-badge]').waitFor();
 
-  step('the To do tab is second, lists the open list first with "1 of 4", and the Inbox badge counts it');
+  step('the To do tab is second, lists the open list first with "1 of 4", and the Needs you badge counts it');
   assert.equal(await page.locator('[data-hub-tab-badge]').innerText(), '4', 'Three things wait in the fixture, and the list is a fourth.');
   await page.locator('.hub-chips .hub-chip').first().waitFor();
   assert.deepEqual(await page.locator('.hub-chips .hub-chip').allInnerTexts(), ['Needs you', 'To do', 'Asks', 'Reviews', 'Requests', 'Blocked', 'Answered']);
