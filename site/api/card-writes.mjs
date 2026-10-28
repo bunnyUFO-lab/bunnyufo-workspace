@@ -82,6 +82,14 @@ const dimension = value => {
   return Number.isFinite(n) ? Math.min(16384, Math.max(1, n)) : null;
 };
 
+const RESPONSE_ID = /^[a-z0-9][a-z0-9._-]{0,79}$/;
+const MAX_SET = 200;
+const MAX_RESPONSES = 4 * 1024 * 1024;
+const responseId = (value, what) => {
+  if (typeof value !== 'string' || !RESPONSE_ID.test(value)) throw fail(`${what} is lowercase letters, digits, dots, dashes and underscores, up to 80.`);
+  return value;
+};
+
 const today = (now = new Date()) => now.toISOString().slice(0, 10);
 
 /** A store over a folder on disk: the local service's workspace. */
@@ -157,8 +165,9 @@ export function bucketStore(bucket, prefix) {
 /**
  * @param store  see the top of this file
  * @param now    the clock, for tests
+ * @param section the workspace id, written into a card's responses doc
  */
-export function cardWriter(store, { now = () => new Date(), retries = 4 } = {}) {
+export function cardWriter(store, { now = () => new Date(), retries = 4, section = '' } = {}) {
   /** Read the card list, let `change` edit it, and write it back only if nobody else did meanwhile. */
   async function editList(change) {
     for (let attempt = 1; ; attempt += 1) {
@@ -184,6 +193,16 @@ export function cardWriter(store, { now = () => new Date(), retries = 4 } = {}) 
     if (!Array.isArray(card.steps)) card.steps = [];
     return card;
   };
+
+  /** The workspace id a card list belongs to, once the card is known to be in it. */
+  async function knownCard(id) {
+    const got = await store.read('workspace.json');
+    if (!got) throw fail('This workspace has no card list (workspace.json).', 404);
+    let list;
+    try { list = JSON.parse(got.text); } catch { throw fail('The workspace card list (workspace.json) is not valid JSON.', 409); }
+    cardIn({ entities: Array.isArray(list.entities) ? list.entities : [] }, id);
+    return section;
+  }
 
   /** A step of the card that is a Markdown file, by its path. */
   const markdownStep = (card, file) => {
@@ -340,6 +359,55 @@ export function cardWriter(store, { now = () => new Date(), retries = 4 } = {}) 
       return { text: body, etag: written.etag };
     },
 
+    /** What a card's viewers saved under one doc name: `{ doc, etag }`, or `{ doc: null, etag: null }` before the first save. */
+    async readResponses({ id, doc }) {
+      const name = responseId(doc, 'A doc id');
+      await knownCard(id);
+      const got = await store.read(`card-responses/${id}/${name}.json`);
+      if (!got) return { doc: null, etag: null };
+      try { return { doc: JSON.parse(got.text), etag: got.etag }; } catch { throw fail('The saved responses are not valid JSON.'); }
+    },
+
+    /**
+     * Apply `set` to a card's responses doc: an item id → `{ updated, data }` puts it, `null` deletes it. The
+     * doc is read, changed and written back only if nobody wrote meanwhile, and read again when they did, so
+     * two pages saving different items both land.
+     */
+    async saveResponses({ id, doc, set }) {
+      const name = responseId(doc, 'A doc id');
+      if (!set || typeof set !== 'object' || Array.isArray(set)) throw fail('Say which items to set.');
+      const entries = Object.entries(set);
+      if (entries.length < 1 || entries.length > MAX_SET) throw fail(`Set between 1 and ${MAX_SET} items at a time.`);
+      for (const [item, value] of entries) {
+        responseId(item, 'An item id');
+        if (value === null) continue;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || !('data' in value)) throw fail('An item needs a data value.');
+        if (typeof value.updated !== 'string' || value.updated.length > 40) throw fail('An item needs an updated time of at most 40 characters.');
+      }
+      const section = await knownCard(id);
+      const where = `card-responses/${id}/${name}.json`;
+      for (let attempt = 1; ; attempt += 1) {
+        const got = await store.read(where);
+        let current = null;
+        if (got) { try { current = JSON.parse(got.text); } catch { throw fail('The saved responses are not valid JSON.', 409); } }
+        const items = { ...(current?.items && typeof current.items === 'object' ? current.items : {}) };
+        for (const [item, value] of entries) {
+          if (value === null) delete items[item]; else items[item] = { updated: value.updated, data: value.data };
+        }
+        const merged = { version: 1, section, card: id, doc: name, updated: now().toISOString(), items };
+        const text = `${JSON.stringify(merged)}
+`;
+        if (Buffer.byteLength(text) > MAX_RESPONSES) throw fail('Too many responses for one file (over 4 MB).', 413);
+        try {
+          const written = await store.write(where, text, { ifMatch: got ? got.etag : null });
+          return { doc: merged, etag: written.etag };
+        } catch (error) {
+          if (error.status !== 412) throw error;
+          if (attempt >= retries) throw fail('The responses kept changing; try again.', 409);
+        }
+      }
+    },
+
     /** A drawing's scene (the .excalidraw JSON), with the etag a save has to name. */
     async readDrawing({ id, path: file }) {
       const got = await store.read('workspace.json');
@@ -439,6 +507,10 @@ export async function cardRoute({ method, route, query, data, writerFor }) {
     const writer = await writerFor(query.get('workspace'));
     return { status: 200, body: await writer.readMarkdown({ id: query.get('id'), path: query.get('path') }) };
   }
+  if (method === 'GET' && route === '/cards/responses') {
+    const writer = await writerFor(query.get('workspace'));
+    return { status: 200, body: await writer.readResponses({ id: query.get('id'), doc: query.get('doc') }) };
+  }
   if (method === 'GET' && route === '/cards/drawing') {
     const writer = await writerFor(query.get('workspace'));
     return { status: 200, body: await writer.readDrawing({ id: query.get('id'), path: query.get('path') }) };
@@ -451,6 +523,7 @@ export async function cardRoute({ method, route, query, data, writerFor }) {
   if (route === '/cards/section/rename') return { status: 200, body: { card: await writer.renameSection(data) } };
   if (route === '/cards/markdown') return { status: 200, body: await writer.saveMarkdown(data) };
   if (route === '/cards/drawing') return { status: 200, body: await writer.saveDrawing(data) };
+  if (route === '/cards/responses') return { status: 200, body: await writer.saveResponses(data) };
   if (route === '/cards/annotate') return { status: 201, body: await writer.annotate(data) };
   return undefined;
 }

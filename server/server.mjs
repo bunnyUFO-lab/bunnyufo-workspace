@@ -229,7 +229,7 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
             const found = (await allWorkspaces()).find(item => item.id === (id || active.id));
             if (!found) throw Object.assign(new Error(`No workspace "${id}" in this session.`), { status: 404 });
             if (found.builtin) throw Object.assign(new Error('The starter examples are read-only; register a workspace of your own to add cards.'), { status: 409 });
-            if (!writers.has(found.root)) writers.set(found.root, cardWriter(folderStore(found.root)));
+            if (!writers.has(found.root)) writers.set(found.root, cardWriter(folderStore(found.root), { section: found.id }));
             return writers.get(found.root);
           },
         });
