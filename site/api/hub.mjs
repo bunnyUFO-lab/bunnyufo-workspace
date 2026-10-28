@@ -37,7 +37,8 @@ const fail = (message, status = 400, extra) => Object.assign(new Error(message),
  * The only way this module names a key: `<prefix>/inbox/<rel>`. `rel` has no empty, `..`, dot or
  * underscore-led segment, starts in one of the Hub's folders, and names no secret-looking file.
  */
-export function inboxKey(rel, prefix = 'sections') {
+export function inboxKey(rel, prefix = 'sections', inbox = 'inbox') {
+  if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) throw fail('That is not an inbox section.', 400);
   const text = String(rel ?? '');
   const segments = text.split('/');
   if (!text || segments.some(part => !part || part === '..' || part.startsWith('.') || part.startsWith('_') || /[\\\0]/.test(part))) {
@@ -45,7 +46,7 @@ export function inboxKey(rel, prefix = 'sections') {
   }
   if (!FOLDERS.includes(segments[0]) || segments.length < 2) throw fail('That path is not in the inbox.', 400);
   if (segments.some(part => SECRET.test(part))) throw fail('That file looks like a secret.', 400);
-  return `${prefix}/inbox/${text}`;
+  return `${prefix}/${inbox}/${text}`;
 }
 
 /** Run `fn` over `items`, at most `size` at a time, keeping the order of the results. */
@@ -98,12 +99,13 @@ const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(v
 /**
  * @param bucket   an s3.mjs bucket (null: the Hub is off)
  * @param prefix   where the sections are in it
+ * @param inbox    the inbox section's id: `inbox`, or `inbox-dev` on the development copy
  * @param enabled  `HUB=1` on the site, bucket-and-not-`HUB=0` on the local service
  * @param env      the merged environment (the chat routes read HERMES_* and STT_* from it)
  */
-export function createHub({ bucket = null, prefix = 'sections', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log } = {}) {
+export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log } = {}) {
   const on = !!enabled && !!bucket;
-  const key = rel => inboxKey(rel, prefix);
+  const key = rel => inboxKey(rel, prefix, inbox);
   const cache = new Map();
   const remember = (name, value) => {
     cache.set(name, value);
@@ -545,7 +547,7 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
   /** Every card of every card section: `sections/<id>/workspace.json` entities, with the section's tracked repo. */
   async function allCards() {
     const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
-    const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && id !== 'inbox');
+    const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && !/^inbox(-[a-z0-9]+)?$/.test(id));
     const lists = await pool(6, sections, async section => {
       const got = await bucket.getJson(`${prefix}/${section}/workspace.json`).catch(() => null);
       const entities = got?.value?.entities;

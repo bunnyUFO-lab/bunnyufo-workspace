@@ -36,6 +36,28 @@ async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, 
   return { fake, seed: seeder(fake), get, post, call, origin, close };
 }
 
+test('a hub made for inbox-dev writes under sections/inbox-dev and reads nothing from sections/inbox', async () => {
+  const { fake, seed, get, post, close } = await fixture({ hubOptions: { inbox: 'inbox-dev' } });
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', '{"name":"Inbox (dev)","hidden":true,"entities":[]}\n', 'application/json');
+    // An Ask in the real inbox: the dev hub must not see it.
+    const real = askJson({ id: id('real', 'r111'), now: NOW, options: threeOptions() });
+    seed.ask(real);
+    assert.equal((await get(`/hub/asks/${real.id}`)).status, 404, 'The real inbox is invisible to the dev hub.');
+    // An Ask in the dev inbox: visible, and its answer lands beside it.
+    const dev = askJson({ id: id('dev', 'd111'), now: NOW, options: threeOptions() });
+    seeder(fake, 'sections/inbox-dev').ask(dev);
+    assert.equal((await get(`/hub/asks/${dev.id}`)).status, 200);
+    const answered = await post(`/hub/asks/${dev.id}/answer`, { choice: 'A' });
+    assert.equal(answered.status, 201, JSON.stringify(answered.body));
+    assert.ok(fake.text(`sections/inbox-dev/asks/${dev.id}/answer.json`), 'The answer is under inbox-dev.');
+    assert.equal(fake.text(`sections/inbox/asks/${dev.id}/answer.json`), null);
+    assert.equal(fake.text(`sections/inbox/asks/${real.id}/answer.json`), null, 'Nothing was written to the real inbox.');
+    assert.equal(inboxKey('asks/x/ask.json', 'sections', 'inbox-dev'), 'sections/inbox-dev/asks/x/ask.json');
+    assert.equal(inboxKey('asks/x/ask.json'), 'sections/inbox/asks/x/ask.json', 'The default is unchanged.');
+  } finally { await close(); }
+});
+
 test('askState: each row of the table, top to bottom, the first match winning', () => {
   const now = new Date('2026-10-26T12:00:00Z');
   const ask = { expiresAt: '2026-10-30T00:00:00Z' };

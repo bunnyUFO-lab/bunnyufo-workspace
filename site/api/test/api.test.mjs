@@ -15,7 +15,7 @@ const card = (id, extra = {}) => ({
 });
 
 /** A bucket like the real one — sections/<id>/workspace.json plus card files — and the service over it. */
-async function fixture({ template = true, bucket: withBucket = true, requireRemoteUser = false, siteUrl, cardApi } = {}) {
+async function fixture({ template = true, bucket: withBucket = true, requireRemoteUser = false, siteUrl, cardApi, dev, stateKey, deployedRef } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-site-api-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
@@ -39,7 +39,7 @@ async function fixture({ template = true, bucket: withBucket = true, requireRemo
     await writeFile(path.join(templateDir, 'sample-markdown', 'index.md'), '# Sample\n');      // ignored: a sample card
   }
 
-  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi });
+  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, dev, stateKey, deployedRef });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const request = (route, data, method, headers = {}) => fetch(`${origin}/api${route}`, {
@@ -391,5 +391,52 @@ test('with no site address or card API set, the reason names no address and card
     const anonymous = await (await request('/capabilities')).json();
     assert.equal(anonymous.reason, 'Read-only here: sign in to change cards.');
     assert.equal(anonymous.cardApi, null);
+  } finally { await close(); }
+});
+
+const devOnly = { writable: id => id.startsWith('dev-') };
+
+test('the development copy writes only dev- sections, reports its branch, and keeps its own state object', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-dev-ref-'));
+  const deployedRef = path.join(root, '.deployed-ref');
+  const first = await fixture({ dev: devOnly, stateKey: 'dev-state.json', deployedRef });
+  try {
+    // Before any deploy there is no branch to name.
+    assert.deepEqual((await (await first.request('/capabilities')).json()).dev, { branch: null });
+  } finally { await first.close(); }
+
+  await writeFile(deployedRef, JSON.stringify({ branch: 'sprint/ws-1-x', sha: 'abc1234def', pr: 7, at: '2026-10-28T10:00:00Z' }));
+  const second = await fixture({ dev: devOnly, stateKey: 'dev-state.json', deployedRef });
+  try {
+    const caps = await (await second.request('/capabilities')).json();
+    assert.deepEqual(caps.dev, { branch: 'sprint/ws-1-x', sha: 'abc1234def', pr: 7, at: '2026-10-28T10:00:00Z' });
+
+    // The real sections are refused, whatever the route.
+    const refused = await second.request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true });
+    assert.equal(refused.status, 403);
+    assert.match((await refused.json()).error, /writes only dev-/);
+    assert.equal((await second.request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'archived' })).status, 403);
+    assert.equal((await second.request('/workspace/pins', { list: [{ workspace: 'one', id: 'alpha' }] })).status, 403);
+    assert.equal((await second.request('/cards', { workspace: 'one', title: 'X' })).status, 403);
+    assert.equal((await second.request('/sections', { name: 'Not dev' })).status, 403);
+    assert.equal(second.stateOf('one', 'alpha'), null);
+
+    // A dev- section works, and its pin goes to dev-state.json, not state.json.
+    second.fake.seed('sections/dev-sandbox/workspace.json', `${JSON.stringify({ entities: [card('probe')] })}\n`, 'application/json');
+    second.fake.seed('sections/dev-sandbox/probe/index.html', '<h1>probe</h1>', 'text/html');
+    const ok = await second.request('/workspace/pin', { workspace: 'dev-sandbox', id: 'probe', pinned: true });
+    assert.equal(ok.status, 200, JSON.stringify(await ok.json().catch(() => null)));
+    assert.equal(second.fake.json('dev-state.json').cards['dev-sandbox/probe'].pinned, true);
+    assert.equal(second.fake.json('state.json').cards['dev-sandbox/probe'], undefined, 'state.json is untouched.');
+    assert.equal((await second.request('/sections', { name: 'dev-newone' })).status, 201);
+  } finally { await second.close(); }
+});
+
+test('the real site has no dev key in /capabilities and accepts writes to any section', async () => {
+  const { request, close } = await fixture();
+  try {
+    const caps = await (await request('/capabilities')).json();
+    assert.equal('dev' in caps, false);
+    assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true })).status, 200);
   } finally { await close(); }
 });

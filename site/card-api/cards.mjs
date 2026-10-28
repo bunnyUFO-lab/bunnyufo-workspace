@@ -423,7 +423,17 @@ async function send(method, route, options, { retry = true } = {}) {
   }
 }
 
-const fileRoute = file => `/sections/inbox/files/${enc(file)}`;
+/** The inbox section: `inbox`, or `inbox-<name>` for the development copy (BUW_INBOX_SECTION). */
+const INBOX_RE = /^inbox(-[a-z0-9]+)?$/;
+const INBOX = (() => {
+  const wanted = process.env.BUW_INBOX_SECTION || 'inbox';
+  if (!INBOX_RE.test(wanted)) {
+    console.error(`BUW_INBOX_SECTION must be "inbox" or "inbox-<name>", not "${wanted}".`);
+    process.exit(2);
+  }
+  return wanted;
+})();
+const fileRoute = file => `/sections/${INBOX}/files/${enc(file)}`;
 const failure = async (method, route, response) => {
   if (response.status === 401 && transport.anonymous) return new Error(noPassphrase());
   const data = await response.json().catch(() => ({}));
@@ -435,8 +445,8 @@ const failure = async (method, route, response) => {
  * create-only write, 'transient' a network error, 429 or 5xx that outlasted the retries. Anything
  * else (a 4xx) throws.
  */
-async function putInbox(file, body, { createOnly = false, contentType = 'application/json', retry = true } = {}) {
-  const route = fileRoute(file);
+async function putInbox(file, body, { createOnly = false, contentType = 'application/json', retry = true, section = INBOX } = {}) {
+  const route = `/sections/${section}/files/${enc(file)}`;
   let response;
   try {
     response = await send('PUT', route, { headers: { 'content-type': contentType, ...(createOnly ? { 'if-none-match': '*' } : {}) }, body }, { retry });
@@ -479,7 +489,7 @@ async function readJson(file) {
 
 /** Files under a prefix, as the API lists them. A prefix keeps to a month or a day, so it stays under the 1000 cap. */
 async function listInbox(prefix) {
-  const route = `/sections/inbox/files?prefix=${encodeURIComponent(prefix)}`;
+  const route = `/sections/${INBOX}/files?prefix=${encodeURIComponent(prefix)}`;
   const response = await send('GET', route, { headers: {} });
   if (!response.ok) throw await failure('GET', route, response);
   const { files, truncated } = await response.json();
@@ -494,7 +504,7 @@ const spoolFile = () => process.env.BUW_SPOOL || path.join(os.homedir(), '.buw',
 async function spool(entry) {
   const file = spoolFile();
   await mkdir(path.dirname(file), { recursive: true });
-  await appendFile(file, `${JSON.stringify({ v: 1, at: isoNow(), kind: 'put', section: 'inbox', contentType: 'application/json', createOnly: true, ...entry })}\n`);
+  await appendFile(file, `${JSON.stringify({ v: 1, at: isoNow(), kind: 'put', section: INBOX, contentType: 'application/json', createOnly: true, ...entry })}\n`);
 }
 
 /**
@@ -521,7 +531,7 @@ async function replaySpool() {
     } catch {
       continue;                                       // a torn line: drop it
     }
-    if (entry?.v !== 1 || entry.kind !== 'put' || entry.section !== 'inbox' || typeof entry.path !== 'string') {
+    if (entry?.v !== 1 || entry.kind !== 'put' || !INBOX_RE.test(String(entry.section)) || typeof entry.path !== 'string') {
       keep.push(line);
       continue;
     }
@@ -532,7 +542,7 @@ async function replaySpool() {
     }
     tried += 1;
     try {
-      const result = await putInbox(inboxPath(entry.path), entry.body, { createOnly: entry.createOnly !== false, contentType: entry.contentType, retry: false });
+      const result = await putInbox(inboxPath(entry.path), entry.body, { section: entry.section, createOnly: entry.createOnly !== false, contentType: entry.contentType, retry: false });
       if (result.state === 'transient') {
         down = true;
         keep.push(line);
@@ -698,6 +708,8 @@ const titleOf = id => String(id).split('-').filter(Boolean).map(word => word[0].
  */
 async function pingNeedsYou({ project, text, path: link }) {
   const hub = await hubConfig();
+  // A dev inbox must not ping the owner's phone with links to the real site: only an explicit webhook does.
+  if (INBOX !== 'inbox' && !process.env.BUW_DISCORD_NEEDS_YOU?.trim()) return;
   const webhook = await needsYouWebhook(hub);
   if (!webhook) return;
   const site = String(hub?.siteUrl || process.env.BUW_SITE_URL || '').replace(/\/+$/, '');

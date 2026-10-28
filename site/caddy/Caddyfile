@@ -56,20 +56,20 @@
 	# to state.json in the bucket, so the change is there for every device at once.
 	handle /api/* {
 		import npm_only_writes
-		reverse_proxy buw-site-api:8099
+		reverse_proxy {$BUW_SITE_API:buw-site-api:8099}
 	}
 
 	# Which sections this site serves: every sections/<id>/workspace.json the bucket holds.
 	handle /sites.json {
 		import npm_only_writes
-		reverse_proxy buw-site-api:8099
+		reverse_proxy {$BUW_SITE_API:buw-site-api:8099}
 	}
 
 	# Each section's own files, streamed from the bucket: /w/<id>/<anything>.
 	# The app builds these URLs from sites.json, so a new section needs no rule here.
 	handle /w/* {
 		import npm_only_writes
-		reverse_proxy buw-site-api:8099
+		reverse_proxy {$BUW_SITE_API:buw-site-api:8099}
 	}
 
 	# The phone app's manifest. Caddy has no type for .webmanifest of its own. (sw.js needs nothing

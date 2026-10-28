@@ -10,6 +10,9 @@
 #   BUW_DOCKER_NETWORK  default buw-docs_default: the network Caddy and the service share.
 #   BUW_SITE_API        default buw-site-api:8099: the service, as Caddy reaches it.
 #   CADDY_PORT          default 4000: the port the health check calls.
+#   BUW_COMPOSE_PROJECT   default api: the compose project name. The development copy deploys from a folder
+#                         with the same name, so it must set its own or it would replace the real container.
+#   BUW_SITE_API_CONTAINER  default buw-site-api: the container's name.
 #
 # The service is what serves the site: it streams every section out of the cards bucket and keeps pins,
 # archives and tags in state.json there. The bucket name and its key are NOT deployed from here: they
@@ -28,6 +31,9 @@ BUW_SITE_API="${BUW_SITE_API:-buw-site-api:8099}"
 CADDY_PORT="${CADDY_PORT:-4000}"
 # site/api/docker-compose.yml reads the first and the network name from here.
 export BUW_DOCS_ROOT
+export BUW_COMPOSE_PROJECT="${BUW_COMPOSE_PROJECT:-api}"
+export BUW_SITE_API_CONTAINER="${BUW_SITE_API_CONTAINER:-buw-site-api}"
+export BUW_DOCKER_NETWORK
 
 echo "::group::Check it starts and its tests pass"
 docker run --rm -v "$PWD:/app" -w /app node:22-bookworm-slim \
