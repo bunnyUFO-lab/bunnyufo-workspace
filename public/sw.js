@@ -108,6 +108,9 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET' || url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
   if (request.headers.has('range')) return
+  // A card opened in its own tab goes straight to the network: the host may answer it with a redirect to the
+  // content host, which depends on the browser's own Sec-Fetch-Dest: document (a fetch made here would say "empty").
+  if (request.destination === 'document' && url.pathname.startsWith('/w/')) return
   if (url.pathname === '/sites.json' || url.pathname.startsWith('/w/')) {
     event.respondWith(cardFirstFromNetwork(request))
   } else if (request.mode === 'navigate') {

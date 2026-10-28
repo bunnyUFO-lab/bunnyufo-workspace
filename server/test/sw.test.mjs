@@ -58,6 +58,13 @@ test('only an HTML navigation becomes the offline app shell', async () => {
   assert.equal((await w.get('/anything', 'navigate')).body, 'app', 'Offline, the shell answers.');
 });
 
+test('a card opened in its own tab is left to the network, a card in a frame is not', async () => {
+  const w = worker({ '/w/one/alpha/index.html': { body: 'card', type: 'text/html' } });
+  const ask = destination => { const e = w.event({ request: { ...{ url: ORIGIN + '/w/one/alpha/index.html', method: 'GET', mode: 'navigate', headers: new Headers() }, destination } }); w.listeners.fetch(e); return e.done().then(() => e.response); };
+  assert.equal(await ask('document'), undefined, 'The worker does not answer, so the host sees the real navigation (and may redirect it).');
+  assert.equal((await ask('iframe')).body, 'card');
+});
+
 test('built files are cache-first and bounded; files that keep their name go to the network first', async () => {
   const w = worker();
   for (let n = 0; n < 230; n += 1) w.serve(`/assets/chunk-${String(n).padStart(8, '0')}.js`, `v${n}`, 'text/javascript');
