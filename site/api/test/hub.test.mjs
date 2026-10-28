@@ -7,22 +7,22 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
-import { askJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
 const id = (slug, n = 'a1b2') => `${NOW.toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${n}`;
 
-async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {} } = {}) {
+async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, wrapBucket = bucket => bucket } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hubInstance = createHub({ bucket, enabled: hub, ...hubOptions });
+  const hubInstance = createHub({ bucket: wrapBucket(bucket), enabled: hub, ...hubOptions });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub: hubInstance });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -734,5 +734,284 @@ test('a blocked row can be marked done: create-only, and it stays hidden', async
     assert.equal((await get('/hub/today')).body.needsYou.some(item => item.kind === 'blocked'), false);
     assert.equal((await post('/hub/blocked/a%2Fb.json/done')).status, 404);
     assert.equal((await post(`/hub/blocked/${stale}/done`, {}, {})).status, 401, 'Read-only copies cannot write.');
+  } finally { await close(); }
+});
+
+// --- Checklists ---
+
+const listId = (slug, n = 'c1d2') => id(slug, n);
+const at = (minutes = 0) => new Date(NOW.getTime() + minutes * 60000);
+const putKeys = fake => fake.log.filter(entry => entry.method === 'PUT').map(entry => entry.key);
+
+test('checklistState: cancel, pickup, submit, then open, from file names alone', () => {
+  assert.equal(checklistState(['checklist.json', 'cancel.json', 'pickup.json', 'submit.json']), 'cancelled');
+  assert.equal(checklistState(new Set(['checklist.json', 'pickup.json', 'submit.json'])), 'picked-up');
+  assert.equal(checklistState(['checklist.json', 'submit.json']), 'submitted');
+  assert.equal(checklistState(['checklist.json', 'tick-01-20261027T143012123Z-a1b2.json']), 'open');
+  assert.equal(checklistState([]), 'open');
+});
+
+test('checklistMarks: the last stamp in the name wins, a tie goes to the greater rand4, and the order of the listing does not matter', () => {
+  const names = [
+    'untick-01-20261027T143100000Z-a111.json', 'tick-01-20261027T143000000Z-zzzz.json', 'tick-01-20261027T143200000Z-0000.json',
+    'tick-02-20261027T143000000Z-aaaa.json', 'untick-02-20261027T143000000Z-bbbb.json',
+    'tick-03-20261027T143000000Z-bbbb.json', 'untick-03-20261027T143000000Z-aaaa.json',
+    'tick-04-20261027T143000000Z-aaaa.json', 'checklist.json', 'tick-5-20261027T143000000Z-aaaa.json', 'tick-06-2026102T143000000Z-aaaa.json', 'tock-07-20261027T143000000Z-aaaa.json',
+  ];
+  for (const order of [names, [...names].reverse()]) {
+    const marks = checklistMarks(order);
+    assert.deepEqual([...marks.keys()].sort(), ['01', '02', '03', '04']);
+    assert.equal(marks.get('01').done, true, 'The tick at 14:32 is the last mark.');
+    assert.equal(marks.get('01').at, '2026-10-27T14:32:00.000Z');
+    assert.equal(marks.get('02').done, false, 'bbbb > aaaa: the untick wins the tie.');
+    assert.equal(marks.get('03').done, true, 'bbbb > aaaa: the tick wins the tie.');
+    assert.equal(marks.get('04').done, true);
+  }
+  const progress = checklistProgress({ items: [{ id: '01' }, { id: '02' }, { id: '09' }] }, names);
+  assert.deepEqual({ done: progress.done, total: progress.total }, { done: 1, total: 3 }, 'Only the list\'s own items count.');
+});
+
+test('checkChecklist: the contract limits', () => {
+  const ok = { title: 'T', items: [{ text: 'a' }] };
+  assert.deepEqual(checkChecklist(ok), []);
+  assert.deepEqual(checkChecklist(checklistJson({ id: id('ok'), now: NOW, card: 'https://example.test/x' })), []);
+  const bad = value => checkChecklist(value).length > 0;
+  assert.ok(bad(null) && bad([]) && bad({}));
+  assert.ok(bad({ ...ok, title: '' }) && bad({ ...ok, title: 'x'.repeat(201) }));
+  assert.ok(bad({ ...ok, items: [] }) && bad({ ...ok, items: Array.from({ length: 51 }, () => ({ text: 'a' })) }));
+  assert.deepEqual(checkChecklist({ ...ok, items: Array.from({ length: 50 }, () => ({ text: 'a' })) }), []);
+  assert.ok(bad({ ...ok, items: [{ text: '' }] }) && bad({ ...ok, items: [{ text: 'x'.repeat(201) }] }));
+  assert.ok(bad({ ...ok, items: [{ text: 'a', group: 'g'.repeat(81) }] }) && bad({ ...ok, items: [{ text: 'a', guide: 'g'.repeat(4001) }] }));
+  assert.ok(bad({ ...ok, context: 'c'.repeat(4001) }));
+  assert.ok(bad({ ...ok, card: 'ftp://example.test/x' }) && bad({ ...ok, items: [{ text: 'a', link: 'javascript:alert(1)' }] }));
+  assert.ok(bad({ ...ok, items: [{ text: 'a', link: `https://example.test/${'x'.repeat(2000)}` }] }));
+  assert.ok(bad({ ...ok, items: [{ text: 'a', id: '07' }] }), 'An item id is its position.');
+});
+
+test('Needs you counts an open checklist, a fully ticked one too, and drops submitted, picked-up and cancelled ones', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const mk = (slug, n, minutes) => checklistJson({ id: listId(slug, n), now: at(minutes), title: `List ${slug}` });
+    const all = [0, 1, 2, 3];
+    const open = mk('open', 'o111', -10);
+    const full = mk('full', 'f111', -20);
+    const submitted = mk('sub', 's111', -30);
+    const picked = mk('pick', 'p111', -40);
+    const cancelled = mk('canc', 'c111', -50);
+    seed.checklist(open, [{ item: '01', at: at(-5) }]);
+    seed.checklist(full, all.map(index => ({ item: `0${index + 1}`, at: at(-6), rand: `a${index}00` })));
+    seed.checklist(submitted); seed.submit(submitted.id);
+    seed.checklist(picked); seed.submit(picked.id); seed.put(`checklists/${picked.id}/pickup.json`, { at: at().toISOString(), host: 'pc' });
+    seed.checklist(cancelled); seed.put(`checklists/${cancelled.id}/cancel.json`, { at: at().toISOString(), by: 'pc' });
+    const today = (await get('/hub/today')).body;
+    assert.deepEqual(today.needsYou.filter(item => item.kind === 'checklist').map(item => item.id), [open.id, full.id], 'Open lists, newest first.');
+    assert.equal(today.counts.needsYou, 2);
+    const row = today.needsYou[0];
+    assert.deepEqual({ kind: row.kind, state: row.state, done: row.done, total: row.total, project: row.project, title: row.title }, { kind: 'checklist', state: 'open', done: 1, total: 4, project: 'probe', title: 'List open' });
+    assert.equal(today.needsYou[1].done, 4, 'Every item ticked: it still waits for Submit.');
+    assert.deepEqual((await get('/hub/inbox?filter=needs-you')).body.items.map(item => item.id), [open.id, full.id]);
+
+    const todo = (await get('/hub/inbox?filter=todo')).body.items;
+    assert.deepEqual(todo.map(item => [item.id, item.state]), [[open.id, 'open'], [full.id, 'open'], [submitted.id, 'submitted'], [picked.id, 'picked-up']], 'Open first, then newest first; cancelled is gone.');
+    assert.equal((await get('/hub/inbox?filter=bogus')).body.items.length, 2, 'An unknown filter is Needs you.');
+  } finally { await close(); }
+});
+
+test('the todo filter: open lists first, then the rest, each newest first', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const older = checklistJson({ id: listId('older', 'a111'), now: at(-60) });
+    const newer = checklistJson({ id: listId('newer', 'b111'), now: at(-5) });
+    const oldOpen = checklistJson({ id: listId('oldopen', 'c111'), now: at(-90) });
+    seed.checklist(older); seed.submit(older.id);
+    seed.checklist(newer); seed.submit(newer.id);
+    seed.checklist(oldOpen);
+    assert.deepEqual((await get('/hub/inbox?filter=todo')).body.items.map(item => item.id), [oldOpen.id, newer.id, older.id]);
+  } finally { await close(); }
+});
+
+test('the checklist detail carries the items with their state, the files and the submission', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('detail'), now: at(-30) });
+    seed.checklist(list, [{ item: '02', at: at(-10) }, { item: '02', done: false, at: at(-9) }, { item: '03', at: at(-8) }]);
+    const detail = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.equal(detail.state, 'open');
+    assert.deepEqual({ done: detail.done, total: detail.total, title: detail.title, project: detail.project }, { done: 1, total: 4, title: 'Finish the Discord bot setup', project: 'probe' });
+    assert.deepEqual(detail.items.map(item => item.done), [false, false, true, false]);
+    assert.equal(detail.items[2].at, at(-8).toISOString());
+    assert.equal(detail.items[1].at, at(-9).toISOString(), 'An untick keeps its time.');
+    assert.equal(detail.items[0].at, undefined);
+    assert.match(detail.items[1].guide, /```bash/);
+    assert.equal(detail.files.length, 4);
+    assert.ok(detail.files.includes('checklist.json'));
+    assert.equal(detail.submit, undefined);
+    assert.equal((await get('/hub/checklists/nope')).status, 404);
+    assert.equal((await get(`/hub/checklists/${listId('missing', 'z999')}`)).status, 404);
+  } finally { await close(); }
+});
+
+test('the item route writes one create-only mark file per change, none for a repeat, and the last stamp wins', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('tick'), now: at(-30) });
+    seed.checklist(list);
+    fake.log.length = 0;
+    const first = await post(`/hub/checklists/${list.id}/items/02`, { done: true });
+    assert.equal(first.status, 200);
+    assert.deepEqual({ done: first.body.done, state: first.body.state }, { done: 1, state: 'open' });
+    assert.equal(first.body.items[1].done, true);
+    const written = putKeys(fake);
+    assert.equal(written.length, 1);
+    assert.match(written[0], new RegExp(`^sections/inbox/checklists/${list.id}/tick-02-\\d{8}T\\d{9}Z-[a-z0-9]{4}\\.json$`));
+    const put = fake.log.find(entry => entry.method === 'PUT');
+    assert.equal(put.headers['if-none-match'], '*');
+    const mark = fake.json(written[0]);
+    assert.deepEqual({ item: mark.item, done: mark.done, by: mark.by }, { item: '02', done: true, by: 'owner' });
+    assert.match(mark.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+
+    fake.log.length = 0;
+    const again = await post(`/hub/checklists/${list.id}/items/02`, { done: true });
+    assert.equal(again.status, 200);
+    assert.deepEqual(putKeys(fake), [], 'The same state again writes nothing.');
+    assert.equal(again.body.done, 1);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/03`, { done: false })).status, 200);
+    assert.deepEqual(putKeys(fake), [], 'Unticking what is not ticked writes nothing either.');
+
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const untick = await post(`/hub/checklists/${list.id}/items/02`, { done: false });
+    assert.equal(untick.body.done, 0);
+    assert.match(putKeys(fake)[0], /\/untick-02-/);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal((await post(`/hub/checklists/${list.id}/items/02`, { done: true })).body.done, 1);
+    const files = [...fake.objects.keys()].filter(key => key.includes(`/${list.id}/`));
+    assert.equal(files.length, 4, 'checklist.json and three marks: nothing was overwritten or removed.');
+    assert.equal(fake.log.filter(entry => entry.method === 'DELETE').length, 0);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.items[1].done, true);
+
+    assert.equal((await post(`/hub/checklists/${list.id}/items/09`, { done: true })).status, 404);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/1`, { done: true })).status, 404);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/01`, { done: 'yes' })).status, 400);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/01`, {})).status, 400);
+    assert.equal((await post(`/hub/checklists/${listId('gone', 'z999')}/items/01`, { done: true })).status, 404);
+  } finally { await close(); }
+});
+
+test('a submitted, picked-up or cancelled checklist can no longer be ticked', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const submitted = checklistJson({ id: listId('subt', 's222'), now: at(-30) });
+    const cancelled = checklistJson({ id: listId('canct', 'c222'), now: at(-30) });
+    const picked = checklistJson({ id: listId('pickt', 'p222'), now: at(-30) });
+    seed.checklist(submitted); seed.submit(submitted.id);
+    seed.checklist(cancelled); seed.put(`checklists/${cancelled.id}/cancel.json`, { at: at().toISOString(), by: 'pc' });
+    seed.checklist(picked); seed.submit(picked.id); seed.put(`checklists/${picked.id}/pickup.json`, { at: at().toISOString(), host: 'pc' });
+    fake.log.length = 0;
+    for (const [list, word] of [[submitted, 'submitted'], [cancelled, 'cancelled'], [picked, 'picked up']]) {
+      const answer = await post(`/hub/checklists/${list.id}/items/01`, { done: true });
+      assert.equal(answer.status, 409, word);
+      assert.match(answer.body.error, new RegExp(word));
+      assert.equal((await post(`/hub/checklists/${list.id}/items/01`, { done: false })).status, 409);
+    }
+    assert.deepEqual(putKeys(fake), []);
+  } finally { await close(); }
+});
+
+test('submit writes submit.json and one checklist-submitted event, the list leaves Needs you, and a second submit is a 409 carrying the first', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('submit'), now: at(-30) });
+    seed.checklist(list, [{ item: '01', at: at(-9) }, { item: '03', at: at(-8) }]);
+    assert.equal((await get('/hub/today')).body.counts.needsYou, 1);
+    fake.log.length = 0;
+    const sent = await post(`/hub/checklists/${list.id}/submit`, { note: '  Skipped the DMs.  ' });
+    assert.equal(sent.status, 201);
+    assert.equal(sent.body.state, 'submitted');
+    const written = putKeys(fake);
+    assert.equal(written.length, 2);
+    const submitKey = `sections/inbox/checklists/${list.id}/submit.json`;
+    assert.ok(written.includes(submitKey));
+    assert.equal(fake.log.find(entry => entry.key === submitKey).headers['if-none-match'], '*');
+    assert.deepEqual(fake.json(submitKey), { at: sent.body.submit.at, by: 'owner', note: 'Skipped the DMs.', done: ['01', '03'], open: ['02', '04'] });
+    const eventKey = written.find(key => key !== submitKey);
+    assert.match(eventKey, /^sections\/inbox\/events\/\d{4}-\d\d-\d\d\/\d{6}-hub-[a-z0-9]{4}\.json$/);
+    const event = fake.json(eventKey);
+    assert.deepEqual({ kind: event.kind, project: event.project, checklist: event.checklist, host: event.host, source: event.source, by: event.by, title: event.title, summary: event.summary },
+      { kind: 'checklist-submitted', project: 'probe', checklist: list.id, host: 'hub', source: 'hub', by: 'owner', title: 'Submitted: Finish the Discord bot setup', summary: '2 of 4 done' });
+
+    const today = (await get('/hub/today')).body;
+    assert.equal(today.counts.needsYou, 0);
+    assert.ok(today.recent.some(entry => entry.kind === 'checklist-submitted'));
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'submitted');
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.submit.note, 'Skipped the DMs.');
+    assert.equal((await get('/hub/inbox?filter=todo')).body.items[0].state, 'submitted');
+
+    fake.log.length = 0;
+    const second = await post(`/hub/checklists/${list.id}/submit`, { note: 'again' });
+    assert.equal(second.status, 409);
+    assert.equal(second.body.submit.note, 'Skipped the DMs.', 'The 409 carries the submission that won.');
+    assert.deepEqual(putKeys(fake), []);
+  } finally { await close(); }
+});
+
+test('submit checks the note, refuses a cancelled list, and a lost event does not undo the submission', async () => {
+  const logged = [];
+  const failEvents = bucket => ({ ...bucket, put: (key, ...rest) => (key.includes('/events/') ? Promise.reject(new Error('disk full')) : bucket.put(key, ...rest)) });
+  const { fake, seed, get, post, close } = await fixture({ hubOptions: { log: line => logged.push(line) }, wrapBucket: failEvents });
+  try {
+    const list = checklistJson({ id: listId('notes'), now: at(-30) });
+    seed.checklist(list);
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, { note: 'x'.repeat(2001) })).status, 400);
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, { note: 12 })).status, 400);
+    const cancelled = checklistJson({ id: listId('notes', 'c333'), now: at(-30) });
+    seed.checklist(cancelled); seed.put(`checklists/${cancelled.id}/cancel.json`, { at: at().toISOString(), by: 'pc' });
+    const refused = await post(`/hub/checklists/${cancelled.id}/submit`, {});
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /withdrew/);
+    assert.equal(refused.body.submit, undefined);
+
+    // The event fails after submit.json landed: the answer is still 201.
+    {
+      const sent = await post(`/hub/checklists/${list.id}/submit`, {});
+      assert.equal(sent.status, 201);
+      assert.equal(fake.objects.has(`sections/inbox/checklists/${list.id}/submit.json`), true);
+      assert.ok(logged.some(line => /was submitted but its event was not written/.test(line)));
+    }
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'submitted');
+  } finally { await close(); }
+});
+
+test('checklist routes: a POST with no Remote-User is a 401 and writes nothing; reads are open', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('auth'), now: at(-30) });
+    seed.checklist(list);
+    fake.log.length = 0;
+    assert.equal((await post(`/hub/checklists/${list.id}/items/01`, { done: true }, {})).status, 401);
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {}, {})).status, 401);
+    assert.deepEqual(putKeys(fake), []);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).status, 200);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/01`, { done: true }, { 'Remote-User': 'owner' })).status, 200);
+  } finally { await close(); }
+});
+
+test('inboxKey accepts checklists/…, and a project of a checklist shows in /hub/projects', async () => {
+  assert.equal(inboxKey('checklists/20261027-probe-x-a1b2/checklist.json'), 'sections/inbox/checklists/20261027-probe-x-a1b2/checklist.json');
+  assert.equal(inboxKey('checklists/20261027-probe-x-a1b2/tick-01-20261027T143012123Z-a1b2.json'), 'sections/inbox/checklists/20261027-probe-x-a1b2/tick-01-20261027T143012123Z-a1b2.json');
+  assert.throws(() => inboxKey('checklists'), undefined);
+  assert.throws(() => inboxKey('checklists/../x/checklist.json'), undefined);
+  const { seed, get, close } = await fixture();
+  try {
+    seed.checklist(checklistJson({ id: id('proj', 'p111').replace('-probe-', '-newproj-'), project: 'newproj', now: at(-5) }));
+    assert.ok((await get('/hub/projects')).body.projects.some(project => project.id === 'newproj'));
+  } finally { await close(); }
+});
+
+test('a checklist whose title mentions a token still has an id the Hub serves', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('rotate-the-api-token', 't111'), now: at(-5), title: 'Rotate the API token' });
+    seed.checklist(list);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).status, 200);
   } finally { await close(); }
 });

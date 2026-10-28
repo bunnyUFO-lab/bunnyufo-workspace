@@ -71,6 +71,89 @@ export const canAnswer = state => state === 'open' || state === 'snoozed';
 /** What a request says about itself plus whether an agent took it. */
 export const requestState = names => ((names instanceof Set ? names.has('taken.json') : names.includes('taken.json')) ? 'taken' : 'open');
 
+// --- Checklists: state comes from file names alone (see docs/workspaces.md, "Checklists") ---
+
+export const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
+export const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024, note: 2000 };
+
+const nameList = names => (names instanceof Set ? [...names] : [...names]);
+
+/** `20261027T143012123Z` → `2026-10-27T14:30:12.123Z`. */
+export const stampIso = stamp => `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(9, 11)}:${stamp.slice(11, 13)}:${stamp.slice(13, 15)}.${stamp.slice(15, 18)}Z`;
+
+/** A Date as the stamp in a mark file's name (UTC, milliseconds, no separators). */
+export const markStamp = date => date.toISOString().replace(/[-:.]/g, '');
+
+/** First match wins: cancel.json → 'cancelled', pickup.json → 'picked-up', submit.json → 'submitted', else 'open'. */
+export function checklistState(names) {
+  const list = nameList(names);
+  if (list.includes('cancel.json')) return 'cancelled';
+  if (list.includes('pickup.json')) return 'picked-up';
+  if (list.includes('submit.json')) return 'submitted';
+  return 'open';
+}
+
+/**
+ * The winning mark of each item from the file names, whatever order they come in: the greatest stamp,
+ * the greater rand4 on a tie. Never S3's LastModified. → Map<item, { done, at (ISO), name }>
+ */
+export function checklistMarks(names) {
+  const best = new Map();
+  for (const name of nameList(names)) {
+    const match = CHECKLIST_MARK_RE.exec(name);
+    if (!match) continue;
+    const [, action, item, stamp, rand] = match;
+    const key = `${stamp}-${rand}`;
+    const current = best.get(item);
+    if (!current || key > current.key) best.set(item, { key, done: action === 'tick', at: stampIso(stamp), name });
+  }
+  return new Map([...best].map(([item, { done, at, name }]) => [item, { done, at, name }]));
+}
+
+/** How many of the checklist's own items are ticked. A mark for an item that does not exist is ignored. */
+export function checklistProgress(checklist, names) {
+  const marks = checklistMarks(names);
+  const ids = (Array.isArray(checklist?.items) ? checklist.items : []).map(item => item.id);
+  return { done: ids.filter(id => marks.get(id)?.done).length, total: ids.length, marks };
+}
+
+export function checklistItem(checklist, names) {
+  const state = checklistState(names);
+  const { done, total } = checklistProgress(checklist, names);
+  return {
+    kind: 'checklist', id: checklist.id, project: checklist.project, title: clip(checklist.title), at: checklist.createdAt, state, done, total,
+    ...(checklist.bead ? { bead: checklist.bead } : {}),
+    ...(checklist.from?.host ? { host: checklist.from.host } : {}),
+    ...(checklist.from?.session ? { session: checklist.from.session } : {}),
+  };
+}
+
+/** The problems with a checklist.json (or the input shape of one, without the ids) against the contract's limits; an empty list means it is valid. */
+export function checkChecklist(raw) {
+  const problems = [];
+  const L = CHECKLIST_LIMITS;
+  const text = (value, min, max) => typeof value === 'string' && value.trim().length >= min && value.length <= max;
+  const link = value => typeof value === 'string' && value.length <= L.link && /^https?:\/\//i.test(value);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return ['the file is not an object'];
+  if (!text(raw.title, 1, L.title)) problems.push(`title is 1 to ${L.title} characters`);
+  if (raw.context !== undefined && !text(raw.context, 0, L.context)) problems.push(`context is at most ${L.context} characters`);
+  if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
+  if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > L.items) problems.push(`items is a list of 1 to ${L.items}`);
+  else {
+    raw.items.forEach((item, index) => {
+      const at = `item ${index + 1}`;
+      if (!item || typeof item !== 'object' || Array.isArray(item)) { problems.push(`${at} is not an object`); return; }
+      if (!text(item.text, 1, L.text)) problems.push(`${at}: text is 1 to ${L.text} characters`);
+      if (item.group !== undefined && !text(item.group, 0, L.group)) problems.push(`${at}: group is at most ${L.group} characters`);
+      if (item.guide !== undefined && !text(item.guide, 0, L.guide)) problems.push(`${at}: guide is at most ${L.guide} characters`);
+      if (item.link !== undefined && !link(item.link)) problems.push(`${at}: link is an http:// or https:// link of at most 2000 characters`);
+      if (item.id !== undefined && item.id !== String(index + 1).padStart(2, '0')) problems.push(`${at}: id is its position (${String(index + 1).padStart(2, '0')})`);
+    });
+  }
+  if (Buffer.byteLength(JSON.stringify(raw)) > L.file) problems.push('the file is over 256 KB');
+  return problems;
+}
+
 const clip = (value, length = 160) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
 export function askItem(ask, state) {
@@ -157,10 +240,12 @@ export function deriveEventItems(events) {
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, events, now }) {
+export function buildToday({ asks, checklists = [], events, now }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
-  const needsYou = [...openAsks, ...reviews, ...blocked];
+  // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
+  const openChecklists = checklists.filter(item => item.state === 'open').sort(newest);
+  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked];
   const since = now.getTime() - DAY;
   const recent = events.filter(event => new Date(event.ts).getTime() >= since);
   const alerts = recent.filter(event => event.kind === 'alert');
@@ -181,18 +266,19 @@ export function reviewDone({ review, event, user, at }) {
   };
 }
 
-export const INBOX_FILTERS = ['needs-you', 'asks', 'reviews', 'requests', 'blocked', 'answered'];
+export const INBOX_FILTERS = ['needs-you', 'todo', 'asks', 'reviews', 'requests', 'blocked', 'answered'];
 
 /** The Inbox's list for one filter. */
-export function buildInbox({ filter, asks, requests, events, now }) {
+export function buildInbox({ filter, asks, checklists = [], requests, events, now }) {
   const { reviews, blocked } = deriveEventItems(events);
   switch (filter) {
     case 'asks': return asks.filter(item => item.state !== 'cancelled' && item.state !== 'picked-up').sort(newest);
+    case 'todo': return [...checklists.filter(item => item.state !== 'cancelled').sort(newest)].sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open'));
     case 'reviews': return reviews;
     case 'requests': return [...requests].sort(newest);
     case 'blocked': return blocked;
     case 'answered': return asks.filter(item => item.state === 'answered' || item.state === 'picked-up').sort(newest);
-    default: return buildToday({ asks, events, now }).needsYou;
+    default: return buildToday({ asks, checklists, events, now }).needsYou;
   }
 }
 

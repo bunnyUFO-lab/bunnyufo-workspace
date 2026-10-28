@@ -18,6 +18,27 @@ export function askJson({ id, project = 'probe', bead, now = new Date(), expires
   };
 }
 
+/** The four steps the UI tests and screenshots use: two groups, the second step with a guide that holds a fenced command and a link. */
+export const checklistItems = () => [
+  { text: 'Create the application', group: 'Discord developer portal', link: 'https://example.test/discord/applications' },
+  {
+    text: 'Copy the bot token into the vault', group: 'Discord developer portal',
+    guide: 'Open **Bot** in the left menu, press *Reset Token* and copy it.\n\nThen store it on the server:\n\n```bash\nssh root@host.example.test\nbunnylink-secret set discord-bot-token\n```\n\nDo not paste the token anywhere else. More in [the portal guide](https://example.test/discord/guide).',
+    link: 'https://example.test/discord/bot',
+  },
+  { text: 'Invite the bot to your server', group: 'Your server' },
+  { text: 'Allow direct messages from server members', group: 'Your server', guide: 'In *Privacy Settings* of the server, switch on **Direct Messages**.' },
+];
+
+/** A checklist.json as `cards checklist create` writes it. */
+export function checklistJson({ id, project = 'probe', bead, now = new Date(), title = 'Finish the Discord bot setup', context = 'The bot needs **four** steps that only you can do.', card, items = checklistItems(), tool = 'claude-code' } = {}) {
+  return {
+    id, project, createdAt: now.toISOString(), from: { host: 'pc.example.test', tool, session: 'sess-checklist' },
+    ...(bead ? { bead } : {}), title, ...(context ? { context } : {}), ...(card ? { card } : {}),
+    items: items.map((item, index) => ({ id: String(index + 1).padStart(2, '0'), ...item })),
+  };
+}
+
 export const threeOptions = () => ['a', 'b', 'c'].map(letter => ({ id: letter.toUpperCase(), label: `Option ${letter.toUpperCase()}`, image: `${letter}.png` }));
 
 export function requestJson({ id, project = 'probe', text = 'Add a wall-jump tutorial', when = 'next-sprint', by = 'owner', now = new Date() } = {}) {
@@ -91,6 +112,15 @@ export function seeder(fake, prefix = INBOX) {
       for (const [name, body] of Object.entries(extra)) put(`${folder}/${name}`, body);
       for (const [name, body] of Object.entries(files)) put(`${folder}/${name}`, body);
     },
+    /** A checklist and its marks: `marks` is [{ item, done = true, at = Date, rand = 'a1b2' }], written the way the Hub names them. */
+    checklist(list, marks = []) {
+      const folder = `checklists/${list.id}`;
+      put(`${folder}/checklist.json`, list);
+      for (const { item, done = true, at = new Date(), rand = 'a1b2' } of marks) {
+        put(`${folder}/${done ? 'tick' : 'untick'}-${item}-${at.toISOString().replace(/[-:.]/g, '')}-${rand}.json`, { item, done, at: at.toISOString(), by: 'owner' });
+      }
+    },
+    submit(id, body = {}) { put(`checklists/${id}/submit.json`, { at: new Date().toISOString(), by: 'owner', done: [], open: [], ...body }); },
     request(request) { put(`requests/${request.id}/request.json`, request); },
     event(event, at = new Date(event.ts)) {
       const day = at.toISOString().slice(0, 10);
