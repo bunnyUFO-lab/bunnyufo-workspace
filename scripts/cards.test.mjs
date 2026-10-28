@@ -166,6 +166,121 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`checklist (${via}): create from a file and from flags, list, get, wait, pickup, cancel`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
+    const file = path.join(dir, 'checklist.json');
+    const input = {
+      title: 'Finish the Discord bot setup', context: 'Four **steps**.',
+      items: [
+        { text: 'Create the bot', group: 'Portal', guide: 'Open the portal.\n\n```bash\nls\n```', link: 'https://example.test/x' },
+        { text: 'Invite it' },
+        { text: 'Allow DMs' },
+      ],
+    };
+    const folder = id => `sections/inbox/checklists/${id}/`;
+    const mark = (id, action, item, stampText, rand = 'a1b2') => fake.seed(`${folder(id)}${action}-${item}-${stampText}-${rand}.json`, JSON.stringify({ item, done: action === 'tick' }), 'application/json');
+    try {
+      for (const bad of [{ ...input, items: [] }, { ...input, title: '' }, { ...input, items: [{ text: 'x', link: 'ftp://example.test' }] }, { ...input, items: [{ text: 'x'.repeat(201) }] }]) {
+        await writeFile(file, JSON.stringify(bad));
+        const refused = await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file);
+        assert.equal(refused.code, 1);
+        assert.match(refused.stderr, /not valid/);
+      }
+      assert.equal((await cli(via, 'checklist', 'create', '--project', 'probe')).code, 1, 'Nothing to create from.');
+      assert.deepEqual(keys('checklists/'), [], 'A refused list writes nothing.');
+
+      await writeFile(file, JSON.stringify(input));
+      const created = await cli(via, 'checklist', 'create', '--project', 'probe', '--bead', 'bd-7', '--card', 'https://example.test/c#/x', '--file', file);
+      assert.equal(created.code, 0, created.stderr);
+      const id = created.stdout.trim();
+      assert.match(id, /^\d{8}-probe-finish-the-discord-bot-setup-[0-9a-f]{4}$/, 'The id has the Ask shape and is the only thing on stdout.');
+      assert.deepEqual(keys('checklists/'), [`${folder(id)}checklist.json`]);
+      const text = fake.text(`${folder(id)}checklist.json`);
+      assert.ok(text.endsWith('}\n') && text.includes('\n  "id"'), 'Pretty JSON with a trailing newline.');
+      const list = JSON.parse(text);
+      assert.deepEqual(Object.keys(list), ['id', 'project', 'createdAt', 'from', 'bead', 'title', 'context', 'card', 'items']);
+      assert.deepEqual({ id: list.id, project: list.project, bead: list.bead, card: list.card, title: list.title }, { id, project: 'probe', bead: 'bd-7', card: 'https://example.test/c#/x', title: input.title });
+      assert.equal(list.from.tool, 'claude-code');
+      assert.match(list.from.host, /^[a-z0-9-]+$/);
+      assert.ok(Math.abs(Date.parse(list.createdAt) - Date.now()) < 60_000);
+      assert.deepEqual(list.items.map(item => item.id), ['01', '02', '03']);
+      assert.deepEqual(list.items[0], { id: '01', text: 'Create the bot', group: 'Portal', guide: 'Open the portal.\n\n```bash\nls\n```', link: 'https://example.test/x' });
+      const [eventKey] = keys(`events/${today()}/`);
+      const event = fake.json(eventKey);
+      assert.deepEqual({ kind: event.kind, checklist: event.checklist, project: event.project, bead: event.bead, source: event.source, title: event.title, summary: event.summary },
+        { kind: 'checklist-created', checklist: id, project: 'probe', bead: 'bd-7', source: 'cards', title: 'Finish the Discord bot setup', summary: '3 steps for you.' });
+
+      const short = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Rotate the keys', '--item', 'First', '--item', 'Second');
+      assert.equal(short.code, 0, short.stderr);
+      const shortId = short.stdout.trim();
+      assert.deepEqual(fake.json(`${folder(shortId)}checklist.json`).items, [{ id: '01', text: 'First' }, { id: '02', text: 'Second' }]);
+
+      assert.equal((await cli(via, 'checklist', 'list', '--project', 'probe')).stdout.trim().split('\n').sort().join('\n'), [`${id}\topen\t0/3\tprobe\tFinish the Discord bot setup`, `${shortId}\topen\t0/2\tprobe\tRotate the keys`].sort().join('\n'));
+      assert.equal((await cli(via, 'checklist', 'list', '--project', 'other')).stdout.trim(), '');
+
+      mark(id, 'tick', '01', '20261027T143100000Z');
+      mark(id, 'tick', '02', '20261027T144000000Z');
+      mark(id, 'untick', '02', '20261027T144500000Z');
+      assert.match((await cli(via, 'checklist', 'list', '--open')).stdout, new RegExp(`^${id}\\topen\\t1/3\\tprobe\\t`, 'm'));
+      const got = await cli(via, 'checklist', 'get', id);
+      assert.equal(got.code, 0, got.stderr);
+      assert.equal(got.stdout.trim(), [`${id}\topen\t1 of 3 done\tprobe`, 'Finish the Discord bot setup', '[x] 01 Create the bot  (2026-10-27 14:31Z)', '[ ] 02 Invite it', '[ ] 03 Allow DMs'].join('\n'));
+      const asJson = JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout);
+      assert.deepEqual({ state: asJson.state, done: asJson.done, total: asJson.total, id: asJson.checklist.id }, { state: 'open', done: 1, total: 3, id });
+      assert.deepEqual(asJson.items[0], { id: '01', text: 'Create the bot', done: true, at: '2026-10-27T14:31:00.000Z' });
+      assert.deepEqual(asJson.items[1], { id: '02', text: 'Invite it', done: false, at: '2026-10-27T14:45:00.000Z' });
+      assert.equal(asJson.submit, undefined);
+      assert.equal((await cli(via, 'checklist', 'get', '20990101-probe-nothing-a1b2')).code, 1);
+
+      const early = await cli(via, 'checklist', 'pickup', id);
+      assert.equal(early.code, 2, 'Not submitted yet.');
+      const waited = await cli(via, 'checklist', 'wait', id, '--timeout', '0.03', '--every', '5');
+      assert.equal(waited.code, 4);
+      assert.match(waited.stdout, /1 of 3 done/);
+      assert.equal((await cli(via, 'checklist', 'wait', id, '--every', '1')).code, 1, '--every is at least 5.');
+
+      fake.seed(`${folder(id)}submit.json`, JSON.stringify({ at: '2026-10-27T15:02:00.000Z', by: 'owner', note: 'All but DMs.', done: ['01'], open: ['02', '03'] }), 'application/json');
+      const submitted = await cli(via, 'checklist', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(submitted.code, 0, submitted.stderr);
+      assert.match(submitted.stdout, new RegExp(`^${id}\\tsubmitted\\t1 of 3 done\\tprobe`));
+      assert.match(submitted.stdout, /== submit\.json[\s\S]*"note": "All but DMs\."/);
+      assert.match((await cli(via, 'checklist', 'list', '--submitted')).stdout, /\tsubmitted\t1\/3\t/);
+      assert.equal((await cli(via, 'checklist', 'list', '--submitted', '--project', 'probe')).stdout.trim().split('\n').length, 1);
+
+      assert.equal((await cli(via, 'checklist', 'cancel', id)).code, 3, 'A submitted list cannot be withdrawn.');
+      const picked = await cli(via, 'checklist', 'pickup', id);
+      assert.equal(picked.code, 0, picked.stderr);
+      const pickup = fake.json(`${folder(id)}pickup.json`);
+      assert.deepEqual(Object.keys(pickup).sort(), ['at', 'host']);
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 3);
+      assert.match((await cli(via, 'checklist', 'get', id)).stdout, /\tpicked-up\t[\s\S]*== pickup\.json/);
+
+      const cancelled = await cli(via, 'checklist', 'cancel', shortId);
+      assert.equal(cancelled.code, 0, cancelled.stderr);
+      assert.deepEqual(Object.keys(fake.json(`${folder(shortId)}cancel.json`)).sort(), ['at', 'by']);
+      assert.match((await cli(via, 'checklist', 'list', '--project', 'probe')).stdout, new RegExp(`^${shortId}\\tcancelled\\t0/2\\t`, 'm'));
+      assert.equal((await cli(via, 'checklist', 'cancel', shortId)).code, 3);
+      assert.equal((await cli(via, 'checklist', 'wait', shortId, '--timeout', '1', '--every', '5')).code, 3, 'wait on a withdrawn list.');
+      assert.equal((await cli(via, 'checklist', 'pickup', shortId)).code, 2);
+      assert.equal((await cli(via, 'checklist', 'bogus', id)).code, 1);
+    } finally { await close(); }
+  });
+
+  test(`checklist (${via}): create pings #needs-you with the Hub link and never prints the webhook`, async () => {
+    const { cli, dir, close } = await setup();
+    const hook = await webhook();
+    try {
+      cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/' };
+      const made = await cli(via, 'checklist', 'create', '--project', 'magic-loops', '--title', 'Finish the Discord bot setup', '--item', 'One', '--item', 'Two', '--item', 'Three');
+      assert.equal(made.code, 0, made.stderr);
+      const id = made.stdout.trim();
+      assert.equal(hook.posts.length, 1);
+      assert.deepEqual(hook.posts[0].body.allowed_mentions, { parse: [] });
+      assert.equal(hook.posts[0].body.content, `**Agent needs you · Magic Loops**\nFinish the Discord bot setup (3 steps)\nhttps://hub.example.test/#/~hub/checklist/${id}`);
+      assert.ok(!made.stdout.includes(hook.url) && !made.stderr.includes(hook.url), 'The address is never printed.');
+    } finally { await hook.close(); await close(); }
+  });
+
   test(`request (${via}): create, list --open, take, second take exits 3`, async () => {
     const { cli, close } = await setup();
     try {
