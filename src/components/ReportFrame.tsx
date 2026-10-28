@@ -46,7 +46,7 @@ function ThemedFrame({ url, onLoad, bridge, ...props }: Props) {
   useEffect(() => {
     const element = frame.current
     if (!element || !workspace || !id) return
-    return attachCardBridge(element, { workspace, id }, { origin: new URL(src).origin, enabled: () => host.cards && !host.saves, call: api })
+    return attachCardBridge(element, { workspace, id }, { origin: new URL(src).origin, enabled: () => host.cards && !host.saves && window.top === window && !window.opener, call: api })
   }, [workspace, id, src])
   return <iframe {...props} ref={frame} src={src} onLoad={() => { loaded.current = true; applyTheme(); onLoad?.() }} />
 }

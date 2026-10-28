@@ -531,7 +531,15 @@ frame was loaded from, and replies to that origin, never `*`. A request is
 
 `path` must be one of the card's Markdown steps. A card's Markdown answer is read and saved with
 `BuwCardData.bridge.call('markdown.get', { path })` and `('markdown.save', { path, text, base: etag })`.
-Writes are limited to 10 a second per frame (429). When the app cannot save (signed out, or the local
+Writes are limited to 10 a second per frame (429).
+
+Every card page shares the content host's origin, so any card page can script the card frame the app is
+showing if it holds a handle to the app's window. The app shell therefore must not be framed or reachable
+through a window another page holds: the site sends `Cross-Origin-Opener-Policy: same-origin`,
+`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` with it (Caddyfile, and the
+stand-in in `server/test/card-sandbox-ui.mjs`, which tries all three attacks: framing the app, opening it in
+a popup, and keeping a popup open while the owner moves to another card). The app also answers the bridge only
+when it is a top-level window with no opener. Keep these headers on any proxy in front of the app. When the app cannot save (signed out, or the local
 app), every op answers 401 and the page falls to local mode at once.
 
 Opened in its own tab, a card has no app to ask: `store.mode` is `'local'`, input stays in the

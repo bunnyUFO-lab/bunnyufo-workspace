@@ -26,6 +26,7 @@ await mkdir(path.join(root, '.cache'), { recursive: true });
 const fake = await startFakeS3();
 const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
 const card = { id: 'alpha', folder: 'alpha', title: 'Alpha card', description: 'A card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Page', path: 'index.html' }, { name: 'Form', path: 'form.html' }, { name: 'Answers page', path: 'answers.html' }, { name: 'Answers', path: 'answers.md' }] };
+const beta = { ...card, id: 'beta', folder: 'beta', title: 'Beta card', steps: [{ name: 'Page', path: 'index.html' }, { name: 'Answers', path: 'answers.md' }] };
 const seed = (key, body, type) => fake.seed(key, body, type);
 
 const log = [];
@@ -38,7 +39,7 @@ const appHost = new URL(appOrigin).host;
 const contentHost = new URL(contentOrigin).host;
 
 // The card: a stylesheet, the shared stylesheet and script, and a script of its own that tries things.
-seed('sections/one/workspace.json', JSON.stringify({ name: 'One', entities: [card] }), 'application/json');
+seed('sections/one/workspace.json', JSON.stringify({ name: 'One', entities: [card, beta] }), 'application/json');
 seed('state.json', '{"version":1,"cards":{}}', 'application/json');
 seed('sections/one/_shared/report.css', await readFile(path.join(root, 'workspace/_shared/report.css')), 'text/css');
 seed('sections/one/_shared/report.js', await readFile(path.join(root, 'workspace/_shared/report.js')), 'text/javascript');
@@ -97,12 +98,52 @@ window.__answers = {
   },
 };
 </script></body></html>`, 'text/html; charset=utf-8');
+// A hostile card (alpha) that gets hold of the app's window and tries to script the frame of another card (beta) in it,
+// to send bridge messages as beta. All cards share the content origin, so that frame is script-reachable from alpha
+// unless the app cannot be framed (frame-ancestors) or reached through an opener (Cross-Origin-Opener-Policy).
+seed('sections/one/beta/index.html', '<!doctype html><html><head><meta charset="utf-8"><title>Beta</title></head><body><h1>Beta heading</h1></body></html>', 'text/html; charset=utf-8');
+seed('sections/one/alpha/attack.js', `
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const MESSAGES = [
+  { type: 'buw:bridge', v: 1, id: 'atk1', op: 'markdown.save', path: 'answers.md', text: 'written by alpha', base: null },
+  { type: 'buw:bridge', v: 1, id: 'atk2', op: 'responses.set', doc: 'ratings', set: { evil: { updated: 'x', data: 1 } } },
+];
+window.__attack = async mode => {
+  let app = null;
+  try {
+    if (mode === 'frame') { const inner = document.createElement('iframe'); inner.src = ${JSON.stringify(appOrigin)} + '/one#/beta/0'; document.body.append(inner); app = inner.contentWindow; }
+    else if (mode === 'popup') app = window.open(${JSON.stringify(appOrigin)} + '/one#/beta/0');
+    else app = window.opener && window.opener.top;
+  } catch { /* no handle */ }
+  if (!app) return 'no app window';
+  for (let n = 0; n < 40; n += 1) {
+    try {
+      const other = app[0];
+      if (other && other.location.pathname.includes('/w/one/beta/') && other.document.body) {
+        const script = other.document.createElement('script');
+        script.textContent = 'for (const m of ' + JSON.stringify(MESSAGES) + ') parent.postMessage(m, "*")';
+        other.document.body.append(script);
+        await sleep(1500);
+        return 'injected';
+      }
+    } catch { /* cross-origin, or not there */ }
+    await sleep(250);
+  }
+  return 'no beta frame';
+};
+`, 'text/javascript');
+seed('sections/one/alpha/helper.html', '<!doctype html><html><head><meta charset="utf-8"><title>Helper</title></head><body><p>helper</p><script src="attack.js"></script></body></html>', 'text/html; charset=utf-8');
 seed('sections/one/alpha/index.html', '<!doctype html><html data-buw-report="document"><head><meta charset="utf-8"><title>Alpha</title><link rel="stylesheet" href="../_shared/report.css"><link rel="stylesheet" href="style.css"></head><body><main><h1>Alpha heading</h1><p id="mark">Text.</p></main><script src="../_shared/report.js"></script><script src="probe.js"></script></body></html>', 'text/html; charset=utf-8');
 
 const api = createSiteApi({
   bucket, sectionsTtl: 0, contentOrigin, allowedOrigins: [appOrigin],
   stateFile: path.join(root, '.cache', 'card-sandbox-state.json'),
 });
+// What the real site's Caddy sends with the app shell: it must not be framed or reachable from a card's window,
+// because every card shares the content origin and could script the card frame the app shows. BUW_TEST_NO_APP_HEADERS=1
+// leaves them off (=coop: only the opener policy), to see the hostile steps below fail.
+const OFF = process.env.BUW_TEST_NO_APP_HEADERS;   // '1': none; 'coop': all but the opener policy
+const APP_SHELL = OFF === '1' ? {} : { ...(OFF === 'coop' ? {} : { 'Cross-Origin-Opener-Policy': 'same-origin' }), 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Frame-Options': 'DENY' };
 const send = (response, status, type, body, extra = {}) => { response.writeHead(status, { 'Content-Type': type, ...extra }); response.end(body); };
 site.on('request', async (request, response) => {
   const url = new URL(request.url, 'http://site');
@@ -117,8 +158,8 @@ site.on('request', async (request, response) => {
   try {
     const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     const body = await readFile(path.join(dist, file));
-    return send(response, 200, file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', body);
-  } catch { return send(response, 200, 'text/html', await readFile(path.join(dist, 'index.html'))); }
+    return send(response, 200, file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', body, APP_SHELL);
+  } catch { return send(response, 200, 'text/html', await readFile(path.join(dist, 'index.html')), APP_SHELL); }
 });
 
 const browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
@@ -129,7 +170,7 @@ try {
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => { throw error; });
   await page.goto(`${appOrigin}/one`);
-  await page.locator('.entity-card').waitFor();
+  await page.locator('.entity-card').first().waitFor();
   await page.evaluate(() => { localStorage.setItem('app-secret', 'the app only'); localStorage.setItem('buw.workspaceTheme', 'light'); });
 
   step('the app reports the content origin');
@@ -210,7 +251,7 @@ try {
   step('the old card API passphrase is removed from the app origin when the app loads');
   await page.evaluate(() => localStorage.setItem('buw.cardApiPassphrase', 'left over'));
   await page.goto(`${appOrigin}/one`);
-  await page.locator('.entity-card').waitFor();
+  await page.locator('.entity-card').first().waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('buw.cardApiPassphrase')), null);
   log.length = 0;
 
@@ -250,6 +291,43 @@ try {
   await settle(1000);
   assert.equal(fake.json('sections/one/card-responses/alpha/ratings.json').items.evil, undefined, 'the nested frame wrote no response');
   assert.equal(fake.text('sections/one/alpha/answers.md'), '{"picked":"b"}', 'the nested frame wrote no answer');
+
+  // Beta's answers and responses must stay as they were through all three: nothing exists for it, so any write shows.
+  const betaUntouched = () => {
+    assert.equal(fake.text('sections/one/beta/answers.md'), null, "beta's answer file was not written");
+    for (const key of ['sections/one/card-responses/beta/ratings.json']) assert.equal(fake.json(key), null, `${key} was not written`);
+    assert.equal(fake.json('sections/one/card-responses/alpha/ratings.json').items.evil, undefined, 'alpha ratings got no evil item');
+  };
+
+  step('hostile: a card frames the app to script another card\'s frame: the app refuses to be framed');
+  const framer = await context.newPage();
+  framer.setDefaultTimeout(30000);
+  await framer.goto(`${contentOrigin}/w/one/alpha/helper.html`);
+  assert.notEqual(await framer.evaluate(() => window.__attack('frame')), 'injected');
+  betaUntouched();
+  await framer.close();
+
+  step('hostile: a card opens the app in a popup and scripts another card\'s frame: no handle to the app');
+  const opener = await context.newPage();
+  opener.setDefaultTimeout(30000);
+  await opener.goto(`${contentOrigin}/w/one/alpha/helper.html`);
+  assert.notEqual(await opener.evaluate(() => window.__attack('popup')), 'injected');
+  betaUntouched();
+  for (const extra of context.pages()) if (extra !== page && extra !== tab && extra !== opener) await extra.close();
+  await opener.close();
+
+  step('hostile: a popup a card kept open cannot reach the app after the owner moves to another card');
+  await appFrame(1, () => window.__form);
+  const inFormFrame = page.frames().find(f => f.url().startsWith(`${contentOrigin}/w/one/alpha/form.html`));
+  const [popup] = await Promise.all([page.waitForEvent('popup'), inFormFrame.evaluate(() => { window.open('helper.html'); })]);
+  await popup.waitForLoadState();
+  await page.goto(`${appOrigin}/one#/beta/0`);
+  await page.reload();
+  await page.locator('iframe.report-frame').waitFor();
+  popup.setDefaultTimeout(30000);
+  assert.notEqual(await popup.evaluate(() => window.__attack('held')), 'injected');
+  betaUntouched();
+  await popup.close();
 
   step('opened in its own tab: local mode, the message, and no request to the responses route');
   log.length = 0;

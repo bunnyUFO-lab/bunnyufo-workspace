@@ -98,8 +98,8 @@ export function attachCardBridge(frame, card, { origin, enabled, call, win = win
     if (!target || event.source !== target || event.origin !== origin) return;
     if (!isBridgeRequest(event.data)) return;
     void handler.handle(event.data).then(answer => {
-      // The frame may have gone somewhere else while the call was out: the target origin then drops it.
-      if (answer && frame.contentWindow === target) target.postMessage(answer, origin);
+      // The window outlives a navigation, so the target origin is what drops a reply to a frame that has moved on.
+      if (answer) target.postMessage(answer, origin);
     });
   };
   win.addEventListener('message', onMessage);
