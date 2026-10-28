@@ -40,9 +40,15 @@ function useCardFile(cardDir: string | undefined, path: string | undefined): Car
   return key && loaded.key === key ? loaded.file : { state: 'loading' }
 }
 
+const PR_RE = /^https:\/\/github\.com\/[\w.-]+\/([\w.-]+)\/pull\/(\d+)$/
 const prLabel = (url: string) => {
-  const match = /^https:\/\/github\.com\/[\w.-]+\/([\w.-]+)\/pull\/(\d+)$/.exec(url)
+  const match = PR_RE.exec(url)
   return match ? `${match[1]} #${match[2]}` : 'Open link'
+}
+
+/** A link that is not a pull request: a card of this site (its hash is a route) or any other page. */
+const otherLinkLabel = (url: string) => {
+  try { return new URL(url).hash.startsWith('#/') ? 'Open card' : 'Open link' } catch { return 'Open link' }
 }
 
 function Shot({ url, caption, alt, onFail }: { url: string; caption: string; alt: string; onFail: (url: string) => void }) {
@@ -131,7 +137,10 @@ export default function ReviewView({ route }: { route: string }) {
   const verdicts = detail.verdicts ?? []
   const linked = linkSummary(detail.summary ?? '', { repo: inferred?.repo, prs: detail.prs ?? [], id, files: files.map(entry => entry.path) })
   const foundPrs = !detail.prs?.length && linked.prs.length > 0
-  const prs = detail.prs?.length ? detail.prs : foundPrs ? linked.prs : detail.url ? [detail.url] : []
+  // Only a pull request goes under Pull requests; any other `url` (a card, a page) is a button in the head.
+  const urlIsPr = !!detail.url && PR_RE.test(detail.url)
+  const prs = detail.prs?.length ? detail.prs : foundPrs ? linked.prs : urlIsPr && detail.url ? [detail.url] : []
+  const otherUrl = detail.url && !urlIsPr ? detail.url : undefined
   const folder = file && file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
   // An event from before reviews carried links and results: one note instead of four empty sections.
   const legacy = !detail.prs?.length && !detail.cardDir && !detail.cardFiles?.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
@@ -153,6 +162,7 @@ export default function ReviewView({ route }: { route: string }) {
         </div>
         <p className="hub-muted">Posted {ago(detail.at)}{detail.host ? ` from ${detail.host}` : ''}.</p>
         {detail.summary && <Md text={linked.text} />}
+        {otherUrl && <p><a className="hub-btn" href={otherUrl} target="_blank" rel="noopener noreferrer" data-link-head>{otherLinkLabel(otherUrl)}</a></p>}
       </div>
       <div className="hub-review-grid" data-solo={files.length || file ? undefined : 'true'}>
         <div className="hub-review-side">
@@ -160,7 +170,7 @@ export default function ReviewView({ route }: { route: string }) {
             <section className="hub-panel" aria-label="Older review">
               <p className="hub-muted" data-legacy>{found
                 ? 'This review was posted before reviews carried their links and test results. The links here were found from the text of the summary.'
-                : 'This review was posted before reviews carried their links and test results. The summary above is what came with it.'}</p>
+                : 'No links or test results came with this review.'}</p>
               {!showFiles && (cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
             </section>
           )}
