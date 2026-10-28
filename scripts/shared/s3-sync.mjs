@@ -40,7 +40,7 @@ export async function defaultScope(root) {
 }
 
 /**
- * Where cards save what a viewer enters (workspace/_shared/card-data.js, through the card API).
+ * Where cards save what a viewer enters (workspace/_shared/card-data.js, through the app's card bridge).
  * Written by the browser, never by a folder on disk, so no publish may upload, delete or pull it,
  * even when a card folder or a named path would otherwise cover it.
  */
