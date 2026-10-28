@@ -45,7 +45,7 @@ export default function ReportViewer(props: ViewerProps) {
  * A card page's address as a frame loads it. With a content host, a `/w/` page of this site is framed from there,
  * so the page runs on an origin of its own and cannot reach the app's storage or post to it as the app.
  */
-export function frameUrl(url: string): string {
+function frameUrl(url: string): string {
   const content = host.contentOrigin
   if (!content) return url
   const target = new URL(url, window.location.href)
