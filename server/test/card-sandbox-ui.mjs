@@ -54,6 +54,17 @@ window.__result = (async () => {
   return result;
 })();
 `, 'text/javascript');
+// A card that frames an app-host /w/ page: that page must not end up running as the app.
+seed('sections/one/alpha/evil.js', `
+window.__result = (async () => {
+  const result = { origin: location.origin };
+  try { result.storage = localStorage.getItem('app-secret'); } catch { result.storage = 'threw'; }
+  await fetch('/api/workspace/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace: 'one', id: 'alpha', pinned: true }) }).catch(() => {});
+  return result;
+})();
+`, 'text/javascript');
+seed('sections/one/alpha/evil.html', '<!doctype html><html><head><meta charset="utf-8"><title>Evil</title></head><body><p>evil</p><script src="evil.js"></script></body></html>', 'text/html; charset=utf-8');
+seed('sections/one/alpha/nest.html', `<!doctype html><html><head><meta charset="utf-8"><title>Nest</title></head><body><iframe id="inner" src="${appOrigin}/w/one/alpha/evil.html"></iframe></body></html>`, 'text/html; charset=utf-8');
 seed('sections/one/alpha/index.html', '<!doctype html><html data-buw-report="document"><head><meta charset="utf-8"><title>Alpha</title><link rel="stylesheet" href="../_shared/report.css"><link rel="stylesheet" href="style.css"></head><body><main><h1>Alpha heading</h1><p id="mark">Text.</p></main><script src="../_shared/report.js"></script><script src="probe.js"></script></body></html>', 'text/html; charset=utf-8');
 
 const api = createSiteApi({
@@ -67,7 +78,7 @@ site.on('request', async (request, response) => {
   response.on('finish', () => log.push({ method: request.method, host, path: url.pathname, origin: request.headers.origin ?? null, status: response.statusCode }));
   const toApi = () => api.emit('request', request, response);
   if (host === contentHost) return toApi();   // the API itself serves /w/ only, with the CSP, on this host
-  if (url.pathname.startsWith('/w/') && request.headers['sec-fetch-dest'] === 'document') {
+  if (url.pathname.startsWith('/w/') && ['document', 'iframe', 'frame', 'object', 'embed'].includes(request.headers['sec-fetch-dest'])) {
     return send(response, 302, 'text/plain', '', { Location: `${contentOrigin}${url.pathname}${url.search}` });
   }
   if (url.pathname.startsWith('/api/') || url.pathname === '/sites.json' || url.pathname.startsWith('/w/')) return toApi();
@@ -141,6 +152,17 @@ try {
   const own = log.find(entry => entry.method === 'POST' && entry.host === appHost);
   assert.equal(own?.status, 403, "The tab's POST to the app is refused.");
   assert.deepEqual(fake.json('state.json').cards, {}, 'Still no pin.');
+
+  step('a card that frames an app-host /w/ page: the inner page does not run as the app and writes nothing');
+  await tab.goto(`${contentOrigin}/w/one/alpha/nest.html`);
+  await settle(1500);
+  const inner = tab.frames().find(f => f !== tab.mainFrame());
+  assert.ok(inner, 'The inner frame exists.');
+  const innerOrigin = new URL(inner.url() === 'about:blank' ? contentOrigin : inner.url()).origin;
+  assert.notEqual(innerOrigin, appOrigin, `The inner page is not on the app origin (${inner.url()}).`);
+  const innerResult = await inner.evaluate(() => window.__result).catch(() => null);
+  if (innerResult) assert.deepEqual(innerResult.storage, null, 'The inner page cannot read the app storage.');
+  assert.deepEqual(fake.json('state.json').cards, {}, 'The inner page wrote no pin.');
 
   step('the content host serves nothing but /w/');
   for (const route of ['/api/capabilities', '/sites.json', '/', '/one']) {
