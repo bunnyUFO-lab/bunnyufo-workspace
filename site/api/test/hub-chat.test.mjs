@@ -20,10 +20,10 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {})
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', STT_URL: `${upstream.url}/v1/audio/transcriptions`, STT_API_KEY: 'k1', ...env };
-  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, hub: createHub({ bucket, enabled: true, env: hubEnv }) });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, allowedOrigins: ['https://site.example'], hub: createHub({ bucket, enabled: true, env: hubEnv }) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const owner = { 'Remote-User': 'owner' };
+  const owner = { 'Remote-User': 'owner', Origin: 'https://site.example' };
   const call = (method, route, data, headers = owner) => fetch(`${origin}/api${route}`, { method, headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers }, body: data === undefined ? undefined : JSON.stringify(data) });
   const close = async () => { server.closeAllConnections?.(); server.close(); await upstream.close(); await fake.close(); };
   return { fake, upstream, call, origin, owner, close };

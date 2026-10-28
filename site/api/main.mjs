@@ -20,6 +20,7 @@
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
 //   STT_URL, STT_API_KEY, STT_MODEL            push-to-talk (an OpenAI-compatible …/audio/transcriptions)
 //                           Chat and speech stay off, and hidden in the UI, until their keys are here.
+//   BUW_SITE_ORIGINS        comma list of origins writes may come from; default: the origin of BUW_SITE_URL
 //   BUW_SITE_URL            the public address people sign in at; named in the read-only message
 //   BUW_CARD_API            the card API's address, told to pages in /api/capabilities (`cardApi`)
 //   HUB_INBOX               the Hub's inbox section; default `inbox`, or `inbox-<name>` (the development copy uses `inbox-dev`)
@@ -30,7 +31,7 @@
 // With no bucket at all the service answers /api/capabilities with write: false and a reason,
 // and serves nothing — there is nothing to serve.
 import { readFileSync } from 'node:fs';
-import { createSiteApi } from './server.mjs';
+import { createSiteApi, allowedOriginsFrom } from './server.mjs';
 import { createHub } from './hub.mjs';
 import { createBucket } from './s3.mjs';
 
@@ -65,6 +66,7 @@ const bucket = name
 const requireRemoteUser = env.REQUIRE_REMOTE_USER === '1';
 const prefix = env.BUW_S3_PREFIX || 'sections';
 const siteUrl = env.BUW_SITE_URL || '';
+const allowedOrigins = allowedOriginsFrom({ origins: env.BUW_SITE_ORIGINS, siteUrl })
 const cardApi = env.BUW_CARD_API || '';
 const inbox = env.HUB_INBOX || 'inbox';
 if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) {
@@ -75,8 +77,8 @@ const stateKey = env.BUW_STATE_KEY || 'state.json';
 const dev = env.BUW_DEV === '1' ? { writable: id => id.startsWith('dev-') } : null;
 const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox });
 const server = bucket
-  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, cardApi, stateKey, dev })
-  : createSiteApi({ requireRemoteUser, siteUrl, cardApi });
+  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, allowedOrigins, cardApi, stateKey, dev })
+  : createSiteApi({ requireRemoteUser, siteUrl, allowedOrigins, cardApi });
 server.listen(port, '0.0.0.0', () => {
   console.log(`[site-api] ${bucket ? `s3://${name}/${env.BUW_S3_PREFIX || 'sections'}` : 'no bucket (read-only, nothing to serve)'} on :${port}${requireRemoteUser ? ', writes need Remote-User' : ''}`);
 });

@@ -261,6 +261,11 @@ Run them from a private repository's CI on your own runner, never from a public 
 Two more keys can go in `api.env`: `BUW_SITE_URL` (the address people sign in at, named in the
 read-only message) and `BUW_CARD_API` (the card API's address, which pages learn from `/api/capabilities`).
 
+Writes also need an `Origin` header that matches the site: the origin of `BUW_SITE_URL`, or the comma list in
+`BUW_SITE_ORIGINS` if you set it. A request with no `Origin`, or from another page, gets 403, and a write whose
+`Content-Type` is not `application/json` (`audio/*` for `/api/hub/transcribe`) gets 415. With `BUW_SITE_URL` unset or
+malformed, every write is refused.
+
 Who may write is who has passed the passkey check. The service has no login of its own: writes
 need the `Remote-User` header that Nginx Proxy Manager sets after the check. Caddy locks the port to
 match. Anything but GET, HEAD and OPTIONS is refused (403) unless the TCP peer is NPM
