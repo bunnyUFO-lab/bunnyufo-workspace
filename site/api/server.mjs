@@ -334,8 +334,10 @@ export function createSiteApi({
       const data = await body(request, route === '/cards/drawing' ? 8 * 1024 * 1024 : route === '/cards/markdown' ? 2 * 1024 * 1024 : undefined);
 
       if (route.startsWith('/cards') || route.startsWith('/workspace/')) {
-        mayWrite(data.workspace);
-        if (route === '/workspace/pins' && Array.isArray(data.list)) for (const item of data.list) mayWrite(item?.workspace ?? data.workspace);
+        // /workspace/pins crosses sections and names each one per pin; the app sends no top-level workspace.
+        if (route === '/workspace/pins') {
+          if (Array.isArray(data.list)) for (const item of data.list) mayWrite(item?.workspace ?? data.workspace);
+        } else mayWrite(data.workspace);
       }
       const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor });
       if (card) return json(response, card.status, card.body);

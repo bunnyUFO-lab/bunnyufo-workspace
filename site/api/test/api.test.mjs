@@ -429,6 +429,14 @@ test('the development copy writes only dev- sections, reports its branch, and ke
     assert.equal(second.fake.json('dev-state.json').cards['dev-sandbox/probe'].pinned, true);
     assert.equal(second.fake.json('state.json').cards['dev-sandbox/probe'], undefined, 'state.json is untouched.');
     assert.equal((await second.request('/sections', { name: 'dev-newone' })).status, 201);
+
+    // Pins name their own sections (the app sends no top-level workspace): all dev- passes, a mixed list is refused.
+    second.fake.seed('sections/dev-sandbox/workspace.json', `${JSON.stringify({ entities: [card('probe'), card('other')] })}
+`, 'application/json');
+    const allDev = await second.request('/workspace/pins', { list: [{ workspace: 'dev-sandbox', id: 'probe' }, { workspace: 'dev-sandbox', id: 'other' }] });
+    assert.equal(allDev.status, 200, JSON.stringify(await allDev.json().catch(() => null)));
+    const mixed = await second.request('/workspace/pins', { list: [{ workspace: 'dev-sandbox', id: 'probe' }, { workspace: 'one', id: 'alpha' }] });
+    assert.equal(mixed.status, 403);
   } finally { await second.close(); }
 });
 
