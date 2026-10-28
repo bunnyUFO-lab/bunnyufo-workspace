@@ -70,6 +70,23 @@ try {
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
   await noSideways(page, 'Today');
+  step('Today after the mockup: greeting, eyebrow, three Needs-you rows with kind labels, the Open button count, Alerts column');
+  assert.match(await page.locator('.today-head h2').innerText(), /^Good (morning|afternoon|evening)$/);
+  assert.match(await page.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d$/);
+  assert.match(await page.locator('.today-head p').innerText(), /^3 things wait on you\. 1 session is running\.$/);
+  assert.equal((await page.locator('[data-today-open] .today-num').innerText()).trim(), '3', 'The Open button counts what needs you.');
+  const kindRows = await page.locator('.hub-panel[aria-label="Needs you"] .nrow small').allInnerTexts();
+  assert.equal(kindRows.length, 3, 'Today shows the top three Needs-you rows.');
+  for (const row of kindRows) assert.match(row, /^(Question|Steps|PR review|Unstick|Approval) · /, `Row "${row}" starts with its kind.`);
+  assert.equal(await page.locator('.hub-panel[aria-label="Alerts"]').count(), 1);
+  const phoneToday = await page.context().newPage();
+  await phoneToday.setViewportSize({ width: 375, height: 812 });
+  await phoneToday.goto(`${fixture.url}#/~hub/today`);
+  await phoneToday.locator('.today-cols').waitFor();
+  const columns = (await phoneToday.locator('.today-cols').evaluate(node => getComputedStyle(node).gridTemplateColumns)).trim().split(/\s+/);
+  assert.equal(columns.length, 1, 'At 375 px the columns stack.');
+  assert.ok(await phoneToday.evaluate(() => document.documentElement.scrollWidth <= 375), 'Today does not scroll sideways at 375 px.');
+  await phoneToday.close();
   await page.locator('[data-hub-link="needs"]').click();
   await page.locator('.hub[data-screen="needs"]').waitFor();
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).waitFor();
@@ -311,6 +328,7 @@ try {
     '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
     '/w/one/workspace.json': { entities: [] },
     '/api/hub/today': { counts: { needsYou: 2, running: 0, recent: 0, alerts: 0 }, needsYou: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }, { kind: 'review', id: '120000-pc-000001.json', title: 'A read-only review', at: new Date().toISOString(), project: 'probe' }], running: [], recent: [], alerts: [], at: new Date().toISOString() },
+    '/api/hub/inbox': { items: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }, { kind: 'review', id: '120000-pc-000001.json', title: 'A read-only review', at: new Date().toISOString(), project: 'probe' }] },
     '/api/hub/projects': { projects: [{ id: 'probe', name: 'Probe', beads: true }] },
     '/api/hub/map/probe': { project: 'probe', meta: { count: 1, pushedAt: new Date().toISOString() }, ageMinutes: 5, sprints: [], milestones: [{ id: 'm1', title: 'M1', state: 'next', features: [{ id: 'f1', title: 'F1', state: 'next', tasks: [{ id: 'bd-1', title: 'A task', state: 'next', status: 'open', signs: [], sprints: [], deps: [] }] }] }] },
     '/api/hub/asks/20261026-probe-x-a1b2': { id: '20261026-probe-x-a1b2', project: 'probe', createdAt: new Date().toISOString(), expiresAt: new Date().toISOString(), from: { host: 'h', tool: 'claude-code' }, question: 'A read-only question', options: [{ id: 'A', label: 'one' }], allowNote: true, allowDrawing: true, state: 'open', files: ['ask.json'] },
@@ -328,7 +346,7 @@ try {
   await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
   try {
     const guest = await open({ width: 1200, height: 800 });
-    await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/today`);
+    await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/needs`);
     await guest.locator('.hub-banner', { hasText: 'Read-only here' }).waitFor();
     assert.match(await guest.locator('.hub-banner a').getAttribute('href'), /^https:\/\/site\.example\.test/);
     assert.match(await guest.locator('.hub-banner').innerText(), /need you to be signed in/);
