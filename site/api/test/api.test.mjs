@@ -142,7 +142,7 @@ test('with a content origin, its host serves card files with the sandbox CSP and
     assert.equal((await onContent('/api/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404, 'No write reaches the API from the content host.');
     const app = await raw('/w/one/alpha/index.html');
     assert.equal(app.status, 200);
-    assert.equal(app.headers.get('content-security-policy'), null, 'The app host serves /w/ as before.');
+    assert.equal(app.headers.get('content-security-policy'), "frame-ancestors 'self'", 'The app host serves /w/ but only the app itself may frame it.');
     assert.equal((await raw('/api/capabilities')).status, 200);
   } finally { await close(); }
 });

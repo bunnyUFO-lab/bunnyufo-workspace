@@ -263,7 +263,9 @@ export function createSiteApi({
       'Content-Type': object.contentType || contentTypeOf(clean),
       'Cache-Control': 'no-cache',
       'X-Content-Type-Options': 'nosniff',
-      ...(sandboxed ? { 'Content-Security-Policy': CONTENT_CSP } : {}),
+      // With a content host, a /w/ file the app host still serves (a frame request an old browser sent without
+      // Sec-Fetch-Dest, a cached copy) may not be framed by another origin: that would run it as the app.
+      ...(sandboxed ? { 'Content-Security-Policy': CONTENT_CSP } : contentHost ? { 'Content-Security-Policy': "frame-ancestors 'self'" } : {}),
       ...(object.etag ? { ETag: `"${object.etag}"` } : {}),
       ...(object.lastModified ? { 'Last-Modified': object.lastModified } : {}),
     };
