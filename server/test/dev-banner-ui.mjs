@@ -50,6 +50,18 @@ try {
   const box = await dev.locator('.app-layout').boundingBox();
   assert.ok(box.y >= 28 && box.y + box.height <= 900, 'The layout sits under the banner without overflowing.');
 
+  // Light theme at phone width: the bar keeps its colour and the menu button sits below it.
+  const phone = await (await browser.newContext({ viewport: { width: 375, height: 700 } })).newPage();
+  phone.setDefaultTimeout(15000);
+  await phone.addInitScript(() => { try { localStorage.setItem('buw.workspaceTheme', 'light'); } catch {} });
+  await phone.goto(`${origin}/agent-plans`);
+  await phone.locator('[data-dev-banner]').waitFor();
+  assert.equal(await phone.locator('html').getAttribute('data-workspace-theme'), 'light');
+  const bar = await phone.locator('[data-dev-banner]').boundingBox();
+  assert.equal(await phone.locator('[data-dev-banner]').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(245, 196, 81)', 'The bar is the same amber in light theme.');
+  const toggle = await phone.locator('.rail-toggle').boundingBox();
+  assert.ok(toggle.y >= bar.y + bar.height, `The menu button (top ${toggle.y}) sits below the bar (bottom ${bar.y + bar.height}).`);
+
   state.dev = null;
   const real = await open();
   assert.equal(await real.locator('[data-dev-banner]').count(), 0);

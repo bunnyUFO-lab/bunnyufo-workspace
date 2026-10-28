@@ -68,7 +68,8 @@ button:focus-visible {
   justify-content: center;
   gap: 0.4em;
   padding: 0 12px;
-  background: var(--amber);
+  /* A literal, not --amber: light theme darkens that token, and the bar must read the same in both. */
+  background: #f5c451;
   color: #1b1307;
   font-size: 0.78rem;
   font-weight: 600;
@@ -76,7 +77,10 @@ button:focus-visible {
   overflow: hidden;
 }
 .dev-banner > span { flex: none; }
-@media (max-width: 600px) { .dev-banner { justify-content: flex-start; padding-right: 64px; } }
+@media (max-width: 600px) { .dev-banner { justify-content: flex-start; } }
+/* The phone menu button is fixed to the screen: keep it, and its open menu, below the bar. */
+body:has(.dev-banner) .rail-toggle { top: 38px; }
+body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .dev-banner > .dev-banner-branch { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dev-banner + .app-layout { height: calc(100% - 28px); }
 
