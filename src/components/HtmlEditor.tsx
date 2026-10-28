@@ -143,7 +143,8 @@ export default function HtmlEditor({ path, url, title, onClose, onSaved }: {
     const key = event.key.toLowerCase()
     if (ctrl && !event.shiftKey && !event.altKey && key === 's') { event.preventDefault(); void keys.current.save() }
     else if (ctrl && !event.shiftKey && !event.altKey && key === 'e') { event.preventDefault(); event.stopPropagation(); keys.current.close() }
-    else if (event.key === 'Escape' && !ctrl) { event.preventDefault(); event.stopPropagation(); keys.current.close() }
+    // An open palette takes Esc first: it closes itself, and the editor stays.
+    else if (event.key === 'Escape' && !ctrl && !document.querySelector('dialog.pal[open]')) { event.preventDefault(); event.stopPropagation(); keys.current.close() }
   }, [])
   useEffect(() => {
     window.addEventListener('keydown', onKey, true)

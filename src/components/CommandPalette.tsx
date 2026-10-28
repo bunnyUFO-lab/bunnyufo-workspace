@@ -129,7 +129,14 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
     }
   }
 
-  let lastGroup = ''
+  // Rows arrive grouped in order; each run of one group is a labelled group for screen readers.
+  const groups: { name: string; start: number; rows: Row[] }[] = []
+  rows.forEach((row, index) => {
+    const last = groups[groups.length - 1]
+    if (last && last.name === row.group) last.rows.push(row)
+    else groups.push({ name: row.group, start: index, rows: [row] })
+  })
+
   return (
     <dialog
       ref={dialog}
@@ -158,27 +165,29 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
         />
       </div>
       <div className="pal-list" role="listbox" id={listId} aria-label="Results" ref={list}>
-        {rows.map((row, index) => {
-          const head = row.group !== lastGroup
-          lastGroup = row.group
-          return (
-            <div key={`${row.group}-${index}`} role="presentation">
-              {head && <div className="pal-g" role="presentation">{row.group}</div>}
-              <div
-                id={`${uid}-row-${index}`}
-                role="option"
-                aria-selected={index === at}
-                className={`pal-i${index === at ? ' on' : ''}`}
-                onMouseMove={() => { if (index !== at) setSelected(index) }}
-                onClick={() => choose(row)}
-              >
-                <span className="pal-i-icon" aria-hidden="true">{row.icon}</span>
-                <span className="pal-i-label">{row.label}</span>
-                {row.hint && <span className="pal-hint">{row.hint}</span>}
-              </div>
-            </div>
-          )
-        })}
+        {groups.map(group => (
+          <div key={group.name} role="group" aria-labelledby={`${uid}-g-${group.start}`}>
+            <div className="pal-g" id={`${uid}-g-${group.start}`}>{group.name}</div>
+            {group.rows.map((row, offset) => {
+              const index = group.start + offset
+              return (
+                <div
+                  key={index}
+                  id={`${uid}-row-${index}`}
+                  role="option"
+                  aria-selected={index === at}
+                  className={`pal-i${index === at ? ' on' : ''}`}
+                  onMouseMove={() => { if (index !== at) setSelected(index) }}
+                  onClick={() => choose(row)}
+                >
+                  <span className="pal-i-icon" aria-hidden="true">{row.icon}</span>
+                  <span className="pal-i-label">{row.label}</span>
+                  {row.hint && <span className="pal-hint">{row.hint}</span>}
+                </div>
+              )
+            })}
+          </div>
+        ))}
         {!rows.length && <div className="pal-empty">Nothing matches.</div>}
       </div>
       <div className="pal-f" aria-hidden="true">

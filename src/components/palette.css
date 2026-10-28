@@ -20,6 +20,15 @@ dialog.pal {
 @starting-style {
   dialog.pal[open] { transform: translate(-50%, -8px); opacity: 0; }
 }
+/* .app-shell input (local.css) has the same weight; this one is heavier. */
+dialog.pal .pal-in input {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  padding: 0 16px 0 44px;
+}
 dialog.pal::backdrop { background: rgb(0 0 0 / 0.5); }
 .pal-in { position: relative; border-bottom: 1px solid var(--line); }
 .pal-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--t3); font-size: 17px; line-height: 1; }

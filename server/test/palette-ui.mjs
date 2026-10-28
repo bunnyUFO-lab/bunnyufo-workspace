@@ -33,6 +33,9 @@ try {
   const listId = await input.getAttribute('aria-controls');
   assert.equal(await page.locator(`[id="${listId}"]`).getAttribute('role'), 'listbox');
   assert.ok(await input.evaluate(el => el === document.activeElement), 'The input has focus.');
+  const field = await input.evaluate(el => { const style = getComputedStyle(el); return { left: style.paddingLeft, border: style.borderTopWidth, radius: style.borderTopLeftRadius }; });
+  assert.deepEqual(field, { left: '44px', border: '0px', radius: '0px' }, 'The app-wide input rule does not reach the palette field.');
+  assert.ok(await dialog.locator('[role="group"][aria-labelledby]').count() >= 2, 'Groups are labelled.');
   const groups = await dialog.locator('.pal-g').allInnerTexts();
   assert.deepEqual(groups.slice(0, 2).map(text => text.toLowerCase()), ['go to', 'needs you']);
   assert.equal(await dialog.locator('[role="option"][aria-selected="true"]').count(), 1);

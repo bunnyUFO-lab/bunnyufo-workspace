@@ -475,7 +475,7 @@ export default function Sidebar({
           value={query}
           onChange={ev => onQuery(ev.target.value)}
           onKeyDown={onSearchKey}
-          placeholder="Search…  ( / )"
+          placeholder="Filter cards…  ( / )"
           aria-label="Search entities"
         />
         {query && (
