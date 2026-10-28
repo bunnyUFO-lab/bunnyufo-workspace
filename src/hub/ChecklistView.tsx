@@ -62,7 +62,7 @@ export default function ChecklistView({ id }: { id: string }) {
     setErrors(previous => without(previous, item.id))
     setProblem(null)
     try {
-      const fresh = await hubPost<Checklist>(`/checklists/${encodeURIComponent(detail!.id)}/items/${item.id}`, { done: next })
+      const fresh = await hubPost<Checklist>(`/checklists/${encodeURIComponent(detail!.id)}/items/${encodeURIComponent(item.id)}`, { done: next })
       setAnswer({ detail: fresh, time: Date.now() })
     } catch (failure) {
       if (failure instanceof HubError && failure.status === 409) reload()

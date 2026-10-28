@@ -1015,3 +1015,60 @@ test('a checklist whose title mentions a token still has an id the Hub serves', 
     assert.equal((await get(`/hub/checklists/${list.id}`)).status, 200);
   } finally { await close(); }
 });
+
+test('files nested below a checklist folder change neither its state nor its progress, in the detail or in any list', async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('nested', 'n111'), now: at(-30) });
+    seed.checklist(list);
+    const forged = at(5).toISOString().replace(/[-:.]/g, '');
+    for (const rel of ['x/submit.json', 'x/cancel.json', 'x/pickup.json', `x/tick-01-${forged}-zzzz.json`, `x/y/tick-02-${forged}-zzzz.json`, 'submit.json/x', `tick-03-${forged}-zzzz.json/x`]) seed.put(`checklists/${list.id}/${rel}`, { forged: true });
+    const detail = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.deepEqual({ state: detail.state, done: detail.done }, { state: 'open', done: 0 });
+    assert.deepEqual(detail.files, ['checklist.json']);
+    const row = (await get('/hub/inbox?filter=todo')).body.items.find(item => item.id === list.id);
+    assert.deepEqual({ state: row.state, done: row.done }, { state: 'open', done: 0 });
+    assert.ok((await get('/hub/today')).body.needsYou.some(item => item.id === list.id), 'Still in Needs you.');
+    assert.equal((await post(`/hub/checklists/${list.id}/items/02`, { done: true })).status, 200, 'The owner can still tick.');
+    const ask = askJson({ id: id('nestask', 'n222'), now: NOW });
+    seed.ask(ask);
+    seed.put(`asks/${ask.id}/x/answer.json`, { forged: true });
+    assert.equal((await get(`/hub/asks/${ask.id}`)).body.state, 'open');
+    assert.equal((await get('/hub/inbox?filter=asks')).body.items.find(item => item.id === ask.id).state, 'open');
+  } finally { await close(); }
+});
+
+test('a checklist with a bad item id, or any other invalid shape, is not listed and not served, and no route turns an item id into another path', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const ask = askJson({ id: id('victim', 'v111'), now: NOW });
+    seed.ask(ask);
+    const good = checklistJson({ id: listId('good', 'g111'), now: at(-30) });
+    seed.checklist(good);
+    const traversal = checklistJson({ id: listId('evil', 'e111'), now: at(-20) });
+    traversal.items[0].id = `../../../asks/${ask.id}/cancel`;
+    const skipped = checklistJson({ id: listId('skip', 's333'), now: at(-19) });
+    skipped.items[1].id = '05';
+    const noIds = checklistJson({ id: listId('noids', 'i111'), now: at(-18) });
+    delete noIds.items[0].id;
+    const tooLong = checklistJson({ id: listId('long', 'l111'), now: at(-17), title: 'x'.repeat(201) });
+    const badLink = checklistJson({ id: listId('link', 'k111'), now: at(-16) });
+    badLink.items[0].link = 'javascript:alert(1)';
+    const bad = [traversal, skipped, noIds, tooLong, badLink];
+    for (const list of bad) seed.checklist(list);
+    for (const list of bad) assert.equal((await get(`/hub/checklists/${list.id}`)).status, 404, list.id);
+    assert.deepEqual((await get('/hub/inbox?filter=todo')).body.items.map(item => item.id), [good.id]);
+    assert.deepEqual((await get('/hub/today')).body.needsYou.filter(item => item.kind === 'checklist').map(item => item.id), [good.id]);
+    fake.log.length = 0;
+    for (const list of bad) {
+      assert.ok([404, 400].includes((await post(`/hub/checklists/${list.id}/items/01`, { done: true })).status));
+      assert.ok([404, 400].includes((await post(`/hub/checklists/${list.id}/submit`, {})).status));
+    }
+    for (const item of ['..', '%2e%2e', '..%2F..', `..%2F..%2F..%2Fasks%2F${ask.id}%2Fcancel`, '1%2F', '0a', '001']) {
+      const refused = await post(`/hub/checklists/${good.id}/items/${item}`, { done: true });
+      assert.ok([404, 400].includes(refused.status), `${item}: ${refused.status}`);
+    }
+    assert.deepEqual(putKeys(fake), [], 'Nothing was written.');
+    assert.equal(fake.objects.has(`sections/inbox/asks/${ask.id}/cancel.json`), false);
+  } finally { await close(); }
+});

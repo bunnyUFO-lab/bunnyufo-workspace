@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, CHECKLIST_LIMITS, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
+  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -141,8 +141,10 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     for (const month of monthPrefixes(at)) {
       const { objects } = await bucket.list(key(`${root}/${month}`));
       for (const object of objects) {
-        const [id, file] = object.key.slice(folder(root).length).split('/');
-        if (!id || !file) continue;
+        const parts = object.key.slice(folder(root).length).split('/');
+        // Exactly <id>/<file>: a deeper key (<id>/x/submit.json) is no file of the folder, whatever its last segment says.
+        if (parts.length !== 2 || !parts[0] || !parts[1]) continue;
+        const [id, file] = parts;
         if (!found.has(id)) found.set(id, new Set());
         found.get(id).add(file);
       }
@@ -163,12 +165,19 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
     return rows.filter(Boolean);
   }
 
+  /** The file names directly in `<root>/<id>/`: keys one level deeper do not count. */
+  const directNames = (objects, base) => new Set(objects.map(object => object.key.slice(base.length)).filter(name => name && !name.includes('/')));
+
+  /** A stored list must be valid, with its items numbered 01.. in order, or it is treated as missing: it is an agent's file. */
+  const validChecklist = value => !!value && typeof value === 'object' && checkChecklist(value).length === 0
+    && value.items.every((item, index) => item.id === String(index + 1).padStart(2, '0'));
+
   async function loadChecklists(at) {
     const folders = await listFolders('checklists', at);
     const rows = await pool(POOL, [...folders], async ([id, names]) => {
       if (!names.has('checklist.json') || !validId(id)) return null;
       const checklist = await cached(`checklists/${id}/checklist.json`);
-      if (!checklist || typeof checklist.title !== 'string' || !Array.isArray(checklist.items)) return null;
+      if (!validChecklist(checklist)) return null;
       return { checklist: { ...checklist, id }, names, item: checklistItem({ ...checklist, id }, names) };
     });
     return rows.filter(Boolean);
@@ -226,8 +235,9 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
 
   async function askFolder(id) {
     if (!validId(id)) throw fail('No such Ask.', 404);
-    const { objects } = await bucket.list(key(`asks/${id}`) + '/');
-    const names = new Set(objects.map(object => object.key.split('/').pop()));
+    const base = key(`asks/${id}`) + '/';
+    const { objects } = await bucket.list(base);
+    const names = directNames(objects, base);
     if (!names.has('ask.json')) throw fail('No such Ask.', 404);
     const ask = await cached(`asks/${id}/ask.json`);
     if (!ask) throw fail('No such Ask.', 404);
@@ -249,11 +259,12 @@ export function createHub({ bucket = null, prefix = 'sections', enabled = false,
 
   async function checklistFolder(id) {
     if (!validId(id)) throw fail('No such checklist.', 404);
-    const { objects } = await bucket.list(key(`checklists/${id}`) + '/');
-    const names = new Set(objects.map(object => object.key.split('/').pop()));
+    const base = key(`checklists/${id}`) + '/';
+    const { objects } = await bucket.list(base);
+    const names = directNames(objects, base);
     if (!names.has('checklist.json')) throw fail('No such checklist.', 404);
     const checklist = await cached(`checklists/${id}/checklist.json`);
-    if (!checklist || typeof checklist.title !== 'string' || !Array.isArray(checklist.items)) throw fail('No such checklist.', 404);
+    if (!validChecklist(checklist)) throw fail('No such checklist.', 404);
     return { checklist: { ...checklist, id }, names };
   }
 
