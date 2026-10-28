@@ -164,6 +164,15 @@ try {
   await page.locator('.hub-board').waitFor();
   await page.unroute('**/api/hub/map/*');
 
+  step('Work with no projects says so instead of loading forever');
+  const none = await open({ width: 1200, height: 800 });
+  await none.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"projects":[]}' }));
+  await none.goto(fixture.url);
+  await none.locator('.sidebar-list').waitFor();
+  await go(none, '#/~hub/work');
+  await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
+  assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
+
   step('Activity: grouped by day, filtered, and Load older steps back a day');
   await go(page, '#/~hub/activity');
   await page.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();

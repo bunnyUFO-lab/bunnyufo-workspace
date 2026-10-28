@@ -92,7 +92,8 @@ export default function Board({ project: wanted }: { project?: string }) {
       </div>
       {project && host.write && <RequestForm project={project} />}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
-      {!map.data && !map.error && (listing || map.loading || !project) && !listError && <p className="hub-empty">Loading…</p>}
+      {!map.data && !map.error && (listing || map.loading) && !listError && <p className="hub-empty">Loading…</p>}
+      {!listing && !listError && !project && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
       {map.error && <p className="hub-error" role="alert">{map.error}</p>}
       {map.data && !map.data.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {map.data?.meta && (
