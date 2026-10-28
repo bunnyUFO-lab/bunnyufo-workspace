@@ -27,6 +27,16 @@ async function loadDrawn(id: string): Promise<Drawn> {
   return { scene: text, png: await toBase64(await response.blob()) }
 }
 
+/**
+ * Deletes a sketch after asking. The Hub keeps its files and only stops showing it; requests and
+ * answers already sent keep their own copy. False when the owner said no.
+ */
+async function deleteSketch(id: string): Promise<boolean> {
+  if (!window.confirm('Delete this sketch? Requests and answers you already sent with it keep their copy.')) return false
+  await hubPost(`/drawings/${encodeURIComponent(id)}/delete`, {})
+  return true
+}
+
 export default function Sketch({ id }: { id?: string }) {
   if (!host.write) return <p className="hub-empty">Sketch needs a signed-in user.</p>
   return id ? <SketchPage key={id} routeId={id} /> : <SketchList />
@@ -34,17 +44,30 @@ export default function Sketch({ id }: { id?: string }) {
 
 function SketchList() {
   const { data, error } = useHubData<{ drawings: { id: string; updated: string; hasPng: boolean }[] }>('/drawings')
+  const [gone, setGone] = useState<Set<string>>(() => new Set())
+  const [failed, setFailed] = useState<string | null>(null)
+  const remove = async (id: string) => {
+    try {
+      if (await deleteSketch(id)) setGone(previous => new Set(previous).add(id))
+    } catch (failure) {
+      setFailed((failure as Error).message)
+    }
+  }
+  const shown = data?.drawings.filter(draft => !gone.has(draft.id))
   return (
     <>
       <div className="hub-top"><h2>Sketch</h2><a className="hub-btn pri" href={hubHash('sketch', 'new')}>New sketch</a></div>
-      {error && <p className="hub-error" role="alert">{error}</p>}
-      {data && !data.drawings.length && <p className="hub-empty">No sketches yet. Draw something and send it to an agent.</p>}
+      {(error || failed) && <p className="hub-error" role="alert">{error ?? failed}</p>}
+      {shown && !shown.length && <p className="hub-empty">No sketches yet. Draw something and send it to an agent.</p>}
       <div className="hub-sketches">
-        {data?.drawings.map(draft => (
-          <a key={draft.id} className="hub-sketch" href={hubHash('sketch', draft.id)} data-sketch={draft.id}>
-            <span className="hub-thumb">{draft.hasPng ? <HubImage path={`drawings/${draft.id}/drawing.png`} alt={`Sketch ${draft.id}`} /> : <span className="hub-image-missing">No picture</span>}</span>
-            <span className="hub-muted">{new Date(draft.updated).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-          </a>
+        {shown?.map(draft => (
+          <div key={draft.id} className="hub-sketch-tile">
+            <a className="hub-sketch" href={hubHash('sketch', draft.id)} data-sketch={draft.id}>
+              <span className="hub-thumb">{draft.hasPng ? <HubImage path={`drawings/${draft.id}/drawing.png`} alt={`Sketch ${draft.id}`} /> : <span className="hub-image-missing">No picture</span>}</span>
+              <span className="hub-muted">{new Date(draft.updated).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+            </a>
+            <button type="button" className="hub-sketch-delete" onClick={() => void remove(draft.id)} title="Delete this sketch" aria-label="Delete this sketch" data-sketch-delete={draft.id}>✕</button>
+          </div>
         ))}
       </div>
     </>
@@ -94,6 +117,16 @@ function SketchPage({ routeId }: { routeId: string }) {
     if (!draftRef.current) window.location.assign(hubHash('sketch'))
   }
 
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const remove = async () => {
+    if (!draftRef.current) return
+    try {
+      if (await deleteSketch(draftRef.current)) window.location.assign(hubHash('sketch'))
+    } catch (failure) {
+      setDeleteError((failure as Error).message)
+    }
+  }
+
   return (
     <>
       <div className="hub-top"><h2>Sketch</h2><a className="hub-btn" href={hubHash('sketch')}>All sketches</a></div>
@@ -104,7 +137,11 @@ function SketchPage({ routeId }: { routeId: string }) {
         <>
           <section className="hub-panel">
             <span className="hub-thumb hub-sketch-big"><HubImage key={version} path={`drawings/${draft}/drawing.png`} alt="Your sketch" /></span>
-            <div className="hub-actions start"><button type="button" className="hub-btn" onClick={() => setEditing(true)}>Edit</button></div>
+            <div className="hub-actions start">
+              <button type="button" className="hub-btn" onClick={() => setEditing(true)}>Edit</button>
+              <button type="button" className="hub-btn danger" onClick={() => void remove()} data-sketch-delete>Delete</button>
+            </div>
+            {deleteError && <p className="hub-error" role="alert">{deleteError}</p>}
           </section>
           <SendPanel draft={draft} />
         </>
