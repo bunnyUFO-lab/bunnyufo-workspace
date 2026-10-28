@@ -91,6 +91,9 @@ function cleanPath(value) {
  *                    page, or with no Origin, is refused (403). With `requireRemoteUser` on and none given,
  *                    every write is refused. With it off, the check runs only when this list is given.
  * @param cardApi     the card API's address, reported to pages in /capabilities as `cardApi` (null when unset).
+ * @param contentOrigin  the origin cards are served from (`https://host`), reported in /capabilities as `contentOrigin`
+ *                    (null when unset). A request whose Host is that origin's gets only /w/ files, each with the
+ *                    sandbox CSP below; everything else on it is a 404. Unset leaves /w/ as it was.
  * @param stateKey    the bucket object holding pins, archives and tags (`dev-state.json` on the development copy).
  * @param dev         null on the real site. On the development copy `{ writable(sectionId) }`: every write to a card
  *                    section is refused unless it says so, and /capabilities reports the deployed branch.
@@ -118,6 +121,9 @@ export function writeOriginsFor({ requireRemoteUser = false, origins = '', siteU
   return requireRemoteUser || list.length ? list : null;
 }
 
+/** The CSP of a card page on the content host: its own origin (cookies reach it) but none of the app's storage. */
+export const CONTENT_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-downloads allow-same-origin';
+
 export function createSiteApi({
   bucket = null,
   prefix = 'sections',
@@ -129,6 +135,7 @@ export function createSiteApi({
   siteUrl = '',
   allowedOrigins = null,
   cardApi = '',
+  contentOrigin = '',
   stateKey = 'state.json',
   dev = null,
   deployedRef = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '.deployed-ref'),
@@ -241,7 +248,7 @@ export function createSiteApi({
   }
 
   /** Stream one object of a section to the browser, headers and all. */
-  async function serve(request, response, id, file) {
+  async function serve(request, response, id, file, { sandboxed = false } = {}) {
     const clean = cleanPath(file);
     if (!clean) throw Object.assign(new Error('Not found'), { status: 404 });
     await findSection(id);
@@ -256,6 +263,7 @@ export function createSiteApi({
       'Content-Type': object.contentType || contentTypeOf(clean),
       'Cache-Control': 'no-cache',
       'X-Content-Type-Options': 'nosniff',
+      ...(sandboxed ? { 'Content-Security-Policy': CONTENT_CSP } : {}),
       ...(object.etag ? { ETag: `"${object.etag}"` } : {}),
       ...(object.lastModified ? { 'Last-Modified': object.lastModified } : {}),
     };
@@ -270,11 +278,15 @@ export function createSiteApi({
     Readable.fromWeb(object.body).pipe(response);
   }
 
+  const contentHost = contentOrigin ? new URL(contentOrigin).host : '';
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://site');
       const route = url.pathname.replace(/^\/api(?=\/|$)/, '');
       const reading = request.method === 'GET' || request.method === 'HEAD';
+      // The content host shows card files and nothing else: no /api, no sites.json, no writes.
+      const onContentHost = !!contentHost && String(request.headers.host ?? '').toLowerCase() === contentHost.toLowerCase();
+      if (onContentHost && !(reading && url.pathname.startsWith('/w/'))) return json(response, 404, { error: 'Not found' });
       const signedIn = String(request.headers['remote-user'] ?? '').trim() !== '';
 
       // The Asks bot's two routes carry a bearer token, not Remote-User, so they come before the sign-in
@@ -311,7 +323,7 @@ export function createSiteApi({
       const served = reading && /^\/w\/([^/]+)\/(.+)$/.exec(route);
       if (served) {
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
-        return await serve(request, response, decodeURIComponent(served[1]), decodeURIComponent(served[2]));
+        return await serve(request, response, decodeURIComponent(served[1]), decodeURIComponent(served[2]), { sandboxed: onContentHost });
       }
 
       if (request.method === 'GET' && route === '/capabilities') {
@@ -327,6 +339,7 @@ export function createSiteApi({
             store: cards.kind,
             ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
             cardApi: cardApi || null,
+            contentOrigin: contentOrigin || null,
             ...(dev ? { dev: await devInfo() } : {}),
             reason: siteUrl ? `Read-only here: sign in at ${siteUrl} to change cards.` : 'Read-only here: sign in to change cards.',
           });
@@ -341,6 +354,7 @@ export function createSiteApi({
           sections: [...known.keys()],
           store: cards.kind,
           cardApi: cardApi || null,
+          contentOrigin: contentOrigin || null,
           ...(dev ? { dev: await devInfo() } : {}),
           ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
           ...(reason ? { reason } : {}),

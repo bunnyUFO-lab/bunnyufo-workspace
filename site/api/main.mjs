@@ -23,6 +23,7 @@
 //   BUW_SITE_ORIGINS        comma list of origins writes may come from; default: the origin of BUW_SITE_URL
 //   BUW_SITE_URL            the public address people sign in at; named in the read-only message
 //   BUW_CARD_API            the card API's address, told to pages in /api/capabilities (`cardApi`)
+//   BUW_CONTENT_ORIGIN      where card pages are served from (https://host), told to the app as contentOrigin; that host gets card files only, sandboxed. Unset: as before
 //   HUB_INBOX               the Hub's inbox section; default `inbox`, or `inbox-<name>` (the development copy uses `inbox-dev`)
 //   BUW_STATE_KEY           the object holding pins, archives and tags; default `state.json` (`dev-state.json` on the development copy)
 //   BUW_DEV                 `1` makes this the development copy: it writes only `dev-…` sections and says so in /api/capabilities
@@ -31,7 +32,7 @@
 // With no bucket at all the service answers /api/capabilities with write: false and a reason,
 // and serves nothing — there is nothing to serve.
 import { readFileSync } from 'node:fs';
-import { createSiteApi, writeOriginsFor } from './server.mjs';
+import { createSiteApi, originOf, writeOriginsFor } from './server.mjs';
 import { createHub } from './hub.mjs';
 import { createBucket } from './s3.mjs';
 
@@ -68,6 +69,7 @@ const prefix = env.BUW_S3_PREFIX || 'sections';
 const siteUrl = env.BUW_SITE_URL || '';
 const allowedOrigins = writeOriginsFor({ requireRemoteUser, origins: env.BUW_SITE_ORIGINS, siteUrl })
 const cardApi = env.BUW_CARD_API || '';
+const contentOrigin = originOf(env.BUW_CONTENT_ORIGIN || '') || '';
 const inbox = env.HUB_INBOX || 'inbox';
 if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) {
   console.error(`[site-api] HUB_INBOX must be "inbox" or "inbox-<name>" (lower-case letters and digits), not "${inbox}".`);
@@ -77,8 +79,8 @@ const stateKey = env.BUW_STATE_KEY || 'state.json';
 const dev = env.BUW_DEV === '1' ? { writable: id => id.startsWith('dev-') } : null;
 const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox });
 const server = bucket
-  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, allowedOrigins, cardApi, stateKey, dev })
-  : createSiteApi({ requireRemoteUser, siteUrl, allowedOrigins, cardApi });
+  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, allowedOrigins, cardApi, contentOrigin, stateKey, dev })
+  : createSiteApi({ requireRemoteUser, siteUrl, allowedOrigins, cardApi, contentOrigin });
 if (allowedOrigins?.length) console.log(`[site-api] writes allowed from ${allowedOrigins.join(', ')}`);
 else if (allowedOrigins) console.warn('[site-api] WARNING: no allowed origin (BUW_SITE_URL or BUW_SITE_ORIGINS is missing or malformed), so every write is refused');
 server.listen(port, '0.0.0.0', () => {
