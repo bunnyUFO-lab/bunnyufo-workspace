@@ -75,7 +75,7 @@ try {
   step('desktop: the rail is grouped Operate, Plan, Know in one column, with no Run, and Needs you keeps its badge');
   assert.deepEqual(await page.locator('[data-hub-group] .sidebar-hub-heading').allTextContents(), ['Operate', 'Plan', 'Know'], 'The headings, in order, with no Run.');
   assert.equal(await page.locator('[data-hub-group="run"]').count(), 0);
-  assert.deepEqual(await page.locator('[data-hub-group="operate"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['today', 'needs', 'work'], 'Team joins Operate when its screen ships.');
+  assert.deepEqual(await page.locator('[data-hub-group="operate"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['today', 'needs', 'work', 'team'], 'Team is in Operate.');
   assert.deepEqual(await page.locator('[data-hub-group="know"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['library', 'sketch']);
   assert.equal(await page.locator('[data-hub-group="operate"] [data-hub-link="today"]').getAttribute('aria-current'), 'page');
   assert.equal(await page.locator('[data-hub-link="needs"] [data-hub-inbox-badge]').innerText(), '3');
@@ -203,7 +203,7 @@ try {
   const boxes = await phone.locator('.hub-option').evaluateAll(list => list.map(item => item.getBoundingClientRect().top));
   assert.ok(boxes[1] > boxes[0] && boxes[2] > boxes[1], 'The options stack on a phone.');
 
-  step('phone tab bar: Today, Needs you, Work, More and Search; Library is under More with the menu shut; no bar over a card or on desktop');
+  step('phone tab bar: Today, Needs you, Work, Team, More and Search; Library is under More with the menu shut; no bar over a card or on desktop');
   const tabs = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await tabs.goto(`${fixture.url}#/`);
   await tabs.locator('nav.hub-tabs').waitFor();
@@ -212,7 +212,7 @@ try {
   // 3 seeded, plus the phone Ask added above.
   assert.equal(await tabs.locator('[data-hub-tab-badge]').innerText(), '4');
   assert.equal(await tabs.locator('[data-hub-tab="chat"]').count(), 0, 'No Chat tab without Hermes.');
-  assert.deepEqual(await tabs.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'more', 'search']);
+  assert.deepEqual(await tabs.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'more', 'search']);
   assert.equal(await tabs.locator('[data-hub-tab="more"]').getAttribute('class').then(c => c.includes('active')), true, 'More is the active tab on Home, where the Library lives.');
   assert.equal(await tabs.locator('[data-hub-tab="cards"]').count(), 0, 'No Cards tab any more.');
   await noSideways(tabs, 'Home with the tab bar');
@@ -233,8 +233,8 @@ try {
   fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: threeOptions() }));
   await tabs.locator('[data-hub-tab="needs"]').tap();
   await tabs.locator('.hub[data-screen="needs"]').waitFor();
-  // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at five.
-  assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 5, 'Five items in the bar.');
+  // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at six.
+  assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 6, 'Six items in the bar.');
   await tabs.locator('[data-hub-tab="more"]').tap();
   assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['map', 'library', 'sketch']);
   assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Plan', 'Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
