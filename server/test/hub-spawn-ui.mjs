@@ -187,6 +187,42 @@ try {
   assert.deepEqual(signed2.map(item => item.target).sort(), ['hermes', 'pc']);
   assert.ok(signed2.every(item => item.signature && item.by === 'local'));
 
+  step('Approve says why it is off, and reads Approving… while it works');
+  await real.locator('[data-spawn-open]').click();
+  await real.locator('[data-spawn-project]').selectOption('magic-loops');
+  await real.locator('[data-preset="research"]').click();
+  await real.locator('[data-spawn-why]').waitFor();
+  assert.equal(await real.locator('[data-spawn-go]').isDisabled(), true);
+  assert.equal(await real.locator('[data-spawn-note]').innerText(), 'Write what it should do.');
+  await real.locator('[data-spawn-text]').fill('Why do runs stall');
+  assert.equal(await real.locator('[data-spawn-go]').isDisabled(), false);
+  await real.route('**/api/hub/requests/*/approve', async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); });
+  await real.locator('[data-spawn-go]').click();
+  await real.locator('[data-spawn-go]', { hasText: 'Approving…' }).waitFor();
+  assert.equal(await real.locator('[data-spawn-go]').getAttribute('aria-busy'), 'true');
+  await real.locator('[data-spawn-toast]').waitFor();
+  await real.unroute('**/api/hub/requests/*/approve');
+
+  step('Edit: Done when can be changed, and an Edit that leaves the text alone keeps "written by"');
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const agentId = `${day}-magic-loops-market-research-on-tug-a1a1`;
+  keyed.seed.request({ id: agentId, project: 'magic-loops', createdAt: minutesAgo(keyed.now, 20).toISOString(), by: 'hermes', text: 'Market research on tug-of-war card games', preset: 'market-research', target: 'hermes', doneWhen: 'three takeaways', origin: { kind: 'agent', name: 'hermes' } });
+  await real.goto(`${keyed.url}#/~hub/request/${encodeURIComponent(agentId)}`);
+  await real.locator('[data-approval-warning]').waitFor();
+  await real.locator('[data-approval-edit]').click();
+  await real.locator('[data-spawn-sheet]').waitFor();
+  assert.equal(await real.locator('[data-spawn-done]').isDisabled(), false, 'Done when can be edited.');
+  assert.equal(await real.locator('[data-spawn-done]').inputValue(), 'three takeaways');
+  await real.locator('[data-spawn-done]').fill('A card with prices');
+  const [again] = await Promise.all([real.waitForRequest(request => request.url().includes('/again')), real.locator('[data-spawn-go]').click()]);
+  const sent = JSON.parse(again.postData());
+  assert.equal(sent.doneWhen, 'A card with prices');
+  assert.equal(sent.text, undefined, 'The text was not touched, so it is not sent.');
+  await real.locator('[data-spawn-toast]').waitFor();
+  const copyKey = [...keyed.fake.objects.keys()].find(key => /requests\/[^/]+\/request\.json$/.test(key) && keyed.fake.json(key).replaces === agentId);
+  const copy = keyed.fake.json(copyKey);
+  assert.deepEqual([copy.doneWhen, copy.textOrigin?.kind, copy.textOrigin?.name], ['A card with prices', 'agent', 'hermes']);
+
   step('Phone: a bottom sheet the width of the screen, no sideways scroll, the buttons reachable');
   const phone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/needs`);

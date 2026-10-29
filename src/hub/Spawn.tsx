@@ -114,6 +114,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const canApprove = host.approve && !atPc
   const trimmed = text.trim()
   const ready = !!preset && !!project && !!trimmed && repoValid && !!target && !busy
+  // Why the button is off, first thing first.
+  const missing = busy ? null : !trimmed ? 'Write what it should do.' : !project ? 'Pick a project.' : !repoValid ? 'The repo is owner/name.' : !target ? (routeError ?? 'Working out where it runs…') : null
 
   const send = useCallback(async () => {
     if (!preset || !target) return
@@ -123,7 +125,12 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     try {
       if (edit && canApprove) {
         // One signed path: the server copies the request, approves the copy and retires the old one.
-        const again = await hubPost<ApproveAnswer & { id: string }>(`/requests/${encodeURIComponent(edit.id)}/again`, { target, text: trimmed })
+        // Send only what changed: an Edit that leaves the text alone keeps the "written by" marker the server holds with it.
+        const again = await hubPost<ApproveAnswer & { id: string }>(`/requests/${encodeURIComponent(edit.id)}/again`, {
+          target,
+          ...(trimmed !== edit.text.trim() ? { text: trimmed } : {}),
+          ...(doneWhen.trim() !== (edit.doneWhen ?? '').trim() ? { doneWhen: doneWhen.trim() } : {}),
+        })
         onDone(approvedNote(target, again.waiting))
         return
       }
@@ -152,7 +159,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone])
 
   const machine = target ? MACHINE[target] : null
-  const button = atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
+  const button = busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
   const ids = { project: `${uid}-project`, repo: `${uid}-repo`, text: `${uid}-text`, done: `${uid}-done`, where: `${uid}-where` }
 
   return (
@@ -202,7 +209,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             </label>
             {preset.fields.includes('doneWhen') && (
               <label className="sp-field" htmlFor={ids.done}>Done when
-                <input id={ids.done} value={doneWhen} disabled={!!edit} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
+                <input id={ids.done} value={doneWhen} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
               </label>
             )}
             <div>
@@ -247,9 +254,9 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         <span className="sp-spacer" />
         <button type="button" className="hub-btn" onClick={() => dialog.current?.close()}>Cancel</button>
         <span className="sp-go">
-          <button type="button" className="hub-btn pri" disabled={!ready} onClick={() => void send()} data-spawn-go>{button}</button>
+          <button type="button" className="hub-btn pri" disabled={!ready} aria-busy={busy} onClick={() => void send()} data-spawn-go>{button}</button>
           <span className="sp-note" data-spawn-note>
-            {atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
+            {missing ? missing : atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
           </span>
         </span>
       </div>
