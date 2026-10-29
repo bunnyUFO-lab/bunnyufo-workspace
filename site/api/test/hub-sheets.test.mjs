@@ -202,6 +202,21 @@ test('the list is newest first and holds at most 20', async () => {
   } finally { await f.close(); }
 });
 
+test('a chosen sheet keeps counting, and its PNG is served, after 20 newer valid sheets exist', async () => {
+  const f = await fixture();
+  try {
+    const old = teamSheet('claude', { stamp: '20260101T100000Z', rand: 'old1' });
+    f.putSheet('claude', old);
+    assert.equal((await pick(f, 'claude', old.id)).status, 200);
+    for (let index = 0; index < 21; index += 1) f.putSheet('claude', teamSheet('claude', { rand: `n${String(index).padStart(3, '0')}`, stamp: `202610${String(10 + index).padStart(2, '0')}T100000Z`, shade: 0x20 + index }));
+    const { sheets } = (await f.get('/hub/team/claude/sheets')).body;
+    assert.equal(sheets.length, 20);
+    assert.ok(!sheets.some(row => row.sheet === old.id), 'Not in the newest 20.');
+    assert.equal((await sprite(f, 'claude')).sheet, old.id);
+    assert.equal((await f.raw(`/hub/file?path=team/claude/${old.id}.png`)).status, 200);
+  } finally { await f.close(); }
+});
+
 test('checkSheet and pngSize on their own', () => {
   const good = teamSheet('claude');
   assert.deepEqual(pngSize(good.png), { width: 1536, height: 1872 });

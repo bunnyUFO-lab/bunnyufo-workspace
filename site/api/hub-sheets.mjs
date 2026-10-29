@@ -105,12 +105,16 @@ export function createSheets({ bucket, folderKey, agents }) {
     return verdict;
   }
 
+  async function namesOf(agentId) {
+    const base = folderKey(agentId);
+    const { objects } = await bucket.list(base);
+    return new Map(objects.map(object => [object.key.slice(base.length), object]));
+  }
+
   /** The agent's listed sheets, newest first, at most `SHEETS_LISTED`. Each is `{ sheet, at, rows, sha256, etag }`. */
   async function listSheets(agentId) {
     if (!agents.includes(agentId)) return [];
-    const base = folderKey(agentId);
-    const { objects } = await bucket.list(base);
-    const byName = new Map(objects.map(object => [object.key.slice(base.length), object]));
+    const byName = await namesOf(agentId);
     const ids = [...byName.keys()].map(name => SHEET_PNG_RE.exec(name)?.[1]).filter(id => id && byName.has(`${id}.json`)).sort().reverse();
     const found = [];
     for (const id of ids) {
@@ -123,10 +127,13 @@ export function createSheets({ bucket, folderKey, agents }) {
 
   return {
     listSheets,
-    /** One listed sheet by id, or null. */
+    /** One sheet by id, checked on its own (however many newer ones exist), or null. */
     async find(agentId, id) {
-      if (!SHEET_ID_RE.test(id ?? '')) return null;
-      return (await listSheets(agentId)).find(sheet => sheet.sheet === id) ?? null;
+      if (!agents.includes(agentId) || !SHEET_ID_RE.test(id ?? '')) return null;
+      const byName = await namesOf(agentId);
+      if (!byName.has(`${id}.json`) || !byName.has(`${id}.png`)) return null;
+      const verdict = await verdictOf(agentId, id, byName.get(`${id}.json`), byName.get(`${id}.png`));
+      return verdict.ok ? verdict.sheet : null;
     },
   };
 }
