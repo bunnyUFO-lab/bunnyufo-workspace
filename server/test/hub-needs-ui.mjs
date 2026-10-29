@@ -16,6 +16,7 @@ const fixture = await startHubFixture({ checklists: true });
 let second = null;
 let third = null;
 let fourth = null;
+let fifth = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -207,12 +208,16 @@ try {
   await tall(phone.locator('.ni .hub-option-pick'), 'options');
   await tall(phone.locator('.ni .hub-actions .hub-btn, .ni .ni-a .hub-btn'), 'buttons');
   await tall(phone.locator('.hub-chips .hub-chip'), 'chips');
+  await go(phone, '#/~hub/needs');
+  await phone.locator('.hub-chips-wrap[data-overflow~="end"]').waitFor();
+  assert.equal(await phone.locator('.hub-chips-wrap').getAttribute('data-overflow'), 'end', 'The chip row fades at the cut edge.');
   await tall(phone.locator('.ni [data-box]'), 'step boxes');
   await tall(phone.locator('.ni [data-attach]'), 'camera buttons');
   await phone.locator('.ni [data-item="02"] [data-evidence] img').waitFor();
   await go(phone, `#/~hub/ask/${FIXTURE_ASK}`);
   await phone.locator('.hub-option').first().waitFor();
   await noSideways(phone, 'the Ask view at 375 px');
+  assert.equal(await phone.locator('.hub-btn', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs', 'Back to Needs you opens All, like the checklist and review pages.');
 
   // ---- The next item: a second fixture with a known queue (Questions, a list, a blocked session). ----
   second = await startHubFixture({ seedData: false });
@@ -423,6 +428,42 @@ try {
   const pills = await phoneCard.locator('[data-decision="d1"] .dr-seg').boundingBox();
   assert.ok(pills && pills.x >= 0 && pills.x + pills.width <= 375, 'The three buttons fit the width.');
 
+  // ---- The end of a chip: a fifth fixture with one Design review and one Question. ----
+  fifth = await startHubFixture({ seedData: false });
+  const lone = designAskJson({ id: askId('lone', 'l1l1'), now: new Date(nowMs - 8 * 60000), question: 'Review the lone frame' });
+  const left = askJson({ id: askId('left', 'l2l2'), now: new Date(nowMs - 4 * 60000), question: 'Which one is left?', options: plainOptions() });
+  fifth.seed.ask(lone);
+  fifth.seed.ask(left);
+  const endPage = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+
+  step('the last item of a chip: the note says no more of that kind, how many wait in All, and links to All; it never says "Nothing else waits"');
+  await endPage.goto(`${fifth.url}#/~hub/needs/design`);
+  const loneCard = endPage.locator(`.ni[data-need="ask-${lone.id}"]`);
+  await loneCard.waitFor();
+  for (const id of ['d1', 'd2', 'd3']) await loneCard.locator(`[data-decision="${id}"] [data-verdict-btn="approve"]`).tap();
+  await loneCard.getByRole('button', { name: 'Send review' }).tap();
+  const endNote = endPage.locator('[data-next-note]');
+  await endNote.waitFor();
+  const endText = await endNote.innerText();
+  assert.match(endText, /Review sent\./);
+  assert.match(endText, /No more design reviews\./);
+  assert.match(endText, /1 more wait in All/);
+  assert.doesNotMatch(endText, /Nothing else waits/);
+  assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs');
+  await endPage.locator('.needs-empty', { hasText: 'No design review waits on you.' }).waitFor();
+  assert.equal(await endPage.locator('.hub-chip[data-filter="all"] .n').textContent(), '1', 'The All chip counts what All lists next.');
+  await noSideways(endPage, 'the end-of-chip note at 375 px');
+  await endNote.locator('[data-next-all]').tap();
+  await endPage.locator('.hub-chip.on[data-filter="all"]').waitFor();
+  await endPage.locator('.ni').first().waitFor();
+  assert.equal(await endPage.locator('.ni').count(), 1, 'All lists the one question the note counted.');
+  assert.equal(await endPage.locator('[data-next-note]').count(), 0, 'The note belongs to the chip it was left on.');
+  const leftCard = endPage.locator(`.ni[data-need="ask-${left.id}"]`);
+  await leftCard.locator('[data-option="B"] .hub-option-pick').tap();
+  await leftCard.getByRole('button', { name: 'Send answer' }).tap();
+  await endPage.locator('[data-next-note]', { hasText: 'Nothing else waits on you.' }).waitFor();
+  assert.equal(await endPage.locator('[data-next-all]').count(), 0, 'With the whole queue empty there is nothing to link to.');
+
   // ---- Playtests: a fourth fixture with one playtest checklist. ----
   fourth = await startHubFixture({ seedData: false });
   const play = playtestJson({ id: askId('play', 'y1y1'), now: new Date(nowMs - 10 * 60000), platform: 'windows', build: 'https://example.test/build/win' });
@@ -501,5 +542,6 @@ try {
   await second?.close();
   await third?.close();
   await fourth?.close();
+  await fifth?.close();
 }
 console.log('hub-needs-ui: passed');

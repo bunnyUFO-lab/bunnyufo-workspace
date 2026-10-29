@@ -7,7 +7,8 @@
 .hub .needs-next { color: var(--ground); }
 .needs-next:hover:not(:disabled) { background: var(--text-bright); }
 
-.needs .hub-chips.one-row { margin-bottom: 14px; padding-bottom: 2px; }
+.needs .hub-chips-wrap { margin-bottom: 14px; }
+.needs .hub-chips.one-row { padding-bottom: 2px; }
 .needs .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
 .needs .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
 .needs .hub-chip.on .n { color: inherit; }
