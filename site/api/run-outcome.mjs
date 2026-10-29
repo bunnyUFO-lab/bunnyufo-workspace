@@ -10,6 +10,19 @@ export function cardOf(output) {
   return matches.length ? matches.at(-1)[1] : null;
 }
 
+/**
+ * The question a finished run ends with, or null. Only a run's last paragraph counts (after the last blank line), with
+ * Markdown emphasis and trailing space removed: it must end in `?` and be at most 600 characters. A `CARD:` line always
+ * wins, so callers check `cardOf` first. Chat turns never use this rule.
+ */
+export function questionOf(output) {
+  const text = String(output ?? '').trim();
+  if (!text || cardOf(text)) return null;
+  const last = text.split(/\r?\n[ \t]*\r?\n/).at(-1) ?? '';
+  const plain = last.replace(/[*_`~]+/g, '').replace(/\s+/g, ' ').trim();
+  return plain.endsWith('?') && plain.length <= 600 ? plain : null;
+}
+
 /** True when a failed run's error reads as the plan's quota running out. */
 export const isQuotaError = error => /429|quota/i.test(String(error ?? ''));
 
@@ -29,6 +42,8 @@ export function outcomeOf({ run, stopped = false, timedOut = false, retried = fa
   if (run.status === 'completed') {
     const card = cardOf(output);
     if (card) return { ...base, outcome: 'card', card, summary: clip(output, 500) };
+    const question = questionOf(output);
+    if (question) return { ...base, outcome: 'question', question, summary: clip(output, 500) };
     return { ...base, outcome: 'failed', summary: 'Hermes finished without a card.' };
   }
   if (stopped || run.status === 'cancelled') {

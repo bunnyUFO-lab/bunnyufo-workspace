@@ -339,6 +339,7 @@ user (`Remote-User`), like every other write.
 | `GET /api/hub/requests/:id/events` | Server-sent events of a Hermes request run: `message.delta`, `tool.started`, `tool.completed`, `approval.request`, `approval.settled`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted`, then `state { state }` and the end. The site's follower feeds it (recent events are replayed); closing the page never stops the run. 409 when the request has no Hermes run; a finished request answers `state` at once |
 | `GET /api/hub/hermes-approvals/:id` | One Hermes approval: `{ approval, answer?, state }` (`open`, `answered` or `expired`) |
 | `POST /api/hub/hermes-approvals/:id/answer` | `{ choice: once \| deny }`: forwards the answer to the Hermes run, then writes `answer.json` `{ choice, at, by, forwarded: true }`. Needs a signed-in user. After the 5 minutes, or when the run has ended, or when Hermes no longer waits, it writes `forwarded: false` with the reason and answers 409. A second answer is 409 |
+| `POST /api/hub/requests/:id/answer-run` | `{ text }` (1 to 2000 characters): answers a Hermes run that ended with a question (state `asking`). First claims the old request with the signed stop `answered by <new id>` (create-only, so of two answers at once one gets 409 and only one run starts), then makes a new request that `replaces` it with `followUp { from, question, answer, summary }` and `textOrigin` (who wrote the job text: an answer does not make the owner its author), and approves it for Hermes. In the brief only `answer` follows "The owner answered:"; the run's question and summary are quoted line by line and labelled as not the owner's words. Without a signing key the new request stays a proposal and the old one stays as it is. If starting fails after the claim, the new request stays a proposal with the answer kept in it. 409 in any other state, so a second answer is refused. "Close" is `…/stop`, which is allowed in `asking` |
 | `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
 | `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
@@ -429,6 +430,14 @@ prompt, so a replayed event writes nothing and pings nothing. `#needs-you` gets 
 "Answer within 5 minutes." (`HUB_DISCORD_NEEDS_YOU`, silent without it). An open approval is a Needs you row of kind
 `hermes-approval` (needs kind `approval`, label "Hermes approval"); it leaves when it is answered, when its run
 has a result, or at `expiresAt`, because Hermes denies it on its own after 300 seconds.
+
+Run questions: Hermes clarify stays off, so a run asks by ending its output with a question. When a run is `completed`
+with no `CARD: assistant/<folder>` line and its last paragraph (after the last blank line, Markdown emphasis removed)
+ends in `?` and is at most 600 characters, `result.json` has outcome `question` with that `question` and a `summary` (the
+first 500 characters of the output); the state is `asking` and the request is a Needs you row of kind
+`run-question` ("Hermes asks"). A `CARD:` line always wins, and Chat turns never use this rule.
+
+A copy the owner approves keeps who wrote the text (`textOrigin`) and, separately, who wrote the "done when" (`doneWhenOrigin`): rewriting the text does not make an agent's "done when" the owner's, and the signed brief marks it as written by that agent, on one line. Only a "done when" the owner changes carries no mark.
 
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.

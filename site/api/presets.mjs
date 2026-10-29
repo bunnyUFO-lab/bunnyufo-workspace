@@ -21,7 +21,7 @@ The job:
 Done when: {{doneWhen}}
 {{followUp}}`;
 
-const RESEARCH = `Research the question below with web search. Write exactly one card to the \`assistant\` section with the cards tool. Cite every source with a link.
+const RESEARCH = `Research the question below with web search. The project named above is context only; do not pull its cards unless the question is about that project. Write exactly one card to the \`assistant\` section with the cards tool. Cite every source with a link.
 If you cannot finish without the owner, end your final message with one question on its own line, ending in \`?\`, and no \`CARD:\` line. Never create requests or Asks.
 End the final message with one line: \`CARD: assistant/<folder>\`.`;
 
@@ -136,7 +136,32 @@ export function route({ preset: given, project, needs = [], repo, cloudRepos = [
   return found;
 }
 
+/** The "done when" for the brief, marked with its author unless the owner wrote it. */
+function doneWhenLine(request) {
+  if (!request.doneWhen) return 'the job above is complete';
+  const author = request.doneWhenOrigin;
+  if (!author || author.kind === 'owner') return request.doneWhen;
+  return `${String(request.doneWhen).replace(/[\s\u0085]+/g, ' ').trim()} (this "done when" was written by ${originWords(author)}, not by the owner)`;
+}
+
 const originWords = origin => (origin?.kind === 'owner' ? `the owner${origin.name ? ` (${origin.name})` : ''}` : origin?.kind === 'run' ? `an earlier run${origin.name ? ` (${origin.name})` : ''}` : `an agent${origin?.name ? ` (${origin.name})` : ''}`);
+
+/**
+ * What an earlier run asked and what the owner answered. The run's words (its question and its summary) are quoted line
+ * by line and labelled as not the owner's, so nothing in them can pass for an owner line; only `answer` follows
+ * "The owner answered:".
+ */
+const quoted = text => String(text ?? '').split(/\r\n|[\r\n\u2028\u2029\u0085]/).map(line => `> ${line}`).join('\n');
+function followUpBlock(follow) {
+  return [
+    '',
+    'An earlier run asked this (the run\'s words, not the owner\'s):',
+    quoted(follow.question),
+    `The owner answered: ${String(follow.answer ?? '').replace(/[\s\u0085]+/g, ' ').trim()}`,
+    ...(follow.summary ? ['What the earlier run wrote before it asked (the run\'s words, not the owner\'s):', quoted(follow.summary)] : []),
+    '',
+  ].join('\n');
+}
 
 /** The preset's template filled with the request, in one pass so request text is never read as a placeholder. Throws over 16 KB. */
 export function renderBrief({ preset: given, request }) {
@@ -146,13 +171,15 @@ export function renderBrief({ preset: given, request }) {
   const values = {
     title: request.title ?? String(request.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
     text: request.text ?? '',
-    doneWhen: request.doneWhen || 'the job above is complete',
+    // A "done when" an agent or a run wrote stays marked as theirs, on one line, even after the owner rewrote the text.
+    doneWhen: doneWhenLine(request),
     project: request.project ?? '',
     repo: request.repo || 'the project\'s repository',
     requestId: request.id ?? '',
     minutes: String(Math.min(preset.minutes, MAX_RUN_MINUTES)),
-    origin: originWords(request.origin),
-    followUp: follow ? `\nAn earlier run asked: ${follow.question}\nThe owner answered: ${follow.answer}\nEarlier summary: ${follow.summary || '(none)'}\n` : '',
+    // Who wrote the job text: after an answer or an Approve again the request is the owner's, but the text may not be.
+    origin: originWords(request.textOrigin ?? request.origin),
+    followUp: follow ? followUpBlock(follow) : '',
   };
   const brief = preset.template.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? '');
   if (Buffer.byteLength(brief) > MAX_BRIEF_BYTES) throw Object.assign(new Error('That brief is over 16 KB.'), { status: 400 });
