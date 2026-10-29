@@ -1,0 +1,38 @@
+/* Work: the Lanes tab and the tabs over it. M0 tokens only. */
+.wk-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+.wk-tab { padding: 8px 14px; margin-bottom: -1px; font-size: 13px; font-weight: 500; color: var(--t3); text-decoration: none; border-bottom: 2px solid transparent; }
+.wk-tab:hover { color: var(--t1); }
+.wk-tab.on { color: var(--t1); border-bottom-color: var(--t1); }
+.wk-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+
+.wk-lane-chips { display: none; }
+.wk-lanes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap: 12px; overflow-x: auto; max-width: 100%; padding-bottom: 8px; align-items: start; }
+.wk-lane { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3); padding: 12px; min-width: 0; }
+.wk-lane > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); }
+.wk-lane > h3 span { margin-left: auto; font: 600 11px var(--mono); font-variant-numeric: tabular-nums; color: var(--t3); }
+.wk-more { width: 100%; justify-content: center; }
+
+.wk-card { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; padding: 10px 12px; background: var(--s2); border: 1px solid var(--line); border-radius: 10px; color: var(--t1); text-decoration: none; min-width: 0; transition: border-color 0.15s; }
+.wk-card:hover { border-color: var(--line2); }
+.wk-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.wk-card.live { border-color: color-mix(in srgb, var(--st-working) 45%, var(--line)); box-shadow: 0 0 14px color-mix(in srgb, var(--st-working) 18%, transparent); }
+.wk-title { font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere; }
+.wk-why { font-size: 12px; color: var(--amber); overflow-wrap: anywhere; }
+.wk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--t3); }
+.wk-src { color: var(--t3); }
+.wk-project { padding: 0 8px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11px; color: var(--t2); }
+.wk-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--st-idle); flex: none; }
+.wk-dot.working { background: var(--st-working); box-shadow: 0 0 8px var(--st-working); }
+
+@media (max-width: 639px) {
+  .wk-lane-chips { display: flex; gap: 6px; margin: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+  .wk-lane-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--s1); border: 1px solid var(--line); color: var(--t2); font: inherit; font-size: 13px; cursor: pointer; }
+  .wk-lane-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
+  .wk-lane-chip.on { background: var(--s3); border-color: var(--t2); color: var(--t1); }
+  .wk-lane-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .wk-lanes { display: block; overflow: visible; }
+  .wk-lane { display: none; }
+  .wk-lanes[data-active="backlog"] .wk-lane[data-lane="backlog"], .wk-lanes[data-active="ready"] .wk-lane[data-lane="ready"],
+  .wk-lanes[data-active="running"] .wk-lane[data-lane="running"], .wk-lanes[data-active="blocked"] .wk-lane[data-lane="blocked"],
+  .wk-lanes[data-active="review"] .wk-lane[data-lane="review"], .wk-lanes[data-active="done"] .wk-lane[data-lane="done"] { display: block; }
+}

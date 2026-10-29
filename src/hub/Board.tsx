@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import type { MapTask, ProgressMap } from '../lib/hub'
-import { copyAge, hubPost } from '../lib/hub'
+import type { Sign } from '../lib/hub'
+import { hubPost } from '../lib/hub'
+import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { useHubData } from './useHub'
 import { useProject } from './useProject'
+import './work.css'
+import { defaultLane } from './workLanes'
 
 const WHEN: [string, string][] = [['next-sprint', 'Next sprint'], ['nightly', 'Nightly'], ['record', 'Just record it']]
 
@@ -55,61 +58,84 @@ function RequestForm({ project }: { project: string }) {
   )
 }
 
-function Card({ task, tag }: { task: MapTask; tag?: string }) {
+const LANES: [WorkLane, string][] = [
+  ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'Running'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
+]
+const COLLAPSE = 10
+const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'Beads task'], request: ['✉', 'Request'], hermes: ['☁', 'Hermes run'] }
+
+function Card({ card, showProject, projectName }: { card: WorkCard; showProject: boolean; projectName: string }) {
+  const [glyph, source] = SOURCE[card.source]
   return (
-    <div className="hub-ticket" data-task={task.id}>
-      <div className="hub-ticket-title">{task.title}</div>
-      <div className="hub-ticket-meta">
-        <span className="hub-id">{task.id}</span>
-        {tag && <span className="hub-pill amber">{tag}</span>}
-        {task.signs.map(sign => <span key={sign} className="hub-sign" title={SIGN_LABEL[sign]} aria-label={SIGN_LABEL[sign]}>{SIGN_GLYPH[sign]}</span>)}
-      </div>
-    </div>
+    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}`} href={card.href} data-card={card.key}>
+      <span className="wk-title">{card.title}</span>
+      {card.why && <span className="wk-why">{card.why}</span>}
+      <span className="wk-meta">
+        {card.live && <span className={`wk-dot ${card.live.state === 'working' ? 'working' : 'idle'}`} role="img" aria-label={card.live.state === 'working' ? 'A session is working on it' : 'A session is idle on it'} />}
+        <span className="wk-src" title={source} aria-label={source}>{glyph}</span>
+        <span className="hub-id">{card.id}</span>
+        {showProject && card.project && <span className="wk-project">{projectName}</span>}
+        {card.signs.map(sign => <span key={sign} className="hub-sign" title={SIGN_LABEL[sign as Sign]} aria-label={SIGN_LABEL[sign as Sign]}>{SIGN_GLYPH[sign as Sign]}</span>)}
+      </span>
+    </a>
   )
 }
 
+/** Work's Lanes tab: `project` is a project id, `all` for every project, or absent for the default one. */
 export default function Board({ project: wanted }: { project?: string }) {
-  const { list, project, loading: listing, error: listError } = useProject(wanted)
-  const map = useHubData<ProgressMap>(project ? `/map/${encodeURIComponent(project)}` : null)
-
-  const tasks = (map.data?.milestones ?? []).flatMap(milestone => milestone.features.flatMap(feature => feature.tasks))
-  const has = (task: MapTask, sign: string) => task.signs.some(item => item === sign)
-  const ready = tasks.filter(task => task.state === 'next' || task.state === 'you')
-  const progress = tasks.filter(task => task.state === 'doing' && !has(task, 'review') && !has(task, 'pr'))
-  const review = tasks.filter(task => task.state !== 'done' && (has(task, 'review') || has(task, 'pr')))
-  const done = tasks.filter(task => task.state === 'done').sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? '')).slice(0, 20)
-  const later = tasks.filter(task => task.state === 'later').length
-  const columns: [string, MapTask[]][] = [['Ready', ready], ['In progress', progress], ['Review', review], ['Done', done]]
+  const all = wanted === 'all'
+  const { list, project: chosen, loading: listing, error: listError } = useProject(all ? undefined : wanted)
+  const project = all ? undefined : chosen
+  const work = useHubData<WorkLanes>(all || project ? `/work${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [picked, setPicked] = useState<WorkLane | null>(null)
+  const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
+  const data = work.data
+  const active = picked ?? (data ? defaultLane(data.counts) : 'running')
 
   return (
-    <>
-      <div className="hub-top">
-        <h2>Work{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
-        {map.data?.ageMinutes != null && <span className="hub-muted">Beads copy from {copyAge(map.data.ageMinutes)}</span>}
-      </div>
+    <div className="work">
       <div className="hub-chips" aria-label="Project">
-        {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
+        <a className={`hub-chip${all ? ' on' : ''}`} href={hubHash('work', 'all')}>All</a>
+        {list.map(item => <a key={item.id} className={`hub-chip${!all && item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
       </div>
       {project && host.write && <RequestForm project={project} />}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
-      {!map.data && !map.error && (listing || map.loading) && !listError && <p className="hub-empty">Loading…</p>}
-      {!listing && !listError && !project && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
-      {map.error && <p className="hub-error" role="alert">{map.error}</p>}
-      {map.data && !map.data.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
-      {map.data?.meta && (
+      {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
+      {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
+      {!listing && !listError && !project && !all && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
+      {(work.error || listError) && <p className="hub-error" role="alert">{work.error ?? listError}</p>}
+      {data && (
         <>
-          <div className="hub-board">
-            {columns.map(([label, items]) => (
-              <section key={label} className="hub-column" aria-label={label}>
-                <h3>{label} <span>{items.length}</span></h3>
-                {items.map(task => <Card key={task.id} task={task} tag={task.state === 'you' ? 'needs you' : undefined} />)}
-                {!items.length && <p className="hub-empty">Nothing here.</p>}
-              </section>
+          <div className="wk-lane-chips" role="group" aria-label="Lane">
+            {LANES.map(([lane, label]) => (
+              <button key={lane} type="button" className={`wk-lane-chip${lane === active ? ' on' : ''}`} aria-pressed={lane === active} data-lane-chip={lane} onClick={() => setPicked(lane)}>
+                {label} <span className="n">{data.counts[lane]}</span>
+              </button>
             ))}
           </div>
-          <p className="hub-muted">{later} later</p>
+          <div className="wk-lanes" data-active={active}>
+            {LANES.map(([lane, label]) => {
+              const cards = data.lanes[lane]
+              const collapsible = (lane === 'backlog' || lane === 'done') && cards.length > COLLAPSE
+              const shown = collapsible && !expanded[lane] ? cards.slice(0, COLLAPSE) : cards
+              return (
+                <section key={lane} className="wk-lane" data-lane={lane} aria-label={label}>
+                  <h3>{label} <span>{data.counts[lane]}</span></h3>
+                  {shown.map(card => <Card key={card.key} card={card} showProject={all} projectName={nameOf(card.project)} />)}
+                  {!cards.length && <p className="hub-empty">Nothing here.</p>}
+                  {collapsible && (
+                    <button type="button" className="hub-btn wk-more" onClick={() => setExpanded(value => ({ ...value, [lane]: !value[lane] }))}>
+                      {expanded[lane] ? 'Show fewer' : `Show all ${cards.length}`}
+                    </button>
+                  )}
+                  {data.counts[lane] > cards.length && <p className="hub-muted">{data.counts[lane] - cards.length} older not shown.</p>}
+                </section>
+              )
+            })}
+          </div>
         </>
       )}
-    </>
+    </div>
   )
 }

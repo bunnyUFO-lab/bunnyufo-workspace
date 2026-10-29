@@ -32,7 +32,6 @@ export default function Activity({ filter }: { filter?: string }) {
   return (
     <>
       <div className="hub-top">
-        <h2>Activity</h2>
         <label className="hub-muted">Project <select value={project} onChange={event => setProject(event.target.value)} aria-label="Project">
           <option value="">All</option>
           {(projects.data?.projects ?? []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
