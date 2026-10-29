@@ -81,6 +81,20 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     const name = text(origin.name, REQUEST_LIMITS.name, 'The origin name');
     out.origin = { kind: origin.kind, ...(name ? { name } : {}) };
   }
+  if (data.textOrigin !== undefined && data.textOrigin !== null) {
+    if (!fromOwner) throw fail('Only the site can say who wrote the job text.');
+    const written = data.textOrigin;
+    if (typeof written !== 'object' || Array.isArray(written) || !ORIGIN_KINDS.includes(written.kind)) throw fail('The text origin is { kind: owner, agent or run, name }.');
+    const writtenName = text(written.name, REQUEST_LIMITS.name, 'The text origin name');
+    out.textOrigin = { kind: written.kind, ...(writtenName ? { name: writtenName } : {}) };
+  }
+  if (data.doneWhenOrigin !== undefined && data.doneWhenOrigin !== null) {
+    if (!fromOwner) throw fail('Only the site can say who wrote the "done when".');
+    const doneBy = data.doneWhenOrigin;
+    if (typeof doneBy !== 'object' || Array.isArray(doneBy) || !ORIGIN_KINDS.includes(doneBy.kind)) throw fail('The "done when" origin is { kind: owner, agent or run, name }.');
+    const doneByName = text(doneBy.name, REQUEST_LIMITS.name, 'The "done when" origin name');
+    out.doneWhenOrigin = { kind: doneBy.kind, ...(doneByName ? { name: doneByName } : {}) };
+  }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
     const follow = data.followUp;
@@ -210,7 +224,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * the owner's (`origin.kind: owner`, set here and never taken from the body) and carries the proposed target.
    */
   async function createRequest(data, user, at) {
-    const { origin: _origin, followUp: _followUp, ...body } = data ?? {};
+    const { origin: _origin, followUp: _followUp, textOrigin: _textOrigin, doneWhenOrigin: _doneWhenOrigin, ...body } = data ?? {};
     const clean = checkRequest(body, { fromOwner: true });
     const preset = clean.preset ? presetOf(clean.preset) : null;
     if (clean.preset && !preset) throw fail('There is no such preset.', 400);
@@ -235,9 +249,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /** Write a new request folder under a free id: `build(id)` gives its request.json body; a drawing is stored beside it. */
-  async function writeNew(project, text, at, build, checked = null) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const id = newRequestId(project, text, at);
+  async function writeNew(project, text, at, build, checked = null, fixedId = null) {
+    for (let attempt = 0; attempt < (fixedId ? 1 : 3); attempt += 1) {
+      const id = fixedId ?? newRequestId(project, text, at);
       const conflict = fail('Could not find a free id; try again.', 409);
       try {
         const request = build(id);
@@ -297,6 +311,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const body = { v: 1, outcome: 'manual', ...(summary ? { summary } : {}), by: 'hub', at: at.toISOString() };
     await putCreateOnly(`requests/${id}/result.json`, `${JSON.stringify(body, null, 2)}\n`, 'application/json', clash('That request already has a result.'));
     return { status: 201, body: { state: 'done' } };
+  }
+
+  /** Who wrote this request's "done when", for a copy the owner approves: the author it already names, else the request's own (an agent's or a run's), else nobody. */
+  function doneWhenAuthor(request, origin) {
+    if (!request.doneWhen) return null;
+    if (request.doneWhenOrigin) return request.doneWhenOrigin.kind === 'owner' ? null : request.doneWhenOrigin;
+    return (origin ?? {}).kind === 'owner' ? null : (origin ?? { kind: 'agent' });
   }
 
   const needKey = () => { if (!signingKey) throw fail(approveReason, 503); };
@@ -367,7 +388,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return state;
   }
 
-  const STOPPABLE = ['approved', 'expired', 'taken', 'running', 'lost'];
+  const STOPPABLE = ['approved', 'expired', 'taken', 'running', 'lost', 'asking'];
 
   /** `POST /hub/requests/:id/approve { target? }` */
   async function approveRoute(id, raw, user, at) {
@@ -402,8 +423,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { origin: _origin, followUp, ...copy } = request;
-    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), target, replaces: id }, { fromOwner: true });
+    const { origin: oldOrigin, followUp, ...copy } = request;
+    // The copy is the owner's. Unless the owner rewrote the text, it still says who wrote it.
+    const wroteText = raw?.text !== undefined || (oldOrigin ?? {}).kind === 'owner' ? null : (request.textOrigin ?? oldOrigin ?? { kind: 'agent' });
+    // The "done when" has its own author: rewriting the text does not make an agent's "done when" the owner's.
+    const doneBy = doneWhenAuthor(request, oldOrigin);
+    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
     }));
@@ -425,8 +450,52 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { status: 201, body: { id: made.id, ...approval } };
   }
 
+  /**
+   * `POST /hub/requests/:id/answer-run { text }` (1 to 2000 characters), for a run that ended by asking a question
+   * (state `asking`). Makes a new request copied from this one that `replaces` it and carries `followUp`
+   * `{ from, question, answer, summary }` (the site wrote it, so it is signed into the brief as the owner's answer),
+   * approves that for Hermes, then retires this one with a signed stop `answered by <new id>`. Without a signing key
+   * the new request stays a proposal with the answer kept in it, and this one stays as it is.
+   */
+  async function answerRunRoute(id, raw, user, at) {
+    const answer = text(raw?.text, REQUEST_LIMITS.answer, 'An answer', { required: true });
+    const { parts, state } = await loadOne(id, at);
+    if (state !== 'asking') throw fail(`That request is ${state}; only a run that asked a question can be answered.`, 409);
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const preset = presetOf(request.preset);
+    if (!preset?.targets.includes('hermes')) throw fail('Only a Hermes run can be answered this way.', 400);
+    const question = String(parts.result?.question ?? '').slice(0, REQUEST_LIMITS.question);
+    if (!question) throw fail('That run left no question.', 409);
+    const { origin: oldOrigin, followUp: _older, ...copy } = request;
+    // The job text keeps its author: an answer does not make the owner the writer of text an agent or a run wrote.
+    const wroteText = request.textOrigin ?? ((oldOrigin ?? {}).kind === 'owner' ? null : (oldOrigin ?? { kind: 'agent' }));
+    const clean = checkRequest({
+      ...copy, target: 'hermes', replaces: id, origin: { kind: 'owner', name: user }, ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneWhenAuthor(request, oldOrigin) ?? undefined,
+      followUp: { from: id, question, answer, summary: String(parts.result?.summary ?? '').slice(0, REQUEST_LIMITS.followSummary) },
+    }, { fromOwner: true });
+    const newId = newRequestId(clean.project, clean.text, at);
+    const build = made => ({ id: made, ...clean, createdAt: at.toISOString(), by: user });
+    if (!signingKey) {
+      const proposal = await writeNew(clean.project, clean.text, at, build, null, newId);
+      return { status: 201, body: { id: proposal.id, state: 'proposed' } };
+    }
+    // Claim this request before anything else is written: the signed stop is create-only, so of two answers at once only one
+    // gets past it (the other is a 409) and only one follow-up run starts.
+    await writeStop(id, `answered by ${newId}`, user, at, ['asking']);
+    const made = await writeNew(clean.project, clean.text, at, build, null, newId);
+    try {
+      const approval = await approveRequest(made.id, { target: 'hermes', by: user, at });
+      return { status: 201, body: { id: made.id, ...approval } };
+    } catch (error) {
+      // The answer is kept in the new proposal; a tap on it signs and starts the run.
+      return { status: 201, body: { id: made.id, state: 'proposed', waiting: `Could not start yet: ${scrub(error.message, 80)}` } };
+    }
+  }
+
   /** The POST routes under `/hub/requests/:id/`. Each needs a signed-in user, even where REQUIRE_REMOTE_USER is off. */
-  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute };
+  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'answer-run': answerRunRoute };
 
   async function post(id, action, raw, user, at) {
     if (!Object.hasOwn(actions, action)) throw fail('Not found', 404);

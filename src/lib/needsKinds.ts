@@ -13,6 +13,7 @@ export function needsKind(item: Item): NeedsKind {
     case 'request': return 'approval'
     case 'approval': return 'approval'
     case 'hermes-approval': return 'approval'
+    case 'run-question': return 'question'
     case 'ask': return item.design === true ? 'design' : 'question'
     default: return 'question' // a session never reaches Needs you
   }

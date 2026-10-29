@@ -311,10 +311,11 @@ export function requestItem(request, state, taken, extra = {}) {
   const target = approved?.target ?? request.target;
   const since = state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
   return {
-    kind: state === 'proposed' ? 'approval' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
+    kind: state === 'proposed' ? 'approval' : state === 'asking' ? 'run-question' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
     ...(taken?.bead ? { bead: taken.bead } : {}),
     ...(request.by ? { by: request.by } : {}),
     ...(request.preset ? { preset: request.preset } : {}),
+    ...(state === 'asking' && result?.question ? { question: result.question, ...(result.summary ? { summary: result.summary } : {}) } : {}),
     ...(target ? { target } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
     ...(typeof since === 'string' ? { since } : {}),
@@ -401,7 +402,7 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
   const openChecklists = checklists.filter(item => item.state === 'open').sort(newest);
   // A request that waits for the owner's approval is Needs you; one that failed, was lost or expired is an alert.
-  const approvals = requests.filter(item => item.kind === 'approval').sort(newest);
+  const approvals = requests.filter(item => item.kind === 'approval' || item.kind === 'run-question').sort(newest);
   const hermes = [...hermesApprovals].sort(newest);
   const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
   const since = now.getTime() - DAY;
@@ -438,6 +439,7 @@ export function needsKindOf(item) {
     case 'request': return 'approval';
     case 'approval': return 'approval';
     case 'hermes-approval': return 'approval';
+    case 'run-question': return 'question';
     case 'ask': return item.design === true ? 'design' : 'question';
     default: return 'question';
   }
@@ -485,6 +487,7 @@ export function describeItem(item, now) {
   const who = (item.kind === 'ask' || item.kind === 'checklist' ? [item.tool, item.host] : [item.host]).filter(Boolean).join(' · ');
   const minutes = Math.max(0, Math.floor((now.getTime() - new Date(item.at).getTime()) / 60000));
   const base = { kind, who, age: Number.isFinite(minutes) ? minutes : 0 };
+  if (item.kind === 'run-question') return { ...base, what: 'Hermes asks a question', state: 'The run paused for your answer', next: 'Answer and run again, or close it', blocker: 'Your answer' };
   // A request made the old way is listed under the requests filter and reads as before; only a proposal to approve is an approval.
   switch (kind === 'approval' && item.kind === 'request' ? 'question' : kind) {
     case 'steps':

@@ -174,6 +174,35 @@ try {
   const goneAnswer = gone.fake.json(`sections/inbox/hermes-approvals/${goneId}/answer.json`);
   assert.deepEqual([goneAnswer.choice, goneAnswer.forwarded], ['deny', false]);
 
+  step('A run that ended by asking: the answer says Answered and links the follow-up run, Close says Cancelled, never Marked done');
+  const asking = await startHubFixture({ hermes: true, signing: true });
+  fixtures.push(asking);
+  const askIds = { answer: `${day}-magic-loops-which-tug-game-g8g8`, close: `${day}-magic-loops-which-other-game-h9h9` };
+  for (const [kind, id] of Object.entries(askIds)) {
+    asking.seed.request({ id, project: 'magic-loops', createdAt: minutesAgo(asking.now, 30 + (kind === 'close' ? 5 : 0)).toISOString(), by: 'owner', text: `Research which game (${kind})`, preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'owner' } });
+    asking.seed.put(`requests/${id}/approved.json`, { v: 1, request: id, project: 'magic-loops', repo: null, target: 'hermes', limits: { minutes: 30 }, expires: NEVER, at: minutesAgo(asking.now, 29).toISOString(), by: 'owner', signature: 'x' });
+    asking.seed.put(`requests/${id}/taken.json`, { runner: 'hermes', host: 'hub', nonce: 'n', at: minutesAgo(asking.now, 28).toISOString() });
+    asking.seed.put(`requests/${id}/result.json`, { v: 1, outcome: 'question', question: 'Which of the two games do you mean?', summary: 'Two games.', by: 'hub', at: minutesAgo(asking.now, 2).toISOString() });
+  }
+  const askPage = await open({ width: 1280, height: 1000 });
+  await askPage.goto(`${asking.url}#/~hub/needs`);
+  const answerCard = askPage.locator(`[data-need="run-question-${askIds.answer}"]`);
+  await answerCard.waitFor();
+  await answerCard.locator('[data-run-answer]').fill('The card game from 2019.');
+  await answerCard.locator('[data-run-send]').click();
+  await askPage.locator('[data-next-note]').waitFor();
+  const answeredNote = await askPage.locator('[data-next-note]').innerText();
+  assert.match(answeredNote, /^Answered/);
+  assert.match(answeredNote, /the follow-up run started/);
+  assert.doesNotMatch(answeredNote, /Marked done/);
+  const followHref = await askPage.locator('[data-next-link]').getAttribute('href');
+  const followId = decodeURIComponent(/#\/~hub\/request\/(.+)$/.exec(followHref)?.[1] ?? '');
+  assert.ok(followId && followId !== askIds.answer, `The link names the new request (${followHref}).`);
+  assert.equal(asking.fake.json(`sections/inbox/requests/${followId}/request.json`).replaces, askIds.answer);
+  await askPage.locator(`[data-need="run-question-${askIds.close}"]`).locator('[data-run-close]').click();
+  await askPage.waitForFunction(() => /^Cancelled/.test(document.querySelector('[data-next-note]')?.textContent ?? ''));
+  assert.doesNotMatch(await askPage.locator('[data-next-note]').innerText(), /Marked done/);
+
   console.log('hub-approval-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
