@@ -60,8 +60,8 @@ test('the agent list is Hermes, Briefs and Claude Code', async () => {
     assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code']);
     assert.deepEqual(agent(body, 'hermes').sprite, { kind: 'builtin', key: 'hermes' }, 'No choice gives the default.');
     assert.equal(agent(body, 'claude').sprite.kind, 'random', 'Claude Code has no built-in of its own.');
-    assert.equal(agent(body, 'hermes').model, 'Codex gpt-6-sol · Sonnet, DeepSeek fallback');
-    assert.equal(agent(body, 'briefs').model, 'Haiku 5.5 · DeepSeek fallback');
+    assert.equal(agent(body, 'hermes').model, 'Codex gpt-6-sol Â· Sonnet, DeepSeek fallback');
+    assert.equal(agent(body, 'briefs').model, 'Haiku 5.5 Â· DeepSeek fallback');
   } finally { await f.close(); }
 });
 
