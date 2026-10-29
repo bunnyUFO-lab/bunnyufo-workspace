@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, buildInbox, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
 import { askJson, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -260,13 +260,13 @@ test('Today and the Inbox: needs you, running and recent come from a seven-day w
     assert.ok(!today.recent.some(event => event.title === 'Three days ago'), 'Not in the last 24 hours.');
     assert.equal(today.counts.alerts, 1);
     assert.deepEqual((await get('/hub/inbox')).body.items.map(item => item.kind), ['ask', 'review', 'blocked']);
-    assert.deepEqual((await get('/hub/inbox?filter=reviews')).body.items.map(item => item.id).length, 1);
+    assert.deepEqual((await get('/hub/inbox?filter=pr')).body.items.map(item => item.id).length, 1);
 
     seed.event(eventJson({ kind: 'pr-merged', ts: minutesAgo(NOW, 5), bead: 'bd-2' }));
     seed.event(eventJson({ kind: 'session-ended', ts: minutesAgo(NOW, 4), session: 'sess-b' }));
     today = (await get('/hub/today')).body;
     assert.equal(today.counts.needsYou, 1);
-    assert.deepEqual((await get('/hub/inbox?filter=blocked')).body.items, []);
+    assert.deepEqual((await get('/hub/inbox?filter=unstick')).body.items, []);
     const events = (await get(`/hub/events?since=${encodeURIComponent(new Date(NOW.getTime() - 4 * 86400000).toISOString())}`)).body;
     assert.ok(events.events.some(event => event.title === 'Three days ago'));
     assert.equal(events.truncated, false);
@@ -278,7 +278,7 @@ test("a blocked item clears on its own session's next event, not another's", asy
   const { fake, seed, get, close } = await fixture();
   const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
   const LINK = 'https://claude.ai/code/session_TESTabc123';
-  const blocked = async hub => (await hub('/hub/inbox?filter=blocked')).body.items;
+  const blocked = async hub => (await hub('/hub/inbox?filter=unstick')).body.items;
   const check = async hub => {
     const items = await blocked(hub);
     const by = session => items.filter(item => item.session === session);
@@ -326,7 +326,7 @@ test('a blocked item passes on only a real session link and an app link of the e
     seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 's1', title: 'Evil app link', appUrl: 'claude://evil/x', url: 'http://claude.ai/code/session_TESTabc123' }));
     seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 29), session: 's2', title: 'Script link', appUrl: 'javascript:alert(1)', url: 'https://claude.ai/code/' }));
     seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 28), session: 's3', title: 'Good links', appUrl: OK_APP, url: 'https://claude.ai/code/session_TESTabc123' }));
-    const items = (await get('/hub/inbox?filter=blocked')).body.items;
+    const items = (await get('/hub/inbox?filter=unstick')).body.items;
     const by = session => items.find(item => item.session === session);
     assert.equal(items.length, 3);
     for (const session of ['s1', 's2']) {
@@ -341,7 +341,7 @@ test('a blocked item passes on only a real session link and an app link of the e
   } finally { await close(); }
 });
 
-test('the Inbox filters: asks, answered, requests', async () => {
+test('the Inbox filters: question, answered, requests', async () => {
   const { seed, get, close } = await fixture();
   try {
     const open = askJson({ id: id('one', 'a111'), now: NOW });
@@ -354,9 +354,9 @@ test('the Inbox filters: asks, answered, requests', async () => {
     seed.ask(dead, { files: { 'cancel.json': {} } });
     seed.request(requestJson({ id: id('req', 'r111'), now: NOW }));
     const ids = async filter => (await get(`/hub/inbox?filter=${filter}`)).body.items.map(item => item.id).sort();
-    assert.deepEqual(await ids('asks'), [open.id, answered.id].sort());
+    assert.deepEqual(await ids('question'), [open.id], 'Only open Asks wait on you.');
     assert.deepEqual(await ids('answered'), [answered.id, taken.id].sort());
-    assert.deepEqual(await ids('needs-you'), [open.id]);
+    assert.deepEqual(await ids('all'), [open.id]);
     assert.deepEqual(await ids('requests'), [id('req', 'r111')]);
   } finally { await close(); }
 });
@@ -679,7 +679,7 @@ test('no Hub list repeats a key: not in Needs you, any Inbox filter, or the runn
     const today = (await get('/hub/today')).body;
     assert.deepEqual(repeated(today.needsYou, kindId), [], 'Needs you');
     assert.deepEqual(repeated(today.running, item => item.id), [], 'running');
-    for (const filter of ['needs-you', 'asks', 'reviews', 'requests', 'blocked', 'answered']) {
+    for (const filter of ['all', 'question', 'pr', 'requests', 'unstick', 'answered']) {
       assert.deepEqual(repeated((await get(`/hub/inbox?filter=${filter}`)).body.items, kindId), [], filter);
     }
     assert.equal(today.needsYou.filter(item => item.kind === 'blocked' && item.id === 'sess-a').length, 1);
@@ -780,7 +780,7 @@ test('a blocked row can be marked done: create-only, and it stays hidden', async
   try {
     const stale = seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 30), session: 'sess-stale', title: 'Stale permission' }));
     const review = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'A review' }));
-    const items = async () => (await get('/hub/inbox?filter=blocked')).body.items;
+    const items = async () => (await get('/hub/inbox?filter=unstick')).body.items;
     assert.equal((await items())[0].file, stale);
     assert.equal((await post(`/hub/blocked/${review}/done`)).status, 404, 'A review is not a blocked row.');
     assert.equal((await post(`/hub/reviews/${stale}/done`)).status, 404, 'A blocked row is not a review.');
@@ -867,13 +867,15 @@ test('Needs you counts an open checklist, a fully ticked one too, and drops subm
     assert.equal(today.needsYou[1].done, 4, 'Every item ticked: it still waits for Submit.');
     assert.deepEqual((await get('/hub/inbox?filter=needs-you')).body.items.map(item => item.id), [open.id, full.id]);
 
-    const todo = (await get('/hub/inbox?filter=todo')).body.items;
-    assert.deepEqual(todo.map(item => [item.id, item.state]), [[open.id, 'open'], [full.id, 'open'], [submitted.id, 'submitted'], [picked.id, 'picked-up']], 'Open first, then newest first; cancelled is gone.');
+    const todo = (await get('/hub/inbox?filter=steps')).body.items;
+    assert.deepEqual(todo.map(item => [item.id, item.state]), [[open.id, 'open'], [full.id, 'open']], 'Open lists only, newest first.');
+    const history = (await get('/hub/inbox?filter=answered')).body.items;
+    assert.deepEqual(history.map(item => [item.id, item.state]), [[submitted.id, 'submitted'], [picked.id, 'picked-up']], 'Submitted and picked-up lists are history; cancelled is gone.');
     assert.equal((await get('/hub/inbox?filter=bogus')).body.items.length, 2, 'An unknown filter is Needs you.');
   } finally { await close(); }
 });
 
-test('the todo filter: open lists first, then the rest, each newest first', async () => {
+test('the steps filter holds the open lists, newest first; answered holds the submitted ones', async () => {
   const { seed, get, close } = await fixture();
   try {
     const older = checklistJson({ id: listId('older', 'a111'), now: at(-60) });
@@ -882,7 +884,9 @@ test('the todo filter: open lists first, then the rest, each newest first', asyn
     seed.checklist(older); seed.submit(older.id);
     seed.checklist(newer); seed.submit(newer.id);
     seed.checklist(oldOpen);
-    assert.deepEqual((await get('/hub/inbox?filter=todo')).body.items.map(item => item.id), [oldOpen.id, newer.id, older.id]);
+    seed.checklist(checklistJson({ id: listId('second', 'd111'), now: at(-30) }));
+    assert.deepEqual((await get('/hub/inbox?filter=steps')).body.items.map(item => item.id), [listId('second', 'd111'), oldOpen.id]);
+    assert.deepEqual((await get('/hub/inbox?filter=answered')).body.items.map(item => item.id), [newer.id, older.id]);
   } finally { await close(); }
 });
 
@@ -1000,7 +1004,7 @@ test('submit writes submit.json and one checklist-submitted event, the list leav
     assert.ok(today.recent.some(entry => entry.kind === 'checklist-submitted'));
     assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'submitted');
     assert.equal((await get(`/hub/checklists/${list.id}`)).body.submit.note, 'Skipped the DMs.');
-    assert.equal((await get('/hub/inbox?filter=todo')).body.items[0].state, 'submitted');
+    assert.equal((await get('/hub/inbox?filter=answered')).body.items[0].state, 'submitted');
 
     fake.log.length = 0;
     const second = await post(`/hub/checklists/${list.id}/submit`, { note: 'again' });
@@ -1082,7 +1086,7 @@ test('files nested below a checklist folder change neither its state nor its pro
     const detail = (await get(`/hub/checklists/${list.id}`)).body;
     assert.deepEqual({ state: detail.state, done: detail.done }, { state: 'open', done: 0 });
     assert.deepEqual(detail.files, ['checklist.json']);
-    const row = (await get('/hub/inbox?filter=todo')).body.items.find(item => item.id === list.id);
+    const row = (await get('/hub/inbox?filter=steps')).body.items.find(item => item.id === list.id);
     assert.deepEqual({ state: row.state, done: row.done }, { state: 'open', done: 0 });
     assert.ok((await get('/hub/today')).body.needsYou.some(item => item.id === list.id), 'Still in Needs you.');
     assert.equal((await post(`/hub/checklists/${list.id}/items/02`, { done: true })).status, 200, 'The owner can still tick.');
@@ -1113,7 +1117,7 @@ test('a checklist with a bad item id, or any other invalid shape, is not listed 
     const bad = [traversal, skipped, noIds, tooLong, badLink];
     for (const list of bad) seed.checklist(list);
     for (const list of bad) assert.equal((await get(`/hub/checklists/${list.id}`)).status, 404, list.id);
-    assert.deepEqual((await get('/hub/inbox?filter=todo')).body.items.map(item => item.id), [good.id]);
+    assert.deepEqual((await get('/hub/inbox?filter=steps')).body.items.map(item => item.id), [good.id]);
     assert.deepEqual((await get('/hub/today')).body.needsYou.filter(item => item.kind === 'checklist').map(item => item.id), [good.id]);
     fake.log.length = 0;
     for (const list of bad) {
@@ -1126,5 +1130,78 @@ test('a checklist with a bad item id, or any other invalid shape, is not listed 
     }
     assert.deepEqual(putKeys(fake), [], 'Nothing was written.');
     assert.equal(fake.objects.has(`sections/inbox/asks/${ask.id}/cancel.json`), false);
+  } finally { await close(); }
+});
+
+test('the Needs you filters: every old name maps to a new one, unknown names are all', () => {
+  assert.deepEqual(['needs-you', 'asks', 'todo', 'reviews', 'blocked'].map(inboxFilter), ['all', 'question', 'steps', 'pr', 'unstick']);
+  assert.deepEqual(['all', 'question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'answered', 'requests'].map(inboxFilter), ['all', 'question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'answered', 'requests']);
+  assert.equal(inboxFilter('toString'), 'all', 'A name from Object.prototype is no filter.');
+  assert.equal(inboxFilter(null), 'all');
+});
+
+test('the old filter names answer through the API with the same rows as the new ones', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    seed.ask(askJson({ id: id('one', 'a111'), now: NOW }));
+    seed.checklist(checklistJson({ id: id('steps', 'b111'), now: NOW }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 9), title: 'Review one' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 8), session: 'sess-a', title: 'Paused' }));
+    const ids = async filter => (await get(`/hub/inbox?filter=${filter}`)).body.items.map(item => item.id);
+    for (const [old, now] of [['needs-you', 'all'], ['asks', 'question'], ['todo', 'steps'], ['reviews', 'pr'], ['blocked', 'unstick']]) {
+      assert.deepEqual(await ids(old), await ids(now), `${old} is ${now}`);
+    }
+    const all = (await get('/hub/inbox')).body;
+    assert.deepEqual(all.items.map(item => item.needs), ['question', 'steps', 'pr', 'unstick'], 'The default is all, in the order Today uses.');
+    assert.deepEqual(all.counts, { all: 4, question: 1, design: 0, steps: 1, playtest: 0, unstick: 1, pr: 1 });
+  } finally { await close(); }
+});
+
+test('describeItem: four plain sentences for each kind', () => {
+  const now = new Date('2026-10-29T12:00:00Z');
+  const at = '2026-10-29T11:30:00Z';
+  const ask = describeItem({ kind: 'ask', id: 'x', project: 'probe', bead: 'bd-7', title: 'q', at, state: 'open', tool: 'claude-code', host: 'pc' }, now);
+  assert.deepEqual(ask, { kind: 'question', who: 'claude-code · pc', age: 30, what: 'A question from bead bd-7', state: 'Waiting for your answer', next: 'Pick an option or write a note', blocker: 'Your answer' });
+  assert.equal(describeItem({ kind: 'ask', id: 'x', project: 'probe', title: 'q', at, state: 'open' }, now).what, 'A question from project probe');
+  assert.equal(describeItem({ kind: 'ask', id: 'x', title: 'q', at, state: 'snoozed', summary: 'Snoozed until 2026-10-30T09:00:00Z' }, now).state, 'Snoozed until 2026-10-30T09:00:00Z');
+  const steps = describeItem({ kind: 'checklist', id: 'y', title: 't', at, state: 'open', done: 1, total: 4, tool: 'claude-code', host: 'pc' }, now);
+  assert.deepEqual([steps.what, steps.state, steps.next, steps.blocker], ['Steps only you can do', '1 of 4 done', 'Tick each step, then Submit', 'Your hands']);
+  const pr = describeItem({ kind: 'review', id: 'z.json', title: 'p', at, host: 'pc', verdicts: [{ leg: 'smoke', result: 'pass' }, { leg: 'qa', result: 'fail' }] }, now);
+  assert.deepEqual([pr.what, pr.state, pr.next, pr.blocker, pr.who], ['A pull request ready for you', 'Smoke pass · QA fail', 'Open it or mark it done', 'Merging stays yours', 'pc']);
+  assert.equal(describeItem({ kind: 'review', id: 'z.json', title: 'p', at }, now).state, 'Ready for review');
+  const stuck = describeItem({ kind: 'blocked', id: 's', title: 'b', at, summary: 'Which one should I use?' }, now);
+  assert.deepEqual([stuck.what, stuck.state, stuck.next, stuck.blocker], ['A session waiting on you', 'Asked a question', 'Open the session', 'Your answer in the session']);
+  assert.equal(describeItem({ kind: 'blocked', id: 's', title: 'b', at, summary: 'Run npm test' }, now).state, 'Paused at a prompt');
+  assert.equal(needsKindOf({ kind: 'session' }), 'question');
+  assert.equal(inboxCounts([{ kind: 'ask' }, { kind: 'ask' }, { kind: 'blocked' }]).question, 2);
+  assert.equal(buildInbox({ filter: 'todo', asks: [], checklists: [], requests: [], events: [], now }).length, 0);
+});
+
+test('detail=1 embeds the Ask options and the checklist items', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const ask = askJson({ id: id('one', 'a111'), now: NOW, options: threeOptions() });
+    seed.ask(ask);
+    const list = checklistJson({ id: id('steps', 'b111'), now: NOW });
+    seed.checklist(list, [{ item: '01', at: minutesAgo(NOW, 5) }]);
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 8), session: 'sess-a', title: 'Paused' }));
+    const plain = (await get('/hub/inbox')).body.items;
+    assert.ok(plain.every(item => item.detail === undefined), 'No detail unless asked.');
+    const rows = (await get('/hub/inbox?detail=1')).body.items;
+    assert.deepEqual(rows.find(item => item.kind === 'ask').detail.options.map(option => option.id), ['A', 'B', 'C']);
+    const steps = rows.find(item => item.kind === 'checklist').detail;
+    assert.equal(steps.items.length, list.items.length);
+    assert.equal(steps.items[0].done, true);
+    assert.equal(rows.find(item => item.kind === 'blocked').detail, undefined, 'Only Asks and lists carry detail.');
+  } finally { await close(); }
+});
+
+test('detail=1 stops at 30 rows; the rest come without it', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    for (let n = 0; n < 32; n += 1) seed.ask(askJson({ id: id(`many${n}`, `a${String(n).padStart(3, '0')}`), now: minutesAgo(NOW, n) }));
+    const rows = (await get('/hub/inbox?detail=1')).body.items;
+    assert.equal(rows.length, 32);
+    assert.equal(rows.filter(item => item.detail).length, 30);
   } finally { await close(); }
 });

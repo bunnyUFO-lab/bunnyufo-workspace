@@ -124,6 +124,7 @@ export function checklistItem(checklist, names) {
     kind: 'checklist', id: checklist.id, project: checklist.project, title: clip(checklist.title), at: checklist.createdAt, state, done, total,
     ...(checklist.bead ? { bead: checklist.bead } : {}),
     ...(checklist.from?.host ? { host: checklist.from.host } : {}),
+    ...(checklist.from?.tool ? { tool: clip(checklist.from.tool, 40) } : {}),
     ...(checklist.from?.session ? { session: checklist.from.session } : {}),
   };
 }
@@ -162,6 +163,7 @@ export function askItem(ask, state) {
     ...(ask.bead ? { bead: ask.bead } : {}),
     ...(state.snoozedUntil ? { summary: `Snoozed until ${state.snoozedUntil}` } : {}),
     ...(ask.from?.host ? { host: ask.from.host } : {}),
+    ...(ask.from?.tool ? { tool: clip(ask.from.tool, 40) } : {}),
     ...(ask.from?.session ? { session: ask.from.session } : {}),
   };
 }
@@ -193,6 +195,14 @@ export const blockedSessionUrl = url => (typeof url === 'string' && /^https:\/\/
 /** The desktop app's link to a session: exactly `claude://claude.ai/epitaxy/local_<uuid>`. */
 export const blockedAppUrl = url => (typeof url === 'string' && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(url) ? url : undefined);
 
+/** What a review row shows without opening it: each leg's result, and how many screenshots came with it. */
+const reviewExtras = event => {
+  const verdicts = Array.isArray(event.verdicts)
+    ? event.verdicts.filter(verdict => verdict && ['smoke', 'review', 'qa'].includes(verdict.leg) && ['pass', 'fail', 'noted'].includes(verdict.result)).map(verdict => ({ leg: verdict.leg, result: verdict.result }))
+    : [];
+  return { ...(verdicts.length ? { verdicts } : {}), ...(Array.isArray(event.screenshots) && event.screenshots.length ? { shots: event.screenshots.length } : {}) };
+};
+
 const eventItem = (kind, event, extra = {}) => ({
   kind, id: event.file, project: event.project, title: event.title, at: event.ts,
   ...(event.bead ? { bead: event.bead } : {}), ...(event.url ? { url: event.url } : {}),
@@ -221,7 +231,7 @@ export function deriveEventItems(events) {
   for (const event of ordered) {
     if (event.kind === 'ready-for-review') {
       const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
-      if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event));
+      if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event, reviewExtras(event)));
     } else if (event.kind === 'blocked') {
       const resolved = !!event.session && after(event, other => other.session === event.session);
       if (resolved || done.has(event.file)) continue;
@@ -266,19 +276,76 @@ export function reviewDone({ review, event, user, at }) {
   };
 }
 
-export const INBOX_FILTERS = ['needs-you', 'todo', 'asks', 'reviews', 'requests', 'blocked', 'answered'];
+// The kind of a row on Needs you. src/lib/needsKinds.ts mirrors these rules: change both together.
+export const NEEDS_KINDS = ['question', 'design', 'steps', 'playtest', 'unstick', 'pr'];
 
-/** The Inbox's list for one filter. */
-export function buildInbox({ filter, asks, checklists = [], requests, events, now }) {
-  const { reviews, blocked } = deriveEventItems(events);
-  switch (filter) {
-    case 'asks': return asks.filter(item => item.state !== 'cancelled' && item.state !== 'picked-up').sort(newest);
-    case 'todo': return [...checklists.filter(item => item.state !== 'cancelled').sort(newest)].sort((a, b) => Number(b.state === 'open') - Number(a.state === 'open'));
-    case 'reviews': return reviews;
-    case 'requests': return [...requests].sort(newest);
-    case 'blocked': return blocked;
-    case 'answered': return asks.filter(item => item.state === 'answered' || item.state === 'picked-up').sort(newest);
-    default: return buildToday({ asks, checklists, events, now }).needsYou;
+export function needsKindOf(item) {
+  switch (item.kind) {
+    case 'checklist': return 'steps';
+    case 'review': return 'pr';
+    case 'blocked': return 'unstick';
+    case 'request': return 'approval';
+    default: return 'question';
+  }
+}
+
+export const INBOX_FILTERS = ['all', ...NEEDS_KINDS, 'answered', 'requests'];
+
+/** Old filter names, kept so links in Discord history and bookmarks still land on the right chip. */
+export const INBOX_FILTER_ALIASES = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick' };
+
+/** The filter a request names, old names mapped to new ones; anything unknown is `all`. */
+export function inboxFilter(raw) {
+  const mapped = Object.prototype.hasOwnProperty.call(INBOX_FILTER_ALIASES, raw) ? INBOX_FILTER_ALIASES[raw] : raw;
+  return INBOX_FILTERS.includes(mapped) ? mapped : 'all';
+}
+
+/** The Needs you list for one filter. `all` keeps the order Today uses: open Asks, open checklists, reviews, blocked sessions. */
+export function buildInbox({ filter: raw, asks, checklists = [], requests, events, now }) {
+  const filter = inboxFilter(raw);
+  if (filter === 'requests') return [...requests].sort(newest);
+  if (filter === 'answered') {
+    return [...asks.filter(item => item.state === 'answered' || item.state === 'picked-up'), ...checklists.filter(item => item.state === 'submitted' || item.state === 'picked-up')].sort(newest);
+  }
+  const needs = buildToday({ asks, checklists, events, now }).needsYou;
+  return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);
+}
+
+/** How many items wait per kind (and in all): the chips' numbers. */
+export function inboxCounts(needsYou) {
+  const counts = { all: needsYou.length };
+  for (const kind of NEEDS_KINDS) counts[kind] = 0;
+  for (const item of needsYou) { const kind = needsKindOf(item); if (kind in counts) counts[kind] += 1; }
+  return counts;
+}
+
+const LEG_NAME = { smoke: 'Smoke', review: 'Review', qa: 'QA' };
+
+/**
+ * Four plain sentences for a Needs you card: what it is, where it stands, what the owner does next, and
+ * what blocks it. `who` is the sender (tool and host), `age` the item's age in minutes.
+ */
+export function describeItem(item, now) {
+  const kind = needsKindOf(item);
+  const where = item.bead ? `bead ${item.bead}` : item.project ? `project ${item.project}` : 'an agent';
+  const who = (item.kind === 'ask' || item.kind === 'checklist' ? [item.tool, item.host] : [item.host]).filter(Boolean).join(' · ');
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(item.at).getTime()) / 60000));
+  const base = { kind, who, age: Number.isFinite(minutes) ? minutes : 0 };
+  switch (kind) {
+    case 'steps':
+      return { ...base, what: 'Steps only you can do', state: `${item.done ?? 0} of ${item.total ?? 0} done`, next: 'Tick each step, then Submit', blocker: 'Your hands' };
+    case 'pr': {
+      const legs = Array.isArray(item.verdicts) ? item.verdicts.map(verdict => `${LEG_NAME[verdict.leg]} ${verdict.result}`).join(' · ') : '';
+      return { ...base, what: 'A pull request ready for you', state: legs || 'Ready for review', next: 'Open it or mark it done', blocker: 'Merging stays yours' };
+    }
+    case 'unstick':
+      return { ...base, what: 'A session waiting on you', state: /\?\s*$/.test(item.summary ?? '') ? 'Asked a question' : 'Paused at a prompt', next: 'Open the session', blocker: 'Your answer in the session' };
+    default:
+      return {
+        ...base, what: `A question from ${where}`,
+        state: item.state === 'snoozed' ? item.summary || 'Snoozed' : 'Waiting for your answer',
+        next: 'Pick an option or write a note', blocker: 'Your answer',
+      };
   }
 }
 

@@ -66,10 +66,10 @@ try {
 
   const page = await open({ width: 1280, height: 800 });
   await stubWorld(page);
-  await page.goto(`${fixture.url}#/~hub/needs/reviews`);
+  await page.goto(`${fixture.url}#/~hub/needs/pr`);
 
   step('the row text is a link to the review, and the row keeps its buttons');
-  const row = page.locator('.hub-row', { hasText: 'Detail probe' });
+  const row = page.locator('.ni', { hasText: 'Detail probe' });
   await row.waitFor();
   const entry = row.locator('[data-review-open]');
   assert.equal(await entry.getAttribute('href'), `#/~hub/review/${file}`);
@@ -116,8 +116,8 @@ try {
   await page.locator('[data-section="status"]').waitFor();
   assert.equal(await page.locator('[data-legacy]').count(), 0, 'Verdicts only: not old.');
   await page.getByText('No screenshots came with this item.').waitFor();
-  await go(page, '#/~hub/needs/reviews');
-  assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('button', { hasText: 'Mark done' }).getAttribute('title'), 'Hide from Needs you. Does not approve or merge.');
+  await go(page, '#/~hub/needs/pr');
+  assert.equal(await page.locator('.ni', { hasText: 'Detail probe' }).locator('button', { hasText: 'Mark done' }).getAttribute('title'), 'Hide from Needs you. Does not approve or merge.');
   await go(page, `#/~hub/review/${file}`);
   await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
   for (const [w, h] of [[800, 600], [1280, 800]]) {
@@ -161,8 +161,8 @@ try {
   assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs');
 
   step('an old event with only a title opens with honest empty states and a working Mark done');
-  await go(page, '#/~hub/needs/reviews');
-  await page.locator('.hub-row', { hasText: 'Old probe' }).locator('[data-review-open]').click();
+  await go(page, '#/~hub/needs/pr');
+  await page.locator('.ni', { hasText: 'Old probe' }).locator('[data-review-open]').click();
   await page.locator('.hub-review h2', { hasText: 'Old probe' }).waitFor();
   await page.locator('[data-legacy]').waitFor();
   assert.equal(await page.locator('.hub-review-reader').count(), 0, 'Nothing to read: no reader panel.');
@@ -179,9 +179,9 @@ try {
   assert.equal(await page.evaluate(() => history.length), before, 'It replaced the entry; Back does not reopen the review.');
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, oldFile);
-  await go(page, '#/~hub/needs/reviews');
-  await page.locator('.hub-row', { hasText: 'Detail probe' }).waitFor();
-  assert.equal(await page.locator('.hub-row', { hasText: 'Old probe' }).count(), 0, 'The row is gone.');
+  await go(page, '#/~hub/needs/pr');
+  await page.locator('.ni', { hasText: 'Detail probe' }).waitFor();
+  assert.equal(await page.locator('.ni', { hasText: 'Old probe' }).count(), 0, 'The row is gone.');
   await go(page, `#/~hub/review/${oldFile}`);
   await page.locator('[data-done]', { hasText: /Marked done .* by local/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Mark done' }).count(), 0);
@@ -218,8 +218,8 @@ try {
 
   step('a blocked row has Mark done: it hides the row for good');
   const blockedFile = fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 60000), session: 'sess-stale-ui', title: 'Stale blocked session' }));
-  await go(page, '#/~hub/needs/blocked');
-  const stale = page.locator('.hub-row[data-blocked]', { hasText: 'Stale blocked session' });
+  await go(page, '#/~hub/needs/unstick');
+  const stale = page.locator('.ni[data-kind="unstick"]', { hasText: 'Stale blocked session' });
   await stale.waitFor();
   await stale.locator('button', { hasText: 'Mark done' }).click();
   await stale.waitFor({ state: 'detached' });
@@ -227,7 +227,7 @@ try {
   await page.reload();
   await page.locator('.hub-chips').waitFor();
   await page.waitForTimeout(300);
-  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Stale blocked session' }).count(), 0, 'Still hidden after a reload.');
+  assert.equal(await page.locator('.ni[data-kind="unstick"]', { hasText: 'Stale blocked session' }).count(), 0, 'Still hidden after a reload.');
 
   step('phone: no sideways scroll at 390 and 375 px, the reader replaces the sections, Back returns focus to the file');
   const phone = await open({ width: 390, height: 844 });
@@ -257,9 +257,9 @@ try {
   await noSideways(phone, 'review view at 375 px');
 
   step('a review whose url is a card link: Open card in the head, nothing under Pull requests, no "posted before" note');
-  await go(page, '#/~hub/needs/reviews');
-  assert.equal(await page.locator('.hub-row', { hasText: 'Card link probe' }).locator('a.hub-btn').innerText(), 'Open card');
-  assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('a.hub-btn', { hasText: 'Open link' }).innerText(), 'Open link', 'A link that is no card keeps its label.');
+  await go(page, '#/~hub/needs/pr');
+  assert.equal(await page.locator('.ni', { hasText: 'Card link probe' }).locator('a.hub-btn:not([data-review-open])').innerText(), 'Open card');
+  assert.equal(await page.locator('.ni', { hasText: 'Detail probe' }).locator('a.hub-btn', { hasText: 'Open link' }).innerText(), 'Open link', 'A link that is no card keeps its label.');
   await go(page, `#/~hub/review/${cardLinkFile}`);
   await page.locator('.hub-review h2', { hasText: 'Card link probe' }).waitFor();
   const linkHead = page.locator('.hub-review-head [data-link-head]');

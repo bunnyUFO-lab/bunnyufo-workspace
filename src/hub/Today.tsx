@@ -8,6 +8,7 @@ import { hubHash } from '../lib/route'
 import ItemRow from './ItemRow'
 import PcTile from './PcTile'
 import WorkingNow from './WorkingNow'
+import { itemKey, setFocus } from './needsFocus'
 import { TodayContext, useHubData } from './useHub'
 import './today.css'
 
@@ -85,7 +86,7 @@ export default function Today() {
             {data.needsYou.length ? data.needsYou.slice(0, 3).map(item => {
               const kind = needsKind(item)
               return (
-                <a key={`${item.kind}-${item.id}`} className="nrow" href={hubHash('needs')} data-nrow={kind}>
+                <a key={itemKey(item)} className="nrow" href={hubHash('needs')} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
                   <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
                   <span className="nrow-text">
                     <b>{item.title}</b>

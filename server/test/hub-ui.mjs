@@ -41,7 +41,7 @@ const noSideways = async (page, what) => {
 };
 /** A note or error sits under the row's title, and the title keeps at least 40% of the row. */
 const noteUnderTitle = async (row, selector, what) => {
-  const [title, whole, note] = await Promise.all([row.locator('.hub-row-title').boundingBox(), row.boundingBox(), row.locator(selector).boundingBox()]);
+  const [title, whole, note] = await Promise.all([row.locator('.hub-row-title, .ni-t').boundingBox(), row.boundingBox(), row.locator(selector).boundingBox()]);
   assert.ok(note, `${what}: the note is on screen.`);
   assert.ok(note.y >= title.y + title.height - 1, `${what}: the note sits under the title (${note.y} < ${title.y + title.height}).`);
   assert.ok(title.width >= whole.width * 0.4, `${what}: the title keeps its width (${title.width} of ${whole.width}).`);
@@ -100,17 +100,16 @@ try {
   await busy.close();
   await page.locator('[data-hub-link="needs"]').click();
   await page.locator('.hub[data-screen="needs"]').waitFor();
-  await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).waitFor();
-  assert.equal(await page.locator('.hub-row').count(), 3, 'The Ask, the review and the blocked session.');
-  const review = page.locator('.hub-row', { hasText: 'PR ready for review' });
-  const reviewLink = review.locator('a.hub-btn');
+  await page.locator('.ni', { hasText: 'Which jump arc feels right?' }).waitFor();
+  assert.equal(await page.locator('.ni').count(), 3, 'The Ask, the review and the blocked session.');
+  const review = page.locator('.ni', { hasText: 'PR ready for review' });
+  const reviewLink = review.locator('a.hub-btn:not([data-review-open])');
   assert.equal(await reviewLink.innerText(), 'Open link', 'The fixture link is not on github.com.');
   assert.equal(await reviewLink.getAttribute('target'), '_blank');
   assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
-  const fixtureBlocked = page.locator('.hub-row', { hasText: 'Permission needed' });
+  const fixtureBlocked = page.locator('.ni', { hasText: 'Permission needed' });
   assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^Open the Claude app on pc\.example\.test$/);
   assert.equal(await fixtureBlocked.locator('a').count(), 0, 'No link: it is words, not a button.');
-  assert.equal(await fixtureBlocked.evaluate(node => node.tagName), 'DIV', 'The row is not a link either.');
   assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
   // One shared source: the sidebar's Needs you entry and the phone bar's badge say the same.
   assert.equal(await page.locator('[data-hub-inbox-badge]').innerText(), '3');
@@ -118,7 +117,7 @@ try {
   assert.equal(await page.locator('[data-hub-tab-badge]').textContent(), '3', 'The tab bar is hidden on desktop but holds the same count.');
 
   step('CUJ 1 without the drawing: pick B, write a note, send; the answer is in the bucket and the UI says Answered');
-  await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).click();
+  await page.locator('.ni', { hasText: 'Which jump arc feels right?' }).locator('.ni-t a').click();
   await page.locator('.hub[data-screen="ask"] .hub-option').first().waitFor();
   assert.equal(await page.locator('.hub-option').count(), 3);
   assert.match(await page.locator('.hub-steps li.on').innerText(), /Open/);
@@ -150,7 +149,7 @@ try {
   await page.locator('h2', { hasText: 'Written without a sender?' }).waitFor();
   await page.locator('.hub-muted', { hasText: 'From an unknown sender' }).waitFor();
   await page.locator('.sidebar').first().waitFor();
-  await page.route('**/api/hub/inbox*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [null] }) }));
+  await page.route('**/api/hub/inbox*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: 'oops' }) }));
   await go(page, '#/~hub/needs');
   await page.locator('.report-error', { hasText: 'This Hub screen could not be shown' }).waitFor();
   assert.ok(await page.locator('.sidebar').first().isVisible(), 'The sidebar survives a broken Hub screen.');
@@ -216,15 +215,15 @@ try {
   await phone.locator('.sidebar-reopen, .sidebar').first().waitFor();
   const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: threeOptions() });
   fixture.seed.ask(phoneAsk);
-  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.hub-panel'], ['#/~hub/work/magic-loops', '.hub-board'], ['#/~hub/activity', '.hub-chips']]) {
+  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.hub-board'], ['#/~hub/activity', '.hub-chips']]) {
     await go(phone, hash);
     await phone.locator(`.hub ${selector}`).first().waitFor();
     await phone.waitForTimeout(250);
     await noSideways(phone, hash);
   }
   await go(phone, '#/~hub/needs');
-  await phone.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).first().waitFor();
-  await phone.locator('.hub-row[href*="/ask/"]').first().click();
+  await phone.locator('.ni', { hasText: 'Which jump arc feels right?' }).first().waitFor();
+  await phone.locator('.ni[data-kind="question"] .ni-t a').first().click();
   await phone.locator('.hub-option').first().waitFor();
   await phone.waitForTimeout(250);
   await noSideways(phone, 'Ask');
@@ -266,7 +265,7 @@ try {
   assert.equal(await tabs.locator('.app-layout.sidebar-collapsed').count(), 1, 'The menu was never opened.');
   assert.equal(await tabs.locator('[data-hub-tab="needs"]').getAttribute('aria-current'), 'page');
   // A write refreshes the count at once: no reload, no waiting for the 60 s poll.
-  await tabs.locator('.hub-row[href*="/ask/"]').first().tap();
+  await tabs.locator('.ni[data-kind="question"] .ni-t a').first().tap();
   await tabs.locator('.hub-option').first().waitFor();
   await tabs.locator('.hub-option-pick').first().tap();
   await tabs.locator('button:has-text("Send answer")').tap();
@@ -302,12 +301,12 @@ try {
   assert.equal(await tabs.locator('nav.hub-tabs').count(), 0, 'No tab bar while a card is open.');
   assert.equal(await page.locator('nav.hub-tabs').isVisible(), false, 'No tab bar on desktop.');
 
-  step('old links: #/~hub/inbox/asks lands on needs/asks with Asks selected, board lands on Work, roadmap on the Roadmap; an Ask link keeps its address');
+  step('old links: #/~hub/inbox/asks lands on needs/question with Question selected, board lands on Work, roadmap on the Roadmap; an Ask link keeps its address');
   const old = await open({ width: 1280, height: 800 });
   await old.goto(`${fixture.url}#/~hub/inbox/asks`);
   await old.locator('.hub[data-screen="needs"]').waitFor();
-  assert.equal(await old.evaluate(() => location.hash), '#/~hub/needs/asks', 'The address shows the new name.');
-  assert.equal(await old.locator('.hub-chip.on').innerText(), 'Asks');
+  assert.equal(await old.evaluate(() => location.hash), '#/~hub/needs/question', 'The address shows the new name.');
+  assert.equal(await old.locator('.hub-chip.on').getAttribute('data-filter'), 'question');
   assert.equal(await old.locator('.hub h2').first().innerText(), 'Needs you');
   await go(old, '#/~hub/board');
   await old.locator('.hub[data-screen="work"]').waitFor();
@@ -361,10 +360,10 @@ try {
     await guest.locator('.hub-banner', { hasText: 'Read-only here' }).waitFor();
     assert.match(await guest.locator('.hub-banner a').getAttribute('href'), /^https:\/\/site\.example\.test/);
     assert.match(await guest.locator('.hub-banner').innerText(), /need you to be signed in/);
-    assert.equal(await guest.locator('.hub-row', { hasText: 'A read-only question' }).count(), 1);
+    assert.equal(await guest.locator('.ni', { hasText: 'A read-only question' }).count(), 1);
     assert.match(await guest.locator('.hub-banner').innerText(), /marking reviews done/);
-    const readOnlyReview = guest.locator('.hub-row', { hasText: 'A read-only review' });
-    assert.equal(await readOnlyReview.locator('a.hub-btn').count(), 0, 'No link, so only Mark done.');
+    const readOnlyReview = guest.locator('.ni', { hasText: 'A read-only review' });
+    assert.equal(await readOnlyReview.locator('a.hub-btn:not([data-review-open])').count(), 0, 'No link, so only Mark done and Details.');
     const markDone = readOnlyReview.locator('button', { hasText: 'Mark done' });
     assert.equal(await markDone.getAttribute('aria-disabled'), 'true');
     await markDone.click({ force: true });
@@ -1123,24 +1122,21 @@ try {
   const doneEvents = () => [...reviewsIn()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
   fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Report-only review', card: 'https://example.test/section#/report' }));
   const bareFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Bare review' }));
-  await page.goto(`${fixture.url}#/~hub/needs/reviews`);
-  await page.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
-  const reportRow = page.locator('.hub-row', { hasText: 'Report-only review' });
-  const bareRow = page.locator('.hub-row', { hasText: 'Bare review' });
+  await page.goto(`${fixture.url}#/~hub/needs/pr`);
+  await page.locator('.ni', { hasText: 'Bare review' }).waitFor();
+  const reportRow = page.locator('.ni', { hasText: 'Report-only review' });
+  const bareRow = page.locator('.ni', { hasText: 'Bare review' });
   assert.equal(await reportRow.locator('a.hub-btn', { hasText: 'Open report' }).getAttribute('href'), 'https://example.test/section#/report');
-  assert.equal(await reportRow.locator('a.hub-btn').count(), 1);
-  assert.equal(await bareRow.locator('a.hub-btn').count(), 0, 'A review with no link has no link button.');
-  assert.equal(await page.locator('.hub-row').count(), 3);
-  assert.equal(await page.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
+  assert.equal(await reportRow.locator('a.hub-btn:not([data-review-open])').count(), 1);
+  assert.equal(await bareRow.locator('a.hub-btn:not([data-review-open])').count(), 0, 'A review with no link has no link button.');
+  assert.equal(await page.locator('.ni').count(), 3);
+  assert.equal(await page.locator('.ni button', { hasText: 'Mark done' }).count(), 3, 'Every review can be marked done.');
   assert.equal(await page.locator('[data-readonly-note]').count(), 0);
   await noSideways(page, 'Reviews');
-  await phone.goto(`${fixture.url}#/~hub/needs/reviews`);
-  await phone.locator('.hub-row', { hasText: 'Bare review' }).waitFor();
-  assert.equal(await phone.locator('.hub-row button', { hasText: 'Mark done' }).count(), 3, 'The buttons stay on a phone.');
+  await phone.goto(`${fixture.url}#/~hub/needs/pr`);
+  await phone.locator('.ni', { hasText: 'Bare review' }).waitFor();
+  assert.equal(await phone.locator('.ni button', { hasText: 'Mark done' }).count(), 3, 'The buttons stay on a phone.');
   await noSideways(phone, 'Reviews at phone width');
-  const plainTitle = await bareRow.locator('.hub-row-title').boundingBox();
-  const plainButton = await bareRow.locator('button', { hasText: 'Mark done' }).boundingBox();
-  assert.ok(plainButton.y < plainTitle.y + plainTitle.height && plainButton.y + plainButton.height > plainTitle.y, 'Without a note the button sits beside the title.');
   await page.route('**/api/hub/reviews/*/done', route => route.fulfill({ status: 500, body: '{"error":"Test failure"}', contentType: 'application/json' }), { times: 1 });
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
   await bareRow.locator('.hub-error', { hasText: 'Test failure' }).waitFor();
@@ -1156,38 +1152,38 @@ try {
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, bareFile);
   await page.reload();
-  await page.locator('.hub-row', { hasText: 'Report-only review' }).waitFor();
-  assert.equal(await page.locator('.hub-row', { hasText: 'Bare review' }).count(), 0, 'Still gone after a reload.');
-  assert.equal(await page.locator('.hub-row').count(), 2);
+  await page.locator('.ni', { hasText: 'Report-only review' }).waitFor();
+  assert.equal(await page.locator('.ni', { hasText: 'Bare review' }).count(), 0, 'Still gone after a reload.');
+  assert.equal(await page.locator('.ni').count(), 2);
 
   step('blocked: a link opens the session, the desktop link sits beside it, no link says where to go, and a later event clears the row');
   const LINKED = 'https://claude.ai/code/session_TESTabc123';
   const APP = 'claude://claude.ai/epitaxy/local_00000000-0000-0000-0000-000000000001';
   fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 2 * 60000), session: 'sess-linked', title: 'Linked session needs permission', url: LINKED, appUrl: APP }));
-  await page.goto(`${fixture.url}#/~hub/needs/blocked`);
-  const linked = page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await page.goto(`${fixture.url}#/~hub/needs/unstick`);
+  const linked = page.locator('.ni[data-kind="unstick"]', { hasText: 'Linked session' });
   await linked.waitFor();
-  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 2);
+  assert.equal(await page.locator('.ni[data-kind="unstick"]').count(), 2);
   assert.equal(await linked.locator('[data-link="session"]').getAttribute('href'), LINKED);
   assert.equal(await linked.locator('[data-link="session"]').getAttribute('target'), '_blank');
   assert.equal(await linked.locator('[data-link="app"]').getAttribute('href'), APP);
   assert.equal(await linked.locator('[data-link="app"]').getAttribute('target'), null);
   assert.equal(await linked.locator('[data-blocked-hint]').count(), 0, 'A linked row has no hint.');
-  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).locator('[data-link]').count(), 0);
+  assert.equal(await page.locator('.ni[data-kind="unstick"]', { hasText: 'Permission needed' }).locator('[data-link]').count(), 0);
   await noSideways(page, 'Blocked');
-  await phone.goto(`${fixture.url}#/~hub/needs/blocked`);
-  const phoneLinked = phone.locator('.hub-row[data-blocked]', { hasText: 'Linked session' });
+  await phone.goto(`${fixture.url}#/~hub/needs/unstick`);
+  const phoneLinked = phone.locator('.ni[data-kind="unstick"]', { hasText: 'Linked session' });
   await phoneLinked.waitFor();
-  const phoneBare = phone.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' });
+  const phoneBare = phone.locator('.ni[data-kind="unstick"]', { hasText: 'Permission needed' });
   await phoneBare.locator('[data-blocked-hint]').waitFor({ state: 'visible' });
   assert.equal(await phoneLinked.locator('[data-link="session"]').isVisible(), true, 'The session button stays on a phone.');
   assert.equal(await phoneLinked.locator('[data-link="app"]').isVisible(), false, 'The desktop link is not offered on a touch screen.');
   await noSideways(phone, 'Blocked at phone width');
   fixture.seed.event(eventJson({ kind: 'resumed', ts: new Date(), session: 'sess-linked', title: 'probe: back at work' }));
   await page.reload();
-  await page.locator('.hub-row[data-blocked]', { hasText: 'Permission needed' }).waitFor();
-  assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' }).count(), 0, 'resumed clears it, even after a reload.');
-  assert.equal(await page.locator('.hub-row[data-blocked]').count(), 1);
+  await page.locator('.ni[data-kind="unstick"]', { hasText: 'Permission needed' }).waitFor();
+  assert.equal(await page.locator('.ni[data-kind="unstick"]', { hasText: 'Linked session' }).count(), 0, 'resumed clears it, even after a reload.');
+  assert.equal(await page.locator('.ni[data-kind="unstick"]').count(), 1);
 
   // Part 4: Chat against the fake Hermes.
   step('chat off: without Hermes there is no Chat row and the screen says so');

@@ -1,5 +1,5 @@
 // Run after npm run build. A checklist (#/~hub/checklist/<id>) through a real browser on a phone (390 x 844, touch), over
-// the fixture service with its two checklists: the To do tab and the Needs you badge, the guide that starts open, 44 px tap
+// the fixture service with its two checklists: the Steps chip and the Needs you badge, the guide that starts open, 44 px tap
 // targets, Copy, ticks that show at once and survive a reload, an untick, a failed tick, Submit with its one warning,
 // the submitted list, and the read-only host. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
@@ -50,21 +50,28 @@ try {
   await page.goto(`${fixture.url}#/~hub/needs`);
   await page.locator('[data-hub-tab-badge]').waitFor();
 
-  step('the To do tab is second, lists the open list first with "1 of 4", and the Needs you badge counts it');
+  step('the Steps chip lists the open list with "1 of 4", the submitted one is history, and the Needs you badge counts it');
   assert.equal(await page.locator('[data-hub-tab-badge]').innerText(), '4', 'Three things wait in the fixture, and the list is a fourth.');
   await page.locator('.hub-chips .hub-chip').first().waitFor();
-  assert.deepEqual(await page.locator('.hub-chips .hub-chip').allInnerTexts(), ['Needs you', 'To do', 'Asks', 'Reviews', 'Requests', 'Blocked', 'Answered']);
-  assert.ok(await page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' }).count() >= 1, 'The list is in Needs you too.');
-  await page.locator('.hub-chip', { hasText: 'To do' }).tap();
-  const row = page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' });
-  await page.locator('.hub-row', { hasText: 'Update the router settings' }).waitFor();
-  assert.match(await row.locator('.hub-row-meta').innerText(), /^To do · probe · 1 of 4 · /);
-  assert.deepEqual(await page.locator('.hub-row .hub-row-title').allInnerTexts(), ['Finish the Discord bot setup', 'Update the router settings'], 'Open first, then the submitted one.');
-  assert.match(await page.locator('.hub-row', { hasText: 'Update the router settings' }).locator('.hub-row-meta').innerText(), /^To do · probe · 2 of 3 · submitted · /);
-  await noSideways(page, 'To do');
+  await page.locator('.hub-chip[data-filter="steps"] .n').waitFor();
+  assert.deepEqual(await page.locator('.hub-chips .hub-chip').evaluateAll(list => list.map(item => item.getAttribute('data-filter'))), ['all', 'question', 'steps', 'unstick', 'pr', 'answered'], 'Chips with nothing in them hide.');
+  assert.ok(await page.locator('.ni', { hasText: 'Finish the Discord bot setup' }).count() >= 1, 'The list is in Needs you too.');
+  await page.locator('.hub-chip[data-filter="steps"]').tap();
+  const row = page.locator('.ni', { hasText: 'Finish the Discord bot setup' });
+  await row.waitFor();
+  assert.match(await row.locator('[data-four]').innerText(), /1 of 4 done/);
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 1);
+  assert.deepEqual(await page.locator('.ni .ni-t').allInnerTexts(), ['Finish the Discord bot setup'], 'Only open lists wait on you.');
+  await page.locator('.hub-chip[data-filter="answered"]').tap();
+  const history = page.locator('.hub-row', { hasText: 'Update the router settings' });
+  await history.waitFor();
+  assert.match(await history.locator('.hub-row-meta').innerText(), /^To do · probe · 2 of 3 · submitted · /);
+  await page.locator('.hub-chip[data-filter="steps"]').tap();
+  await row.waitFor();
+  await noSideways(page, 'Steps');
 
   step('opening it: the first open item with a guide is expanded, and a done item shows its time');
-  await row.tap();
+  await row.locator('.ni-t a').tap();
   await page.locator('.hub-cl h2', { hasText: 'Finish the Discord bot setup' }).waitFor();
   assert.equal(await page.locator('[data-hub-inbox-badge], [data-hub-tab-badge]').first().innerText(), '4');
   assert.equal(await page.locator('[data-item="02"] [data-toggle]').getAttribute('aria-expanded'), 'true');
@@ -169,8 +176,8 @@ try {
   assert.equal(events.length, 1);
   assert.deepEqual({ checklist: events[0].checklist, summary: events[0].summary, title: events[0].title }, { checklist: FIXTURE_CHECKLIST, summary: '2 of 4 done', title: 'Submitted: Finish the Discord bot setup' });
   await page.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3');
-  assert.equal(await page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' }).count(), 0, 'Gone from Needs you.');
-  await page.locator('.hub-chip', { hasText: 'To do' }).tap();
+  assert.equal(await page.locator('.ni', { hasText: 'Finish the Discord bot setup' }).count(), 0, 'Gone from Needs you.');
+  await page.locator('.hub-chip[data-filter="answered"]').tap();
   const submittedRow = page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' });
   await submittedRow.waitFor();
   assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^To do · probe · 2 of 4 · submitted · /);
@@ -200,7 +207,7 @@ try {
   assert.deepEqual(await page.locator('.hub-cl-group').allTextContents(), ['Router', 'After']);
   await noSideways(page, 'the second list');
   await go(page, '#/~hub/checklist');
-  await page.locator('.hub-chip.on', { hasText: 'To do' }).waitFor();
+  await page.locator('.hub-chip.on[data-filter="steps"]').waitFor();
 
   step('a read-only host shows the list, says "Sign in to tick items." and sends nothing');
   const dist = path.join(root, 'dist');

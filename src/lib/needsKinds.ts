@@ -1,5 +1,6 @@
-// The kinds of thing that wait on the owner, shared by Today and (later) the Needs you list.
-// In M0 the kind comes from the item's own kind; M1 adds design and playtest.
+// The kinds of thing that wait on the owner, shared by Today and the Needs you list.
+// site/api/hub-model.mjs (`needsKindOf`, `NEEDS_KINDS`, `INBOX_FILTER_ALIASES`) holds the server's copy of
+// these rules: change both together. Design review and playtest rows arrive with their own items.
 import type { Item } from './hub'
 
 export type NeedsKind = 'question' | 'design' | 'steps' | 'playtest' | 'unstick' | 'pr' | 'approval'
@@ -27,4 +28,16 @@ export const KIND_ICON: Record<NeedsKind, string> = {
   unstick: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="m7.5 9.5 3 2.5-3 2.5M12.5 15h4"/>',
   pr: '<circle cx="6.5" cy="6" r="2"/><circle cx="6.5" cy="18" r="2"/><circle cx="17.5" cy="18" r="2"/><path d="M6.5 8v8M17.5 16V9.5A2.5 2.5 0 0 0 15 7h-4M13 4.8 10.8 7 13 9.2"/>',
   approval: '<path d="M12 3.5 5 6.2v5.4c0 4.3 3 7.6 7 8.9 4-1.3 7-4.6 7-8.9V6.2z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
+}
+
+/** The chips of the Needs you list, in order. `answered` is history; `requests` shows only when it is the open filter. */
+export const NEEDS_FILTERS = ['all', 'question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'answered', 'requests'] as const
+
+/** Old filter names, kept so links in Discord history and bookmarks land on the right chip. */
+const FILTER_ALIAS: Record<string, string> = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick' }
+
+/** The filter a URL names, old names mapped to the new ones; an unknown or missing name is `all`. */
+export function canonicalFilter(raw: string | undefined): string {
+  const mapped = raw && Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) ? FILTER_ALIAS[raw] : raw
+  return mapped && (NEEDS_FILTERS as readonly string[]).includes(mapped) ? mapped : 'all'
 }
