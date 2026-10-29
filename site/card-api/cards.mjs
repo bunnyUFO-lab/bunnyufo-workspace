@@ -70,9 +70,21 @@
 //        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
 //   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
 //   cards checklist cancel <id>     exit 3 when already cancelled or submitted
-//   cards request list [--project <p>] [--open]
+//   cards request list [--project <p>] [--open | --approved] [--target pc|cloud|hermes]   --approved: signed, not yet taken, not stopped, declined, finished or expired
 //   cards request take <id> --bead <b>                                exit 3 when already taken; exit 4 for a request with a
 //        preset (a dispatched run starts only from its approval)
+//   cards request take <id> --runner pc|cloud --nonce <n> [--session <id or link>]   a runner claims an approval it has verified
+//        (taken.json with the nonce, no bead); exit 5 when the nonce is not the approval's
+//   cards request verify <id> [--target pc|cloud] [--repo owner/name]   check the owner's signature and every limit; prints one JSON line
+//        { id, project, repo, target, limits, nonce, preset }, or exits 5 with the first failed check (unsigned, bad-signature,
+//        wrong-request, hash-mismatch, expired, bad-limits, no-run-block, stopped, declined, nonce-used, wrong-target, wrong-repo).
+//        The public key: HUB_SIGNING_PUBKEY (base64 SPKI or PEM), else the file BUW_APPROVAL_PUBKEY names, else
+//        ~/.buw/secrets/approval-signing-key.pub; none is exit 5
+//   cards request brief <id>                                          verify, then print the run's brief (exit 5 when invalid)
+//   cards request run <id> --state started|working|turn-ended|usage-limit [--last <text>] [--link <url>]   a progress file (secrets masked)
+//   cards request finish <id> --outcome pr|card|failed --summary <s> [--pr <url>] [--card <link>] [--reason <r>] [--report <file.md>]
+//        report.md then result.json, both create-only (exit 3 when result.json exists); posts pr-opened or alert
+//   cards request state <id>                                          proposed | approved | taken | running | stopping | stopped | done | failed | lost | expired | declined
 //   cards request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]
 //        [--preset <id> [--title <t>] [--repo owner/name] [--needs unity,gpu,comfyui,sprite-studio,lan,local-files]
 //        [--target pc|cloud|hermes|at-pc] [--done-when <t>] [--origin-run <id>]]
@@ -81,7 +93,7 @@
 //        is set, else { kind: agent }; never owner.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 import { spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
 import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -97,7 +109,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...] | beads push --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | beads push --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -1189,7 +1201,14 @@ async function requestList(flags) {
   const ids = [...folders.keys()].filter(id => folders.get(id).has('request.json')).sort();
   const rows = await mapLimit(ids, 8, async id => {
     const names = folders.get(id);
-    const state = names.has('taken.json') ? 'taken' : names.has('declined.json') ? 'declined' : 'open';
+    let state = names.has('taken.json') ? 'taken' : names.has('declined.json') ? 'declined' : 'open';
+    if (flags.approved || flags.target) {
+      // Only an approval the runner could still start: signed, not taken, not stopped, not declined, not finished, not expired.
+      if (!names.has('approved.json') || ['taken.json', 'declined.json', 'stop.json', 'result.json'].some(name => names.has(name))) return null;
+      const approved = await readJson(inboxPath('requests', id, 'approved.json'));
+      if (!approved || !(Date.parse(approved.expires) > Date.now()) || (flags.target && approved.target !== flags.target)) return null;
+      state = 'approved';
+    }
     if (flags.open && state !== 'open') return null;
     const request = await readJson(inboxPath('requests', id, 'request.json'));
     return { id, state, request };
@@ -1247,6 +1266,207 @@ async function requestCreate(flags) {
   }
 }
 
+// --- Runner commands: verify an approval, read its brief, claim it, report progress, finish ---
+// What a runner trusts is the owner's Ed25519 signature on approved.json and nothing else: it checks that the signature,
+// the request bytes, the target, the expiry, the limits and the nonce all hold, and refuses on the first that does not.
+
+// --- signature check: a copy of canonical, parsePublicKey and verify in site/api/signing.mjs (a test keeps them equal) ---
+function canonical(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `[${value.map(item => (item === undefined ? 'null' : canonical(item))).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.keys(value).filter(name => value[name] !== undefined).sort().map(name => `${JSON.stringify(name)}:${canonical(value[name])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+function parsePublicKey(text) {
+  const body = String(text ?? '').split(/\r?\n/).filter(line => !line.startsWith('-----')).join('').replace(/\s+/g, '');
+  return createPublicKey({ key: Buffer.from(body, 'base64'), format: 'der', type: 'spki' });
+}
+function verifySigned(doc, publicKey) {
+  try {
+    if (!doc || typeof doc !== 'object' || typeof doc.signature !== 'string') return false;
+    const signature = Buffer.from(doc.signature, 'base64');
+    if (signature.length !== 64) return false;
+    const rest = Object.fromEntries(Object.entries(doc).filter(([key]) => key !== 'signature'));
+    return edVerify(null, Buffer.from(canonical(rest), 'utf8'), publicKey, signature);
+  } catch {
+    return false;
+  }
+}
+// --- end of the signature check ---
+
+const MAX_RUN_MINUTES = 120;   // MAX_RUN_MINUTES in site/api/presets.mjs
+const RUN_STATES = ['started', 'working', 'turn-ended', 'usage-limit'];
+const FINISH_OUTCOMES = ['pr', 'card', 'failed'];
+
+/** The public key a runner trusts: HUB_SIGNING_PUBKEY (base64 SPKI or PEM text), else the file BUW_APPROVAL_PUBKEY names, else ~/.buw/secrets/approval-signing-key.pub. Exit 5 without one. */
+async function approvalPublicKey() {
+  let text = process.env.HUB_SIGNING_PUBKEY?.trim();
+  if (!text) {
+    const file = process.env.BUW_APPROVAL_PUBKEY?.trim() || path.join(os.homedir(), '.buw', 'secrets', 'approval-signing-key.pub');
+    text = await readFile(file, 'utf8').catch(() => '');
+  }
+  if (!text.trim()) { console.error('no public key: set HUB_SIGNING_PUBKEY or BUW_APPROVAL_PUBKEY, or put approval-signing-key.pub in ~/.buw/secrets.'); throw new Exit(5); }
+  try {
+    return parsePublicKey(text);
+  } catch {
+    console.error('no public key: the one given is not an Ed25519 SPKI key.');
+    throw new Exit(5);
+  }
+}
+
+const refuse = reason => { console.error(reason); throw new Exit(5); };
+
+/** The approval for a request if every check holds; else exit 5 naming the first check that failed. */
+async function verifyApproval(rawId, { target, repo } = {}) {
+  const id = idSafe(rawId);
+  if (!id) throw new Error('A request id is needed.');
+  const publicKey = await approvalPublicKey();
+  const [requestBytes, approvedText, takenDoc, stopText, declinedText] = await Promise.all([
+    readInboxBytes(inboxPath('requests', id, 'request.json')),
+    readInbox(inboxPath('requests', id, 'approved.json')),
+    readJson(inboxPath('requests', id, 'taken.json')),
+    readInbox(inboxPath('requests', id, 'stop.json')),
+    readInbox(inboxPath('requests', id, 'declined.json')),
+  ]);
+  let approved = null;
+  try { approved = approvedText === null ? null : JSON.parse(approvedText); } catch { /* unsigned */ }
+  if (!approved || typeof approved !== 'object' || Array.isArray(approved) || typeof approved.signature !== 'string') refuse('unsigned: there is no signed approval for this request.');
+  if (!verifySigned(approved, publicKey)) refuse('bad-signature: the approval is not signed by the configured key.');
+  if (approved.v !== 1 || approved.request !== id) refuse('wrong-request: the approval is for another request.');
+  if (requestBytes === null || createHash('sha256').update(requestBytes).digest('hex') !== approved.requestSha256) refuse('hash-mismatch: request.json changed after it was approved.');
+  let request = null;
+  try { request = JSON.parse(requestBytes.toString('utf8').replace(/^﻿/, '')); } catch { /* checked next */ }
+  if (!request || request.id !== id || request.project !== approved.project) refuse('wrong-request: request.json does not match the approval.');
+  const expires = typeof approved.expires === 'string' ? Date.parse(approved.expires) : NaN;
+  if (!(expires > Date.now())) refuse('expired: the approval is past its expiry.');
+  const minutes = approved.limits?.minutes;
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_RUN_MINUTES) refuse(`bad-limits: limits.minutes must be 1 to ${MAX_RUN_MINUTES}.`);
+  const run = approved.run;
+  if (!run || typeof run !== 'object' || typeof run.brief !== 'string' || !run.brief || typeof run.preset !== 'string') refuse('no-run-block: the approval has no run block.');
+  if (stopText !== null) refuse('stopped: the owner stopped this request.');
+  if (declinedText !== null) refuse('declined: the owner declined this request.');
+  if (typeof approved.nonce !== 'string' || !approved.nonce || (takenDoc && takenDoc.nonce !== approved.nonce)) refuse('nonce-used: another run took this approval.');
+  if (!['pc', 'cloud', 'hermes'].includes(approved.target) || (target && approved.target !== target)) refuse(`wrong-target: the approval is for ${approved.target}.`);
+  if (repo && approved.repo !== repo) refuse(`wrong-repo: the approval is for ${approved.repo ?? 'no repo'}.`);
+  return { id, approved, request };
+}
+
+async function requestVerify(rawId, flags) {
+  if (flags.target && !['pc', 'cloud'].includes(flags.target)) throw new Error('--target is pc or cloud.');
+  const { id, approved } = await verifyApproval(rawId, flags);
+  console.log(JSON.stringify({ id, project: approved.project, repo: approved.repo ?? null, target: approved.target, limits: approved.limits, nonce: approved.nonce, preset: approved.run.preset }));
+}
+
+async function requestBrief(rawId) {
+  const { approved } = await verifyApproval(rawId);
+  process.stdout.write(approved.run.brief.endsWith('\n') ? approved.run.brief : `${approved.run.brief}\n`);
+}
+
+/** Secret-looking runs hidden before text goes to the Hub: sk-…, ghp_…, AKIA…, JWTs, and 32+ character hex or base64 runs. */
+function maskSecrets(text) {
+  return String(text ?? '')
+    .replace(/\beyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]*/g, '[masked]')
+    .replace(/\bsk-[\w-]{10,}/g, '[masked]')
+    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[masked]')
+    .replace(/\bAKIA[0-9A-Z]{12,}/g, '[masked]')
+    .replace(/\b[0-9a-fA-F]{32,}\b/g, '[masked]')
+    .replace(/[A-Za-z0-9+/_-]{32,}={0,2}/g, '[masked]');
+}
+
+const runId = flags => idSafe(flags._[1] ?? process.env.BUW_REQUEST_ID);
+const markStampNow = () => `${new Date().toISOString().replace(/[-:]/g, '').replace('.', '')}-${rand(2)}`;   // 20261029T100000123Z-ab12
+
+async function requestTakeRunner(rawId, flags) {
+  if (!['pc', 'cloud'].includes(flags.runner)) throw new Error('--runner is pc or cloud.');
+  if (!flags.nonce) throw new Error('Usage: request take <id> --runner pc|cloud --nonce <n> [--session <id or link>]');
+  const id = idSafe(rawId);
+  const approved = await readJson(inboxPath('requests', id, 'approved.json'));
+  if (!approved?.nonce) refuse('unsigned: there is no approval to take.');
+  if (approved.nonce !== flags.nonce) refuse('nonce-used: that nonce is not this approval\'s.');
+  const session = flags.session || process.env.CLAUDE_SESSION_ID;
+  return claim('requests', id, 'taken.json', { runner: flags.runner, host: hostName(), nonce: approved.nonce, ...(session ? { session } : {}), at: isoNow() });
+}
+
+async function requestRun(flags) {
+  const id = runId(flags);
+  if (!id) throw new Error('Usage: request run <id> --state started|working|turn-ended|usage-limit [--last <text>] [--link <url>]');
+  if (!RUN_STATES.includes(flags.state)) throw new Error(`--state is one of: ${RUN_STATES.join(', ')}.`);
+  if (flags.link && !/^https:\/\/\S+$/.test(flags.link)) throw new Error('--link is an https address.');
+  const session = process.env.CLAUDE_SESSION_ID;
+  const doc = {
+    v: 1, request: id, state: flags.state,
+    ...(flags.last ? { lastAction: clip(maskSecrets(flags.last), 200) } : {}),
+    ...(session ? { session } : {}),
+    ...(flags.link ? { sessionLink: flags.link } : {}),
+    at: isoNow(),
+  };
+  const file = inboxPath('requests', id, `run-${markStampNow()}.json`);
+  if (await mustPut(file, `${JSON.stringify(doc, null, 2)}\n`, { createOnly: true }) === 'exists') throw new Error(`${file} already exists; run it again.`);
+  console.log(file);
+}
+
+async function requestFinish(rawId, flags) {
+  const id = runId({ _: ['finish', rawId] });
+  if (!id) throw new Error('Usage: request finish <id> --outcome pr|card|failed --summary <s> [--pr <url>] [--card <link>] [--reason <r>] [--report <file.md>]');
+  if (!FINISH_OUTCOMES.includes(flags.outcome)) throw new Error(`--outcome is one of: ${FINISH_OUTCOMES.join(', ')}.`);
+  if (!flags.summary?.trim()) throw new Error('--summary is needed.');
+  if (flags.pr && !/^https:\/\/\S+$/.test(flags.pr)) throw new Error('--pr is an https address.');
+  let report = null;
+  if (flags.report) {
+    report = await readFile(flags.report);
+    if (report.length > 256 * 1024) throw new Error('--report is over 256 KB.');
+  }
+  const resultFile = inboxPath('requests', id, 'result.json');
+  if (await readInbox(resultFile) !== null) { console.error(`requests/${id}/result.json was written already.`); throw new Exit(3); }
+  if (report) await mustPut(inboxPath('requests', id, 'report.md'), report, { createOnly: true, contentType: 'text/markdown' });   // already there: a retry
+  const result = {
+    v: 1, outcome: flags.outcome,
+    ...(flags.pr ? { pr: flags.pr } : {}),
+    ...(flags.card ? { card: String(flags.card) } : {}),
+    summary: clip(maskSecrets(flags.summary), 500),
+    ...(flags.reason ? { reason: flags.reason } : {}),
+    by: 'run', at: isoNow(),
+  };
+  if (await mustPut(resultFile, `${JSON.stringify(result, null, 2)}\n`, { createOnly: true }) === 'exists') { console.error(`requests/${id}/result.json was written already.`); throw new Exit(3); }
+  console.log(`requests/${id}/result.json`);
+  const project = (await readJson(inboxPath('requests', id, 'request.json')).catch(() => null))?.project;
+  const quiet = () => {};
+  if (flags.pr) await postEvent({ kind: 'pr-opened', title: `PR opened for ${id}`, url: flags.pr, summary: result.summary, source: 'cards-finish', ...(project ? { project } : {}) }, { out: quiet }).catch(() => {});
+  if (flags.outcome === 'failed') await postEvent({ kind: 'alert', title: `Run failed: ${id}`, summary: result.summary, source: 'cards-finish', ...(project ? { project } : {}) }, { out: quiet }).catch(() => {});
+}
+
+const stampTime = name => {
+  const match = /^run-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z/.exec(name);
+  return match ? Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +match[6], +match[7]) : 0;
+};
+
+/** The state of one request from its files (no PC report here): the table's rows, without `hermesLive`. */
+async function requestStateOf(id, names) {
+  const read = name => (names.has(name) ? readJson(inboxPath('requests', id, name)) : Promise.resolve(null));
+  const [request, approved, taken, result] = await Promise.all([read('request.json'), read('approved.json'), read('taken.json'), read('result.json')]);
+  const now = Date.now();
+  if (names.has('declined.json')) return 'declined';
+  if (names.has('stop.json')) return result || !taken ? 'stopped' : 'stopping';
+  if (result) return result.outcome === 'failed' ? 'failed' : 'done';
+  if (!request?.preset) return taken ? 'taken' : 'open';
+  if (taken) {
+    const newest = Math.max(0, ...[...names].map(stampTime));
+    if (now - newest < 20 * 60000) return 'running';
+    return now - Date.parse(taken.at) < 20 * 60000 ? 'taken' : 'lost';
+  }
+  if (approved) return Date.parse(approved.expires) <= now ? 'expired' : 'approved';
+  return 'proposed';
+}
+
+async function requestState(rawId) {
+  const id = idSafe(rawId);
+  const names = new Set((await listInbox(`requests/${id}/`)).map(file => file.split('/').slice(2).join('/')));
+  if (!names.has('request.json')) { console.error(`No request ${id}.`); throw new Exit(2); }
+  console.log(await requestStateOf(id, names));
+}
+
 // --- Beads ---
 
 /** A worktree root as it is hashed and stored: forward slashes, no trailing slash. */
@@ -1297,7 +1517,7 @@ async function beadsPush(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest']);
+const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -1335,6 +1555,12 @@ async function inbox(command, args) {
   if (command === 'checklist' && sub === 'cancel' && id) return checklistCancel(id);
   if (command === 'request' && sub === 'list') return requestList(flags);
   if (command === 'request' && sub === 'create') return requestCreate(flags);
+  if (command === 'request' && sub === 'verify' && id) return requestVerify(id, flags);
+  if (command === 'request' && sub === 'brief' && id) return requestBrief(id);
+  if (command === 'request' && sub === 'run') return requestRun(flags);
+  if (command === 'request' && sub === 'finish') return requestFinish(id ?? process.env.BUW_REQUEST_ID, flags);
+  if (command === 'request' && sub === 'state' && id) return requestState(id);
+  if (command === 'request' && sub === 'take' && id && flags.runner !== undefined) return requestTakeRunner(id, flags);
   if (command === 'request' && sub === 'take' && id) {
     const wanted = await readJson(inboxPath('requests', idSafe(id), 'request.json'));
     if (wanted?.preset) {
