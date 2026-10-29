@@ -156,7 +156,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
         </>
       )}
 
-      {result && (
+      {result && (result.outcome !== 'question' || result.summary) && (
         <>
           <h4 className="rd-h">Result</h4>
           <div className="rd-result" data-run-result>
