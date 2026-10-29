@@ -11,6 +11,7 @@
 //  - Every file written is create-only. A 412 means another follower or process got there first.
 import { TERMINAL, createFollowers } from './hermes-follower.mjs';
 import { createHermesRuns } from './hermes-runs.mjs';
+import { createScrub } from './scrub.mjs';
 import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
 
 export const MAX_HERMES_RUNS = 3;
@@ -27,7 +28,9 @@ const SSE_KEEPALIVE_MS = 15_000;
  * @param timing        for the follower (reopenMs, pollMs, backoffMs, tickMs…), the HTTP client (timeoutMs, idleMs) and
  *                      `sweepMs` (60 s)
  */
-export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, listFolders, putCreateOnly, cached, fail, allCards, now = () => new Date(), log = () => {}, timing = {}, onApproval = null }) {
+export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, listFolders, putCreateOnly, cached, fail, allCards, now = () => new Date(), log: rawLog = () => {}, timing = {}, onApproval = null, scrub = createScrub(env) }) {
+  // Every line this module logs and every reason it stores goes through the one scrub: no URL or token leaves in text.
+  const log = line => rawLog(scrub(line, 400));
   const runs = createHermesRuns({ env, fetchImpl, timeoutMs: timing.timeoutMs, idleMs: timing.idleMs });
   const byRequest = new Map(); // request id -> the run id being followed
   const sweepMs = timing.sweepMs ?? 60_000;
@@ -60,11 +63,12 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
   const folders = async at => [...(await listFolders('requests', at))];
   const going = async at => (await folders(at)).filter(([, names]) => names.has('hermes-run.json') && !names.has('result.json')).length;
 
-  const limitAtOf = (approved, startedAt) => new Date(new Date(startedAt).getTime() + (approved?.limits?.minutes ?? 30) * 60_000);
+  const limitAtOf = (approved, from) => new Date(new Date(from).getTime() + (approved?.limits?.minutes ?? 30) * 60_000);
 
-  function attach(id, runId, approved, { retry = false, startedAt }) {
+  // `limitFrom` is when the request first started: the quota retry shares the first run's time limit, it does not get a fresh one.
+  function attach(id, runId, approved, { retry = false, startedAt, limitFrom = startedAt }) {
     byRequest.set(id, runId);
-    return followers.follow({ id, retry, startedAt, approved }, runId, { limitAt: limitAtOf(approved, startedAt) });
+    return followers.follow({ id, retry, startedAt, limitFrom, approved }, runId, { limitAt: limitAtOf(approved, limitFrom) });
   }
 
   /** Start the run of an approved request. Called with the lock held. Returns `{ waiting? }` or null. */
@@ -85,7 +89,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     try {
       ({ runId } = await runs.start({ input: approved.run.brief, idempotencyKey: id }));
     } catch (error) {
-      await writeResult(id, startFailedOutcome({ reason: error.status ? `${error.message} (${error.status})` : error.message, at: at.toISOString() }));
+      await writeResult(id, startFailedOutcome({ reason: scrub(error.status ? `${error.message} (${error.status})` : error.message), at: at.toISOString() }));
       return;
     }
     await writeOnce(id, 'hermes-run.json', { runId, at: at.toISOString() });
@@ -120,11 +124,11 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     try {
       ({ runId } = await runs.start({ input: approved.run.brief, provider, model: retryModel, idempotencyKey: `${id}-retry` }));
     } catch (error) {
-      await writeResult(id, startFailedOutcome({ reason: `the retry on Anthropic failed: ${error.message}`, at: at.toISOString() }));
+      await writeResult(id, startFailedOutcome({ reason: `the retry on Anthropic failed: ${scrub(error.message)}`, at: at.toISOString() }));
       return;
     }
     await writeOnce(id, 'hermes-retry.json', { runId, at: at.toISOString(), provider, model: retryModel, reason: 'quota' });
-    attach(id, runId, approved, { retry: true, startedAt: at.toISOString() });
+    attach(id, runId, approved, { retry: true, startedAt: at.toISOString(), limitFrom: context.limitFrom });
   }
 
   async function stateOfEnd(id, at) {
@@ -146,7 +150,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
         await startRetry(context, at);
         return;
       } else {
-        await writeResult(id, outcomeOf({ run, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() }), run.output);
+        await writeResult(id, outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() }), run.output);
       }
     } finally {
       if (byRequest.get(id) === follower.runId) byRequest.delete(id);
@@ -168,7 +172,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     runs, log, now, timing,
     async onEvent(follower, entry) {
       if (entry.event === 'approval.request' && onApproval) {
-        try { await onApproval(follower.context, entry.data, follower.runId); } catch (error) { log(`[hermes] could not copy an approval: ${error.message}`); }
+        try { await onApproval(follower.context, entry.data, follower.runId, { polled: entry.polled === true }); } catch (error) { log(`[hermes] could not copy an approval: ${error.message}`); }
       }
     },
     onEnd,
@@ -189,7 +193,8 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
         const retry = await readFile(id, names, 'hermes-retry.json');
         const run = retry ?? await cached(`requests/${id}/hermes-run.json`);
         if (!run?.runId) continue;
-        attach(id, run.runId, approved, { retry: !!retry, startedAt: run.at });
+        const first = retry ? await cached(`requests/${id}/hermes-run.json`) : run;
+        attach(id, run.runId, approved, { retry: !!retry, startedAt: run.at, limitFrom: first?.at ?? run.at });
         count += 1;
       } else {
         const taken = await readFile(id, names, 'taken.json');

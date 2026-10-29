@@ -31,7 +31,7 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
     if (followers.has(runId)) return followers.get(runId);
     const follower = {
       context, runId, lastSeq: since, events: [], listeners: new Set(), ended: false, timedOut: false, stopped: false, abort: new AbortController(),
-      seenControls: new Set(), done: null,
+      seenControls: new Set(), done: null, stopSent: false, stopping: false,
     };
     followers.set(runId, follower);
     follower.done = loop(follower, limitAt).catch(error => log(`[hermes] follower for ${runId} failed: ${error.message}`)).finally(() => {
@@ -51,11 +51,13 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
 
   async function loop(follower, limitAt) {
     const { runId } = follower;
+    // At the time limit the run is stopped, and the stop is sent again on every tick until Hermes takes it or the run ends:
+    // a stop that failed once (Hermes unreachable, a 5xx) must not leave the run without a limit.
     const ticker = limitAt ? setInterval(() => {
-      if (!follower.timedOut && !follower.ended && now().getTime() >= limitAt.getTime()) {
-        follower.timedOut = true;
-        runs.stop(runId).catch(error => log(`[hermes] could not stop ${runId} at its time limit: ${error.message}`));
-      }
+      if (follower.ended || follower.stopSent || follower.stopping || now().getTime() < limitAt.getTime()) return;
+      follower.timedOut = true;
+      follower.stopping = true;
+      runs.stop(runId).then(() => { follower.stopSent = true; }, error => log(`[hermes] could not stop ${runId} at its time limit, will retry: ${error.message}`)).finally(() => { follower.stopping = false; });
     }, t.tickMs) : null;
     ticker?.unref?.();
     let failures = 0;

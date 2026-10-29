@@ -25,7 +25,7 @@ export function outcomeOf({ run, stopped = false, timedOut = false, retried = fa
   const output = String(run.output ?? '');
   const usage = run.usage && Object.keys(run.usage).length ? { ...run.usage, ...(run.runtime?.requested ? { requested: run.runtime.requested } : {}) } : undefined;
   const base = { v: 1, by: 'hub', at, ...(usage ? { usage } : {}) };
-  if (timedOut) return { ...base, outcome: 'failed', reason: 'time-limit', summary: 'The run reached its time limit and was stopped.' };
+  if (timedOut && run.status !== 'completed') return { ...base, outcome: 'failed', reason: 'time-limit', summary: 'The run reached its time limit and was stopped.' };
   if (run.status === 'completed') {
     const card = cardOf(output);
     if (card) return { ...base, outcome: 'card', card, summary: clip(output, 500) };

@@ -109,7 +109,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {} }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
@@ -351,8 +351,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
       if (handed?.waiting) waiting = handed.waiting;
     } catch (error) {
-      log(`[hub] hand-off to ${chosen} failed for ${id}: ${String(error.message).slice(0, 120)}`);
-      waiting = `Could not start yet: ${String(error.message).replace(/\s+/g, ' ').slice(0, 80)}`;
+      log(`[hub] hand-off to ${chosen} failed for ${id}: ${scrub(error.message, 120)}`);
+      waiting = `Could not start yet: ${scrub(error.message, 80)}`;
     }
     const after = await loadOne(id, at).catch(() => null);
     return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}) };

@@ -40,9 +40,9 @@ async function stack({ hermesOptions = {}, env = {}, timing = TIMING, noHermes =
   const hermes = noHermes ? null : await startFakeHermes({ key: 'k', delayMs: 5, ...hermesOptions });
   const clock = { at: Date.now() };
   const opened = [];
-  const addHub = async () => {
+  const addHub = async ({ fetchImpl, log } = {}) => {
     const hub = createHub({
-      bucket, enabled: true, now: () => new Date(clock.at), hermesTiming: timing, log: () => {},
+      bucket, enabled: true, now: () => new Date(clock.at), hermesTiming: timing, log: log ?? (() => {}), ...(fetchImpl ? { fetchImpl } : {}),
       env: { HUB_SIGNING_KEY: KEY, ...(hermes ? { HERMES_URL: hermes.url, HERMES_API_KEY: 'k' } : {}), ...env },
     });
     const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, `state-${opened.length}.json`), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
@@ -386,5 +386,81 @@ test('a crash between taken.json and the run is picked up again under the same i
     assert.equal(result.card, 'assistant/again');
     assert.equal(s.hermes.runs.length, 1);
     assert.equal(s.hermes.runs[0].key, id);
+  } finally { await s.close(); }
+});
+
+// --- review fixes: the time cap, and what leaves in text ---
+
+const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+test('the time limit stop is retried until Hermes takes it, and a failed stop does not lift the limit', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['start ', { hold: true }] } });
+  try {
+    let stopCalls = 0;
+    const api = await s.addHub({
+      fetchImpl: async (url, init) => {
+        if (String(url).endsWith('/stop') && ++stopCalls === 1) return jsonResponse(500, { error: { message: 'down' } });
+        return fetch(url, init);
+      },
+    });
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    s.clock.at += 31 * 60_000;
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.reason], ['failed', 'time-limit']);
+    assert.ok(stopCalls >= 2, `stop was tried ${stopCalls} times`);
+    assert.equal(s.hermes.stops.length, 1);
+    assert.equal(s.hermes.runs[0].status, 'cancelled');
+  } finally { await s.close(); }
+});
+
+test('the quota retry shares the first run\'s time limit instead of starting a new one', async () => {
+  const s = await stack({ hermesOptions: { chain: [{ provider: 'openai-codex', model: 'gpt-6-sol' }], providerFailures: { 'openai-codex': '429 usage limit reached' }, runScript: ['second ', { hold: true }] } });
+  try {
+    let started = 0;
+    const api = await s.addHub({
+      fetchImpl: async (url, init) => {
+        const answer = await fetch(url, init);
+        if (init?.method === 'POST' && String(url).endsWith('/v1/runs') && ++started === 1) s.clock.at += 20 * 60_000; // the retry starts 20 minutes after the first run
+        return answer;
+      },
+    });
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => s.file(id, 'hermes-retry.json'), 'hermes-retry.json');
+    const first = s.file(id, 'hermes-run.json');
+    const follower = api.hub.hermes.followers.get(s.file(id, 'hermes-retry.json').runId);
+    assert.equal(follower.context.limitFrom, first.at, 'The limit counts from the first start.');
+    assert.notEqual(follower.context.startedAt, first.at);
+    s.clock.at += 11 * 60_000; // 31 minutes after the first start, 11 after the retry's
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.reason, 'time-limit');
+  } finally { await s.close(); }
+});
+
+test('no URL or token leaves in a hand-off error: waiting, result.json, the 409 text and the log', async () => {
+  const lines = [];
+  const leak = 'connect failed https://hermes.internal.example/v1/runs?token=abc123 Bearer sekret-token-value';
+  const s = await stack();
+  try {
+    const failing = await s.addHub({
+      log: line => lines.push(line),
+      fetchImpl: async (url, init) => (init?.method === 'POST' && String(url).endsWith('/v1/runs') ? jsonResponse(500, { error: { message: leak } }) : fetch(url, init)),
+    });
+    const id = s.propose();
+    await approve(failing, id);
+    const result = s.resultOf(id);
+    assert.equal(result.reason, 'start-failed');
+    assert.match(result.summary, /^Hermes did not start: /);
+    for (const text of [JSON.stringify(result), ...lines]) assert.doesNotMatch(text, /hermes\.internal|https?:|abc123|sekret|Bearer/i, text);
+
+    const throwing = await s.addHub({ log: line => lines.push(line) });
+    throwing.hub.requestHooks.handOff.hermes = async () => { throw new Error(leak); };
+    const other = s.propose('other');
+    const answer = await approve(throwing, other);
+    assert.equal(answer.status, 201);
+    assert.match(answer.body.waiting, /^Could not start yet: /);
+    for (const text of [answer.body.waiting, ...lines]) assert.doesNotMatch(text, /hermes\.internal|https?:|abc123|sekret|Bearer/i, text);
   } finally { await s.close(); }
 });

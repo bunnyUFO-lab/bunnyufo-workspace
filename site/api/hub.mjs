@@ -21,6 +21,7 @@ import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
+import { createScrub } from './scrub.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -237,11 +238,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   let signingKey = null;
   let approveReason = 'Approvals are signed on the server; open mission control on the site.';
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log });
+  const scrub = createScrub(env);
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub });
   const { loadRequests } = requestFiles;
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
-  const hermesDispatch = createHermesDispatch({ env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming });
-  if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${error.message}`));
+  const hermesDispatch = createHermesDispatch({ env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming, scrub });
+  if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
   async function loadBeads(project) {
