@@ -46,6 +46,12 @@ const noteUnderTitle = async (row, selector, what) => {
   assert.ok(note.y >= title.y + title.height - 1, `${what}: the note sits under the title (${note.y} < ${title.y + title.height}).`);
   assert.ok(title.width >= whole.width * 0.4, `${what}: the title keeps its width (${title.width} of ${whole.width}).`);
 };
+/** Sending an answer from the Ask's own page moves on to the next item with a note; Back returns to the answered Ask. */
+const answeredThenBack = async page => {
+  await page.locator('[data-next-note]').waitFor();
+  await page.locator('[data-next-back]').click();
+  await page.locator('.hub-steps li.on', { hasText: 'Answered' }).waitFor();
+};
 const go = async (page, hash) => {
   await page.evaluate(value => { location.hash = value; }, hash);
 };
@@ -125,7 +131,7 @@ try {
   await page.locator('[data-option="B"] .hub-option-pick').click();
   await page.locator('.hub-field textarea').fill('shorter hang here');
   await page.locator('button:has-text("Send answer")').click();
-  await page.locator('.hub-steps li.on', { hasText: 'Answered' }).waitFor();
+  await answeredThenBack(page);
   assert.deepEqual([hubAnswer(FIXTURE_ASK).choice, hubAnswer(FIXTURE_ASK).note, hubAnswer(FIXTURE_ASK).by], ['B', 'shorter hang here', 'local']);
   assert.match(await page.locator('.hub-answer').innerText(), /B · floatier/);
   fixture.seed.put(`asks/${FIXTURE_ASK}/pickup.json`, { at: new Date().toISOString(), host: 'pc.example.test', bead: 'bd-7f3c' });
@@ -269,7 +275,7 @@ try {
   await tabs.locator('.hub-option').first().waitFor();
   await tabs.locator('.hub-option-pick').first().tap();
   await tabs.locator('button:has-text("Send answer")').tap();
-  await tabs.locator('.hub-steps li.on', { hasText: 'Answered' }).waitFor();
+  await answeredThenBack(tabs);
   await tabs.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3', null, { timeout: 5000 });
   assert.equal(await tabs.locator('[data-hub-badge]').count() ? await tabs.locator('[data-hub-badge]').innerText() : '3', '3', 'The sidebar count follows too.');
   // Later steps need an open Ask again.
@@ -1061,7 +1067,7 @@ try {
     assert.match(await target.locator('[data-attached]').innerText(), /Drawing attached to option B/);
     assert.equal(await target.locator('[data-option="B"].sel').count(), 1, 'Drawing on an option selects it.');
     await target.locator('button:has-text("Send answer")').click();
-    await target.locator('.hub-steps li.on', { hasText: 'Answered' }).waitFor();
+    await answeredThenBack(target);
     const folder = `sections/inbox/asks/${ask.id}`;
     const answer = fixture.fake.json(`${folder}/answer.json`);
     assert.equal(answer.choice, 'B');
