@@ -359,6 +359,10 @@ app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to 
 
 A `ready-for-review` event may also carry `prs` (GitHub pull request links), `cardDir` (`<section>/<card folder>`), `cardFiles` (`.md` paths inside that folder, such as `briefs/x.md`), `screenshots` (https image links), `deployUrl` (an https build link) and `verdicts` (`{ leg: smoke|review|qa, result: pass|fail|noted, text }`, at most three). The review view (`#/~hub/review/<file>`) checks each field again, shows what is there and an empty line for what is not, and reads the card files from the site's `/w/<cardDir>/<path>`. On the local service, which has no `/w/` route, a file shows as not here and the view offers the card instead.
 
+### Cloud runs
+
+The routine a cloud request fires, its environment and its fixed prompt are in [Cloud routines](cloud-routines.md).
+
 ### Requests
 
 A request is a folder `requests/<id>/` in the inbox. Every file in it is create-only. The state is never
