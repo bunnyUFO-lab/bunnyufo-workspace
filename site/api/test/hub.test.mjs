@@ -16,6 +16,9 @@ const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2
 const NOW = new Date();
 const id = (slug, n = 'a1b2') => `${NOW.toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${n}`;
 
+// The origin the site's own pages write from; every write in these tests carries it.
+const SITE = 'https://site.example';
+
 async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, wrapBucket = bucket => bucket } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-'));
   const fake = await startFakeS3();
@@ -23,11 +26,11 @@ async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, 
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hubInstance = createHub({ bucket: wrapBucket(bucket), enabled: hub, ...hubOptions });
-  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub: hubInstance });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub: hubInstance, allowedOrigins: [SITE] });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = (method, route, data, headers = {}) => fetch(`${origin}/api${route}`, {
-    method, headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+    method, headers: { ...(method === 'GET' ? {} : { Origin: SITE }), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
     body: data === undefined ? undefined : typeof data === 'string' ? data : JSON.stringify(data),
   });
   const get = async route => { const answer = await call('GET', route); return { status: answer.status, body: await answer.json().catch(() => null) }; };

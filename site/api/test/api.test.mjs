@@ -39,12 +39,12 @@ async function fixture({ template = true, bucket: withBucket = true, requireRemo
     await writeFile(path.join(templateDir, 'sample-markdown', 'index.md'), '# Sample\n');      // ignored: a sample card
   }
 
-  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, dev, stateKey, deployedRef });
+  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, dev, stateKey, deployedRef, ...(requireRemoteUser ? { allowedOrigins: ['https://site.example'] } : {}) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const request = (route, data, method, headers = {}) => fetch(`${origin}/api${route}`, {
     method: method ?? (data === undefined ? 'GET' : 'POST'),
-    headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+    headers: { ...(requireRemoteUser && (method ?? (data === undefined ? 'GET' : 'POST')) !== 'GET' ? { Origin: 'https://site.example' } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
     body: data === undefined ? undefined : JSON.stringify(data),
   });
   const raw = (route, init) => fetch(`${origin}${route}`, init);

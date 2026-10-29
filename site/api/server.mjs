@@ -87,6 +87,9 @@ function cleanPath(value) {
  *                    report the site read-only to a visitor who has none. Off by default: the local
  *                    dev proxy and the tests send no such header.
  * @param siteUrl     the address people sign in at, named in the read-only reason; empty leaves it out.
+ * @param allowedOrigins  the origins a write may come from (`https://host`, no path). A write from any other
+ *                    page, or with no Origin, is refused (403). With `requireRemoteUser` on and none given,
+ *                    every write is refused. With it off, the check runs only when this list is given.
  * @param cardApi     the card API's address, reported to pages in /capabilities as `cardApi` (null when unset).
  * @param stateKey    the bucket object holding pins, archives and tags (`dev-state.json` on the development copy).
  * @param dev         null on the real site. On the development copy `{ writable(sectionId) }`: every write to a card
@@ -95,6 +98,26 @@ function cleanPath(value) {
  * @param hub         a Hub from hub.mjs (createHub), or null: the /hub/ routes, answered after the sign-in
  *                    check and before anything that reads a body. It reports itself in /capabilities.
  */
+/** `https://host/path` → `https://host`. A malformed address gives nothing, which refuses every write. */
+export function originOf(value) {
+  try { return new URL(String(value)).origin; } catch { return ''; }
+}
+
+/** The origins writes may come from: a comma list if given, else the origin of the site address. */
+export function allowedOriginsFrom({ origins = '', siteUrl = '' } = {}) {
+  const list = String(origins).split(',').map(item => item.trim()).filter(Boolean);
+  return (list.length ? list : [siteUrl]).map(originOf).filter(o => o && o !== 'null');
+}
+
+/**
+ * What main.mjs passes as `allowedOrigins`: the list when sign-in is required or an origin was configured,
+ * else null, so a local run with neither set (the dev proxy keeps the browser's own Origin) is not refused.
+ */
+export function writeOriginsFor({ requireRemoteUser = false, origins = '', siteUrl = '' } = {}) {
+  const list = allowedOriginsFrom({ origins, siteUrl });
+  return requireRemoteUser || list.length ? list : null;
+}
+
 export function createSiteApi({
   bucket = null,
   prefix = 'sections',
@@ -104,6 +127,7 @@ export function createSiteApi({
   requireRemoteUser = false,
   hub = null,
   siteUrl = '',
+  allowedOrigins = null,
   cardApi = '',
   stateKey = 'state.json',
   dev = null,
@@ -263,6 +287,19 @@ export function createSiteApi({
 
       if (requireRemoteUser && !reading && !signedIn) {
         return json(response, 401, { error: 'Writes need a signed-in user (Remote-User).' });
+      }
+
+      // A write comes from this site's own pages and says so in JSON. A page an agent wrote lives on
+      // another origin (or an opaque one), and a form post from anywhere sends text or form types.
+      if (!reading && request.method !== 'OPTIONS' && (requireRemoteUser || allowedOrigins)) {
+        const origins = allowedOrigins ?? [];
+        if (!origins.length) return json(response, 403, { error: 'No allowed origin is configured (BUW_SITE_URL or BUW_SITE_ORIGINS is missing or malformed), so writes are off.' });
+        if (!origins.includes(String(request.headers.origin ?? ''))) {
+          return json(response, 403, { error: "Writes come only from this site's own pages." });
+        }
+        const type = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+        const wanted = route === '/hub/transcribe' ? /^audio\/[a-z0-9.+-]+$/ : /^application\/json$/;
+        if (!wanted.test(type)) return json(response, 415, { error: 'Send JSON.' });
       }
 
       // The site list the UI loads first: one entry per section in the bucket.

@@ -34,7 +34,7 @@ async function fixture({ discord = true, token = `buwd_${randomBytes(32).toStrin
   const logs = [];
   const env = discord ? { HUB_DISCORD_TOKEN_SHA256: sha(token), HUB_DISCORD_OWNER_ID: OWNER } : {};
   const hub = createHub({ bucket, enabled: true, env, log: line => logs.push(line) });
-  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, allowedOrigins: ['https://site.example'], hub });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   const origin = `http://127.0.0.1:${port}`;
@@ -62,6 +62,18 @@ async function fixture({ discord = true, token = `buwd_${randomBytes(32).toStrin
   const close = async () => { server.close(); await fake.close(); };
   return { fake, token, logs, port, call, list, answer, answerBody, ask, askKey, answerKey, revOf, writes, bearer, seed, close };
 }
+
+test('0. the bot answers with its bearer token and no Origin, while a browser write without one is refused', async () => {
+  const f = await fixture();
+  try {
+    const ask = f.ask('noorigin');
+    const done = await f.answer(f.answerBody(ask, f.revOf(ask)));
+    assert.equal(done.status, 201);
+    assert.equal(done.body.answer?.choice ?? JSON.parse(f.fake.text(f.answerKey(ask))).choice, 'A');
+    const browser = await f.call('POST', `/hub/asks/${f.ask('web', {}, {}, 'd4d4').id}/snooze`, { body: {}, headers: { 'Remote-User': 'owner' } });
+    assert.equal(browser.status, 403, 'The same server refuses a signed-in write that has no Origin.');
+  } finally { await f.close(); }
+});
 
 test('1. another user\'s click is refused and writes nothing', async () => {
   const f = await fixture();
