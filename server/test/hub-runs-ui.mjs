@@ -105,10 +105,19 @@ try {
   await stopper.goto(`${held.url}#/~hub/needs`);
   await stopper.locator(`[data-need="approval-${ids.hold}"] [data-approval-approve]`).click();
   await stopper.locator('[data-next-note]').waitFor();
+  // The first events connection drops before any data: the drawer opens it again and shows the text once.
+  let eventCalls = 0;
+  await stopper.route('**/api/hub/requests/*/events', async route => {
+    eventCalls += 1;
+    if (eventCalls === 1) await route.abort(); else await route.continue();
+  });
   await stopper.goto(`${held.url}#/~hub/needs/requests`);
   await stopper.locator(`[data-request-open="${ids.hold}"]`).click();
   const heldDrawer = stopper.locator('[data-run-drawer]');
   await heldDrawer.locator('[data-run-text]', { hasText: 'Working on it.' }).waitFor();
+  assert.ok(eventCalls >= 2, 'The drawer reconnected after the drop.');
+  assert.equal(await heldDrawer.locator('[data-run-text]').count(), 1, 'The text is not doubled by the reconnect.');
+  assert.equal((await heldDrawer.locator('[data-run-text]').innerText()).trim(), 'Working on it.');
   await heldDrawer.locator('[data-run-stop]').click();
   await heldDrawer.locator('[data-run-state-chip]', { hasText: /^(Stopping|Stopped)$/ }).waitFor();
   await heldDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();

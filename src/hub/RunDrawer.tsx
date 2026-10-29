@@ -8,8 +8,9 @@ import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
 import { RUN_EVENT, takeRun } from './runStore'
-import type { LiveLine } from './runStream'
-import { applyRunEvent, streamRun } from './runStream'
+import type { LiveLine } from './runLines'
+import { applyRunEvent } from './runLines'
+import { streamRun } from './runStream'
 import { useHubData } from './useHub'
 import './runs.css'
 
@@ -30,7 +31,7 @@ const STATE_WORD: Record<string, string> = {
 }
 const STOPPABLE = new Set(['approved', 'taken', 'running', 'lost', 'asking'])
 const AGAIN = new Set(['expired', 'failed', 'lost'])
-const LIVE_STATES = new Set(['approved', 'taken', 'running'])
+const LIVE_STATES = new Set(['approved', 'taken', 'running', 'stopping'])
 const RUN_WORD: Record<string, string> = { started: 'Started', working: 'Working', 'turn-ended': 'Turn ended', 'usage-limit': 'Usage limit' }
 
 const usageLine = (usage?: Record<string, unknown>) => Object.entries(usage ?? {}).filter(([, value]) => typeof value === 'number').slice(0, 4).map(([name, value]) => `${name.replace(/_/g, ' ')} ${(value as number).toLocaleString()}`).join(' · ')
@@ -85,15 +86,27 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   useEffect(() => {
     if (!live) return undefined
     const controller = new AbortController()
-    let fresh = true
-    streamRun(id, event => {
-      if (event.event === 'state') { reload(); return }
-      // The server replays what it buffered, so a stream that starts again starts the list again.
-      const restart = fresh
-      fresh = false
-      setLines(current => applyRunEvent(restart ? [] : current, event))
-    }, controller.signal).then(() => { setEnded(true); reload() }, (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setEnded(true) })
-    return () => controller.abort()
+    let wait = 0
+    let timer = 0
+    // Follow until the request reaches a terminal state (this effect ends when `live` turns false). A stream that ends or drops
+    // is opened again after a pause that grows to 15 s; the server replays what it buffered, so each connection starts the list again.
+    const follow = () => {
+      let fresh = true
+      streamRun(id, event => {
+        wait = 0
+        if (event.event === 'state') { reload(); return }
+        const restart = fresh
+        fresh = false
+        setLines(current => applyRunEvent(restart ? [] : current, event))
+      }, controller.signal).then(() => { setEnded(true); reload() }, (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setEnded(true) })
+        .finally(() => {
+          if (controller.signal.aborted) return
+          wait = Math.min(wait === 0 ? 1000 : wait * 2, 15_000)
+          timer = window.setTimeout(follow, wait)
+        })
+    }
+    follow()
+    return () => { controller.abort(); window.clearTimeout(timer) }
   }, [live, id, reload])
 
   useEffect(() => {
