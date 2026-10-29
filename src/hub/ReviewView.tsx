@@ -3,7 +3,9 @@ import type { Item, ReviewDetail, ShotPair, Verdict } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { MarkdownView } from '../components/MarkdownDocument'
 import { entityHash, hubHash, reviewHash } from '../lib/route'
-import { setFlash } from './flash'
+import { takeHandoff } from './flash'
+import NextNote from './NextNote'
+import { goNext, useQueueOrder } from './useGoNext'
 import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
 import Md from './Md'
@@ -90,6 +92,8 @@ export default function ReviewView({ route }: { route: string }) {
   const id = slash < 0 ? route : route.slice(0, slash)
   const file = slash < 0 ? undefined : route.slice(slash + 1) || undefined
   const { data: detail, error } = useHubData<ReviewDetail>(`/reviews/${encodeURIComponent(id)}`)
+  const [handoff] = useState(takeHandoff)
+  const queue = useQueueOrder()
   const root = useRef<HTMLDivElement>(null)
   const title = useRef<HTMLHeadingElement>(null)
   const pushes = useRef(0)
@@ -151,6 +155,7 @@ export default function ReviewView({ route }: { route: string }) {
 
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
+      {handoff && <NextNote note={handoff} />}
       <div className="hub-review-head">
         <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
         <div className="hub-top">
@@ -221,7 +226,7 @@ export default function ReviewView({ route }: { route: string }) {
                 : (
                   <>
                     <p className="hub-muted" data-done-hint>Mark done hides this review from Needs you. It does not approve or merge anything.</p>
-                    <ReviewActions item={item} links={false} onDone={() => { setFlash('Marked done. It is gone from Needs you.'); window.location.replace(hubHash('needs')) }} />
+                    <ReviewActions item={item} links={false} onDone={() => void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id))} />
                   </>
                 )}
           </section>

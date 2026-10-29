@@ -6,12 +6,13 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, checklistJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
 const fixture = await startHubFixture({ checklists: true });
+let second = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -109,7 +110,7 @@ try {
   await card.getByRole('button', { name: 'Send answer' }).click();
   await card.waitFor({ state: 'detached' });
   assert.deepEqual([answerOf(FIXTURE_ASK).choice, answerOf(FIXTURE_ASK).note, answerOf(FIXTURE_ASK).by], ['B', 'shorter hang here', 'local']);
-  await page.locator('.ni-status', { hasText: 'Answered.' }).waitFor();
+  await page.locator('[data-next-note]', { hasText: 'Answered' }).waitFor();
   await page.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '3');
   assert.equal(await page.locator('.hub-chip[data-filter="question"]').count(), 0, 'The Question chip hides when nothing is left.');
   await page.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3');
@@ -130,7 +131,7 @@ try {
   await page.locator('.ni[data-kind="unstick"]').waitFor({ state: 'detached' });
   const done = [...fixture.fake.objects.keys()].filter(key => key.includes('/events/')).map(key => fixture.fake.json(key)).filter(event => event.kind === 'review-done');
   assert.equal(done.length, 2);
-  await page.locator('.ni-status', { hasText: 'Marked done.' }).waitFor();
+  await page.locator('[data-next-note]', { hasText: 'Marked done' }).waitFor();
 
   step('Snooze a day takes an Ask off the list and writes snooze.json for a day');
   const snoozed = askJson({ id: askId('snooze-me', 's1s1'), now: new Date(), question: 'Snooze me?' });
@@ -143,7 +144,7 @@ try {
   const snooze = fixture.fake.json(`sections/inbox/asks/${snoozed.id}/snooze.json`);
   const hours = (new Date(snooze.until ?? snooze.snoozedUntil).getTime() - Date.now()) / 3600000;
   assert.ok(hours > 23 && hours <= 24.1, `Snoozed for a day (${hours} h).`);
-  await page.locator('.ni-status', { hasText: 'Snoozed for a day.' }).waitFor();
+  await page.locator('[data-next-note]', { hasText: 'Snoozed' }).waitFor();
 
   step('with the collapse on, the card is still on screen during the animation and gone after it');
   const motion = await open({ width: 1280, height: 800 });
@@ -178,9 +179,105 @@ try {
   await go(phone, `#/~hub/ask/${FIXTURE_ASK}`);
   await phone.locator('.hub-option').first().waitFor();
   await noSideways(phone, 'the Ask view at 375 px');
+
+  // ---- The next item: a second fixture with a known queue (Questions, a list, a blocked session). ----
+  second = await startHubFixture({ seedData: false });
+  const nowMs = Date.now();
+  const q1 = askJson({ id: askId('first', 'f1f1'), now: new Date(nowMs - 20 * 60000), question: 'Question one?' });
+  const q2 = askJson({ id: askId('second', 's2s2'), now: new Date(nowMs - 10 * 60000), question: 'Question two?' });
+  const q3 = askJson({ id: askId('third', 't3t3'), now: new Date(nowMs - 5 * 60000), question: 'Question three?' });
+  const listOne = checklistJson({ id: askId('steps', 'c4c4'), now: new Date(nowMs - 30 * 60000), title: 'Steps for you' });
+  for (const item of [q1, q2]) second.seed.ask(item);
+  second.seed.checklist(listOne);
+  second.seed.event(eventJson({ kind: 'blocked', ts: new Date(nowMs - 40 * 60000), session: 'sess-next', title: 'Stuck session' }));
+  const flat = text => text.replace(/\s+/g, ' ').trim();
+  const reduced = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+
+  step('next item, in the list: answering the first Question collapses it, a note names the next one, focus moves to it');
+  await reduced.goto(`${second.url}#/~hub/needs`);
+  const first = reduced.locator(`.ni[data-need="ask-${q2.id}"]`);
+  await first.waitFor();
+  assert.deepEqual(await reduced.locator('.ni .ni-t').allTextContents(), ['Question two?', 'Question one?', 'Steps for you', 'Stuck session'], 'The server order: newest Ask first.');
+  await first.locator('textarea').fill('two is fine');
+  await first.getByRole('button', { name: 'Send answer' }).click();
+  const note = reduced.locator('[data-next-note]');
+  await note.waitFor();
+  assert.equal(flat(await note.textContent()), 'Answered · next: Question one?Back', 'The note names what was done and what comes next.');
+  assert.equal(await note.getAttribute('role'), 'status');
+  await first.waitFor({ state: 'detached' });
+  assert.equal(await reduced.evaluate(() => document.activeElement?.closest('.ni')?.getAttribute('data-need')), `ask-${q1.id}`, 'Focus is on the next card.');
+  assert.equal(await reduced.evaluate(() => document.activeElement?.classList.contains('ni-t')), true, 'On its title.');
+  assert.equal(await reduced.locator('.nq > *').first().evaluate(node => node.matches('[data-next-note]')), true, 'The note sits in the slot the card left.');
+  assert.equal(second.fake.json(`sections/inbox/asks/${q2.id}/answer.json`).note, 'two is fine');
+
+  step('Back opens the answered item and shows its answer');
+  assert.equal(await note.locator('[data-next-back]').getAttribute('href'), `#/~hub/ask/${q2.id}`);
+  await note.locator('[data-next-back]').click();
+  await reduced.locator('.hub-answer', { hasText: 'two is fine' }).waitFor();
+  assert.equal(await reduced.locator('[data-next-note]').count(), 0, 'No note on the settled item itself.');
+
+  step('next item, from a deep link: Submit lands on the next item with the note, and the browser Back returns to the list');
+  await go(reduced, `#/~hub/checklist/${listOne.id}`);
+  await reduced.locator('[data-submit]').waitFor();
+  await reduced.locator('[data-submit]').click();
+  await reduced.locator('[data-warning]').waitFor();
+  await reduced.locator('[data-submit]').click();
+  await reduced.locator('[data-next-note]', { hasText: 'Submitted · next: Stuck session' }).waitFor();
+  await reduced.locator('.ni[data-kind="unstick"].flash').waitFor();
+  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/unstick', 'The Ask came before the list in the queue, so the next item is the blocked session: no page of its own, so the Unstick chip.');
+  assert.equal(await reduced.locator('[data-next-note] [data-next-back]').getAttribute('href'), `#/~hub/checklist/${listOne.id}`);
+  await reduced.goBack();
+  await reduced.locator('.hub-cl[data-state="submitted"]').waitFor();
+
+  step('an Unstick item has no page of its own: its link is the Unstick chip with the card in focus; the last Mark done leaves the empty state with the note');
+  await go(reduced, `#/~hub/ask/${q1.id}`);
+  await reduced.locator('textarea').fill('one is fine');
+  await reduced.getByRole('button', { name: 'Send answer' }).click();
+  await reduced.locator('[data-next-note]', { hasText: 'Answered · next: Stuck session' }).waitFor();
+  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/unstick');
+  await reduced.locator('.ni[data-kind="unstick"]').waitFor();
+  await reduced.locator('.ni[data-kind="unstick"] .ni-t').waitFor();
+  await reduced.locator('.ni[data-kind="unstick"]').getByRole('button', { name: 'Mark done' }).click();
+  await reduced.locator('.needs-empty').waitFor();
+  const empty = reduced.locator('[data-next-note]');
+  assert.equal(flat(await empty.textContent()), 'Marked done. Nothing else waits on you.Back');
+  assert.equal(await empty.locator('[data-next-back]').getAttribute('href'), '#/~hub/needs/unstick');
+  assert.equal(await reduced.locator('.hub-chip.on').getAttribute('data-filter'), 'unstick');
+
+  step('Snooze counts as settled: from a deep link the next item opens');
+  const q4 = askJson({ id: askId('fourth', 'q4q4'), now: new Date(nowMs - 1 * 60000), question: 'Question four?' });
+  second.seed.ask(q3);
+  second.seed.ask(q4);
+  await go(reduced, `#/~hub/ask/${q4.id}`);
+  await reduced.getByRole('button', { name: 'Snooze a day' }).waitFor();
+  await reduced.getByRole('button', { name: 'Snooze a day' }).click();
+  await reduced.locator('[data-next-note]', { hasText: 'Snoozed · next: Question three?' }).waitFor();
+  assert.equal(await reduced.evaluate(() => location.hash), `#/~hub/ask/${q3.id}`);
+
+  step('phone: the note fits at 375 px, Back is 44 px tall, nothing scrolls sideways, the note is above the tab bar');
+  const phone2 = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+  second.seed.ask(askJson({ id: askId('p-one', 'p1p1'), now: new Date(nowMs - 4 * 60000), question: 'A phone question with a title long enough to need clipping on a narrow screen, really quite long indeed?' }));
+  second.seed.ask(askJson({ id: askId('p-two', 'p2p2'), now: new Date(nowMs - 3 * 60000), question: 'Phone question two?' }));
+  await phone2.goto(`${second.url}#/~hub/needs/question`);
+  await phone2.locator('.ni').nth(2).waitFor();
+  const target = phone2.locator('.ni').first();
+  await target.locator('textarea').fill('ok');
+  await target.getByRole('button', { name: 'Send answer' }).tap();
+  const phoneNote = phone2.locator('[data-next-note]');
+  await phoneNote.waitFor();
+  await phone2.waitForTimeout(400);
+  const back = await phoneNote.locator('[data-next-back]').boundingBox();
+  assert.ok(back && back.height >= 44, `Back is ${back?.height} px tall.`);
+  const box = await phoneNote.boundingBox();
+  const bar = await phone2.locator('nav.hub-tabs').boundingBox();
+  assert.ok(box && box.y >= 0 && box.y + box.height <= (bar?.y ?? 812), 'The note is on screen and above the phone bar.');
+  assert.ok(back.x + back.width <= 375, 'Back is not pushed off screen.');
+  assert.ok(await phoneNote.locator('.nq-next-text').evaluate(node => node.getBoundingClientRect().height < 70), 'The note is at most two lines.');
+  await noSideways(phone2, 'the next-item note at 375 px');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   await fixture.close();
+  await second?.close();
 }
 console.log('hub-needs-ui: passed');
