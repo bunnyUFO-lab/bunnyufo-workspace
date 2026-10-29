@@ -77,10 +77,11 @@
 //        (taken.json with the nonce, no bead); exit 5 when the nonce is not the approval's
 //   cards request verify <id> [--target pc|cloud] [--repo owner/name]   check the owner's signature and every limit; prints one JSON line
 //        { id, project, repo, target, limits, nonce, preset }, or exits 5 with the first failed check (unsigned, bad-signature,
-//        wrong-request, hash-mismatch, expired, bad-limits, no-run-block, stopped, declined, nonce-used, wrong-target, wrong-repo).
+//        wrong-request, hash-mismatch, expired, bad-limits, no-run-block, stopped, declined, finished, nonce-used, wrong-target, wrong-repo;
+//        a hermes approval is always wrong-target here, and an unreadable taken.json is nonce-used).
 //        The public key: HUB_SIGNING_PUBKEY (base64 SPKI or PEM), else the file BUW_APPROVAL_PUBKEY names, else
 //        ~/.buw/secrets/approval-signing-key.pub; none is exit 5
-//   cards request brief <id>                                          verify, then print the run's brief (exit 5 when invalid)
+//   cards request brief <id> [--target pc|cloud] [--repo owner/name]                                          verify, then print the run's brief (exit 5 when invalid)
 //   cards request run <id> --state started|working|turn-ended|usage-limit [--last <text>] [--link <url>]   a progress file (secrets masked)
 //   cards request finish <id> --outcome pr|card|failed --summary <s> [--pr <url>] [--card <link>] [--reason <r>] [--report <file.md>]
 //        report.md then result.json, both create-only (exit 3 when result.json exists); posts pr-opened or alert
@@ -1323,13 +1324,21 @@ async function verifyApproval(rawId, { target, repo } = {}) {
   const id = idSafe(rawId);
   if (!id) throw new Error('A request id is needed.');
   const publicKey = await approvalPublicKey();
-  const [requestBytes, approvedText, takenDoc, stopText, declinedText] = await Promise.all([
+  const [requestBytes, approvedText, takenBytes, stopText, declinedText, resultText] = await Promise.all([
     readInboxBytes(inboxPath('requests', id, 'request.json')),
     readInbox(inboxPath('requests', id, 'approved.json')),
-    readJson(inboxPath('requests', id, 'taken.json')),
+    readInboxBytes(inboxPath('requests', id, 'taken.json')),
     readInbox(inboxPath('requests', id, 'stop.json')),
     readInbox(inboxPath('requests', id, 'declined.json')),
+    readInbox(inboxPath('requests', id, 'result.json')),
   ]);
+  // A taken.json that is there but cannot be read counts as taken by someone else.
+  let takenDoc = null;
+  let takenUnreadable = false;
+  if (takenBytes !== null) {
+    try { takenDoc = JSON.parse(takenBytes.toString('utf8').replace(/^\uFEFF/, '')); } catch { takenUnreadable = true; }
+    if (!takenDoc || typeof takenDoc !== 'object') takenUnreadable = true;
+  }
   let approved = null;
   try { approved = approvedText === null ? null : JSON.parse(approvedText); } catch { /* unsigned */ }
   if (!approved || typeof approved !== 'object' || Array.isArray(approved) || typeof approved.signature !== 'string') refuse('unsigned: there is no signed approval for this request.');
@@ -1337,7 +1346,7 @@ async function verifyApproval(rawId, { target, repo } = {}) {
   if (approved.v !== 1 || approved.request !== id) refuse('wrong-request: the approval is for another request.');
   if (requestBytes === null || createHash('sha256').update(requestBytes).digest('hex') !== approved.requestSha256) refuse('hash-mismatch: request.json changed after it was approved.');
   let request = null;
-  try { request = JSON.parse(requestBytes.toString('utf8').replace(/^﻿/, '')); } catch { /* checked next */ }
+  try { request = JSON.parse(requestBytes.toString('utf8').replace(/^\uFEFF/, '')); } catch { /* checked next */ }
   if (!request || request.id !== id || request.project !== approved.project) refuse('wrong-request: request.json does not match the approval.');
   const expires = typeof approved.expires === 'string' ? Date.parse(approved.expires) : NaN;
   if (!(expires > Date.now())) refuse('expired: the approval is past its expiry.');
@@ -1347,8 +1356,10 @@ async function verifyApproval(rawId, { target, repo } = {}) {
   if (!run || typeof run !== 'object' || typeof run.brief !== 'string' || !run.brief || typeof run.preset !== 'string') refuse('no-run-block: the approval has no run block.');
   if (stopText !== null) refuse('stopped: the owner stopped this request.');
   if (declinedText !== null) refuse('declined: the owner declined this request.');
-  if (typeof approved.nonce !== 'string' || !approved.nonce || (takenDoc && takenDoc.nonce !== approved.nonce)) refuse('nonce-used: another run took this approval.');
-  if (!['pc', 'cloud', 'hermes'].includes(approved.target) || (target && approved.target !== target)) refuse(`wrong-target: the approval is for ${approved.target}.`);
+  if (resultText !== null) refuse('finished: this request already has a result.');
+  if (typeof approved.nonce !== 'string' || !approved.nonce || takenUnreadable || (takenDoc && takenDoc.nonce !== approved.nonce)) refuse('nonce-used: another run took this approval.');
+  // This CLI runs pc and cloud approvals only: a hermes one is started by the site API, never by a runner.
+  if (!['pc', 'cloud'].includes(approved.target) || (target && approved.target !== target)) refuse(`wrong-target: the approval is for ${approved.target}.`);
   if (repo && approved.repo !== repo) refuse(`wrong-repo: the approval is for ${approved.repo ?? 'no repo'}.`);
   return { id, approved, request };
 }
@@ -1359,8 +1370,9 @@ async function requestVerify(rawId, flags) {
   console.log(JSON.stringify({ id, project: approved.project, repo: approved.repo ?? null, target: approved.target, limits: approved.limits, nonce: approved.nonce, preset: approved.run.preset }));
 }
 
-async function requestBrief(rawId) {
-  const { approved } = await verifyApproval(rawId);
+async function requestBrief(rawId, flags) {
+  if (flags.target && !['pc', 'cloud'].includes(flags.target)) throw new Error('--target is pc or cloud.');
+  const { approved } = await verifyApproval(rawId, flags);
   process.stdout.write(approved.run.brief.endsWith('\n') ? approved.run.brief : `${approved.run.brief}\n`);
 }
 
@@ -1426,7 +1438,7 @@ async function requestFinish(rawId, flags) {
     ...(flags.pr ? { pr: flags.pr } : {}),
     ...(flags.card ? { card: String(flags.card) } : {}),
     summary: clip(maskSecrets(flags.summary), 500),
-    ...(flags.reason ? { reason: flags.reason } : {}),
+    ...(flags.reason ? { reason: clip(maskSecrets(flags.reason), 80) } : {}),
     by: 'run', at: isoNow(),
   };
   if (await mustPut(resultFile, `${JSON.stringify(result, null, 2)}\n`, { createOnly: true }) === 'exists') { console.error(`requests/${id}/result.json was written already.`); throw new Exit(3); }
@@ -1556,7 +1568,7 @@ async function inbox(command, args) {
   if (command === 'request' && sub === 'list') return requestList(flags);
   if (command === 'request' && sub === 'create') return requestCreate(flags);
   if (command === 'request' && sub === 'verify' && id) return requestVerify(id, flags);
-  if (command === 'request' && sub === 'brief' && id) return requestBrief(id);
+  if (command === 'request' && sub === 'brief' && id) return requestBrief(id, flags);
   if (command === 'request' && sub === 'run') return requestRun(flags);
   if (command === 'request' && sub === 'finish') return requestFinish(id ?? process.env.BUW_REQUEST_ID, flags);
   if (command === 'request' && sub === 'state' && id) return requestState(id);

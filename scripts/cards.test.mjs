@@ -950,18 +950,33 @@ for (const via of ['api', 's3']) {
         ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ bead: 'bd-1' }), 'application/json'); }],
         ['wrong-target', () => seedApproved(fake, { target: 'cloud' })],
         ['wrong-target', () => seedApproved(fake, { target: 'moon' })],
+        ['finished', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/result.json`, '{}', 'application/json'); }],
+        ['finished', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ nonce: 'AAAAAAAAAAAAAAAAAAAAAA' }), 'application/json'); fake.seed(`sections/inbox/requests/${RUN_ID}/result.json`, '{}', 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{ broken')]), 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, 'null', 'application/json'); }],
       ];
       for (const [reason, arrange] of cases) {
-        for (const name of ['stop.json', 'declined.json', 'taken.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
+        for (const name of ['stop.json', 'declined.json', 'taken.json', 'result.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
         arrange();
         const bad = await cli(via, 'request', 'verify', RUN_ID, '--target', 'pc');
         assert.equal(bad.code, 5, `${reason}: ${bad.stderr}`);
         assert.equal(reasonOf(bad), reason, bad.stderr);
         assert.equal(bad.stdout, '', 'nothing on stdout for a refusal');
-        if (reason !== 'wrong-target') assert.equal((await cli(via, 'request', 'brief', RUN_ID)).code, 5, `${reason}: brief refuses too`);
+        if (reason !== 'wrong-target' || arrange.toString().includes('moon')) assert.equal((await cli(via, 'request', 'brief', RUN_ID)).code, 5, `${reason}: brief refuses too`);
       }
-      for (const name of ['stop.json', 'declined.json', 'taken.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
+      for (const name of ['stop.json', 'declined.json', 'taken.json', 'result.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
+      // A hermes approval is never run by this CLI, with or without --target; brief checks target and repo too.
+      seedApproved(fake, { target: 'hermes' });
+      for (const args of [['verify'], ['verify', '--target', 'pc'], ['brief'], ['brief', '--target', 'pc']]) {
+        const refused = await cli(via, 'request', args[0], RUN_ID, ...args.slice(1));
+        assert.equal(refused.code, 5, args.join(' '));
+        assert.equal(reasonOf(refused), 'wrong-target');
+        assert.equal(refused.stdout, '', 'no brief printed');
+      }
       seedApproved(fake, { target: 'cloud', repo: 'example/game' });
+      assert.equal(reasonOf(await cli(via, 'request', 'brief', RUN_ID, '--target', 'pc')), 'wrong-target');
+      assert.equal(reasonOf(await cli(via, 'request', 'brief', RUN_ID, '--repo', 'example/other')), 'wrong-repo');
+      assert.equal((await cli(via, 'request', 'brief', RUN_ID, '--target', 'cloud', '--repo', 'example/game')).code, 0);
       assert.equal((await cli(via, 'request', 'verify', RUN_ID, '--target', 'pc')).code, 5, 'wrong target');
       assert.equal(reasonOf(await cli(via, 'request', 'verify', RUN_ID, '--repo', 'example/other')), 'wrong-repo');
       assert.equal((await cli(via, 'request', 'verify', RUN_ID, '--target', 'cloud', '--repo', 'example/game')).code, 0);
@@ -1043,6 +1058,15 @@ for (const via of ['api', 's3']) {
       const result = JSON.parse(fake.objects.get(`sections/inbox/requests/${RUN_ID}/result.json`).body.toString());
       assert.deepEqual({ ...result, at: undefined }, { v: 1, outcome: 'card', card: 'assistant/tugs', summary: 'Three tug games', by: 'run', at: undefined });
       assert.equal((await cli(via, 'request', 'finish', RUN_ID, '--outcome', 'failed', '--summary', 'again')).code, 3);
+      const second = RUN_ID.replace('a1b2', 'f7a8');
+      seedApproved(fake, {}, { id: second, requestText: REQUEST_JSON.replace(RUN_ID, second) });
+      const secret = ['sk', 'ant-api03-xxxxxxxxxxxxxxxxxxxxxxxx'].join('-');
+      assert.equal((await cli(via, 'request', 'finish', second, '--outcome', 'failed', '--summary', `leak ${secret}`, '--reason', `time-limit ${secret} ${'z '.repeat(60)}`)).code, 0);
+      const failed = JSON.parse(fake.objects.get(`sections/inbox/requests/${second}/result.json`).body.toString());
+      assert.equal(failed.reason.includes('ant-api03'), false, 'the reason is masked');
+      assert.match(failed.reason, /^time-limit \[masked\]/);
+      assert.ok(failed.reason.length <= 80, 'the reason is clipped');
+      assert.equal(failed.summary, 'leak [masked]');
       assert.equal((await cli(via, 'request', 'finish', 'other-1234', '--outcome', 'win', '--summary', 'x')).code, 1);
     } finally { await close(); }
   });
@@ -1103,3 +1127,24 @@ test('MAX_RUN_MINUTES in cards.mjs equals the one in presets.mjs', async () => {
   const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
   assert.equal(Number(/const MAX_RUN_MINUTES = (\d+);/.exec(source)[1]), presets.MAX_RUN_MINUTES);
 });
+
+for (const via of ['api', 's3']) {
+  test(`request verify (${via}): request.json with a BOM verifies when the hash is over the raw bytes, and not when it is over the text`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem };
+      const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(REQUEST_JSON, 'utf8')]);
+      const seedBom = requestSha256 => {
+        seedApproved(fake, { requestSha256 });
+        fake.seed(`sections/inbox/requests/${RUN_ID}/request.json`, withBom, 'application/json');
+      };
+      seedBom(sha256Hex(withBom));
+      const good = await cli(via, 'request', 'verify', RUN_ID);
+      assert.equal(good.code, 0, good.stderr);
+      seedBom(sha256Hex(Buffer.from(REQUEST_JSON, 'utf8')));
+      const bad = await cli(via, 'request', 'verify', RUN_ID);
+      assert.equal(bad.code, 5);
+      assert.equal(reasonOf(bad), 'hash-mismatch');
+    } finally { await close(); }
+  });
+}
