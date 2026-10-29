@@ -13,7 +13,7 @@ export interface RoomDef {
 /** The rooms, in the order they are drawn. An agent whose room is not here sits in Ops. */
 export const ROOMS: readonly RoomDef[] = [
   { id: 'Command', label: 'Command', note: 'plans, chats, dispatches', span: 2 },
-  { id: 'Research', label: 'Research', note: 'web and market', span: 1 },
+  { id: 'Research', label: 'Research', note: 'web and market', span: 2 },
   { id: 'Art', label: 'Art', note: 'sprites, boards', span: 1 },
   { id: 'Build', label: 'Build', note: 'design and code', span: 2 },
   { id: 'Review', label: 'Review', note: 'verify and play-test', span: 2 },
