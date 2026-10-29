@@ -43,8 +43,8 @@
 //        link to the Ask (`siteUrl` in hub.json or BUW_SITE_URL). A failed post is spooled for hub-hooks to
 //        replay and never changes the exit code; the webhook address is never printed or stored.
 //        A simple multiple-choice Ask (2 to 5 options, no pictures, no drawing) also gets Discord buttons once the
-//        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where a
-//        passkey signs the answer: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
+//        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where only you,
+//        signed in, can answer it: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
