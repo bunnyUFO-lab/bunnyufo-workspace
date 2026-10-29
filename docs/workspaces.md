@@ -460,7 +460,7 @@ tap does not count); over it a proposal stays with the note "Policy limit reache
 
 Cloud runs (`routines.mjs`): a repo has a cloud target when the site API's environment holds the pair
 `CLAUDE_ROUTINE_<REPO_KEY>_URL` and `_TOKEN` (`REPO_KEY` is the repo's name part in capitals with every other character
-as `_`: `owner/my-repo` is `MY_REPO`). A half pair is logged once by key name and ignored. Optionally `CLAUDE_ROUTINE_<REPO_KEY>_REPO=owner/name` limits the routine to that exact repo (without it, any `<owner>/<name>` with the same name part matches and a log line says so). Approving a cloud request signs
+as `_`: `owner/my-repo` is `MY_REPO`). A half pair is logged once by key name and ignored. `CLAUDE_ROUTINE_<REPO_KEY>_REPO=owner/name` is required: the routine serves only that exact repo. Without it the routine is refused (fail closed): nothing is sent, the fire record has `reason: routine-repo-unset` and the log says which key is missing. Approving a cloud request signs
 it, then fires the routine with one POST whose body is exactly `{"text":"<request id>"}` (the routine fetches the signed
 approval itself), unless today's count of ok fires has reached `HUB_CLOUD_DAILY` (default 10): then the request waits in
 `approved`. A day is the owner's day in `HUB_TIME_ZONE` (an IANA name, default `UTC`). Every attempt is one

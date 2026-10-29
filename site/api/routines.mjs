@@ -64,12 +64,16 @@ export function nextMidnight(date, zone) {
 /**
  * The routine for a repo, or undefined. The key (the repo's name part) finds it; when the routine names its repo
  * (`CLAUDE_ROUTINE_<KEY>_REPO=owner/name`) the whole `owner/name` must match, so `other/name` cannot borrow it.
+ * A routine without `_REPO` is found but never fired (`routineUnbound`).
  */
 export function routineFor(routines, repo) {
   const routine = routines.get(repoKey(repo));
   if (!routine) return undefined;
   return !routine.repo || routine.repo.toLowerCase() === String(repo).toLowerCase() ? routine : undefined;
 }
+
+/** True when a routine has no `_REPO`: it is never fired (fail closed), because the key alone is only the repo's name part. */
+export const routineUnbound = routine => !routine.repo;
 
 /**
  * The routines the environment names: `CLAUDE_ROUTINE_<KEY>_URL` and `_TOKEN` as a pair, and optionally
@@ -110,7 +114,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
   const beta = String(env.HUB_ROUTINE_BETA ?? '').trim() || ROUTINE_BETA;
   const timeoutMs = timing.timeoutMs ?? FIRE_TIMEOUT_MS;
   const publicKey = signingKey ? createPublicKey(signingKey) : null;
-  for (const [name, routine] of routines) if (!routine.repo) log(`[hub] CLAUDE_ROUTINE_${name}_REPO is not set: the routine matches on the repo name alone`);
+  for (const [name, routine] of routines) if (!routine.repo) log(`[hub] CLAUDE_ROUTINE_${name}_REPO is not set: that routine is refused until it is`);
   for (const name of incomplete) log(`[hub] ${name} is set without its pair; that routine is ignored`);
   if (dryRun && routines.size) log('[hub] Cloud routine dry run is on (HUB_ROUTINE_DRY_RUN): nothing is fired, whatever routine keys are set');
 
@@ -122,6 +126,10 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     if (dryRun) return { ok: true, status: 0, dryRun: true };
     const routine = routineFor(routines, repo);
     if (!routine) return { ok: false, status: 0, reason: 'no-routine' };
+    if (routineUnbound(routine)) {
+      log(`[hub] not fired: CLAUDE_ROUTINE_${repoKey(repo)}_REPO is not set, so the routine is refused (set it to owner/name)`);
+      return { ok: false, status: 0, reason: 'routine-repo-unset' };
+    }
     try {
       const response = await fetchImpl(routine.url, {
         method: 'POST',

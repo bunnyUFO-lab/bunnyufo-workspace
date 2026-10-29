@@ -27,6 +27,7 @@ const ENV = {
   HUB_SIGNING_KEY: keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'),
   CLAUDE_ROUTINE_PROBE_URL: SECRET_URL,
   CLAUDE_ROUTINE_PROBE_TOKEN: SECRET_TOKEN,
+  CLAUDE_ROUTINE_PROBE_REPO: 'example/probe',
 };
 // 23:30 UTC on 29 Oct 2026 is 16:30 in Los Angeles (PDT).
 const START = Date.UTC(2026, 9, 29, 23, 30);
@@ -83,6 +84,25 @@ test('loadRoutines: a pair loads, a half pair names the missing key and no value
   assert.deepEqual(incomplete.sort(), ['CLAUDE_ROUTINE_ONLYTOKEN_URL', 'CLAUDE_ROUTINE_ONLYURL_TOKEN']);
   assert.ok(!JSON.stringify(incomplete).includes('secret'));
   assert.equal(repoKey('bunnyUFO-lab/bunnyufo-workspace'), 'BUNNYUFO_WORKSPACE');
+});
+
+test('a routine with no _REPO is refused: nothing is sent, the fire record and the log say why', async () => {
+  const f = await fixture({ env: { CLAUDE_ROUTINE_PROBE_REPO: '' } });
+  try {
+    assert.ok(f.logs.some(line => line.includes('CLAUDE_ROUTINE_PROBE_REPO is not set')));
+    const request = f.proposeCloud();
+    const approved = await f.post(`/hub/requests/${request.id}/approve`, {});
+    assert.equal(approved.status, 201, 'The approval stands.');
+    assert.equal(approved.body.cloud.fired, false);
+    assert.equal(approved.body.cloud.reason, 'routine-repo-unset');
+    assert.equal(f.routine.calls.length, 0);
+    const [record] = f.fires(request.id);
+    assert.equal(record.ok, false);
+    assert.equal(record.reason, 'routine-repo-unset');
+    assert.ok(f.logs.some(line => line.includes('not fired: CLAUDE_ROUTINE_PROBE_REPO is not set')));
+    assert.equal((await f.post(`/hub/requests/${request.id}/fire`, {})).body.reason, 'routine-repo-unset');
+    assert.equal(f.routine.calls.length, 0);
+  } finally { await f.close(); }
 });
 
 test('a routine that names its repo serves only that owner/name', async () => {
