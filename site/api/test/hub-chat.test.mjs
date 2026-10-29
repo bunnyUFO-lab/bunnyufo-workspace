@@ -531,3 +531,49 @@ test('on a help chat\'s first turn the owner\'s pictures come first and the item
     assert.equal(upstream.requests[0].messages.at(-1).content.filter(part => part.type === 'image_url').length, 4);
   } finally { await close(); }
 });
+
+// --- Get help on top of Chat on runs ---
+
+test('runs on: a help chat without pictures goes through runs with the pinned context as the first history entry, on every turn', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Try ', { tool: 'search_files' }, 'again.'] } });
+  try {
+    seeder(fake).event(eventJson({ kind: 'blocked', session: 'sess-runs', title: 'Blocked: needs a login', summary: 'The deploy asks for a login.' }));
+    const first = await chatLive(call, { text: 'Help', about: { kind: 'blocked', id: 'sess-runs' } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(upstream.requests.length, 0, 'nothing went to completions');
+    const run = upstream.runs[0].body;
+    assert.equal(run.input, 'Help');
+    assert.equal(run.conversation_history.length, 1);
+    assert.equal(run.conversation_history[0].role, 'user');
+    assert.match(run.conversation_history[0].content, /^\[Hub: the owner opened this chat/);
+    assert.match(run.conversation_history[0].content, /Blocked session: The deploy asks for a login\./);
+    assert.ok(first.events.some(item => item.event === 'tool'), 'tool lines still stream');
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done');
+    assert.equal(done.data.context.role, 'context');
+    const saved = lines(fake, done.data.conversation);
+    assert.deepEqual(saved.map(line => line.role), ['context', 'user', 'assistant']);
+    assert.equal(saved[2].run, upstream.runs[0].id);
+
+    const second = await chatLive(call, { text: 'Still stuck', conversation: done.data.conversation });
+    assert.equal(second.events.at(-1).event, 'done');
+    const history = upstream.runs[1].body.conversation_history;
+    assert.deepEqual(history.map(line => line.role), ['user', 'user', 'assistant']);
+    assert.match(history[0].content, /^\[Hub: the owner opened this chat/);
+    assert.equal(history[1].content, 'Help');
+  } finally { await close(); }
+});
+
+test('runs on: a help chat whose context carries a picture stays on completions, with the picture', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const { list } = stepsList(fake, 'help-r111');
+    const first = await chat(call, { text: 'Step 02 failed', about: { kind: 'checklist', id: list.id, step: '02' } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const name = first.events.at(-1).data.conversation;
+    await chat(call, { conversation: name, text: 'Again' });
+    assert.equal(upstream.runs.length, 0);
+    assert.equal(upstream.requests.length, 2);
+    assert.equal(upstream.requests[1].messages[0].content[1].type, 'image_url', 'The stored picture goes back on later turns.');
+  } finally { await close(); }
+});
