@@ -2,7 +2,9 @@ import { useRef, useState } from 'react'
 import type { Checklist, ChecklistItem } from '../lib/hub'
 import { HubError, clock, hubPost, safeUrl } from '../lib/hub'
 import { host } from '../lib/host'
+import HubImage from './HubImage'
 import Md from './Md'
+import { prepareImage, toBase64 } from './chatImages'
 
 const SIGN_IN = 'Sign in to tick items.'
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
@@ -28,6 +30,9 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const [submitting, setSubmitting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const [signIn, setSignIn] = useState(false)
+  // Pictures stored in this view: shown at once, and kept over a read that does not have them yet.
+  const [uploaded, setUploaded] = useState<Record<string, string>>({})
+  const [uploading, setUploading] = useState<Record<string, boolean>>({})
   const firstGuide = useRef<string | null | undefined>(undefined)
 
   const detail = answer && (!loadedAt || answer.time > loadedAt.getTime()) ? answer.detail : data
@@ -57,6 +62,28 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
       setErrors(previous => ({ ...previous, [item.id]: failure instanceof Error ? failure.message : 'That did not save.' }))
     } finally {
       setPending(previous => without(previous, item.id))
+    }
+  }
+
+  async function attach(item: ChecklistItem, file: File | undefined) {
+    if (!file) return
+    if (!host.write) { setSignIn(true); return }
+    if (!live || uploading[item.id]) return
+    setUploading(previous => ({ ...previous, [item.id]: true }))
+    setErrors(previous => without(previous, item.id))
+    try {
+      const picture = await prepareImage(file)
+      try {
+        const stored = await hubPost<{ file: string }>(`/checklists/${encodeURIComponent(detail.id)}/files`, { for: item.id, image: { type: picture.type, data: await toBase64(picture.blob) } })
+        setUploaded(previous => ({ ...previous, [item.id]: stored.file }))
+      } finally {
+        URL.revokeObjectURL(picture.url)
+      }
+    } catch (failure) {
+      if (failure instanceof HubError && failure.status === 409) reload()
+      setErrors(previous => ({ ...previous, [item.id]: failure instanceof Error ? failure.message : 'That picture did not save.' }))
+    } finally {
+      setUploading(previous => without(previous, item.id))
     }
   }
 
@@ -97,6 +124,8 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           const more = !!item.guide || !!link
           const open = more && isExpanded(item)
           const labelId = `hub-cl-${detail.id}-${item.id}`
+          // File names start with the step and a sortable stamp, so the greater name is the newer picture.
+          const stored = [detail.evidence?.[item.id]?.file, uploaded[item.id]].filter((name): name is string => !!name).sort().pop()
           const when = done ? (mark?.at ?? item.at) : undefined
           const body = (
             <>
@@ -119,6 +148,21 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </button>
                 ) : (
                   <span className="hub-cl-text plain" onClick={() => void tick(item)}>{body}</span>
+                )}
+                {stored && (
+                  <span className="hub-cl-thumb" data-evidence>
+                    <HubImage path={`checklists/${detail.id}/${stored}`} alt={`The picture for step ${Number(item.id)}`} open />
+                  </span>
+                )}
+                {live && (
+                  <label className="hub-cl-cam" data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
+                    <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
+                    <input
+                      type="file" accept="image/jpeg,image/png,image/*" capture="environment" data-attach-input
+                      aria-label={`Attach evidence for step ${Number(item.id)}`} disabled={!!uploading[item.id]}
+                      onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void attach(item, file) }}
+                    />
+                  </label>
                 )}
               </div>
               {errors[item.id] && <p className="hub-error" role="alert" data-item-error>{errors[item.id]}</p>}

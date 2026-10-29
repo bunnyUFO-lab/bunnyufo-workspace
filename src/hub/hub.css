@@ -430,6 +430,15 @@ button.hub-cl-text { cursor: pointer; }
 .hub-cl-meta { font-size: 0.72rem; color: var(--text-dim); }
 .hub-cl-chev { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 1.2rem; color: var(--text-dim); }
 .hub-cl-item[data-done] .hub-cl-title { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--hairline-strong); }
+.hub-cl-cam { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; min-height: 44px; align-self: center; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-dim); font-size: 1.15rem; }
+.hub-cl-cam:hover { background: var(--surface-2); }
+.hub-cl-cam[aria-disabled="true"] { cursor: default; opacity: 0.6; }
+.hub-cl-cam input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
+.hub-cl-cam:focus-within { box-shadow: var(--focus-ring); }
+.hub-cl-thumb { flex: 0 0 48px; align-self: center; display: inline-flex; width: 48px; height: 48px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--hairline-strong); background: var(--surface-2); }
+.hub-cl-thumb a, .hub-cl-thumb img, .hub-cl-thumb > span { display: block; width: 48px; height: 48px; }
+.hub-cl-thumb a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-cl-thumb img { object-fit: cover; }
 .hub-cl-more { margin: 0 0 10px 52px; padding: 2px 0 4px; min-width: 0; }
 .hub-cl-more .hub-btn { min-height: 44px; }
 .hub-cl-item > .hub-error { margin: 0 0 8px 52px; }

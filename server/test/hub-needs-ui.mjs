@@ -7,6 +7,7 @@ import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, checklistJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { solidPng } from '../../site/api/test/png.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -124,6 +125,27 @@ try {
   assert.equal(files(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/tick-`).length, before + 1);
   await list.locator('[data-four]').getByText('2 of 4 done').waitFor();
 
+  step('a picture is attached to a step: a thumbnail shows at once, one file is stored in the checklist folder, a reload keeps it');
+  const folder = `sections/inbox/checklists/${FIXTURE_CHECKLIST}/`;
+  assert.equal(files(`${folder}evidence-`).length, 0);
+  await list.locator('[data-item="02"] [data-attach-input]').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: solidPng(64, 48) });
+  await list.locator('[data-item="02"] [data-evidence] img').waitFor();
+  assert.equal(files(`${folder}evidence-`).length, 1);
+  assert.match(files(`${folder}evidence-`)[0], /\/evidence-02-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  assert.equal(await list.locator('[data-item="01"] [data-evidence]').count(), 0, 'Only the step with a picture has a thumbnail.');
+  const thumb = await list.locator('[data-item="02"] [data-evidence]').boundingBox();
+  assert.ok(thumb && thumb.width === 48 && thumb.height === 48, 'The thumbnail is 48 px.');
+  assert.ok((await list.locator('[data-item="02"] [data-attach]').boundingBox()).height >= 44, 'The camera button is 44 px tall.');
+  const reopened = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+  await reopened.goto(`${fixture.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
+  await reopened.locator('[data-item="02"] [data-evidence] img').waitFor();
+  await reopened.waitForFunction(() => { const image = document.querySelector('[data-item="02"] [data-evidence] img'); return image && image.complete && image.naturalWidth > 0; });
+  step('a file that is not a picture shows its error under the step and stores nothing');
+  await list.locator('[data-item="03"] [data-attach-input]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a picture') });
+  await list.locator('[data-item="03"] [data-item-error]').waitFor();
+  assert.match(await list.locator('[data-item="03"] [data-item-error]').innerText(), /can't be opened/);
+  assert.equal(files(`${folder}evidence-`).length, 1);
+
   step('Mark done on a pull request review and on a blocked session removes the card, and the writes are events');
   await page.locator('.ni[data-kind="pr"]').getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.ni[data-kind="pr"]').waitFor({ state: 'detached' });
@@ -176,6 +198,8 @@ try {
   await tall(phone.locator('.ni .hub-actions .hub-btn, .ni .ni-a .hub-btn'), 'buttons');
   await tall(phone.locator('.hub-chips .hub-chip'), 'chips');
   await tall(phone.locator('.ni [data-box]'), 'step boxes');
+  await tall(phone.locator('.ni [data-attach]'), 'camera buttons');
+  await phone.locator('.ni [data-item="02"] [data-evidence] img').waitFor();
   await go(phone, `#/~hub/ask/${FIXTURE_ASK}`);
   await phone.locator('.hub-option').first().waitFor();
   await noSideways(phone, 'the Ask view at 375 px');
