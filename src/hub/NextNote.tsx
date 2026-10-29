@@ -13,7 +13,7 @@ export default function NextNote({ note }: { note: Handoff }) {
         {note.next ? <span className="nq-next-n"><span aria-hidden="true"> · </span>next: <i>{note.next}</i></span> : null}
         {note.nothingLeft ? <span className="nq-next-n"> Nothing else waits on you.</span> : null}
         {!note.next && !note.nothingLeft && note.elsewhere ? (
-          <span className="nq-next-n"> {note.kindPlural ? `No more ${note.kindPlural}. ` : ''}<a href={hubHash('needs')} data-next-all>{note.elsewhere} more wait in All →</a></span>
+          <span className="nq-next-n nq-next-else"> {note.kindPlural ? `No more ${note.kindPlural}. ` : ''}<a href={hubHash('needs')} data-next-all>{note.elsewhere} more wait in All →</a></span>
         ) : null}
       </span>
       <a className="nq-next-back" href={note.backHash} data-next-back>Back</a>
