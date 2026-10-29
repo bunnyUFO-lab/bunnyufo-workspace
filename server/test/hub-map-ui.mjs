@@ -221,7 +221,7 @@ try {
   await phone.goto(`${fixture.url}#/~hub/map`);
   await phone.locator('.hub-map-wrap').waitFor();
   assert.equal(await phone.locator('.hub-chip.on').innerText(), 'Magic Loops');
-  assert.equal(await phone.locator('.hub-runs').innerText(), 'PC');
+  assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs on PC');
   assert.equal(await phone.locator('.hub-runs').getAttribute('title'), 'Work for this project runs on the PC by default.');
   assert.match(await phone.locator('.hub-runs').getAttribute('aria-label'), /^Runs on: Gaming PC/);
   await noSideways(phone, 'Roadmap at 390');
@@ -230,12 +230,35 @@ try {
   assert.ok(heights.row <= heights.chips + 0.5, `The chips row is no taller than on main (${heights.row} > ${heights.chips}).`);
   await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
   await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
-  assert.equal(await phone.locator('.hub-runs').innerText(), 'Cloud');
+  assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs in cloud');
+  await noSideways(phone, 'Roadmap at 390 with the longer chip');
+
+  step('a tap on the Runs on chip shows the rule; a second tap, Escape and a tap outside hide it');
+  await phone.locator('.hub-chip', { hasText: 'Magic Loops' }).click();
+  await phone.locator('.hub-chip.on', { hasText: 'Magic Loops' }).waitFor();
+  const ruleText = 'Work for this project runs on the PC by default.';
+  const rule = phone.locator('.hub-runs-rule');
+  assert.equal(await rule.count(), 0);
+  await phone.locator('.hub-runs').tap();
+  assert.equal(await rule.innerText(), ruleText);
+  assert.equal(await phone.locator('.hub-runs').getAttribute('aria-expanded'), 'true');
+  const ruleBox = await rule.boundingBox();
+  assert.ok(ruleBox.x >= 0 && ruleBox.x + ruleBox.width <= 390, 'The rule lies inside the screen.');
+  await phone.locator('.hub-runs').tap();
+  assert.equal(await rule.count(), 0, 'A second tap hides it.');
+  await phone.locator('.hub-runs').tap();
+  await phone.keyboard.press('Escape');
+  assert.equal(await rule.count(), 0, 'Escape hides it.');
+  await phone.locator('.hub-runs').tap();
+  await phone.touchscreen.tap(20, 600);
+  assert.equal(await rule.count(), 0, 'A tap outside hides it.');
+  await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
+  await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');
   await wayfinder(desk, 'Desktop');
-  assert.equal(await desk.locator('.hub-wayfinder-text').innerText(), 'A tidy Roadmap that tells the owner where to go next, and why, in one line.');
+  assert.equal(await desk.locator('.hub-wayfinder-dest').innerText(), 'A tidy Roadmap that tells the owner where to go next, and why, in one line.');
   assert.equal(await desk.locator('.hub-wayfinder-count').innerText(), '3 decisions');
   assert.equal(await desk.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true', 'The list starts open on a wide box.');
   const links = desk.locator('.hub-wayfinder-list a');
@@ -255,7 +278,7 @@ try {
   assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
   const collapsed = await row();
-  assert.ok(collapsed.height < 50, `The collapsed row is one line (${collapsed.height}).`);
+  assert.ok(collapsed.height < 62, `The collapsed row is one line (a 44 px tap target) (${collapsed.height}).`);
   const fits = async what => {
     const view = await phone.evaluate(() => ({ box: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, bar: document.querySelector('.hub').getBoundingClientRect().bottom }));
     assert.ok(Math.abs(view.box - (view.bar - 8)) <= 10, `${what}: the map box still reaches the bottom (${view.box} vs ${view.bar}).`);
@@ -268,6 +291,47 @@ try {
   await noSideways(phone, 'Wayfinder row at 390 expanded');
   const axis = await phone.locator('.hub-map-box').getAttribute('data-axis');
   if (axis !== null) assert.equal(axis, 'y', 'The row does not change the axis.');
+
+  step('the destination itself is the toggle: tap to read it all, tap again to clamp it');
+  await showMap(phone, '#/~hub/map/wayfind');
+  await wayfinder(phone, 'Phone');
+  const text = phone.locator('button.hub-wayfinder-text');
+  const dest = phone.locator('.hub-wayfinder-dest');
+  const clipped = () => dest.evaluate(node => ({ clipped: node.scrollWidth > node.clientWidth, height: node.getBoundingClientRect().height }));
+  const before = await clipped();
+  assert.ok(before.clipped, 'The destination is clamped.');
+  assert.equal(await text.getAttribute('aria-expanded'), 'false');
+  assert.match(await text.innerText(), /More/);
+  assert.ok((await text.boundingBox()).height >= 44, 'The tap target is at least 44 px high.');
+  await text.tap();
+  const after = await clipped();
+  assert.equal(await text.getAttribute('aria-expanded'), 'true');
+  assert.ok(!after.clipped && after.height > before.height, 'It wraps in full.');
+  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 2, 'The questions show with it.');
+  await fits('destination expanded');
+  await noSideways(phone, 'destination expanded at 390');
+  await text.tap();
+  assert.ok((await clipped()).clipped, 'It is clamped again.');
+  assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
+  await phone.locator('.hub-wayfinder-toggle').tap();
+  assert.equal(await text.getAttribute('aria-expanded'), 'true', 'The questions button toggles the same state.');
+  assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true');
+  assert.equal(await phone.locator('.hub-map-box').getAttribute('data-axis'), 'y');
+
+  step('with no open questions the destination is still a button that expands');
+  fixture.seed.beads('calm', [
+    beadsIssue({ id: 'ca-map', title: 'Calm map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z', updated: '2026-10-20T10:00:00Z', description: '## Destination\n\nA destination long enough to be cut short on a phone, so that the only way to read all of it is to tap the text itself.' }),
+    beadsIssue({ id: 'ca-d1', title: 'Decision one', parent: 'ca-map', status: 'closed', closed: '2026-10-10T10:00:00Z', labels: ['wayfinder:decision'], created: '2026-10-02T10:00:00Z' }),
+  ], { pushedAt: minutesAgo(fixture.now, 8).toISOString(), host: 'pc.example.test', count: 2, repo: 'example/calm' });
+  await showMap(phone, '#/~hub/map/calm');
+  await wayfinder(phone, 'Phone, no questions');
+  assert.equal(await phone.locator('.hub-wayfinder-toggle').count(), 0, 'There is no Open questions button.');
+  const calm = await clipped();
+  assert.ok(calm.clipped);
+  await text.tap();
+  const calmOpen = await clipped();
+  assert.ok(!calmOpen.clipped && calmOpen.height > calm.height, 'It expands.');
+  assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
 }
 
   console.log('hub-map-ui: passed');
