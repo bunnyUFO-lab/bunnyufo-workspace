@@ -95,3 +95,32 @@ test('again without text keeps who wrote the text; with text the owner has writt
     assert.equal(copy.textOrigin, undefined, 'The owner rewrote it, so there is nothing to warn about.');
   } finally { await close(); }
 });
+
+test('an agent\'s "Done when" stays marked as the agent\'s unless the owner changes it', async () => {
+  const { fake, post, seed, close } = await fixture();
+  try {
+    const rewrote = agentRequest('dwa');
+    seed.request(rewrote);
+    const textOnly = await post(`/hub/requests/${rewrote.id}/again`, { text: 'My own words' });
+    assert.equal(textOnly.status, 201, JSON.stringify(textOnly.body));
+    assert.deepEqual(copyOf(fake, textOnly).doneWhenOrigin, { kind: 'agent', name: 'hermes-briefs' }, 'New text, same agent "Done when".');
+    assert.match(fake.json(`sections/inbox/requests/${textOnly.body.id}/approved.json`).run.brief, /Done when: three takeaways \(this "done when" was written by an agent \(hermes-briefs\), not by the owner\)/);
+
+    const sent = agentRequest('dwb');
+    seed.request(sent);
+    const same = await post(`/hub/requests/${sent.id}/again`, { text: 'My own words', doneWhen: 'three takeaways' });
+    assert.deepEqual(copyOf(fake, same).doneWhenOrigin, { kind: 'agent', name: 'hermes-briefs' }, 'Sending the same "Done when" back changes nothing.');
+
+    const changed = agentRequest('dwc');
+    seed.request(changed);
+    const mine = await post(`/hub/requests/${changed.id}/again`, { doneWhen: 'my own finish line' });
+    const copy = copyOf(fake, mine);
+    assert.deepEqual([copy.doneWhen, copy.doneWhenOrigin], ['my own finish line', undefined], 'The owner wrote it: no mark.');
+    assert.match(fake.json(`sections/inbox/requests/${mine.body.id}/approved.json`).run.brief, /^Done when: my own finish line$/m);
+
+    const removed = agentRequest('dwd');
+    seed.request(removed);
+    const none = await post(`/hub/requests/${removed.id}/again`, { doneWhen: '' });
+    assert.deepEqual([copyOf(fake, none).doneWhen, copyOf(fake, none).doneWhenOrigin], [undefined, undefined]);
+  } finally { await close(); }
+});

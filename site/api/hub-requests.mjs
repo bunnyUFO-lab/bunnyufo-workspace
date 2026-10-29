@@ -432,7 +432,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // The copy is the owner's. Unless the owner rewrote the text, it still says who wrote it.
     const wroteText = raw?.text !== undefined || (oldOrigin ?? {}).kind === 'owner' ? null : (request.textOrigin ?? oldOrigin ?? { kind: 'agent' });
     // The "done when" has its own author: rewriting the text does not make an agent's "done when" the owner's.
-    const doneBy = doneWhenAuthor(request, oldOrigin);
+    // Only a "done when" the owner changed (or removed) is the owner's; one sent back as it was keeps its author.
+    const ownerChangedDone = raw?.doneWhen !== undefined && raw.doneWhen.trim() !== String(request.doneWhen ?? '').trim();
+    const doneBy = ownerChangedDone ? null : doneWhenAuthor(request, oldOrigin);
     const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
