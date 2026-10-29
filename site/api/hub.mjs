@@ -18,6 +18,7 @@ import {
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
+import { defaultsOf } from './project-defaults.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 
 const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat'];
@@ -610,7 +611,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const found = new Map();
     const add = (id, patch = {}) => {
       if (!validProject(id)) return;
-      found.set(id, { id, name: titleCase(id), beads: false, ...found.get(id), ...patch });
+      const known = defaultsOf(id);
+      found.set(id, { id, name: known?.name ?? titleCase(id), beads: false, ...(known ? { order: known.order, runsOn: known.runsOn } : {}), ...found.get(id), ...patch });
     };
     const { objects } = await bucket.list(folder('beads'));
     await pool(POOL, objects.filter(object => object.key.endsWith('.meta.json')), async object => {
@@ -623,7 +625,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     for (const row of checklists) add(row.checklist.project);
     for (const item of requests) add(item.project);
     for (const event of window.events) add(event.project);
-    return [...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)).sort((a, b) => (a.id < b.id ? -1 : 1));
+    return [...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)).sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.id < b.id ? -1 : 1));
   }
 
   async function serveFile(response, rel) {

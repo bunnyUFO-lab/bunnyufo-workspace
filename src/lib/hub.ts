@@ -152,7 +152,9 @@ export interface Checklist {
   files: string[]
 }
 
-export interface HubProject { id: string; name: string; beads: boolean; pushedAt?: string }
+/** Where a project's work runs by default: the Gaming PC, the cloud, or only when the owner starts it at the PC. */
+export type RunsOn = 'pc' | 'cloud' | 'at-pc'
+export interface HubProject { id: string; name: string; beads: boolean; pushedAt?: string; order?: number; runsOn?: RunsOn }
 
 export type TaskState = 'done' | 'doing' | 'you' | 'next' | 'later'
 export type Sign = 'working' | 'idle' | 'new' | 'pr' | 'ci-failed' | 'review' | 'deployed'
