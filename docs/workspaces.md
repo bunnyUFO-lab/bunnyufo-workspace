@@ -601,3 +601,16 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 | Hermes run | | | `running` | `waiting`, `waiting-approval` | | `completed` |
 
 Milestones and issues with children are left out (the map shows them). A task that only inherited the `milestone` label from its milestone is a task, by the same rule the map uses (`milestoneIssuesOf`). A busy or idle session in a fresh PC status whose branch names the bead gives the card `live: { host, session, state }`. `signs` are the map's (`issueSigns` in `hub-map.mjs`). `hermesRuns` is always empty for now: no store exists yet, and the mapping is tested with fixtures. A bead's `href` opens the map panel; a request's opens Needs you's requests filter.
+
+### Team
+
+The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` Sonnet 5.5, `briefs` Haiku 5.5, both with the DeepSeek fallback).
+
+| Route | Does |
+|---|---|
+| `GET /api/hub/team` | `{ agents }`: each agent with `status` (`working`, `needs-you`, `failed`, `idle`, `offline`), `task` and `sprite`. Claude Code also carries `sessions` (its Working now items) |
+| `POST /api/hub/team/:agent/avatar` | `{ kind: 'builtin', key }` (a key of `BUILTIN_KEYS`) or `{ kind: 'random', salt }` (a whole number, 0 to 9999). 400 for anything else, 404 for an agent not in the list, 401 without a signed-in user |
+
+Statuses: Claude Code is `needs-you` if a session is, else `working` if one is, else `idle` when sessions exist or the PC status is fresh, else `offline`. Hermes asks `HERMES_URL` `/health` (no key, 1.5 s, cached 60 s): healthy is `idle` with "Last chat <ago>", otherwise `offline`; with no `HERMES_URL` it is `offline`, "Not set up". Briefs is always `idle`.
+
+An avatar choice is the owner's. The site writes it as a create-only file, `inbox/team/<agent>/avatar-<YYYYMMDDTHHMMSSZ>-<rand4>.json` = `{ kind, key | salt, at, by }`, and the newest name is the current sprite; none means the default. Undo posts the previous choice again. The write is guarded in two places: the route needs a signed-in user and an allowed origin like every Hub write, and the card API refuses `team/<agent>/avatar-*.json` to any token that is not unrestricted (`OWNER_FILES`, for PUT, upload URLs and DELETE), so an agent cannot set or clear an avatar. `BUILTIN_KEYS` is a copy of the client list in `src/hub/team/sprites.ts`; `site/api/test/hub-team.test.mjs` fails if the two differ.

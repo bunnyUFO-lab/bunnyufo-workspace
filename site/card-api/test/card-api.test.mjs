@@ -228,6 +228,27 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
   }
 });
 
+test('inbox: an avatar choice is written by the Hub, so a limited writer cannot put or remove one', async () => {
+  const { fake, call } = await setup();
+  try {
+    const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
+    const file = 'team/x/avatar-1.json';
+    for (const token of ['tok-cloud', 'tok-hermes']) {
+      const refused = await put(token, file);
+      assert.equal(refused.status, 403, token);
+      assert.equal(refused.data.error, 'Only the Hub writes answers.');
+    }
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: 'team/x/avatar-20260101T000000Z-ab12.json' }] } })).status, 403, 'by upload URL');
+    assert.equal(fake.text('sections/inbox/team/x/avatar-1.json'), null);
+    assert.equal((await put('tok-cloud', 'team/x/notes.json')).status, 200, 'Other files in the folder stay open to agents.');
+    assert.equal((await put('tok-all', file)).status, 200, 'The passphrase may.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-cloud' })).status, 403, 'A limited deleter keeps off it.');
+    assert.ok(fake.text('sections/inbox/team/x/avatar-1.json'));
+  } finally {
+    await fake.close();
+  }
+});
+
 test('inbox: ask.json is create-only for a limited token, and a limited deleter keeps off the Hub files', async () => {
   const { fake, call } = await setup();
   try {
