@@ -24,6 +24,7 @@ import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
 import { createHermesApprovals } from './hub-hermes-approvals.mjs';
 import { createNotify } from './notify.mjs';
+import { createPolicy } from './policy.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -242,7 +243,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
   const scrub = createScrub(env);
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub });
-  const { loadRequests } = requestFiles;
+  // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
+  const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
   const notify = createNotify({ env, fetchImpl, log: line => log(scrub(line, 400)) });
   /** What an approval needs to know about the request it belongs to: its project, and whether the run has ended. */
@@ -255,6 +257,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming, scrub,
     onApproval: (context, prompt, runId, options) => hermesApprovals.copyApproval({ runId, request: context.id, prompt, startedAt: context.startedAt, polled: options?.polled === true }),
   });
+  // Policy approval (off unless HUB_POLICY_APPROVE names kinds): signs eligible proposals through the same path as a tap.
+  const policy = createPolicy({ env, requests: requestFiles, listFolders, cached, canSign: on && !!signingKey, now, log });
   if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -879,14 +883,15 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
     /** Stops the followers and the sweep (shutdown, tests). */
-    close: () => hermesDispatch.close(),
+    policy,
+    close: async () => { policy.close(); await hermesDispatch.close(); },
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
       return {
         hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }),
         // Only a host with the Hub on says anything about approving: the local service (no Hub) keeps its old answer.
-        ...(on ? { approve: !!signingKey && signedIn, ...(signingKey && signedIn ? {} : { approveReason: signingKey ? 'Sign in to approve.' : approveReason }), policy: [] } : {}),
+        ...(on ? { approve: !!signingKey && signedIn, ...(signingKey && signedIn ? {} : { approveReason: signingKey ? 'Sign in to approve.' : approveReason }), policy: policy.kinds } : {}),
       };
     },
     /**
@@ -930,7 +935,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') hermesDispatch.pageLoad(at);
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') { hermesDispatch.pageLoad(at); policy.pageLoad(at); }
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
             const status = await loadPcStatus(at);

@@ -19,6 +19,7 @@
 //                           and the owner's Discord user id. Without both, those routes answer 404 to everyone (the kill switch).
 //   HUB_SIGNING_KEY         the Ed25519 private key that signs approvals and stops (base64 PKCS8 DER, one line). Made on this host and never copied
 //                           to the PC; without it Approve is off. HUB_DISCORD_NEEDS_YOU: the #needs-you webhook (read by the notify module)
+//   HUB_POLICY_APPROVE      preset kinds the site API signs by itself, from `research,docs` (default: none). HUB_POLICY_PER_DAY: the day's limit (10)
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
 //                           Chat stays off, and hidden in the UI, until its keys are here.
 //   BUW_SITE_ORIGINS        comma list of origins writes may come from; default: the origin of BUW_SITE_URL
