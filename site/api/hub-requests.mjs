@@ -408,7 +408,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
-   * `POST /hub/requests/:id/again { target?, text?, title? }`: for an expired, failed, lost or proposed request. Makes a
+   * `POST /hub/requests/:id/again { target?, text?, title?, doneWhen? }`: for an expired, failed, lost or proposed request. Makes a
    * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
    * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
    */
@@ -424,7 +424,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { origin: oldOrigin, followUp, ...copy } = request;
+    const { origin: oldOrigin, followUp, ...kept } = request;
+    // "Done when" may be rewritten (an empty one removes it); the length check is the one a new request gets.
+    if (raw?.doneWhen !== undefined && typeof raw.doneWhen !== 'string') throw fail('"Done when" is text.', 400);
+    const { doneWhen: _oldDone, ...withoutDone } = kept;
+    const copy = raw?.doneWhen === undefined ? kept : raw.doneWhen.trim() ? { ...withoutDone, doneWhen: raw.doneWhen } : withoutDone;
     // The copy is the owner's. Unless the owner rewrote the text, it still says who wrote it.
     const wroteText = raw?.text !== undefined || (oldOrigin ?? {}).kind === 'owner' ? null : (request.textOrigin ?? oldOrigin ?? { kind: 'agent' });
     // The "done when" has its own author: rewriting the text does not make an agent's "done when" the owner's.
