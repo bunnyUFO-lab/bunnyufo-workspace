@@ -1,8 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
 import { KIND_LABEL, canonicalFilter } from '../lib/needsKinds'
 import { hubHash } from '../lib/route'
-import { takeFlash } from './flash'
+import type { Handoff } from './flash'
+import { takeHandoff } from './flash'
+import { NOTE_VERB } from '../lib/nextItem.mjs'
+import { pickNext } from '../lib/nextItem.mjs'
+import NextNote from './NextNote'
+import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
 import NeedsItem from './NeedsItem'
 import type { SettleVerb } from './NeedsItem'
@@ -27,9 +32,6 @@ const EMPTY: Record<string, string> = {
   answered: 'Nothing has been answered yet.',
   requests: 'No requests. Ask an agent to do something from Work.',
 }
-const NOTE: Record<SettleVerb, string> = {
-  answered: 'Answered.', snoozed: 'Snoozed for a day.', submitted: 'Submitted. The agent sees it at its next session.', done: 'Marked done. It is gone from Needs you.', cancelled: 'Cancelled.',
-}
 const LEAVE_MS = 260
 const reducedMotion = () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -41,12 +43,21 @@ export default function Needs({ filter }: { filter?: string }) {
   const active = canonicalFilter(filter)
   const isHistory = active === 'answered' || active === 'requests'
   const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${active}${isHistory ? '' : '&detail=1'}`)
-  const [status, setStatus] = useState(takeFlash)
+  // The note after the last action: from this list, or handed over by the page the owner settled an item on.
+  const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
   const [settled, setSettled] = useState<ReadonlySet<string>>(new Set())
   const [leaving, setLeaving] = useState<{ item: Item; index: number }[]>([])
   const root = useRef<HTMLDivElement>(null)
   const wanted = useRef<string | null>(null)
   if (wanted.current === null) wanted.current = takeFocus()
+
+  // The note belongs to the list it was left on: another chip starts clean.
+  const lastFilter = useRef(active)
+  useEffect(() => {
+    if (lastFilter.current === active) return
+    lastFilter.current = active
+    setNote(null)
+  }, [active])
 
   // An old filter name in the address becomes the new one, in place: the address stays one entry in the history.
   useEffect(() => {
@@ -71,10 +82,24 @@ export default function Needs({ filter }: { filter?: string }) {
 
   function handleSettled(item: Item, verb: SettleVerb) {
     const key = itemKey(item)
+    const order = shown.filter(other => !leaving.some(ghost => itemKey(ghost.item) === itemKey(other)) || itemKey(other) === key)
+    const index = Math.max(0, order.findIndex(other => itemKey(other) === key))
+    const remaining = base.filter(other => itemKey(other) !== key)
+    const next = pickNext(remaining, key, order.map(itemKey))
+    const page = itemPage(item)
     setSettled(previous => new Set(previous).add(key))
-    setLeaving(previous => [...previous, { item, index: Math.max(0, shown.findIndex(other => itemKey(other) === key)) }])
-    setStatus(NOTE[verb])
+    setLeaving(previous => [...previous, { item, index }])
+    setNote({
+      handoff: { verb: NOTE_VERB[verb], title: item.title, next: next?.title ?? null, nothingLeft: !next, backHash: page ?? hubHash('needs', 'unstick') },
+      index, nextKey: next ? itemKey(next) : null,
+    })
     window.setTimeout(() => setLeaving(previous => previous.filter(ghost => itemKey(ghost.item) !== key)), reducedMotion() ? 0 : LEAVE_MS)
+    // The next card takes focus on its title; the note, in the slot the settled card left, is what the page scrolls to.
+    window.setTimeout(() => {
+      const card = [...(root.current?.querySelectorAll<HTMLElement>('[data-need]') ?? [])].find(node => node.dataset.need === (next ? itemKey(next) : ''))
+      card?.querySelector<HTMLElement>('.ni-t')?.focus({ preventScroll: true })
+      root.current?.querySelector<HTMLElement>('.nq-next')?.scrollIntoView({ block: 'start', behavior: 'auto' })
+    }, reducedMotion() ? 20 : LEAVE_MS + 20)
   }
 
   function answerNext() {
@@ -84,6 +109,8 @@ export default function Needs({ filter }: { filter?: string }) {
     first.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' })
   }
 
+  // The slot is a position among the cards that stay; a collapsing card sits just before it.
+  const noteSlot = note ? Math.min(note.index + leaving.filter(ghost => ghost.index <= note.index).length, shown.length) : -1
   const counts = data?.counts
   const waiting = counts?.all ?? 0
   const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === active || (counts?.[key] ?? 0) > 0)
@@ -109,18 +136,33 @@ export default function Needs({ filter }: { filter?: string }) {
           )
         })}
       </div>
-      {status && <p className="ni-status" role="status" data-marked-done>{status}</p>}
       {error && <p className="hub-error" role="alert">{error}</p>}
       {data ? (
         isHistory ? (
           <section className="hub-panel">
             {shown.length ? shown.map(item => <ItemRow key={itemKey(item)} item={item} />) : <p className="hub-empty">{EMPTY[active]}</p>}
           </section>
-        ) : shown.length ? (
-          <div className="nq">
-            {shown.map(item => <NeedsItem key={itemKey(item)} item={item} at={at} reload={reload} onSettled={handleSettled} leaving={leaving.some(ghost => itemKey(ghost.item) === itemKey(item))} />)}
-          </div>
-        ) : <p className="hub-empty needs-empty">{EMPTY[active]}</p>
+        ) : (
+          <>
+            {note && !shown.length && <NextNote note={note.handoff} />}
+            {shown.length ? (
+              <div className="nq">
+                {shown.map((item, index) => {
+                  const ghost = leaving.some(entry => itemKey(entry.item) === itemKey(item))
+                  // The note sits in the slot the settled card left: before the card that took its place.
+                  const slot = note && shown.length && index === noteSlot ? <NextNote key="note" note={note.handoff} /> : null
+                  return (
+                    <Fragment key={itemKey(item)}>
+                      {slot}
+                      <NeedsItem item={item} at={at} reload={reload} onSettled={handleSettled} leaving={ghost} />
+                    </Fragment>
+                  )
+                })}
+                {note && shown.length > 0 && noteSlot >= shown.length && <NextNote note={note.handoff} />}
+              </div>
+            ) : <p className="hub-empty needs-empty">{EMPTY[active]}</p>}
+          </>
+        )
       ) : !error && loading && <p className="hub-empty">Loading…</p>}
     </div>
   )

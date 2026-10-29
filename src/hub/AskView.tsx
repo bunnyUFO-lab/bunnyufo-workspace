@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import type { Ask, AskAnswer } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import { takeHandoff } from './flash'
+import NextNote from './NextNote'
+import { goNext, useQueueOrder } from './useGoNext'
 import AskBody from './AskBody'
 import { optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
@@ -25,6 +28,8 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
 export default function AskView({ id }: { id: string }) {
   const { data: ask, error, reload } = useHubData<Ask>(`/asks/${encodeURIComponent(id)}`)
   const [taken, setTaken] = useState<AskAnswer | null>(null)
+  const [handoff] = useState(takeHandoff)
+  const queue = useQueueOrder()
 
   if (!ask) return <p className="hub-empty">{error ?? 'Loading…'}</p>
   const from = { tool: text(ask.from?.tool), host: text(ask.from?.host) }
@@ -33,6 +38,7 @@ export default function AskView({ id }: { id: string }) {
 
   return (
     <>
+      {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{text(ask.question)}</h2>
         <span><span className="hub-pill">{text(ask.project)}</span>{text(ask.bead) && <> <span className="hub-pill">{text(ask.bead)}</span></>}</span>
@@ -46,7 +52,7 @@ export default function AskView({ id }: { id: string }) {
       </ol>
       <section className="hub-panel">
         <p className="hub-muted">{from.tool || from.host ? `From ${from.tool || 'an agent'}${from.host ? ` on ${from.host}` : ''}, ` : 'From an unknown sender, '}{when(ask.createdAt)}.</p>
-        <AskBody ask={ask} reload={reload} onTaken={setTaken} view />
+        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={verb => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id))} view />
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}

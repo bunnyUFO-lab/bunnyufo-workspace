@@ -2,7 +2,10 @@ import type { Checklist } from '../lib/hub'
 import { ago, safeUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import ChecklistBody from './ChecklistBody'
-import { setFlash } from './flash'
+import { useState } from 'react'
+import { takeHandoff } from './flash'
+import NextNote from './NextNote'
+import { goNext, useQueueOrder } from './useGoNext'
 import Md from './Md'
 import { useHubData } from './useHub'
 
@@ -11,6 +14,8 @@ const text = (value: unknown) => (typeof value === 'string' || typeof value === 
 /** One checklist on its own page: its header, the shared steps and Submit, and what became of it. */
 export default function ChecklistView({ id }: { id: string }) {
   const { data: detail, error, reload, at: loadedAt } = useHubData<Checklist>(`/checklists/${encodeURIComponent(id)}`)
+  const [handoff] = useState(takeHandoff)
+  const queue = useQueueOrder()
   if (!detail) {
     return (
       <>
@@ -25,6 +30,7 @@ export default function ChecklistView({ id }: { id: string }) {
 
   return (
     <div className="hub-cl" data-state={detail.state}>
+      {handoff && <NextNote note={handoff} />}
       <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
@@ -36,7 +42,7 @@ export default function ChecklistView({ id }: { id: string }) {
 
       <ChecklistBody
         data={detail} loadedAt={loadedAt} reload={reload}
-        onSubmitted={() => { setFlash('Submitted. The agent sees it at its next session.'); window.location.replace(hubHash('needs')) }}
+        onSubmitted={() => void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, 'submitted', queue(), hubHash('checklist', detail.id))}
       />
 
       {submitted && detail.submit && (

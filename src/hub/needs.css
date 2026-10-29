@@ -12,7 +12,16 @@
 .needs .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
 .needs .hub-chip.on .n { color: inherit; }
 .needs-empty { padding: 28px 4px; }
-.ni-status { margin: 0 0 12px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--s2); border: 1px solid var(--line); color: var(--t2); font-size: 0.85rem; }
+.nq-next { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 12px; padding: 4px 4px 4px 14px; scroll-margin-top: 12px; border-radius: var(--r3); background: color-mix(in srgb, var(--accent) 8%, var(--s1)); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--t1); font-size: 0.88rem; }
+.nq .nq-next { margin-bottom: 0; }
+.nq-next-text { flex: 1; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nq-next-v { font-weight: 600; }
+.nq-next-n { color: var(--t2); }
+.nq-next-n i { font-style: normal; color: var(--t1); }
+.nq-next-back { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 0 12px; border-radius: var(--r3); text-decoration: none; font-weight: 600; color: var(--accent); }
+.hub a.nq-next-back { color: var(--accent); }
+.nq-next-back:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.nq-next-back:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .nq { display: flex; flex-direction: column; gap: 12px; }
 .ni { display: grid; grid-template-rows: 1fr; scroll-margin-top: 12px; transition: grid-template-rows 0.26s var(--ease-out), opacity 0.2s var(--ease-out), transform 0.26s var(--ease-out), margin 0.26s var(--ease-out); }
@@ -56,6 +65,9 @@
 .ni .hub-btn { min-height: 38px; }
 
 @media (max-width: 760px) {
+  .nq-next-text { white-space: normal; overflow: visible; }
+  .nq-next-v, .nq-next-n { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nq-next-n [aria-hidden] { display: none; }
   .hub .needs-head h2 { font-size: 28px; }
   .four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .four > div:nth-child(3) { border-left: 0; }

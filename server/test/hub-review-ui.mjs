@@ -174,9 +174,10 @@ try {
   assert.match(await page.locator('[data-done-hint]').innerText(), /does not approve or merge/);
   const before = await page.evaluate(() => history.length);
   await page.getByRole('button', { name: 'Mark done' }).click();
-  await page.locator('[data-marked-done]', { hasText: 'Marked done.' }).waitFor();
-  assert.equal(await page.evaluate(() => location.hash), '#/~hub/needs', 'Mark done goes back to Needs you.');
-  assert.equal(await page.evaluate(() => history.length), before, 'It replaced the entry; Back does not reopen the review.');
+  await page.locator('[data-next-note]', { hasText: 'Marked done · next:' }).waitFor();
+  assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/(review|needs)/, 'Mark done moves on to the next item.');
+  assert.equal(await page.locator('[data-next-back]').getAttribute('href'), `#/~hub/review/${oldFile}`, 'Back opens the review that was marked done.');
+  assert.equal(await page.evaluate(() => history.length), before + 1, 'It added an entry: the browser Back returns to the review too.');
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, oldFile);
   await go(page, '#/~hub/needs/pr');
