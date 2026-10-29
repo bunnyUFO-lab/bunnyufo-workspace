@@ -582,6 +582,6 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 |---|---|---|---|---|---|---|
 | Beads issue | `deferred` | `open` with every blocker closed | `in_progress` | `blocked`; `open` with an open blocker; an open Ask on the bead or label `needs-owner` (why: "needs you") | not closed and an open `pr-opened` or `ready-for-review` event | `closed` |
 | Request | `open` (shown as proposed) and any unknown state | `approved`, `taken` | `running` | `lost`, `failed`, `at-pc` | `done` with an open PR on its bead | `done` |
-| Hermes run | | | `running` | `waiting` | | `completed` |
+| Hermes run | | | `running` | `waiting`, `waiting-approval` | | `completed` |
 
 Milestones and issues with children are left out (the map shows them). A task that only inherited the `milestone` label from its milestone is a task, by the same rule the map uses (`milestoneIssuesOf`). A busy or idle session in a fresh PC status whose branch names the bead gives the card `live: { host, session, state }`. `signs` are the map's (`issueSigns` in `hub-map.mjs`). `hermesRuns` is always empty for now: no store exists yet, and the mapping is tested with fixtures. A bead's `href` opens the map panel; a request's opens Needs you's requests filter.
