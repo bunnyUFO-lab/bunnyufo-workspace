@@ -5,6 +5,7 @@ import type { WorkingItem } from '../lib/hubPc'
 import { hubHash, mapHash } from '../lib/route'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
+import { stateOf } from './team/spriteState'
 import { STATE_DOT, STATE_LABEL, duration } from './working'
 import './working.css'
 
@@ -22,7 +23,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
   const since = duration(item.since, now)
   return (
     <div className={`wn-row wn-${item.state}`} data-working={item.state} data-source={item.source}>
-      <span className="wn-sprite"><AgentSprite sprite={SPRITE} size={32} /></span>
+      <span className="wn-sprite"><AgentSprite sprite={SPRITE} size={32} name="Claude Code" state={stateOf({ status: item.state === 'idle' ? 'idle' : item.state, now })} /></span>
       <span className="wn-text">
         <b>{item.state === 'needs-you' ? <a href={needsHref(item, blocked)}>{item.title}</a> : item.title}</b>
         <small>

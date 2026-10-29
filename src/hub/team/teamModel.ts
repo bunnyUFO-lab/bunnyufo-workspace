@@ -1,6 +1,7 @@
 // Pure logic for the Team screen and its Sprite sheet. Kept out of the .tsx files so Node can test it.
 import type { AgentStatus, AvatarChoice, AvatarSprite, TeamAgent } from '../../lib/hubTeam'
 import { BUILTIN_KEYS, genSprite } from './sprites.ts'
+import type { CustomSprite } from './spriteState.ts'
 
 export const STATUS_LABEL: Record<AgentStatus, string> = {
   working: 'Working', 'needs-you': 'Needs you', failed: 'Failed', idle: 'Idle', offline: 'Offline',
@@ -19,12 +20,18 @@ export function rosterCounts(agents: Pick<TeamAgent, 'status'>[]) {
   }
 }
 
-export const sameSprite = (a: AvatarSprite, b: AvatarSprite): boolean =>
-  a.kind === 'builtin' ? b.kind === 'builtin' && a.key === b.key : b.kind === 'random' && a.salt === b.salt && a.name === b.name
+// A custom sprite is a pet sheet (see spriteState.ts). Until `AvatarSprite` itself has that case, these two accept it too.
+type AnySprite = AvatarSprite | CustomSprite
+
+export const sameSprite = (a: AnySprite, b: AnySprite): boolean => {
+  if (a.kind === 'custom' || b.kind === 'custom') return a.kind === 'custom' && b.kind === 'custom' && a.sheet === b.sheet
+  return a.kind === 'builtin' ? b.kind === 'builtin' && a.key === b.key : b.kind === 'random' && a.salt === b.salt && a.name === b.name
+}
 
 /** The body of the avatar POST for a sprite. */
-export const choiceOf = (sprite: AvatarSprite): AvatarChoice =>
-  sprite.kind === 'builtin' ? { kind: 'builtin', key: sprite.key } : { kind: 'random', salt: sprite.salt }
+export const choiceOf = (sprite: AnySprite): AvatarChoice | { kind: 'custom'; sheet: string } =>
+  sprite.kind === 'custom' ? { kind: 'custom', sheet: sprite.sheet }
+    : sprite.kind === 'builtin' ? { kind: 'builtin', key: sprite.key } : { kind: 'random', salt: sprite.salt }
 
 export const SALT_MAX = 9999
 

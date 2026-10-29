@@ -81,11 +81,13 @@ try {
   await sheet.waitFor({ state: 'detached' });
   await desk.waitForFunction(() => document.activeElement?.getAttribute('data-sprite-open') === 'hermes');
 
-  step('the Custom segment is one disabled line');
+  step('the Custom segment says there are no sheets yet');
+  await desk.route('**/api/hub/team/*/sheets', route => route.fulfill({ json: { sheets: [] } }));
   await hermesButton.click();
   await sheet.waitFor();
   await sheet.locator('[data-sheet-mode="custom"]').click();
-  assert.equal(await sheet.locator('[data-sheet-custom]').innerText(), 'Custom sprites arrive with the Agent avatar preset.');
+  await sheet.locator('[data-sheet-custom]').getByText('No custom sheets yet.').waitFor();
+  assert.equal(await sheet.locator('[data-sheet-custom]').innerText(), 'No custom sheets yet. They arrive with the Agent avatar preset.');
   assert.equal(await sheet.locator('[data-sheet-use]').count(), 0, 'No Use this on the Custom segment.');
   await sheet.locator('[data-sheet-mode="quick"]').click();
 

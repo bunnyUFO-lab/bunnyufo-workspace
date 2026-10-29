@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ago, appUrl, hubPost, sessionUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import type { AvatarSprite, TeamAgent, TeamView } from '../lib/hubTeam'
+import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
+import type { SpriteChoice } from './team/sprites'
+import type { CustomSprite } from './team/spriteState'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
 import { openSpawn } from './spawnStore'
@@ -33,12 +36,15 @@ function SessionRow({ item }: { item: WorkingItem }) {
     : <li><span className="team-session">{body}</span></li>
 }
 
-function AgentCard({ agent, canPick, onSprite, opener }: { agent: TeamAgent; canPick: boolean; onSprite: (agent: TeamAgent) => void; opener: (node: HTMLButtonElement | null) => void }) {
+function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent; now: number; canPick: boolean; onSprite: (agent: TeamAgent) => void; opener: (node: HTMLButtonElement | null) => void }) {
   const dot = STATUS_DOT[agent.status]
+  const live = agent as TeamAgent & AgentActivity
+  const state = stateOf({ status: agent.status, doneAt: live.doneAt, review: live.review, now })
+  const sprite: SpriteChoice | CustomSprite = agent.sprite as SpriteChoice | CustomSprite
   return (
     <article className={`team-card st-${agent.status}`} data-agent={agent.id} data-status={agent.status}>
       <header className="team-card-head">
-        <span className="team-tile"><AgentSprite sprite={agent.sprite} size={44} title={`${agent.name} sprite`} /></span>
+        <span className="team-tile"><AgentSprite sprite={sprite} size={sprite.kind === 'custom' ? 52 : 44} name={agent.name} state={state} /></span>
         <span className="team-card-name">
           <h3>{agent.name}</h3>
           <span className="team-status"><span className={`dot st-${dot}${agent.status === 'working' ? ' live' : ''}`} aria-hidden="true" />{STATUS_LABEL[agent.status]}</span>
@@ -70,6 +76,9 @@ export default function Team() {
   const [failure, setFailure] = useState<string | null>(null)
   const openers = useRef(new Map<string, HTMLButtonElement | null>())
   const timer = useRef(0)
+  // The Done window ends on its own, so the clock ticks even when no new data arrives.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => { const tick = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(tick) }, [])
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
   const say = useCallback((next: Toast | null) => {
@@ -119,7 +128,7 @@ export default function Team() {
       {failure && <p className="hub-error" role="alert">{failure}</p>}
       <div className="team-roster">
         {data.agents.map(agent => (
-          <AgentCard key={agent.id} agent={agent} canPick={host.write} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(agent.id, node) }} />
+          <AgentCard key={agent.id} agent={agent} now={now} canPick={host.write} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(agent.id, node) }} />
         ))}
       </div>
       {sheetAgent && (

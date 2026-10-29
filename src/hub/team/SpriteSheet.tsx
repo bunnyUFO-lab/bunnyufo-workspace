@@ -1,16 +1,51 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AvatarSprite, TeamAgent } from '../../lib/hubTeam'
+import { ago, hubGet } from '../../lib/hub'
+import type { CustomSprite, SheetInfo } from './spriteState'
 import { AgentSprite } from './AgentSprite'
 import { builtinLabel, nextSalt, quickTiles, randomOf, sameSprite, sheetNote, spriteKey, startSalt } from './teamModel'
 
 type Mode = 'quick' | 'custom'
 
+/** The sheet's own sprite, for a preview or a Use this. */
+const spriteOfSheet = (info: SheetInfo): CustomSprite => ({ kind: 'custom', sheet: info.sheet, url: info.url, frame: { w: 192, h: 208 }, cols: 8, rows: info.rows })
+
 /**
- * The Custom segment. M2 shows one line; the Agent avatar preset replaces this body with the agent's
- * sprite sheets and a "Use this" for each (same `onUse`, so the same toast and Undo).
+ * The Custom segment: the agent's pet sheets, newest first, each a live preview of its idle row and
+ * a Use this (same `onUse`, so the same toast and Undo as Quick). The server marks the current one.
  */
-function CustomTab({ agent }: { agent: TeamAgent; onUse: (sprite: AvatarSprite) => Promise<boolean> }) {
-  return <p className="sheet-custom" data-sheet-custom data-agent={agent.id}>Custom sprites arrive with the Agent avatar preset.</p>
+function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AvatarSprite) => Promise<boolean>; onDone: () => void }) {
+  const [sheets, setSheets] = useState<SheetInfo[] | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  useEffect(() => {
+    const abort = new AbortController()
+    hubGet<{ sheets: SheetInfo[] }>(`/team/${encodeURIComponent(agent.id)}/sheets`, abort.signal)
+      .then(answer => setSheets(Array.isArray(answer.sheets) ? answer.sheets : []))
+      .catch(failure => { if (!abort.signal.aborted) setProblem(failure instanceof Error ? failure.message : 'The sheets did not load.') })
+    return () => abort.abort()
+  }, [agent.id, agent.sprite])
+  if (problem) return <p className="hub-error" role="alert" data-sheet-custom>{problem}</p>
+  if (!sheets) return <p className="sheet-custom" data-sheet-custom aria-busy="true">Loading…</p>
+  if (!sheets.length) return <p className="sheet-custom" data-sheet-custom data-agent={agent.id}>No custom sheets yet. They arrive with the Agent avatar preset.</p>
+  const use = async (info: SheetInfo) => {
+    setBusy(info.sheet)
+    // `AvatarSprite` gains the custom case with m5-custom-sheets; until then this is the one cast.
+    const done = await onUse(spriteOfSheet(info) as unknown as AvatarSprite)
+    setBusy(null)
+    if (done) onDone()
+  }
+  return (
+    <ul className="sheet-list" data-sheet-custom data-agent={agent.id} aria-label={`${agent.name} sprite sheets`}>
+      {sheets.map(info => (
+        <li key={info.sheet} className={`sheet-item${info.current ? ' on' : ''}`} data-sheet-item={info.sheet}>
+          <span className="team-tile"><AgentSprite sprite={spriteOfSheet(info)} size={52} name={agent.name} state="idle" /></span>
+          <span className="sheet-item-text"><b>{info.current ? 'Current sheet' : 'Sheet'}</b><small>{ago(info.at)}</small></span>
+          <button type="button" className="hub-btn pri" disabled={info.current || busy !== null} onClick={() => { void use(info) }} data-sheet-use-custom={info.sheet}>{info.current ? 'In use' : 'Use this'}</button>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 /**
@@ -97,7 +132,7 @@ export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgen
             </div>
             <p className="team-dim sheet-hint">Instant, no job. Randomize draws one from the name {agent.name}: body, palette and accessory.</p>
           </>
-        ) : <CustomTab agent={agent} onUse={onUse} />}
+        ) : <CustomTab agent={agent} onUse={onUse} onDone={() => dialog.current?.close()} />}
       </div>
       {mode === 'quick' && (
         <div className="sheet-foot">
