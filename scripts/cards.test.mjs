@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createBucket } from '../site/api/s3.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
@@ -319,6 +319,41 @@ for (const via of ['api', 's3']) {
       assert.equal((await cli(via, 'request', 'list', '--open')).stdout.trim(), '');
       assert.match((await cli(via, 'request', 'list')).stdout, /\ttaken\t/);
       assert.equal((await cli(via, 'request', 'take', id, '--bead', 'bd-9')).code, 3);
+    } finally { await close(); }
+  });
+
+  test(`request (${via}): --preset takes every new flag, a bad one exits 1, take of a preset request exits 4`, async () => {
+    const { cli, keys, fake, close } = await setup();
+    try {
+      cli.env = { BUW_REQUEST_ID: '' };
+      assert.equal((await cli(via, 'request', 'create', '--project', 'probe', '--text', 'x', '--preset', 'nope')).code, 1);
+      assert.equal((await cli(via, 'request', 'create', '--project', 'probe', '--text', 'x', '--preset', 'research', '--target', 'moon')).code, 1);
+      assert.equal((await cli(via, 'request', 'create', '--project', 'probe', '--text', 'x', '--preset', 'research', '--needs', 'gpu,telepathy')).code, 1);
+      assert.equal((await cli(via, 'request', 'create', '--project', 'probe', '--text', 'x', '--preset', 'research', '--repo', 'no-slash')).code, 1);
+      assert.equal(keys('requests/').length, 0, 'Nothing written for a refused create.');
+      const made = await cli(via, 'request', 'create', '--project', 'probe', '--text', 'Compare two jump arcs', '--title', 'Jump arcs', '--preset', 'code-task',
+        '--repo', 'example/probe', '--needs', 'unity,gpu', '--target', 'pc', '--done-when', 'a PR is open', '--by', 'agent-x');
+      assert.equal(made.code, 0, made.stderr);
+      const id = made.stdout.trim().split('\n').at(-1);
+      const key = keys(`requests/${id}/`).find(name => name.endsWith('request.json'));
+      const request = JSON.parse(fake.objects.get(key).body.toString());
+      assert.deepEqual({ ...request, createdAt: undefined }, {
+        id, project: 'probe', by: 'agent-x', text: 'Compare two jump arcs', title: 'Jump arcs', preset: 'code-task', repo: 'example/probe',
+        needs: ['unity', 'gpu'], target: 'pc', doneWhen: 'a PR is open', origin: { kind: 'agent', name: 'agent-x' }, createdAt: undefined,
+      });
+      assert.equal('when' in request, false, 'A preset request has no when.');
+      cli.env = { BUW_REQUEST_ID: 'run-from-env' };
+      const fromRun = await cli(via, 'request', 'create', '--project', 'probe', '--text', 'Follow up', '--preset', 'docs');
+      const runId = fromRun.stdout.trim().split('\n').at(-1);
+      const runKey = keys(`requests/${runId}/`).find(name => name.endsWith('request.json'));
+      assert.deepEqual(JSON.parse(fake.objects.get(runKey).body.toString()).origin, { kind: 'run', name: 'run-from-env' });
+      cli.env = {};
+      const before = keys('requests/').length;
+      const taken = await cli(via, 'request', 'take', id, '--bead', 'bd-1');
+      assert.equal(taken.code, 4);
+      assert.match(taken.stderr, /starts only from its approval/);
+      assert.equal((await cli(via, 'request', 'take', id)).code, 4, 'exit 4 even without --bead');
+      assert.equal(keys('requests/').length, before, 'take wrote nothing.');
     } finally { await close(); }
   });
 
@@ -824,4 +859,32 @@ test('ask create: a picture whose bytes do not match its file type is refused be
     }
     assert.equal(keys('asks/').filter(key => key.endsWith('ask.json')).length, 3);
   } finally { await close(); }
+});
+
+test('request create pings #needs-you once with the request link only for a preset', async () => {
+  const { cli, close } = await setup();
+  const hook = await webhook();
+  try {
+    cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/', BUW_REQUEST_ID: '' };
+    const plain = await cli('api', 'request', 'create', '--project', 'magic-loops', '--text', 'Legacy one', '--when', 'nightly');
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.equal(hook.posts.length, 0, 'No preset, no ping.');
+    const made = await cli('api', 'request', 'create', '--project', 'magic-loops', '--text', 'Research the tug mechanic', '--title', 'Tug research', '--preset', 'research');
+    assert.equal(made.code, 0, made.stderr);
+    const id = made.stdout.trim().split('\n').at(-1);
+    assert.equal(hook.posts.length, 1);
+    assert.equal(hook.posts[0].body.content, `**Agent needs you · Magic Loops**\nTug research\nhttps://hub.example.test/#/~hub/request/${id}`);
+    assert.ok(!made.stdout.includes(hook.url) && !made.stderr.includes(hook.url));
+    const help = await cli('api', 'request', 'create', '--project', 'magic-loops');
+    assert.equal(help.code, 1);
+    assert.match(help.stderr, /--preset <id>.*--target pc\|cloud\|hermes\|at-pc.*--done-when/);
+  } finally { await hook.close(); await close(); }
+});
+
+test('PRESET_IDS in cards.mjs equals the presets of the site API (once presets.mjs exists)', async () => {
+  const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  const ids = JSON.parse(source.match(/const PRESET_IDS = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
+  let presets;
+  try { presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href); } catch { return; }   // lands with m3a-presets
+  assert.deepEqual([...ids].sort(), Object.keys(presets.PRESETS).sort());
 });
