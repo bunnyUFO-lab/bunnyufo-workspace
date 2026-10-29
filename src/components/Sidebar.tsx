@@ -27,6 +27,8 @@ interface SidebarProps {
   query: string
   onQuery: (q: string) => void
   searchRef: RefObject<HTMLInputElement | null>
+  /** Opens the Ctrl+K palette. */
+  onPalette: () => void
   workspaces: CardWorkspace[]
   project: string
   counts: Map<string, number>
@@ -244,6 +246,7 @@ export default function Sidebar({
   query,
   onQuery,
   searchRef,
+  onPalette,
   workspaces,
   project,
   counts,
@@ -457,6 +460,12 @@ export default function Sidebar({
 
       {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} library={!hubScreen && activeId === null} onHome={onHome} />}
 
+      <button type="button" className="sidebar-palette" onClick={onPalette} data-palette-open>
+        <span aria-hidden="true">{'⌕'}</span>
+        <span className="sidebar-palette-text">Search</span>
+        <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+      </button>
+
       <div className="sidebar-search">
         <span className="search-icon" aria-hidden="true">
           {'⌕'}
@@ -466,7 +475,7 @@ export default function Sidebar({
           value={query}
           onChange={ev => onQuery(ev.target.value)}
           onKeyDown={onSearchKey}
-          placeholder="Search…  ( / )"
+          placeholder="Filter cards…  ( / )"
           aria-label="Search entities"
         />
         {query && (

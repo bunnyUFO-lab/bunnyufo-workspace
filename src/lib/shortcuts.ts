@@ -56,6 +56,7 @@ export const SHORTCUT_GROUPS: { title: string; items: Shortcut[] }[] = [
   {
     title: 'Anywhere',
     items: [
+      { keys: ['Ctrl', 'K'], does: 'Open the palette: go to a screen, an item, a roadmap or a card' },
       { keys: ['Ctrl', 'H'], does: 'This list (or ?)' },
       { keys: ['Esc'], does: 'Close a dialog, or stop editing a page' },
     ],
