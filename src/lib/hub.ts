@@ -3,6 +3,7 @@
 // code runs against the published site and the local app.
 import { authHeaders } from '../local/client'
 import type { PcSummary, WorkingItem } from './hubPc'
+import type { NeedsKind } from './needsKinds'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'review' | 'blocked' | 'session'
 export interface Item {
@@ -26,7 +27,19 @@ export interface Item {
   /** A checklist row: items ticked and items in all. */
   done?: number
   total?: number
+  /** The sending tool of an Ask or a checklist. */
+  tool?: string
+  /** A review row: each leg's result, and the screenshots that came with it. */
+  verdicts?: { leg: Verdict['leg']; result: Verdict['result'] }[]
+  shots?: number
+  /** Needs you rows only: the kind, four plain sentences, and (with `detail=1`) the Ask or list itself. */
+  needs?: NeedsKind
+  describe?: Described
+  detail?: Ask | Checklist
 }
+
+/** `describeItem` on the server: what a Needs you card says in its four cells. `age` is in minutes. */
+export interface Described { kind: NeedsKind; who: string; age: number; what: string; state: string; next: string; blocker: string }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
   | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted'

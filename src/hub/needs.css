@@ -1,0 +1,75 @@
+/* Needs you, after the mission-control mockup (.nq, .ni, .four, .opt). Tokens only. Loaded after hub.css, so these win on equal weight. */
+.needs-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 18px; }
+.needs-eyebrow { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); }
+.hub .needs-head h2 { font-family: var(--font); font-size: 34px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin-top: 6px; }
+.needs-head p { margin: 8px 0 0; color: var(--t2); font-size: 0.95rem; max-width: 52ch; }
+.needs-next { margin-left: auto; background: var(--t1); color: var(--ground); border-color: var(--t1); font-weight: 600; border-radius: 999px; min-height: 36px; padding: 0 16px; }
+.hub .needs-next { color: var(--ground); }
+.needs-next:hover:not(:disabled) { background: var(--text-bright); }
+
+.needs .hub-chips.one-row { margin-bottom: 14px; padding-bottom: 2px; }
+.needs .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
+.needs .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
+.needs .hub-chip.on .n { color: inherit; }
+.needs-empty { padding: 28px 4px; }
+.ni-status { margin: 0 0 12px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--s2); border: 1px solid var(--line); color: var(--t2); font-size: 0.85rem; }
+
+.nq { display: flex; flex-direction: column; gap: 12px; }
+.ni { display: grid; grid-template-rows: 1fr; scroll-margin-top: 12px; transition: grid-template-rows 0.26s var(--ease-out), opacity 0.2s var(--ease-out), transform 0.26s var(--ease-out), margin 0.26s var(--ease-out); }
+.ni > .ni-card { overflow: hidden; min-height: 0; padding: 0; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3); transition: border-color 0.3s; }
+.ni.leaving { grid-template-rows: 0fr; opacity: 0; transform: translateX(32px); margin-top: -12px; pointer-events: none; }
+.ni.flash > .ni-card { border-color: color-mix(in srgb, var(--accent) 50%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+.ni-h { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 12px; }
+.ni-hm { min-width: 0; flex: 1; }
+.hub .ni-t { display: block; margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; text-transform: none; color: var(--t1); overflow-wrap: anywhere; }
+.ni-t a { text-decoration: none; }
+.ni-t a:hover { text-decoration: underline; }
+.ni-t:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+.ni-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; color: var(--t3); }
+.ni-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--t2); font-size: 11.5px; line-height: 1; white-space: nowrap; }
+.ni-chip.pass { color: var(--st-done); border-color: color-mix(in srgb, var(--st-done) 30%, transparent); background: color-mix(in srgb, var(--st-done) 10%, transparent); }
+.ni-chip.fail { color: var(--st-failed); border-color: color-mix(in srgb, var(--st-failed) 30%, transparent); background: color-mix(in srgb, var(--st-failed) 10%, transparent); }
+.ni-chip.noted { color: var(--st-needs); border-color: color-mix(in srgb, var(--st-needs) 30%, transparent); background: color-mix(in srgb, var(--st-needs) 10%, transparent); }
+.ni-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--t1) 2%, transparent); }
+.four > div { padding: 10px 18px; border-left: 1px solid var(--line); min-width: 0; }
+.four > div:first-child { border-left: 0; }
+.four dt { font: 600 9.5px var(--font); text-transform: uppercase; letter-spacing: 0.13em; color: var(--t3); }
+.four dd { margin: 3px 0 0; font-size: 12.5px; color: var(--t2); line-height: 1.4; overflow-wrap: anywhere; }
+
+.ni-b { padding: 16px 18px; }
+.ni-b + .ni-b { padding-top: 0; }
+.ni-a { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 18px 16px; align-items: center; }
+.ni-a .sp { flex: 1; }
+.ni-notes .hub-error, .ni-notes .hub-muted { margin: 0; }
+.ni-mono { margin: 0; padding: 10px 12px; max-height: 12em; overflow: auto; border-radius: var(--radius-sm); background: var(--s2); border: 1px solid var(--line); font: 12px/1.5 var(--mono); color: var(--t2); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The shared bodies sit in the card without their own panel. */
+.ni .hub-panel { background: none; border: 0; padding: 0; margin: 0 0 12px; border-radius: 0; }
+.ni .hub-panel:last-child, .ni-b > :last-child { margin-bottom: 0; }
+.ni .hub-options { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 0; }
+.ni .hub-option-pick { min-height: 44px; }
+.ni .hub-option { background: none; border-color: var(--line); border-radius: var(--r2, 12px); }
+.ni .hub-option.sel { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 7%, transparent); box-shadow: none; }
+.ni .hub-btn { min-height: 38px; }
+
+@media (max-width: 760px) {
+  .hub .needs-head h2 { font-size: 28px; }
+  .four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .four > div:nth-child(3) { border-left: 0; }
+  .four > div:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .ni-h, .ni-b { padding-left: 14px; padding-right: 14px; }
+  .ni-a { padding: 0 14px 14px; }
+  .four > div { padding: 9px 14px; }
+  .ni-meta { gap: 6px; }
+  .ni .hub-btn, .ni .hub-option-pick, .ni .hub-cl-box { min-height: 44px; }
+  .ni .hub-actions { justify-content: stretch; }
+  .ni .hub-actions .hub-btn { flex: 1 1 auto; }
+  .needs .hub-chip { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ni { transition: none; }
+  .ni > .ni-card { transition: none; }
+}
