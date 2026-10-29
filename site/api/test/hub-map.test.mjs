@@ -181,3 +181,45 @@ test('sprint bands span the milestones they touch, ordered by their earliest tas
     { name: 'two', milestones: [{ id: 'm1', count: 1, total: 1 }, { id: 'm2', count: 1, total: 3 }] },
   ]);
 });
+
+const MAP_BODY = 'Intro.\n\n## Destination\n\nA **calm**, `fast` [Roadmap](https://example.test/x) that\nreads in _one_ line.\n\nSecond paragraph.\n\n## Other\n\nNot this.';
+const wayMap = (extra = {}) => issue({ id: 'wf', type: 'epic', labels: ['wayfinder:map'], description: MAP_BODY, updated: '2026-10-20T10:00:00Z', ...extra });
+
+test('wayfinder: the destination is the first paragraph under the heading, as plain text', () => {
+  const map = build([wayMap()]);
+  assert.equal(map.wayfinder.destination, 'A calm, fast Roadmap that reads in one line.');
+});
+
+test('wayfinder: a long destination is clipped to 280 characters with an ellipsis', () => {
+  const map = build([wayMap({ description: `## Destination\n\n${'word '.repeat(100)}` })]);
+  assert.equal(map.wayfinder.destination.length, 280);
+  assert.ok(map.wayfinder.destination.endsWith('…'));
+});
+
+test('wayfinder: closed children are the decisions; open wayfinder children are the questions, oldest first, at most 8', () => {
+  const kids = [
+    issue({ id: 'd1', parent: 'wf', status: 'closed', closed: '2026-10-05T10:00:00Z', labels: ['wayfinder:decision'], created: '2026-10-02T10:00:00Z' }),
+    issue({ id: 'd2', parent: 'wf', status: 'closed', closed: '2026-10-06T10:00:00Z', created: '2026-10-02T11:00:00Z' }),
+    issue({ id: 'plain', parent: 'wf', created: '2026-10-02T12:00:00Z' }),
+    ...Array.from({ length: 10 }, (_, index) => issue({ id: `q${String(index).padStart(2, '0')}`, title: `Question ${index}`, parent: 'wf', labels: ['wayfinder:question'], created: `2026-10-03T10:${String(59 - index).padStart(2, '0')}:00Z` })),
+  ];
+  const way = build([wayMap(), ...kids]).wayfinder;
+  assert.equal(way.decisions, 2);
+  assert.equal(way.open.length, 8);
+  assert.deepEqual(way.open.slice(0, 2).map(item => [item.id, item.title, item.type]), [['q09', 'Question 9', 'question'], ['q08', 'Question 8', 'question']]);
+  assert.ok(!way.open.some(item => item.id === 'plain'), 'An open child without a wayfinder label is not a question.');
+});
+
+test('wayfinder: a map without the heading has no destination and still counts', () => {
+  const way = build([wayMap({ description: 'Just notes.' }), issue({ id: 'd', parent: 'wf', status: 'closed', closed: '2026-10-05T10:00:00Z' })]).wayfinder;
+  assert.deepEqual(way, { destination: null, decisions: 1, open: [] });
+});
+
+test('wayfinder: the newest updated map wins, a closed map is ignored, and no map gives null', () => {
+  const older = wayMap({ id: 'old', description: '## Destination\n\nOld.', updated: '2026-10-01T10:00:00Z' });
+  const newer = wayMap({ id: 'new', description: '## Destination\n\nNew.', updated: '2026-10-25T10:00:00Z' });
+  const closed = wayMap({ id: 'shut', description: '## Destination\n\nShut.', updated: '2026-10-26T10:00:00Z', status: 'closed', closed: '2026-10-26T10:00:00Z' });
+  assert.equal(build([older, newer, closed]).wayfinder.destination, 'New.');
+  assert.equal(build([closed]).wayfinder, null);
+  assert.equal(build([issue({ id: 'm', type: 'milestone' })]).wayfinder, null);
+});
