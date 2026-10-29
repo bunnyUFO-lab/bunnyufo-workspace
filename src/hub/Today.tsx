@@ -74,7 +74,7 @@ function MoveTile({ offer }: { offer: MoveOffer }) {
     <div className="move-tile" data-move-offer={offer.request}>
       <span className="nrow-text">
         <b>{offer.title}</b>
-        <small>Waited 6 h for the PC. Move it to the cloud? It only needs the repo.</small>
+        <small>Waited 6 h for the PC. Move it to the cloud{offer.repo ? ` (${offer.repo})` : ''}? It only needs the repo.</small>
       </span>
       <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void move()} data-move-to-cloud>Move to the cloud</button>
       {problem && <small className="hub-error" role="alert" data-move-error>{problem}</small>}

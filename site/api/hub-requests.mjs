@@ -8,14 +8,15 @@
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
 import { RULES, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
-import { newNonce, sha256Hex, sign } from './signing.mjs';
+import { createPublicKey } from 'node:crypto';
+import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, validId, validProject } from './hub-model.mjs';
 
 /** The needs a request may name. */
 export const NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-files'];
-/** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 /** How long a request waits for the PC before the cloud is offered. */
 export const MOVE_AFTER_MS = 6 * 3600 * 1000;
+/** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
 export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
@@ -139,10 +140,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * not taken, for 6 hours or more; its preset must allow the cloud; neither the preset nor the request may need anything
    * only the PC has; it needs a repo that has a routine; and its project may not be Bunnylink or in `HUB_CLOUD_NEVER`.
    */
-  function moveEligibility(request, state, approved, at) {
+  const publicKey = signingKey ? createPublicKey(signingKey) : null;
+  function moveEligibility(request, state, approved, at, stored = null) {
     const preset = presetOf(request.preset);
     if (!preset) return 'Only a request made from a preset can move.';
-    if (state !== 'approved' || approved?.target !== 'pc') return 'Only a request approved for the PC that has not been taken can move to the cloud.';
+    if (state !== 'approved') return `That request is ${state}; it cannot move to the cloud.`;
+    if (approved?.target !== 'pc') return `That request is approved for ${approved?.target ?? 'nothing'}, not the PC.`;
+    // The old approval is checked as the queue checks a cloud one: this host's signature, this request, the PC, not expired and, when
+    // the stored bytes are at hand (the route), the hash of the request. An approval signed by another key is never offered or re-signed.
+    if (!publicKey || !verify(approved, publicKey)) return 'The approval on that request failed the server\'s check.';
+    if (approved.request !== request.id || !(Date.parse(approved.expires) > at.getTime())) return 'The approval on that request failed the server\'s check.';
+    if (stored && approved.requestSha256 !== sha256Hex(stored.buffer)) return 'The approval on that request failed the server\'s check.';
     if (at.getTime() - Date.parse(approved.at) < MOVE_AFTER_MS) return 'It has not waited 6 hours yet.';
     if (!preset.targets.includes('cloud')) return `${preset.label} cannot run in the cloud.`;
     if (preset.needs.length || (request.needs ?? []).length) return 'It needs something only the PC has.';
@@ -187,6 +195,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       // Where a cloud request stands (queued, fired, waiting, fire-failed, not-started); null for everything else.
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
       const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
+      // (The list pass skips the request hash; the route checks it.)
       return requestItem(full, state, parts.taken, { ...parts, cloud, offer });
     });
     return rows.filter(Boolean);
@@ -459,12 +468,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * `POST /hub/requests/:id/again { target?, text?, title?, doneWhen? }`: for an expired, failed, lost or proposed request. Makes a
    * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
    * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
-   * `moved` is the cloud move (`move-to-cloud`): the request is still approved, for the PC, and the stop says where it went.
+   * `moved` is the cloud move (`move-to-cloud`): the id the copy must take. The old request was stopped first, naming that id, so the
+   * copy is made under it and the old request is not stopped again.
    */
-  async function againRoute(id, raw, user, at, { moved = false } = {}) {
+  async function againRoute(id, raw, user, at, { moved = null } = {}) {
     needKey();
     const { parts, state } = await loadOne(id, at);
-    if (!(moved ? ['approved'] : ['expired', 'failed', 'lost', 'proposed']).includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
+    if (!(moved ? ['stopped'] : ['expired', 'failed', 'lost', 'proposed']).includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
@@ -487,7 +497,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
-    }));
+    }), null, moved);
     let approval;
     try {
       approval = await approveRequest(made.id, { target, by: user, at });
@@ -500,9 +510,10 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       }
       approval = { state: 'approved', waiting: 'Could not finish the hand-off; it will start when it can.' };
     }
-    const reason = moved ? `moved to the cloud: ${made.id}` : `replaced by ${made.id}`;
+    const reason = `replaced by ${made.id}`;
+    if (moved) return { status: 201, body: { id: made.id, ...approval } };
     if (state === 'proposed') await writeSigned(id, 'declined.json', { at: at.toISOString(), by: user, reason }, 'That request is already declined.');
-    else await writeStop(id, reason, user, at, moved ? ['approved'] : ['expired', 'failed', 'lost']);
+    else await writeStop(id, reason, user, at, ['expired', 'failed', 'lost']);
     return { status: 201, body: { id: made.id, ...approval } };
   }
 
@@ -551,9 +562,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
-   * `POST /hub/requests/:id/move-to-cloud`: the owner's tap on the offer. The same as Approve again with the cloud as the target:
-   * a new request that replaces this one, a new signed approval, a hand-off (so the daily cap and a pause apply), and a signed stop
-   * on the old one. A second tap, or one on a request that is no longer eligible, is a 409.
+   * `POST /hub/requests/:id/move-to-cloud`: the owner's tap on the offer. Approve again with the cloud as the target, in this order:
+   * (1) check the old approval and the rules; (2) choose the new id and write the old request's signed, create-only `stop.json`
+   * naming it, which is the lock: a PC take before it makes this a 409 with nothing made, a take after it meets the stop, and a
+   * second move from any process meets the create-only write; (3) only then make the cloud copy under that id, sign it and hand it to
+   * the fire queue (the daily cap and a pause apply). If step 3 fails, the old request stays stopped (the copy is declined when
+   * nothing was signed), and the owner approves the work again by hand. The chosen id is random, so a clash is not retried.
    */
   async function moveRoute(id, _raw, user, at) {
     needKey();
@@ -561,9 +575,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     moving.add(id);
     try {
       const { request, parts, state } = await loadOne(id, at);
-      const why = moveEligibility(request, state, parts.approved, at);
+      const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+      if (!stored) throw fail('No such request.', 404);
+      const why = moveEligibility(request, state, parts.approved, at, stored);
       if (why) throw clash(why);
-      return await againRoute(id, { target: 'cloud' }, user, at, { moved: true });
+      const newId = newRequestId(request.project, request.text, at);
+      await writeStop(id, `moved to the cloud: ${newId}`, user, at, ['approved']);
+      return await againRoute(id, { target: 'cloud' }, user, at, { moved: newId });
     } finally { moving.delete(id); }
   }
 

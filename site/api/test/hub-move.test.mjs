@@ -13,6 +13,7 @@ import { markStamp } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { createFakeRoutine } from './fake-routine.mjs';
 import { requestJson } from './hub-fixtures.mjs';
+import { sha256Hex, sign } from '../signing.mjs';
 
 const SITE = 'https://site.example';
 const MIN = 60000;
@@ -24,6 +25,7 @@ const ENV = {
   CLAUDE_ROUTINE_PROBE_TOKEN: 'tok-SECRET',
   CLAUDE_ROUTINE_PROBE_REPO: 'example/probe',
 };
+const otherPair = generateKeyPairSync('ed25519');
 const START = Date.UTC(2026, 9, 29, 12, 0);
 
 async function fixture({ env = {} } = {}) {
@@ -49,11 +51,12 @@ async function fixture({ env = {} } = {}) {
   const post = (url, data, headers = { 'Remote-User': 'owner' }) => call('POST', url, data, headers);
   let n = 0;
   /** A code task for the PC, proposed and approved at the start of the test clock. */
-  const pcRequest = async (extra = {}) => {
+  const pcRequest = async (extra = {}, { sign: signed = true } = {}) => {
     n += 1;
     const id = `20261029-probe-job${n}-c${String(n).padStart(3, '0')}`;
     const request = { ...requestJson({ id, now: new Date(clock.time) }), preset: 'code-task', target: 'pc', repo: 'example/probe', title: `Job ${n}`, origin: { kind: 'owner', name: 'owner' }, ...extra };
     fake.seed(`sections/inbox/requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json');
+    if (!signed) return request;
     const approved = await post(`/hub/requests/${id}/approve`, { target: 'pc' });
     assert.equal(approved.status, 201, JSON.stringify(approved.body));
     return request;
@@ -61,7 +64,31 @@ async function fixture({ env = {} } = {}) {
   const files = id => [...fake.objects.keys()].filter(name => name.startsWith(`sections/inbox/requests/${id}/`)).map(name => name.split('/').pop());
   const offers = async () => (await call('GET', '/hub/today')).body.offers ?? [];
   const detail = async id => (await call('GET', `/hub/requests/${id}`)).body;
-  return { fake, hub, call, post, clock, routine, pcRequest, files, offers, detail, close: async () => { await hub.close(); server.close(); await fake.close(); } };
+  const extra = [];
+  /** A second site API on the same bucket and clock, with its own routine: another process of the same service. */
+  const second = async () => {
+    const routine2 = createFakeRoutine();
+    const hub2 = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env: { ...ENV, ...env }, fetchImpl: routine2.fetchImpl, log: () => {} });
+    const server2 = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state2.json'), sectionsTtl: 0, requireRemoteUser: false, hub: hub2, allowedOrigins: [SITE] });
+    await new Promise(resolve => server2.listen(0, '127.0.0.1', resolve));
+    extra.push(async () => { await hub2.close(); server2.close(); });
+    const origin2 = `http://127.0.0.1:${server2.address().port}`;
+    const post2 = async url => {
+      const answer = await fetch(`${origin2}/api${url}`, { method: 'POST', headers: { Origin: SITE, 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: '{}' });
+      return { status: answer.status, body: await answer.json().catch(() => null) };
+    };
+    return { post: post2, routine: routine2 };
+  };
+  /** Replace a request's approval with one signed by `privateKey` (the PC wrote it, or a stranger did). */
+  const reapprove = (request, { privateKey = otherPair.privateKey, sha = null } = {}) => {
+    const bytes = fake.text(`sections/inbox/requests/${request.id}/request.json`);
+    const approved = sign({
+      v: 1, request: request.id, project: request.project, repo: request.repo ?? null, target: 'pc', requestSha256: sha ?? sha256Hex(Buffer.from(bytes)), limits: { minutes: 120 },
+      expires: new Date(START + 72 * HOUR).toISOString(), nonce: 'n'.repeat(22), at: new Date(START).toISOString(), by: 'owner', run: { preset: 'code-task', brief: 'Do the job.' },
+    }, privateKey);
+    fake.seed(`sections/inbox/requests/${request.id}/approved.json`, `${JSON.stringify(approved, null, 2)}\n`, 'application/json');
+  };
+  return { fake, hub, call, post, clock, routine, pcRequest, files, offers, detail, second, reapprove, close: async () => { await hub.close(); server.close(); for (const stop of extra) await stop(); await fake.close(); } };
 }
 
 test('offered at 6 hours and not before; moving makes a cloud request, fires it and stops the old one', async () => {
@@ -173,5 +200,84 @@ test('two moves at once make one new request', async () => {
     assert.equal(f.routine.calls.length, 1);
     const copies = [...f.fake.objects.keys()].filter(name => /requests\/[^/]+\/request\.json$/.test(name) && JSON.parse(f.fake.text(name)).replaces === request.id);
     assert.equal(copies.length, 1);
+  } finally { await f.close(); }
+});
+
+test('a request the PC took meets a 409 with no stop, no copy and no fire', async () => {
+  const f = await fixture();
+  try {
+    const request = await f.pcRequest();
+    f.clock.time = START + 7 * HOUR;
+    f.fake.seed(`sections/inbox/requests/${request.id}/taken.json`, JSON.stringify({ v: 1, runner: 'pc', host: 'pc', at: new Date(START + 6.5 * HOUR).toISOString() }), 'application/json');
+    const answer = await f.post(`/hub/requests/${request.id}/move-to-cloud`);
+    assert.equal(answer.status, 409);
+    assert.ok(![...f.fake.objects.keys()].some(name => name.includes(`${request.id}/stop.json`)), 'No stop.');
+    assert.equal([...f.fake.objects.keys()].filter(name => name.endsWith('/request.json')).length, 1, 'No copy.');
+    assert.equal(f.routine.calls.length, 0);
+  } finally { await f.close(); }
+});
+
+test('the old request is stopped before the copy fires', async () => {
+  const f = await fixture();
+  try {
+    const request = await f.pcRequest();
+    f.clock.time = START + 7 * HOUR;
+    const seen = [];
+    // The routine is called after the copy is signed: look at the bucket at that moment.
+    f.routine.calls.push = function push(...items) { seen.push([...f.fake.objects.keys()].some(name => name.includes(`${request.id}/stop.json`))); return Array.prototype.push.apply(this, items); };
+    const moved = await f.post(`/hub/requests/${request.id}/move-to-cloud`);
+    assert.equal(moved.status, 201, JSON.stringify(moved.body));
+    assert.deepEqual(seen, [true], 'The stop was already there when the routine was called.');
+    assert.equal(f.fake.json(`sections/inbox/requests/${request.id}/stop.json`).reason, `moved to the cloud: ${moved.body.id}`);
+  } finally { await f.close(); }
+});
+
+test('two site APIs on one bucket moving at once make one copy and one fire', async () => {
+  const f = await fixture();
+  try {
+    const other = await f.second();
+    const request = await f.pcRequest();
+    f.clock.time = START + 7 * HOUR;
+    const [a, b] = await Promise.all([f.post(`/hub/requests/${request.id}/move-to-cloud`), other.post(`/hub/requests/${request.id}/move-to-cloud`)]);
+    assert.deepEqual([a.status, b.status].sort(), [201, 409], JSON.stringify([a.body, b.body]));
+    assert.equal(f.routine.calls.length + other.routine.calls.length, 1);
+    const copies = [...f.fake.objects.keys()].filter(name => /requests\/[^/]+\/request\.json$/.test(name) && JSON.parse(f.fake.text(name)).replaces === request.id);
+    assert.equal(copies.length, 1);
+  } finally { await f.close(); }
+});
+
+test('an approval signed by another key, or for other bytes, is never offered or re-signed', async () => {
+  const f = await fixture();
+  try {
+    const forged = await f.pcRequest({ origin: { kind: 'agent', name: 'hermes' } }, { sign: false });
+    const changed = await f.pcRequest({}, { sign: false });
+    const good = await f.pcRequest();
+    f.reapprove(forged);
+    f.reapprove(changed, { privateKey: keyPair.privateKey, sha: 'a'.repeat(64) });
+    f.clock.time = START + 7 * HOUR;
+    const offered = (await f.offers()).map(offer => offer.request);
+    assert.ok(!offered.includes(forged.id), 'A forged approval is not offered.');
+    assert.ok(offered.includes(good.id));
+    for (const request of [forged, changed]) {
+      const answer = await f.post(`/hub/requests/${request.id}/move-to-cloud`);
+      assert.equal(answer.status, 409, request.id);
+      assert.match(answer.body.error, /failed the server's check/);
+      assert.ok(![...f.fake.objects.keys()].some(name => name.includes(`${request.id}/stop.json`)), 'Nothing was stopped.');
+    }
+    assert.equal([...f.fake.objects.keys()].filter(name => name.endsWith('/request.json')).length, 3, 'No copy.');
+    assert.equal(f.routine.calls.length, 0);
+  } finally { await f.close(); }
+});
+
+test('the 409 for a request that cannot move names its state; the offer carries the repo', async () => {
+  const f = await fixture();
+  try {
+    const request = await f.pcRequest();
+    f.clock.time = START + 7 * HOUR;
+    assert.equal((await f.offers())[0].repo, 'example/probe');
+    await f.post(`/hub/requests/${request.id}/stop`, {});
+    const answer = await f.post(`/hub/requests/${request.id}/move-to-cloud`);
+    assert.equal(answer.status, 409);
+    assert.match(answer.body.error, /That request is stopped; it cannot move to the cloud\./);
   } finally { await f.close(); }
 });

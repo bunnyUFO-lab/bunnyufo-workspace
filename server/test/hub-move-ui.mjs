@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
+import { sha256Hex, sign } from '../../site/api/signing.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -36,7 +37,8 @@ try {
   const pcRequest = (id, text, extra = {}) => {
     seed.request({ id, project: 'magic-loops', createdAt: minutesAgo(now, 500).toISOString(), by: 'owner', text, preset: 'code-task', repo: 'example/magic-loops', target: 'pc', origin: { kind: 'owner', name: 'owner' }, ...extra });
   };
-  const approve = (id, hours) => seed.put(`requests/${id}/approved.json`, { v: 1, request: id, project: 'magic-loops', repo: 'example/magic-loops', target: 'pc', limits: { minutes: 120 }, expires: NEVER, at: minutesAgo(now, hours * 60).toISOString(), by: 'owner', signature: 'x' });
+  // A PC approval as the server signed it, `hours` ago: the move checks the signature and the hash of request.json.
+  const approve = (id, hours, host = fixture) => host.seed.put(`requests/${id}/approved.json`, sign({ v: 1, request: id, project: 'magic-loops', repo: 'example/magic-loops', target: 'pc', requestSha256: sha256Hex(host.fake.objects.get(`sections/inbox/requests/${id}/request.json`).body), limits: { minutes: 120 }, expires: NEVER, nonce: 'n'.repeat(22), at: minutesAgo(host.now, hours * 60).toISOString(), by: 'owner', run: { preset: 'code-task', brief: 'Do the job.' } }, host.signingKey));
   pcRequest(ids.old, 'Fix the tab order on the settings sheet');
   approve(ids.old, 7);
   pcRequest(ids.fresh, 'Rename the dash constants');
@@ -52,7 +54,7 @@ try {
   await tile.waitFor();
   assert.equal(await page.locator('[data-move-offer]').count(), 1);
   assert.match(await tile.innerText(), /Fix the tab order on the settings sheet/);
-  assert.match(await tile.innerText(), /Waited 6 h for the PC\. Move it to the cloud\? It only needs the repo\./);
+  assert.match(await tile.innerText(), /Waited 6 h for the PC\. Move it to the cloud \(example\/magic-loops\)\? It only needs the repo\./);
   await shot(page, 'move-today');
 
   step('the tap opens the new request: started in the cloud, nothing sent; the old one is stopped and its tile is gone');
@@ -77,7 +79,7 @@ try {
   const other = await startHubFixture({ signing: true, env: { HUB_ROUTINE_DRY_RUN: '1' } });
   fixtures.push(other);
   other.seed.request({ id: ids.old, project: 'magic-loops', createdAt: minutesAgo(other.now, 500).toISOString(), by: 'owner', text: 'Fix the tab order on the settings sheet, the one on the phone that nobody can reach', preset: 'code-task', repo: 'example/magic-loops', target: 'pc', origin: { kind: 'owner', name: 'owner' } });
-  other.seed.put(`requests/${ids.old}/approved.json`, { v: 1, request: ids.old, project: 'magic-loops', repo: 'example/magic-loops', target: 'pc', limits: { minutes: 120 }, expires: NEVER, at: minutesAgo(other.now, 400).toISOString(), by: 'owner', signature: 'x' });
+  approve(ids.old, 7, other);
   await new Promise(resolve => setTimeout(resolve, 100));
   const phone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${other.url}#/~hub/today`);

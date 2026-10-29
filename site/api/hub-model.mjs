@@ -319,7 +319,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(target ? { target } : {}),
     ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
-    ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}) } : {}),
+    ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}), ...(request.repo ? { repo: request.repo } : {}) } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
   };
@@ -422,7 +422,7 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
     }));
   // Offers: what the owner could do now. A PC request that has waited 6 hours may move to the cloud.
   const offers = requests.filter(item => item.offer === 'move-to-cloud')
-    .map(item => ({ kind: 'move-to-cloud', request: item.id, project: item.project, title: item.title, since: item.approvedAt }))
+    .map(item => ({ kind: 'move-to-cloud', request: item.id, project: item.project, repo: item.repo, title: item.title, since: item.approvedAt }))
     .sort((a, b) => (a.since < b.since ? -1 : 1));
   const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts, ...cloudAlerts, ...extraAlerts];
   return {

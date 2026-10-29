@@ -140,7 +140,7 @@ export interface Today {
   offers?: MoveOffer[]
 }
 
-export interface MoveOffer { kind: 'move-to-cloud'; request: string; project?: string; title: string; since?: string }
+export interface MoveOffer { kind: 'move-to-cloud'; request: string; project?: string; repo?: string; title: string; since?: string }
 
 export interface AskOption { id: string; label: string; image?: string }
 export type DecisionVerdict = 'approve' | 'change' | 'skip'
