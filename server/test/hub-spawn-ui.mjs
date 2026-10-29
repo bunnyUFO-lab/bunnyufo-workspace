@@ -159,6 +159,29 @@ try {
   await signed.route('**/api/hub/requests/*/approve', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'The signing key is not set.' }) }));
   await approve('research', 'Fourth', 'Saved, but not approved. It waits in Needs you: The signing key is not set.');
 
+  step('Approve for real: with a signing key the button reads Approve and writes a signed approved.json');
+  const keyed = await startHubFixture({ signing: true });
+  fixtures.push(keyed);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const real = await open({ width: 1280, height: 900 });
+  await real.goto(`${keyed.url}#/~hub/today`);
+  const spawnReal = async (preset, text, toast) => {
+    await real.locator('[data-spawn-open]').click();
+    await real.locator('[data-spawn-project]').selectOption('magic-loops');
+    await real.locator(`[data-preset="${preset}"]`).click();
+    await real.locator('[data-spawn-text]').fill(text);
+    await real.locator('[data-spawn-why]').waitFor();
+    assert.equal(await real.locator('[data-spawn-go]').innerText(), 'Approve');
+    await real.locator('[data-spawn-go]').click();
+    await real.locator('[data-spawn-toast]', { hasText: toast }).waitFor();
+  };
+  await spawnReal('research', 'Why do runs end early', 'Approved. Hermes starts it now.');
+  await spawnReal('code-task', 'Fix the tab order', 'Approved. It waits for the PC dispatcher.');
+  const signed2 = requestsIn(keyed).map(key => key.replace('request.json', 'approved.json')).filter(key => keyed.fake.objects.has(key)).map(key => keyed.fake.json(key));
+  assert.equal(signed2.length, 2, 'Both requests are approved.');
+  assert.deepEqual(signed2.map(item => item.target).sort(), ['hermes', 'pc']);
+  assert.ok(signed2.every(item => item.signature && item.by === 'local'));
+
   step('Phone: a bottom sheet the width of the screen, no sideways scroll, the buttons reachable');
   const phone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/needs`);

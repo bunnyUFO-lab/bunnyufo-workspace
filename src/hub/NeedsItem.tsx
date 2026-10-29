@@ -4,6 +4,7 @@ import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { SettledVerb } from '../lib/nextItem.mjs'
 import { reviewHash } from '../lib/route'
 import AskBody from './AskBody'
+import { ApprovalBody } from './ApprovalView'
 import ChecklistBody from './ChecklistBody'
 import { ReviewActions } from './ItemRow'
 import { useMarkDone } from './useMarkDone'
@@ -102,6 +103,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
         {item.kind === 'checklist' && (detail
           ? <div className="ni-b"><ChecklistBody data={detail as Checklist} loadedAt={at} reload={reload} onSubmitted={() => onSettled(item, kind === 'playtest' ? 'reported' : 'submitted')} /></div>
           : <div className="ni-b"><p className="hub-muted">{fetched.error ?? 'Loading…'}</p></div>)}
+        {item.kind === 'approval' && <ApprovalBody id={item.id} onSettled={verb => onSettled(item, verb)} />}
         {item.kind === 'review' && <ReviewBody item={item} onSettled={() => onSettled(item, 'done')} />}
         {item.kind === 'blocked' && <BlockedBody item={item} onSettled={() => onSettled(item, 'done')} />}
       </article>

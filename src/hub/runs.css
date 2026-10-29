@@ -66,3 +66,21 @@
 .needs-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .needs-actions .hub-btn { min-height: 36px; border-radius: 999px; padding: 0 16px; }
 .needs-actions .needs-next { margin-left: 0; }
+
+/* The approval item and the request page. */
+.ap-body { display: flex; flex-direction: column; gap: 10px; }
+.ap-warn { margin: 0; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--amber, var(--line2)); background: var(--amber-dim, var(--s2)); color: var(--amber, var(--t1)); font-size: 13px; }
+.ap-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.ap-rest { display: flex; flex-direction: column; gap: 10px; }
+.ap-facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; }
+.ap-facts > div { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.ap-facts dt { flex: none; width: 88px; font-size: 12px; color: var(--text-dim); }
+.ap-facts dd { margin: 0; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.ap-pick { margin-left: 8px; min-height: 44px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--s2); color: var(--t1); font: inherit; font-size: 12.5px; }
+.ap-actions .hub-btn { min-height: 44px; }
+.ap-state-chip.expired, .ap-state-chip.failed, .ap-state-chip.lost { color: var(--red); }
+.ap-state p { margin: 0 0 6px; font-size: 13px; color: var(--t2); }
+.ap-page { margin-top: 12px; }
+@media (max-width: 767px) {
+  .ap-facts dt { width: 100%; }
+}

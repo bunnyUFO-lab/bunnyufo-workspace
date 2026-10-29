@@ -4,6 +4,7 @@
 //
 //   node server/test/hub-fixture.mjs --serve [--no-hermes] [--checklists]
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
@@ -26,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, work = false } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, work = false, signing = false } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -142,6 +143,8 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     bucketOptions: { endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' },
     hubOptions: { env: {
       BUW_S3_BUCKET: '',
+      // A throwaway Ed25519 key made for this run, so Approve can sign. Off by default: the service then only saves proposals.
+      ...(signing ? { HUB_SIGNING_KEY: generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') } : {}),
       ...(upstream ? { HERMES_URL: upstream.url, HERMES_API_KEY: 'fixture-key' } : {}),
     } },
   });

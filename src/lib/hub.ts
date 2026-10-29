@@ -5,7 +5,7 @@ import { authHeaders } from '../local/client'
 import type { PcSummary, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
 
-export type ItemKind = 'ask' | 'checklist' | 'request' | 'review' | 'blocked' | 'session'
+export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'review' | 'blocked' | 'session'
 export interface Item {
   kind: ItemKind
   id: string
@@ -39,6 +39,10 @@ export interface Item {
   design?: boolean
   decisions?: number
   takes?: number
+  /** A request row: its preset, where it is proposed to run, and who wrote it (`origin.kind` is owner, agent or run). */
+  preset?: string
+  target?: string
+  origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   /** Needs you rows only: the kind, four plain sentences, and (with `detail=1`) the Ask or list itself. */
   needs?: NeedsKind
   describe?: Described

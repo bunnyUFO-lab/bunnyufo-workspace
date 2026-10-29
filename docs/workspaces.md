@@ -707,6 +707,10 @@ Spawn is the sheet that sends a job to an agent. Open it from the Spawn button i
 
 It reads `GET /api/hub/presets` and `/api/hub/projects`, and asks `GET /api/hub/presets/route` (150 ms after the last change) where the job runs and which of the five rules matched. A target chosen by hand reads "your choice" and highlights no rule. The button depends on the host's capabilities: `approve` true creates the request and then signs it (`POST /requests/:id/approve { target }`); otherwise it reads "Save as a proposal" and only creates. A Bunnylink job (`at-pc`) reads "Add to Needs you": you start it at the PC. If the request is saved but approving fails, the toast says it waits in Needs you, with the reason. The agent is the preset's `agent`, shown as text.
 
+### The Approval item
+
+A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.tsx`, a case in `NeedsItem.tsx`), and `#/~hub/request/<id>` opens the same item on its own page: this is the link a `#needs-you` ping carries. It shows the preset and project, who asked, and for a request that an agent or a run wrote the line "Written by <name>, not by you. Read it before approving." It also shows the text, where it runs and why (with a machine choice), its side effects, the time limit and when it starts. Approve (`POST /requests/:id/approve { target }`, or `again` for an expired one), Edit (Spawn on the request; its Approve calls `again` with the new text), and Decline (an optional reason) all hand the next item to the list (`Approved · next: …`). A request for the PC (`at-pc`) has Copy prompt and Mark done instead of Approve. A request signed by policy reads "Signed by policy". A request in any other state shows its state and outcome; the run drawer fills that page later.
+
 ### Team
 
 The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` runs on Codex gpt-6-sol with Sonnet, then DeepSeek, as fallbacks; `briefs` runs on Haiku 5.5 with the DeepSeek fallback).
