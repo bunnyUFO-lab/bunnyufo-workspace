@@ -16,6 +16,9 @@ import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha = text => createHash('sha256').update(text).digest('hex');
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+/** The eight-byte PNG signature: enough for the CLI's picture check. */
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** The handler behind a local HTTP server; `flaky.fail` is how many requests answer 503 first (Infinity: always). */
@@ -126,7 +129,7 @@ for (const via of ['api', 's3']) {
     const { fake, cli, keys, dir, close } = await setup();
     try {
       await writeFile(path.join(dir, 'ask.json'), JSON.stringify({ question: 'Rotate the API token now or next week?', context: 'Some **context**.', options: [{ id: 'now', label: 'Now' }, { id: 'later', label: 'Later', image: 'later.png' }] }));
-      await writeFile(path.join(dir, 'later.png'), Buffer.from([137, 80, 78, 71]));
+      await writeFile(path.join(dir, 'later.png'), PNG_BYTES);
       const bad = await cli(via, 'ask', 'create', '--project', 'probe', '--file', path.join(dir, 'ask.json'));
       assert.equal(bad.code, 1);
       assert.match(bad.stderr, /later\.png/, 'An option names a picture that was not given.');
@@ -617,7 +620,7 @@ for (const via of ['api', 's3']) {
   test(`ask create (${via}): a Design review from flags only; the picture goes up before ask.json`, async () => {
     const { fake, cli, keys, dir, close } = await setup();
     try {
-      await writeFile(path.join(dir, 'frame.png'), Buffer.from([137, 80, 78, 71]));
+      await writeFile(path.join(dir, 'frame.png'), PNG_BYTES);
       const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Card frame',
         '--decision', 'Warm oak, not dark walnut|Matches the Wood board', '--decision', 'Counter top-right', '--image', path.join(dir, 'frame.png'));
       assert.equal(made.code, 0, made.stderr);
@@ -666,8 +669,8 @@ for (const via of ['api', 's3']) {
   test(`ask create (${via}): --option with and without a picture; two pictures leave the image to the file; the file's own image and allowDrawing stay`, async () => {
     const { fake, cli, dir, close } = await setup();
     try {
-      await writeFile(path.join(dir, 'a.png'), Buffer.from([137, 80, 78, 71]));
-      await writeFile(path.join(dir, 'b.png'), Buffer.from([137, 80, 78, 71]));
+      await writeFile(path.join(dir, 'a.png'), PNG_BYTES);
+      await writeFile(path.join(dir, 'b.png'), PNG_BYTES);
       const idOf = made => made.stdout.trim().split('\n').at(-1);
       const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which arc?', '--option', 'high=High arc @ the top@a.png', '--option', 'low=Low', '--image', path.join(dir, 'a.png'));
       assert.equal(made.code, 0, made.stderr);
@@ -788,7 +791,7 @@ test('checklist create --playtest pings "Playtest: <title>" with the Hub link an
 test('ask create: --option with an unusable picture after @ is refused with a clear error and writes nothing', async () => {
   const { cli, keys, dir, close } = await setup();
   try {
-    await writeFile(path.join(dir, 'x.png'), Buffer.from([137, 80, 78, 71]));
+    await writeFile(path.join(dir, 'x.png'), PNG_BYTES);
     for (const bad of ['a=A@dir/x.png', 'a=A@x.bmp', 'a=A@_x.png', `a=A@${'n'.repeat(120)}.png`]) {
       const refused = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--option', bad, '--image', path.join(dir, 'x.png'));
       assert.equal(refused.code, 1, bad);
@@ -797,5 +800,28 @@ test('ask create: --option with an unusable picture after @ is refused with a cl
     const name = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--decision', 'Oak', '--image', path.join(dir, 'x.png'));
     assert.equal(name.code, 0, name.stderr);
     assert.deepEqual(keys('asks/').filter(key => key.endsWith('ask.json')).length, 1, 'Only the good ask was written.');
+  } finally { await close(); }
+});
+
+test('ask create: a picture whose bytes do not match its file type is refused before anything is uploaded; real PNG, JPEG and SVG pass', async () => {
+  const { cli, keys, dir, close } = await setup();
+  try {
+    await writeFile(path.join(dir, 'fake.png'), JSON.stringify({ type: 'Buffer', data: [137, 80, 78, 71] }));
+    await writeFile(path.join(dir, 'real.png'), PNG_BYTES);
+    await writeFile(path.join(dir, 'real.jpg'), JPEG_BYTES);
+    await writeFile(path.join(dir, 'real.svg'), '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>');
+    await writeFile(path.join(dir, 'text.svg'), 'not a picture');
+    await writeFile(path.join(dir, 'liar.jpg'), PNG_BYTES);
+    for (const [name, type] of [['fake.png', 'PNG'], ['liar.jpg', 'JPEG'], ['text.svg', 'SVG']]) {
+      const refused = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--decision', 'Oak', '--image', path.join(dir, name));
+      assert.equal(refused.code, 1, name);
+      assert.match(refused.stderr, new RegExp(`${name.replace('.', '\\.')} is not a ${type} picture\\.`));
+    }
+    assert.deepEqual(keys('asks/'), [], 'Nothing was uploaded.');
+    for (const name of ['real.png', 'real.jpg', 'real.svg']) {
+      const made = await cli('api', 'ask', 'create', '--project', 'probe', '--question', `Q ${name}`, '--decision', 'Oak', '--image', path.join(dir, name));
+      assert.equal(made.code, 0, made.stderr);
+    }
+    assert.equal(keys('asks/').filter(key => key.endsWith('ask.json')).length, 3);
   } finally { await close(); }
 });

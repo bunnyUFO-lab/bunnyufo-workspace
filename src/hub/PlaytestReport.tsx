@@ -40,7 +40,7 @@ export default function PlaytestReport({ report, checklistId, live }: { report: 
               className="pt-input" type="text" maxLength={500} value={draft} placeholder="What went wrong?" aria-label="Describe an issue" data-issue-input
               onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); report.add() } }}
             />
-            <label className="hub-cl-cam" data-attach-shot aria-disabled={uploading || undefined}>
+            <label className="hub-cl-cam" title="Attach a screenshot" data-attach-shot aria-disabled={uploading || undefined}>
               <span aria-hidden="true">{uploading ? '…' : '📷'}</span>
               <input
                 type="file" accept="image/jpeg,image/png,image/*" aria-label="Attach a screenshot to this issue" disabled={uploading} data-shot-input

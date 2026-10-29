@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
-import { KIND_LABEL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
+import { useOverflowEdges } from '../lib/useOverflowEdges'
+import type { NeedsKind } from '../lib/needsKinds'
+import { KIND_LABEL, KIND_PLURAL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
 import { hubHash } from '../lib/route'
 import type { Handoff } from './flash'
 import { takeHandoff } from './flash'
@@ -96,8 +98,11 @@ export default function Needs({ filter }: { filter?: string }) {
     const page = itemPage(item)
     setSettled(previous => new Set(previous).add(key))
     setLeaving(previous => [...previous, { item, index }])
+    // The last item of a chip is not the last item of the queue: the counts from before this action say how many wait in other kinds.
+    const elsewhere = !next && active !== 'all' && !isHistory ? Math.max(0, (data?.counts?.all ?? 0) - (data?.counts?.[active] ?? 0)) : 0
+    const plural = KIND_PLURAL[active as NeedsKind] as string | undefined
     setNote({
-      handoff: { verb: NOTE_VERB[verb], title: item.title, next: next?.title ?? null, nothingLeft: !next, backHash: page ?? hubHash('needs', 'unstick') },
+      handoff: { verb: NOTE_VERB[verb], title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? hubHash('needs', 'unstick') },
       index, nextKey: next ? itemKey(next) : null,
     })
     window.setTimeout(() => setLeaving(previous => previous.filter(ghost => itemKey(ghost.item) !== key)), reducedMotion() ? 0 : LEAVE_MS)
@@ -122,6 +127,16 @@ export default function Needs({ filter }: { filter?: string }) {
   const waiting = counts?.all ?? 0
   const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === active || (counts?.[key] ?? 0) > 0)
   if (active === 'requests') visible.push(['requests', 'Requests'])
+  const chipRow = useRef<HTMLDivElement>(null)
+  const overflow = useOverflowEdges(chipRow, [visible.length, active])
+  // Only the row scrolls, never the page: a scrollIntoView would undo the jump to a linked card.
+  useEffect(() => {
+    const row = chipRow.current
+    const chip = row?.querySelector<HTMLElement>('.hub-chip.on')
+    if (!row || !chip) return
+    if (chip.offsetLeft < row.scrollLeft) row.scrollLeft = chip.offsetLeft
+    else if (chip.offsetLeft + chip.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = chip.offsetLeft + chip.offsetWidth - row.clientWidth
+  }, [visible.length, active])
 
   return (
     <div className="needs" ref={root}>
@@ -133,7 +148,8 @@ export default function Needs({ filter }: { filter?: string }) {
         </div>
         {waiting > 0 && <button type="button" className="hub-btn needs-next" data-answer-next onClick={answerNext}>Answer the next one</button>}
       </header>
-      <div className="hub-chips one-row" role="group" aria-label="Needs you filter">
+      <div className="hub-chips-wrap" data-overflow={overflow}>
+      <div className="hub-chips one-row" role="group" aria-label="Needs you filter" ref={chipRow}>
         {visible.map(([key, label]) => {
           const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
           return (
@@ -142,6 +158,7 @@ export default function Needs({ filter }: { filter?: string }) {
             </a>
           )
         })}
+      </div>
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {data ? (

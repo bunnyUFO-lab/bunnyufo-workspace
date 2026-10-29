@@ -7,7 +7,8 @@
 .hub .needs-next { color: var(--ground); }
 .needs-next:hover:not(:disabled) { background: var(--text-bright); }
 
-.needs .hub-chips.one-row { margin-bottom: 14px; padding-bottom: 2px; }
+.needs .hub-chips-wrap { margin-bottom: 14px; }
+.needs .hub-chips.one-row { padding-bottom: 2px; }
 .needs .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
 .needs .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
 .needs .hub-chip.on .n { color: inherit; }
@@ -22,6 +23,7 @@
 .hub a.nq-next-back { color: var(--accent); }
 .nq-next-back:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .nq-next-back:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.nq-next-else a { color: var(--accent); font-weight: 600; text-decoration: none; padding: 10px 0; margin: -10px 0; }
 
 .nq { display: flex; flex-direction: column; gap: 12px; }
 .ni { display: grid; grid-template-rows: 1fr; scroll-margin-top: 12px; transition: grid-template-rows 0.26s var(--ease-out), opacity 0.2s var(--ease-out), transform 0.26s var(--ease-out), margin 0.26s var(--ease-out); }
@@ -67,6 +69,7 @@
 @media (max-width: 760px) {
   .nq-next-text { white-space: normal; overflow: visible; }
   .nq-next-v, .nq-next-n { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nq-next-n.nq-next-else { white-space: normal; overflow: visible; }
   .nq-next-n [aria-hidden] { display: none; }
   .hub .needs-head h2 { font-size: 28px; }
   .four { grid-template-columns: repeat(2, minmax(0, 1fr)); }

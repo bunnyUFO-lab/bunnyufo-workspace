@@ -5,7 +5,7 @@ import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import { goNext, useQueueOrder } from './useGoNext'
 import AskBody from './AskBody'
-import { VERDICTS, decisionList, designKind, optionList, text, when } from './askAnswer'
+import { VERDICTS, decisionList, optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
 import { useHubData } from './useHub'
 
@@ -64,7 +64,7 @@ export default function AskView({ id }: { id: string }) {
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
-      <p><a className="hub-btn" href={hubHash('needs', designKind(ask) ? 'design' : 'question')}>Back to Needs you</a></p>
+      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
     </>
   )
 }

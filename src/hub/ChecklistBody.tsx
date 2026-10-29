@@ -160,7 +160,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </span>
                 )}
                 {live && !playtest && (
-                  <label className="hub-cl-cam" data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
+                  <label className="hub-cl-cam" title="Attach a photo" data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
                     <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
                     <input
                       type="file" accept="image/jpeg,image/png,image/*" capture="environment" data-attach-input
