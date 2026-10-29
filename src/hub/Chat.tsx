@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatLine, ChatSummary, ChatTool, Item } from '../lib/hub'
+import type { ChatApproval, ChatLine, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
-import { hubHash } from '../lib/route'
+import { hubHash, parseHelpId, reviewHash } from '../lib/route'
+import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { plainText, streamChat } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
@@ -14,6 +15,8 @@ import Md from './Md'
 import { useHubData } from './useHub'
 import { onAsk, takeAsk } from './askHermes'
 import './chatRuns.css'
+import { takeHelpDraft } from './flash'
+import { setFocus } from './needsFocus'
 
 const READ_KEY = 'buw.hub.readAloud'
 
@@ -83,6 +86,38 @@ function ApprovalCard({ approval, onAnswered }: { approval: ChatApproval; onAnsw
   )
 }
 
+/** The page of the item a help chat is about (Unstick has none: it opens Needs you on its card). */
+function itemLink(kind: HelpKind, id: string): { href: string; focus?: string } {
+  if (kind === 'ask') return { href: hubHash('ask', id) }
+  if (kind === 'checklist') return { href: hubHash('checklist', id) }
+  if (kind === 'review') return { href: reviewHash(id) }
+  return { href: hubHash('needs'), focus: `blocked-${id}` }
+}
+
+/**
+ * Under the top bar of a help chat: what it is about, a way back to the item, and what Hermes was given. The text is
+ * display only; the server builds it again from the stored item when the owner sends.
+ */
+function HelpBanner({ about, text, pictures }: { about: { kind: HelpKind; id: string; title: string } | null; text?: string; pictures: { path?: string; url?: string }[] }) {
+  if (!about) return <p className="hub-help-banner hub-muted" data-help-banner data-gone>This item is no longer in the Hub.</p>
+  const link = itemLink(about.kind, about.id)
+  return (
+    <div className="hub-help-banner" data-help-banner>
+      <div className="hub-help-line">
+        <span className="hub-help-title">Help with: {about.title}</span>
+        <a className="hub-help-open" href={link.href} data-help-open onClick={() => { if (link.focus) setFocus(link.focus) }}>Open item</a>
+      </div>
+      {text && (
+        <details className="hub-help-seen" data-help-seen>
+          <summary>What Hermes sees</summary>
+          <pre className="hub-help-text">{text}</pre>
+          {pictures.length > 0 && <div className="hub-help-pics">{pictures.map(picture => <HubImage key={picture.path ?? picture.url} path={picture.path} url={picture.url} open className="hub-help-pic" alt="A picture Hermes sees" />)}</div>}
+        </details>
+      )}
+    </div>
+  )
+}
+
 function Bubble({ line, conversation }: { line: Shown; conversation?: string }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
@@ -112,11 +147,13 @@ const carry = (id: string, lines: Shown[]) => { carried = { id, lines } }
 const isPicture = (file: File) => file.type.startsWith('image/')
 
 function ChatView({ id }: { id?: string }) {
+  const help = parseHelpId(id)
+  const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
   const list = useHubData<{ conversations: ChatSummary[] }>('/chat')
   const [initial] = useState<Shown[] | null>(() => { const hit = carried && carried.id === id ? carried.lines : null; carried = null; return hit })
   const [messages, setMessages] = useState<Shown[]>(initial ?? [])
   const [pending, setPending] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : ''))
   const [images, setImages] = useState<Prepared[]>([])
   const [preparing, setPreparing] = useState(0)
   const [trayNote, setTrayNote] = useState<string | null>(null)
@@ -131,21 +168,21 @@ function ChatView({ id }: { id?: string }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
-  const conversation = useRef<string | undefined>(id)
-  const [shownId, setShownId] = useState<string | undefined>(id)
+  const conversation = useRef<string | undefined>(help ? undefined : id)
+  const [shownId, setShownId] = useState<string | undefined>(help ? undefined : id)
   const urls = useRef(new Set<string>())
   const slots = useRef(MAX_IMAGES)
   const speaks = typeof window !== 'undefined' && 'speechSynthesis' in window
 
   // The conversation in the address is the one on screen.
   useEffect(() => {
-    if (!id || initial) return undefined
+    if (!id || initial || help) return undefined
     let stopped = false
     hubGet<{ messages: ChatLine[] }>(`/chat/${encodeURIComponent(id)}`)
       .then(answer => { if (!stopped) setMessages(answer.messages) })
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
-  }, [id, initial])
+  }, [id, initial, help])
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [messages, pending])
   useEffect(() => {
@@ -232,11 +269,13 @@ function ChatView({ id }: { id?: string }) {
     let created: Item[] = []
     let finished: string | null = null
     let saved: ChatLine | undefined
+    let savedContext: ChatLine | undefined
     let problem: string | null = null
     const used: string[] = []
     try {
       const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
-      await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
+      const gone = !!help && !!preview.error && preview.data === null
+      await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
         onDelta: piece => { reply += piece; setPending(reply) },
         onCreated: items => { created = items },
         onTool: tool => {
@@ -245,7 +284,7 @@ function ChatView({ id }: { id?: string }) {
         },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
-        onDone: (name, user) => { finished = name; saved = user },
+        onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },
         onError: message => { problem = message },
       }, controller.signal)
     } catch (failure) {
@@ -262,7 +301,7 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : optimistic
-    const lines: Shown[] = [...before, userLine, { role: 'assistant', text: stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
@@ -293,6 +332,12 @@ function ChatView({ id }: { id?: string }) {
   }
 
   const conversations = list.data?.conversations ?? []
+  // The banner: from the preview of a new help chat, or from the context line a stored one starts with.
+  const stored = messages[0]?.role === 'context' && messages[0].about ? messages[0] : null
+  const gone = !!help && !stored && !!preview.error && preview.data === null
+  const banner = stored
+    ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
+    : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
   const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
   return (
     <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
@@ -311,9 +356,10 @@ function ChatView({ id }: { id?: string }) {
           <h2>Chat</h2>
           <button type="button" className="hub-btn hub-chat-toggle" aria-expanded={drawer} onClick={() => setDrawer(value => !value)}>Chats</button>
         </div>
+        {banner}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">Ask the assistant anything, or tell it what to do.</p>}
-          {messages.map((line, index) => <Bubble key={index} line={line} conversation={shownId} />)}
+          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} />))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
               {pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}

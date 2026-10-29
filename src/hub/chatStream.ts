@@ -5,7 +5,7 @@ import { authHeaders } from '../local/client'
 export interface ChatHandlers {
   onDelta: (text: string) => void
   onCreated: (items: Item[]) => void
-  onDone: (conversation: string, user?: ChatLine) => void
+  onDone: (conversation: string, user?: ChatLine, context?: ChatLine) => void
   onError: (message: string) => void
   onTool?: (tool: ChatTool) => void
   onApproval?: (approval: ChatApproval) => void
@@ -17,7 +17,7 @@ export interface ChatHandlers {
  * response body itself and parses its `event:` and `data:` blocks. Throws a HubError, before
  * anything streams, when the server refuses (a 502 from Hermes, a 503 when chat is not set up).
  */
-export async function streamChat(body: { conversation?: string; text: string; images?: { type: string; data: string }[] }, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
+export async function streamChat(body: { conversation?: string; text: string; images?: { type: string; data: string }[]; about?: { kind: string; id: string; step?: string } }, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
   const response = await fetch('/api/hub/chat', {
     method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   })
@@ -40,7 +40,7 @@ export async function streamChat(body: { conversation?: string; text: string; im
     try { value = JSON.parse(data.join('\n')) as Record<string, unknown> } catch { return }
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
-    else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined)
+    else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined, value.context && typeof value.context === 'object' ? value.context as ChatLine : undefined)
     else if (event === 'tool' && typeof value.name === 'string') handlers.onTool?.(value as unknown as ChatTool)
     else if (event === 'approval' && typeof value.id === 'string') handlers.onApproval?.(value as unknown as ChatApproval)
     else if (event === 'approval-settled') handlers.onApprovalSettled?.()

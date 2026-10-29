@@ -10,6 +10,7 @@ import Md from './Md'
 import HubImage from './HubImage'
 import { VERDICT_LABEL } from './playtest'
 import { useHubData } from './useHub'
+import GetHelp, { HelpAttachedNote } from './GetHelp'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 
@@ -37,6 +38,7 @@ export default function ChecklistView({ id }: { id: string }) {
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
         <span><span className="hub-pill">{text(detail.project)}</span>{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
+        <GetHelp className="hub-top-help" target={{ kind: 'checklist', id: detail.id, label: detail.kind === 'playtest' ? 'playtest' : 'checklist', title: text(detail.title) }} />
       </div>
       <p className="hub-muted">Posted {ago(detail.createdAt)}{text(detail.from?.host) ? ` from ${text(detail.from?.host)}` : ''}.</p>
       {typeof detail.context === 'string' && detail.context && <Md text={detail.context} />}
@@ -61,6 +63,7 @@ export default function ChecklistView({ id }: { id: string }) {
               ))}
             </ul>
           )}
+          <HelpAttachedNote chat={detail.submit.help?.chat} />
           {typeof detail.submit.note === 'string' && detail.submit.note && <p className="hub-note-text">{detail.submit.note}</p>}
           {detail.state === 'picked-up' && detail.pickup && <p className="hub-muted">Picked up {ago(detail.pickup.at)}{text(detail.pickup.host) ? ` on ${text(detail.pickup.host)}` : ''}.</p>}
         </section>

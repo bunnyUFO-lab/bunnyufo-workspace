@@ -5,6 +5,7 @@ import type { AskVerb } from './askAnswer'
 import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer'
 import HubImage from './HubImage'
 import Md from './Md'
+import { useAttachHelp } from './useAttachHelp'
 
 const DrawingEditor = lazy(() => import('../components/DrawingEditor'))
 
@@ -19,7 +20,9 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   onTaken?: (answer: AskAnswer | null) => void
   view?: boolean
 }) {
-  const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view })
+  const live0 = ask.state === 'open' || ask.state === 'snoozed'
+  const attachHelp = useAttachHelp('ask', ask.id, live0)
+  const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view, help: attachHelp.help })
   const { choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
   const options = optionList(ask)
   const live = ask.state === 'open' || ask.state === 'snoozed'
@@ -133,6 +136,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
         </div>
       )}
       {problem && <p className="hub-error" role="alert">{problem}</p>}
+      {writable && attachHelp.element}
       {writable && (
         <div className="hub-actions">
           {confirming ? (

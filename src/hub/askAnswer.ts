@@ -34,7 +34,7 @@ export function designKind(ask: Ask): 'review' | 'pick' | null {
  * Everything the owner does to one Ask: pick an option, write a note, draw, and then send, snooze or cancel.
  * The list card and the Ask's own view share it; only the own view (`handoff`) takes a drawing handed over from Sketch. `onSettled` runs after a write that took the Ask off the queue.
  */
-export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false }: { reload: () => void; onSettled?: (verb: AskVerb) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean }) {
+export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false, help }: { reload: () => void; onSettled?: (verb: AskVerb) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean; help?: { chat: string } }) {
   const [choice, setChoice] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [verdicts, setVerdicts] = useState<Verdicts>({})
@@ -95,7 +95,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
     // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
     ready: decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing,
-    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}) }), kind ? 'reviewed' : 'answered'),
+    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}) }), kind ? 'reviewed' : 'answered'),
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
   }

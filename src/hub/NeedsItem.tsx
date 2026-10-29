@@ -12,6 +12,8 @@ import { ReviewActions } from './ItemRow'
 import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
+import GetHelp from './GetHelp'
+import type { HelpTarget } from './helpDraft'
 
 /** What the owner did to take an item off the queue, as `onSettled` reports it. */
 export type SettleVerb = SettledVerb
@@ -83,6 +85,9 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
   const page = itemPage(item)
   const link = safeUrl(page)
   const key = itemKey(item)
+  // An approval is a signed request: chat does not sit between the owner and a signature. Unstick is a blocked event.
+  const helpKind = item.kind === 'ask' || item.kind === 'checklist' || item.kind === 'review' || item.kind === 'blocked' ? item.kind : null
+  const help: HelpTarget | null = helpKind && kind !== 'approval' ? { kind: helpKind, id: item.id, label: KIND_LABEL[kind].toLowerCase(), title: item.title } : null
   const who = info?.who || item.host || ''
   const meta = [who, `asked ${ago(item.at)}`, item.bead ?? item.project].filter(Boolean)
   const cells: [string, string | undefined][] = [['What', info?.what], ['State', info?.state], ['Next action', info?.next], ['Blocker', info?.blocker]]
@@ -96,6 +101,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
             <h3 className="ni-t" id={`ni-${key}`} tabIndex={-1}>{page ? <a href={page}>{item.title}</a> : item.title}</h3>
             <div className="ni-meta"><span className="ni-chip">{item.kind === 'hermes-approval' ? 'Hermes approval' : item.kind === 'run-question' ? 'Hermes asks' : KIND_LABEL[kind]}</span>{meta.map(part => <span key={part}>{part}</span>)}</div>
           </div>
+          {help && <GetHelp target={help} />}
         </header>
         {info && (
           <dl className="four" data-four>

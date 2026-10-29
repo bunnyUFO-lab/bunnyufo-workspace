@@ -75,6 +75,24 @@ export function reviewHash(id: string, file?: string): string {
   return file ? `${base}/${file.split('/').map(encodeURIComponent).join('/')}` : base
 }
 
+/** The stored kinds a help chat can be about. */
+export type HelpKind = 'ask' | 'checklist' | 'review' | 'blocked'
+
+/**
+ * `#/~hub/chat/help/<kind>/<step or ->/<id>`: Chat in help mode for one item. The id goes last because a review's or a
+ * blocked session's id is an event file name. Nothing personal travels in it; a draft for the composer is handed over
+ * through `setHelpDraft`, not the address.
+ */
+export const helpHash = (item: { kind: HelpKind; id: string }, step?: string): string => `#/~hub/chat/help/${item.kind}/${step || '-'}/${encodeURIComponent(item.id)}`
+
+/** The kind, step and id back out of a Chat route id that starts with `help/`; null for anything else. */
+export function parseHelpId(id: string | undefined): { kind: HelpKind; step?: string; id: string } | null {
+  const match = /^help\/(ask|checklist|review|blocked)\/([^/]+)\/(.+)$/.exec(id ?? '')
+  if (!match) return null
+  const step = /^\d{2}$/.test(match[2]) ? match[2] : undefined
+  return { kind: match[1] as HelpKind, ...(step ? { step } : {}), id: match[3] }
+}
+
 /** The screen the Hub's navigation marks as current: an Ask or a review is opened from Needs you, so Needs you stays lit. A checklist is the same. Activity is Work's second tab, so Work stays lit. */
 export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' || screen === 'request' ? 'needs' : screen === 'activity' ? 'work' : screen ?? null)
 
