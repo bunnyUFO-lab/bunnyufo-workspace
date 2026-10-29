@@ -20,6 +20,7 @@ import {
 import { buildMap } from './hub-map.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
+import { buildWork } from './hub-work.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 
@@ -857,6 +858,18 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             });
           } else if (route === '/hub/projects') {
             reply({ projects: await projects(at) });
+          } else if (route === '/hub/work') {
+            const only = query.get('project');
+            if (only && !validProject(only)) throw fail('No such project.', 404);
+            const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
+            const [loaded, requests, window, asks, status] = await Promise.all([
+              pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadPcStatus(at),
+            ]);
+            reply(buildWork({
+              issues: loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))),
+              requests: only ? requests.filter(item => item.project === only) : requests,
+              events: window.events, asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), status, now: at,
+            }));
           } else if ((match = /^\/hub\/beads\/([^/]+)$/.exec(route))) {
             if (!validProject(match[1])) throw fail('No such project.', 404);
             reply(await loadBeads(match[1]));

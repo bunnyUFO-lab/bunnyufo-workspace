@@ -7,7 +7,7 @@
 // blocked issue holds it).
 import { chronological } from './hub-model.mjs';
 
-const isMilestoneIssue = issue => issue.issue_type === 'milestone' || (issue.labels ?? []).some(label => label === 'milestone' || label === 'wayfinder:map');
+export const isMilestoneIssue = issue => issue.issue_type === 'milestone' || (issue.labels ?? []).some(label => label === 'milestone' || label === 'wayfinder:map');
 const isGroupType = issue => issue.issue_type === 'epic' || issue.issue_type === 'feature';
 
 /** Roll a list of child states up into one, as the prototype's `roll` does. */
@@ -91,6 +91,63 @@ function wayfinderOf(issues, childrenOf) {
 }
 
 /**
+ * The issues the map treats as milestones. A label a child inherited from its milestone (bd's
+ * default) must not turn a feature into a milestone, so one whose parent is also a milestone is not.
+ * `parentOf` maps an issue id to its parent id; Work uses the same rule.
+ */
+export function milestoneIssuesOf(issues, parentOf) {
+  const byId = new Map(issues.map(issue => [issue.id, issue]));
+  return issues.filter(issue => isMilestoneIssue(issue) && !(parentOf.has(issue.id) && isMilestoneIssue(byId.get(parentOf.get(issue.id)))));
+}
+
+/** Events grouped by the bead they name, oldest first. */
+export function eventsByBeadOf(events) {
+  const grouped = new Map();
+  for (const event of chronological(events)) {
+    if (!event.bead) continue;
+    if (!grouped.has(event.bead)) grouped.set(event.bead, []);
+    grouped.get(event.bead).push(event);
+  }
+  return grouped;
+}
+
+/**
+ * The signs on one issue (working, idle, new, pr, ci-failed, review, deployed) and its PRs.
+ * `ctx.eventsByBead` is `eventsByBeadOf(events)`; `state` is the map state ('done' hides live signs.)
+ */
+export function issueSigns(issue, state, ctx) {
+  const list = ctx.eventsByBead.get(issue.id) ?? [];
+  const signs = [];
+  let prUrl;
+  if (state !== 'done') {
+    const session = [...list].reverse().find(event => event.kind === 'session-started' || event.kind === 'session-ended');
+    if (session?.kind === 'session-started') signs.push('working');
+    else if (session) signs.push('idle');
+    if (issue.status === 'open' && !list.length) signs.push('new');
+  }
+  const lastIndex = kind => list.map(event => event.kind).lastIndexOf(kind);
+  const open = kind => { const at = lastIndex(kind); return at >= 0 && lastIndex('pr-merged') < at ? list[at] : null; };
+  const pr = open('pr-opened');
+  if (pr) { signs.push('pr'); prUrl = pr.url; }
+  const ci = [...list].reverse().find(event => event.kind === 'ci-failed' || event.kind === 'ci-passed');
+  if (ci?.kind === 'ci-failed') signs.push('ci-failed');
+  if (open('ready-for-review')) signs.push('review');
+  if (list.some(event => event.kind === 'deployed')) signs.push('deployed');
+  // Every PR the bead had, open or merged, in the order they opened. Entries without a url are kept so they still count.
+  const prs = [];
+  for (const event of list) {
+    if (event.kind === 'pr-opened') prs.push({ ...(event.url ? { url: event.url } : {}), state: 'open', at: event.ts });
+    else if (event.kind === 'pr-merged') {
+      const same = event.url ? prs.find(entry => entry.url === event.url) : null;
+      const targets = event.url ? (same ? [same] : []) : prs.filter(entry => entry.state === 'open');
+      for (const entry of targets) { entry.state = 'merged'; entry.at = event.ts; }
+      if (!targets.length) prs.push({ ...(event.url ? { url: event.url } : {}), state: 'merged', at: event.ts });
+    }
+  }
+  return { signs, prUrl, prs };
+}
+
+/**
  * @param events chronological or not; only those naming a task's bead matter
  * @param asks   [{ id, bead?, state }] with the Ask's derived state
  */
@@ -115,20 +172,14 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
   const blockers = issue => blockersOf.get(issue.id) ?? [];
   const children = issue => childrenOf.get(issue.id) ?? [];
 
-  // A label inherited by a child (bd's default) must not turn a feature into a milestone.
-  const milestoneIssues = issues.filter(issue => isMilestoneIssue(issue) && !(parentOf.has(issue.id) && isMilestoneIssue(byId.get(parentOf.get(issue.id)))));
+  const milestoneIssues = milestoneIssuesOf(issues, parentOf);
   const milestoneIds = new Set(milestoneIssues.map(issue => issue.id));
 
   const asksByBead = new Map();
   for (const ask of asks) {
     if (ask.bead && (ask.state === 'open' || ask.state === 'snoozed')) asksByBead.set(ask.bead, ask.id);
   }
-  const eventsByBead = new Map();
-  for (const event of chronological(events)) {
-    if (!event.bead) continue;
-    if (!eventsByBead.has(event.bead)) eventsByBead.set(event.bead, []);
-    eventsByBead.get(event.bead).push(event);
-  }
+  const eventsByBead = eventsByBeadOf(events);
 
   const taskState = issue => {
     if (issue.status === 'closed') return 'done';
@@ -138,41 +189,9 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     return 'later';
   };
 
-  const signsOf = (issue, state) => {
-    const list = eventsByBead.get(issue.id) ?? [];
-    const signs = [];
-    let prUrl;
-    if (state !== 'done') {
-      const session = [...list].reverse().find(event => event.kind === 'session-started' || event.kind === 'session-ended');
-      if (session?.kind === 'session-started') signs.push('working');
-      else if (session) signs.push('idle');
-      if (issue.status === 'open' && !list.length) signs.push('new');
-    }
-    const lastIndex = kind => list.map(event => event.kind).lastIndexOf(kind);
-    const open = kind => { const at = lastIndex(kind); return at >= 0 && lastIndex('pr-merged') < at ? list[at] : null; };
-    const pr = open('pr-opened');
-    if (pr) { signs.push('pr'); prUrl = pr.url; }
-    const ci = [...list].reverse().find(event => event.kind === 'ci-failed' || event.kind === 'ci-passed');
-    if (ci?.kind === 'ci-failed') signs.push('ci-failed');
-    if (open('ready-for-review')) signs.push('review');
-    if (list.some(event => event.kind === 'deployed')) signs.push('deployed');
-    // Every PR the bead had, open or merged, in the order they opened. Entries without a url are kept so they still count.
-    const prs = [];
-    for (const event of list) {
-      if (event.kind === 'pr-opened') prs.push({ ...(event.url ? { url: event.url } : {}), state: 'open', at: event.ts });
-      else if (event.kind === 'pr-merged') {
-        const same = event.url ? prs.find(entry => entry.url === event.url) : null;
-        const targets = event.url ? (same ? [same] : []) : prs.filter(entry => entry.state === 'open');
-        for (const entry of targets) { entry.state = 'merged'; entry.at = event.ts; }
-        if (!targets.length) prs.push({ ...(event.url ? { url: event.url } : {}), state: 'merged', at: event.ts });
-      }
-    }
-    return { signs, prUrl, prs };
-  };
-
   const toTask = issue => {
     const state = taskState(issue);
-    const { signs, prUrl, prs } = signsOf(issue, state);
+    const { signs, prUrl, prs } = issueSigns(issue, state, { eventsByBead });
     return {
       id: issue.id, title: issue.title ?? issue.id, state, status: issue.status ?? 'open', signs,
       sprints: (issue.labels ?? []).filter(label => label.startsWith('sprint:')).map(label => label.slice(7)),

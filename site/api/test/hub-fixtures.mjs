@@ -159,3 +159,29 @@ export function seedPcStatus(fake, status, prefix = INBOX) {
   fake.seed(`${prefix}/pc/status-${stamp}.json`, `${JSON.stringify(status)}\n`, 'application/json');
   return `pc/status-${stamp}.json`;
 }
+
+/**
+ * Beads issues for Work's lanes, one per table cell, in project `ws` (prefix `ws`): returns the
+ * issues, the events and the open Ask that put some of them in Review and Blocked.
+ */
+export function workFixture({ now = new Date() } = {}) {
+  const recent = minutesAgo(now, 30);
+  const issues = [
+    beadsIssue({ id: 'ws-grp', title: 'A feature group', type: 'epic' }),
+    beadsIssue({ id: 'ws-child', title: 'Child of the group', parent: 'ws-grp' }),
+    beadsIssue({ id: 'ws-ms', title: 'A milestone', type: 'milestone' }),
+    beadsIssue({ id: 'ws-defer', title: 'Later idea', status: 'deferred' }),
+    beadsIssue({ id: 'ws-ready', title: 'Ready to start' }),
+    beadsIssue({ id: 'ws-doing', title: 'In progress', status: 'in_progress' }),
+    beadsIssue({ id: 'ws-stuck', title: 'Marked blocked', status: 'blocked' }),
+    beadsIssue({ id: 'ws-wait', title: 'Waits on another', blocks: ['ws-doing'] }),
+    beadsIssue({ id: 'ws-ask', title: 'Has an Ask' }),
+    beadsIssue({ id: 'ws-owner', title: 'Owner step', labels: ['needs-owner'] }),
+    beadsIssue({ id: 'ws-pr', title: 'Has a PR', status: 'in_progress' }),
+    beadsIssue({ id: 'ws-fresh', title: 'Closed today', status: 'closed', closed: iso(recent) }),
+    beadsIssue({ id: 'ws-old', title: 'Closed long ago', status: 'closed', closed: iso(minutesAgo(now, 60 * 24 * 30)) }),
+  ];
+  const events = [eventJson({ kind: 'pr-opened', ts: recent, project: 'ws', bead: 'ws-pr', url: 'https://example.test/pr/1' })];
+  const asks = [{ id: 'ask-1', bead: 'ws-ask', state: 'open' }];
+  return { issues: issues.map(issue => ({ ...issue, project: 'ws' })), events, asks };
+}
