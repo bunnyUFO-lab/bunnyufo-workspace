@@ -353,3 +353,54 @@ test('runs on: a turn with a picture stays on completions, and a failed run ends
     assert.equal(result.status, 502);
   } finally { await busy.close(); }
 });
+
+test('runs on: a long quiet tool does not end the turn', async () => {
+  const quiet = await fixture({ env: { ...RUNS, HUB_CHAT_IDLE_MS: '250' }, hermes: { keepaliveMs: 50, runScript: ['Start. ', { tool: 'build' }, { wait: 900 }, 'Built.'] } });
+  try {
+    const result = await chat(quiet.call, { text: 'build it' });
+    assert.equal(result.events.at(-1).event, 'done', JSON.stringify(result.events.at(-1)));
+    assert.match(result.events.filter(item => item.event === 'delta').map(item => item.data.text).join(''), /Built\./);
+    assert.deepEqual(quiet.upstream.stops, []);
+  } finally { await quiet.close(); }
+});
+
+test('runs on: a dropped event stream stops the run', async () => {
+  const dropped = await fixture({ env: RUNS, hermes: { dropStreamAfter: 1, runScript: ['One. ', { hold: true }] } });
+  try {
+    const result = await chat(dropped.call, { text: 'go' });
+    assert.equal(result.events.at(-1).event, 'error');
+    assert.equal(dropped.upstream.stops.length, 1, 'The run was told to stop.');
+  } finally { await dropped.close(); }
+});
+
+test('runs on: an approval card counts its time from when Hermes asked and offers only once or deny', async () => {
+  const { call, close } = await fixture({ env: RUNS, hermes: { askApproval: true, approvalAgeMs: 200_000, approvalChoices: ['once', 'session', 'always', 'deny'], runScript: ['Writing. ', 'Done.'] } });
+  try {
+    let card = null;
+    await chatLive(call, { text: 'write it' }, async ({ event, data }) => {
+      if (event !== 'approval') return;
+      card = data;
+      await call('POST', `/hub/hermes-approvals/${data.id}/answer`, { choice: 'deny' });
+    });
+    assert.deepEqual(card.choices, ['once', 'deny']);
+    const left = (new Date(card.expiresAt).getTime() - Date.now()) / 1000;
+    assert.ok(left > 80 && left < 110, `about 100 s left, got ${left}`);
+  } finally { await close(); }
+});
+
+test('runs on: a failed run leaves no URL or token in the error, and saved tool names are clipped and capped', async () => {
+  const failing = await fixture({ env: RUNS, hermes: { failWith: 'Provider said no at https://api.provider.example/v1/x with Bearer sk-abc123' } });
+  try {
+    const result = await chat(failing.call, { text: 'hi' });
+    const error = result.events.at(-1);
+    assert.equal(error.event, 'error');
+    assert.doesNotMatch(error.data.error, /https?:|Bearer|sk-abc/);
+  } finally { await failing.close(); }
+  const many = await fixture({ env: RUNS, hermes: { runScript: [...Array.from({ length: 25 }, (_, index) => ({ tool: `${index}-${'t'.repeat(120)}` })), 'ok'] } });
+  try {
+    const result = await chat(many.call, { text: 'tools' });
+    const saved = lines(many.fake, result.events.at(-1).data.conversation)[1];
+    assert.equal(saved.tools.length, 20);
+    assert.ok(saved.tools.every(name => name.length <= 80));
+  } finally { await many.close(); }
+});
