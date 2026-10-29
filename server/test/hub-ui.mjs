@@ -72,6 +72,16 @@ try {
   await page.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await page.locator('[data-hub-badge]').innerText(), '3');
   assert.equal(await page.locator('[data-hub-nav] [data-section="hub"] .sidebar-count').count(), 0, 'The Hub heading carries no count: it only counted the rows below it.');
+  step('desktop: the rail is grouped Operate, Plan, Know in one column, with no Run, and Needs you keeps its badge');
+  assert.deepEqual(await page.locator('[data-hub-group] .sidebar-hub-heading').allTextContents(), ['Operate', 'Plan', 'Know'], 'The headings, in order, with no Run.');
+  assert.equal(await page.locator('[data-hub-group="run"]').count(), 0);
+  assert.deepEqual(await page.locator('[data-hub-group="operate"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['today', 'needs', 'work'], 'Team joins Operate when its screen ships.');
+  assert.deepEqual(await page.locator('[data-hub-group="know"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['library', 'sketch']);
+  assert.equal(await page.locator('[data-hub-group="operate"] [data-hub-link="today"]').getAttribute('aria-current'), 'page');
+  assert.equal(await page.locator('[data-hub-link="needs"] [data-hub-inbox-badge]').innerText(), '3');
+  assert.equal(await page.locator('[data-hub-link]').evaluateAll(list => new Set(list.map(item => Math.round(item.getBoundingClientRect().left))).size), 1, 'One column.');
+  assert.equal(await page.locator('.sidebar-palette').count(), 1, 'The sidebar keeps Search.');
+  assert.equal(await page.locator('.sidebar-search input').count(), 1, 'The sidebar keeps the filter.');
   assert.equal((await page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '3');
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Working now"]').innerText(), /running since \d\d:\d\d/);
@@ -226,7 +236,8 @@ try {
   // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at five.
   assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 5, 'Five items in the bar.');
   await tabs.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'map', 'sketch']);
+  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['map', 'library', 'sketch']);
+  assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Plan', 'Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
   await tabs.locator('[data-hub-more="map"]').tap();
   await tabs.locator('.hub[data-screen="map"]').waitFor();
   assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a choice.');

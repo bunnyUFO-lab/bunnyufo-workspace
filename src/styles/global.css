@@ -363,21 +363,31 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .home .project-filter { padding: 0 0 18px; }
 .home .project-chip { font-size: 0.74rem; padding: 5px 13px; }
 
-/* The Hub: buttons two to a row above the search box, set apart from the cards below by a line,
-   so its rows do not read as more cards. The Needs you count is the phone tab bar's pink badge. */
+/* The Hub: one column of rows under the headings Operate, Plan and Know, above the search box, set
+   apart from the cards below by a line, so its rows do not read as more cards. The Needs you count
+   is the phone tab bar's pink badge. */
 .sidebar-hub {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 12px 12px 12px;
   border-bottom: 1px solid var(--hairline);
+}
+.sidebar-hub-group { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-hub-heading,
+.hub-more-heading {
+  padding: 0 9px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 .hub-link {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 34px;
   padding: 0 9px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
@@ -1868,6 +1878,7 @@ button.open-ext {
   }
   .hub-more a { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--text); text-decoration: none; font-size: 15px; }
   .hub-more a.active { color: var(--pink); }
+  .hub-more-heading { padding: 10px 16px 2px; }
   .hub-tab.active { color: var(--pink); }  .hub-tab-icon { font-size: 18px; line-height: 1; }
   .hub-tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hub-tab-badge {
