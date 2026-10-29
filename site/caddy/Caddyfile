@@ -21,6 +21,16 @@
 # Reached from outside behind an authenticating proxy; the compose file this runs under lives in
 # the Caddy stack's folder on the server (CADDY_DIR in site/deploy/publish-site-api.sh).
 #
+# The content host (optional). A page an agent wrote must not act as the signed-in owner, so card pages are
+# also served from a second host name in the same registrable domain: $BUW_CONTENT_HOST (a bare host name, in
+# Caddy's environment, beside BUW_CONTENT_ORIGIN in the API's). There the page's origin is not the app's, so it
+# cannot read the app's storage, and a write it sends to the app carries the wrong Origin and is refused. The
+# session cookie still reaches it (same site), so its images, styles and scripts load behind the sign-in.
+#   - On the content host Caddy serves only /w/*, each response with the sandbox CSP below, and 404s the rest.
+#   - On the app host, a /w/* page loaded as a document, frame or embed (Sec-Fetch-Dest) is sent on to the content
+#     host. Frames are pointed at the content host by the app itself (`contentOrigin` in /api/capabilities).
+#   - With BUW_CONTENT_HOST unset nothing changes: no redirect, and the placeholder host below matches nothing.
+#
 # This file is deployed by site/deploy/publish-site-api.sh: validated, copied to
 # $CADDY_DIR/Caddyfile, and Caddy restarted when it changed.
 {
@@ -51,6 +61,31 @@
 	# Only the login proxy may say who is signed in.
 	@notProxy not remote_ip {$NPM_IP:127.0.0.1}
 	request_header @notProxy -Remote-User
+
+	# The content host: card files and nothing else (see the top of this file).
+	@contentHost host {$BUW_CONTENT_HOST:content-host.invalid}
+	handle @contentHost {
+		handle /w/* {
+			import npm_only_writes
+			header Content-Security-Policy "sandbox allow-scripts allow-forms allow-popups allow-downloads allow-same-origin"
+			reverse_proxy {$BUW_SITE_API:buw-site-api:8099}
+		}
+		handle {
+			respond "Not found" 404
+		}
+	}
+
+	# A card page loaded on the app host (own tab, or any frame or embed) moves to the content host, when there is one,
+	# so a page an agent wrote cannot run on the app's origin by being framed from the content host.
+	@cardTab {
+		expression `"{$BUW_CONTENT_HOST:}" != ""`
+		path /w/*
+		header_regexp Sec-Fetch-Dest ^(document|iframe|frame|object|embed)$
+	}
+	handle @cardTab {
+
+		redir https://{$BUW_CONTENT_HOST:}{uri} 302
+	}
 
 	# Cards are changed through this: pin, archive, tag, and starting a section. They are written
 	# to state.json in the bucket, so the change is there for every device at once.

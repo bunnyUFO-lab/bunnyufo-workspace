@@ -26,6 +26,10 @@ for (const file of ['workspace/_shared/report.css', 'workspace/_shared/examples.
   assert.ok(!(await read(file)).includes('gdw-'), `${file} still carries the old gdw- prefix`);
 for (const current of ['[data-buw-report=document]', '[data-buw-report]', '.buw-card', '--buw-bg'])
   assert.ok(reportCss.includes(current), `workspace/_shared/report.css must match ${current}`);
+// The light theme the app injects into a local report is also in the shared stylesheet, for the content host,
+// where the app cannot write into the frame.
+const { reportThemeCSS } = await import('../server/report-theme.mjs');
+assert.ok(reportCss.replace(/\r\n/g, '\n').includes(reportThemeCSS.trim()), 'workspace/_shared/report.css must carry server/report-theme.mjs (the light theme rules).');
 // No skills or agent configuration live here: each user keeps them in their own settings, and a
 // committed copy would only drift from them.
 const tracked = execFileSync('git', ['ls-files', '.agents', '.claude', '.codex', '.opencode', 'opencode.json', '.mcp.json', 'apm.yml'], { cwd: root, encoding: 'utf8' }).trim();

@@ -39,12 +39,14 @@ export interface HostCapabilities {
   reason: string | null
   /** The card API's address (http or https) when the host knows it, else null. */
   cardApi: string | null
+  /** Where card pages are served from (`https://host`), when the site has a content host; null when it does not. */
+  contentOrigin: string | null
   /** Set only on the development copy: the branch it was deployed from (null before the first deploy). */
   dev?: { branch: string | null; sha?: string; pr?: number; at?: string }
 }
 
 const NONE: HostCapabilities = {
-  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, transcribe: false, reason: null, cardApi: null,
+  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, transcribe: false, reason: null, cardApi: null, contentOrigin: null,
 }
 
 export let host: HostCapabilities = NONE
@@ -86,6 +88,7 @@ export async function probeHost(): Promise<void> {
       hub: !!answer.hub, chat: !!answer.chat, transcribe: !!answer.transcribe,
       reason: typeof answer.reason === 'string' ? answer.reason : null,
       cardApi: typeof answer.cardApi === 'string' && /^https?:\/\//.test(answer.cardApi) ? answer.cardApi : null,
+      contentOrigin: typeof answer.contentOrigin === 'string' && /^https?:\/\//.test(answer.contentOrigin) ? new URL(answer.contentOrigin).origin : null,
       ...parseDev(answer.dev),
     }
   } catch {

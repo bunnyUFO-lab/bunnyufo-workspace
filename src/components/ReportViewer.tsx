@@ -41,6 +41,18 @@ export default function ReportViewer(props: ViewerProps) {
   return <AnnotateContext.Provider value={annotation}><ReportPage {...props} /></AnnotateContext.Provider>
 }
 
+/**
+ * A card page's address as a frame loads it. With a content host, a `/w/` page of this site is framed from there,
+ * so the page runs on an origin of its own and cannot reach the app's storage or post to it as the app.
+ */
+function frameUrl(url: string): string {
+  const content = host.contentOrigin
+  if (!content) return url
+  const target = new URL(url, window.location.href)
+  if (target.origin !== window.location.origin || !target.pathname.startsWith('/w/')) return url
+  return `${content}${target.pathname}${target.search}${target.hash}`
+}
+
 /** The picture's size, for a drawing made over it. */
 const sizeOf = (src: string) => new Promise<{ width: number; height: number }>((resolve, reject) => {
   const picture = new Image()
@@ -116,10 +128,11 @@ function ReportPage({ url, title, relativePath, card }: ViewerProps) {
   const ready = available && loaded
   const fullPath = /^(?:[a-zA-Z]:)?[\\/]/.test(relativePath) ? relativePath : `${serviceState().repo}/${relativePath}`
   if (canEdit && editing) return <div className="report-document"><HtmlEditor path={fullPath} url={url} title={title} onClose={() => setEditing(false)} onSaved={() => setSaves(n => n + 1)} /></div>
-  const shown = saves ? `${url}${url.includes('?') ? '&' : '?'}buw-saved=${saves}` : url
+  const framed = frameUrl(url)
+  const shown = saves ? `${framed}${framed.includes('?') ? '&' : '?'}buw-saved=${saves}` : framed
   return <div className="report-document" aria-busy={!ready}>
     {canEdit && ready && <button type="button" className="report-edit" onClick={() => setEditing(true)} title="Edit the text on this page ( Ctrl+E )">✎ Edit</button>}
-    <ReportFrame url={shown} title={title} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(url, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
+    <ReportFrame url={shown} title={title} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
     {!ready && <div className="report-loading" role="status">Opening report…</div>}
   </div>
 }

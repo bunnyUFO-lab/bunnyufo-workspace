@@ -4,9 +4,20 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { createSiteApi, slugify } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+
+/** A request with a Host of our choosing (fetch will not send one): the status and the headers. */
+const asHost = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
+  const request = http.request(`${origin}${route}`, { method, headers: { ...headers, Host: host } }, response => {
+    response.resume();
+    response.on('end', () => resolve({ status: response.statusCode, headers: new Headers(Object.entries(response.headers).map(([k, v]) => [k, String(v)])) }));
+  });
+  request.on('error', reject);
+  request.end(body);
+});
 
 const card = (id, extra = {}) => ({
   id, folder: id, title: id, description: 'A card.', category: 'test',
@@ -15,7 +26,7 @@ const card = (id, extra = {}) => ({
 });
 
 /** A bucket like the real one — sections/<id>/workspace.json plus card files — and the service over it. */
-async function fixture({ template = true, bucket: withBucket = true, requireRemoteUser = false, siteUrl, cardApi, dev, stateKey, deployedRef } = {}) {
+async function fixture({ template = true, bucket: withBucket = true, requireRemoteUser = false, siteUrl, cardApi, contentOrigin, dev, stateKey, deployedRef } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-site-api-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
@@ -39,7 +50,7 @@ async function fixture({ template = true, bucket: withBucket = true, requireRemo
     await writeFile(path.join(templateDir, 'sample-markdown', 'index.md'), '# Sample\n');      // ignored: a sample card
   }
 
-  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, dev, stateKey, deployedRef, ...(requireRemoteUser ? { allowedOrigins: ['https://site.example'] } : {}) });
+  const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, contentOrigin, dev, stateKey, deployedRef, ...(requireRemoteUser ? { allowedOrigins: ['https://site.example'] } : {}) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const request = (route, data, method, headers = {}) => fetch(`${origin}/api${route}`, {
@@ -52,7 +63,7 @@ async function fixture({ template = true, bucket: withBucket = true, requireRemo
   /** What the state object holds for one card — the overlay the page applies over the published list. */
   const stateOf = (id, cardId) => fake.json('state.json')?.cards[`${id}/${cardId}`] ?? null;
   const close = async () => { server.close(); await fake.close(); };
-  return { server, request, raw, fake, bucket, entity, stateOf, close };
+  return { server, origin, request, raw, fake, bucket, entity, stateOf, close };
 }
 
 test('a name becomes the id the address uses', () => {
@@ -106,6 +117,42 @@ test('capabilities say what the site can do', async () => {
     assert.equal(answer.create, true);
     assert.equal(answer.store, 'bucket');
     assert.deepEqual(answer.sections.sort(), ['one', 'two']);
+  } finally { await close(); }
+});
+
+test('capabilities report contentOrigin only when one is set', async () => {
+  const unset = await fixture();
+  try { assert.equal((await (await unset.request('/capabilities')).json()).contentOrigin, null); } finally { await unset.close(); }
+  const set = await fixture({ contentOrigin: 'https://cards.example.localhost/ignored/path' });
+  try { assert.equal((await (await set.request('/capabilities')).json()).contentOrigin, 'https://cards.example.localhost/ignored/path'); } finally { await set.close(); }
+});
+
+test('with a content origin, its host serves card files with the sandbox CSP and nothing else', async () => {
+  const { origin, raw, close } = await fixture({ contentOrigin: 'http://cards.example.localhost' });
+  const onContent = (route, init) => asHost(origin, 'cards.example.localhost', route, init);
+  const csp = 'sandbox allow-scripts allow-forms allow-popups allow-downloads allow-same-origin';
+  try {
+    const page = await onContent('/w/one/alpha/index.html');
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('content-security-policy'), csp);
+    assert.equal((await onContent('/w/one/_shared/report.css')).headers.get('content-security-policy'), csp, 'Every /w/ response carries it, not only HTML.');
+    for (const route of ['/api/capabilities', '/api/card-state', '/sites.json', '/api/hub/asks', '/']) {
+      assert.equal((await onContent(route)).status, 404, `${route} is not served on the content host.`);
+    }
+    assert.equal((await onContent('/api/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404, 'No write reaches the API from the content host.');
+    const app = await raw('/w/one/alpha/index.html');
+    assert.equal(app.status, 200);
+    assert.equal(app.headers.get('content-security-policy'), "frame-ancestors 'self'", 'The app host serves /w/ but only the app itself may frame it.');
+    assert.equal((await raw('/api/capabilities')).status, 200);
+  } finally { await close(); }
+});
+
+test('without a content origin, /w/ has no CSP and no host is special', async () => {
+  const { origin, close } = await fixture();
+  try {
+    const page = await asHost(origin, 'cards.example.localhost', '/w/one/alpha/index.html');
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('content-security-policy'), null);
   } finally { await close(); }
 });
 
