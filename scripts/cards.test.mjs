@@ -881,10 +881,9 @@ test('request create pings #needs-you once with the request link only for a pres
   } finally { await hook.close(); await close(); }
 });
 
-test('PRESET_IDS in cards.mjs equals the presets of the site API (once presets.mjs exists)', async () => {
+test('PRESET_IDS in cards.mjs equals PRESET_IDS in site/api/presets.mjs', async () => {
   const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
   const ids = JSON.parse(source.match(/const PRESET_IDS = (\[[^\]]*\]);/)[1].replace(/'/g, '"'));
-  let presets;
-  try { presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href); } catch { return; }   // lands with m3a-presets
-  assert.deepEqual([...ids].sort(), Object.keys(presets.PRESETS).sort());
+  const presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href);
+  assert.deepEqual([...ids].sort(), [...presets.PRESET_IDS].sort());
 });
