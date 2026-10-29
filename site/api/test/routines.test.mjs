@@ -777,3 +777,15 @@ test('the request detail never carries the routine key: neither on a fire record
     assert.match(answer.body.fires[0].session, /^https:\/\/claude\.ai\//);
   } finally { await f.close(); }
 });
+
+test('a repo picked from the known list goes to the cloud only when a routine names it', async () => {
+  const f = await fixture({ env: { HUB_KNOWN_REPOS: 'example/probe,example/other' } });
+  try {
+    const repos = (await f.call('GET', '/hub/presets/repos')).body.repos.map(row => row.repo);
+    assert.ok(repos.includes('example/probe') && repos.includes('example/other'), JSON.stringify(repos));
+    const withRoutine = (await f.call('GET', '/hub/presets/route?preset=code-task&project=probe&repo=example/probe')).body;
+    assert.equal(withRoutine.target, 'cloud');
+    const without = (await f.call('GET', '/hub/presets/route?preset=code-task&project=probe&repo=example/other')).body;
+    assert.notEqual(without.target, 'cloud', 'No routine names example/other.');
+  } finally { await f.close(); }
+});
