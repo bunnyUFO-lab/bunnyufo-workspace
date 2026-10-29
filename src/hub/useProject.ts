@@ -7,7 +7,7 @@ const KEY = 'buw.hub.project'
 
 /**
  * The project Work and the Roadmap show: the one in the address (any project, so a link to one
- * without a Beads copy says so), else the last one chosen, else the first. Both draw from a Beads
+ * without a Beads copy says so), else the last one chosen, else the first in the server's order (the project table's order, then alphabetical; nothing here re-sorts). Both draw from a Beads
  * copy, so the chips list only projects that have one (all of them while none has).
  */
 export function useProject(wanted?: string) {

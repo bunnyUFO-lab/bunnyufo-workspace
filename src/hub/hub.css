@@ -161,7 +161,15 @@
   mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 .hub[data-screen="map"] { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: 8px; }
-.hub[data-screen="map"] > .hub-chips-wrap { flex: none; margin: 0 0 8px; }
+.hub[data-screen="map"] > .hub-map-chips { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.hub-map-chips > .hub-chips-wrap { flex: 1; min-width: 0; margin: 0; }
+/* Where the project's work runs: a pill beside the project chips, short text on a phone. */
+.hub-runs { flex: none; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; cursor: help; }
+.hub-runs-short { display: none; }
+@media (max-width: 600px) {
+  .hub-runs-full { display: none; }
+  .hub-runs-short { display: inline; }
+}
 .hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty { flex: none; }
 /* The map takes everything the chips leave; the toolbar, hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
 .hub-map-wrap { position: relative; flex: 1; min-height: 0; }

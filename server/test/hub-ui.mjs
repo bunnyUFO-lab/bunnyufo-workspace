@@ -960,7 +960,7 @@ try {
     const hub = document.querySelector('.hub');
     const rect = element => element.getBoundingClientRect();
     const box = rect(document.querySelector('.hub-map-box'));
-    const chips = rect(document.querySelector('.hub-chips-wrap'));
+    const chips = rect(document.querySelector('.hub-map-chips'));
     const inner = rect(hub);
     const above = [...hub.children].filter(child => child.getBoundingClientRect().bottom <= box.top + 1 && getComputedStyle(child).position !== 'absolute').map(child => child.className);
     return {
@@ -971,7 +971,7 @@ try {
   assert.ok(bigLayout.scroll <= 1, `The Hub does not scroll (${bigLayout.scroll}).`);
   assert.ok(Math.abs(bigLayout.boxBottom - (bigLayout.hubBottom - 8)) <= 10, `The box reaches the bottom (${bigLayout.boxBottom} vs ${bigLayout.hubBottom}).`);
   assert.ok(bigLayout.boxWidth >= bigLayout.hubWidth - 20, `The box is as wide as the screen (${bigLayout.boxWidth} of ${bigLayout.hubWidth}).`);
-  assert.deepEqual(bigLayout.above, ['hub-chips-wrap'], 'Only the project chips sit above the box.');
+  assert.deepEqual(bigLayout.above, ['hub-map-chips'], 'Only the project chips row sits above the box.');
   assert.ok(bigLayout.chipsGap <= 12, `The box follows the chips (${bigLayout.chipsGap}).`);
   assert.ok(bigLayout.k > 1, `The first view enlarges the map (${bigLayout.k}).`);
   await noSideways(big, 'Progress map at 1920');
