@@ -375,8 +375,8 @@ export function createSiteApi({
         return json(response, 200, { cards: await cards.all() });
       }
 
-      const writerFor = async id => cardWriter(bucketStore(bucket, keyOf((await findSection(id)).id, '').replace(/\/$/, '')));
-      if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing')) {
+      const writerFor = async id => { const found = (await findSection(id)).id; return cardWriter(bucketStore(bucket, keyOf(found, '').replace(/\/$/, '')), { section: found }); };
+      if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing' || route === '/cards/responses')) {
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
         const answer = await cardRoute({ method: 'GET', route, query: url.searchParams, data: {}, writerFor });
         return json(response, answer.status, answer.body);
@@ -384,7 +384,7 @@ export function createSiteApi({
 
       if (request.method !== 'POST') throw Object.assign(new Error('Not found'), { status: 404 });
       if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
-      const data = await body(request, route === '/cards/drawing' ? 8 * 1024 * 1024 : route === '/cards/markdown' ? 2 * 1024 * 1024 : undefined);
+      const data = await body(request, route === '/cards/drawing' ? 8 * 1024 * 1024 : route === '/cards/markdown' ? 2 * 1024 * 1024 : route === '/cards/responses' ? 5 * 1024 * 1024 : undefined);
 
       if (route.startsWith('/cards') || route.startsWith('/workspace/')) {
         // /workspace/pins crosses sections and names each one per pin; the app sends no top-level workspace.

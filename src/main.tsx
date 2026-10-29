@@ -29,6 +29,8 @@ const mount = () => createRoot(document.getElementById('root')!).render(
 )
 
 // What the host can do is asked once, together with the site list, so nothing renders before both are known.
+// The card API passphrase is gone: card pages save through the app now (workspace/_shared/card-data.js).
+try { localStorage.removeItem('buw.cardApiPassphrase') } catch { /* blocked storage */ }
 const probed = probeHost()
 void Promise.all([probed, resolveSite()]).then(mount, mount)
 // The phone app's worker, once it is known whether this is the published site.

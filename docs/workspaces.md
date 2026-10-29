@@ -509,16 +509,45 @@ store.on('status', (status, message) => {});             // saved | saving | off
 store.exportJson();                                      // download the whole doc
 ```
 
-It saves through the card API's file routes, one whole file per doc, at
-`sections/<section>/card-responses/<card>/<doc>.json` (`GET`/`PUT /sections/<id>/files/…`,
-`Authorization: Bearer <passphrase>`). A save reads the latest file, applies the page's pending
-items (`null` deletes one) and writes it back, so two browsers saving in the same instant can
-lose one write: this is a single-user store. The passphrase is kept in the browser's
-`localStorage` (`buw.cardApiPassphrase`) by `store.signIn()`; without it, or when the API cannot
-be reached, input stays in `localStorage` (`mode` is `'local'`) and is pushed on the next open.
-The card id comes from `<html data-buw-card="…">`.
+A card page holds no credential and never calls `/api`. The Workspace app shows the card in a frame
+and saves for it: `card-data.js` sends the app a message (`window.postMessage`), and the app calls the
+site API as the signed-in user, for that one card only. It stores one whole file per doc at
+`sections/<section>/card-responses/<card>/<doc>.json`, merging item by item (`null` deletes one), so
+two browsers saving different items both land. The page learns its section and card from the app, not
+from its own markup.
 
-Why that key: the card API refuses a path whose first segment starts with `_` or `.`, and a file
+The app answers a message only when it comes from the frame it is showing and from the origin that
+frame was loaded from, and replies to that origin, never `*`. A request is
+`{ type: 'buw:bridge', v: 1, id, op, ...fields }`; the answer is `{ …, ok: true, result }` or
+`{ …, ok: false, status, error, current? }`.
+
+| `op` | fields | `result` |
+|---|---|---|
+| `hello` | none | `{ section, card, ops }` |
+| `responses.get` | `doc` | `{ doc, etag }` (`doc` is `null` before the first save) |
+| `responses.set` | `doc`, `set` (item → `{ updated, data }` or `null`, 1 to 200) | `{ doc, etag }` |
+| `markdown.get` | `path` | `{ text, etag }` |
+| `markdown.save` | `path`, `text`, `base` | `{ text, etag }`; a stale `base` fails with 409 and `current` |
+
+`path` must be one of the card's Markdown steps. A card's Markdown answer is read and saved with
+`BuwCardData.bridge.call('markdown.get', { path })` and `('markdown.save', { path, text, base: etag })`.
+Writes are limited to 10 a second per frame (429).
+
+Every card page shares the content host's origin, so any card page can script the card frame the app is
+showing if it holds a handle to the app's window. The app shell therefore must not be framed or reachable
+through a window another page holds: the site sends `Cross-Origin-Opener-Policy: same-origin`,
+`Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` with it (Caddyfile, and the
+stand-in in `server/test/card-sandbox-ui.mjs`, which tries all three attacks: framing the app, opening it in
+a popup, and keeping a popup open while the owner moves to another card). The app also answers the bridge only
+when it is a top-level window with no opener. Keep these headers on any proxy in front of the app. When the app cannot save (signed out, or the local
+app), every op answers 401 and the page falls to local mode at once.
+
+Opened in its own tab, a card has no app to ask: `store.mode` is `'local'`, input stays in the
+browser's `localStorage`, `store.message` says "Open this card inside the Workspace, signed in, to
+save it.", and `exportJson()` still works. `store.signIn()` takes no passphrase and never prompts; it
+asks the app again.
+
+Why that key: the card API (agents' file routes) refuses a path whose first segment starts with `_` or `.`, and a file
 inside a card folder would be deleted by the next `npm run publish`. `card-responses/` is outside
 every card folder, and `scripts/shared/s3-sync.mjs` skips it on publish and pull, so the name is
 reserved (no card folder may use it).

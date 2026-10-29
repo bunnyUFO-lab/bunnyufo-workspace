@@ -115,6 +115,12 @@
 	# The app itself, for every other path. try_files keeps /magic-loops and /bunnylink working on a
 	# reload: they are the app's own addresses, not files.
 	handle {
+		# The app must not be framed, and must not be reachable through a window another page holds: every card
+		# page shares the content host's origin, so a card that framed the app, opened it in a popup, or kept a
+		# popup open could script the card frame the app shows and send its save requests as that card.
+		header Cross-Origin-Opener-Policy "same-origin"
+		header Content-Security-Policy "frame-ancestors 'none'"
+		header X-Frame-Options "DENY"
 		root * {$BUW_DOCS_ROOT:/srv/buw-docs}/_app/ui
 		try_files {path} /index.html
 		file_server
