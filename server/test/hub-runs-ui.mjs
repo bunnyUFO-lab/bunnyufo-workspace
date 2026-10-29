@@ -22,7 +22,7 @@ const open = async (viewport, options = {}) => {
 };
 const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 const id = slug => `${day}-magic-loops-${slug}`;
-const ids = { live: id('tug-research-a1a1'), hold: id('held-research-b2b2'), policy: id('by-policy-c3c3'), retry: id('retried-d4d4'), asking: id('asks-e5e5'), phone: id('phone-research-f6f6') };
+const ids = { live: id('tug-research-a1a1'), hold: id('held-research-b2b2'), policy: id('by-policy-c3c3'), retry: id('retried-d4d4'), asking: id('asks-e5e5'), phone: id('phone-research-f6f6'), work: id('on-the-board-a8a8'), slow: id('slow-step-b9b9') };
 const proposal = (now, name, text) => ({ id: ids[name], project: 'magic-loops', createdAt: minutesAgo(now, 20).toISOString(), by: 'hermes', text, preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' } });
 try {
   step('a run streams: text arrives, a tool line shows, then the card link and the timeline');
@@ -123,6 +123,52 @@ try {
   await heldDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   assert.ok(held.fake.objects.has(`sections/inbox/requests/${ids.hold}/stop.json`), 'A signed stop was written.');
   assert.equal(await heldDrawer.locator('[data-run-stop]').count(), 0, 'A stopped run has no Stop.');
+
+  step('Stop from the drawer over Work: the card leaves Running within 3 s, and a quiet drawer sends nothing more');
+  held.seed.request(proposal(held.now, 'work', 'A research on the board'));
+  const board = await open({ width: 1280, height: 900 });
+  await board.addInitScript(() => { window.__wrote = 0; window.addEventListener('buw:hub-wrote', () => { window.__wrote += 1; }); });
+  await board.goto(`${held.url}#/~hub/needs`);
+  await board.locator(`[data-need="approval-${ids.work}"] [data-approval-approve]`).click();
+  await board.locator('[data-next-note]').waitFor();
+  await board.goto(`${held.url}#/~hub/work/magic-loops`);
+  const card = board.locator(`[data-card="request:${ids.work}"]`);
+  await board.locator('.wk-lane').first().waitFor();
+  await board.locator('.wk-lane[data-lane="running"] [data-card="request:' + ids.work + '"]').waitFor({ state: 'attached', timeout: 30000 });
+  await card.evaluate(node => node.click());
+  const boardDrawer = board.locator('[data-run-drawer]');
+  await boardDrawer.locator('[data-run-text]', { hasText: 'Working on it.' }).waitFor();
+  await boardDrawer.locator('[data-run-stop]').click();
+  await boardDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
+  const stoppedAt = Date.now();
+  await board.locator(`[data-card="request:${ids.work}"]`).waitFor({ state: 'detached', timeout: 3000 });
+  assert.ok(Date.now() - stoppedAt <= 3200, 'Work heard of the stop within 3 s.');
+  const wrote = await board.evaluate(() => window.__wrote);
+  await board.waitForTimeout(2500);
+  assert.equal(await board.evaluate(() => window.__wrote), wrote, 'A drawer left open on a finished run does not keep announcing.');
+
+  step('a tool step that takes a while shows its running time, then done with no time');
+  const slow = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Starting. ', { tool: 'cards', preview: 'pull the project', ms: 5000 }, 'Finished.'] } });
+  fixtures.push(slow);
+  slow.seed.request(proposal(slow.now, 'slow', 'A slow step'));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const waiter = await open({ width: 1280, height: 900 });
+  await waiter.goto(`${slow.url}#/~hub/needs`);
+  await waiter.locator(`[data-need="approval-${ids.slow}"] [data-approval-approve]`).click();
+  await waiter.locator('[data-next-note]').waitFor();
+  await waiter.goto(`${slow.url}#/~hub/needs/requests`);
+  await waiter.locator(`[data-request-open="${ids.slow}"]`).click();
+  const running = waiter.locator('[data-run-drawer] [data-run-tool="running"]');
+  await running.waitFor();
+  const seen = new Set();
+  for (let i = 0; i < 30 && await running.count(); i += 1) {
+    seen.add((await running.innerText().catch(() => '')).trim());
+    await waiter.waitForTimeout(300);
+  }
+  assert.ok([...seen].filter(text => /running · \d+ s/.test(text)).length >= 3, `The time ticks (saw ${[...seen].join(' | ')}).`);
+  const finished = waiter.locator('[data-run-drawer] [data-run-tool="done"]');
+  await finished.waitFor();
+  assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');
 
   console.log('hub-runs-ui: passed');
 } finally {

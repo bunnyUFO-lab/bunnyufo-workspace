@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { host } from '../lib/host'
-import { HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl } from '../lib/hub'
+import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
 import { entityHash, hubHash } from '../lib/route'
@@ -9,7 +9,7 @@ import Md from './Md'
 import { setFocus } from './needsFocus'
 import { RUN_EVENT, takeRun } from './runStore'
 import type { LiveLine } from './runLines'
-import { applyRunEvent } from './runLines'
+import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
 import { useHubData } from './useHub'
 import './runs.css'
@@ -44,13 +44,23 @@ function cardLink(card: string): string | undefined {
   return folder ? entityHash(folder) : undefined
 }
 
+/** The running time of one tool step, ticking each second; only this span re-renders. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span data-run-elapsed>{elapsedLabel(now - since)}</span>
+}
+
 function Live({ lines, ended }: { lines: LiveLine[]; ended: boolean }) {
   if (!lines.length) return <p className="hub-muted" data-run-waiting>{ended ? 'The run said nothing.' : 'Waiting for Hermes…'}</p>
   return (
     <div className="rd-live" data-run-live aria-live="polite">
       {lines.map((line, index) => {
         if (line.kind === 'text') return <p key={index} className="rd-text" data-run-text>{line.text}</p>
-        if (line.kind === 'tool') return <p key={index} className={`rd-tool ${line.state}`} data-run-tool={line.state}><span className="rd-tool-n">{line.tool}</span> <span className="rd-tool-p">{line.preview}</span><span className="rd-tool-s">{line.state === 'running' ? 'running' : line.state === 'failed' ? 'failed' : 'done'}</span></p>
+        if (line.kind === 'tool') return <p key={index} className={`rd-tool ${line.state}`} data-run-tool={line.state}><span className="rd-tool-n">{line.tool}</span> <span className="rd-tool-p">{line.preview}</span><span className="rd-tool-s">{line.state === 'running' ? <>running · <Elapsed since={line.startedAt} /></> : line.state === 'failed' ? 'failed' : 'done'}</span></p>
         return (
           <div key={index} className="rd-approval" data-run-approval>
             <b>{line.settled ? 'Hermes asked, and it is settled' : 'Hermes asks for approval'}</b>
@@ -80,6 +90,15 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   const hasRun = !!detail?.hermesRun
   const hasResult = !!detail?.result
   const hasReport = !!detail?.report
+
+  // Tell the other screens (Work, Today, the Needs you badge) when this request moves to another state: the drawer hears of it
+  // first, from the stream. Only a change fires, so the refetch that follows does not.
+  const seenState = useRef<string | null>(null)
+  useEffect(() => {
+    if (!state) return
+    if (seenState.current !== null && seenState.current !== state) window.dispatchEvent(new Event(HUB_WROTE))
+    seenState.current = state
+  }, [state])
 
   // Follow the run while it goes. Closing the view (or leaving the page) closes the stream.
   const live = hasRun && !hasResult && LIVE_STATES.has(state)

@@ -1,7 +1,7 @@
 /** What the drawer shows of a live run: the answer text so far, tool lines, and approvals Hermes asked for. */
 export type LiveLine =
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; id: string; tool: string; preview: string; state: 'running' | 'done' | 'failed' }
+  | { kind: 'tool'; id: string; tool: string; preview: string; state: 'running' | 'done' | 'failed'; startedAt: number }
   | { kind: 'approval'; id: string; command: string; description: string; settled: boolean }
 
 /** The most live text kept, and the most lines: nothing upstream caps a run's output, so the page does. */
@@ -11,21 +11,27 @@ export const MAX_LINES = 300
 const str = (value: unknown) => (typeof value === 'string' ? value : '')
 
 /** Fold one event into the list. Pure, so the order of lines is the order of the events. */
-export function applyRunEvent(lines: LiveLine[], { event, data }: { event: string; data: Record<string, unknown> }): LiveLine[] {
-  return capLines(fold(lines, event, data))
+export function applyRunEvent(lines: LiveLine[], { event, data }: { event: string; data: Record<string, unknown> }, now: number = Date.now()): LiveLine[] {
+  return capLines(fold(lines, event, data, now))
+}
+
+/** "54 s", "2 min 10 s": how long a step has been running. */
+export function elapsedLabel(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`
 }
 
 const capText = (text: string) => (text.length > MAX_TEXT ? `…${text.slice(text.length - MAX_TEXT)}` : text)
 const capLines = (lines: LiveLine[]) => (lines.length > MAX_LINES ? lines.slice(lines.length - MAX_LINES) : lines)
 
-function fold(lines: LiveLine[], event: string, data: Record<string, unknown>): LiveLine[] {
+function fold(lines: LiveLine[], event: string, data: Record<string, unknown>, now: number): LiveLine[] {
   if (event === 'message.delta') {
     const delta = str(data.delta)
     if (!delta) return lines
     const last = lines[lines.length - 1]
     return last?.kind === 'text' ? [...lines.slice(0, -1), { kind: 'text', text: capText(last.text + delta) }] : [...lines, { kind: 'text', text: capText(delta) }]
   }
-  if (event === 'tool.started') return [...lines, { kind: 'tool', id: str(data.tool_call_id) || `t${lines.length}`, tool: str(data.tool) || 'tool', preview: str(data.preview), state: 'running' }]
+  if (event === 'tool.started') return [...lines, { kind: 'tool', id: str(data.tool_call_id) || `t${lines.length}`, tool: str(data.tool) || 'tool', preview: str(data.preview), state: 'running', startedAt: now }]
   if (event === 'tool.completed') {
     const id = str(data.tool_call_id)
     const failed = data.error === true
