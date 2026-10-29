@@ -165,7 +165,7 @@ try {
   await approve('research', 'Fourth', 'Saved, but not approved. It waits in Needs you: The signing key is not set.');
 
   step('Approve for real: with a signing key the button reads Approve and writes a signed approved.json');
-  const keyed = await startHubFixture({ signing: true });
+  const keyed = await startHubFixture({ signing: true, hermes: true });
   fixtures.push(keyed);
   await new Promise(resolve => setTimeout(resolve, 100));
   const real = await open({ width: 1280, height: 900 });

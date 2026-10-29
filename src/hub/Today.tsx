@@ -6,7 +6,7 @@ import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
-import ItemRow from './ItemRow'
+import ItemRow, { openFromClick } from './ItemRow'
 import PcTile from './PcTile'
 import WorkingNow from './WorkingNow'
 import { itemKey, setFocus } from './needsFocus'
@@ -111,7 +111,7 @@ export default function Today() {
             {data.alerts.length ? data.alerts.slice(0, 5).map(event => (
               <div key={event.file} className="alert-row" data-alert>
                 <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
-                <span className="nrow-text"><b>{event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+                <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
               </div>
             )) : <p className="hub-empty">No alerts.</p>}
           </section>

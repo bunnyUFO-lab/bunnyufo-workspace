@@ -8,6 +8,7 @@ import Board from './Board'
 import ChecklistView from './ChecklistView'
 import Md from './Md'
 import ReviewView from './ReviewView'
+import RunDrawerHost from './RunDrawer'
 import Chat from './Chat'
 import Needs from './Needs'
 import Sketch from './Sketch'
@@ -39,6 +40,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && <Chat id={route.id} />}
       {host.write && <SpawnHost />}
+      <RunDrawerHost />
     </div>
   )
 }
