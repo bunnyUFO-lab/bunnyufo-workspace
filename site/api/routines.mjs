@@ -306,7 +306,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     const checked = await verifyApproval(id, at);
     if (!checked.ok) throw fail('This approval failed the server\'s check.', 409);
     const { result, record } = await fireAndRecord(id, checked.approved, 'hub', at);
-    return { status: 200, body: { fired: result.ok === true, ...(result.ok ? {} : { reason: result.reason }), fire: record } };
+    return { status: 200, body: { fired: result.ok === true, ...(result.ok ? {} : { reason: result.reason }), fire: { ...record, routine: undefined } } };
   });
 
   /**

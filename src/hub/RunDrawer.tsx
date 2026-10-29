@@ -58,7 +58,7 @@ function whenLabel(iso: string | undefined, now = new Date()): string {
 /** The drawer's line for a cloud request, and what it can do. */
 function cloudLine(cloud: CloudState, fires: CloudFire[]): { text: string; retry: boolean; session?: string } {
   const okFire = fires.find(fire => fire.ok)
-  const session = safeUrl(okFire?.session)
+  const session = sessionUrl(okFire?.session)
   switch (cloud.status) {
     case 'queued': return { text: 'Starting in the cloud…', retry: false }
     case 'waiting':
@@ -230,7 +230,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
           <li key={run.at} data-step="run"><b>{RUN_WORD[run.state] ?? run.state}</b> {run.lastAction ?? ''} · {clock(run.at)}{sessionUrl(run.sessionLink) && <> · <a href={sessionUrl(run.sessionLink)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
         ))}
         {fires.map(fire => (
-          <li key={fire.at + String(fire.ok)} data-step="fire"><b>{fire.ok ? 'Fired' : 'Fire failed'}</b> {fire.ok ? 'in the cloud' : fireReason(fire.reason)} · {clock(fire.at)}{fire.dryRun ? ' (dev: nothing was sent)' : ''}{fire.ok && safeUrl(fire.session) && <> · <a href={safeUrl(fire.session)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
+          <li key={fire.at + String(fire.ok)} data-step="fire"><b>{fire.ok ? 'Fired' : 'Fire failed'}</b> {fire.ok ? 'in the cloud' : fireReason(fire.reason)} · {clock(fire.at)}{fire.dryRun ? ' (dev: nothing was sent)' : ''}{fire.ok && sessionUrl(fire.session) && <> · <a href={sessionUrl(fire.session)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
         ))}
         {taken && <li data-step="taken"><b>Taken</b> by {taken.runner ?? taken.host ?? 'a runner'}{taken.host && taken.runner ? ` on ${taken.host}` : ''} · {clock(taken.at)}</li>}
         {approved && <li data-step="approved"><b data-run-by>{by}</b> · {clock(approved.at)}</li>}

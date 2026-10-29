@@ -760,3 +760,19 @@ test('a run that refused its approval is a Today alert that names the refusal an
     assert.equal(plain.title, 'Request failed: Broke');
   } finally { await f.close(); }
 });
+
+test('the request detail never carries the routine key: neither on a fire record nor in the cloud status', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud();
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    assert.ok(f.fires(request.id)[0].routine, 'The stored record names the routine.');
+    const answer = await f.call('GET', `/hub/requests/${request.id}`);
+    assert.equal(answer.status, 200);
+    assert.ok(answer.body.fires.length >= 1 && answer.body.cloud.fires.length >= 1);
+    assert.ok(!JSON.stringify(answer.body).includes('PROBE'), JSON.stringify(answer.body));
+    assert.ok(!JSON.stringify(answer.body).includes('"routine"'));
+    assert.equal(answer.body.fires[0].ok, true);
+    assert.match(answer.body.fires[0].session, /^https:\/\/claude\.ai\//);
+  } finally { await f.close(); }
+});

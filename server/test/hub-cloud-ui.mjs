@@ -25,6 +25,7 @@ const open = async (viewport, options = {}) => {
   const page = await context.newPage();
   page.setDefaultTimeout(20000);
   page.on('pageerror', error => { throw error; });
+  watch(page);
   return page;
 };
 const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -42,7 +43,14 @@ async function approve(page, fixture, ident) {
   await page.locator(`[data-need="approval-${ident}"] [data-approval-approve]`).click();
   await page.locator('[data-next-note]').waitFor();
 }
+// Every JSON answer the pages read from the hub, to check as well as the page text.
+const bodies = [];
+const watch = page => page.on('response', async response => { if (response.url().includes('/api/hub/')) bodies.push(`${response.url()} ${await response.text().catch(() => '')}`); });
 const noSecrets = async page => {
+  await page.waitForTimeout(300);
+  for (const body of bodies) {
+    for (const secret of ['SECRETURL123', 'SECRETTOKEN456', 'routine.example.test', 'MAGIC_LOOPS', '"routine"']) assert.ok(!body.includes(secret), `A hub answer holds ${secret}: ${body.slice(0, 90)}`);
+  }
   const text = await page.evaluate(() => document.body.innerText + document.documentElement.outerHTML);
   for (const secret of ['SECRETURL123', 'SECRETTOKEN456', 'routine.example.test', 'MAGIC_LOOPS']) assert.ok(!text.includes(secret), `The page shows ${secret}.`);
 };
@@ -53,7 +61,7 @@ const noSideScroll = async (page, selector) => {
 
 try {
   const routine = createFakeRoutine({ status: 401 });
-  const ids = { fail: id('fire-refused', 'a1a1'), queued: id('just-approved', 'b2b2'), stuck: id('fired-and-quiet', 'c3c3'), done: id('finished-pr', 'd4d4'), refused: id('forged-approval', 'e5e5'), limit: id('over-the-limit', 'f6f6') };
+  const ids = { fail: id('fire-refused', 'a1a1'), queued: id('just-approved', 'b2b2'), stuck: id('fired-and-quiet', 'c3c3'), done: id('finished-pr', 'd4d4'), refused: id('forged-approval', 'e5e5'), limit: id('over-the-limit', 'f6f6'), retrying: id('server-error', 'a9a9') };
   const fixture = await startHubFixture({ signing: true, env: ENV, fetchImpl: routine.fetchImpl });
   fixtures.push(fixture);
   const { seed, now, fake } = fixture;
@@ -108,6 +116,15 @@ try {
   put(ids.done, 'taken.json', { v: 1, runner: 'cloud', host: 'cloud', at: minutesAgo(now, 84).toISOString() });
   put(ids.done, `run-${markStamp(minutesAgo(now, 60))}-r001.json`, { v: 1, state: 'running', lastAction: 'editing docs', at: minutesAgo(now, 60).toISOString() });
   put(ids.done, 'result.json', { v: 1, outcome: 'pr', pr: 'https://github.com/example/magic-loops/pull/7', summary: 'Fixed the typo.', by: 'cloud', at: minutesAgo(now, 50).toISOString() });
+  seed.request(proposal(now, ids.retrying, 'Work whose fire hit a server error'));
+  put(ids.retrying, 'approved.json', approvedFile(ids.retrying, 10));
+  fireFile(ids.retrying, 1, { ok: false, status: 500, reason: 'http-500', session: undefined });
+  await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.retrying)}`);
+  const again = page.locator('[data-run-cloud="waiting"]');
+  await again.waitFor();
+  assert.match(await again.innerText(), /^Could not start in the cloud yet \(the routine's service had an error\)\. Tries again at /);
+  assert.equal(await again.getAttribute('data-cloud-reason'), 'retry');
+  assert.equal(await page.locator('[data-run-stop]').count(), 1);
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.queued)}`);
   await page.locator('[data-run-cloud="queued"]').waitFor();
   assert.equal((await page.locator('[data-run-cloud]').innerText()).trim(), 'Starting in the cloud…');
@@ -157,6 +174,7 @@ try {
   assert.match(await limit.innerText(), /^Waiting: cloud usage limit\. Tries again at \d\d:\d\d(?: [AP]M)?\./);
   assert.equal(await limit.getAttribute('data-cloud-reason'), 'usage-limit');
   assert.equal(await limit.locator('[data-run-fire-retry]').count(), 0);
+  assert.equal(await page.locator('[data-run-stop]').count(), 1, 'A waiting request can be stopped.');
   await shot(page, 'cloud-waiting-usage');
   await noSecrets(page);
   await page.goto(`${fixture.url}#/~hub/today`);
