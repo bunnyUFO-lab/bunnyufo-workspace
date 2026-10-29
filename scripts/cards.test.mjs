@@ -519,3 +519,28 @@ test('ask create: --require-passkey and the JSON field both set requirePasskey; 
     assert.equal(stored(flagWins).requirePasskey, true, 'The flag wins over the field.');
   } finally { await close(); }
 });
+
+test('BUW_INBOX_SECTION=inbox-dev writes under sections/inbox-dev, touches nothing in inbox, and sends no ping', async () => {
+  const { fake, cli, keys, dir, close } = await setup();
+  const hook = await webhook();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    await writeFile(path.join(dir, 'ask.json'), JSON.stringify({ question: 'Which jump arc feels right?' }));
+    // The Discord settings of the real inbox are in the environment, as on the owner's PC: the dev inbox must not use them.
+    cli.env = { BUW_INBOX_SECTION: 'inbox-dev', BUW_DISCORD_NEEDS_YOU: '', BUW_SITE_URL: 'https://hub.example.test/' };
+    const made = await cli('api', 'ask', 'create', '--project', 'magic-loops', '--file', path.join(dir, 'ask.json'));
+    assert.equal(made.code, 0, made.stderr);
+    const id = made.stdout.trim().split('\n').at(-1);
+    assert.ok(fake.text(`sections/inbox-dev/asks/${id}/ask.json`), 'The Ask is in the dev inbox.');
+    assert.ok([...fake.objects.keys()].some(key => key.startsWith('sections/inbox-dev/events/')), 'So is its event.');
+    assert.deepEqual(keys('').filter(key => !key.endsWith('/workspace.json')), [], 'Nothing was written to the real inbox.');
+    assert.equal(hook.posts.length, 0);
+    // A webhook is used only when it is named for this run.
+    cli.env = { BUW_INBOX_SECTION: 'inbox-dev', BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/' };
+    await cli('api', 'ask', 'create', '--project', 'magic-loops', '--file', path.join(dir, 'ask.json'));
+    assert.equal(hook.posts.length, 1, 'An explicit webhook still pings.');
+    // A bad section name is refused before anything is sent.
+    cli.env = { BUW_INBOX_SECTION: 'magic-loops' };
+    assert.equal((await cli('api', 'event', 'deployed', '--title', 'x')).code, 2);
+  } finally { await hook.close(); await close(); }
+});

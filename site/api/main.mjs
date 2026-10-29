@@ -22,6 +22,9 @@
 //                           Chat and speech stay off, and hidden in the UI, until their keys are here.
 //   BUW_SITE_URL            the public address people sign in at; named in the read-only message
 //   BUW_CARD_API            the card API's address, told to pages in /api/capabilities (`cardApi`)
+//   HUB_INBOX               the Hub's inbox section; default `inbox`, or `inbox-<name>` (the development copy uses `inbox-dev`)
+//   BUW_STATE_KEY           the object holding pins, archives and tags; default `state.json` (`dev-state.json` on the development copy)
+//   BUW_DEV                 `1` makes this the development copy: it writes only `dev-…` sections and says so in /api/capabilities
 //   PORT                    default 8099
 //
 // With no bucket at all the service answers /api/capabilities with write: false and a reason,
@@ -63,9 +66,16 @@ const requireRemoteUser = env.REQUIRE_REMOTE_USER === '1';
 const prefix = env.BUW_S3_PREFIX || 'sections';
 const siteUrl = env.BUW_SITE_URL || '';
 const cardApi = env.BUW_CARD_API || '';
-const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env });
+const inbox = env.HUB_INBOX || 'inbox';
+if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) {
+  console.error(`[site-api] HUB_INBOX must be "inbox" or "inbox-<name>" (lower-case letters and digits), not "${inbox}".`);
+  process.exit(1);
+}
+const stateKey = env.BUW_STATE_KEY || 'state.json';
+const dev = env.BUW_DEV === '1' ? { writable: id => id.startsWith('dev-') } : null;
+const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox });
 const server = bucket
-  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, cardApi })
+  ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, cardApi, stateKey, dev })
   : createSiteApi({ requireRemoteUser, siteUrl, cardApi });
 server.listen(port, '0.0.0.0', () => {
   console.log(`[site-api] ${bucket ? `s3://${name}/${env.BUW_S3_PREFIX || 'sections'}` : 'no bucket (read-only, nothing to serve)'} on :${port}${requireRemoteUser ? ', writes need Remote-User' : ''}`);

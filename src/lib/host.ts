@@ -39,6 +39,8 @@ export interface HostCapabilities {
   reason: string | null
   /** The card API's address (http or https) when the host knows it, else null. */
   cardApi: string | null
+  /** Set only on the development copy: the branch it was deployed from (null before the first deploy). */
+  dev?: { branch: string | null; sha?: string; pr?: number; at?: string }
 }
 
 const NONE: HostCapabilities = {
@@ -50,6 +52,19 @@ export let host: HostCapabilities = NONE
 export let signedOut: string | null = null
 
 const SIGNED_OUT = 'Signed out — reload the page and sign in again.'
+
+function parseDev(value: unknown): Pick<HostCapabilities, 'dev'> {
+  if (!value || typeof value !== 'object') return {}
+  const raw = value as Record<string, unknown>
+  return {
+    dev: {
+      branch: typeof raw.branch === 'string' ? raw.branch : null,
+      ...(typeof raw.sha === 'string' ? { sha: raw.sha } : {}),
+      ...(typeof raw.pr === 'number' ? { pr: raw.pr } : {}),
+      ...(typeof raw.at === 'string' ? { at: raw.at } : {}),
+    },
+  }
+}
 
 export async function probeHost(): Promise<void> {
   try {
@@ -71,6 +86,7 @@ export async function probeHost(): Promise<void> {
       hub: !!answer.hub, chat: !!answer.chat, transcribe: !!answer.transcribe,
       reason: typeof answer.reason === 'string' ? answer.reason : null,
       cardApi: typeof answer.cardApi === 'string' && /^https?:\/\//.test(answer.cardApi) ? answer.cardApi : null,
+      ...parseDev(answer.dev),
     }
   } catch {
     // No API (the local preview) or no network: a read-only site, as before.

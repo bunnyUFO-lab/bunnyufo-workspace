@@ -29,7 +29,7 @@ import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
 import { contentTypeOf } from './s3.mjs';
 
 const STATUSES = ['active', 'archived'];
-const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub']);
+const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
 const SECTIONS_TTL = 15_000;
 
 const json = (response, status, body) => {
@@ -88,6 +88,10 @@ function cleanPath(value) {
  *                    dev proxy and the tests send no such header.
  * @param siteUrl     the address people sign in at, named in the read-only reason; empty leaves it out.
  * @param cardApi     the card API's address, reported to pages in /capabilities as `cardApi` (null when unset).
+ * @param stateKey    the bucket object holding pins, archives and tags (`dev-state.json` on the development copy).
+ * @param dev         null on the real site. On the development copy `{ writable(sectionId) }`: every write to a card
+ *                    section is refused unless it says so, and /capabilities reports the deployed branch.
+ * @param deployedRef the JSON file (`{ branch, sha, pr, at }`) the deploy leaves beside this file; read for `dev`.
  * @param hub         a Hub from hub.mjs (createHub), or null: the /hub/ routes, answered after the sign-in
  *                    check and before anything that reads a body. It reports itself in /capabilities.
  */
@@ -101,8 +105,35 @@ export function createSiteApi({
   hub = null,
   siteUrl = '',
   cardApi = '',
+  stateKey = 'state.json',
+  dev = null,
+  deployedRef = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '.deployed-ref'),
 } = {}) {
-  const cards = bucket ? createBucketCardStore(bucket) : createCardStore(stateFile);
+  const cards = bucket ? createBucketCardStore(bucket, { key: stateKey }) : createCardStore(stateFile);
+  /** The development copy's write boundary: a card section is writable only when `dev.writable` says so. */
+  const mayWrite = id => {
+    if (dev && !dev.writable(String(id ?? ''))) {
+      throw Object.assign(new Error('The development copy writes only dev-… sections.'), { status: 403 });
+    }
+  };
+  let refCache = { at: 0, value: { branch: null } };
+  async function devInfo() {
+    if (Date.now() - refCache.at < 30000) return refCache.value;
+    let value = { branch: null };
+    try {
+      const ref = JSON.parse(await readFile(deployedRef, 'utf8'));
+      value = {
+        branch: typeof ref.branch === 'string' ? ref.branch : null,
+        ...(typeof ref.sha === 'string' ? { sha: ref.sha } : {}),
+        ...(Number.isInteger(ref.pr) ? { pr: ref.pr } : {}),
+        ...(typeof ref.at === 'string' ? { at: ref.at } : {}),
+      };
+    } catch {
+      // No .deployed-ref yet: the copy runs, with no branch to name.
+    }
+    refCache = { at: Date.now(), value };
+    return value;
+  }
   const keyOf = (id, file) => `${prefix}/${id}/${file}`;
   const reason = bucket ? null : 'This site has no cards bucket configured, so it is read-only.';
 
@@ -259,6 +290,7 @@ export function createSiteApi({
             store: cards.kind,
             ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
             cardApi: cardApi || null,
+            ...(dev ? { dev: await devInfo() } : {}),
             reason: siteUrl ? `Read-only here: sign in at ${siteUrl} to change cards.` : 'Read-only here: sign in to change cards.',
           });
         }
@@ -272,6 +304,7 @@ export function createSiteApi({
           sections: [...known.keys()],
           store: cards.kind,
           cardApi: cardApi || null,
+          ...(dev ? { dev: await devInfo() } : {}),
           ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
           ...(reason ? { reason } : {}),
         });
@@ -300,6 +333,12 @@ export function createSiteApi({
       if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
       const data = await body(request, route === '/cards/drawing' ? 8 * 1024 * 1024 : route === '/cards/markdown' ? 2 * 1024 * 1024 : undefined);
 
+      if (route.startsWith('/cards') || route.startsWith('/workspace/')) {
+        // /workspace/pins crosses sections and names each one per pin; the app sends no top-level workspace.
+        if (route === '/workspace/pins') {
+          if (Array.isArray(data.list)) for (const item of data.list) mayWrite(item?.workspace ?? data.workspace);
+        } else mayWrite(data.workspace);
+      }
       const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor });
       if (card) return json(response, card.status, card.body);
 
@@ -373,6 +412,7 @@ export function createSiteApi({
         const id = slugify(name);
         if (!id) throw new Error('That name has no letters or digits in it.');
         if (RESERVED.has(id)) throw new Error(`"${id}" is reserved; pick another name.`);
+        mayWrite(id);
         if ((await sections({ fresh: true })).has(id)) throw Object.assign(new Error(`A section called "${id}" is already here.`), { status: 409 });
         const files = await newSectionFiles(id, name, data.hidden === true);
         // The card list goes first, and only if nothing is there: two taps on "create" make one section.

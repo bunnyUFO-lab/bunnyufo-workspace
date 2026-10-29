@@ -40,6 +40,7 @@ async function setup() {
     `hermes=${sha('tok-hermes')}:read=*;write=inbox|assistant`,
     `deploy=${sha('tok-deploy')}:read=inbox;write=inbox`,
     `cloud=${sha('tok-cloud')}:read=*;write=inbox`,
+    `devbot=${sha('tok-devbot')}:read=*;write=inbox-dev`,
     `deleter=${sha('tok-deleter')}:read=*;write=inbox;delete=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
@@ -166,6 +167,20 @@ test('rights: a token that writes inbox writes there only, and cannot delete', a
     assert.equal((await put('inbox', 'probes', 'tok-deploy')).status, 200);
     assert.equal((await put('magic-loops', 'probes', 'tok-deploy')).status, 403);
     assert.equal((await call('GET', '/resolve', { token: 'tok-deploy', query: { ref: 'magic-loops/loops-plan' } })).status, 403);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('rights: the development inbox is guarded like the inbox, and a limited token cannot write the Hub\'s files there', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    const put = (token, file) => call('PUT', `/sections/inbox-dev/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
+    assert.equal((await put('tok-cloud', 'asks/x/answer.json')).status, 403, 'answers are the Hub\'s.');
+    assert.equal(fake.text('sections/inbox-dev/asks/x/answer.json'), null);
+    assert.equal((await put('tok-devbot', 'events/p.json')).status, 200, 'events are not.');
+    assert.equal((await call('PUT', '/sections/inbox-dev/cards/not-a-card', { token: 'tok-devbot', body: card('not-a-card') })).status, 403, 'The dev inbox holds files, not cards.');
   } finally {
     await fake.close();
   }

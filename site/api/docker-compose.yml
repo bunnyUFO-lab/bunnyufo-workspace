@@ -11,19 +11,26 @@
 #   AWS_SECRET_ACCESS_KEY=…
 #   REQUIRE_REMOTE_USER=1      writes need the Remote-User header NPM sets after the passkey check
 #   HERMES_URL=…, HERMES_API_KEY=…, STT_URL=…, STT_API_KEY=…   chat and push-to-talk (optional)
+#   HUB_INBOX=inbox-dev, BUW_STATE_KEY=dev-state.json, BUW_DEV=1   the development copy's settings (see docs/workspaces.md)
 #   HUB=1                      turns on the Hub routes (/api/hub/…, hub.mjs); anything else leaves them off
 #   HUB_DISCORD_TOKEN_SHA256=… the sha256 of the Asks bot's token, and
 #   HUB_DISCORD_OWNER_ID=…     the owner's Discord user id: both turn on /api/hub/discord/…; remove either and those routes answer 404
+#
+# A second stack from this same folder (the development copy) sets BUW_COMPOSE_PROJECT,
+# BUW_SITE_API_CONTAINER and BUW_DOCKER_NETWORK, so compose sees a project of its own and
+# never replaces the real container. With none set, the names are the real ones.
 #
 # The service reads that file itself, through the BUW_DOCS_ROOT mount, rather than compose
 # reading it as an env_file: the file is root-only and compose runs as whoever deploys, so
 # env_file turned "the key is readable by root alone" into a failed deploy.
 # Without the file the service still runs, answers /api/capabilities with write:false and a
 # reason, and serves no cards — there is nowhere to read them from.
+name: ${BUW_COMPOSE_PROJECT:-api}
+
 services:
   site-api:
     image: node:22-bookworm-slim
-    container_name: buw-site-api
+    container_name: ${BUW_SITE_API_CONTAINER:-buw-site-api}
     restart: unless-stopped
     working_dir: /app
     command: ["node", "main.mjs"]
@@ -35,10 +42,11 @@ services:
       # Only for api.env: cards are no longer on this disk.
       - ${BUW_DOCS_ROOT:-/srv/buw-docs}:${BUW_DOCS_ROOT:-/srv/buw-docs}:ro
     # The network the buw-docs stack already made, so Caddy can reach this by name.
-    networks: [buw-docs_default]
+    networks: [site]
     # Not published to the host: Caddy reaches it on the shared network, nothing else can.
     expose: ["8099"]
 
 networks:
-  buw-docs_default:
+  site:
+    name: ${BUW_DOCKER_NETWORK:-buw-docs_default}
     external: true

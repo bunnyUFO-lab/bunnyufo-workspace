@@ -32,6 +32,8 @@ const CLIENT = new URL('./cards.mjs', import.meta.url);
 export const MAX_INLINE = 4 * 1024 * 1024; // a Lambda payload is 6 MB, and base64 adds a third
 export const MAX_FILE = 50 * 1024 * 1024; // the same limit `npm run publish` keeps
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
+/** The hidden inbox sections: the real one, and the development copy's. Same rules for both. */
+const INBOXES = new Set(['inbox', 'inbox-dev']);
 const SECTION_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const URL_TTL = 900;
 const MAX_LISTED = 1000;
@@ -167,7 +169,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist)\.json$/i;
   const ownerOnly = (caller, sectionId, file) => {
-    if (sectionId === 'inbox' && caller.rights.write !== null && OWNER_FILES.test(file)) {
+    if (INBOXES.has(sectionId) && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
     }
   };
@@ -177,13 +179,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    * URL cannot enforce create-only, so it is refused for ask.json too.
    */
   const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
-    if (sectionId === 'inbox' && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
+    if (INBOXES.has(sectionId) && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
       throw new HttpError(403, 'ask.json and checklist.json are create-only.');
     }
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (sectionId === 'inbox' && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file))) {
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file))) {
       throw new HttpError(403, 'Only the Hub removes asks, answers, checklists and ticks.');
     }
   };
@@ -229,7 +231,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (typeof entity.folder !== 'string' || !cardPath(`${entity.folder}/x`) || entity.folder.includes('/')) {
         throw new HttpError(400, 'The entry needs a folder: one name, not starting with "_" or ".".');
       }
-      if (sectionId === 'inbox' && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
+      if (INBOXES.has(sectionId) && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
       await section(caller, sectionId, 'write');
       const files = await cardFiles(sectionId, entity.folder);
       if (!files.length) throw new HttpError(409, `${entity.folder}/ has no files yet: upload them first, then add the card.`);
