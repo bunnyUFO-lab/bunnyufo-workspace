@@ -167,6 +167,9 @@ export interface Checklist {
   pickup?: { at: string; host: string; session?: string }
   cancel?: { at: string; by: string }
   files: string[]
+  /** The newest picture per step (by step number, "03") and the playtest screenshots; files in the checklist's folder, shown through `fileUrl`. */
+  evidence?: Record<string, { file: string; at: string }>
+  shots?: { file: string; at: string }[]
 }
 
 /** Where a project's work runs by default: the Gaming PC, the cloud, or only when the owner starts it at the PC. */

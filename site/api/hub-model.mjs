@@ -84,6 +84,39 @@ export const stampIso = stamp => `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${st
 /** A Date as the stamp in a mark file's name (UTC, milliseconds, no separators). */
 export const markStamp = date => date.toISOString().replace(/[-:.]/g, '');
 
+/** Picture files in a checklist's folder: a step's evidence, and a playtest issue's screenshot. JPEG and PNG only. */
+export const EVIDENCE_RE = /^evidence-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
+export const SHOT_RE = /^shot-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
+export const EVIDENCE_PER_STEP = 5;
+export const SHOTS_PER_CHECKLIST = 30;
+
+/**
+ * The picture files of a checklist from its file names: the newest evidence file per step (greatest stamp,
+ * then the greater rand4), how many each step has, and the screenshots oldest first.
+ * → { evidence: Map<item, { file, at, count }>, shots: [{ file, at }] }
+ */
+export function checklistEvidence(names) {
+  const best = new Map();
+  const shots = [];
+  for (const name of nameList(names)) {
+    const e = EVIDENCE_RE.exec(name);
+    if (e) {
+      const [, item, stamp, rand] = e;
+      const rank = `${stamp}-${rand}`;
+      const current = best.get(item);
+      best.set(item, { rank: current && current.rank > rank ? current.rank : rank, file: current && current.rank > rank ? current.file : name, at: current && current.rank > rank ? current.at : stampIso(stamp), count: (current?.count ?? 0) + 1 });
+      continue;
+    }
+    const s = SHOT_RE.exec(name);
+    if (s) shots.push({ rank: `${s[1]}-${s[2]}`, file: name, at: stampIso(s[1]) });
+  }
+  shots.sort((a, b) => (a.rank < b.rank ? -1 : 1));
+  return {
+    evidence: new Map([...best].map(([item, { file, at, count }]) => [item, { file, at, count }])),
+    shots: shots.map(({ file, at }) => ({ file, at })),
+  };
+}
+
 /** First match wins: cancel.json → 'cancelled', pickup.json → 'picked-up', submit.json → 'submitted', else 'open'. */
 export function checklistState(names) {
   const list = nameList(names);

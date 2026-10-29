@@ -269,7 +269,7 @@ test('inbox: a checklist is written once by an agent; ticks and the submission a
   try {
     const folder = 'checklists/20261027-probe-x-a1b2';
     const put = (token, file, headers = {}, text = '{}') => call('PUT', `/sections/inbox/files/${folder}/${file}`, { token, body: Buffer.from(text), base64: true, headers });
-    const owned = ['tick-01-20261027T143012123Z-a1b2.json', 'untick-01-20261027T143012123Z-a1b2.json', 'submit.json'];
+    const owned = ['tick-01-20261027T143012123Z-a1b2.json', 'untick-01-20261027T143012123Z-a1b2.json', 'submit.json', 'evidence-01-20261027T143012123Z-a1b2.png', 'evidence-01-20261027T143012123Z-a1b2.jpg', 'shot-20261027T143012123Z-a1b2.png'];
     for (const file of owned) {
       for (const token of ['tok-cloud', 'tok-hermes']) {
         const refused = await put(token, file, { 'If-None-Match': '*' });
@@ -277,6 +277,11 @@ test('inbox: a checklist is written once by an agent; ticks and the submission a
       }
       assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${folder}/${file}` }] } })).status, 403, `${file} by upload URL`);
       assert.equal(fake.text(`sections/inbox/${folder}/${file}`), null);
+    }
+    for (const file of owned.slice(3)) {
+      assert.equal((await call('PUT', `/sections/inbox/files/${folder}/${file}`, { token: 'tok-all', body: Buffer.from('x'), base64: true })).status, 200, `the passphrase writes ${file}`);
+      fake.seed(`sections/inbox/${folder}/${file}`, 'x', 'image/png');
+      assert.equal((await call('DELETE', `/sections/inbox/files/${folder}/${file}`, { token: 'tok-deleter' })).status, 403, `a limited deleter keeps off ${file}`);
     }
     // checklist.json: create-only for a limited writer, with If-None-Match: * and never by upload URL.
     assert.equal((await put('tok-cloud', 'checklist.json')).status, 403, 'No If-None-Match: refused.');

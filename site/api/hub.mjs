@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -24,6 +24,7 @@ import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
+import { checkOneImage } from './chat-images.mjs';
 
 const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
@@ -304,8 +305,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const { done, total, marks } = checklistProgress(checklist, names);
     const read = async name => (names.has(name) ? cached(`checklists/${id}/${name}`) : undefined);
     const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
+    const pictures = checklistEvidence(names);
     return {
       ...checklist, state, done, total,
+      evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
+      shots: pictures.shots,
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
       ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       files: [...names].sort(),
@@ -332,6 +336,39 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       }
     }
     return { status: 200, body: await checklistDetail(id) };
+  }
+
+  /**
+   * One picture for a step (`for: "03"`) or a playtest issue (`for: "issue"`), as `{ type, data }` in the chat shape. The picture is
+   * checked and stripped of its metadata like a chat picture, then written create-only in the checklist's own folder and nowhere else.
+   */
+  async function putChecklistFile(id, data, at) {
+    const target = data.for;
+    if (target !== 'issue' && !(typeof target === 'string' && /^\d{2}$/.test(target))) throw fail('Send "for" as a step number like "03", or "issue".');
+    const picture = checkOneImage(data.image, fail);
+    const { checklist, names } = await checklistFolder(id);
+    const state = checklistState(names);
+    if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    const pictures = checklistEvidence(names);
+    let prefix;
+    if (target === 'issue') {
+      if (pictures.shots.length >= SHOTS_PER_CHECKLIST) throw fail(`A checklist has at most ${SHOTS_PER_CHECKLIST} screenshots.`, 409);
+      prefix = 'shot';
+    } else {
+      if (!checklist.items.some(candidate => candidate.id === target)) throw fail('No such item.', 404);
+      if ((pictures.evidence.get(target)?.count ?? 0) >= EVIDENCE_PER_STEP) throw fail(`A step has at most ${EVIDENCE_PER_STEP} pictures.`, 409);
+      prefix = `evidence-${target}`;
+    }
+    for (let attempt = 0; ; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      const file = `${prefix}-${markStamp(at)}-${randomId(4)}.${picture.ext}`;
+      try {
+        await putCreateOnly(`checklists/${id}/${file}`, picture.buffer, picture.type, clash);
+        return { status: 201, body: { file, at: at.toISOString() } };
+      } catch (error) {
+        if (error !== clash || attempt >= 2) throw error;
+      }
+    }
   }
 
   /** Send the list back: submit.json create-only, then the `checklist-submitted` event. A lost event is logged and does not undo the submit. */
@@ -659,7 +696,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   async function serveFile(response, rel) {
     const segments = String(rel ?? '').split('/');
-    if (segments.length !== 3 || !['asks', 'requests', 'drawings'].includes(segments[0])) throw fail('That file is not served.', 400);
+    const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? ''));
+    if (segments.length !== 3 || !(picture || ['asks', 'requests', 'drawings'].includes(segments[0]))) throw fail('That file is not served.', 400);
     let object;
     try {
       object = await bucket.get(key(rel));
@@ -751,6 +789,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const bodyLimit = (method, route) => {
     if (method !== 'POST') return 0;
     if (/^\/hub\/asks\/[^/]+\/answer$/.test(route) || route === '/hub/requests' || route.startsWith('/hub/drawings')) return LIMITS.big;
+    if (/^\/hub\/checklists\/[^/]+\/files$/.test(route)) return LIMITS.big;
     if (route === '/hub/chat') return LIMITS.chat;
     return LIMITS.small;
   };
@@ -896,6 +935,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           else send(await cancelAsk(id, user, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/items\/(\d{2})$/.exec(route))) {
           send(await markChecklistItem(decodeURIComponent(match[1]), match[2], raw, user, at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/files$/.exec(route))) {
+          send(await putChecklistFile(decodeURIComponent(match[1]), raw, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/submit$/.exec(route))) {
           send(await submitChecklist(decodeURIComponent(match[1]), raw, user, at));
         } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {

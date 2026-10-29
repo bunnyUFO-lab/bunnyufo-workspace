@@ -54,7 +54,8 @@
 //        (owner-only files); nothing is ever overwritten. --file takes the checklist.json shape without id, project,
 //        createdAt, from and the item ids (the CLI adds them): title, context?, card?, items[{ text, group?, guide?, link? }].
 //   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
-//   cards checklist get <id> [--json]                                      progress, the items, submit.json
+//   cards checklist get <id> [--json] [--into <dir>]                        progress, the items, submit.json; --into downloads the
+//        owner's pictures (evidence-<step>-….png|jpg per step, shot-….png|jpg per playtest issue) and prints their paths
 //   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
 //        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
 //   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
@@ -870,6 +871,17 @@ async function checklistNames(id) {
 }
 
 /** Everything `get` shows: the list, its state, progress and the Hub's and the agent's files. */
+const CHECKLIST_PICTURE_RE = /^(?:evidence-\d{2}|shot)-(?:\d{8}T\d{9}Z)-[a-z0-9]{4}\.(?:png|jpg)$/;
+
+/** The bytes of an inbox file, or null when it is not there. */
+async function readInboxBytes(file) {
+  const route = fileRoute(file);
+  const response = await send('GET', route, { headers: {} });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await failure('GET', route, response);
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function checklistRead(id) {
   const names = await checklistNames(id);
   const checklist = await readJson(inboxPath('checklists', id, 'checklist.json'));
@@ -878,10 +890,22 @@ async function checklistRead(id) {
   const items = checklist.items.map(item => ({ id: item.id, text: item.text, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) }));
   const read = async name => (names.has(name) ? readJson(inboxPath('checklists', id, name)) : undefined);
   const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
-  return {
-    checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items,
+  // The newest picture per step, and the playtest screenshots, from the file names alone.
+  const evidence = {};
+  const shots = [];
+  for (const name of [...names].sort()) {
+    if (!CHECKLIST_PICTURE_RE.test(name)) continue;
+    if (name.startsWith('shot-')) shots.push(name);
+    else evidence[name.slice(9, 11)] = name;
+  }
+  for (const item of items) if (evidence[item.id]) item.evidence = evidence[item.id];
+  const view = {
+    checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items, ...(shots.length ? { shots } : {}),
     ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
   };
+  // Not part of the printed or JSON view: what `--into` downloads.
+  Object.defineProperty(view, 'pictures', { value: [...names].filter(name => CHECKLIST_PICTURE_RE.test(name)).sort() });
+  return view;
 }
 
 const minute = iso => `${iso.slice(0, 10)} ${iso.slice(11, 16)}Z`;
@@ -891,7 +915,11 @@ function printChecklist(view, asJson) {
   const { checklist, state, done, total, items } = view;
   console.log([checklist.id, state, `${done} of ${total} done`, checklist.project].join('\t'));
   console.log(checklist.title);
-  for (const item of items) console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
+  for (const item of items) {
+    console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
+    if (item.evidence) console.log(`     evidence: ${item.evidence}`);
+  }
+  for (const shot of view.shots ?? []) console.log(`screenshot: ${shot}`);
   for (const name of ['submit', 'pickup', 'cancel']) if (view[name]) console.log(`== ${name}.json\n${JSON.stringify(view[name], null, 2)}`);
 }
 
@@ -934,7 +962,26 @@ async function checklistList(flags) {
 }
 
 async function checklistGet(id, flags) {
-  printChecklist(await checklistRead(idSafe(id)), flags.json);
+  id = idSafe(id);
+  const view = await checklistRead(id);
+  if (flags.into !== undefined) {
+    if (typeof flags.into !== 'string' || !flags.into) throw new Error('--into is a folder to put the pictures in.');
+    await mkdir(flags.into, { recursive: true });
+    const saved = [];
+    for (const name of view.pictures) {
+      const bytes = await readInboxBytes(inboxPath('checklists', id, name));
+      if (!bytes) continue;
+      const target = path.join(flags.into, name);
+      await writeFile(target, bytes);
+      saved.push(target);
+    }
+    if (flags.json) view.saved = saved;
+    printChecklist(view, flags.json);
+    if (!flags.json) for (const target of saved) console.log(`saved: ${target}`);
+    else if (!saved.length) console.error('(no pictures on this list)');
+    return;
+  }
+  printChecklist(view, flags.json);
 }
 
 /** Wait for the owner to submit. Exit 0 on submit (prints what `get` prints), 3 on cancel, 4 on timeout (prints the progress). */

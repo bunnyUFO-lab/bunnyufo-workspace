@@ -37,6 +37,9 @@ export const NEEDS_FILTERS = ['all', 'question', 'design', 'steps', 'playtest', 
 const FILTER_ALIAS: Record<string, string> = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick' }
 
 /** The filter a URL names, old names mapped to the new ones; an unknown or missing name is `all`. */
+/** Whether `raw` is a filter key or an old alias of one (anything else in the address is an item id). */
+export const isKnownFilter = (raw: string): boolean => Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) || (NEEDS_FILTERS as readonly string[]).includes(raw)
+
 export function canonicalFilter(raw: string | undefined): string {
   const mapped = raw && Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) ? FILTER_ALIAS[raw] : raw
   return mapped && (NEEDS_FILTERS as readonly string[]).includes(mapped) ? mapped : 'all'

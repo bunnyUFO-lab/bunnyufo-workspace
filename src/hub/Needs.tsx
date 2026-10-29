@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
-import { KIND_LABEL, canonicalFilter } from '../lib/needsKinds'
+import { KIND_LABEL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
 import { hubHash } from '../lib/route'
 import type { Handoff } from './flash'
 import { takeHandoff } from './flash'
@@ -50,6 +50,8 @@ export default function Needs({ filter }: { filter?: string }) {
   const root = useRef<HTMLDivElement>(null)
   const wanted = useRef<string | null>(null)
   if (wanted.current === null) wanted.current = takeFocus()
+  // A link to one item (#/~hub/needs/<event file>, from Working now) names it where a filter would go: the list opens on All, focused on it.
+  const linked = useRef(filter && !isKnownFilter(filter) ? filter : '')
 
   // The note belongs to the list it was left on: another chip starts clean.
   const lastFilter = useRef(active)
@@ -66,9 +68,14 @@ export default function Needs({ filter }: { filter?: string }) {
 
   // A row on Today opens the list on its item: scroll to it and flash it. A key the list does not hold is ignored.
   useEffect(() => {
-    if (!data || !wanted.current) return
-    const key = wanted.current
+    if (!data || (!wanted.current && !linked.current)) return
+    let key = wanted.current
     wanted.current = ''
+    if (linked.current) {
+      const target = data.items.find(item => item && item.kind === 'blocked' && (item.file === linked.current || item.id === linked.current))
+      key = target ? itemKey(target) : key
+      linked.current = ''
+    }
     const card = [...(root.current?.querySelectorAll<HTMLElement>('[data-need]') ?? [])].find(node => node.dataset.need === key)
     if (!card) return
     card.scrollIntoView({ block: 'start', behavior: 'auto' })
