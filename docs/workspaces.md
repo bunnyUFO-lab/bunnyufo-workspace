@@ -558,3 +558,18 @@ call it yet and the page stays in local mode. It needs a `CorsConfiguration` on 
 (allowing the site's origin, the `Authorization` and `Content-Type` headers and the GET/PUT
 methods) or a same-origin proxy route on the site. The local service's sandboxed origin is not
 covered.
+
+## Mission control: PC status, Work and Team
+
+### PC status
+
+The Gaming PC's report script writes a status file about once a minute to `inbox/pc/status-<YYYYMMDDTHHMMSSZ>.json` (create-only, at most 64 KB, `v: 1`; `pc` is one of the Hub's folders). The file holds the host slug, whether someone is using the machine, the GPU band, ComfyUI and Unity, and the open Claude Code sessions (name, status, folder, repo, project, branch, links). `sessions` is `null` when the PC could not list them. `runs` is always `[]` for now.
+
+| Route | Does |
+|---|---|
+| `GET /api/hub/pc` | `{ pc, status }`: the summary (`state` is `on`, or `asleep-or-off` when the file is over 15 minutes old; `ageSeconds`, `inUse`, `keepAwake`, `gpu`, `comfy`, `unity`, busy and idle session counts) and the cleaned file. Both are `null` when there is no valid file |
+| `GET /api/hub/today` | Also carries `working` (the Working now list) and `pc` (the summary or `null`). `counts.running` is the number of `working` and `needs-you` items; `running` is still the event-derived list, for old clients |
+
+The site reads the newest file in this hour and the one before (the day prefixes only when both are empty), never from a cache. A file that fails `validStatus` (wrong version, bad host or time, over 30 sessions) counts as no file; inside a valid one, folders and repos are cut to their last path segment, links must be real session links, and unknown fields are dropped.
+
+Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status: `busy` is `working`, `idle` is `idle`, and a session with an open `blocked` event is `needs-you`. A running session from a `session-started` event on another host is added. Events from the PC's own host are dropped while its status is fresh. With no fresh status it is the event-derived list, as before. The Beads id comes from the branch name and the project's prefix in `site/api/project-defaults.mjs`.

@@ -135,3 +135,27 @@ export function seeder(fake, prefix = INBOX) {
     },
   };
 }
+
+/** One PC status file (v1), the way the report script writes it. Host `test-pc`, no real paths. */
+export function pcStatusJson({ now = new Date(), minutesOld = 0, host = 'test-pc', sessions, inUse = true, extra = {} } = {}) {
+  const at = minutesAgo(now, minutesOld);
+  return {
+    v: 1, host, at: at.toISOString(), reason: 'change', inUse, keepAwake: true,
+    gpu: { util: 7, memMB: 3971, memTotalMB: 24564, band: 'idle' },
+    comfy: { up: true, running: 0, pending: 0 },
+    unity: { open: true, projects: ['probe'] },
+    sessions: sessions ?? [
+      { id: 'pc-sess-a', name: 'Wall-jump tutorial', status: 'busy', kind: 'interactive', folder: 'probe-work', repo: 'probe', project: 'magic-loops', branch: 'sprint/ml-wj-t2-wall-jump', startedAt: minutesAgo(now, minutesOld + 40).toISOString(), updatedAt: at.toISOString() },
+      { id: 'pc-sess-b', name: 'Hub polish', status: 'idle', kind: 'interactive', folder: 'probe-hub', repo: 'probe', project: 'workspace-app', branch: 'main', startedAt: minutesAgo(now, minutesOld + 90).toISOString() },
+    ],
+    runs: [],
+    ...extra,
+  };
+}
+
+/** Put a status file into fake S3 under `<prefix>/pc/status-<stamp>.json` (the stamp is its `at`). */
+export function seedPcStatus(fake, status, prefix = INBOX) {
+  const stamp = new Date(status.at).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  fake.seed(`${prefix}/pc/status-${stamp}.json`, `${JSON.stringify(status)}\n`, 'application/json');
+  return `pc/status-${stamp}.json`;
+}

@@ -19,8 +19,10 @@ import {
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
+import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -231,6 +233,34 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       } catch { /* a bad line is skipped */ }
     }
     return { meta, issues };
+  }
+
+  /**
+   * The newest valid PC status file, or null. The report script writes `pc/status-<stamp>.json`
+   * every minute, so this hour and the one before hold the newest file (at most about 120 keys);
+   * only when both are empty does it look at the day prefixes. The listing is never cached.
+   */
+  async function loadPcStatus(at) {
+    const hour = date => markStamp(date).slice(0, 11);
+    const day = date => markStamp(date).slice(0, 8);
+    const names = async prefixes => {
+      const found = [];
+      for (const prefix of prefixes) {
+        const { objects } = await bucket.list(key(`pc/status-${prefix}`));
+        for (const object of objects) {
+          const name = object.key.slice(folder('pc').length);
+          if (/^status-\d{8}T\d{6,9}Z\.json$/.test(name)) found.push(name);
+        }
+      }
+      return found.sort();
+    };
+    const before = new Date(at.getTime() - 60 * 60 * 1000);
+    let found = await names([hour(before), hour(at)]);
+    if (!found.length) found = await names([day(new Date(at.getTime() - DAY)), day(at)]);
+    const newest = found.at(-1);
+    if (!newest) return null;
+    const got = await fresh(`pc/${newest}`);
+    return got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
   }
 
   const stale = what => fail(`This ${what} changed while you were looking; reload and try again.`, 409);
@@ -775,7 +805,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         if (method === 'GET') {
           if (route === '/hub/today') {
             const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
-            reply(buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), events: window.events, now: at }));
+            const status = await loadPcStatus(at);
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), events: window.events, now: at });
+            const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
+            // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list. `running` stays for old clients.
+            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
+          } else if (route === '/hub/pc') {
+            const status = await loadPcStatus(at);
+            reply({ pc: status ? pcSummary(status, at) : null, status });
           } else if (route === '/hub/inbox') {
             const filter = INBOX_FILTERS.includes(query.get('filter')) ? query.get('filter') : 'needs-you';
             const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
