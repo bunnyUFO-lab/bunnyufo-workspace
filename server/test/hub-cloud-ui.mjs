@@ -45,9 +45,12 @@ async function approve(page, fixture, ident) {
 }
 // Every JSON answer the pages read from the hub, to check as well as the page text.
 const bodies = [];
-const watch = page => page.on('response', async response => { if (response.url().includes('/api/hub/')) bodies.push(`${response.url()} ${await response.text().catch(() => '')}`); });
+const watch = page => page.on('response', async response => { if (response.url().includes('/api/hub/') || response.url().endsWith('/api/capabilities')) bodies.push(`${response.url()} ${await response.text().catch(() => '')}`); });
 const noSecrets = async page => {
   await page.waitForTimeout(300);
+  const caps = bodies.find(body => body.includes('/api/capabilities '));
+  assert.ok(caps, 'The page read /api/capabilities.');
+  assert.ok(caps.includes('"cloudRepos":["example/magic-loops"]'), `capabilities lists the repo, not its key: ${caps.slice(0, 300)}`);
   for (const body of bodies) {
     for (const secret of ['SECRETURL123', 'SECRETTOKEN456', 'routine.example.test', 'MAGIC_LOOPS', '"routine"']) assert.ok(!body.includes(secret), `A hub answer holds ${secret}: ${body.slice(0, 90)}`);
   }

@@ -421,7 +421,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     dryRun, cap, zone, hasRoutine, keys, fire, recordFire, firesToday, capacity, verifyApproval, handOff, retry, exclusive, cloudStatus, sweep, start, close,
     /** Today alerts for approvals the server's check refused, as `kind: alert` rows. */
     alerts: () => [...refused].map(([id, row]) => ({ ts: row.ts, kind: 'alert', source: 'request', request: id, project: row.project, title: `Approval for ${row.title} failed the server's check` })),
-    /** The repo keys that have a routine (never URLs). */
-    cloudRepos: () => keys(),
+    /** The repos (owner/name) that have a routine bound to one: what capabilities advertises. A routine without `_REPO` is refused, so it is not listed. Never URLs, tokens or env key names. */
+    cloudRepos: () => [...routines.values()].map(routine => routine.repo).filter(Boolean),
   };
 }

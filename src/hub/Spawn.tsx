@@ -80,13 +80,15 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       )
     }
     hubGet<{ repos: { repo: string; project?: string }[] }>('/presets/repos', controller.signal).then(
-      answer => setKnown(answer.repos),
+      answer => setKnown(answer?.repos ?? []),
       () => { /* no list: the field still takes owner/name */ },
     )
     hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
       answer => {
-        setProjects(answer.projects)
-        setProject(current => current || (answer.projects.find(item => item.id === remember(PROJECT_KEY))?.id ?? answer.projects.find(item => item.beads)?.id ?? answer.projects[0]?.id ?? ''))
+        // An answer that is not JSON reads as null: treat it as no projects, never as a thrown error.
+        const list = answer?.projects ?? []
+        setProjects(list)
+        setProject(current => current || (list.find(item => item.id === remember(PROJECT_KEY))?.id ?? list.find(item => item.beads)?.id ?? list[0]?.id ?? ''))
       },
       (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Projects did not load.') },
     )

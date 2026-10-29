@@ -333,7 +333,8 @@ test('route() sends a repo-only project to the cloud only when the repo has a ro
     const asked = await f.call('GET', '/hub/presets/route?preset=code-task&project=workspace-app&repo=example/probe');
     assert.equal(asked.body.target, 'cloud');
     const capabilities = f.hub.capabilities({ signedIn: true });
-    assert.deepEqual(capabilities.cloudRepos, ['PROBE']);
+    assert.deepEqual(capabilities.cloudRepos, ['example/probe']);
+    assert.ok(!JSON.stringify(capabilities).includes('PROBE'), 'No env key name.');
     assert.ok(!JSON.stringify(capabilities).includes('SECRET'));
   } finally { await f.close(); }
 });
