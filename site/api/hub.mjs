@@ -876,6 +876,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     requests: requestFiles,
     requestHooks: requestFiles.hooks,
     hermes: hermesDispatch,
+    /** The Hermes approvals module (copy, answer), for the tests. */
+    approvals: hermesApprovals,
     /** Stops the followers and the sweep (shutdown, tests). */
     close: () => hermesDispatch.close(),
     /** What this host tells the page about the Hub (merged into /api/capabilities). */

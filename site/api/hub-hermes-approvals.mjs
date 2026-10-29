@@ -11,6 +11,8 @@ import { createHash } from 'node:crypto';
 import { day8, validId } from './hub-model.mjs';
 
 export const APPROVAL_TTL_MS = 300_000;
+/** The only answers the site forwards, whatever Hermes lists: a standing approval is never one click. */
+export const ANSWERS = ['once', 'deny'];
 const clip = (value, length) => String(value ?? '').slice(0, length);
 
 export const approvalId = (runId, promptId, at) => {
@@ -23,23 +25,33 @@ export const approvalId = (runId, promptId, at) => {
  * @param notify       `createNotify()`
  * @param requestInfo  `(requestId) → Promise<{ project, hasResult }|null>`
  */
-export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail, now = () => new Date(), runs, notify, requestInfo, log = () => {} }) {
+export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail, now = () => new Date(), runs, notify, requestInfo, log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 120) }) {
   const EXISTS = Object.assign(new Error('exists'), { status: 409 });
   const busy = new Set();
 
-  /** Copy an `approval.request` into the inbox. Returns the id; pings only when this call wrote the file. */
-  async function copyApproval({ runId, request = null, chat = null, prompt, at = now() }) {
-    const promptId = String(prompt?.prompt_id ?? prompt?.request_id ?? '');
-    if (!runId || !promptId) return null;
-    const id = approvalId(runId, promptId, at);
+  /**
+   * Copy an `approval.request` into the inbox. Returns the id; pings only when this call wrote the file and the ask is
+   * still open. The id depends on the run, the prompt and the day the run started, so a replay after a restart (even past
+   * midnight) finds the same file. `createdAt` is when Hermes asked (the event's `timestamp`, in seconds); a control found
+   * by polling has no such time and counts from now. Everything copied from Hermes is clipped.
+   */
+  async function copyApproval({ runId, request = null, chat = null, prompt, startedAt = null, polled = false, at = now() }) {
+    const promptId = clip(prompt?.prompt_id ?? prompt?.request_id ?? '', 200);
+    const run = clip(runId, 200);
+    if (!run || !promptId) return null;
+    const dayOf = startedAt && !Number.isNaN(new Date(startedAt).getTime()) ? new Date(startedAt) : at;
+    const id = approvalId(run, promptId, dayOf);
+    const asked = !polled && Number.isFinite(Number(prompt.timestamp)) ? Math.min(Number(prompt.timestamp) * 1000, at.getTime()) : at.getTime();
+    const created = new Date(asked);
     const command = clip(prompt.command, 2000);
     const description = clip(prompt.description, 2000);
+    const choices = (Array.isArray(prompt.choices) ? prompt.choices : []).filter(choice => typeof choice === 'string' && choice.length > 0 && choice.length <= 20).slice(0, 4);
     const body = {
-      runId, requestId: promptId, promptId, executionGeneration: Number.isInteger(prompt.execution_generation) ? prompt.execution_generation : 1,
+      runId: run, requestId: promptId, promptId, executionGeneration: Number.isInteger(prompt.execution_generation) ? prompt.execution_generation : 1,
       request, chat, title: clip((description || command || 'Hermes asks to write a protected file').replace(/\s+/g, ' ').trim(), 200),
       detail: clip([command, description].filter(Boolean).join('\n\n'), 4000), command, description,
-      choices: Array.isArray(prompt.choices) ? prompt.choices.filter(choice => typeof choice === 'string') : ['once', 'deny'],
-      createdAt: at.toISOString(), expiresAt: new Date(at.getTime() + APPROVAL_TTL_MS).toISOString(),
+      choices: choices.length ? choices : [...ANSWERS],
+      createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + APPROVAL_TTL_MS).toISOString(),
     };
     try {
       await putCreateOnly(`hermes-approvals/${id}/approval.json`, `${JSON.stringify(body, null, 2)}\n`, 'application/json', EXISTS);
@@ -47,6 +59,7 @@ export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail
       if (error === EXISTS) return id;
       throw error;
     }
+    if (new Date(body.expiresAt).getTime() <= at.getTime()) return id; // Hermes has denied it by now: nothing to answer, nothing to ping
     const info = request ? await requestInfo(request).catch(() => null) : null;
     await notify.needsYou({ project: info?.project, text: `${body.title}\nAnswer within 5 minutes.`, link: '/#/~hub/needs/approval' });
     return id;
@@ -101,7 +114,7 @@ export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail
     const approval = await cached(`hermes-approvals/${id}/approval.json`);
     if (!approval) throw fail('No such approval.', 404);
     const choice = raw?.choice;
-    if (!approval.choices.includes(choice)) throw fail(`The choice is ${approval.choices.join(' or ')}.`, 400);
+    if (!ANSWERS.includes(choice) || !approval.choices.includes(choice)) throw fail('The choice is once or deny.', 400);
     const first = await cached(`hermes-approvals/${id}/answer.json`);
     if (first) throw fail('That was already answered.', 409, { first });
     if (busy.has(id)) throw fail('That is being answered.', 409);
@@ -118,8 +131,8 @@ export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail
       try {
         await runs().answer(approval.runId, { requestId: approval.requestId, executionGeneration: approval.executionGeneration, choice });
       } catch (error) {
-        log(`[hub] Hermes did not take an approval answer: ${String(error.message).slice(0, 120)}`);
-        await refuse(error.status === 409 ? 'Hermes is no longer waiting for this answer.' : `Hermes did not take the answer: ${String(error.message).slice(0, 120)}`);
+        log(`[hub] Hermes did not take an approval answer: ${scrub(error.message, 120)}`);
+        await refuse(error.status === 409 ? 'Hermes is no longer waiting for this answer.' : `Hermes did not take the answer: ${scrub(error.message, 120)}`);
       }
       if (!await writeAnswer(id, { ...base, forwarded: true })) throw fail('That was already answered.', 409);
       return { status: 201, body: { state: 'answered', choice } };

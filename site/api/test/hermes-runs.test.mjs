@@ -463,6 +463,7 @@ test('no URL or token leaves in a hand-off error: waiting, result.json, the 409 
     assert.match(answer.body.waiting, /^Could not start yet: /);
     for (const text of [answer.body.waiting, ...lines]) assert.doesNotMatch(text, /hermes\.internal|https?:|abc123|sekret|Bearer/i, text);
   } finally { await s.close(); }
+});
 
 // --- Hermes approvals ---
 
@@ -564,4 +565,78 @@ test('answering after the run ended, or after the 5 minutes, writes forwarded fa
     assert.equal(JSON.parse(t.fake.text(secondFolder.replace('approval.json', 'answer.json'))).forwarded, false);
     assert.equal(t.hermes.approvals.length, 0);
   } finally { await s.close(); await t.close(); }
+});
+
+// --- review fixes: ids and expiry from the ask, and what the site forwards ---
+
+test('a replay past midnight finds the same approval: no second file, no second ping', async () => {
+  const hook = await startWebhook();
+  const s = await stack({ hermesOptions: { askApproval: true }, env: { HUB_DISCORD_NEEDS_YOU: hook.url } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => hook.posts.length === 1, 'the first ping');
+    const names = () => [...s.fake.objects.keys()].filter(name => name.endsWith('/approval.json'));
+    assert.equal(names().length, 1);
+    await api.stop();
+    s.clock.at += 25 * 3600_000; // the restart is a day later
+    await s.addHub();
+    await wait(200);
+    assert.equal(names().length, 1, 'The id comes from the run, the prompt and the day the run started.');
+    assert.equal(hook.posts.length, 1);
+  } finally { await s.close(); await hook.close(); }
+});
+
+test('createdAt and the 5 minutes come from when Hermes asked; an ask that is already over pings nothing', async () => {
+  const hook = await startWebhook();
+  const s = await stack({ hermesOptions: { runScript: ['x ', { hold: true }] }, env: { HUB_DISCORD_NEEDS_YOU: hook.url } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    const startedAt = s.file(id, 'hermes-run.json').at;
+    const now = new Date(s.clock.at);
+    const copy = (promptId, extra) => api.hub.approvals.copyApproval({ runId: 'run_demo', request: id, startedAt, at: now, prompt: { prompt_id: promptId, command: 'write AGENTS.md', ...extra } });
+    const late = await copy('p-late', { timestamp: (now.getTime() - 240_000) / 1000 });
+    const lateFile = JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${late}/approval.json`));
+    assert.equal(new Date(lateFile.expiresAt).getTime() - now.getTime(), 60_000, 'Four minutes ago leaves one minute.');
+    assert.equal(hook.posts.length, 1);
+    const old = await copy('p-old', { timestamp: (now.getTime() - 600_000) / 1000 });
+    assert.ok(s.fake.text(`sections/inbox/hermes-approvals/${old}/approval.json`), 'The record is kept.');
+    assert.equal(hook.posts.length, 1, 'An ask Hermes has denied by now pings nobody.');
+    const found = await api.hub.approvals.copyApproval({ runId: 'run_demo', request: id, startedAt, at: now, polled: true, prompt: { prompt_id: 'p-found', command: 'x', timestamp: (now.getTime() - 600_000) / 1000 } });
+    const foundFile = JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${found}/approval.json`));
+    assert.equal(foundFile.createdAt, now.toISOString(), 'A control found by polling counts from now.');
+    // The same ask on another day still names the same file.
+    const again = await api.hub.approvals.copyApproval({ runId: 'run_demo', request: id, startedAt, at: new Date(now.getTime() + 2 * 86400_000), prompt: { prompt_id: 'p-late', command: 'write AGENTS.md' } });
+    assert.equal(again, late);
+  } finally { await s.close(); await hook.close(); }
+});
+
+test('only once and deny are forwarded, whatever Hermes lists; copied choices and ids are clipped', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['x ', { hold: true }] } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    const made = await api.hub.approvals.copyApproval({
+      runId: `run_${'r'.repeat(300)}`, request: id, startedAt: s.file(id, 'hermes-run.json').at,
+      prompt: { prompt_id: 'q'.repeat(300), command: 'c', choices: ['once', 'session', 'always', 'z'.repeat(30), 'deny', 'extra'] },
+    });
+    const stored = JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${made}/approval.json`));
+    assert.deepEqual(stored.choices, ['once', 'session', 'always', 'deny'], 'At most 4 entries of at most 20 characters.');
+    assert.equal(stored.runId.length, 200);
+    assert.equal(stored.promptId.length, 200);
+    for (const choice of ['session', 'always', 'x']) {
+      const answer = await api.post(`/hub/hermes-approvals/${made}/answer`, { choice });
+      assert.equal(answer.status, 400, choice);
+    }
+    assert.equal(s.hermes.approvals.length, 0, 'Nothing was forwarded.');
+    assert.equal(s.fake.text(`sections/inbox/hermes-approvals/${made}/answer.json`), null);
+    const bare = await api.hub.approvals.copyApproval({ runId: 'run_x', request: id, prompt: { prompt_id: 'p9', command: 'c', choices: [] } });
+    assert.deepEqual(JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${bare}/approval.json`)).choices, ['once', 'deny']);
+  } finally { await s.close(); }
 });
