@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AvatarSprite, CustomSprite, SheetInfo, TeamAgent } from '../../lib/hubTeam'
 import { ago, hubGet } from '../../lib/hub'
+import { host } from '../../lib/host'
+import { cachedPresets, loadPresets } from '../spawnData'
+import { openSpawn } from '../spawnStore'
 import { AgentSprite } from './AgentSprite'
 import { nextSalt, quickTiles, randomOf, sameSprite, sheetNote, spriteKey, startSalt, tileId, tileLabel, type AnySprite } from './teamModel'
 
@@ -14,6 +17,37 @@ const spriteOfSheet = (info: SheetInfo): CustomSprite => ({ kind: 'custom', shee
  * a Use this (same `onUse`, so the same toast and Undo as Quick). The server marks the current one.
  */
 function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AnySprite) => Promise<boolean>; onDone: () => void }) {
+  return (
+    <>
+      <MakeNew agent={agent} onDone={onDone} />
+      <CustomSheets agent={agent} onUse={onUse} onDone={onDone} />
+    </>
+  )
+}
+
+/** Make a new one: Spawn, prefilled with the Agent avatar preset. Hidden when signed out or when the server has no such preset. */
+function MakeNew({ agent, onDone }: { agent: TeamAgent; onDone: () => void }) {
+  const [known, setKnown] = useState(() => cachedPresets()?.presets.some(item => item.id === 'agent-avatar') ?? false)
+  useEffect(() => {
+    if (!host.write) return undefined
+    const abort = new AbortController()
+    loadPresets(abort.signal).then(list => setKnown(list.presets.some(item => item.id === 'agent-avatar')), () => { /* no button */ })
+    return () => abort.abort()
+  }, [])
+  if (!host.write || !known) return null
+  const make = () => {
+    onDone()
+    openSpawn({ preset: 'agent-avatar', project: 'sprite-studio', agent: agent.id, text: `Pixel sprite for ${agent.name}: ${agent.role}` })
+  }
+  return (
+    <div className="sheet-make">
+      <button type="button" className="hub-btn pri" onClick={make} data-sheet-make={agent.id}>Make a new one</button>
+      <small className="team-dim">Four pixel-art variants on the Gaming PC. You pick one, then check the finished sheet.</small>
+    </div>
+  )
+}
+
+function CustomSheets({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AnySprite) => Promise<boolean>; onDone: () => void }) {
   const [sheets, setSheets] = useState<SheetInfo[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -26,7 +60,7 @@ function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite:
   }, [agent.id, agent.sprite])
   if (problem) return <p className="hub-error" role="alert" data-sheet-custom>{problem}</p>
   if (!sheets) return <p className="sheet-custom" data-sheet-custom aria-busy="true">Loading…</p>
-  if (!sheets.length) return <p className="sheet-custom" data-sheet-custom data-agent={agent.id}>No custom sheets yet. They arrive with the Agent avatar preset.</p>
+  if (!sheets.length) return <p className="sheet-custom" data-sheet-custom data-agent={agent.id}>No custom sheets yet.</p>
   const use = async (info: SheetInfo) => {
     setBusy(info.sheet)
     const done = await onUse(spriteOfSheet(info))

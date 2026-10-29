@@ -35,3 +35,6 @@ svg.px[data-greeting] { animation: spr-wave 0.8s ease-in-out 1; }
 .sheet-item.on { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink); }
 .sheet-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; }
 .sheet-item-text small { color: var(--t2); }
+
+.sheet-make { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 12px; }
+.sheet-make .hub-btn { min-height: 44px; }

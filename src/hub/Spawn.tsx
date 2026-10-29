@@ -147,6 +147,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
         project, text: trimmed, preset: preset.id,
         ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
+        ...(options.agent && preset.id === 'agent-avatar' && !edit ? { agent: options.agent } : {}),
         ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
         ...(choice ? { target: choice } : {}),
         ...(edit ? { replaces: edit.id } : {}),
@@ -166,7 +167,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone])
+  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, options.agent])
 
   const machine = target ? MACHINE[target] : null
   const button = busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'

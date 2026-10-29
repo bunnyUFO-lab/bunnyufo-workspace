@@ -3,7 +3,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
-import { teamSheet } from '../../site/api/test/hub-fixtures.mjs';
+import { beadsIssue, minutesAgo, teamSheet } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -20,6 +20,9 @@ assert.equal(newest.id, SHEET_ID);
 assert.equal(oldest.id, OLD_ID);
 
 const fixture = await startHubFixture({ pc: 'fresh' });
+fixture.fake.seed('sections/sprite-studio/workspace.json', JSON.stringify({ name: 'sprite-studio', tracked: { repo: 'example/sprite-studio' }, entities: [] }), 'application/json');
+fixture.seed.beads('sprite-studio', [beadsIssue({ id: 'ss-1', title: 'A task', created: '2026-10-01T10:00:00Z' })], { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: 1, repo: 'example/sprite-studio' });
+await new Promise(resolve => setTimeout(resolve, 150));
 for (const sheet of [newest, oldest]) for (const [name, body] of Object.entries(sheet.files)) fixture.seed.put(`team/claude/${name}`, body, name.endsWith('.png') ? 'image/png' : 'application/json');
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
@@ -130,8 +133,34 @@ try {
   const hermes = desk.locator('dialog[data-sprite-sheet="hermes"]');
   await hermes.locator('[data-sheet-mode="custom"]').click();
   await hermes.locator('[data-sheet-custom]').getByText('No custom sheets yet.').waitFor();
-  assert.equal(await hermes.locator('[data-sheet-custom]').innerText(), 'No custom sheets yet. They arrive with the Agent avatar preset.');
+  assert.equal(await hermes.locator('[data-sheet-custom]').innerText(), 'No custom sheets yet.');
+
+  step('Make a new one closes the sheet and opens Spawn with the Agent avatar preset, the project, the agent and the text filled');
+  await hermes.locator('[data-sheet-make="hermes"]').click();
+  await hermes.waitFor({ state: 'detached' });
+  const spawn = desk.locator('[data-spawn-sheet]');
+  await spawn.waitFor();
+  assert.equal(await spawn.locator('[data-preset="agent-avatar"]').getAttribute('aria-pressed'), 'true');
+  await desk.waitForFunction(() => document.querySelector('[data-spawn-project]')?.value === 'sprite-studio');
+  assert.equal(await spawn.locator('[data-spawn-text]').inputValue(), 'Pixel sprite for Hermes: chats, plans and dispatches');
+  assert.match(await spawn.locator('[data-spawn-agent]').innerText(), /Artist/);
+  await spawn.locator('[data-spawn-machine]', { hasText: 'The PC' }).waitFor();
+  await spawn.locator('[data-spawn-go]').click();
+  await desk.locator('[data-spawn-toast]').waitFor();
+  const made = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key)).map(key => fixture.fake.json(key));
+  assert.equal(made.length, 1);
+  assert.deepEqual([made[0].preset, made[0].project, made[0].agent, made[0].target], ['agent-avatar', 'sprite-studio', 'hermes', 'pc']);
+
+  step('the button is hidden when the server lists no Agent avatar preset');
+  await desk.route('**/api/hub/presets', route => route.fulfill({ json: { presets: [], rules: [] } }));
+  await desk.reload();
+  await desk.locator('[data-sprite-open="hermes"]').click();
+  const bare = desk.locator('dialog[data-sprite-sheet="hermes"]');
+  await bare.locator('[data-sheet-mode="custom"]').click();
+  await bare.locator('[data-sheet-custom]').getByText('No custom sheets yet.').waitFor();
+  assert.equal(await bare.locator('[data-sheet-make]').count(), 0);
   await desk.keyboard.press('Escape');
+  await desk.unroute('**/api/hub/presets');
 
   step('reduced motion: no animation runs and frame 0 of the row shows');
   const { page: calm } = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });

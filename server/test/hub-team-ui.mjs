@@ -87,7 +87,7 @@ try {
   await sheet.waitFor();
   await sheet.locator('[data-sheet-mode="custom"]').click();
   await sheet.locator('[data-sheet-custom]').getByText('No custom sheets yet.').waitFor();
-  assert.equal(await sheet.locator('[data-sheet-custom]').innerText(), 'No custom sheets yet. They arrive with the Agent avatar preset.');
+  assert.equal(await sheet.locator('[data-sheet-custom]').innerText(), 'No custom sheets yet.');
   assert.equal(await sheet.locator('[data-sheet-use]').count(), 0, 'No Use this on the Custom segment.');
   await sheet.locator('[data-sheet-mode="quick"]').click();
 
