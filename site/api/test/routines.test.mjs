@@ -85,6 +85,21 @@ test('loadRoutines: a pair loads, a half pair names the missing key and no value
   assert.equal(repoKey('bunnyUFO-lab/bunnyufo-workspace'), 'BUNNYUFO_WORKSPACE');
 });
 
+test('a routine that names its repo serves only that owner/name', async () => {
+  const f = await fixture({ env: { CLAUDE_ROUTINE_PROBE_REPO: 'example/probe' } });
+  try {
+    const own = f.proposeCloud();
+    assert.equal((await f.post(`/hub/requests/${own.id}/approve`, {})).body.cloud.fired, true);
+    const other = f.proposeCloud({ repo: 'attacker/probe' });
+    const refused = await f.post(`/hub/requests/${other.id}/approve`, {});
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /No cloud routine for attacker\/probe/);
+    assert.equal(f.routine.calls.length, 1);
+    assert.equal(await f.hub.routines.fire({ repo: 'attacker/probe', requestId: 'x' }).then(result => result.reason), 'no-routine');
+    assert.equal(route({ preset: 'code-task', project: 'workspace-app', repo: 'attacker/probe', cloudRepos: repo => f.hub.routines.hasRoutine(repo) }).target, 'pc');
+  } finally { await f.close(); }
+});
+
 test('a half pair is logged once by key name, never by value', async () => {
   const f = await fixture({ env: { CLAUDE_ROUTINE_HALF_URL: 'https://half.example/SECRETHALF' } });
   try {

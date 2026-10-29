@@ -24,6 +24,7 @@
 //   HUB_POLICY_APPROVE      preset kinds the site API signs by itself, from `research,docs` (default: none). HUB_POLICY_PER_DAY: the limit per Pacific day (10)
 //   CLAUDE_ROUTINE_<REPO_KEY>_URL, CLAUDE_ROUTINE_<REPO_KEY>_TOKEN   a repo's cloud routine (Fire URL and token); REPO_KEY is the repo's name part, upper-case,
 //                           with every non-letter and non-digit as `_`. A half pair is ignored. Without a pair, the repo has no cloud target.
+//   CLAUDE_ROUTINE_<REPO_KEY>_REPO   optional `owner/name`: the routine then serves only that repo (set it: the key alone is the name part)
 //   HUB_ROUTINE_BETA        the routines API's beta header, if it changes (default experimental-cc-routine-2026-04-01)
 //   HUB_CLOUD_DAILY         cloud fires per day (default 10); HUB_TIME_ZONE: the IANA zone that defines the day (default UTC)
 //   HUB_ROUTINE_DRY_RUN     `1`: every repo counts as having a routine and nothing is sent (the development copy). It wins over real keys

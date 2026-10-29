@@ -62,14 +62,25 @@ export function nextMidnight(date, zone) {
 }
 
 /**
- * The routines the environment names: `CLAUDE_ROUTINE_<KEY>_URL` and `_TOKEN` as a pair. Returns
+ * The routine for a repo, or undefined. The key (the repo's name part) finds it; when the routine names its repo
+ * (`CLAUDE_ROUTINE_<KEY>_REPO=owner/name`) the whole `owner/name` must match, so `other/name` cannot borrow it.
+ */
+export function routineFor(routines, repo) {
+  const routine = routines.get(repoKey(repo));
+  if (!routine) return undefined;
+  return !routine.repo || routine.repo.toLowerCase() === String(repo).toLowerCase() ? routine : undefined;
+}
+
+/**
+ * The routines the environment names: `CLAUDE_ROUTINE_<KEY>_URL` and `_TOKEN` as a pair, and optionally
+ * `_REPO=owner/name`. Returns
  * `{ routines: Map<KEY, { url, token }>, incomplete: string[] }`. `incomplete` holds the key names that have
  * one half only (never a value), so the caller can log them once.
  */
 export function loadRoutines(env = {}) {
   const found = new Map();
   for (const [name, value] of Object.entries(env)) {
-    const match = /^CLAUDE_ROUTINE_([A-Z0-9_]+)_(URL|TOKEN)$/.exec(name);
+    const match = /^CLAUDE_ROUTINE_([A-Z0-9_]+)_(URL|TOKEN|REPO)$/.exec(name);
     if (!match) continue;
     const entry = found.get(match[1]) ?? {};
     entry[match[2].toLowerCase()] = String(value ?? '').trim();
@@ -78,7 +89,7 @@ export function loadRoutines(env = {}) {
   const routines = new Map();
   const incomplete = [];
   for (const [key, entry] of found) {
-    if (entry.url && entry.token) routines.set(key, { url: entry.url, token: entry.token });
+    if (entry.url && entry.token) routines.set(key, { url: entry.url, token: entry.token, ...(/^[\w.-]+\/[\w.-]+$/.test(entry.repo ?? '') ? { repo: entry.repo } : {}) });
     else incomplete.push(`CLAUDE_ROUTINE_${key}_${entry.url ? 'TOKEN' : 'URL'}`);
   }
   return { routines, incomplete };
@@ -99,16 +110,17 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
   const beta = String(env.HUB_ROUTINE_BETA ?? '').trim() || ROUTINE_BETA;
   const timeoutMs = timing.timeoutMs ?? FIRE_TIMEOUT_MS;
   const publicKey = signingKey ? createPublicKey(signingKey) : null;
+  for (const [name, routine] of routines) if (!routine.repo) log(`[hub] CLAUDE_ROUTINE_${name}_REPO is not set: the routine matches on the repo name alone`);
   for (const name of incomplete) log(`[hub] ${name} is set without its pair; that routine is ignored`);
   if (dryRun && routines.size) log('[hub] Cloud routine dry run is on (HUB_ROUTINE_DRY_RUN): nothing is fired, whatever routine keys are set');
 
-  const hasRoutine = repo => dryRun || (!!repo && routines.has(repoKey(repo)));
+  const hasRoutine = repo => dryRun || (!!repo && !!routineFor(routines, repo));
   const keys = () => [...routines.keys()];
 
   /** One POST to the routine's Fire URL. Never throws; never puts the URL, the token or a header in its answer. */
   async function fire({ repo, requestId }) {
     if (dryRun) return { ok: true, status: 0, dryRun: true };
-    const routine = routines.get(repoKey(repo));
+    const routine = routineFor(routines, repo);
     if (!routine) return { ok: false, status: 0, reason: 'no-routine' };
     try {
       const response = await fetchImpl(routine.url, {

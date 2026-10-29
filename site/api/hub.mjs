@@ -19,7 +19,7 @@ import {
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
-import { createRoutines, loadRoutines, repoKey } from './routines.mjs';
+import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
@@ -247,7 +247,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   // Cloud routines (CLAUDE_ROUTINE_<REPO_KEY>_URL/_TOKEN): which repos can run in the cloud, known before the request module is made.
   const routineSet = loadRoutines(env);
   const dryRun = String(env.HUB_ROUTINE_DRY_RUN ?? '').trim() === '1';
-  const hasCloud = repo => dryRun || (!!repo && routineSet.routines.has(repoKey(repo)));
+  const hasCloud = repo => dryRun || (!!repo && !!routineFor(routineSet.routines, repo));
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
     repoProjects: PROJECT_DEFAULTS.map(row => row.id),
     // Repos beyond the projects' own, for Spawn's picker: `HUB_KNOWN_REPOS=owner/name,owner/other`. Bad entries are dropped.
