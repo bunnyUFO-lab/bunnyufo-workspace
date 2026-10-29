@@ -71,11 +71,11 @@ const model = milestones => ({ project: 'p', meta: null, ageMinutes: null, miles
 test('"now" never sits under the milestone it belongs to', () => {
   const none = layoutMap(model([milestone('m1', [task('a', 'next'), task('b', 'next')]), milestone('m2', [task('c', 'later')])]), new Set(), false);
   const first = none.nodes.find(node => node.id === 'm1');
-  assert.ok(none.nowX - first.x > 26, `closed: ${none.nowX - first.x}`);
+  assert.ok(none.now.x - first.x > 26, `closed: ${none.now.x - first.x}`);
   const opened = layoutMap(model([milestone('m1', [task('a', 'next')])]), new Set(['m1']), false);
-  assert.ok(opened.nowX - opened.nodes.find(node => node.id === 'm1').x >= 15 + 8);
+  assert.ok(opened.now.x - opened.nodes.find(node => node.id === 'm1').x >= 15 + 8);
   const some = layoutMap(model([milestone('m1', [task('a', 'done'), task('b', 'done'), task('c', 'next')]), milestone('m2', [task('d', 'later')])]), new Set(), false);
-  assert.ok(some.nowX > some.nodes.find(node => node.id === 'm1').x + 38, 'two of three done puts it well along the line');
+  assert.ok(some.now.x > some.nodes.find(node => node.id === 'm1').x + 38, 'two of three done puts it well along the line');
 });
 
 test('the layout no longer stretches to the box: one milestone is as wide as its content', () => {
@@ -114,7 +114,7 @@ test("a feature's stable point is its elbow, the same closed and open", () => {
   for (const id of ['fa', 'fb']) {
     assert.deepEqual(stableOf(node(closed, id)), stableOf(node(wide, id)), id);
     const branch = closed.branches.find(item => item.id === id);
-    assert.deepEqual(stableOf(node(closed, id)), { x: branch.x1, y: branch.y1 }, "the elbow is the branch's corner");
+    assert.deepEqual(stableOf(node(closed, id)), { x: branch.points[1][0], y: branch.points[1][1] }, "the elbow is the branch's corner");
   }
   assert.deepEqual(stableOf(node(closed, 'm2')), { x: node(closed, 'm2').x, y: 230 });
   assert.notEqual(node(closed, 'fb').x, node(wide, 'fb').x, 'while the circle itself jumps');
@@ -135,7 +135,7 @@ test('zooming in opens the milestone under the pointer, and only that one', () =
 test('with the milestone open, a feature opens only from 2.2, and only the nearest one', () => {
   const open = new Set(['m2']);
   const layout = layoutMap(zoomModel(), open, false);
-  const near = id => { const branch = layout.branches.find(item => item.id === id); return { x: branch.x1 + 6, y: branch.y1 + (branch.y1 < 230 ? 4 : -4) }; };
+  const near = id => { const branch = layout.branches.find(item => item.id === id); return { x: branch.points[1][0] + 6, y: branch.points[1][1] + (branch.points[1][1] < 230 ? 4 : -4) }; };
   assert.ok(OPEN_F > 1.6);
   assert.equal(zoomStep({ layout, open, auto: new Set(['m2']), k: 1.6, dir: 1, at: near('fb'), keep: none }), null, 'no feature below 2.2');
   const step = zoomStep({ layout, open, auto: new Set(['m2']), k: 2.3, dir: 1, at: near('fb'), keep: none });
@@ -214,6 +214,13 @@ const onlyRecorded = (actual, wanted) => {
   if (wanted && typeof wanted === 'object') return Object.fromEntries(Object.keys(wanted).map(key => [key, onlyRecorded(actual[key], wanted[key])]));
   return actual;
 };
+/** The recorded value without the fields the layout has dropped since (the old x0…x2, labelX, elbowX, nowX, spineY, and a band's x1, x2, y: positions now live in points, label, elbow, now, spine and rect). */
+const dropped = new Set(['x0', 'y0', 'x1', 'y1', 'x2', 'labelX', 'elbowX', 'nowX', 'spineY', 'y']);
+const kept = (value, path = '') => {
+  if (Array.isArray(value)) return value.map(item => kept(item, path));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([key]) => !(dropped.has(key) && (path === 'branches' || path === 'bands' || path === 'nodes' || path === ''))).map(([key, item]) => [key, kept(item, key)]));
+  return value;
+};
 
 test('the horizontal layout keeps every field it had; the new ones are only added', () => {
   const m = snapshotModel();
@@ -223,7 +230,7 @@ test('the horizontal layout keeps every field it had; the new ones are only adde
     partly: layoutMap(m, new Set(['m2', 'm2-a']), true),
   };
   for (const [name, layout] of Object.entries(layouts)) {
-    assert.deepEqual(onlyRecorded(spelled(layout), recorded[name]), recorded[name], name);
+    assert.deepEqual(onlyRecorded(spelled(layout), kept(recorded[name])), kept(recorded[name]), name);
     assert.deepEqual(layout.nodes.filter(item => !item.label || !item.center).map(item => item.id), [], `${name}: every node has a label and a centre`);
   }
 });
@@ -231,17 +238,17 @@ test('the horizontal layout keeps every field it had; the new ones are only adde
 test('the horizontal layout describes what ProgressMap draws today', () => {
   const m = snapshotModel();
   const layout = layoutMap(m, everythingOpen(m), true);
-  assert.deepEqual(layout.spine, { from: [16, layout.spineY], to: [layout.width - 14, layout.spineY] });
-  assert.deepEqual(layout.now, { x: layout.nowX, y: layout.spineY });
-  for (const branch of layout.branches) assert.deepEqual(branch.points, [[branch.x0, branch.y0], [branch.x1, branch.y1], [branch.x2, branch.y1]], branch.id);
+  assert.deepEqual(layout.spine, { from: [16, 230], to: [layout.width - 14, 230] });
+  assert.equal(layout.now.y, 230);
+  for (const branch of layout.branches) assert.equal(branch.points[0][1], 230, `${branch.id} leaves the spine`);
   for (const band of layout.bands) {
-    assert.deepEqual(band.rect, { x: band.x1, y: band.y, w: band.x2 - band.x1, h: 22 });
-    assert.deepEqual(band.labelAt, { x: band.x1 + 10, y: band.y + 15, anchor: 'start' });
+    assert.equal(band.rect.h, 22);
+    assert.deepEqual(band.labelAt, { x: band.rect.x + 10, y: band.rect.y + 15, anchor: 'start' });
   }
   const milestoneNode = layout.nodes.find(item => item.id === 'm1');
   assert.deepEqual(milestoneNode.label, { x: milestoneNode.x, y: milestoneNode.y + 34, anchor: 'middle' }, 'an open milestone titles below');
   const featureNode = layout.nodes.find(item => item.id === 'm2-a');
-  assert.deepEqual(featureNode.elbow, { x: featureNode.elbowX, y: featureNode.y });
+  assert.deepEqual(featureNode.elbow, { x: layout.branches.find(item => item.id === 'm2-a').points[1][0], y: featureNode.y });
   assert.deepEqual(featureNode.center, { x: featureNode.x + 22, y: featureNode.y });
 });
 

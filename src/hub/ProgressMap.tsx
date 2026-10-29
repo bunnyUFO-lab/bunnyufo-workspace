@@ -1,10 +1,10 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { CSSProperties, KeyboardEvent } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
-import { layoutMap, type FeatureNode, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
+import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
 import { FIT_MAX, centreOn, clamp, fitScale } from './panZoom'
@@ -20,9 +20,16 @@ const HINT_KEY = 'hub-map-hint-seen'
 const PAD = 16
 const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
 /** Where a node's circle is centred in the drawing (a feature's node sits right of the end of its branch). */
-const pointOf = (node: MapNode) => ({ x: node.kind === 'f' ? node.x + 22 : node.x, y: node.y })
+const pointOf = (node: MapNode) => ({ ...node.center })
 /** After a relayout, one node's point goes back where it was on screen: tap and chevron toggles hold the node's circle, zoom holds its stable point (a feature's elbow). */
 interface Anchor { id: string; old: { x: number; y: number }; origin: { x: number; y: number }; how: 'circle' | 'stable' }
+/** After the axis switches: put a node (else "now") in the middle of the free part of the box. */
+interface Centre { how: 'centre'; id: string | null }
+type Axis = 'x' | 'y'
+/** The box turns vertical when it is at least this much taller than wide, and horizontal when it is no taller than wide; in between it keeps its axis. */
+const TALL = 1.15
+/** The axis a box of this size asks for, or null to keep the current one. */
+const axisFor = (w: number, h: number): Axis | null => (h >= TALL * w ? 'y' : w >= h ? 'x' : null)
 /** A zoom step's relayout may not be followed by another this soon (ms). */
 const SETTLE_MS = 150
 
@@ -115,7 +122,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   const drawn = useRef<SVGGElement>(null)
   const origin = useRef({ x: 0, y: 0 })
   /** What to do with the view once the next layout is measured: the first view, a fit, or keep one node where it is on screen. */
-  const after = useRef<'init' | 'fit' | Anchor | null>('init')
+  const after = useRef<'init' | 'fit' | Anchor | Centre | null>('init')
   /** The ids that zoom opened (the rest of `open` is the user's); zoom folds only these. */
   const auto = useRef<Set<string>>(new Set())
   const relayoutPending = useRef(false)
@@ -133,10 +140,15 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   }, [])
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX })
 
-  const layout = useMemo(() => layoutMap(model, open, sprints), [model, open, sprints])
+  /** The spine runs down when the box is taller than wide, as a phone held upright is. */
+  const [axis, setAxis] = useState<Axis>(() => (window.innerHeight > window.innerWidth ? 'y' : 'x'))
+  const axisNow = useRef(axis)
+  const shown = useRef<string | null>(null)
+  const vertical = axis === 'y'
+  const layout = useMemo(() => layoutMap(model, open, sprints, axis), [model, open, sprints, axis])
   const byId = useMemo(() => new Map(layout.nodes.map(node => [node.id, node])), [layout])
   const toStage = (point: { x: number; y: number }) => ({ x: point.x - origin.current.x, y: point.y - origin.current.y })
-  const nowPoint = () => toStage({ x: layout.nowX, y: layout.spineY })
+  const nowPoint = () => toStage(layout.now)
 
   /** The part of the box the details panel leaves free: the panel is at the right on a desktop and a sheet below on a phone. */
   const freeRect = () => {
@@ -179,6 +191,11 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
       else pz.fit(false)
     } else if (todo === 'fit') {
       pz.fit(true)
+    } else if (todo && todo.how === 'centre') {
+      // The axis switched: the selected node (else "now") goes to the middle of what the panel leaves free, at the scale it had.
+      const node = todo.id ? layout.nodes.find(item => item.id === todo.id) : null
+      pz.go(centreOn(toStage(node ? pointOf(node) : layout.now), freeRect(), pz.current().k), false)
+      pz.rebase()
     } else if (todo) {
       const node = layout.nodes.find(item => item.id === todo.id)
       if (node) {
@@ -197,6 +214,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
 
   // The panel the model has for the address; an id the model does not know opens nothing and leaves the address alone.
   const shownId = nodeId && find(model, nodeId) ? nodeId : null
+  useLayoutEffect(() => { shown.current = shownId }, [shownId])
 
   // Semantic zoom: the milestone, then the feature, under the pointer opens as you zoom in; what zoom opened folds as you zoom out.
   // Called at most once per frame by the pan-zoom, never for Fit, Now or glides, and never while a relayout is on its way.
@@ -228,8 +246,22 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     const element = wrap.current
     if (!element || typeof ResizeObserver === 'undefined') return undefined
     let last = { w: element.clientWidth, h: element.clientHeight }
+    let first = true
     const observer = new ResizeObserver(() => {
       const next = { w: element.clientWidth, h: element.clientHeight }
+      // The first size has no previous axis: vertical when taller than wide. After that the dead band keeps the axis.
+      const wanted = first ? (next.h > next.w ? 'y' : 'x') : axisFor(next.w, next.h)
+      const initial = first
+      first = false
+      if (wanted && wanted !== axisNow.current && next.w > 0 && next.h > 0) {
+        axisNow.current = wanted
+        // Hold the selection (else "now") in view across the switch; zoom waits for the new layout like it does for its own.
+        if (after.current !== 'init' || !initial) after.current = { how: 'centre', id: shown.current }
+        relayoutPending.current = true
+        last = next
+        setAxis(wanted)
+        return
+      }
       if (next.w === last.w && next.h === last.h) return
       const view = pz.current()
       pz.go({ ...view, x: view.x + (next.w - last.w) / 2, y: view.y + (next.h - last.h) / 2 }, false)
@@ -294,6 +326,17 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
   const goNow = () => pz.go(centreOn(nowPoint(), freeRect(), Math.max(pz.current().k, 1)), true)
 
+  /** The "now" pill: below the dot on a horizontal map, to its right on a vertical one. */
+  const pill = vertical ? { x: layout.now.x + 16, y: layout.now.y - 8 } : { x: layout.now.x - 18, y: layout.now.y + 14 }
+  const bandsDrawn = layout.bands.map(band => (
+    <g key={band.name} className="hub-band" data-band={band.name}>
+      {vertical && <title>{`${band.name}: ${band.parts}`}</title>}
+      <rect x={band.rect.x} y={band.rect.y} width={band.rect.w} height={band.rect.h} rx={Math.min(11, band.rect.w / 2)} strokeWidth="1" style={{ fill: band.col, fillOpacity: 0.13, stroke: band.col }} />
+      <text x={band.labelAt.x} y={band.labelAt.y} fontSize="11" fontWeight="600" textAnchor={vertical ? band.labelAt.anchor : undefined} style={{ fill: band.col }}>{band.name}</text>
+      {band.partsAt && <text x={band.partsAt.x} y={band.partsAt.y} fontSize="10.5" className="hub-map-label">{band.parts}</text>}
+    </g>
+  ))
+
   return (
     <>
       <div className="hub-map-wrap" ref={wrap} onKeyDown={event => { if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() } }}>
@@ -307,21 +350,21 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
-        <div className="hub-map-box" ref={box} tabIndex={0} role="group" aria-label="Roadmap. Arrow keys move it, plus and minus zoom.">
+        <div className="hub-map-box" ref={box} data-axis={axis} tabIndex={0} role="group" aria-label="Roadmap. Arrow keys move it, plus and minus zoom.">
         <div className="hub-map-stage" ref={stage}>
           <svg ref={svg} role="presentation">
             <defs>
               <marker id="hub-tip" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><path d="M0,0 L10,5 L0,10 z" className="hub-map-tip" /></marker>
             </defs>
             <g ref={drawn}>
-              <line x1="16" y1={layout.spineY} x2={layout.width - 14} y2={layout.spineY} className="hub-map-spine" strokeWidth="5" strokeLinecap="round" markerEnd="url(#hub-tip)" />
-              <line x1="16" y1={layout.spineY} x2={layout.nowX} y2={layout.spineY} className="hub-map-spine-done" strokeWidth="5" strokeLinecap="round" />
+              {vertical && bandsDrawn}
+              <line x1={layout.spine.from[0]} y1={layout.spine.from[1]} x2={layout.spine.to[0]} y2={layout.spine.to[1]} className="hub-map-spine" strokeWidth="5" strokeLinecap="round" markerEnd="url(#hub-tip)" />
+              <line x1={layout.spine.from[0]} y1={layout.spine.from[1]} x2={layout.now.x} y2={layout.now.y} className="hub-map-spine-done" strokeWidth="5" strokeLinecap="round" />
               {layout.branches.map(branch => (
-                <path key={branch.id} data-branch={branch.id} d={`M${branch.x0} ${branch.y0} L${branch.x1} ${branch.y1} L${branch.x2} ${branch.y1}`} strokeWidth="2.5" fill="none" strokeLinejoin="round" style={{ stroke: branch.lit ? branch.col : 'var(--hairline-strong)' }} />
+                <path key={branch.id} data-branch={branch.id} d={branch.points.map(([px, py], at) => `${at ? 'L' : 'M'}${px} ${py}`).join(' ')} strokeWidth="2.5" fill="none" strokeLinejoin="round" style={{ stroke: branch.lit ? branch.col : 'var(--hairline-strong)' }} />
               ))}
               {layout.nodes.filter((item): item is TaskNode => item.kind === 't').map(task => {
                 const color = STATE_COLOR[task.state]
-                const ty = task.up ? task.y - 22 : task.y + 32
                 return (
                   <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className={`hub-map-node${shownId === task.id ? ' selected' : ''}`}
                     aria-label={`${task.title}, ${STATE_LABEL[task.state]}`} aria-pressed={shownId === task.id} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(task.id)} onKeyDown={event => onKey(event, () => openPanel(task.id))}>
@@ -330,26 +373,26 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                     {shownId === task.id && <circle cx={task.x} cy={task.y} r="13" className="hub-map-ring" />}
                     <MapSigns signs={task.signs} x={task.x + 13} y={task.y - 11} />
                     {task.lines.map((line, k) => (
-                      <text key={k} x={task.x} y={task.up ? ty - (task.lines.length - 1 - k) * 12 : ty + k * 12} fontSize="10.5" textAnchor="middle" className={task.state === 'later' ? 'hub-map-label dim' : 'hub-map-label'}>{line}</text>
+                      <text key={k} x={task.label.x} y={task.label.y + k * (task.label.step ?? 12)} fontSize="10.5" textAnchor={task.label.anchor} className={task.state === 'later' ? 'hub-map-label dim' : 'hub-map-label'}>{line}</text>
                     ))}
                   </g>
                 )
               })}
               {layout.nodes.filter((item): item is FeatureNode => item.kind === 'f').map(feature => {
                 const radius = 22
-                const cx = feature.x + radius
+                const cx = feature.center.x
                 return (
                   <Fragment key={feature.id}>
                   <g data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className={`hub-map-node${shownId === feature.id ? ' selected' : ''}`}
                     aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.done} of ${feature.total} done`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(feature.id)} onKeyDown={event => onKey(event, () => openPanel(feature.id))}>
                     <title>{nodeTip(feature.title, feature.id)}</title>
-                    <circle cx={cx} cy={feature.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
-                    {shownId === feature.id && <circle cx={cx} cy={feature.y} r={radius + 5} className="hub-map-ring" />}
-                    <text x={cx} y={feature.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.done}/{feature.total}</text>
-                    <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.y - radius + 2} />
-                    <text x={feature.open ? cx + radius + 8 : feature.labelX} y={feature.open ? feature.y + 4 : feature.y + (feature.side < 0 ? -10 : 18)} fontSize="12" fontWeight="600" className="hub-map-title">{feature.title}</text>
+                    <circle cx={cx} cy={feature.center.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
+                    {shownId === feature.id && <circle cx={cx} cy={feature.center.y} r={radius + 5} className="hub-map-ring" />}
+                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.done}/{feature.total}</text>
+                    <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.center.y - radius + 2} />
+                    <MapTitle label={feature.label} title={feature.title} vertical={vertical} fontWeight="600" className="hub-map-title" />
                   </g>
-                  <Chevron id={feature.id} title={feature.title} open={feature.open} x={cx} y={feature.y + feature.side * (radius + 16)} onToggle={() => toggle(feature)} />
+                  <Chevron id={feature.id} title={feature.title} open={feature.open} x={feature.chevronAt.x} y={feature.chevronAt.y} onToggle={() => toggle(feature)} />
                   </Fragment>
                 )
               })}
@@ -362,26 +405,20 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                     <title>{nodeTip(milestone.title, milestone.id)}</title>
                     <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" style={{ stroke: milestone.col, fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
                     {shownId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 6} className="hub-map-ring" />}
-                    {!milestone.open && <text x={milestone.x} y={milestone.y + 4} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.done}/{milestone.total}</text>}
+                    {!milestone.open && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.done}/{milestone.total}</text>}
                     <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
-                    <text x={milestone.x} y={milestone.y + (milestone.open ? 34 : milestone.index % 2 ? 48 : -38)} fontSize="12" textAnchor="middle" fontWeight="700" style={{ fill: milestone.col }}>{milestone.title}</text>
+                    <MapTitle label={milestone.label} title={milestone.title} vertical={vertical} fontWeight="700" style={{ fill: milestone.col }} />
                   </g>
-                  <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.x - radius - 16} y={milestone.y} onToggle={() => toggle(milestone)} />
+                  <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />
                   </Fragment>
                 )
               })}
-              {layout.bands.map(band => (
-                <g key={band.name} className="hub-band" data-band={band.name}>
-                  <rect x={band.x1} y={band.y} width={band.x2 - band.x1} height="22" rx="11" strokeWidth="1" style={{ fill: band.col, fillOpacity: 0.13, stroke: band.col }} />
-                  <text x={band.x1 + 10} y={band.y + 15} fontSize="11" fontWeight="600" style={{ fill: band.col }}>{band.name}</text>
-                  <text x={band.x1 + 12 + band.name.length * 6.4 + 10} y={band.y + 15} fontSize="10.5" className="hub-map-label">{band.parts}</text>
-                </g>
-              ))}
+              {!vertical && bandsDrawn}
               <g className="hub-map-nowg" aria-hidden="true">
-                <circle cx={layout.nowX} cy={layout.spineY} r="9" className="hub-map-now-ring" />
-                <circle cx={layout.nowX} cy={layout.spineY} r="5" className="hub-map-now" />
-                <rect x={layout.nowX - 18} y={layout.spineY + 14} width="36" height="17" rx="8" className="hub-map-now-pill" />
-                <text x={layout.nowX} y={layout.spineY + 26} className="hub-map-now-text" fontSize="11" textAnchor="middle" fontWeight="600">now</text>
+                <circle cx={layout.now.x} cy={layout.now.y} r="9" className="hub-map-now-ring" />
+                <circle cx={layout.now.x} cy={layout.now.y} r="5" className="hub-map-now" />
+                <rect x={pill.x} y={pill.y} width="36" height="17" rx="8" className="hub-map-now-pill" />
+                <text x={vertical ? pill.x + 18 : layout.now.x} y={pill.y + 12} className="hub-map-now-text" fontSize="11" textAnchor="middle" fontWeight="600">now</text>
               </g>
             </g>
           </svg>
@@ -408,6 +445,17 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
       </div>
       {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} onOpen={openPanel} />}
     </>
+  )
+}
+
+/** A milestone's or feature's title at its place in the layout; the vertical layout wraps it into lines. */
+function MapTitle({ label, title, vertical, fontWeight, className, style }: { label: Label; title: string; vertical: boolean; fontWeight: string; className?: string; style?: CSSProperties }) {
+  const anchor = vertical || label.anchor === 'middle' ? label.anchor : undefined
+  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}</text>
+  return (
+    <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>
+      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}</tspan>)}
+    </text>
   )
 }
 
