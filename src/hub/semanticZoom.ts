@@ -18,11 +18,8 @@ export interface Point { x: number; y: number }
  * the tasks fan out from it), a task's centre.
  */
 export function stableOf(node: MapNode): Point {
-  return node.kind === 'f' ? { x: node.elbowX, y: node.y } : { x: node.x, y: node.y }
+  return node.kind === 'f' ? { ...node.elbow } : { x: node.x, y: node.y }
 }
-
-/** The corners of a branch, from the spine to its end. */
-const polyline = (branch: Branch): Point[] => [{ x: branch.x0, y: branch.y0 }, { x: branch.x1, y: branch.y1 }, { x: branch.x2, y: branch.y1 }]
 
 /** Distance from a point to the segment a-b. */
 export function distanceToSegment(p: Point, a: Point, b: Point): number {
@@ -33,9 +30,9 @@ export function distanceToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
 }
 
-/** Distance from a point to a branch's polyline. */
+/** Distance from a point to a branch's polyline (its corners run from the spine to its end). */
 export function distanceToBranch(p: Point, branch: Branch): number {
-  const points = polyline(branch)
+  const points = branch.points.map(([x, y]): Point => ({ x, y }))
   let best = Infinity
   for (let i = 1; i < points.length; i += 1) best = Math.min(best, distanceToSegment(p, points[i - 1], points[i]))
   return best

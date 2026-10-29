@@ -1,0 +1,1207 @@
+{
+ "open": {
+  "axis": "x",
+  "slots": [
+   {
+    "id": "m1",
+    "from": "-Infinity",
+    "to": 532
+   },
+   {
+    "id": "m2",
+    "from": 532,
+    "to": 1076
+   },
+   {
+    "id": "m3",
+    "from": 1076,
+    "to": "Infinity"
+   }
+  ],
+  "width": 1608,
+  "height": 470,
+  "spineY": 230,
+  "nowX": 612.8,
+  "nodes": [
+   {
+    "kind": "m",
+    "id": "m1",
+    "title": "Foundations",
+    "x": 120,
+    "y": 230,
+    "state": "done",
+    "col": "var(--red)",
+    "index": 0,
+    "open": true,
+    "done": 2,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m1-a",
+    "milestone": "m1",
+    "title": "Project setup",
+    "x": 452,
+    "y": 152,
+    "side": -1,
+    "state": "done",
+    "col": "var(--red)",
+    "open": true,
+    "labelX": 200,
+    "elbowX": 194,
+    "done": 2,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t1",
+    "milestone": "m1",
+    "feature": "m1-a",
+    "title": "Create the repository",
+    "x": 230,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "done",
+    "col": "var(--red)",
+    "signs": [],
+    "lines": [
+     "Create the repository"
+    ],
+    "up": true,
+    "done": 1,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t2",
+    "milestone": "m1",
+    "feature": "m1-a",
+    "title": "Wire the build and the tests together",
+    "x": 322,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "done",
+    "col": "var(--red)",
+    "signs": [],
+    "lines": [
+     "Wire the build and the",
+     "tests together"
+    ],
+    "up": false,
+    "done": 1,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m2",
+    "title": "The long milestone title that needs wrapping",
+    "x": 572,
+    "y": 230,
+    "state": "doing",
+    "col": "var(--amber)",
+    "index": 1,
+    "open": true,
+    "done": 1,
+    "total": 8,
+    "marks": {
+     "working": true,
+     "idle": true,
+     "prs": 1,
+     "review": 1,
+     "failing": 1,
+     "fresh": true,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-a",
+    "milestone": "m2",
+    "title": "Combat",
+    "x": 996,
+    "y": 152,
+    "side": -1,
+    "state": "doing",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 652,
+    "elbowX": 646,
+    "done": 1,
+    "total": 3,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t3",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Hit boxes",
+    "x": 682,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "done",
+    "col": "var(--amber)",
+    "signs": [
+     "deployed"
+    ],
+    "lines": [
+     "Hit boxes"
+    ],
+    "up": true,
+    "done": 1,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t4",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Damage numbers that float up and fade out slowly",
+    "x": 774,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "doing",
+    "col": "var(--amber)",
+    "signs": [
+     "working",
+     "pr"
+    ],
+    "lines": [
+     "Damage numbers that",
+     "float up and fade out s…"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t5",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Knockback",
+    "x": 866,
+    "y": 152,
+    "side": -1,
+    "slot": 2,
+    "state": "next",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Knockback"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-b",
+    "milestone": "m2",
+    "title": "A feature with a rather long title indeed",
+    "x": 926,
+    "y": 308,
+    "side": 1,
+    "state": "next",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 674,
+    "elbowX": 668,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": true,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t6",
+    "milestone": "m2",
+    "feature": "m2-b",
+    "title": "Spawn tables",
+    "x": 704,
+    "y": 308,
+    "side": 1,
+    "slot": 0,
+    "state": "next",
+    "col": "var(--amber)",
+    "signs": [
+     "new"
+    ],
+    "lines": [
+     "Spawn tables"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": true,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t7",
+    "milestone": "m2",
+    "feature": "m2-b",
+    "title": "Waves",
+    "x": 796,
+    "y": 308,
+    "side": 1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Waves"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-c",
+    "milestone": "m2",
+    "title": "Loot",
+    "x": 856,
+    "y": 74,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 696,
+    "elbowX": 690,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t8",
+    "milestone": "m2",
+    "feature": "m2-c",
+    "title": "Drop rates",
+    "x": 726,
+    "y": 74,
+    "side": -1,
+    "slot": 0,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Drop rates"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-d",
+    "milestone": "m2",
+    "title": "Audio",
+    "x": 970,
+    "y": 386,
+    "side": 1,
+    "state": "you",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 718,
+    "elbowX": 712,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": true,
+     "prs": 0,
+     "review": 1,
+     "failing": 1,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t9",
+    "milestone": "m2",
+    "feature": "m2-d",
+    "title": "Mix the sound effects",
+    "x": 748,
+    "y": 386,
+    "side": 1,
+    "slot": 0,
+    "state": "you",
+    "col": "var(--amber)",
+    "signs": [
+     "review"
+    ],
+    "lines": [
+     "Mix the sound effects"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 1,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t10",
+    "milestone": "m2",
+    "feature": "m2-d",
+    "title": "Music loops",
+    "x": 840,
+    "y": 386,
+    "side": 1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [
+     "ci-failed",
+     "idle"
+    ],
+    "lines": [
+     "Music loops"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": true,
+     "prs": 0,
+     "review": 0,
+     "failing": 1,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-e",
+    "milestone": "m2",
+    "title": "Polish",
+    "x": 808,
+    "y": -4,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 740,
+    "elbowX": 734,
+    "done": 0,
+    "total": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m3",
+    "title": "Launch",
+    "x": 1116,
+    "y": 230,
+    "state": "later",
+    "col": "var(--blue)",
+    "index": 2,
+    "open": true,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m3-a",
+    "milestone": "m3",
+    "title": "Store page",
+    "x": 1448,
+    "y": 152,
+    "side": -1,
+    "state": "later",
+    "col": "var(--blue)",
+    "open": true,
+    "labelX": 1196,
+    "elbowX": 1190,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t11",
+    "milestone": "m3",
+    "feature": "m3-a",
+    "title": "Trailer",
+    "x": 1226,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "later",
+    "col": "var(--blue)",
+    "signs": [],
+    "lines": [
+     "Trailer"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t12",
+    "milestone": "m3",
+    "feature": "m3-a",
+    "title": "Screenshots",
+    "x": 1318,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--blue)",
+    "signs": [],
+    "lines": [
+     "Screenshots"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   }
+  ],
+  "branches": [
+   {
+    "id": "m1-a",
+    "milestone": "m1",
+    "x0": 154,
+    "y0": 230,
+    "x1": 194,
+    "y1": 152,
+    "x2": 452,
+    "col": "var(--red)",
+    "lit": true
+   },
+   {
+    "id": "m2-a",
+    "milestone": "m2",
+    "x0": 606,
+    "y0": 230,
+    "x1": 646,
+    "y1": 152,
+    "x2": 996,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-b",
+    "milestone": "m2",
+    "x0": 628,
+    "y0": 230,
+    "x1": 668,
+    "y1": 308,
+    "x2": 926,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-c",
+    "milestone": "m2",
+    "x0": 650,
+    "y0": 230,
+    "x1": 690,
+    "y1": 74,
+    "x2": 856,
+    "col": "var(--amber)",
+    "lit": false
+   },
+   {
+    "id": "m2-d",
+    "milestone": "m2",
+    "x0": 672,
+    "y0": 230,
+    "x1": 712,
+    "y1": 386,
+    "x2": 970,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-e",
+    "milestone": "m2",
+    "x0": 694,
+    "y0": 230,
+    "x1": 734,
+    "y1": -4,
+    "x2": 808,
+    "col": "var(--amber)",
+    "lit": false
+   },
+   {
+    "id": "m3-a",
+    "milestone": "m3",
+    "x0": 1150,
+    "y0": 230,
+    "x1": 1190,
+    "y1": 152,
+    "x2": 1448,
+    "col": "var(--blue)",
+    "lit": false
+   }
+  ],
+  "bands": [
+   {
+    "name": "Sprint 1",
+    "x1": 90,
+    "x2": 602,
+    "y": 300,
+    "col": "var(--purple)",
+    "parts": "2 of 2 tasks of Foundations · 1 of 10 tasks of The long mileston…"
+   },
+   {
+    "name": "Sprint 2",
+    "x1": 542,
+    "x2": 1146,
+    "y": 330,
+    "col": "var(--blue)",
+    "parts": "0 of 10 tasks of The long mileston… · 0 of 2 tasks of Launch"
+   }
+  ]
+ },
+ "closed": {
+  "axis": "x",
+  "slots": [
+   {
+    "id": "m1",
+    "from": "-Infinity",
+    "to": 250
+   },
+   {
+    "id": "m2",
+    "from": 250,
+    "to": 588
+   },
+   {
+    "id": "m3",
+    "from": 588,
+    "to": "Infinity"
+   }
+  ],
+  "width": 838,
+  "height": 470,
+  "spineY": 230,
+  "nowX": 328,
+  "nodes": [
+   {
+    "kind": "m",
+    "id": "m1",
+    "title": "Foundations",
+    "x": 120,
+    "y": 230,
+    "state": "done",
+    "col": "var(--red)",
+    "index": 0,
+    "open": false,
+    "done": 2,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m2",
+    "title": "The long milestone title that needs wrapping",
+    "x": 290,
+    "y": 230,
+    "state": "doing",
+    "col": "var(--amber)",
+    "index": 1,
+    "open": false,
+    "done": 1,
+    "total": 8,
+    "marks": {
+     "working": true,
+     "idle": true,
+     "prs": 1,
+     "review": 1,
+     "failing": 1,
+     "fresh": true,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m3",
+    "title": "Launch",
+    "x": 628,
+    "y": 230,
+    "state": "later",
+    "col": "var(--blue)",
+    "index": 2,
+    "open": false,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   }
+  ],
+  "branches": [],
+  "bands": []
+ },
+ "partly": {
+  "axis": "x",
+  "slots": [
+   {
+    "id": "m1",
+    "from": "-Infinity",
+    "to": 250
+   },
+   {
+    "id": "m2",
+    "from": 250,
+    "to": 794
+   },
+   {
+    "id": "m3",
+    "from": 794,
+    "to": "Infinity"
+   }
+  ],
+  "width": 1044,
+  "height": 470,
+  "spineY": 230,
+  "nowX": 330.8,
+  "nodes": [
+   {
+    "kind": "m",
+    "id": "m1",
+    "title": "Foundations",
+    "x": 120,
+    "y": 230,
+    "state": "done",
+    "col": "var(--red)",
+    "index": 0,
+    "open": false,
+    "done": 2,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m2",
+    "title": "The long milestone title that needs wrapping",
+    "x": 290,
+    "y": 230,
+    "state": "doing",
+    "col": "var(--amber)",
+    "index": 1,
+    "open": true,
+    "done": 1,
+    "total": 8,
+    "marks": {
+     "working": true,
+     "idle": true,
+     "prs": 1,
+     "review": 1,
+     "failing": 1,
+     "fresh": true,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-a",
+    "milestone": "m2",
+    "title": "Combat",
+    "x": 714,
+    "y": 152,
+    "side": -1,
+    "state": "doing",
+    "col": "var(--amber)",
+    "open": true,
+    "labelX": 370,
+    "elbowX": 364,
+    "done": 1,
+    "total": 3,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t3",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Hit boxes",
+    "x": 400,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "done",
+    "col": "var(--amber)",
+    "signs": [
+     "deployed"
+    ],
+    "lines": [
+     "Hit boxes"
+    ],
+    "up": true,
+    "done": 1,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": true
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t4",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Damage numbers that float up and fade out slowly",
+    "x": 492,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "doing",
+    "col": "var(--amber)",
+    "signs": [
+     "working",
+     "pr"
+    ],
+    "lines": [
+     "Damage numbers that",
+     "float up and fade out s…"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t5",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Knockback",
+    "x": 584,
+    "y": 152,
+    "side": -1,
+    "slot": 2,
+    "state": "next",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Knockback"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-b",
+    "milestone": "m2",
+    "title": "A feature with a rather long title indeed",
+    "x": 506,
+    "y": 308,
+    "side": 1,
+    "state": "next",
+    "col": "var(--amber)",
+    "open": false,
+    "labelX": 392,
+    "elbowX": 386,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": true,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-c",
+    "milestone": "m2",
+    "title": "Loot",
+    "x": 528,
+    "y": 74,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": false,
+    "labelX": 414,
+    "elbowX": 408,
+    "done": 0,
+    "total": 1,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-d",
+    "milestone": "m2",
+    "title": "Audio",
+    "x": 550,
+    "y": 386,
+    "side": 1,
+    "state": "you",
+    "col": "var(--amber)",
+    "open": false,
+    "labelX": 436,
+    "elbowX": 430,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": true,
+     "prs": 0,
+     "review": 1,
+     "failing": 1,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-e",
+    "milestone": "m2",
+    "title": "Polish",
+    "x": 572,
+    "y": -4,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": false,
+    "labelX": 458,
+    "elbowX": 452,
+    "done": 0,
+    "total": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m3",
+    "title": "Launch",
+    "x": 834,
+    "y": 230,
+    "state": "later",
+    "col": "var(--blue)",
+    "index": 2,
+    "open": false,
+    "done": 0,
+    "total": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    }
+   }
+  ],
+  "branches": [
+   {
+    "id": "m2-a",
+    "milestone": "m2",
+    "x0": 324,
+    "y0": 230,
+    "x1": 364,
+    "y1": 152,
+    "x2": 714,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-b",
+    "milestone": "m2",
+    "x0": 346,
+    "y0": 230,
+    "x1": 386,
+    "y1": 308,
+    "x2": 506,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-c",
+    "milestone": "m2",
+    "x0": 368,
+    "y0": 230,
+    "x1": 408,
+    "y1": 74,
+    "x2": 528,
+    "col": "var(--amber)",
+    "lit": false
+   },
+   {
+    "id": "m2-d",
+    "milestone": "m2",
+    "x0": 390,
+    "y0": 230,
+    "x1": 430,
+    "y1": 386,
+    "x2": 550,
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-e",
+    "milestone": "m2",
+    "x0": 412,
+    "y0": 230,
+    "x1": 452,
+    "y1": -4,
+    "x2": 572,
+    "col": "var(--amber)",
+    "lit": false
+   }
+  ],
+  "bands": [
+   {
+    "name": "Sprint 1",
+    "x1": 90,
+    "x2": 509.7,
+    "y": 300,
+    "col": "var(--purple)",
+    "parts": "2 of 2 tasks of Foundations · 1 of 10 tasks of The long mileston…"
+   },
+   {
+    "name": "Sprint 2",
+    "x1": 260,
+    "x2": 864,
+    "y": 330,
+    "col": "var(--blue)",
+    "parts": "0 of 10 tasks of The long mileston… · 0 of 2 tasks of Launch"
+   }
+  ]
+ }
+}
