@@ -690,6 +690,12 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 
 Milestones and issues with children are left out (the map shows them). A task that only inherited the `milestone` label from its milestone is a task, by the same rule the map uses (`milestoneIssuesOf`). A busy or idle session in a fresh PC status whose branch names the bead gives the card `live: { host, session, state }`. `signs` are the map's (`issueSigns` in `hub-map.mjs`). `hermesRuns` is always empty for now: no store exists yet, and the mapping is tested with fixtures. A bead's `href` opens the map panel; a request's opens Needs you's requests filter.
 
+### Spawn
+
+Spawn is the sheet that sends a job to an agent. Open it from the Spawn button in the Today and Needs you headers, from "Spawn work" on Work (for the project shown), or from the palette: Ctrl+K, then `Spawn: <what you want>` (a word list guesses the preset). It is a dialog on a desktop and a bottom sheet under 768 px. The code is `src/hub/Spawn.tsx`; its styles are in `src/hub/runs.css`.
+
+It reads `GET /api/hub/presets` and `/api/hub/projects`, and asks `GET /api/hub/presets/route` (150 ms after the last change) where the job runs and which of the five rules matched. A target chosen by hand reads "your choice" and highlights no rule. The button depends on the host's capabilities: `approve` true creates the request and then signs it (`POST /requests/:id/approve { target }`); otherwise it reads "Save as a proposal" and only creates. A Bunnylink job (`at-pc`) reads "Add to Needs you": you start it at the PC. If the request is saved but approving fails, the toast says it waits in Needs you, with the reason. The agent is the preset's `agent`, shown as text.
+
 ### Team
 
 The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` runs on Codex gpt-6-sol with Sonnet, then DeepSeek, as fallbacks; `briefs` runs on Haiku 5.5 with the DeepSeek fallback).

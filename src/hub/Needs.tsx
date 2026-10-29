@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
+import { host } from '../lib/host'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import type { NeedsKind } from '../lib/needsKinds'
 import { KIND_LABEL, KIND_PLURAL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
@@ -14,6 +15,7 @@ import ItemRow from './ItemRow'
 import NeedsItem from './NeedsItem'
 import type { SettleVerb } from './NeedsItem'
 import { itemKey, takeFocus } from './needsFocus'
+import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import './needs.css'
 
@@ -146,7 +148,12 @@ export default function Needs({ filter }: { filter?: string }) {
           <h2>Needs you</h2>
           <p>Everything that waits on you, in one place. Your answer goes straight back to whoever asked.</p>
         </div>
-        {waiting > 0 && <button type="button" className="hub-btn needs-next" data-answer-next onClick={answerNext}>Answer the next one</button>}
+        {(waiting > 0 || host.write) && (
+          <div className="needs-actions">
+            {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>Spawn</button>}
+            {waiting > 0 && <button type="button" className="hub-btn needs-next" data-answer-next onClick={answerNext}>Answer the next one</button>}
+          </div>
+        )}
       </header>
       <div className="hub-chips-wrap" data-overflow={overflow}>
       <div className="hub-chips one-row" role="group" aria-label="Needs you filter" ref={chipRow}>

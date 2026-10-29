@@ -4,11 +4,13 @@ import type { Item, Today as TodayData } from '../lib/hub'
 import { ago, clock } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
+import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import ItemRow from './ItemRow'
 import PcTile from './PcTile'
 import WorkingNow from './WorkingNow'
 import { itemKey, setFocus } from './needsFocus'
+import { openSpawn } from './spawnStore'
 import { TodayContext, useHubData } from './useHub'
 import './today.css'
 
@@ -66,6 +68,7 @@ export default function Today() {
         <div className="today-actions">
           <span className="hub-muted">Updated {at ? clock(at.toISOString()) : ''}</span>
           <button type="button" className="hub-btn today-icon" onClick={reload} aria-label="Refresh"><Icon paths={ICON_REFRESH} /></button>
+          {host.write && <button type="button" className="hub-btn" onClick={() => openSpawn()} data-spawn-open>Spawn</button>}
           <a className="hub-btn today-primary" href={hubHash('needs')} data-today-open>Open Needs you · <span className="today-num">{counts.needsYou}</span></a>
         </div>
       </header>

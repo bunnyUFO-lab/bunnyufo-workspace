@@ -1,0 +1,284 @@
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { host } from '../lib/host'
+import type { HubProject } from '../lib/hub'
+import { HubError, hubGet, hubPost, remember } from '../lib/hub'
+import type { ApproveAnswer, SpawnPreset, SpawnRoute, SpawnRule, SpawnTarget } from '../lib/hubSpawn'
+import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, guessPreset } from '../lib/hubSpawn'
+import { SPAWN_EVENT, takeSpawn } from './spawnStore'
+import type { SpawnOptions } from './spawnStore'
+import './runs.css'
+
+const ICONS: Record<string, string> = {
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>',
+  pc: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  cloud: '<path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5 4.25 4.25 0 0 1 17 18z"/>',
+  hand: '<path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10m0-2.5a1.5 1.5 0 0 1 3 0V11m0-2a1.5 1.5 0 0 1 3 0v5a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L4 14.5a1.5 1.5 0 0 1 2.4-1.8L9 15"/>',
+  code: '<path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>',
+  doc: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
+  face: '<circle cx="12" cy="12" r="8.5"/><path d="M9 10v.01M15 10v.01M9 15c1.7 1.5 4.3 1.5 6 0"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+}
+
+function Icon({ name }: { name: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name] ?? ICONS.spark }} />
+}
+
+/** The presets and the rule list, read once per page load. */
+let presetsCache: { presets: SpawnPreset[]; rules: SpawnRule[] } | null = null
+const PROJECT_KEY = 'buw.hub.project'
+
+const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within 5 minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
+
+/** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
+function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClose: () => void; onDone: (note: string) => void }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const uid = useId()
+  const [data, setData] = useState(presetsCache)
+  const [projects, setProjects] = useState<HubProject[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [presetId, setPresetId] = useState(options.preset ?? (options.text ? guessPreset(options.text) : 'code-task'))
+  const [project, setProject] = useState(options.project ?? '')
+  const [repo, setRepo] = useState('')
+  const [text, setText] = useState(options.text ?? '')
+  const [doneWhen, setDoneWhen] = useState('')
+  const [override, setOverride] = useState<SpawnTarget | ''>('')
+  const [route, setRoute] = useState<SpawnRoute | null>(null)
+  const [routeError, setRouteError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const node = dialog.current
+    if (node && !node.open) node.showModal()
+  }, [])
+
+  // The text box takes the focus once the form is there (the presets may still be on their way).
+  const loaded = !!data
+  useEffect(() => { if (loaded) dialog.current?.querySelector<HTMLElement>('textarea')?.focus() }, [loaded])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    if (!presetsCache) {
+      hubGet<{ presets: SpawnPreset[]; rules: SpawnRule[] }>('/presets', controller.signal).then(
+        answer => { presetsCache = answer; setData(answer) },
+        (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Presets did not load.') },
+      )
+    }
+    hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
+      answer => {
+        setProjects(answer.projects)
+        setProject(current => current || (answer.projects.find(item => item.id === remember(PROJECT_KEY))?.id ?? answer.projects.find(item => item.beads)?.id ?? answer.projects[0]?.id ?? ''))
+      },
+      (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Projects did not load.') },
+    )
+    return () => controller.abort()
+  }, [])
+
+  const preset = data?.presets.find(item => item.id === presetId) ?? data?.presets[0] ?? null
+  const wantsRepo = !!preset?.fields.includes('repo')
+  const repoValid = !repo.trim() || /^[\w.-]+\/[\w.-]+$/.test(repo.trim())
+
+  // The server decides where it runs; ask again 150 ms after the last change.
+  useEffect(() => {
+    if (!preset || !project || !repoValid) return undefined
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams({ preset: preset.id, project })
+      if (wantsRepo && repo.trim()) query.set('repo', repo.trim())
+      hubGet<SpawnRoute>(`/presets/route?${query}`, controller.signal).then(
+        answer => { setRoute(answer); setRouteError(null) },
+        (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') { setRoute(null); setRouteError(failure instanceof Error ? failure.message : 'The route did not load.') } },
+      )
+    }, 150)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [preset, project, repo, wantsRepo, repoValid])
+
+  // A preset with fewer targets than the chosen one drops the choice.
+  const allowed = preset?.targets ?? []
+  const choice = override && allowed.includes(override) ? override : ''
+  const target: SpawnTarget | null = choice || route?.target || null
+  const changed = !!choice && !!route && choice !== route.target
+  const atPc = target === 'at-pc'
+  const canApprove = host.approve && !atPc
+  const trimmed = text.trim()
+  const ready = !!preset && !!project && !!trimmed && repoValid && !!target && !busy
+
+  const send = useCallback(async () => {
+    if (!preset || !target) return
+    setBusy(true)
+    setError(null)
+    let id: string | null = null
+    try {
+      const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
+        project, text: trimmed, preset: preset.id,
+        ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
+        ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
+        ...(choice ? { target: choice } : {}),
+      })
+      id = created.id
+      if (!canApprove) {
+        onDone(atPc ? 'Added to Needs you. You start it at the PC.' : 'Saved as a proposal. It waits in Needs you.')
+        return
+      }
+      const signed = await hubPost<ApproveAnswer>(`/requests/${encodeURIComponent(id)}/approve`, { target })
+      onDone(approvedNote(target, signed.waiting))
+    } catch (failure) {
+      const reason = failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.'
+      if (id) onDone(`Saved, but not approved. It waits in Needs you: ${reason}`)
+      else setError(reason)
+    } finally {
+      setBusy(false)
+    }
+  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, onDone])
+
+  const machine = target ? MACHINE[target] : null
+  const button = atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
+  const ids = { project: `${uid}-project`, repo: `${uid}-repo`, text: `${uid}-text`, done: `${uid}-done`, where: `${uid}-where` }
+
+  return (
+    <dialog
+      ref={dialog}
+      className="spawn-sheet"
+      aria-labelledby={`${uid}-title`}
+      data-spawn-sheet
+      onClose={onClose}
+      onClick={event => { if (event.target === dialog.current) dialog.current?.close() }}
+    >
+      <div className="sp-head">
+        <Icon name="spark" />
+        <h2 id={`${uid}-title`}>Spawn work</h2>
+        <button type="button" className="hub-btn sp-x" aria-label="Close" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
+      </div>
+      <div className="sp-body">
+        {loadError && <p className="hub-error" role="alert">{loadError}</p>}
+        {!data && !loadError && <p className="hub-empty">Loading…</p>}
+        {data && preset && (
+          <>
+            <div>
+              <div className="sp-label" id={`${uid}-tpl`}>Template</div>
+              <div className="sp-tpls" role="group" aria-labelledby={`${uid}-tpl`}>
+                {data.presets.map(item => (
+                  <button key={item.id} type="button" className={`sp-tpl${item.id === preset.id ? ' on' : ''}`} aria-pressed={item.id === preset.id} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride('') }}>
+                    <Icon name={item.icon} />{item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className={wantsRepo ? 'sp-two' : 'sp-one'}>
+              <label className="sp-field" htmlFor={ids.project}>Project
+                <select id={ids.project} value={project} onChange={event => { setProject(event.target.value); setOverride('') }} data-spawn-project>
+                  {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              {wantsRepo && (
+                <label className="sp-field" htmlFor={ids.repo}>Repo
+                  <input id={ids.repo} value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/name (the project's repo)" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} data-spawn-repo />
+                </label>
+              )}
+            </div>
+            <p className="sp-agent" data-spawn-agent>Agent · <b>{preset.agent}</b></p>
+            <label className="sp-field" htmlFor={ids.text}>What should it do?
+              <textarea id={ids.text} value={text} onChange={event => setText(event.target.value)} placeholder={preset.example} rows={4} maxLength={4000} data-spawn-text />
+            </label>
+            {preset.fields.includes('doneWhen') && (
+              <label className="sp-field" htmlFor={ids.done}>Done when
+                <input id={ids.done} value={doneWhen} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
+              </label>
+            )}
+            <div>
+              <div className="sp-label" id={ids.where}>Runs on</div>
+              <div className="sp-route" role="group" aria-labelledby={ids.where} data-spawn-route={target ?? ''}>
+                {machine && route ? (
+                  <>
+                    <span className="sp-mach"><Icon name={machine.icon} /></span>
+                    <div className="sp-route-t">
+                      <b data-spawn-machine>{machine.name}</b>
+                      <p data-spawn-why>{changed ? `You changed it from ${MACHINE[route.target].name}` : route.why}<span className="sp-faint"> · {changed ? 'your choice' : `rule ${route.rule}`}</span></p>
+                      {data.rules.length > 0 && (
+                        <ol className="sp-rules" aria-label="Routing rules">
+                          {data.rules.map(rule => (
+                            <li key={rule.rule} className={!changed && rule.rule === route.rule ? 'hit' : ''} aria-current={!changed && rule.rule === route.rule ? 'true' : undefined} data-rule={rule.rule}>
+                              <span className="n">{rule.rule}</span><span>{rule.text} → {RULE_TO[rule.rule] ?? ''}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <p className="sp-faint sp-caps">{CAPS_LINE}</p>
+                    </div>
+                    <select className="sp-pick" aria-label="Change where it runs" value={choice} onChange={event => setOverride(event.target.value as SpawnTarget | '')} data-spawn-target>
+                      <option value="">Auto</option>
+                      {allowed.map(item => <option key={item} value={item}>{MACHINE[item].name}</option>)}
+                    </select>
+                  </>
+                ) : <p className="hub-muted" role={routeError ? 'alert' : undefined}>{routeError ?? 'Working out where it runs…'}</p>}
+              </div>
+            </div>
+            <div className="sp-est" data-spawn-estimate>
+              <div><span>Estimated cost</span><b>{preset.estimate.cost}</b></div>
+              <div><span>Time</span><b>{preset.estimate.time}</b></div>
+              <div className="wide"><span>Result</span><b>{preset.produces}</b></div>
+            </div>
+          </>
+        )}
+        {error && <p className="hub-error" role="alert" data-spawn-error>{error}</p>}
+      </div>
+      <div className="sp-foot">
+        <span className="sp-spacer" />
+        <button type="button" className="hub-btn" onClick={() => dialog.current?.close()}>Cancel</button>
+        <span className="sp-go">
+          <button type="button" className="hub-btn pri" disabled={!ready} onClick={() => void send()} data-spawn-go>{button}</button>
+          <span className="sp-note" data-spawn-note>
+            {atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
+          </span>
+        </span>
+      </div>
+    </dialog>
+  )
+}
+
+/** Mounted once in the Hub screen: opens the sheet when `openSpawn` is called, and says what happened after it closes. */
+export default function SpawnHost() {
+  const [options, setOptions] = useState<SpawnOptions | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
+  const timer = useRef(0)
+
+  useEffect(() => {
+    const open = () => {
+      const next = takeSpawn()
+      if (!next || !host.write) return
+      if (!(document.activeElement instanceof HTMLElement && document.activeElement.closest('dialog'))) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setOptions(next)
+    }
+    open()
+    window.addEventListener(SPAWN_EVENT, open)
+    return () => { window.removeEventListener(SPAWN_EVENT, open); window.clearTimeout(timer.current) }
+  }, [])
+
+  const close = useCallback(() => setOptions(null), [])
+  // The focus goes back to what opened the sheet once the sheet is gone.
+  const showing = !!options
+  useEffect(() => {
+    if (showing) return
+    const back = opener.current
+    opener.current = null
+    if (back && document.contains(back)) back.focus({ preventScroll: true })
+  }, [showing])
+  const done = useCallback((note: string) => {
+    setToast(note)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setToast(null), 8000)
+    close()
+  }, [close])
+
+  return (
+    <>
+      {options && <SpawnSheet options={options} onClose={close} onDone={done} />}
+      {toast && <div className="runs-toast" role="status" data-spawn-toast>{toast}</div>}
+    </>
+  )
+}

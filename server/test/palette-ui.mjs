@@ -106,7 +106,7 @@ try {
   await dialog.waitFor({ state: 'detached' });
   assert.ok(await search.evaluate(el => el === document.activeElement), 'The search box has the focus again.');
 
-  step('Tab stays inside, arrows move the selection, no match says so');
+  step('Tab stays inside, arrows move the selection, no match leaves only the Spawn command');
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.press('Tab');
@@ -115,7 +115,9 @@ try {
   assert.equal(await dialog.locator('[role="option"][aria-selected="true"]').evaluate(el => el.id), await dialog.locator('input').getAttribute('aria-activedescendant'));
   assert.equal(await dialog.locator('[role="option"]').nth(1).getAttribute('aria-selected'), 'true');
   await page.keyboard.type('zzzzqq');
-  await dialog.locator('.pal-empty').waitFor();
+  // Nothing matches a place or a card; with the Hub on and write allowed, what is left is the Spawn command for those words.
+  await dialog.locator('[role="option"]', { hasText: 'Spawn: zzzzqq' }).waitFor();
+  assert.equal(await dialog.locator('[role="option"]').count(), 1, 'Only the Spawn command is left.');
   await page.keyboard.press('Escape');
 
   step('the sidebar button opens it and shows the key; the shortcut sheet lists it');

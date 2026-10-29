@@ -5,6 +5,7 @@ import { host } from '../lib/host'
 import { hubRows } from '../lib/hubNav'
 import { hubGet, type HubProject, type Item } from '../lib/hub'
 import { entityHash, hubHash, mapHash, reviewHash } from '../lib/route'
+import { openSpawn } from '../hub/spawnStore'
 import './palette.css'
 
 /** One row of the palette: a group, a label, an optional hint on the right, and where it goes. */
@@ -103,9 +104,15 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
       .sort((a, b) => Number(!a.row.first) - Number(!b.row.first) || a.rank - b.rank || a.index - b.index)
       .slice(0, limit)
       .map(entry => entry.row)
+    // A command, not a place: "Spawn: <what you typed>" opens the Spawn sheet with it. Typing "spawn" puts it first.
+    const typed = query.trim().replace(/^spawn\b[:\s]*/i, '').trim()
+    const spawn: Row[] = host.hub && host.write
+      ? [{ group: 'Commands', label: typed ? `Spawn: ${typed}` : 'Spawn work', icon: '✦', run: () => openSpawn(typed ? { text: typed } : {}) }]
+      : []
     // An empty query shows where to go and what waits; Roadmaps and Cards need a word.
-    if (!words.length) return [...goTo, ...pick(needs, 8)]
-    return [...pick(goTo, 12), ...pick(needs, 8), ...pick(maps, 8), ...pick(found, 8)]
+    if (!words.length) return [...goTo, ...pick(needs, 8), ...spawn]
+    const rest = [...pick(goTo, 12), ...pick(needs, 8), ...pick(maps, 8), ...pick(found, 8)]
+    return /^spawn\b/i.test(query.trim()) ? [...spawn, ...rest] : [...rest, ...spawn]
   }, [query, cards, items, projects, waiting, onHome])
 
   const at = Math.min(selected, Math.max(rows.length - 1, 0))
