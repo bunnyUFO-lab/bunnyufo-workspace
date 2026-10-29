@@ -76,6 +76,7 @@
 //   cards request take <id> --bead <b>                                exit 3 when already taken; exit 4 for a request with a
 //        preset (a dispatched run starts only from its approval)
 //   cards request take <id> --runner pc|cloud --nonce <n> [--session <id or link>]   a runner claims an approval it has verified
+//                                                                   exit 5 (stopped, declined or finished) means: do not start the run
 //        (taken.json with the nonce, no bead); exit 5 when the nonce is not the approval's
 //   cards request verify <id> [--target pc|cloud] [--repo owner/name]   check the owner's signature and every limit; prints one JSON line
 //        { id, project, repo, target, limits, nonce, preset }, or exits 5 with the first failed check (unsigned, bad-signature,
@@ -1408,8 +1409,15 @@ async function requestTakeRunner(rawId, flags) {
   const approved = await readJson(inboxPath('requests', id, 'approved.json'));
   if (!approved?.nonce) refuse('unsigned: there is no approval to take.');
   if (approved.nonce !== flags.nonce) refuse('nonce-used: that nonce is not this approval\'s.');
+  // A signed stop, a decline or a result ends the request: a runner that verified earlier must not start it now.
+  if (await readInbox(inboxPath('requests', id, 'stop.json')) !== null) refuse('stopped: the owner stopped this request.');
+  if (await readInbox(inboxPath('requests', id, 'declined.json')) !== null) refuse('declined: the owner declined this request.');
+  if (await readInbox(inboxPath('requests', id, 'result.json')) !== null) refuse('finished: this request already has a result.');
   const session = flags.session || process.env.CLAUDE_SESSION_ID;
-  return claim('requests', id, 'taken.json', { runner: flags.runner, host: hostName(), nonce: approved.nonce, ...(session ? { session } : {}), at: isoNow() });
+  await claim('requests', id, 'taken.json', { runner: flags.runner, host: hostName(), nonce: approved.nonce, ...(session ? { session } : {}), at: isoNow() });
+  // A stop written between the check and the claim: the request now shows "stopping", and the runner must not start. It runs
+  // `request finish --outcome failed --reason stopped` to end it.
+  if (await readInbox(inboxPath('requests', id, 'stop.json')) !== null) refuse('stopped: the owner stopped this request while it was being taken; do not start it (run request finish --outcome failed --reason stopped).');
 }
 
 async function requestRun(flags) {

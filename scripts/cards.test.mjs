@@ -1062,6 +1062,43 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`request take --runner (${via}): a stop, a decline or a result before the claim exits 5 and writes nothing`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem };
+      seedApproved(fake);
+      for (const [file, word] of [['stop.json', 'stopped'], ['declined.json', 'declined'], ['result.json', 'finished']]) {
+        fake.seed(`sections/inbox/requests/${RUN_ID}/${file}`, JSON.stringify({ v: 1, at: new Date().toISOString() }), 'application/json');
+        const took = await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA');
+        assert.equal(took.code, 5, `${file}: ${took.stderr}`);
+        assert.equal(reasonOf(took), word);
+        assert.equal(keys(`requests/${RUN_ID}/`).some(key => key.endsWith('taken.json')), false, `${file}: nothing was claimed`);
+        fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${file}`);
+      }
+      assert.equal((await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA')).code, 0, 'Once they are gone it takes.');
+    } finally { await close(); }
+  });
+
+  test(`request take --runner (${via}): a stop that lands during the claim is seen after it and exits 5`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem };
+      seedApproved(fake);
+      // The stop appears when taken.json is written: the check before the claim saw nothing, the one after sees it.
+      const put = fake.objects.set.bind(fake.objects);
+      let stopped = false;
+      fake.objects.set = (name, value) => {
+        const result = put(name, value);
+        if (name.endsWith(`${RUN_ID}/taken.json`) && !stopped) { stopped = true; fake.seed(`sections/inbox/requests/${RUN_ID}/stop.json`, JSON.stringify({ v: 1, at: new Date().toISOString() }), 'application/json'); }
+        return result;
+      };
+      const took = await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA');
+      assert.equal(took.code, 5, took.stderr);
+      assert.equal(reasonOf(took), 'stopped');
+      assert.match(took.stderr, /do not start it/);
+    } finally { await close(); }
+  });
+
   test(`request run and finish (${via}): run masks secrets; finish writes report.md then result.json once`, async () => {
     const { fake, cli, dir, close } = await setup();
     try {
