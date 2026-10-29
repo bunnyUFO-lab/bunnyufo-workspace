@@ -80,6 +80,18 @@ try {
   assert.equal(await report().locator('canvas').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(30, 80, 40)');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
+  // At phone width the menu button and its open menu follow the theme (the phone rules are dark literals).
+  await page.setViewportSize({ width: 375, height: 800 });
+  const toggle = page.locator('.rail-toggle');
+  await toggle.waitFor();
+  const dots = await toggle.locator('svg').evaluate(node => parseFloat(getComputedStyle(node).strokeWidth));
+  assert.ok(dots >= 3, `The dots are drawn bold enough to show at rest (stroke ${dots}).`);
+  assert.equal(await toggle.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(255, 255, 255, 0.9)');
+  await toggle.click();
+  await expect(page.locator('.files-container.menu-open .files-rail')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  assert.notEqual(await page.locator('.rail-backdrop').evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(5, 6, 9, 0.4)', 'The backdrop is not the dark literal.');
+  await toggle.click();
+  await page.setViewportSize({ width: 1300, height: 920 });
   assert.deepEqual(errors, []);
   await context.close();
   await service.close();

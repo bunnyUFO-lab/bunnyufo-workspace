@@ -76,4 +76,11 @@ html[data-chrome-hidden] .rail-toggle:not([aria-expanded=true]){transform:transl
 .files-container.menu-open .rail-tool{flex-direction:row;justify-content:flex-start;gap:12px;width:100%;min-height:44px;padding:0 14px}
 .files-container.menu-open .rail-tool span{font-size:14px}
 .files-container.expanded .files-panel{position:fixed;inset:0;right:0;width:100%;z-index:63}
+/* The three dots are 1.4px wide at the icon's own stroke, which reads as a plain disc. */
+.rail-toggle svg{stroke-width:3}
+/* The light theme: these rules need the html attribute to beat the phone rules above, whose literals are dark. */
+html[data-workspace-theme=light] .rail-toggle{background:#ffffffe6;border-color:var(--hairline-strong);color:var(--text-dim)}
+html[data-workspace-theme=light] .rail-toggle[aria-expanded=true]{color:var(--pink);border-color:var(--pink)}
+html[data-workspace-theme=light] .files-container.menu-open .files-rail{background:#fff;border-color:var(--hairline-strong);box-shadow:var(--shadow-2)}
+html[data-workspace-theme=light] .rail-backdrop{background:#18213622}
 }
