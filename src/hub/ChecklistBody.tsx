@@ -1,14 +1,20 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
 import type { Checklist, ChecklistItem } from '../lib/hub'
 import { HubError, clock, hubPost, safeUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import HubImage from './HubImage'
 import Md from './Md'
 import { prepareImage, toBase64 } from './chatImages'
+import { hasFiles, hasText, isTextField, pictureFiles } from '../lib/pastePictures.mjs'
+import { clearTarget, getTarget, setTarget, useTarget } from './stepTarget'
 import PlaytestReport from './PlaytestReport'
 import { usePlaytestReport } from './playtest'
 
 const SIGN_IN = 'Sign in to tick items.'
+const finePointer = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
+type How = 'camera' | 'paste' | 'drop'
+const VERB: Record<How, string> = { camera: 'Attached to', paste: 'Pasted to', drop: 'Dropped on' }
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 const plural = (count: number, one: string, many: string) => (count === 1 ? one : many)
 const without = <T,>(record: Record<string, T>, key: string): Record<string, T> => Object.fromEntries(Object.entries(record).filter(([name]) => name !== key))
@@ -35,6 +41,13 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   // Pictures stored in this view: shown at once, and kept over a read that does not have them yet.
   const [uploaded, setUploaded] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
+  // A line under the progress bar (a hint), and the line under the step that last took a picture.
+  const [hint, setHint] = useState<string | null>(null)
+  const [attached, setAttached] = useState<{ step: string; text: string } | null>(null)
+  const [dropping, setDropping] = useState<string | null>(null)
+  const target = useTarget()
+  const stepsRef = useRef<HTMLElement | null>(null)
+  const submitRef = useRef<HTMLElement | null>(null)
   const report = usePlaytestReport(data.id, data.state === 'open', reload)
   const firstGuide = useRef<string | null | undefined>(undefined)
 
@@ -50,9 +63,12 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   // The first item still to do that has a guide starts open; once the owner opens or closes anything, their choice rules.
   if (firstGuide.current === undefined) firstGuide.current = items.find(item => !item.done && item.guide)?.id ?? null
   const isExpanded = (item: ChecklistItem) => (expanded ? !!expanded[item.id] : item.id === firstGuide.current)
-  const toggleExpanded = (item: ChecklistItem) => setExpanded(previous => ({ ...(previous ?? (firstGuide.current ? { [firstGuide.current]: true } : {})), [item.id]: !isExpanded(item) }))
+  const toggleExpanded = (item: ChecklistItem) => { setTarget({ checklist: detail.id, step: item.id }); setHint(null); setAttached(null); setExpanded(previous => ({ ...(previous ?? (firstGuide.current ? { [firstGuide.current]: true } : {})), [item.id]: !isExpanded(item) })) }
 
   async function tick(item: ChecklistItem) {
+    setTarget({ checklist: detail.id, step: item.id })
+    setHint(null)
+    setAttached(null)
     if (!host.write) { setSignIn(true); return }
     if (!live || pending[item.id]) return
     const next = !isDone(item)
@@ -70,10 +86,13 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     }
   }
 
-  async function attach(item: ChecklistItem, file: File | undefined) {
+  async function attach(item: ChecklistItem, file: File | undefined, how: How = 'camera') {
     if (!file) return
     if (!host.write) { setSignIn(true); return }
     if (!live || uploading[item.id]) return
+    setTarget({ checklist: detail.id, step: item.id })
+    setHint(null)
+    setAttached(null)
     setUploading(previous => ({ ...previous, [item.id]: true }))
     setErrors(previous => without(previous, item.id))
     try {
@@ -81,6 +100,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
       try {
         const stored = await hubPost<{ file: string }>(`/checklists/${encodeURIComponent(detail.id)}/files`, { for: item.id, image: { type: picture.type, data: await toBase64(picture.blob) } })
         setUploaded(previous => ({ ...previous, [item.id]: stored.file }))
+        setAttached({ step: item.id, text: `${VERB[how]} step ${Number(item.id)}` })
       } finally {
         URL.revokeObjectURL(picture.url)
       }
@@ -90,6 +110,63 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     } finally {
       setUploading(previous => without(previous, item.id))
     }
+  }
+
+  // Ctrl+V: a picture on the clipboard goes to the step touched last, when it is on this list.
+  const latest = useRef({ items, attach, report, detailId: detail.id })
+  useEffect(() => { latest.current = { items, attach, report, detailId: detail.id } })
+  const listening = live && host.write
+  useEffect(() => {
+    if (!listening) return
+    const onPaste = (event: ClipboardEvent) => {
+      const { items: steps, attach: put, report: issue, detailId } = latest.current
+      const pictures = pictureFiles(event.clipboardData)
+      if (!pictures.length || event.defaultPrevented) return
+      const origin = event.target as Element | null
+      if (origin?.closest?.('.excalidraw')) return
+      if (isTextField(origin) && hasText(event.clipboardData)) return
+      const mine = getTarget()?.checklist === detailId
+      const inside = [stepsRef.current, submitRef.current].some(part => !!part && origin instanceof Node && part.contains(origin))
+      if (!mine) {
+        if (inside && !getTarget()) { event.preventDefault(); setHint(playtest ? 'Paste a screenshot while writing an issue.' : 'Tap a step first, then paste.') }
+        return
+      }
+      if (playtest) {
+        event.preventDefault()
+        if (getTarget()?.step !== 'issue') { setHint('Paste a screenshot while writing an issue.'); return }
+        setHint(pictures.length > 1 ? 'One picture per paste.' : null)
+        void issue.attach(pictures[0])
+        return
+      }
+      const step = steps.find(item => item.id === getTarget()?.step)
+      if (!step) return
+      event.preventDefault()
+      void put(step, pictures[0], 'paste')
+      if (pictures.length > 1) setHint('One picture per paste.')
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [listening, playtest])
+  useEffect(() => () => clearTarget(detail.id), [detail.id])
+
+  // Dragging files: a step is a drop zone; anywhere else on the list only keeps the browser from opening the file.
+  const canDrop = live && !playtest && host.write
+  const rowDrag = (event: DragEvent, item: ChecklistItem) => {
+    if (!canDrop || !hasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.type === 'drop') {
+      setDropping(null)
+      const pictures = pictureFiles(event.dataTransfer)
+      void attach(item, pictures[0] ?? event.dataTransfer.files[0], 'drop')
+      if (pictures.length > 1) setHint('One picture per drop.')
+    } else setDropping(item.id)
+  }
+  const rowLeave = (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(null) }
+  const guardDrag = (event: DragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    if (event.type === 'drop' && !playtest) { setDropping(null); setAttached(null); setHint('Drop the picture on a step.') }
   }
 
   async function submit() {
@@ -114,9 +191,11 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   let group: string | undefined
 
   const stepsSection = (
-      <section className="hub-panel" aria-label={playtest ? 'What to try' : 'Steps'}>
+      <section className="hub-panel" aria-label={playtest ? 'What to try' : 'Steps'} ref={stepsRef} onDragOver={guardDrag} onDrop={guardDrag}>
         <p className="hub-cl-count" data-progress aria-live="polite">{doneCount} of {total} done</p>
         <div className="hub-cl-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={total} aria-valuenow={doneCount}><span style={{ width: `${percent}%` }} /></div>
+        {hint && <p className="hub-muted" role="status" data-paste-hint>{hint}</p>}
+        {canDrop && finePointer() && <p className="hub-muted hub-cl-tip" data-paste-tip>Tip: click a step, then paste a screenshot.</p>}
         {signIn && !host.write && <p className="hub-muted" data-readonly-note>{SIGN_IN}</p>}
         {detail.state === 'cancelled' && <p className="hub-muted" data-cancelled>The agent withdrew this list.</p>}
 
@@ -139,7 +218,11 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
             </>
           )
           return (
-            <div key={item.id} className="hub-cl-item" data-item={item.id} data-done={done ? 'true' : undefined}>
+            <div
+              key={item.id} className={`hub-cl-item${target?.checklist === detail.id && target.step === item.id ? ' target' : ''}${dropping === item.id ? ' hub-cl-drop' : ''}`} data-item={item.id} data-done={done ? 'true' : undefined}
+              onPointerDown={() => setTarget({ checklist: detail.id, step: item.id })} onFocus={() => setTarget({ checklist: detail.id, step: item.id })}
+              onDragEnter={event => rowDrag(event, item)} onDragOver={event => rowDrag(event, item)} onDragLeave={rowLeave} onDrop={event => rowDrag(event, item)}
+            >
               {heading && <h3 className="hub-cl-group">{heading}</h3>}
               <div className="hub-cl-line">
                 <button
@@ -160,7 +243,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </span>
                 )}
                 {live && !playtest && (
-                  <label className="hub-cl-cam" title="Attach a photo" data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
+                  <label className="hub-cl-cam" title={finePointer() ? 'Attach a picture, or paste one (Ctrl+V) after tapping a step' : 'Attach a photo'} data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
                     <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
                     <input
                       type="file" accept="image/jpeg,image/png,image/*" capture="environment" data-attach-input
@@ -170,6 +253,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </label>
                 )}
               </div>
+              {attached?.step === item.id && <p className="hub-muted" role="status" data-attached-note>{attached.text}</p>}
               {errors[item.id] && <p className="hub-error" role="alert" data-item-error>{errors[item.id]}</p>}
               {open && (
                 <div className="hub-cl-more" id={`${labelId}-more`}>
@@ -184,7 +268,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   )
 
   const submitSection = live && (
-        <section className="hub-panel hub-cl-submit" aria-label={playtest ? 'Report' : 'Submit'}>
+        <section className="hub-panel hub-cl-submit" aria-label={playtest ? 'Report' : 'Submit'} ref={submitRef} onDragOver={guardDrag} onDrop={guardDrag}>
           {playtest && <PlaytestReport report={report} checklistId={detail.id} live={live} />}
           <label className="hub-field">Note to the agent (optional)
             <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={2000} disabled={submitting} />

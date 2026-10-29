@@ -17,6 +17,7 @@ let second = null;
 let third = null;
 let fourth = null;
 let fifth = null;
+let sixth = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -43,6 +44,32 @@ const tall = async (locator, what) => {
 };
 const chips = page => page.locator('.hub-chips .hub-chip').evaluateAll(list => list.map(item => [item.getAttribute('data-filter'), item.querySelector('.n')?.textContent ?? null]));
 const answerOf = id => fixture.fake.json(`sections/inbox/asks/${id}/answer.json`);
+
+const pasteImage = (page, { text = '', width = 0 } = {}) => page.evaluate(async ({ base64, text }) => {
+  const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+  const transfer = new DataTransfer();
+  transfer.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+  if (text) transfer.setData('text/plain', text);
+  const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.querySelector('[data-progress]');
+  const event = new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+  return event.defaultPrevented;
+}, { base64: solidPng(30 + width, 30).toString('base64'), text });
+const dropOn = (page, selector, { image = true } = {}) => page.evaluate(async ({ selector, base64, image }) => {
+  const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+  const transfer = new DataTransfer();
+  transfer.items.add(image ? new File([bytes], 'drop.png', { type: 'image/png' }) : new File(['no'], 'notes.txt', { type: 'text/plain' }));
+  const target = document.querySelector(selector);
+  const make = type => new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true });
+  const over = make('dragover');
+  target.dispatchEvent(make('dragenter'));
+  target.dispatchEvent(over);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const outlined = target.closest('.hub-cl-item')?.classList.contains('hub-cl-drop') ?? false;
+  const drop = make('drop');
+  target.dispatchEvent(drop);
+  return { overPrevented: over.defaultPrevented, dropPrevented: drop.defaultPrevented, outlined };
+}, { selector, base64: solidPng(40, 30).toString('base64'), image });
 const files = prefix => [...fixture.fake.objects.keys()].filter(key => key.startsWith(prefix));
 
 try {
@@ -156,6 +183,91 @@ try {
   await list.locator('[data-item="03"] [data-item-error]').waitFor();
   assert.match(await list.locator('[data-item="03"] [data-item-error]').innerText(), /can't be opened/);
   assert.equal(files(`${folder}evidence-`).length, 1);
+
+  step('paste: with no step touched, the list says "Tap a step first, then paste." and stores nothing');
+  const storedCount = () => files(`${folder}evidence-`).length;
+  const storedBefore = storedCount();
+  await reopened.locator('[data-progress]').click();
+  assert.equal(await pasteImage(reopened), true, 'The paste is taken.');
+  await reopened.locator('[data-paste-hint]', { hasText: 'Tap a step first, then paste.' }).waitFor();
+  await reopened.waitForTimeout(300);
+  assert.equal(storedCount(), storedBefore, 'No picture was stored.');
+
+  step('paste: after a step is touched, Ctrl+V puts the picture on it, and the step says so');
+  await list.locator('[data-item="03"] [data-box]').focus();
+  assert.equal(await list.locator('.hub-cl-item.target').count(), 1, 'One step is marked as the target.');
+  assert.equal(await list.locator('.hub-cl-item.target').getAttribute('data-item'), '03');
+  await pasteImage(page);
+  await list.locator('[data-item="03"] [data-attached-note]', { hasText: 'Pasted to step 3' }).waitFor();
+  await list.locator('[data-item="03"] [data-evidence] img').waitFor();
+  assert.equal(storedCount(), storedBefore + 1);
+  assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-03-')), /evidence-03-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  assert.equal(await list.locator('[data-item="03"] [data-item-error]').count(), 0, 'The earlier error is gone.');
+
+  step('paste: text with a picture into the note stays the browser paste, and nothing is uploaded');
+  await list.locator('textarea').focus();
+  assert.equal(await pasteImage(page, { text: 'hello' }), false, 'The browser keeps its own paste.');
+  await page.waitForTimeout(300);
+  assert.equal(storedCount(), storedBefore + 1, 'Nothing was uploaded.');
+
+  step('paste: an image-only paste while the note has focus still goes to the touched step');
+  await pasteImage(page, { width: 1 });
+  for (let wait = 0; wait < 100 && storedCount() < storedBefore + 2; wait += 1) await page.waitForTimeout(100);
+  assert.equal(storedCount(), storedBefore + 2);
+
+  step('drop: a picture on a step outlines it, is stored for that step, and says so');
+  const dropped = await dropOn(page, `.ni[data-need="checklist-${FIXTURE_CHECKLIST}"] [data-item="04"] .hub-cl-title`);
+  assert.equal(dropped.overPrevented, true);
+  assert.equal(dropped.outlined, true, 'The row shows the drop outline.');
+  await list.locator('[data-item="04"] [data-attached-note]', { hasText: 'Dropped on step 4' }).waitFor();
+  assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-04-')), /evidence-04-/);
+
+  step('drop: a file on the panel header does not open in the tab, and the list says where to drop');
+  const header = await dropOn(page, `.ni[data-need="checklist-${FIXTURE_CHECKLIST}"] [data-progress]`);
+  assert.equal(header.dropPrevented, true, 'The browser is kept from navigating to the file.');
+  await list.locator('[data-paste-hint]', { hasText: 'Drop the picture on a step.' }).waitFor();
+  assert.equal(new URL(page.url()).origin, new URL(fixture.url).origin, 'Still on the app.');
+
+  step('drop: a file that is not a picture shows the usual error on that step');
+  await dropOn(page, `.ni[data-need="checklist-${FIXTURE_CHECKLIST}"] [data-item="01"] .hub-cl-title`, { image: false });
+  await list.locator('[data-item="01"] [data-item-error]', { hasText: "can't be opened" }).waitFor();
+
+  step('paste: a sixth picture on one step shows the server limit on that step');
+  await list.locator('[data-item="03"] [data-box]').focus();
+  for (let have = files(`${folder}evidence-03-`).length; have < 5; have += 1) {
+    await pasteImage(page, { width: 10 + have });
+    for (let wait = 0; wait < 100 && files(`${folder}evidence-03-`).length <= have; wait += 1) await page.waitForTimeout(100);
+  }
+  assert.equal(files(`${folder}evidence-03-`).length, 5);
+  await pasteImage(page, { width: 40 });
+  await list.locator('[data-item="03"] [data-item-error]', { hasText: 'at most 5 pictures' }).waitFor();
+  assert.equal(files(`${folder}evidence-03-`).length, 5);
+
+  step('paste: with two lists open, only the list whose step was touched last takes it');
+  sixth = await startHubFixture({ seedData: false });
+  const listA = checklistJson({ id: askId('lista', 'a1a1'), now: new Date(Date.now() - 8 * 60000), title: 'List A' });
+  const listB = checklistJson({ id: askId('listb', 'b1b1'), now: new Date(Date.now() - 7 * 60000), title: 'List B' });
+  sixth.seed.checklist(listA);
+  sixth.seed.checklist(listB);
+  const two = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+  await two.goto(`${sixth.url}#/~hub/needs`);
+  const cardA = two.locator(`.ni[data-need="checklist-${listA.id}"]`);
+  const cardB = two.locator(`.ni[data-need="checklist-${listB.id}"]`);
+  await cardA.waitFor();
+  await cardB.waitFor();
+  const inList = (fix, id) => [...fix.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${id}/evidence-`)).length;
+  await cardA.locator('[data-item="02"] [data-box]').focus();
+  await cardB.locator('[data-item="01"] [data-box]').focus();
+  await pasteImage(two);
+  await cardB.locator('[data-item="01"] [data-attached-note]', { hasText: 'Pasted to step 1' }).waitFor();
+  assert.equal(inList(sixth, listB.id), 1);
+  assert.equal(inList(sixth, listA.id), 0, 'The other list took nothing.');
+  assert.equal(await cardA.locator('.hub-cl-item.target').count(), 0, 'Only one step on the page is the target.');
+  await cardA.locator('[data-item="02"] [data-box]').focus();
+  await pasteImage(two, { width: 5 });
+  await cardA.locator('[data-item="02"] [data-attached-note]', { hasText: 'Pasted to step 2' }).waitFor();
+  assert.equal(inList(sixth, listA.id), 1);
+  assert.equal(inList(sixth, listB.id), 1);
 
   step('Mark done on a pull request review and on a blocked session removes the card, and the writes are events');
   await page.locator('.ni[data-kind="pr"]').getByRole('button', { name: 'Mark done' }).click();
@@ -500,7 +612,16 @@ try {
   assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 1, 'One screenshot is stored.');
   await pcard.locator('[data-add-issue]').click();
   await pcard.locator('[data-issue] [data-issue-shot] img').waitFor();
+  step('playtest: pasting while a step has focus only says what to do; with the issue box focused it becomes the next screenshot');
+  await pcard.locator('[data-item="01"] [data-box]').focus();
+  await pasteImage(playPage);
+  await pcard.locator('[data-paste-hint]', { hasText: 'Paste a screenshot while writing an issue.' }).waitFor();
+  assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 1, 'Nothing new was stored.');
   await pcard.locator('[data-issue-input]').fill('Jump feels floaty');
+  await pcard.locator('[data-issue-input]').focus();
+  await pasteImage(playPage);
+  await pcard.locator('[data-pending-shot]').waitFor();
+  assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 2, 'The pasted screenshot is stored.');
   await pcard.locator('[data-add-issue]').click();
   assert.equal(await pcard.locator('[data-issue]').count(), 2);
   await pcard.locator('[data-verdict-btn="fix-first"]').click();
@@ -512,7 +633,7 @@ try {
   assert.equal(sentReport.verdict, 'fix-first');
   assert.equal(sentReport.issues.length, 2);
   assert.match(sentReport.issues[0].shot, /^shot-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
-  assert.equal(sentReport.issues[1].shot, undefined);
+  assert.match(sentReport.issues[1].shot, /^shot-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/, 'The pasted screenshot went with the second issue.');
   assert.deepEqual(sentReport.done, ['01']);
   await playPage.locator('[data-next-note]', { hasText: 'Report sent' }).waitFor();
   await playPage.locator('[data-next-back]').click();
@@ -543,5 +664,6 @@ try {
   await third?.close();
   await fourth?.close();
   await fifth?.close();
+  await sixth?.close();
 }
 console.log('hub-needs-ui: passed');

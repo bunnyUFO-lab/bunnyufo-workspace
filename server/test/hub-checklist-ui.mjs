@@ -89,6 +89,8 @@ try {
   assert.equal(await page.locator('[data-item="02"] .hub-cl-more a', { hasText: 'the portal guide' }).getAttribute('target'), '_blank');
   assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
   await noSideways(page, 'checklist');
+  assert.equal(await page.locator('[data-paste-tip]').count(), 0, 'No paste tip on a phone.');
+  assert.equal(await page.locator('[data-item="02"]').evaluate(row => getComputedStyle(row).outlineStyle), 'none', 'No target outline on a touch device.');
 
   step('every checkbox, the expand toggle, Copy and Submit are at least 44 px tall');
   await tall(page.locator('[data-box]'), 'a checkbox');

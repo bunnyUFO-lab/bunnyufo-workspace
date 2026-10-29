@@ -449,7 +449,13 @@ button.hub-cl-text { cursor: pointer; }
 .hub-cl-thumb img { object-fit: cover; }
 .hub-cl-more { margin: 0 0 10px 52px; padding: 2px 0 4px; min-width: 0; }
 .hub-cl-more .hub-btn { min-height: 44px; }
-.hub-cl-item > .hub-error { margin: 0 0 8px 52px; }
+.hub-cl-item > .hub-error, .hub-cl-item > [data-attached-note] { margin: 0 0 8px 52px; }
+.hub-cl-tip { display: none; margin: 0 0 6px; font-size: 0.8rem; }
+.hub-cl-drop { outline: 2px dashed var(--pink); outline-offset: -2px; border-radius: var(--radius-sm); background: var(--pink-dim); }
+@media (hover: hover) and (pointer: fine) {
+  .hub-cl-tip { display: block; }
+  .hub-cl-item.target { outline: 1px solid var(--hairline-strong); outline-offset: -1px; border-radius: var(--radius-sm); }
+}
 .hub-cl-submit .hub-field textarea { min-height: 4.5rem; }
 .hub-cl-warn { background: var(--amber-dim); color: var(--amber); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.88rem; margin: 8px 0; }
 .hub-cl-send { min-height: 48px; min-width: 9rem; }
