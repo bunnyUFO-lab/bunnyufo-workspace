@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { ProgressMap as MapModel, TaskState } from '../lib/hub'
+import type { ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
@@ -42,16 +42,37 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
   return (
     <>
       <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
-      <div className="hub-chips-wrap" data-overflow={overflow}>
-        <div className="hub-chips one-row" aria-label="Project" ref={chips}>
-          {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('map', item.id)}>{item.name}</a>)}
+      <div className="hub-map-chips">
+        <div className="hub-chips-wrap" data-overflow={overflow}>
+          <div className="hub-chips one-row" aria-label="Project" ref={chips}>
+            {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('map', item.id)}>{item.name}</a>)}
+          </div>
         </div>
+        <RunsOnChip runsOn={list.find(item => item.id === project)?.runsOn} />
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && <MapView key={project} model={model} project={project} nodeId={nodeId} />}
     </>
+  )
+}
+
+/** Where a project's work runs by default: full text and the rule in plain words, a short text on a phone. */
+const RUNS_ON: Record<RunsOn, { full: string; short: string; rule: string }> = {
+  pc: { full: 'Runs on: Gaming PC', short: 'PC', rule: 'Work for this project runs on the PC by default.' },
+  cloud: { full: 'Runs on: cloud', short: 'Cloud', rule: 'This project lives in a GitHub repository, so its work runs in the cloud.' },
+  'at-pc': { full: 'Started by you at the PC', short: 'At the PC', rule: 'This project is never started remotely; you start its work at the PC.' },
+}
+
+function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
+  const text = runsOn && RUNS_ON[runsOn]
+  if (!text) return null
+  return (
+    <span className="hub-runs" title={text.rule} aria-label={`${text.full}. ${text.rule}`} role="note">
+      <span className="hub-runs-full">{text.full}</span>
+      <span className="hub-runs-short" aria-hidden="true">{text.short}</span>
+    </span>
   )
 }
 

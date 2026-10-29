@@ -361,6 +361,18 @@ test('the Inbox filters: asks, answered, requests', async () => {
   } finally { await close(); }
 });
 
+test('projects: table projects first in table order, then the rest alphabetically', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const meta = { pushedAt: minutesAgo(NOW, 5).toISOString(), host: 'pc.example.test', count: 0, repo: 'example/x' };
+    for (const name of ['zeta', 'bunnylink', 'alpha', 'sprite-studio', 'magic-loops']) seed.put(`beads/${name}.meta.json`, meta);
+    seed.ask(askJson({ id: id('wtask', 'w222'), now: NOW, project: 'kind-poincare-019351' }));
+    const projects = (await get('/hub/projects')).body.projects;
+    assert.deepEqual(projects.map(item => [item.id, item.name]), [['magic-loops', 'Magic Loops'], ['sprite-studio', 'Sprite Studio'], ['bunnylink', 'Bunnylink'], ['alpha', 'Alpha'], ['zeta', 'Zeta']]);
+    assert.deepEqual(projects.map(item => item.runsOn), ['pc', 'pc', 'at-pc', undefined, undefined]);
+  } finally { await close(); }
+});
+
 test('projects, Beads and the map', async () => {
   const { seed, get, close } = await fixture();
   try {
@@ -375,7 +387,7 @@ test('projects, Beads and the map', async () => {
     // A session's worktree folder reported as a project is not one.
     seed.ask(askJson({ id: id('wtask', 'w111'), now: NOW, project: 'kind-poincare-019351' }));
     const projects = (await get('/hub/projects')).body.projects;
-    assert.deepEqual(projects.map(item => [item.id, item.name, item.beads]), [['magic-loops', 'Magic Loops', true], ['probe', 'Probe', false]]);
+    assert.deepEqual(projects.map(item => [item.id, item.name, item.beads, item.order, item.runsOn]), [['magic-loops', 'Magic Loops', true, 1, 'pc'], ['probe', 'Probe', false, undefined, undefined]]);
     assert.ok(projects[0].pushedAt);
     const beads = (await get('/hub/beads/magic-loops')).body;
     assert.equal(beads.issues.length, issues.length);
