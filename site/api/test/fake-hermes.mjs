@@ -10,7 +10,7 @@
 //   hermes.release(id, output?)  ends a run held by a `{ hold: true }` step as completed
 //   hermes.forget(id)   drops one run, as a Hermes restart would (status and events answer 404)
 // Options for runs:
-//   runScript      steps: 'text' (message.delta) | { tool, preview?, error? } | { approval: { command?, description? } }
+//   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms? } (ms: how long the step runs before it completes) | { approval: { command?, description? } }
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
 //                  | { end: 'output' } | { fail: 'error text' }. Default: the `chunks` as deltas.
 //   askApproval    true adds a protected-file write that asks for approval after the first delta
@@ -138,6 +138,8 @@ export async function startFakeHermes({
       if (step.tool) {
         const id = `toolu_${randomBytes(8).toString('hex')}`;
         emit(run, 'tool.started', { tool: step.tool, preview: step.preview ?? '', tool_call_id: id });
+        if (step.ms) await pause(run, step.ms); // a step that takes a while: Hermes says nothing in between
+        if (run.stopped) break;
         emit(run, 'tool.completed', { tool: step.tool, duration: 0, error: Boolean(step.error), tool_call_id: id, preview: '' });
         continue;
       }

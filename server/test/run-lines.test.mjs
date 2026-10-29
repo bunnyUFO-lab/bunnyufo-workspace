@@ -29,3 +29,12 @@ test('the oldest lines go past the line cap', () => {
   assert.equal(lines.length, MAX_LINES);
   assert.equal(lines[lines.length - 1].tool, `t${MAX_LINES + 39}`);
 });
+
+test('a tool line remembers when it started, and the time reads in seconds then minutes', async () => {
+  const { elapsedLabel } = await import('../../src/hub/runLines.ts');
+  const lines = applyRunEvent([], { event: 'tool.started', data: { tool: 'cards', preview: 'pull', tool_call_id: 'a' } }, 1_000);
+  assert.equal(lines[0].startedAt, 1_000);
+  assert.equal(elapsedLabel(54_400), '54 s');
+  assert.equal(elapsedLabel(130_000), '2 min 10 s');
+  assert.equal(elapsedLabel(-5), '0 s');
+});
