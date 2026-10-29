@@ -330,7 +330,8 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
-| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` (see Requests) |
+| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
+| `GET /api/hub/presets`, `/presets/route?preset=&project=&repo=`, `/presets/brief?request=` | The eight presets for the Spawn sheet (no templates) with the five routing rules; where a job would run (`{ target, rule, why }`); the rendered brief of a request the owner starts at the PC (400 for any other) |
 | `GET /api/hub/requests/:id` | One request: `{ request, state, approved?, taken?, runs, result?, hermesRun?, retry?, fires, stop?, declined?, files, report }`. `runs` and `fires` are the newest 20 `run-*` and `fire-*` files, newest first; `approved` comes without `run.brief`; 404 for an id that is not a request |
 | `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
 | `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
@@ -381,6 +382,15 @@ without a `preset` is a legacy one (`when` set, no approval) and is only ever `o
 | 9 | `expired` | `approved.json` past its `expires` |
 | 10 | `approved` | `approved.json` |
 | 11 | `proposed` | has a `preset`, none of the above |
+
+Presets live in `site/api/presets.mjs`, in code, so no inbox token can rewrite a template: `code-task`, `docs`,
+`research`, `market-research`, `game-teardown`, `playtest-build`, `sprite-set`, `agent-avatar`. A run is never
+longer than `MAX_RUN_MINUTES` (120): research kinds 30, `agent-avatar` and `docs` 60, the rest 120. Hermes
+presets have `model: null` and the site never sends a provider or model on an ordinary run. The target
+comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the preset or request needs
+something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
+`project-defaults.mjs` is `pc`: `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
+targets becomes its first target, and `cloud` without a cloud routine for the repo becomes `pc`.
 
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.

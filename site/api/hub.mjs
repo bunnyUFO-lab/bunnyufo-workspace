@@ -228,7 +228,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   const beadsReader = createBeadsReader({ bucket, key });
 
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail });
+  /** The repo a project's section tracks (`workspace.json` `tracked.repo`), if any. */
+  const projectRepo = async project => trackedRepo((await bucket.getJson(`${prefix}/${project}/workspace.json`).catch(() => null))?.value?.tracked?.repo);
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo });
   const { loadRequests } = requestFiles;
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -922,6 +924,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
             reply(await requestFiles.detail(decodeURIComponent(match[1]), at));
+          } else if (route.startsWith('/hub/presets')) {
+            reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {
             const floor = at.getTime() - WINDOW_DAYS * DAY;
             const wanted = sendTime(query.get('since'))?.getTime() ?? at.getTime() - DAY;
