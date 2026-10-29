@@ -41,7 +41,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
   useEffect(() => { chips.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [list.length, project])
   return (
     <>
-      <h2 className="hub-sr">Progress map{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
+      <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
       <div className="hub-chips-wrap" data-overflow={overflow}>
         <div className="hub-chips one-row" aria-label="Project" ref={chips}>
           {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('map', item.id)}>{item.name}</a>)}
@@ -257,7 +257,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
-        <div className="hub-map-box" ref={box} tabIndex={0} role="group" aria-label="Progress map. Arrow keys move it, plus and minus zoom.">
+        <div className="hub-map-box" ref={box} tabIndex={0} role="group" aria-label="Roadmap. Arrow keys move it, plus and minus zoom.">
         <div className="hub-map-stage" ref={stage}>
           <svg ref={svg} role="presentation">
             <defs>

@@ -112,10 +112,10 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
         <a
           className={`crumb-link${entity ? ' crumb-back' : ''}`}
           {...homeLink(onHome)}
-          title={entity ? 'Back to the cards ( Esc )' : 'Home'}
+          title={entity ? 'Back to the Library ( Esc )' : 'Home'}
           data-home-link="crumb"
         >
-          {entity ? <><span aria-hidden="true">←</span> Cards</> : 'Workspace'}
+          {entity ? <><span aria-hidden="true">←</span> Library</> : 'Workspace'}
         </a>
         {entity && showProject && (
           <>

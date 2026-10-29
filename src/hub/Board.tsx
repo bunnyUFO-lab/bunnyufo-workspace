@@ -84,15 +84,16 @@ export default function Board({ project: wanted }: { project?: string }) {
   return (
     <>
       <div className="hub-top">
-        <h2>Board{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
+        <h2>Work{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
         {map.data?.ageMinutes != null && <span className="hub-muted">Beads copy from {copyAge(map.data.ageMinutes)}</span>}
       </div>
       <div className="hub-chips" aria-label="Project">
-        {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('board', item.id)}>{item.name}</a>)}
+        {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
       </div>
       {project && host.write && <RequestForm project={project} />}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
-      {!map.data && !map.error && (listing || map.loading || !project) && !listError && <p className="hub-empty">Loading…</p>}
+      {!map.data && !map.error && (listing || map.loading) && !listError && <p className="hub-empty">Loading…</p>}
+      {!listing && !listError && !project && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
       {map.error && <p className="hub-error" role="alert">{map.error}</p>}
       {map.data && !map.data.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {map.data?.meta && (

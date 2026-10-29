@@ -12,7 +12,7 @@ export default function Today() {
   if (!data) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
   const { counts } = data
   const tiles: [string, number, string, string][] = [
-    ['needs-you', counts.needsYou, 'need you', hubHash('inbox')],
+    ['needs-you', counts.needsYou, 'need you', hubHash('needs')],
     ['running', counts.running, 'running', hubHash('activity')],
     ['recent', counts.recent, 'since yesterday', hubHash('activity')],
     ['alerts', counts.alerts, 'alerts', hubHash('activity', 'alerts')],

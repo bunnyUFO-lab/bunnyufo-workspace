@@ -364,7 +364,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .home .project-chip { font-size: 0.74rem; padding: 5px 13px; }
 
 /* The Hub: buttons two to a row above the search box, set apart from the cards below by a line,
-   so its rows do not read as more cards. The Inbox count is the phone tab bar's pink badge. */
+   so its rows do not read as more cards. The Needs you count is the phone tab bar's pink badge. */
 .sidebar-hub {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1822,8 +1822,8 @@ button.open-ext {
 }
 
 /* ── The Hub's tab bar (a phone only) ─────────────────────────────────────────
-   The Hub group lives in the menu, which a phone keeps shut. This bar puts Today, Inbox, Map,
-   Activity (Chat where it is set up) and the cards one tap away. App leaves it out while a card
+   The Hub group lives in the menu, which a phone keeps shut. This bar puts Today, Needs you and Work,
+   then More (Roadmap, Activity, Chat where it is set up, Library) and Search, one tap away. App leaves it out while a card
    is open, where the reader needs the height. It stays put when the header slides away. */
 .hub-tabs { display: none; }
 @media (max-width: 640px) {

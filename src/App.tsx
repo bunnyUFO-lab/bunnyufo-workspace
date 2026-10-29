@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, canonicalHubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -48,13 +48,20 @@ const sortPins = (cards: WorkspaceCard[]) =>
 /** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. */
 const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
+/** The route in the address. An old Hub screen name (`inbox`, `board`) is rewritten in place to the new one, so the bar shows it. */
+function readRoute(): Route {
+  const canonical = canonicalHubHash()
+  if (canonical) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + canonical)
+  return parseHash()
+}
+
 export default function App() {
   const { data, offline, lastSync } = useWorkspace()
   // Pin, reorder and archive are offered wherever something can write them: the local
   // service, or a published site running the write API. Everywhere else the cards stay
   // read-only, which is what a site without that API has always been.
   const canWrite = useCanWrite()
-  const [route, setRoute] = useState<Route>(parseHash)
+  const [route, setRoute] = useState<Route>(readRoute)
   // The Hub's one `/today` poll: the sidebar badge, the phone's tab bar and the Today screen all read it.
   const today = useHubData<Today>(host.hub ? '/today' : null)
   const needsYou = today.data?.counts.needsYou ?? 0
@@ -102,7 +109,7 @@ export default function App() {
     // Both halves of the address at once. Back fires popstate before hashchange, so updating
     // only the project here leaves one render where the filter has moved but the open card has
     // not — long enough for the effect below to rewrite the entry you just came back to.
-    const onPop = () => { setChosenProject(pathId()); setRoute(parseHash()) }
+    const onPop = () => { setChosenProject(pathId()); setRoute(readRoute()) }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -137,7 +144,7 @@ export default function App() {
   useEffect(() => {
     // Opening a card puts the menu away when the menu is the whole screen — otherwise you
     // land on the card behind a menu you have to dismiss by hand.
-    const onHash = () => { setRoute(parseHash()); if (overlayMenu()) setCollapsed(true) }
+    const onHash = () => { setRoute(readRoute()); if (overlayMenu()) setCollapsed(true) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -686,7 +693,7 @@ export default function App() {
           )}
         </div>
       </main>
-      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} />}
+      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} onSearch={() => { setCollapsed(false); window.setTimeout(() => searchRef.current?.focus(), 0) }} />}
     </div>
     </TodayContext.Provider>
   )

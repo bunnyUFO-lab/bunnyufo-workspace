@@ -119,7 +119,7 @@ export default function ReviewView({ route }: { route: string }) {
     return (
       <>
         <p className="hub-empty" role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>
-        {error && <p><a className="hub-btn" href={hubHash('inbox')}>Back to the Inbox</a></p>}
+        {error && <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>}
       </>
     )
   }
@@ -152,7 +152,7 @@ export default function ReviewView({ route }: { route: string }) {
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
       <div className="hub-review-head">
-        <p><a className="hub-btn" href={hubHash('inbox')} data-back-top>‹ Inbox</a></p>
+        <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
         <div className="hub-top">
           <h2>{detail.title}</h2>
           <span>
@@ -221,7 +221,7 @@ export default function ReviewView({ route }: { route: string }) {
                 : (
                   <>
                     <p className="hub-muted" data-done-hint>Mark done hides this review from Needs you. It does not approve or merge anything.</p>
-                    <ReviewActions item={item} links={false} onDone={() => { setFlash('Marked done. It is gone from Needs you.'); window.location.replace(hubHash('inbox')) }} />
+                    <ReviewActions item={item} links={false} onDone={() => { setFlash('Marked done. It is gone from Needs you.'); window.location.replace(hubHash('needs')) }} />
                   </>
                 )}
           </section>
@@ -244,7 +244,7 @@ export default function ReviewView({ route }: { route: string }) {
           ) : <p className="hub-muted">Pick a file to read it here.</p>}
         </section>}
       </div>
-      <p><a className="hub-btn" href={hubHash('inbox')}>Back to the Inbox</a></p>
+      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
     </div>
   )
 }

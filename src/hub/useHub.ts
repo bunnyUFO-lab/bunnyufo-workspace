@@ -49,7 +49,7 @@ export function useHubData<T>(path: string | null): HubData<T> {
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') run() }, 60_000)
     const onVisible = () => { if (document.visibilityState === 'visible') run() }
     document.addEventListener('visibilitychange', onVisible)
-    // A write from any screen refreshes every Hub read at once (the Inbox badge, Today's count).
+    // A write from any screen refreshes every Hub read at once (the Needs you badge, Today's count).
     window.addEventListener(HUB_WROTE, run)
     return () => { stopped = true; window.removeEventListener(HUB_WROTE, run); controller.abort(); window.clearInterval(timer); window.clearTimeout(retry); document.removeEventListener('visibilitychange', onVisible) }
   }, [path, tick])

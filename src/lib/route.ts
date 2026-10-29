@@ -2,7 +2,7 @@
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-export const HUB_SCREENS = ['today', 'inbox', 'ask', 'checklist', 'review', 'map', 'board', 'activity', 'sketch', 'chat'] as const
+export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'activity', 'sketch', 'chat'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */
@@ -19,11 +19,25 @@ export interface Route {
 
 const safeDecode = (value: string) => { try { return decodeURIComponent(value) } catch { return value } }
 
+/** Old names of Hub screens, from before the rename: links in Discord history and bookmarks keep working. */
+export const HUB_ALIASES: Record<string, HubScreen> = { inbox: 'needs', board: 'work', roadmap: 'map' }
+
+const isAlias = (raw: string) => Object.prototype.hasOwnProperty.call(HUB_ALIASES, raw)
+const hubScreenOf = (raw: string) => (isAlias(raw) ? HUB_ALIASES[raw] : raw)
+
+/** The same address with an old screen name swapped for the new one, or null when it already uses the new name. */
+export function canonicalHubHash(): string | null {
+  const match = /^#\/?~hub\/([^/?#]+)(.*)$/.exec(window.location.hash)
+  if (!match || !isAlias(match[1])) return null
+  return `#/~hub/${HUB_ALIASES[match[1]]}${match[2]}`
+}
+
 export function parseHash(): Route {
   const raw = window.location.hash.replace(/^#\/?/, '')
   if (!raw) return { id: null, step: -1 }
   if (raw === '~hub' || raw.startsWith('~hub/')) {
-    const [, screen, ...rest] = raw.split('/')
+    const [, first, ...rest] = raw.split('/')
+    const screen = hubScreenOf(first)
     const known = (HUB_SCREENS as readonly string[]).includes(screen) ? screen as HubScreen : 'today'
     const id = known === screen ? safeDecode(rest.join('/')) : ''
     return { id: null, step: -1, hub: { screen: known, ...(id ? { id } : {}) } }
@@ -61,8 +75,8 @@ export function reviewHash(id: string, file?: string): string {
   return file ? `${base}/${file.split('/').map(encodeURIComponent).join('/')}` : base
 }
 
-/** The screen the Hub's navigation marks as current: an Ask or a review is opened from the Inbox, so the Inbox stays lit. A checklist is the same. */
-export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' ? 'inbox' : screen ?? null)
+/** The screen the Hub's navigation marks as current: an Ask or a review is opened from Needs you, so Needs you stays lit. A checklist is the same. */
+export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' ? 'needs' : screen ?? null)
 
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>

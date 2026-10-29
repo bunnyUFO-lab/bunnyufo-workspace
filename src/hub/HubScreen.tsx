@@ -23,11 +23,11 @@ export default function HubScreen({ route }: { route: HubRoute }) {
         </div>
       )}
       {route.screen === 'today' && <Today />}
-      {route.screen === 'inbox' && <Inbox filter={route.id} />}
+      {route.screen === 'needs' && <Inbox filter={route.id} />}
       {route.screen === 'ask' && (route.id ? <AskView key={route.id} id={route.id} /> : <Inbox filter="asks" />)}
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Inbox filter="todo" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Inbox filter="reviews" />)}
-      {route.screen === 'board' && <Board project={route.id} />}
+      {route.screen === 'work' && <Board project={route.id} />}
       {route.screen === 'activity' && <Activity filter={route.id} />}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}

@@ -38,7 +38,7 @@ export default function ChecklistView({ id }: { id: string }) {
     return (
       <>
         <p className="hub-empty" role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>
-        {error && <p><a className="hub-btn" href={hubHash('inbox')}>Back to the Inbox</a></p>}
+        {error && <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>}
       </>
     )
   }
@@ -81,7 +81,7 @@ export default function ChecklistView({ id }: { id: string }) {
     try {
       await hubPost(`/checklists/${encodeURIComponent(detail!.id)}/submit`, note.trim() ? { note: note.trim() } : {})
       setFlash('Submitted. The agent sees it at its next session.')
-      window.location.replace(hubHash('inbox'))
+      window.location.replace(hubHash('needs'))
     } catch (failure) {
       if (failure instanceof HubError && failure.status === 409) reload()
       setProblem(failure instanceof Error ? failure.message : 'That did not send.')
@@ -97,7 +97,7 @@ export default function ChecklistView({ id }: { id: string }) {
 
   return (
     <div className="hub-cl" data-state={detail.state}>
-      <p><a className="hub-btn" href={hubHash('inbox')} data-back-top>‹ Inbox</a></p>
+      <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
         <span><span className="hub-pill">{text(detail.project)}</span>{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
@@ -181,7 +181,7 @@ export default function ChecklistView({ id }: { id: string }) {
           {detail.state === 'picked-up' && detail.pickup && <p className="hub-muted">Picked up {ago(detail.pickup.at)}{text(detail.pickup.host) ? ` on ${text(detail.pickup.host)}` : ''}.</p>}
         </section>
       )}
-      <p><a className="hub-btn" href={hubHash('inbox')}>Back to the Inbox</a></p>
+      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
     </div>
   )
 }

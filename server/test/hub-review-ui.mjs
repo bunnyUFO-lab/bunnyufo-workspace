@@ -66,7 +66,7 @@ try {
 
   const page = await open({ width: 1280, height: 800 });
   await stubWorld(page);
-  await page.goto(`${fixture.url}#/~hub/inbox/reviews`);
+  await page.goto(`${fixture.url}#/~hub/needs/reviews`);
 
   step('the row text is a link to the review, and the row keeps its buttons');
   const row = page.locator('.hub-row', { hasText: 'Detail probe' });
@@ -105,18 +105,18 @@ try {
   assert.equal(await view.locator('[data-section="try"] a', { hasText: 'Open the build' }).getAttribute('target'), '_blank');
   await noSideways(page, 'review view at 1280 px');
 
-  step('a review has a top link to the Inbox, a hint on Mark done, and the row button says what it does');
+  step('a review has a top link to Needs you, a hint on Mark done, and the row button says what it does');
   assert.equal(await page.locator('[data-legacy]').count(), 0, 'A review with fields is not old.');
   assert.equal(await view.locator('[data-done-hint]').isVisible(), true);
   assert.match(await page.locator('.hub-review-reader').innerText(), /Pick a file to read it here\./);
   await page.locator('[data-back-top]').waitFor();
-  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/inbox');
-  assert.equal(await page.locator('[data-hub-link="inbox"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Inbox current.');
+  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs');
+  assert.equal(await page.locator('[data-hub-link="needs"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Needs you current.');
   await go(page, `#/~hub/review/${partFile}`);
   await page.locator('[data-section="status"]').waitFor();
   assert.equal(await page.locator('[data-legacy]').count(), 0, 'Verdicts only: not old.');
   await page.getByText('No screenshots came with this item.').waitFor();
-  await go(page, '#/~hub/inbox/reviews');
+  await go(page, '#/~hub/needs/reviews');
   assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('button', { hasText: 'Mark done' }).getAttribute('title'), 'Hide from Needs you. Does not approve or merge.');
   await go(page, `#/~hub/review/${file}`);
   await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
@@ -158,10 +158,10 @@ try {
   await page.getByRole('heading', { name: 'Brief heading' }).waitFor();
   await go(page, '#/~hub/review/nope.json');
   await page.getByText('This review is not in the last 7 days.').waitFor();
-  assert.equal(await page.locator('a', { hasText: 'Back to the Inbox' }).getAttribute('href'), '#/~hub/inbox');
+  assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs');
 
   step('an old event with only a title opens with honest empty states and a working Mark done');
-  await go(page, '#/~hub/inbox/reviews');
+  await go(page, '#/~hub/needs/reviews');
   await page.locator('.hub-row', { hasText: 'Old probe' }).locator('[data-review-open]').click();
   await page.locator('.hub-review h2', { hasText: 'Old probe' }).waitFor();
   await page.locator('[data-legacy]').waitFor();
@@ -175,11 +175,11 @@ try {
   const before = await page.evaluate(() => history.length);
   await page.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('[data-marked-done]', { hasText: 'Marked done.' }).waitFor();
-  assert.equal(await page.evaluate(() => location.hash), '#/~hub/inbox', 'Mark done goes back to the Inbox.');
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/needs', 'Mark done goes back to Needs you.');
   assert.equal(await page.evaluate(() => history.length), before, 'It replaced the entry; Back does not reopen the review.');
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, oldFile);
-  await go(page, '#/~hub/inbox/reviews');
+  await go(page, '#/~hub/needs/reviews');
   await page.locator('.hub-row', { hasText: 'Detail probe' }).waitFor();
   assert.equal(await page.locator('.hub-row', { hasText: 'Old probe' }).count(), 0, 'The row is gone.');
   await go(page, `#/~hub/review/${oldFile}`);
@@ -218,7 +218,7 @@ try {
 
   step('a blocked row has Mark done: it hides the row for good');
   const blockedFile = fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 60000), session: 'sess-stale-ui', title: 'Stale blocked session' }));
-  await go(page, '#/~hub/inbox/blocked');
+  await go(page, '#/~hub/needs/blocked');
   const stale = page.locator('.hub-row[data-blocked]', { hasText: 'Stale blocked session' });
   await stale.waitFor();
   await stale.locator('button', { hasText: 'Mark done' }).click();
@@ -235,11 +235,11 @@ try {
   await phone.goto(`${fixture.url}#/~hub/review/${file}`);
   await phone.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
   await phone.waitForFunction(() => [...document.querySelectorAll('[data-pair] img')].every(image => image.complete));
-  assert.equal(await phone.locator('[data-hub-tab="inbox"]').getAttribute('aria-current'), 'page', 'Inbox is the current tab on a review.');
+  assert.equal(await phone.locator('[data-hub-tab="needs"]').getAttribute('aria-current'), 'page', 'Needs you is the current tab on a review.');
   assert.equal(await phone.locator('[data-hub-tab="more"].active').count(), 0, 'More is not active.');
   const tabStyle = key => phone.locator(`[data-hub-tab="${key}"]`).evaluate(node => { const style = getComputedStyle(node); return `${style.color}|${style.fontWeight}`; });
-  assert.equal(await tabStyle('more'), await tabStyle('map'), 'More looks like the other idle tabs.');
-  assert.notEqual((await tabStyle('more')).split('|')[0], (await tabStyle('inbox')).split('|')[0], 'The Inbox tab is lit and More is not.');
+  assert.equal(await tabStyle('more'), await tabStyle('work'), 'More looks like the other idle tabs.');
+  assert.notEqual((await tabStyle('more')).split('|')[0], (await tabStyle('needs')).split('|')[0], 'The Needs you tab is lit and More is not.');
   await noSideways(phone, 'review view at 390 px');
   const wide = await phone.evaluate(() => [...document.querySelectorAll('.hub-review img')].filter(image => image.getBoundingClientRect().right > innerWidth + 0.5).length);
   assert.equal(wide, 0, 'No image is wider than the screen.');
@@ -257,7 +257,7 @@ try {
   await noSideways(phone, 'review view at 375 px');
 
   step('a review whose url is a card link: Open card in the head, nothing under Pull requests, no "posted before" note');
-  await go(page, '#/~hub/inbox/reviews');
+  await go(page, '#/~hub/needs/reviews');
   assert.equal(await page.locator('.hub-row', { hasText: 'Card link probe' }).locator('a.hub-btn').innerText(), 'Open card');
   assert.equal(await page.locator('.hub-row', { hasText: 'Detail probe' }).locator('a.hub-btn', { hasText: 'Open link' }).innerText(), 'Open link', 'A link that is no card keeps its label.');
   await go(page, `#/~hub/review/${cardLinkFile}`);
