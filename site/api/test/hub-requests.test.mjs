@@ -339,13 +339,13 @@ test('Mark done: an at-pc request gets a manual result, once; any other request 
   } finally { await close(); }
 });
 
-test('POST /hub/requests keeps the legacy body, refuses a preset for now, and the report is served', async () => {
+test('POST /hub/requests keeps the legacy body, refuses an unknown preset, and the report is served', async () => {
   const { fake, get, post, put, close } = await fixture();
   try {
     const made = await post('/hub/requests', { project: 'probe', text: 'Add a token vault for the secret password', when: 'next-sprint' });
     assert.equal(made.status, 201);
     assert.deepEqual(Object.keys(fake.json(`sections/inbox/requests/${made.body.id}/request.json`)).sort(), ['by', 'createdAt', 'id', 'project', 'text', 'when']);
-    assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', preset: 'research' })).status, 400);
+    assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', preset: 'no-such-preset' })).status, 400);
 
     const id = rid('rep');
     put(preset(id), { 'report.md': '# Findings\n\nSome text.\n' });

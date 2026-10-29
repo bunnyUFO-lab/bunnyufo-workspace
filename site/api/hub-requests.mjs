@@ -7,6 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
+import { RULES, presetOf, presetsForClient, renderBrief, route } from './presets.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, validId, validProject } from './hub-model.mjs';
 
 /** The needs a request may name. */
@@ -100,10 +101,12 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param putCreateOnly writes a file with `ifNoneMatch: '*'`, throwing the given error on a 412
  * @param listFolders   `(root, at) → Map<id, Set<file name>>` for this month and the one before
  * @param pool          bounded parallel map
+ * @param projectRepo  `(project) → 'owner/name' | undefined`: the repo the project's section tracks
+ * @param cloudRepos   `() → string[]`: repos with a cloud routine (none until cloud runs exist)
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {} }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [] }) {
   const live = { hermesLive: () => false, pcBusy: () => false, ...hooks };
   const clash = message => fail(message, 409);
 
@@ -196,28 +199,70 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     };
   }
 
-  /** `POST /hub/requests`: the legacy body (`project`, `text`, `when`, `drawing?`). */
+  /**
+   * `POST /hub/requests`. The legacy body is `{ project, text, when, drawing? }`. With a `preset` it is
+   * `{ project, text, title?, preset, repo?, needs?, target?, doneWhen?, replaces?, drawing? }`: the request is
+   * the owner's (`origin.kind: owner`, set here and never taken from the body) and carries the proposed target.
+   */
   async function createRequest(data, user, at) {
-    const clean = checkRequest(data, { fromOwner: true });
-    if (clean.preset) throw fail('Presets are not available yet.', 400);
+    const { origin: _origin, followUp: _followUp, ...body } = data ?? {};
+    const clean = checkRequest(body, { fromOwner: true });
+    const preset = clean.preset ? presetOf(clean.preset) : null;
+    if (clean.preset && !preset) throw fail('There is no such preset.', 400);
+    if (preset && !user) throw fail('Sign in to send a job.', 401);
+    let proposal = {};
+    if (preset) {
+      const repo = clean.repo ?? (preset.fields.includes('repo') ? await projectRepo(clean.project) : undefined);
+      const needs = clean.needs ?? (preset.needs.length ? preset.needs : undefined);
+      if (clean.target && clean.target !== 'at-pc' && !preset.targets.includes(clean.target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
+      const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: cloudRepos() });
+      proposal = {
+        ...(clean.title ? { title: clean.title } : {}), preset: preset.id, ...(repo ? { repo } : {}), ...(needs ? { needs } : {}),
+        target: clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}),
+        origin: { kind: 'owner', name: user }, ...(clean.replaces ? { replaces: clean.replaces } : {}),
+      };
+      proposal.why = clean.target ? 'you chose it' : routed.why;
+    }
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const id = newRequestId(clean.project, clean.text, at);
       const conflict = fail('Could not find a free id; try again.', 409);
       try {
-        const request = { id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, when: clean.when };
+        const { why, ...stored } = proposal;
+        const request = { id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }) };
         if (checked) {
           await putCreateOnly(`requests/${id}/request.excalidraw`, checked.sceneText, 'application/json', conflict);
           await putCreateOnly(`requests/${id}/request.png`, checked.pngBuffer, 'image/png', conflict);
           request.drawing = { excalidraw: 'request.excalidraw', png: 'request.png' };
         }
-        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', conflict);
-        return { status: 201, body: { id } };
+        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}
+`, 'application/json', conflict);
+        return { status: 201, body: { id, ...(preset ? { target: request.target, why } : {}) } };
       } catch (error) {
         if (error !== conflict || attempt === 2) throw error;
       }
     }
     throw fail('Could not find a free id; try again.', 409);
+  }
+
+  /** `GET /hub/presets`, `/hub/presets/route?preset=&project=&repo=` and `/hub/presets/brief?request=<id>`. */
+  async function presetRoutes(path, query, at) {
+    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES };
+    if (path === '/hub/presets/route') {
+      const preset = presetOf(query.get('preset'));
+      if (!preset) throw fail('There is no such preset.', 400);
+      const project = query.get('project') ?? '';
+      if (!validProject(project)) throw fail('Name the project.', 400);
+      const repo = query.get('repo') || (preset.fields.includes('repo') ? await projectRepo(project) : undefined);
+      return route({ preset, project, repo: repo || undefined, cloudRepos: cloudRepos() });
+    }
+    if (path === '/hub/presets/brief') {
+      const { request } = await loadOne(query.get('request') ?? '', at);
+      const preset = presetOf(request.preset);
+      if (!preset || request.target !== 'at-pc') throw fail('Only a request you start at the PC has a brief to copy.', 400);
+      return { brief: renderBrief({ preset, request }) };
+    }
+    throw fail('Not found', 404);
   }
 
   /** `POST /hub/requests/:id/decline { reason? }`: only a request nobody has acted on (open, proposed or expired). */
@@ -253,5 +298,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return actions[action](id, raw, user, at);
   }
 
-  return { loadRequests, detail: requestDetail, create: createRequest, post, loadOne, stateOf, hooks: live };
+  return { loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, loadOne, stateOf, hooks: live };
 }
