@@ -60,8 +60,12 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
-      {model?.meta && project && model.wayfinder && <WayfinderHeader key={project} project={project} wayfinder={model.wayfinder} />}
-      {model?.meta && project && <MapView key={project} model={model} project={project} nodeId={nodeId} />}
+      {model?.meta && project && (
+        <Fragment key={project}>
+          {model.wayfinder && <WayfinderHeader project={project} wayfinder={model.wayfinder} />}
+          <MapView model={model} project={project} nodeId={nodeId} />
+        </Fragment>
+      )}
     </>
   )
 }

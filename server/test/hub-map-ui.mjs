@@ -61,6 +61,15 @@ const DESKTOP_EXPANDED = '67b5f7049a9278bbe20b96a1965930506b3f47be60bb20261b2942
 const DESKTOP_EXPANDED_NO_SPRINTS = '850cea9062b44b20e07c0196d481e4ff266643764352d44c887fe24e77d46ccc';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
+// The Wayfinder row of the project just opened: waits for the map under it (they mount together), then requires exactly one row. A second row is a double mount, never a timing slip.
+const wayfinder = async (page, what) => {
+  await page.locator('.hub-map-wrap').waitFor();
+  const rows = page.locator('.hub-wayfinder');
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 1, `${what}: the Wayfinder row is mounted once.`);
+  return rows;
+};
+
 try {
 {
   step('a phone held upright reads top to bottom: the box is vertical and "now" is below the first milestone');
@@ -225,7 +234,7 @@ try {
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');
-  await desk.locator('.hub-wayfinder').waitFor();
+  await wayfinder(desk, 'Desktop');
   assert.equal(await desk.locator('.hub-wayfinder-text').innerText(), 'A tidy Roadmap that tells the owner where to go next, and why, in one line.');
   assert.equal(await desk.locator('.hub-wayfinder-count').innerText(), '3 decisions');
   assert.equal(await desk.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true', 'The list starts open on a wide box.');
@@ -241,8 +250,8 @@ try {
 
   step('the Wayfinder row at phone width: one line, collapsed, the map keeps the rest');
   await go(phone, '#/~hub/map/wayfind');
-  await phone.locator('.hub-wayfinder').waitFor();
-  const row = () => phone.locator('.hub-wayfinder').boundingBox();
+  const rows = await wayfinder(phone, 'Phone');
+  const row = () => rows.boundingBox();
   assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
   const collapsed = await row();
