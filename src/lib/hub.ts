@@ -137,7 +137,7 @@ export interface Today {
 export interface AskOption { id: string; label: string; image?: string }
 export type DecisionVerdict = 'approve' | 'change' | 'skip'
 export interface AskDecision { id: string; text: string; detail?: string }
-export interface AskAnswer { at: string; by: string; via?: string; choice?: string; note?: string; drawing?: { excalidraw: string; png: string }; decisions?: Record<string, { verdict: DecisionVerdict; note?: string }> }
+export interface AskAnswer { at: string; by: string; via?: string; help?: HelpAttached; choice?: string; note?: string; drawing?: { excalidraw: string; png: string }; decisions?: Record<string, { verdict: DecisionVerdict; note?: string }> }
 export type AskState = 'open' | 'snoozed' | 'answered' | 'picked-up' | 'cancelled' | 'expired'
 export interface Ask {
   id: string
@@ -195,7 +195,7 @@ export interface Checklist {
   build?: string
   platform?: string
   lookFor?: string
-  submit?: { at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
+  submit?: { help?: HelpAttached; at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
   pickup?: { at: string; host: string; session?: string }
   cancel?: { at: string; by: string }
   files: string[]
@@ -310,9 +310,15 @@ export const sessionUrl = (value: string | undefined): string | undefined => (va
 export const appUrl = (value: string | undefined): string | undefined => (value && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(value) ? value : undefined)
 
 export interface ChatImage { file: string; type: string; width: number; height: number }
-export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[]; images?: ChatImage[]; run?: string; tools?: string[] }
+/** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
+export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[] }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout }
+/** What Hermes will be given for an item, as the preview route shows it. */
+export interface HelpPreview { about: ChatAbout; title: string; text: string; pictures: { path: string; label?: string }[] }
+/** The excerpt an answer or a submission carries when the owner attached a help chat. */
+export interface HelpAttached { chat: string; lines: number; excerpt: string }
 /** A tool Hermes is using (or used) during a turn. */
 export interface ChatTool { id: string; name: string; summary?: string; state: 'running' | 'done' | 'failed' }
 /** An approval Hermes asked for during a turn; the answer goes to `/hub/hermes-approvals/<id>/answer`. */
 export interface ChatApproval { id: string; title: string; command?: string; description?: string; choices: string[]; expiresAt: string }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number }

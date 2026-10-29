@@ -526,8 +526,18 @@ export function describeItem(item, now) {
   }
 }
 
+export const HELP_CHAT_RE = /^\d{8}-[a-z0-9]{6}$/;
+
+/** The shape of `help` on an answer or a submission: `{ chat: <conversation id> }`, or nothing. Returns the chat id or null; the chat itself is checked against the item by the caller. */
+export function checkHelp(help) {
+  if (help === undefined || help === null) return null;
+  if (typeof help !== 'object' || Array.isArray(help) || typeof help.chat !== 'string' || !HELP_CHAT_RE.test(help.chat)) throw Object.assign(new Error('help is { "chat": "<conversation id>" }.'), { status: 400 });
+  return help.chat;
+}
+
 /** What a posted answer must hold, checked against the Ask. Throws a 400 with a plain reason. */
 export function checkAnswer(ask, data) {
+  checkHelp(data?.help);
   const fail = message => Object.assign(new Error(message), { status: 400 });
   const { choice, note, drawing, decisions } = data ?? {};
   const asked = validDecisions(ask);

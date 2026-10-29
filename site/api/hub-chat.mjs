@@ -16,10 +16,11 @@
 import { Readable } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
-import { IMAGE_FILE, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
+import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
+import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
 const MB = 1024 * 1024;
-const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
+export const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
 const MAX_FILE = 1024 * 1024;
 const HISTORY_IMAGE_BUDGET = 6 * MB;
 const NO_PICTURE = '[An earlier picture is not included.]';
@@ -32,7 +33,7 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now, hermesRuns = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
@@ -40,6 +41,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   const titles = new Map();   // etag → { title, count }
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+
+  /** The `about` of a stored context line, cut to what the page may show. */
+  const helpAbout = about => (about && HELP_KINDS.includes(about.kind) && typeof about.id === 'string'
+    ? { kind: about.kind, id: about.id, ...(typeof about.step === 'string' && /^\d{2}$/.test(about.step) ? { step: about.step } : {}), title: clip(about.title, 120) }
+    : null);
 
   async function list() {
     const { objects } = await bucket.list(`${key('chat/x.jsonl').slice(0, -'x.jsonl'.length)}`);
@@ -52,11 +58,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (!info) {
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);
         const first = lines.find(line => line.role === 'user');
-        info = { title: clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length };
+        const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;   // help:
+        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}) };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
-      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count });
+      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}) });
     }
     return conversations;
   }
@@ -100,9 +107,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    */
   async function historyMessages(id, lines, spent) {
     let left = HISTORY_IMAGE_BUDGET - spent;
-    const messages = lines.map(line => ({ role: line.role, content: line.text }));
+    const messages = lines.map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text }));   // help: the context line goes as the first user message
     for (let at = lines.length - 1; at >= 0; at -= 1) {
-      const pictures = lines[at].role === 'user' && Array.isArray(lines[at].images) ? lines[at].images.filter(image => IMAGE_FILE.test(String(image?.file))) : [];
+      const pictures = (lines[at].role === 'user' || lines[at].role === 'context') && Array.isArray(lines[at].images) ? lines[at].images.filter(image => IMAGE_FILE.test(String(image?.file))) : [];
       if (!pictures.length) continue;
       const parts = lines[at].text ? [{ type: 'text', text: lines[at].text }] : [];
       for (const image of pictures) {
@@ -115,6 +122,48 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     return messages;
   }
 
+  /** help: a file of the inbox, or null. */
+  async function readInbox(rel) {
+    try {
+      const object = await bucket.get(key(rel));
+      return Buffer.from(await new Response(object.body).arrayBuffer());
+    } catch { return null; }
+  }
+
+  /** help: the server-built context for an `about` of `{ kind, id, step? }`: 400 for a bad shape, 404 for an item that is gone. */
+  async function helpContext(about) {
+    if (!about || typeof about !== 'object' || Array.isArray(about)) throw fail('about is { kind, id, step? }.');
+    const { kind, id, step } = about;
+    if (!HELP_KINDS.includes(kind)) throw fail('about.kind is ask, checklist, review or blocked.');
+    if (typeof id !== 'string' || !id || id.length > 200) throw fail('about.id is the id of the item.');
+    if (step !== undefined && step !== null && step !== '-' && step !== '' && !(typeof step === 'string' && /^\d{2}$/.test(step))) throw fail('about.step is a step number like "03".');
+    if (!loadHelpItem) throw fail('Help is not available on this host.', 503);
+    const detail = await loadHelpItem(kind, id, now());
+    return buildHelpContext(kind, detail, { id, step: typeof step === 'string' && step !== '-' ? step : undefined, readFile: readInbox, fail });
+  }
+
+  /** help: a context picture as the Hub stores it, a create-only file of the new conversation. */
+  async function putContextPictures(id, pictures) {
+    const stored = [];
+    for (const picture of pictures) {
+      const file = `${randomId(10)}.${picture.ext}`;
+      await bucket.put(key(`chat/${id}/${file}`), picture.buffer, { contentType: picture.type, ifNoneMatch: '*' });
+      stored.push({ file, type: picture.type, width: picture.width, height: picture.height });
+    }
+    return stored;
+  }
+
+  /** help: the chat an answer attaches. 404 when it is gone, 400 when it is not about this item. */
+  async function excerptOf(chatId, { kind, id }) {
+    if (typeof chatId !== 'string' || !CHAT_ID.test(chatId)) throw fail('No such conversation.', 404);
+    const got = await fresh(`chat/${chatId}.jsonl`);
+    if (!got) throw fail('No such conversation.', 404);
+    const lines = parse(got.text);
+    const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;
+    if (!about || about.kind !== kind || about.id !== id) throw fail('That chat is not about this item.');
+    return { chat: chatId, ...helpExcerpt(lines) };
+  }
+
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const text = typeof data.text === 'string' ? data.text.trim() : '';
@@ -122,7 +171,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if ((!text && !pictures.length) || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
     let id = data.conversation;
     let history = [];
-    if (id !== undefined && id !== null && id !== '') {
+    const asking = id !== undefined && id !== null && id !== '';
+    if (data.about !== undefined && data.about !== null && asking) throw fail('about opens a new conversation; send it without conversation.');   // help:
+    const context = asking ? null : (data.about !== undefined && data.about !== null ? await helpContext(data.about) : null);   // help:
+    if (asking) {
       if (typeof id !== 'string' || !CHAT_ID.test(id)) throw fail('No such conversation.', 404);
       const got = await fresh(`chat/${id}.jsonl`);
       if (!got) throw fail('No such conversation.', 404);
@@ -134,9 +186,27 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const current = pictures.length
       ? [...(text ? [{ type: 'text', text }] : []), ...pictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))]
       : text;
-    const spent = pictures.reduce((sum, picture) => sum + picture.buffer.length, 0);
-    const runTurn = runsOn && !pictures.length;
-    const messages = runTurn ? [] : [...await historyMessages(id, history.slice(-20), spent), { role: 'user', content: current }];
+    if (context) {   // help: the context pictures yield to the owner's own, so one message stays within the usual limits
+      let room = MAX_IMAGES - pictures.length;
+      let bytes = MAX_TOTAL_BYTES - pictures.reduce((sum, picture) => sum + picture.buffer.length, 0);
+      const kept = context.pictures.filter(picture => { if (room > 0 && picture.buffer.length <= bytes) { room -= 1; bytes -= picture.buffer.length; return true; } return false; });
+      if (kept.length < context.pictures.length) {
+        context.text += `
+(${context.pictures.length - kept.length} of the item's pictures are not included in this turn.)`;
+        context.pictures = kept;
+      }
+    }
+    const contextPictures = context?.pictures ?? [];
+    const spent = [...pictures, ...contextPictures].reduce((sum, picture) => sum + picture.buffer.length, 0);
+    // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.
+    const recent = history[0]?.role === 'context' ? [history[0], ...history.slice(1).slice(-20)] : history.slice(-20);
+    // Runs carry text only: a turn that has to carry a picture (its own, or the pictures of a help chat's context) stays on completions.
+    const runTurn = runsOn && !pictures.length && !contextPictures.length && !(recent[0]?.role === 'context' && recent[0].images?.length);
+    const contextMessage = context && {   // help: a new help chat sends its context as the first user message
+      role: 'user',
+      content: contextPictures.length ? [{ type: 'text', text: context.text }, ...contextPictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))] : context.text,
+    };
+    const messages = runTurn ? [] : [...(contextMessage ? [contextMessage] : []), ...await historyMessages(id, recent, spent), { role: 'user', content: current }];
     const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
     const started = Date.now();
 
@@ -153,7 +223,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let runId = null;
     if (runTurn) {
       // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
-      const earlier = history.slice(-20).map(line => ({ role: line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+      const earlier = [...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
       try {
         ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}` }));
       } catch (error) {
@@ -275,7 +345,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const at = now().toISOString();
     const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}) };
     const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}) };
+    let contextLine = null;   // help:
     try {
+      if (context) {
+        contextLine = { role: 'context', about: context.about, text: context.text, at: new Date(started).toISOString() };
+        if (context.pictures.length) contextLine.images = await putContextPictures(id, context.pictures);
+      }
       // The pictures first, so a line never points at a missing file.
       if (pictures.length) {
         userLine.images = [];
@@ -285,12 +360,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           userLine.images.push({ file, type: picture.type, width: picture.width, height: picture.height });
         }
       }
-      await append(id, [userLine, ...(failure && !reply ? [] : [assistant])]);
+      await append(id, [...(contextLine ? [contextLine] : []), userLine, ...(failure && !reply ? [] : [assistant])]);
     } catch (error) {
       failure ??= 'The reply could not be saved.';
     }
     if (failure) emit('error', { error: failure });
-    else emit('done', { conversation: id, user: userLine });
+    else emit('done', { conversation: id, user: userLine, ...(contextLine ? { context: contextLine } : {}) });
     response.end();
   }
 
@@ -321,11 +396,19 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       return { chat: allowed && chatConfigured };
     },
     /** Answers the chat routes; the caller has checked that the route is one of them. */
+    /** help: the excerpt an answer carries, `{ chat, lines, excerpt }`. */
+    helpExcerpt: excerptOf,
     async handle({ request, response, method, route, user, requireRemoteUser }) {
       if (requireRemoteUser && !user) throw fail('Chat needs a signed-in user.', 401);
       if (!chatConfigured) throw fail('Chat is not set up on this host.', 503);
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list() });
       let match;
+      // help: the preview of what Hermes will be given for an item; the context is rebuilt on send.
+      if (method === 'GET' && (match = /^\/hub\/chat\/about\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(route))) {
+        const [kind, step, itemId] = match.slice(1).map(part => { try { return decodeURIComponent(part); } catch { throw fail('Bad address.'); } });
+        const built = await helpContext({ kind, id: itemId, step });
+        return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
+      }
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list() });
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);

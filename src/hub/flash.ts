@@ -11,3 +11,8 @@ export interface Handoff { verb: string; /** Plain words after the verb, and a l
 let handoff: Handoff | null = null
 export const setHandoff = (value: Handoff) => { handoff = value }
 export const takeHandoff = (): Handoff | null => { const value = handoff; handoff = null; return value }
+
+/** The text Get help leaves for the composer of the help chat it opens: owner-side, editable, never sent by itself. */
+let helpDraft = ''
+export const setHelpDraft = (text: string) => { helpDraft = text }
+export const takeHelpDraft = () => { const text = helpDraft; helpDraft = ''; return text }

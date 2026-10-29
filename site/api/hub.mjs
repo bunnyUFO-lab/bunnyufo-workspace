@@ -15,7 +15,7 @@ import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
   askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
-  randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
@@ -501,11 +501,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const playtest = checklist.kind === 'playtest';
     if (!playtest && ['rating', 'verdict', 'issues'].some(name => data[name] !== undefined)) throw fail('Only a playtest takes a rating.');
     const report = playtest ? checkPlaytestSubmit(checklist, data, names) : null;
+    const help = await helpFor(data.help, 'checklist', id);
     const submit = {
       at: at.toISOString(), by: user || 'local',
       ...(typeof note === 'string' && note.trim() ? { note: note.trim() } : {}),
       done: ids.filter(item => marks.get(item)?.done), open: ids.filter(item => !marks.get(item)?.done),
       ...(report ?? {}),
+      ...(help ? { help } : {}),
     };
     try {
       await bucket.put(key(`checklists/${id}/submit.json`), `${JSON.stringify(submit, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
@@ -583,6 +585,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     cache.delete(key(`asks/${id}/answer.json`));
   }
 
+  /** help: the attached help chat's excerpt, read from the stored chat and checked to be about this item; null when none is attached. */
+  async function helpFor(raw, kind, id) {
+    const chatId = checkHelp(raw);
+    if (!chatId) return null;
+    const { chat: name, lines, excerpt } = await chat.helpExcerpt(chatId, { kind, id });
+    return { chat: name, lines, excerpt };
+  }
+
   async function answerAsk(id, data, user, at, response) {
     if (await exists(`asks/${id}/answer.json`)) throw await alreadyAnswered(id);
     const { ask, names } = await askFolder(id);
@@ -592,6 +602,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       throw fail(state === 'expired' ? `This Ask is expired: it ran out at ${ask.expiresAt}.` : `This Ask is ${state.replace('-', ' ')}.`, 409);
     }
     checkAnswer(ask, data);
+    const help = await helpFor(data.help, 'ask', id);
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const answer = { at: at.toISOString(), by: user || 'local' };
     if (data.choice) answer.choice = data.choice;
@@ -607,6 +618,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       await putDrawingFile(id, 'answer.png', checked.pngBuffer, 'image/png');
       answer.drawing = { excalidraw: 'answer.excalidraw', png: 'answer.png' };
     }
+    if (help) answer.help = help;
     await writeAnswer(id, answer);
     return { status: 201, body: { state: 'answered', answer } };
   }
@@ -905,7 +917,21 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return LIMITS.small;
   };
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  /** help: the stored item a help chat is about, as its own detail route reads it. 400 for a kind that is none of the four, 404 for a missing item. */
+  async function loadHelpItem(kind, id, at) {
+    if (kind === 'ask') return askDetail(id, at);
+    if (kind === 'checklist') return checklistDetail(id);
+    if (kind === 'review') return reviewDetailFor(id, at);
+    if (kind === 'blocked') {
+      const { events } = await loadEvents(at);
+      const row = deriveEventItems(events).blocked.find(item => item.id === id);
+      if (!row) throw fail('This session is no longer blocked, or is not in the last 7 days.', 404);
+      return row;
+    }
+    throw fail('No such kind of item.');
+  }
+
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
 
   const self = {
     enabled: on,

@@ -10,6 +10,7 @@ import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
 import Md from './Md'
 import { useHubData } from './useHub'
+import GetHelp from './GetHelp'
 
 const LEG_LABEL: Record<Verdict['leg'], string> = { smoke: 'Smoke tests', review: 'Review', qa: 'QA' }
 const DOT: Record<Verdict['result'], string> = { pass: 'g', fail: 'r', noted: 'y' }
@@ -164,6 +165,7 @@ export default function ReviewView({ route }: { route: string }) {
             {detail.project && <span className="hub-pill">{detail.project}</span>}
             {detail.source && <> <span className="hub-pill">{detail.source}</span></>}
           </span>
+          <GetHelp className="hub-top-help" target={{ kind: 'review', id, label: 'review', title: detail.title }} />
         </div>
         <p className="hub-muted">Posted {ago(detail.at)}{detail.host ? ` from ${detail.host}` : ''}.</p>
         {detail.summary && <Md text={linked.text} />}

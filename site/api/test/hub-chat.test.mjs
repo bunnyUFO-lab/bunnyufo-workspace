@@ -9,7 +9,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { startFakeHermes } from './fake-hermes.mjs';
-import { requestJson } from './hub-fixtures.mjs';
+import { checklistJson, designAskJson, eventJson, requestJson, seeder } from './hub-fixtures.mjs';
 import { jpeg, solidPng, textPng } from './png.mjs';
 
 async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {}) {
@@ -403,4 +403,189 @@ test('runs on: a failed run leaves no URL or token in the error, and saved tool 
     assert.equal(saved.tools.length, 20);
     assert.ok(saved.tools.every(name => name.length <= 80));
   } finally { await many.close(); }
+});
+
+// --- Get help: a chat opened from a Needs-you item ---
+
+const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const EVIDENCE = 'evidence-02-20261029T120600000Z-abcd.png';
+
+function stepsList(fake, name = 'help-a111') {
+  const list = checklistJson({ id: `${TODAY}-probe-${name}`, now: new Date(), title: 'Finish the bot setup' });
+  const seed = seeder(fake);
+  seed.checklist(list);
+  seed.put(`checklists/${list.id}/${EVIDENCE}`, solidPng(24, 18), 'image/png');
+  return { list, seed };
+}
+
+test('a help chat stores the server-built context first, copies its pictures, and sends it as message 0 on every turn', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const { list } = stepsList(fake);
+    const first = await chat(call, { text: 'Step 02 failed', about: { kind: 'checklist', id: list.id, step: '02', text: 'FORGED BY THE BROWSER', title: 'Forged' } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const name = first.events.at(-1).data.conversation;
+    const saved = lines(fake, name);
+    assert.deepEqual(saved.map(line => line.role), ['context', 'user', 'assistant']);
+    assert.deepEqual(saved[0].about, { kind: 'checklist', id: list.id, step: '02', title: 'Finish the bot setup' });
+    assert.match(saved[0].text, /<<agent>>/);
+    assert.doesNotMatch(saved[0].text, /FORGED/);
+    assert.equal(saved[0].images.length, 1);
+    assert.ok(fake.objects.has(`sections/inbox/chat/${name}/${saved[0].images[0].file}`), 'The picture is copied into the conversation.');
+    const body = upstream.requests[0];
+    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages[0].role, 'user');
+    assert.equal(body.messages[0].content[0].type, 'text');
+    assert.match(body.messages[0].content[0].text, /Focus: step 02/);
+    assert.equal(body.messages[0].content[1].type, 'image_url');
+    assert.equal(body.messages[1].content, 'Step 02 failed');
+    assert.equal(body.model, 'hermes-agent');
+    assert.ok(!('provider' in body), 'The Hub names no provider.');
+
+    await chat(call, { conversation: name, text: 'Tried it' });
+    await chat(call, { conversation: name, text: 'Still stuck' });
+    for (const request of upstream.requests.slice(1)) {
+      assert.match(request.messages[0].content[0].text, /^\[Hub: the owner opened this chat/);
+      assert.equal(request.messages[0].content[1].type, 'image_url', 'The picture goes back from the stored copy.');
+    }
+    assert.equal(upstream.requests[2].messages.length, 6);
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.equal(listed.conversations[0].title, 'Help: Finish the bot setup');
+    assert.deepEqual(listed.conversations[0].about, { kind: 'checklist', id: list.id, step: '02', title: 'Finish the bot setup' });
+    assert.equal(listed.conversations[0].count, 7);
+  } finally { await close(); }
+});
+
+test('the context stays first after 25 more lines', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const { list } = stepsList(fake);
+    const first = await chat(call, { text: 'Hello', about: { kind: 'checklist', id: list.id } });
+    const name = first.events.at(-1).data.conversation;
+    const stored = lines(fake, name);
+    for (let n = 0; n < 25; n += 1) stored.push({ role: n % 2 ? 'assistant' : 'user', text: `old ${n}`, at: new Date().toISOString() });
+    fake.seed(`sections/inbox/chat/${name}.jsonl`, `${stored.map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+    await chat(call, { conversation: name, text: 'Latest' });
+    const sent = upstream.requests.at(-1).messages;
+    assert.equal(sent.length, 1 + 20 + 1);
+    assert.match(Array.isArray(sent[0].content) ? sent[0].content[0].text : sent[0].content, /^\[Hub: the owner opened this chat/);
+    assert.equal(sent.at(-1).content, 'Latest');
+  } finally { await close(); }
+});
+
+test('about is refused with a conversation, for an unknown kind, and for an item that is gone; the preview shows what Hermes will see', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const { list } = stepsList(fake);
+    const plain = await chat(call, { text: 'Hi' });
+    const name = plain.events.at(-1).data.conversation;
+    assert.equal((await chat(call, { conversation: name, text: 'x', about: { kind: 'checklist', id: list.id } })).status, 400);
+    assert.equal((await chat(call, { text: 'x', about: { kind: 'secrets', id: list.id } })).status, 400);
+    assert.equal((await chat(call, { text: 'x', about: { kind: 'checklist', id: `${TODAY}-probe-gone-zzzz` } })).status, 404);
+    assert.equal((await chat(call, { text: 'x', about: { kind: 'checklist', id: list.id, step: 'three' } })).status, 400);
+    assert.equal(upstream.requests.length, 1, 'None of the refusals reached Hermes.');
+
+    const preview = await call('GET', `/hub/chat/about/checklist/02/${encodeURIComponent(list.id)}`);
+    assert.equal(preview.status, 200);
+    const shown = await preview.json();
+    assert.equal(shown.title, 'Finish the bot setup');
+    assert.match(shown.text, /Focus: step 02/);
+    assert.deepEqual(shown.pictures.map(picture => picture.path), [`checklists/${list.id}/${EVIDENCE}`]);
+    assert.equal((await call('GET', `/hub/chat/about/checklist/-/${encodeURIComponent(`${TODAY}-probe-gone-zzzz`)}`)).status, 404);
+    assert.equal((await call('GET', '/hub/chat/about/nope/-/x')).status, 400);
+    assert.equal((await call('GET', `/hub/chat/about/checklist/-/${encodeURIComponent(list.id)}`, undefined, {})).status, 401, 'The preview needs a signed-in user.');
+  } finally { await close(); }
+});
+
+test('help works for a design Ask and a blocked session, and a cross-origin POST is still refused', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const ask = designAskJson({ id: `${TODAY}-probe-help-d111`, now: new Date() });
+    seeder(fake).ask(ask);
+    const asked = await chat(call, { text: 'What is d2?', about: { kind: 'ask', id: ask.id } });
+    assert.equal(asked.status, 200, JSON.stringify(asked.body));
+    assert.match(upstream.requests[0].messages[0].content[0].text, /Item: Design review/);
+    assert.equal(upstream.requests[0].messages[0].content[1].type, 'image_url');
+
+    seeder(fake).event(eventJson({ kind: 'blocked', session: 'sess-help', title: 'Blocked: needs a login', summary: 'The deploy asks for a login.' }));
+    const blocked = await chat(call, { text: 'Help', about: { kind: 'blocked', id: 'sess-help' } });
+    assert.equal(blocked.status, 200, JSON.stringify(blocked.body));
+    assert.match(upstream.requests[1].messages[0].content, /Blocked session: The deploy asks for a login\./);
+
+    const crossed = await call('POST', '/hub/chat', { text: 'x', about: { kind: 'ask', id: ask.id } }, { 'Remote-User': 'owner', Origin: 'https://evil.example' });
+    assert.equal(crossed.status, 403);
+    assert.equal(upstream.requests.length, 2);
+  } finally { await close(); }
+});
+
+test('on a help chat\'s first turn the owner\'s pictures come first and the item\'s yield to the limit', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const { list } = stepsList(fake);
+    const pictures = Array.from({ length: 4 }, () => ({ type: 'image/png', data: solidPng(16, 16).toString('base64') }));
+    const sent = await chat(call, { text: 'See these', images: pictures, about: { kind: 'checklist', id: list.id, step: '02' } });
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    const content = upstream.requests[0].messages[0].content;
+    assert.equal(typeof content === 'string' ? 0 : content.filter(part => part.type === 'image_url').length, 0, 'No room left for the item\'s picture.');
+    assert.match(typeof content === 'string' ? content : content[0].text, /not included in this turn/);
+    assert.equal(upstream.requests[0].messages.at(-1).content.filter(part => part.type === 'image_url').length, 4);
+  } finally { await close(); }
+});
+
+// --- Get help on top of Chat on runs ---
+
+test('runs on: a help chat without pictures goes through runs with the pinned context as the first history entry, on every turn', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Try ', { tool: 'search_files' }, 'again.'] } });
+  try {
+    seeder(fake).event(eventJson({ kind: 'blocked', session: 'sess-runs', title: 'Blocked: needs a login', summary: 'The deploy asks for a login.' }));
+    const first = await chatLive(call, { text: 'Help', about: { kind: 'blocked', id: 'sess-runs' } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(upstream.requests.length, 0, 'nothing went to completions');
+    const run = upstream.runs[0].body;
+    assert.equal(run.input, 'Help');
+    assert.equal(run.conversation_history.length, 1);
+    assert.equal(run.conversation_history[0].role, 'user');
+    assert.match(run.conversation_history[0].content, /^\[Hub: the owner opened this chat/);
+    assert.match(run.conversation_history[0].content, /Blocked session: The deploy asks for a login\./);
+    assert.ok(first.events.some(item => item.event === 'tool'), 'tool lines still stream');
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done');
+    assert.equal(done.data.context.role, 'context');
+    const saved = lines(fake, done.data.conversation);
+    assert.deepEqual(saved.map(line => line.role), ['context', 'user', 'assistant']);
+    assert.equal(saved[2].run, upstream.runs[0].id);
+
+    const second = await chatLive(call, { text: 'Still stuck', conversation: done.data.conversation });
+    assert.equal(second.events.at(-1).event, 'done');
+    const history = upstream.runs[1].body.conversation_history;
+    assert.deepEqual(history.map(line => line.role), ['user', 'user', 'assistant']);
+    assert.match(history[0].content, /^\[Hub: the owner opened this chat/);
+    assert.equal(history[1].content, 'Help');
+  } finally { await close(); }
+});
+
+test('runs on: a help chat whose context carries a picture stays on completions, with the picture', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const { list } = stepsList(fake, 'help-r111');
+    const first = await chat(call, { text: 'Step 02 failed', about: { kind: 'checklist', id: list.id, step: '02' } });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const name = first.events.at(-1).data.conversation;
+    await chat(call, { conversation: name, text: 'Again' });
+    assert.equal(upstream.runs.length, 0);
+    assert.equal(upstream.requests.length, 2);
+    assert.equal(upstream.requests[1].messages[0].content[1].type, 'image_url', 'The stored picture goes back on later turns.');
+  } finally { await close(); }
+});
+
+test('runs on: a plain chat whose first turn had a picture sends its later text turns to runs', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const first = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    assert.equal(upstream.requests.length, 1, 'the picture turn went to completions');
+    const second = await chatLive(call, { text: 'and now text', conversation: first.events.at(-1).data.conversation });
+    assert.equal(second.events.at(-1).event, 'done');
+    assert.equal(upstream.requests.length, 1, 'the text turn did not go to completions');
+    assert.equal(upstream.runs.length, 1);
+  } finally { await close(); }
 });

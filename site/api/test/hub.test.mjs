@@ -1582,3 +1582,91 @@ test('Beads copies: files whose copy name the client would refuse are ignored (l
     assert.deepEqual((await get('/hub/beads/ghost')).body, { meta: null, issues: [] });
   } finally { await close(); }
 });
+
+// --- Get help: an attached chat travels with the answer or the submission ---
+
+const helpChat = (fake, name, about, extra = []) => {
+  const lines = [
+    { role: 'context', about, text: 'THE AGENT WROTE THIS', at: NOW.toISOString() },
+    { role: 'user', text: 'Step 02 failed', at: NOW.toISOString() },
+    { role: 'assistant', text: 'Try the other link.', at: NOW.toISOString() },
+    ...extra,
+  ];
+  fake.seed(`sections/inbox/chat/${name}.jsonl`, `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+};
+const CHAT = `${NOW.toISOString().slice(0, 10).replace(/-/g, '')}-abcdef`;
+const OTHER = `${NOW.toISOString().slice(0, 10).replace(/-/g, '')}-zyxwvu`;
+
+test('a submission carries the excerpt of the attached help chat, built from the stored chat', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('help', 'h111'), now: at(-30) });
+    const other = checklistJson({ id: listId('help', 'h222'), now: at(-30) });
+    seed.checklist(list);
+    seed.checklist(other);
+    helpChat(fake, CHAT, { kind: 'checklist', id: list.id, title: 'T' });
+    helpChat(fake, OTHER, { kind: 'checklist', id: other.id, title: 'T' });
+    const path = `/hub/checklists/${list.id}/submit`;
+    assert.equal((await post(path, { help: { chat: OTHER } })).status, 400, 'Another item\'s chat.');
+    assert.equal((await post(path, { help: { chat: '20260101-nopeno' } })).status, 404, 'A missing chat.');
+    assert.equal((await post(path, { help: { chat: 'not-an-id' } })).status, 400);
+    assert.equal((await post(path, { help: 'yes' })).status, 400);
+    assert.equal(fake.text(`sections/inbox/checklists/${list.id}/submit.json`), null, 'The refusals wrote nothing.');
+    const sent = await post(path, { help: { chat: CHAT, excerpt: 'FORGED', lines: 99 } });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    const stored = fake.json(`sections/inbox/checklists/${list.id}/submit.json`);
+    assert.deepEqual(stored.help, { chat: CHAT, lines: 2, excerpt: 'Owner: Step 02 failed\nHermes: Try the other link.' });
+    assert.doesNotMatch(JSON.stringify(stored.help), /AGENT WROTE|FORGED/);
+    const plain = await post(`/hub/checklists/${other.id}/submit`, {});
+    assert.equal(plain.status, 201);
+    assert.equal(fake.json(`sections/inbox/checklists/${other.id}/submit.json`).help, undefined);
+  } finally { await close(); }
+});
+
+test('an answer carries the excerpt, help alone does not answer, and Discord ignores it', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const ask = askJson({ id: id('help', 'h333'), now: NOW, options: threeOptions() });
+    seed.ask(ask);
+    helpChat(fake, CHAT, { kind: 'ask', id: ask.id, title: 'T' });
+    const path = `/hub/asks/${ask.id}/answer`;
+    assert.equal((await post(path, { help: { chat: CHAT } })).status, 400, 'help alone needs a choice, a note or a drawing.');
+    assert.equal(fake.text(`sections/inbox/asks/${ask.id}/answer.json`), null);
+    assert.equal((await post(path, { choice: 'A', help: { chat: OTHER } })).status, 404);
+    helpChat(fake, OTHER, { kind: 'ask', id: 'someone-else', title: 'T' });
+    assert.equal((await post(path, { choice: 'A', help: { chat: OTHER } })).status, 400);
+    const sent = await post(path, { choice: 'A', help: { chat: CHAT } });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    assert.equal(fake.json(`sections/inbox/asks/${ask.id}/answer.json`).help.lines, 2);
+    assert.match(fake.json(`sections/inbox/asks/${ask.id}/answer.json`).help.excerpt, /^Owner: Step 02 failed/);
+    assert.equal((await post(path, { choice: 'B' })).status, 409);
+  } finally { await close(); }
+});
+
+test('an Ask that takes no note still takes a help chat', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const ask = askJson({ id: id('help', 'h444'), now: NOW, options: threeOptions(), allowNote: false });
+    seed.ask(ask);
+    helpChat(fake, CHAT, { kind: 'ask', id: ask.id, title: 'T' });
+    assert.equal((await post(`/hub/asks/${ask.id}/answer`, { choice: 'C', help: { chat: CHAT } })).status, 201);
+  } finally { await close(); }
+});
+
+test('the stored help excerpt is masked on the server', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('help', 'h555'), now: at(-30) });
+    seed.checklist(list);
+    const lines = [
+      { role: 'context', about: { kind: 'checklist', id: list.id, title: 'T' }, text: 'x', at: NOW.toISOString() },
+      { role: 'user', text: `GITHUB_TOKEN=ghp_${'a1B2'.repeat(9)} and API_KEY=abc123`, at: NOW.toISOString() },
+      { role: 'assistant', text: 'Set it in .env, never paste it.', at: NOW.toISOString() },
+    ];
+    fake.seed(`sections/inbox/chat/${CHAT}.jsonl`, `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, { help: { chat: CHAT } })).status, 201);
+    const stored = JSON.stringify(fake.json(`sections/inbox/checklists/${list.id}/submit.json`).help);
+    assert.ok(!stored.includes('ghp_') && !stored.includes('abc123'), stored);
+    assert.match(stored, /GITHUB_TOKEN=\[masked\]/);
+  } finally { await close(); }
+});

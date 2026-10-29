@@ -10,6 +10,8 @@ import { hasFiles, hasText, isTextField, pictureFiles } from '../lib/pastePictur
 import { clearTarget, getTarget, setTarget, useTarget } from './stepTarget'
 import PlaytestReport from './PlaytestReport'
 import { usePlaytestReport } from './playtest'
+import { StepHelp } from './GetHelp'
+import { useAttachHelp } from './useAttachHelp'
 
 const SIGN_IN = 'Sign in to tick items.'
 const finePointer = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -49,6 +51,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const stepsRef = useRef<HTMLElement | null>(null)
   const submitRef = useRef<HTMLElement | null>(null)
   const report = usePlaytestReport(data.id, data.state === 'open', reload)
+  const attachHelp = useAttachHelp('checklist', data.id, data.state === 'open')
   const firstGuide = useRef<string | null | undefined>(undefined)
 
   const detail = answer && (!loadedAt || answer.time > loadedAt.getTime()) ? answer.detail : data
@@ -177,7 +180,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     setSubmitting(true)
     setProblem(null)
     try {
-      await hubPost(`/checklists/${encodeURIComponent(detail.id)}/submit`, { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}) })
+      await hubPost(`/checklists/${encodeURIComponent(detail.id)}/submit`, { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) })
       onSubmitted()
     } catch (failure) {
       if (failure instanceof HubError && failure.status === 409) reload()
@@ -205,7 +208,8 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           const done = isDone(item)
           const mark = pending[item.id]
           const link = safeUrl(item.link)
-          const more = !!item.guide || !!link
+          // Any step can fail, so with Chat every step opens to its Get help link.
+          const more = !!item.guide || !!link || host.chat
           const open = more && isExpanded(item)
           const labelId = `hub-cl-${detail.id}-${item.id}`
           // File names start with the step and a sortable stamp, so the greater name is the newer picture.
@@ -259,6 +263,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                 <div className="hub-cl-more" id={`${labelId}-more`}>
                   {item.guide && <Md text={item.guide} copy />}
                   {link && <p><a className="hub-btn" href={link} target="_blank" rel="noopener noreferrer">Open details</a></p>}
+                  <StepHelp target={{ kind: 'checklist', id: detail.id, label: 'checklist', title: text(detail.title) }} step={item.id} text={text(item.text)} note={note} />
                 </div>
               )}
             </div>
@@ -273,6 +278,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           <label className="hub-field">Note to the agent (optional)
             <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={2000} disabled={submitting} />
           </label>
+          {attachHelp.element}
           {warning && <p className="hub-cl-warn" role="alert" data-warning>{openCount} {plural(openCount, 'item is', 'items are')} still open. Submit anyway?</p>}
           {problem && <p className="hub-error" role="alert">{problem}</p>}
           <div className="hub-actions">

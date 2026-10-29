@@ -8,6 +8,7 @@ import AskBody from './AskBody'
 import { VERDICTS, decisionList, optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
 import { useHubData } from './useHub'
+import GetHelp, { HelpAttachedNote } from './GetHelp'
 
 const STEPS: [string, string][] = [['open', 'Open'], ['answered', 'Answered'], ['picked-up', 'Picked up']]
 const SIDE: Record<string, string> = { snoozed: 'Snoozed', expired: 'Expired', cancelled: 'Cancelled' }
@@ -27,6 +28,7 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
       )}
       {answer.choice && <p><b>{option ? `${option.id} · ${text(option.label)}` : text(answer.choice)}</b></p>}
       {typeof answer.note === 'string' && answer.note && <p className="hub-note-text">{answer.note}</p>}
+      <HelpAttachedNote chat={answer.help?.chat} />
       {answer.drawing && <HubImage className="hub-drawing" path={`asks/${ask.id}/${answer.drawing.png}`} alt="The drawing sent with the answer" />}
     </section>
   )
@@ -50,6 +52,7 @@ export default function AskView({ id }: { id: string }) {
       <div className="hub-top">
         <h2>{text(ask.question)}</h2>
         <span><span className="hub-pill">{text(ask.project)}</span>{text(ask.bead) && <> <span className="hub-pill">{text(ask.bead)}</span></>}</span>
+        <GetHelp className="hub-top-help" target={{ kind: 'ask', id: ask.id, label: ask.decisions || ask.image ? 'design review' : 'question', title: text(ask.question) }} />
       </div>
       <ol className="hub-steps" aria-label="State">
         {STEPS.map(([key, label], index) => (

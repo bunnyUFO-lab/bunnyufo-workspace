@@ -18,6 +18,7 @@ let third = null;
 let fourth = null;
 let fifth = null;
 let sixth = null;
+let seventh = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -656,6 +657,79 @@ try {
   await noSideways(ptPhone, 'a playtest issue at 375 px');
   const col = await ptPhone.evaluate(() => ({ left: document.querySelector('.pt-left').getBoundingClientRect(), right: document.querySelector('.pt-right').getBoundingClientRect() }));
   assert.ok(col.right.top >= col.left.bottom - 1, 'The report sits under the steps.');
+
+  // Get help: a button on every Needs-you card that is not an approval, Chat opened on the item, and the chat attached to the submit.
+  step('get help: without Hermes there is no Get help button anywhere');
+  await go(page, '#/~hub/needs');
+  await page.locator('.hub[data-screen="needs"] .ni').first().waitFor();
+  assert.equal(await page.locator('[data-get-help]').count(), 0);
+
+  const helpFx = await startHubFixture({ hermes: true, checklists: true });
+  seventh = helpFx;
+  const helpPage = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+  await helpPage.goto(`${helpFx.url}#/~hub/needs`);
+  await helpPage.locator('.hub[data-screen="needs"] .ni').first().waitFor();
+  step('get help: question, steps, review and unstick cards each carry the button');
+  const kinds = await helpPage.locator('.ni').evaluateAll(list => list.map(card => [card.getAttribute('data-kind'), card.querySelectorAll('[data-get-help]').length]));
+  assert.ok(kinds.length >= 4, JSON.stringify(kinds));
+  for (const [kind, count] of kinds) assert.equal(count, 1, `${kind} has Get help`);
+  assert.deepEqual(kinds.map(([kind]) => kind).filter(kind => kind === 'approval'), []);
+
+  step('get help at 375 px: an icon 44 px square, the title still reads, no sideways scroll');
+  const helpPhone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+  await helpPhone.goto(`${helpFx.url}#/~hub/needs`);
+  await helpPhone.locator('.hub[data-screen="needs"] .ni').first().waitFor();
+  const phoneBox = await helpPhone.locator('[data-get-help]').first().boundingBox();
+  assert.ok(phoneBox.width >= 44 && phoneBox.height >= 44 && phoneBox.width <= 48, `icon is ${phoneBox.width}x${phoneBox.height}`);
+  assert.equal(await helpPhone.locator('[data-get-help]').first().getAttribute('aria-label'), 'Get help');
+  const titleBox = await helpPhone.locator('.ni-t').first().boundingBox();
+  assert.ok(titleBox.width > 120, `the title keeps its room (${titleBox.width})`);
+  await noSideways(helpPhone, 'Needs you with Get help');
+
+  step('get help: a step opens Chat on the item with the banner, the draft and what Hermes sees; the draft is not sent');
+  await helpPage.goto(`${helpFx.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
+  await helpPage.locator('[data-item="03"]').waitFor();
+  assert.equal(await helpPage.locator('[data-item="03"] [data-toggle]').count(), 1, 'A step with no guide opens too.');
+  await helpPage.locator('[data-item="03"] [data-toggle]').click();
+  await helpPage.locator('[data-item="03"] [data-step-help]').waitFor();
+  assert.equal(await helpPage.locator('[data-attach-help]').count(), 0, 'No help chat yet, no checkbox.');
+  await helpPage.locator('[data-item="02"] [data-step-help]').click();
+  await helpPage.locator('[data-help-banner]').waitFor();
+  assert.match(helpPage.url(), /#\/~hub\/chat\/help\/checklist\/02\//);
+  assert.match(await helpPage.locator('[data-help-banner]').innerText(), /Help with: Finish the Discord bot setup/);
+  assert.match(await helpPage.locator('textarea[aria-label="Message"]').inputValue(), /^Step 02 failed: Copy the bot token into the vault\./);
+  await helpPage.locator('[data-help-seen] summary').click();
+  const seen = await helpPage.locator('.hub-help-text').innerText();
+  assert.match(seen, /<<agent>>/);
+  assert.match(seen, /Focus: step 02/);
+  assert.equal([...helpFx.fake.objects.keys()].filter(key => /inbox\/chat\//.test(key)).length, 0, 'Nothing was sent.');
+
+  step('get help: send, the reply streams, the chat is listed as Help and stored with its context first');
+  await helpPage.locator('textarea[aria-label="Message"]').press('Enter');
+  await helpPage.locator('.hub-bubble.assistant', { hasText: 'Hello there' }).waitFor();
+  await helpPage.waitForURL(/#\/~hub\/chat\/\d{8}-[a-z0-9]{6}$/);
+  await helpPage.locator('[data-help-banner]').waitFor();
+  assert.equal(await helpPage.locator('.hub-bubble').count(), 2, 'The context is no bubble.');
+  await helpPage.locator('[data-conversation]', { hasText: 'Help: Finish the Discord bot setup' }).waitFor();
+  const chatKey = [...helpFx.fake.objects.keys()].find(key => /inbox\/chat\/[^/]+\.jsonl$/.test(key));
+  const helpStored = helpFx.fake.text(chatKey).trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(helpStored.map(line => line.role), ['context', 'user', 'assistant']);
+  assert.equal(helpStored[0].about.step, '02');
+
+  step('get help: back on the item the chat is attached by default, and Submit stores its excerpt');
+  await helpPage.locator('[data-help-open]').click();
+  const attach = helpPage.locator('[data-attach-help]');
+  await attach.waitFor();
+  assert.match(await attach.innerText(), /Attach my help chat \(2 messages\)/);
+  assert.equal(await attach.locator('input').isChecked(), true);
+  await helpPage.locator('[data-submit]').click();
+  await helpPage.locator('[data-submit]', { hasText: 'Submit with' }).click();
+  await helpPage.locator('[data-next-note], [data-submitted]').first().waitFor();
+  const sentHelp = helpFx.fake.json(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/submit.json`).help;
+  assert.equal(sentHelp.lines, 2);
+  assert.match(sentHelp.excerpt, /^Owner: Step 02 failed/);
+  assert.match(sentHelp.excerpt, /Hermes: Hello there/);
+  assert.doesNotMatch(sentHelp.excerpt, /<<agent>>|Discord bot/);
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
@@ -665,5 +739,6 @@ try {
   await fourth?.close();
   await fifth?.close();
   await sixth?.close();
+  await seventh?.close();
 }
 console.log('hub-needs-ui: passed');
