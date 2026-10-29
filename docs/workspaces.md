@@ -604,7 +604,7 @@ Milestones and issues with children are left out (the map shows them). A task th
 
 ### Team
 
-The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` Sonnet 5.5, `briefs` Haiku 5.5, both with the DeepSeek fallback).
+The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` Codex `gpt-6-sol` with Sonnet then DeepSeek as fallbacks, `briefs` Haiku 5.5 with the DeepSeek fallback).
 
 | Route | Does |
 |---|---|
