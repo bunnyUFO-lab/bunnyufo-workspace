@@ -3,8 +3,11 @@ import type { CSSProperties } from 'react'
 import type { Item, Today as TodayData } from '../lib/hub'
 import { ago, clock } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
+import type { WorkingItem } from '../lib/hubPc'
 import { hubHash } from '../lib/route'
 import ItemRow from './ItemRow'
+import PcTile from './PcTile'
+import WorkingNow from './WorkingNow'
 import { TodayContext, useHubData } from './useHub'
 import './today.css'
 
@@ -19,6 +22,9 @@ function Icon({ paths }: { paths: string }) {
 const titleCase = (text: string) => text.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase())
 const who = (item: Item) => item.by ?? titleCase(item.project ?? '')
 const bare = (text: string) => text.replace(/ ago$/, '')
+/** An old site API sends only `running`: show those sessions as event rows. */
+const legacyRunning = (data: TodayData): WorkingItem[] =>
+  data.running.map(item => ({ id: item.id, source: 'events', host: item.host ?? '', agent: 'claude', title: item.title, project: item.project, state: 'working', since: item.at, url: item.url }))
 const stagger = (index: number) => ({ '--i': index }) as CSSProperties
 
 function greeting(hour: number) {
@@ -44,7 +50,7 @@ export default function Today() {
   ].filter(Boolean).join(' ')
   const tiles: [string, number, string, string, string, string][] = [
     ['needs-you', counts.needsYou, 'Needs you', oldest ? `Oldest waits ${bare(ago(oldest))}` : 'Nothing waiting', hubHash('needs'), 'needs'],
-    ['running', counts.running, 'Running', 'from session events', hubHash('activity'), 'working'],
+    ['running', counts.running, 'Running', 'on the PC and in the cloud', hubHash('activity'), 'working'],
     ['recent', counts.recent, 'Since yesterday', 'events in 24 h', hubHash('activity'), 'idle'],
     ['alerts', counts.alerts, 'Alerts', counts.alerts ? 'need a look' : 'all quiet', hubHash('activity', 'alerts'), 'failed'],
   ]
@@ -105,12 +111,8 @@ export default function Today() {
               </div>
             )) : <p className="hub-empty">No alerts.</p>}
           </section>
-          <section className="hub-panel rise" style={stagger(4)} aria-label="Running">
-            <h3><span className="dot st-working live" aria-hidden="true" />Running <span>{counts.running}</span></h3>
-            {data.running.length ? data.running.map(item => (
-              <ItemRow key={item.id} item={{ ...item, title: `${item.project ?? 'session'} · running since ${clock(item.at)}` }} />
-            )) : <p className="hub-empty">No agent session is running.</p>}
-          </section>
+          <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
+          {data.pc && <PcTile pc={data.pc} />}
         </div>
       </div>
     </div>

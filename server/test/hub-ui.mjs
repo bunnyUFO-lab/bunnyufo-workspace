@@ -68,7 +68,7 @@ try {
   assert.equal(await page.locator('[data-hub-nav] [data-section="hub"] .sidebar-count').count(), 0, 'The Hub heading carries no count: it only counted the rows below it.');
   assert.equal((await page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '3');
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
-  assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
+  assert.match(await page.locator('.hub-panel[aria-label="Working now"]').innerText(), /running since \d\d:\d\d/);
   await noSideways(page, 'Today');
   step('Today after the mockup: greeting, eyebrow, the top three of five Needs-you rows with kind labels, the Open button count, an alert row, stacked at 375 px');
   const busy = await startHubFixture({ busyToday: true });
