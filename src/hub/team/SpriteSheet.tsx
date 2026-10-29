@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AvatarSprite, TeamAgent } from '../../lib/hubTeam'
+import type { AvatarSprite, CustomSprite, SheetInfo, TeamAgent } from '../../lib/hubTeam'
 import { ago, hubGet } from '../../lib/hub'
-import type { CustomSprite, SheetInfo } from './spriteState'
 import { AgentSprite } from './AgentSprite'
-import { builtinLabel, nextSalt, quickTiles, randomOf, sameSprite, sheetNote, spriteKey, startSalt } from './teamModel'
+import { nextSalt, quickTiles, randomOf, sameSprite, sheetNote, spriteKey, startSalt, tileId, tileLabel, type AnySprite } from './teamModel'
 
 type Mode = 'quick' | 'custom'
 
@@ -14,7 +13,7 @@ const spriteOfSheet = (info: SheetInfo): CustomSprite => ({ kind: 'custom', shee
  * The Custom segment: the agent's pet sheets, newest first, each a live preview of its idle row and
  * a Use this (same `onUse`, so the same toast and Undo as Quick). The server marks the current one.
  */
-function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AvatarSprite) => Promise<boolean>; onDone: () => void }) {
+function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AnySprite) => Promise<boolean>; onDone: () => void }) {
   const [sheets, setSheets] = useState<SheetInfo[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -30,8 +29,7 @@ function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite:
   if (!sheets.length) return <p className="sheet-custom" data-sheet-custom data-agent={agent.id}>No custom sheets yet. They arrive with the Agent avatar preset.</p>
   const use = async (info: SheetInfo) => {
     setBusy(info.sheet)
-    // `AvatarSprite` gains the custom case with m5-custom-sheets; until then this is the one cast.
-    const done = await onUse(spriteOfSheet(info) as unknown as AvatarSprite)
+    const done = await onUse(spriteOfSheet(info))
     setBusy(null)
     if (done) onDone()
   }
@@ -53,10 +51,10 @@ function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite:
  * decides). The native dialog gives the focus trap and Escape; Team puts the focus back on the
  * button that opened it.
  */
-export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgent; onClose: () => void; onUse: (sprite: AvatarSprite) => Promise<boolean> }) {
+export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgent; onClose: () => void; onUse: (sprite: AnySprite) => Promise<boolean> }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [mode, setMode] = useState<Mode>('quick')
-  const [selected, setSelected] = useState<AvatarSprite>(agent.sprite)
+  const [selected, setSelected] = useState<AnySprite>(agent.sprite)
   const [randomized, setRandomized] = useState<AvatarSprite | null>(null)
   const [salt, setSalt] = useState(() => startSalt(agent.sprite))
   const [busy, setBusy] = useState(false)
@@ -113,7 +111,7 @@ export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgen
             <div className="sheet-grid" role="radiogroup" aria-label="Built-in sprites">
               {tiles.map((sprite, index) => {
                 const on = sameSprite(sprite, selected)
-                const label = sprite.kind === 'builtin' ? builtinLabel(sprite.key) : 'Randomized sprite'
+                const label = tileLabel(sprite)
                 return (
                   <button
                     key={spriteKey(sprite)}
@@ -122,7 +120,7 @@ export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgen
                     aria-checked={on}
                     aria-label={index === 0 ? `${label}, current` : label}
                     className={`sheet-tile${on ? ' on' : ''}`}
-                    data-sprite-tile={sprite.kind === 'builtin' ? sprite.key : `random-${sprite.salt}`}
+                    data-sprite-tile={tileId(sprite)}
                     onClick={() => setSelected(sprite)}
                   >
                     <AgentSprite sprite={sprite} size={40} />

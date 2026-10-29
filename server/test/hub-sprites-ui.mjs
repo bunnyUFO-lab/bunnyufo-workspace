@@ -1,43 +1,26 @@
 // Run after npm run build. Sprites by state on the Team screen, and the Custom tab, through a real browser over the hub fixture.
-// The team response and the sheets route are patched in the page, so this suite does not depend on the server side of custom sheets.
+// The sheets, the sheet PNGs and the avatar choice are the real routes over seeded sheets; only the team response is patched in the page, to add agents in every state.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
-import { crc32, deflateSync } from 'node:zlib';
 import { startHubFixture } from './hub-fixture.mjs';
+import { teamSheet } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
 const ROWS = ['idle', 'run-right', 'run-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review'];
-const SHEET_ID = 'sheet-20261029T100000-ab12';
-const OLD_ID = 'sheet-20261028T100000-cd34';
+const SHEET_ID = 'sheet-20261029T100000Z-ab12';
+const OLD_ID = 'sheet-20261028T100000Z-cd34';
 
-// A 1536 x 1872 pet sheet a browser decodes: every row a hue, every column a step of brightness, so a frame can be told apart.
-const sheetPng = () => {
-  const width = 1536, height = 1872, stride = width * 4 + 1;
-  const raw = Buffer.alloc(stride * height);
-  for (let y = 0; y < height; y++) {
-    raw[y * stride] = 0;
-    const row = Math.floor(y / 208);
-    for (let x = 0; x < width; x++) {
-      const col = Math.floor(x / 192);
-      const at = y * stride + 1 + x * 4;
-      raw[at] = 40 + row * 25; raw[at + 1] = 200 - row * 20; raw[at + 2] = 60 + col * 24; raw[at + 3] = 255;
-    }
-  }
-  const chunk = (type, data) => {
-    const head = Buffer.alloc(8); head.writeUInt32BE(data.length); head.write(type, 4, 'ascii');
-    const tail = Buffer.alloc(4); tail.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])));
-    return Buffer.concat([head, data, tail]);
-  };
-  const header = Buffer.alloc(13); header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
-};
-const PNG = sheetPng();
+const FRAMES = [4, 6, 6, 4, 6, 3, 2, 6, 4];
 const rows = frames => ROWS.map((state, index) => ({ state, frames: frames[index] ?? 4, fps: 8 }));
-const sheetOf = (id, frames) => ({ kind: 'custom', sheet: id, url: `/hub/file?path=team/claude/${id}.png`, frame: { w: 192, h: 208 }, cols: 8, rows: rows(frames) });
+const newest = teamSheet('claude', { rows: rows(FRAMES) });
+const oldest = teamSheet('claude', { stamp: '20261028T100000Z', rand: 'cd34', rows: rows([4]), at: new Date('2026-10-28T10:00:00Z') });
+assert.equal(newest.id, SHEET_ID);
+assert.equal(oldest.id, OLD_ID);
 
 const fixture = await startHubFixture({ pc: 'fresh' });
+for (const sheet of [newest, oldest]) for (const [name, body] of Object.entries(sheet.files)) fixture.seed.put(`team/claude/${name}`, body, name.endsWith('.png') ? 'image/png' : 'application/json');
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -48,19 +31,6 @@ const open = async (viewport, options = {}) => {
   const errors = [];
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  const current = { sheet: SHEET_ID };
-  await page.route('**/api/hub/file?path=team/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
-  await page.route('**/api/hub/team/*/sheets', route => route.fulfill({
-    json: { sheets: [
-      { sheet: SHEET_ID, at: new Date(Date.now() - 3600_000).toISOString(), rows: rows([4, 6, 6, 4, 6, 3, 2, 6, 4]), url: `/hub/file?path=team/claude/${SHEET_ID}.png`, current: current.sheet === SHEET_ID },
-      { sheet: OLD_ID, at: new Date(Date.now() - 86_400_000).toISOString(), rows: rows([4]), url: `/hub/file?path=team/claude/${OLD_ID}.png`, current: current.sheet === OLD_ID },
-    ] },
-  }));
-  await page.route('**/api/hub/team/*/avatar', async route => {
-    const body = route.request().postDataJSON();
-    if (body.kind === 'custom') current.sheet = body.sheet;
-    await route.fulfill({ json: { ok: true } });
-  });
   await page.route('**/api/hub/team', async route => {
     const response = await route.fetch();
     const body = await response.json();
@@ -70,8 +40,6 @@ const open = async (viewport, options = {}) => {
       { id: 'sx-needs', status: 'needs-you' }, { id: 'sx-failed', status: 'failed' }, { id: 'sx-done', status: 'idle', doneAt: minutes(1) },
       { id: 'sx-old', status: 'idle', doneAt: minutes(11) }, { id: 'sx-review', status: 'idle', review: true }, { id: 'sx-off', status: 'offline' },
     ].map(item => ({ ...base, ...item, name: item.id }));
-    const claude = body.agents.find(agent => agent.id === 'claude');
-    if (claude) claude.sprite = sheetOf(current.sheet, [4, 6, 6, 4, 6, 3, 2, 6, 4]);
     body.agents.push(...extra);
     await route.fulfill({ response, json: body });
   });
@@ -81,11 +49,21 @@ const noSideways = async (page, what) => {
   const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
 };
+// Choose a sheet for Claude Code the way the owner does: Custom tab, Use this. The real avatar route saves it and the team response then carries a real custom sprite.
+const chooseSheet = async (page, sheet) => {
+  await page.goto(`${fixture.url}#/~hub/team`);
+  await page.locator('[data-sprite-open="claude"]').click();
+  const dialog = page.locator('dialog[data-sprite-sheet="claude"]');
+  await dialog.locator('[data-sheet-mode="custom"]').click();
+  await dialog.locator(`[data-sheet-use-custom="${sheet}"]`).click();
+  await dialog.waitFor({ state: 'detached' });
+};
 const spriteOf = (page, agent) => page.locator(`[data-agent="${agent}"] .team-tile [data-row]`);
 
 try {
   step('each card draws the row for its state (reduced motion off)');
   const { page: desk, errors } = await open({ width: 1280, height: 900 });
+  await chooseSheet(desk, SHEET_ID);
   await desk.goto(`${fixture.url}#/~hub/team`);
   await desk.locator('.team-card').first().waitFor();
   const expected = { 'sx-needs': 'waiting', 'sx-failed': 'failed', 'sx-done': 'jumping', 'sx-old': 'idle', 'sx-review': 'review', 'sx-off': 'idle', claude: 'running' };
@@ -101,7 +79,7 @@ try {
   assert.equal(style.name, 'spr-play');
   assert.match(style.timing, /steps\(6/, 'steps over the running row\'s 6 frames');
   assert.equal(style.duration, '0.75s', '6 frames at 8 fps');
-  assert.match(style.image, /\/api\/hub\/file\?path=team/);
+  assert.match(style.image, /\/api\/hub\/file\?path=team(%2F|\/)claude(%2F|\/)sheet-20261029T100000Z-ab12\.png/);
   assert.equal(style.size, '384px 468px', '8 x 9 frames at 48 x 52');
   assert.equal(style.posY, `-${7 * 52}px`, 'the running row');
   assert.equal(style.render, 'pixelated', '52 px high is the art size, so nearest neighbour is exact');
@@ -125,6 +103,14 @@ try {
   await desk.locator('[data-sprite-open="claude"]').click();
   const sheet = desk.locator('dialog[data-sprite-sheet="claude"]');
   await sheet.waitFor();
+  // Quick tab with a custom current sprite: it is the "Custom sprite" tile, not a randomized one.
+  const first = sheet.locator('.sheet-tile').first();
+  assert.equal(await first.getAttribute('data-sprite-tile'), 'custom');
+  assert.equal(await first.getAttribute('aria-label'), 'Custom sprite, current');
+  assert.equal(await first.getAttribute('aria-checked'), 'true');
+  assert.equal(await sheet.locator('[data-sprite-tile^="random"]').count(), 0, 'No tile reads as randomized.');
+  assert.equal(await sheet.locator('[data-sheet-note]').innerText(), 'This is the current sprite');
+  assert.equal(await sheet.locator('[data-sheet-preview] [data-row]').count(), 1, 'The preview is the sheet.');
   await sheet.locator('[data-sheet-mode="custom"]').click();
   const items = sheet.locator('[data-sheet-item]');
   await items.first().waitFor();

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { resolveSprite, type SpriteChoice } from './sprites'
-import { rowOf, rowSpec, sheetSrc, STATE_LABEL, type CustomSprite, type SpriteState } from './spriteState'
+import type { CustomSprite } from '../../lib/hubTeam'
+import { rowOf, rowSpec, sheetSrc, STATE_LABEL, type SpriteState } from './spriteState'
 import './sprite-states.css'
 
 /** The art is drawn at 48 x 52 and the sheet holds it at x4. */

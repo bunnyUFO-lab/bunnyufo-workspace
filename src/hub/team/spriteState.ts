@@ -1,34 +1,11 @@
 // Pure logic for sprite states: an agent's status becomes a state, and a state becomes a row of the pet sheet.
 // Kept out of the .tsx files so Node can test it.
-import type { AgentStatus } from '../../lib/hubTeam'
+import type { AgentStatus, CustomSprite, SheetRow } from '../../lib/hubTeam'
 
 export type SpriteState = 'working' | 'needs-you' | 'failed' | 'done' | 'review' | 'idle' | 'offline'
 
 /** The nine rows of a pet sheet, top to bottom. */
 export const SHEET_ROWS = ['idle', 'run-right', 'run-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review'] as const
-export type SheetRow = (typeof SHEET_ROWS)[number]
-
-/**
- * A custom sprite: one pet sheet. This is the shape `m5-custom-sheets` adds to `AvatarSprite` in
- * `src/lib/hubTeam.ts`; it is declared here too so this file does not wait for that one.
- */
-export interface CustomSprite {
-  kind: 'custom'
-  sheet: string
-  url: string
-  frame: { w: number; h: number }
-  cols: number
-  rows: { state: SheetRow; frames: number; fps: number }[]
-}
-
-/** What `GET /hub/team/<agent>/sheets` lists (same note as above). */
-export interface SheetInfo {
-  sheet: string
-  at: string
-  rows: CustomSprite['rows']
-  url: string
-  current: boolean
-}
 
 /** Fields M3 will add to an agent in `/hub/team`. Until then they are absent and `done` and `review` never show. */
 export interface AgentActivity {

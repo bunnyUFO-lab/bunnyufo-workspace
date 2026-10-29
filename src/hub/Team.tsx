@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ago, appUrl, hubPost, sessionUrl } from '../lib/hub'
 import { host } from '../lib/host'
-import type { AvatarSprite, TeamAgent, TeamView } from '../lib/hubTeam'
+import type { TeamAgent, TeamView } from '../lib/hubTeam'
 import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
-import type { SpriteChoice } from './team/sprites'
-import type { CustomSprite } from './team/spriteState'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
 import { openSpawn } from './spawnStore'
-import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL } from './team/teamModel'
+import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
 import { useHubData } from './useHub'
 
@@ -40,7 +38,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
   const dot = STATUS_DOT[agent.status]
   const live = agent as TeamAgent & AgentActivity
   const state = stateOf({ status: agent.status, doneAt: live.doneAt, review: live.review, now })
-  const sprite: SpriteChoice | CustomSprite = agent.sprite as SpriteChoice | CustomSprite
+  const sprite = agent.sprite
   return (
     <article className={`team-card st-${agent.status}`} data-agent={agent.id} data-status={agent.status}>
       <header className="team-card-head">
@@ -87,7 +85,7 @@ export default function Team() {
     if (next) timer.current = window.setTimeout(() => setToast(null), 10_000)
   }, [])
 
-  const save = useCallback(async (agent: TeamAgent, sprite: AvatarSprite): Promise<boolean> => {
+  const save = useCallback(async (agent: TeamAgent, sprite: AnySprite): Promise<boolean> => {
     setFailure(null)
     try {
       await hubPost(`/team/${encodeURIComponent(agent.id)}/avatar`, choiceOf(sprite))
@@ -100,7 +98,7 @@ export default function Team() {
   }, [reload])
 
   /** Use a sprite; the toast's Undo posts the previous choice again. */
-  const choose = useCallback(async (agent: TeamAgent, next: AvatarSprite, previous: AvatarSprite): Promise<boolean> => {
+  const choose = useCallback(async (agent: TeamAgent, next: AnySprite, previous: AnySprite): Promise<boolean> => {
     if (!(await save(agent, next))) return false
     say({
       text: `${agent.name} has a new sprite. No job needed.`,
