@@ -784,3 +784,18 @@ test('checklist create --playtest pings "Playtest: <title>" with the Hub link an
     assert.ok(!hook.posts[0].body.content.includes('secret-build'), 'The build address stays out of Discord.');
   } finally { await hook.close(); await close(); }
 });
+
+test('ask create: --option with an unusable picture after @ is refused with a clear error and writes nothing', async () => {
+  const { cli, keys, dir, close } = await setup();
+  try {
+    await writeFile(path.join(dir, 'x.png'), Buffer.from([137, 80, 78, 71]));
+    for (const bad of ['a=A@dir/x.png', 'a=A@x.bmp', 'a=A@_x.png', `a=A@${'n'.repeat(120)}.png`]) {
+      const refused = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--option', bad, '--image', path.join(dir, 'x.png'));
+      assert.equal(refused.code, 1, bad);
+      assert.match(refused.stderr, /the picture after @ is a file name like x\.png \(pass the path with --image\)/);
+    }
+    const name = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--decision', 'Oak', '--image', path.join(dir, 'x.png'));
+    assert.equal(name.code, 0, name.stderr);
+    assert.deepEqual(keys('asks/').filter(key => key.endsWith('ask.json')).length, 1, 'Only the good ask was written.');
+  } finally { await close(); }
+});

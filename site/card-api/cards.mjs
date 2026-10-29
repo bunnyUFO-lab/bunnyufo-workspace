@@ -679,6 +679,8 @@ function askFromFile(raw, flags, id) {
   return ask;
 }
 
+/** An Ask picture's file name: the server's rule. */
+const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -696,9 +698,17 @@ function optionFromFlag(value) {
   const equals = value.indexOf('=');
   if (equals < 1) throw new Error(`--option ${value}: write it as <id>=<label>, or <id>=<label>@<image file>.`);
   let label = value.slice(equals + 1).trim();
-  const picture = /@([\w.-]+\.(?:png|jpe?g|gif|webp|svg))$/i.exec(label);
-  if (picture) label = label.slice(0, picture.index).trim();
-  return { id: value.slice(0, equals).trim(), label, ...(picture ? { image: picture[1] } : {}) };
+  // Text after the last "@" with no white space is a picture reference: a bare image file name, or an error.
+  const tail = /@(\S*)$/.exec(label);
+  let image;
+  if (tail) {
+    if (!ASK_IMAGE_RE.test(tail[1]) || !/\.(?:png|jpe?g|gif|webp|svg)$/i.test(tail[1])) {
+      throw new Error(`--option ${value}: the picture after @ is a file name like x.png (pass the path with --image).`);
+    }
+    image = tail[1];
+    label = label.slice(0, tail.index).trim();
+  }
+  return { id: value.slice(0, equals).trim(), label, ...(image ? { image } : {}) };
 }
 
 /** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
@@ -760,7 +770,7 @@ function validateAsk(ask, imageNames) {
     }
   }
   if (ask.image !== undefined) {
-    if (typeof ask.image !== 'string' || !/^[\w.-]+$/.test(ask.image)) problems.push('image is a file name');
+    if (typeof ask.image !== 'string' || !ASK_IMAGE_RE.test(ask.image)) problems.push('image is a file name of letters, digits, . _ - (up to 120, starting with a letter or digit)');
     else if (!imageNames.includes(ask.image)) problems.push(`image names ${ask.image}, which is not among the --image files`);
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
