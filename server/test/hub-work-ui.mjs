@@ -1,6 +1,6 @@
 // Run after npm run build. Work through a real browser, over the fixture service: the six lanes with a
 // card from every cell of the table, the Backlog fold, a live card, the phone's one-lane view, the
-// Activity tab with Work lit in the nav, and the "Ask an agent" form from the default fixture.
+// Activity tab with Work lit in the nav, and the Spawn button from the default fixture.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -173,16 +173,20 @@ try {
   await desk.goto(`${plain.url}#/~hub/work/magic-loops`);
   await desk.locator('.wk-lane').first().waitFor();
 
-  step('CUJ 5: a request from Work lands in the bucket as next-sprint');
+  step('CUJ 5: Spawn replaces the old request form; a job from Work lands in the bucket as a proposal for that project');
   assert.equal(await desk.locator('.wk-lane').count(), 6);
-  await desk.locator('button:has-text("Ask an agent to do something")').click();
-  await desk.locator('.hub-field textarea').fill('Add wall-slide dust particles');
-  await desk.locator('button:has-text("Send")').last().click();
-  await desk.locator('.hub-ok', { hasText: 'Request sent' }).waitFor();
+  assert.equal(await desk.locator('button:has-text("Ask an agent to do something")').count(), 0, 'The old request form is gone.');
+  await desk.locator('button[data-spawn-open]', { hasText: 'Spawn work' }).click();
+  await desk.locator('[data-spawn-sheet]').waitFor();
+  assert.equal(await desk.locator('[data-spawn-project]').inputValue(), 'magic-loops', 'Spawn opens on the project Work shows.');
+  await desk.locator('[data-spawn-text]').fill('Add wall-slide dust particles');
+  // The write refreshes Work in the background: wait for that answer here so the reload below reads its own.
+  await Promise.all([desk.waitForResponse(response => response.url().includes('/api/hub/work')), desk.locator('[data-spawn-go]').click()]);
+  await desk.locator('[data-spawn-toast]').waitFor();
   const requests = [...plain.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key));
   assert.equal(requests.length, 1);
   const stored = plain.fake.json(requests[0]);
-  assert.deepEqual([stored.project, stored.when, stored.text], ['magic-loops', 'next-sprint', 'Add wall-slide dust particles']);
+  assert.deepEqual([stored.project, stored.preset, stored.text], ['magic-loops', 'code-task', 'Add wall-slide dust particles']);
 
   step('Work cards lead with the title; the id is a small selectable line after it');
   // The body is read inside the route, so a later navigation cannot discard it.

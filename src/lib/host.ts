@@ -33,6 +33,12 @@ export interface HostCapabilities {
   hub: boolean
   /** The Hub's chat with the assistant is set up and this visitor may use it. */
   chat: boolean
+  /** This host can sign an approval and the visitor is signed in: Spawn may Approve, not only save a proposal. */
+  approve: boolean
+  /** Why Approve is off, in the host's words, or null. */
+  approveReason: string | null
+  /** The kinds of request the server signs without a tap (empty while policy is off). */
+  policy: string[]
   /** Why this host is read-only, in its own words (it names where to sign in), or null. */
   reason: string | null
   /** The card API's address (http or https) when the host knows it, else null. */
@@ -44,7 +50,7 @@ export interface HostCapabilities {
 }
 
 const NONE: HostCapabilities = {
-  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, reason: null, cardApi: null, contentOrigin: null,
+  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, approve: false, approveReason: null, policy: [], reason: null, cardApi: null, contentOrigin: null,
 }
 
 export let host: HostCapabilities = NONE
@@ -84,6 +90,8 @@ export async function probeHost(): Promise<void> {
       settings: !!answer.settings, workspaces: !!answer.workspaces, live: !!answer.live,
       routes: answer.routes === 'hash' ? 'hash' : 'path',
       hub: !!answer.hub, chat: !!answer.chat,
+      approve: answer.approve === true, approveReason: typeof answer.approveReason === 'string' ? answer.approveReason : null,
+      policy: Array.isArray(answer.policy) ? answer.policy.filter((kind): kind is string => typeof kind === 'string') : [],
       reason: typeof answer.reason === 'string' ? answer.reason : null,
       cardApi: typeof answer.cardApi === 'string' && /^https?:\/\//.test(answer.cardApi) ? answer.cardApi : null,
       contentOrigin: typeof answer.contentOrigin === 'string' && /^https?:\/\//.test(answer.contentOrigin) ? new URL(answer.contentOrigin).origin : null,

@@ -1,63 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Sign } from '../lib/hub'
-import { hubPost } from '../lib/hub'
 import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
+import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import { useProject } from './useProject'
 import './work.css'
 import { defaultLane } from './workLanes'
-
-const WHEN: [string, string][] = [['next-sprint', 'Next sprint'], ['nightly', 'Nightly'], ['record', 'Just record it']]
-
-function RequestForm({ project }: { project: string }) {
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState('')
-  const [when, setWhen] = useState('next-sprint')
-  const [busy, setBusy] = useState(false)
-  const [sent, setSent] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const send = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      const answer = await hubPost<{ id: string }>('/requests', { project, text: text.trim(), when })
-      setSent(answer.id)
-      setText('')
-      setOpen(false)
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'The request was not sent.')
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div className="hub-request">
-      {!open && <button type="button" className="hub-btn pri" onClick={() => { setOpen(true); setSent(null) }}>Ask an agent to do something</button>}
-      {sent && <p className="hub-ok" role="status">Request sent <code>{sent}</code></p>}
-      {open && (
-        <section className="hub-panel" aria-label="New request">
-          <label className="hub-field">What should happen?
-            <textarea value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={4000} />
-          </label>
-          <div className="hub-seg" role="radiogroup" aria-label="When">
-            {WHEN.map(([key, label]) => (
-              <button key={key} type="button" role="radio" aria-checked={when === key} className={when === key ? 'on' : ''} onClick={() => setWhen(key)}>{label}</button>
-            ))}
-          </div>
-          {error && <p className="hub-error" role="alert">{error}</p>}
-          <div className="hub-actions">
-            <button type="button" className="hub-btn" onClick={() => setOpen(false)}>Cancel</button>
-            <button type="button" className="hub-btn pri" disabled={busy || !text.trim()} onClick={() => void send()}>Send</button>
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
 
 const LANES: [WorkLane, string][] = [
   ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'Running'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
@@ -111,7 +63,7 @@ export default function Board({ project: wanted }: { project?: string }) {
           {list.map(item => <a key={item.id} className={`hub-chip${!all && item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
         </div>
       </div>
-      {project && host.write && <RequestForm project={project} />}
+      {project && host.write && <div className="work-spawn"><button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}

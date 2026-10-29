@@ -10,6 +10,7 @@ import ReviewView from './ReviewView'
 import Chat from './Chat'
 import Needs from './Needs'
 import Sketch from './Sketch'
+import SpawnHost from './Spawn'
 import ProgressMap from './ProgressMap'
 import Team from './Team'
 import Today from './Today'
@@ -35,6 +36,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && <Chat id={route.id} />}
+      {host.write && <SpawnHost />}
     </div>
   )
 }

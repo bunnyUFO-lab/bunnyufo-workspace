@@ -1,0 +1,68 @@
+/* Runs: the Spawn sheet, and (1.8, 1.12) the approval view and the run drawer. Kept apart from hub.css. */
+
+.spawn-sheet { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(640px, calc(100vw - 32px)); max-height: min(90vh, 860px); padding: 0; border: 1px solid var(--line2); border-radius: var(--r3); background: var(--s1); color: var(--t1); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45); }
+.spawn-sheet[open] { display: flex; flex-direction: column; }
+.spawn-sheet::backdrop { background: rgba(0, 0, 0, 0.55); }
+.spawn-sheet svg { width: 16px; height: 16px; flex: none; }
+.sp-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.sp-head > svg { color: var(--pink-bright, var(--pink)); width: 18px; height: 18px; }
+.sp-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.sp-x { margin-left: auto; min-height: 44px; min-width: 44px; padding: 0; display: inline-grid; place-items: center; }
+.sp-body { display: flex; flex-direction: column; gap: 14px; padding: 18px; overflow-y: auto; min-height: 0; }
+.sp-label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.sp-tpls { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-tpl { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--t2); font: inherit; font-size: 13px; cursor: pointer; }
+.sp-tpl:hover { border-color: var(--line2); color: var(--t1); }
+.sp-tpl.on { border-color: var(--pink); color: var(--t1); background: var(--pink-dim); }
+.sp-tpl:focus-visible, .sp-pick:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sp-one { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.sp-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.sp-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.sp-field select, .sp-field input, .sp-field textarea { font: inherit; font-size: 14px; color: var(--t1); background: var(--ground); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; min-height: 44px; min-width: 0; width: 100%; box-sizing: border-box; }
+.sp-field textarea { resize: vertical; min-height: 96px; }
+.sp-field :is(select, input, textarea):focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sp-field input[aria-invalid="true"] { border-color: var(--red); }
+.sp-agent { margin: -4px 0 0; font-size: 12px; color: var(--text-dim); }
+.sp-agent b { color: var(--t1); font-weight: 600; }
+.sp-route { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--ground); }
+.sp-mach { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--s2); border: 1px solid var(--line); color: var(--pink-bright, var(--pink)); flex: none; }
+.sp-mach svg { width: 18px; height: 18px; }
+.sp-route-t { flex: 1; min-width: 0; }
+.sp-route-t b { font-weight: 600; }
+.sp-route-t p { margin: 2px 0 0; font-size: 12.5px; color: var(--t2); }
+.sp-faint { color: var(--text-dim); }
+.sp-rules { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.sp-rules li { display: flex; gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 6px; }
+.sp-rules .n { flex: none; width: 16px; text-align: center; opacity: 0.7; }
+.sp-rules .hit { background: var(--pink-dim); color: var(--t1); }
+.sp-caps { font-size: 12px; margin-top: 8px; }
+.sp-pick { flex: none; max-width: 40%; min-height: 44px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--s2); color: var(--t1); font: inherit; font-size: 12.5px; }
+.sp-est { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sp-est > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--ground); min-width: 0; }
+.sp-est .wide { grid-column: 1 / -1; }
+.sp-est span { font-size: 11px; color: var(--text-dim); }
+.sp-est b { font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; }
+.sp-foot { display: flex; align-items: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
+.sp-spacer { flex: 1; }
+.sp-foot .hub-btn { min-height: 44px; }
+.sp-go { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
+.sp-note { font-size: 11.5px; color: var(--text-dim); text-align: right; max-width: 240px; }
+.runs-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; max-width: calc(100vw - 32px); padding: 10px 16px; border: 1px solid var(--line2); border-radius: 999px; background: var(--s2); color: var(--t1); font-size: 13px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
+.work-spawn { margin-bottom: 12px; }
+
+@media (max-width: 767px) {
+  /* A bottom sheet. */
+  .spawn-sheet { width: 100%; max-width: none; max-height: 92vh; margin: auto 0 0; border-radius: 20px 20px 0 0; border-width: 1px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .sp-two { grid-template-columns: minmax(0, 1fr); }
+  .sp-route { flex-wrap: wrap; }
+  .sp-pick { max-width: 100%; }
+  .sp-foot { flex-wrap: wrap; }
+  .sp-note { max-width: 100%; }
+  .runs-toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) { .sp-tpl { transition: none; } }
+
+/* Needs you header: Spawn beside "Answer the next one". */
+.needs-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.needs-actions .hub-btn { min-height: 36px; border-radius: 999px; padding: 0 16px; }
+.needs-actions .needs-next { margin-left: 0; }
