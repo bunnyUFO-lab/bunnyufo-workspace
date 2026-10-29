@@ -38,7 +38,7 @@ try {
   try {
     await page.getByRole('status').filter({ hasText: 'Opening report' }).waitFor();
     assert.equal(await page.locator('iframe.report-frame').evaluate(element => getComputedStyle(element).visibility), 'hidden');
-    assert.equal(await page.locator('.report-document').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(16, 17, 21)');
+    assert.equal(await page.locator('.report-document').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(10, 11, 13)');
   } finally { releaseReport(); }
   await page.locator('.report-document[aria-busy=false]').waitFor();
   assert.equal(await page.frameLocator('iframe.report-frame').locator('body').evaluate(element => getComputedStyle(element).scrollbarColor), 'rgb(81, 76, 89) rgb(17, 18, 23)');

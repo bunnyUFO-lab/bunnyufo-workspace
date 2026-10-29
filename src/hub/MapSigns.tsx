@@ -3,7 +3,7 @@ import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 
 const ORDER: Sign[] = ['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed']
 const COLOR: Record<Sign, string> = {
-  working: 'var(--pink)', idle: 'var(--text-dim)', new: 'var(--blue)', pr: 'var(--purple)', 'ci-failed': 'var(--red)', review: 'var(--amber)', deployed: 'var(--green)',
+  working: 'var(--st-working)', idle: 'var(--st-idle)', new: 'var(--t2)', pr: 'var(--accent)', 'ci-failed': 'var(--st-failed)', review: 'var(--st-needs)', deployed: 'var(--st-done)',
 }
 
 /** Small round badges in a row from (x, y): ⟳ (an animated ring), ⏸, ✦, ⇄, ✕, 👁, ▲, in that order. */

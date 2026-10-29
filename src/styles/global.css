@@ -3,11 +3,12 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body, #root { height: 100%; }
-html { background: #101115; color-scheme: dark; }
-* { scrollbar-width: thin; scrollbar-color: #514c59 #111217; }
+html { background: var(--ground); color-scheme: dark; }
+* { scrollbar-width: thin; scrollbar-color: var(--t4) var(--ground); }
 
 body {
   font-family: var(--font-body);
+  font-feature-settings: 'tnum' 0;
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
@@ -15,17 +16,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Aura — soft pink/purple pools of light behind everything */
+/* Aura removed: the mission-control look has flat ground, no coloured light. */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    radial-gradient(520px 420px at 12% -4%, rgba(240, 160, 176, 0.08), transparent 65%),
-    radial-gradient(720px 560px at 96% 104%, rgba(183, 148, 244, 0.065), transparent 65%),
-    radial-gradient(900px 500px at 55% 120%, rgba(240, 160, 176, 0.03), transparent 70%);
+  background: none;
 }
 
 /* Grain — barely-there film noise so the dark fields don't band */
@@ -42,7 +40,7 @@ body::after {
 
 a { color: var(--pink); text-decoration: none; }
 
-::selection { background: rgba(240, 160, 176, 0.3); }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 
 a:focus-visible,
 button:focus-visible {
@@ -161,7 +159,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .sidebar-collapse:hover {
   background: var(--surface-2);
   color: var(--text-bright);
-  border-color: rgba(240, 160, 176, 0.45);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* ── A narrow screen gets the menu whole ──────────────────────────────────────
@@ -286,7 +284,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .sidebar-search input::placeholder { color: var(--text-muted); }
 .sidebar-search input:focus {
   outline: none;
-  border-color: rgba(240, 160, 176, 0.45);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: var(--surface-2);
   box-shadow: var(--glow-pink);
 }
@@ -333,11 +331,11 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
   transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
     background var(--t-fast) var(--ease);
 }
-.project-chip:hover { color: var(--text); border-color: rgba(240, 160, 176, 0.45); }
+.project-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .project-chip.active {
   color: var(--text);
   background: var(--surface-2);
-  border-color: rgba(187, 150, 240, 0.55);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 /* The workspace agents and new cards write to: a quiet mark, not a second selection. */
 .project-chip.writing::before {
@@ -476,7 +474,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 /* Where the search box's arrow keys are: a ring, so it reads apart from the open card. */
 .sidebar-item.cursor,
 .sidebar-section-toggle.cursor {
-  outline: 1px solid var(--pink, #f0a0b0);
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
   border-radius: 8px;
   background: var(--surface-2);
@@ -493,9 +491,9 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 
 .sidebar-item.pinned {
   box-shadow: inset 2px 0 0 var(--amber);
-  background: rgba(234, 181, 110, 0.04);
+  background: color-mix(in srgb, var(--st-needs) 4%, transparent);
 }
-.sidebar-item.pinned:hover { background: rgba(234, 181, 110, 0.09); }
+.sidebar-item.pinned:hover { background: color-mix(in srgb, var(--st-needs) 9%, transparent); }
 .sidebar-item.pinned.active {
   background:
     linear-gradient(var(--surface-3), var(--surface-2)) padding-box,
@@ -527,7 +525,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 }
 .status-dot.active {
   background: var(--purple);
-  box-shadow: 0 0 8px rgba(183, 148, 244, 0.6);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .status-dot.done { background: var(--green); }
 .status-dot.archived { background: var(--text-muted); }
@@ -535,7 +533,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 /* Pinning by drag: the list you can drop onto is outlined while a card is in the air, and
    lights up under the pointer. The card's pin button does the same job without a mouse. */
 .drop-zone {
-  border: 1px dashed rgba(234, 181, 110, 0.35);
+  border: 1px dashed color-mix(in srgb, var(--st-needs) 35%, transparent);
   border-radius: var(--radius-md);
   padding: 2px;
 }
@@ -568,7 +566,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 /* Keyboard focus in the menu (J/K, ↑/↓, Tab) looks like the search box's cursor: one ring. */
 .sidebar-item:focus-visible,
 .sidebar-section-toggle:focus-visible {
-  outline: 1px solid var(--pink, #f0a0b0);
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
   border-radius: 8px;
   background: var(--surface-2);
@@ -649,11 +647,11 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--green);
-  box-shadow: 0 0 6px rgba(110, 231, 160, 0.5);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--st-done) 50%, transparent);
 }
 .sync-dot.offline {
   background: var(--red);
-  box-shadow: 0 0 6px rgba(232, 112, 112, 0.5);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--st-failed) 50%, transparent);
 }
 
 /* ─── Main column ─── */
@@ -843,8 +841,8 @@ a.crumb-link { text-decoration: none; color: inherit; }
 .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .topbar-right{width:100%;margin:0;align-items:flex-start}
 .app-layout:not([data-entity="my-dream-game"]) .step-tabs-wrap{flex:1 1 auto}
 .app-layout:not([data-entity="my-dream-game"]) .step-tabs{background:transparent;border:0;gap:5px;padding:0}
-.app-layout:not([data-entity="my-dream-game"]) .step-tab{border:1px solid #ffffff0c;padding:6px 10px;color:#a59dab;border-radius:7px}
-.app-layout:not([data-entity="my-dream-game"]) .step-tab.active{border-color:#f0a0b036;color:#f7bbca;background:#f0a0b012}
+.app-layout:not([data-entity="my-dream-game"]) .step-tab{border:1px solid var(--line);padding:6px 10px;color:var(--t2);border-radius:7px}
+.app-layout:not([data-entity="my-dream-game"]) .step-tab.active{border-color:color-mix(in srgb, var(--accent) 35%, transparent);color:var(--accent);background:color-mix(in srgb, var(--accent) 10%, transparent)}
 
 .step-tab {
   padding: 4px 12px;
@@ -901,7 +899,7 @@ button.open-ext {
 }
 .open-ext:hover {
   color: var(--pink);
-  border-color: rgba(240, 160, 176, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   box-shadow: var(--glow-pink);
 }
 
@@ -910,7 +908,7 @@ button.open-ext {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #101115;
+  background: var(--ground);
 }
 
 /* .markdown-reader scrolls itself, but it is a flex child of this block parent, so `flex: 1` does
@@ -920,19 +918,19 @@ button.open-ext {
   height: 100%;
 }
 
-.report-document { position: relative; height: 100%; min-height: 0; background: #101115; }
+.report-document { position: relative; height: 100%; min-height: 0; background: var(--ground); }
 .report-error { padding: 32px; max-width: 760px; line-height: 1.7; }
 .report-error-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-.report-error-actions button { padding: 8px 14px; border: 1px solid #ffffff25; border-radius: 6px; background: #24212a; color: #f4eaf0; cursor: pointer; }
-.report-error details { color: #aaa2b2; }
+.report-error-actions button { padding: 8px 14px; border: 1px solid var(--line2); border-radius: 6px; background: var(--s3); color: var(--t1); cursor: pointer; }
+.report-error details { color: var(--t2); }
 .report-error pre { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 12px; }
-.report-document > .report-loading { position: absolute; inset: 0; background: #101115; }
+.report-document > .report-loading { position: absolute; inset: 0; background: var(--ground); }
 .report-frame {
   display: block;
   width: 100%;
   height: 100%;
   border: none;
-  background: #101115;
+  background: var(--ground);
   color-scheme: dark;
   visibility: hidden;
   opacity: 0;
@@ -940,15 +938,15 @@ button.open-ext {
 .report-frame.loaded { visibility: visible; opacity: 1; }
 
 /* A step with `url`: a live web app with a slim toolbar. */
-.web-view { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #101115; }
-.web-view-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 7px 14px; border-bottom: 1px solid #ffffff14; background: #15151b; font-size: 12px; line-height: 1.4; }
-.web-view-bar strong { font-weight: 600; color: #e9e4ff; }
-.web-view-bar code { color: #a596ee; }
-.web-view-down { color: #f0a36b; }
+.web-view { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--ground); }
+.web-view-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--s1); font-size: 12px; line-height: 1.4; }
+.web-view-bar strong { font-weight: 600; color: var(--t1); }
+.web-view-bar code { color: var(--accent); }
+.web-view-down { color: var(--st-needs); }
 .web-view-spacer { flex: 1; }
-.web-view-bar button, .web-view-bar a { padding: 4px 10px; border: 1px solid #a596ee40; border-radius: 7px; background: transparent; color: #d9d2f5; font: inherit; text-decoration: none; cursor: pointer; }
-.web-view-bar button[aria-pressed="true"] { background: #a596ee22; }
-.web-view > iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: #101115; }
+.web-view-bar button, .web-view-bar a { padding: 4px 10px; border: 1px solid var(--line2); border-radius: 7px; background: transparent; color: var(--t2); font: inherit; text-decoration: none; cursor: pointer; }
+.web-view-bar button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.web-view > iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--ground); }
 .web-view > .report-document, .web-view > .markdown-reader { flex: 1; min-height: 0; overflow: auto; }
 
 /* ─── Home (витрина) ─── */
@@ -1070,7 +1068,7 @@ button.open-ext {
   border: 1px solid transparent;
   border-radius: var(--radius-lg);
   background:
-    linear-gradient(160deg, rgba(24, 24, 30, 0.82), rgba(15, 15, 19, 0.82)) padding-box,
+    linear-gradient(var(--s1), var(--s1)) padding-box,
     var(--edge-soft) border-box;
   box-shadow: var(--shadow-1);
   backdrop-filter: blur(10px);
@@ -1083,7 +1081,7 @@ button.open-ext {
 .buw-card:has(.card-link:focus-visible) {
   transform: translateY(-2px);
   background:
-    linear-gradient(160deg, rgba(28, 28, 35, 0.88), rgba(17, 17, 22, 0.88)) padding-box,
+    linear-gradient(var(--s2), var(--s2)) padding-box,
     var(--edge) border-box;
   box-shadow: var(--shadow-2), var(--glow-pink);
 }
@@ -1095,7 +1093,7 @@ button.open-ext {
 .buw-card.pinned:hover,
 .buw-card.pinned:has(.card-link:focus-visible) {
   background:
-    linear-gradient(160deg, rgba(26, 24, 20, 0.85), rgba(16, 15, 12, 0.85)) padding-box,
+    linear-gradient(var(--s1), var(--s1)) padding-box,
     var(--edge-amber) border-box;
 }
 .buw-card.pinned:hover { box-shadow: var(--shadow-2), var(--glow-amber); }
@@ -1134,7 +1132,7 @@ button.open-ext {
 }
 .chip-pin {
   color: var(--amber);
-  border-color: rgba(234, 181, 110, 0.35);
+  border-color: color-mix(in srgb, var(--st-needs) 35%, transparent);
   background: var(--amber-dim);
 }
 /* Which project a card belongs to, when the grid mixes them. Clicking it filters to that project. */
@@ -1146,7 +1144,7 @@ button.open-ext {
   text-transform: none;
   letter-spacing: 0.2px;
 }
-.chip-project:hover { color: var(--text); border-color: rgba(187, 150, 240, 0.55); }
+.chip-project:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 
 .card-title {
   font-family: var(--font-display);
@@ -1192,11 +1190,11 @@ button.open-ext {
 .buw-card:hover .card-action,
 .card-action:focus-visible { opacity: 1; }
 .card-action:disabled { cursor: progress; color: var(--text-muted); opacity: 0.5; }
-.card-archive:hover { color: var(--pink); border-color: rgba(240, 160, 176, 0.35); }
-.card-pin:hover { color: var(--amber); border-color: rgba(234, 181, 110, 0.35); }
+.card-archive:hover { color: var(--pink); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.card-pin:hover { color: var(--amber); border-color: color-mix(in srgb, var(--st-needs) 35%, transparent); }
 .card-pin.on {
   color: var(--amber);
-  border-color: rgba(234, 181, 110, 0.35);
+  border-color: color-mix(in srgb, var(--st-needs) 35%, transparent);
   background: var(--amber-dim);
   opacity: 1;
 }
@@ -1261,7 +1259,7 @@ button.open-ext {
 }
 .icon-picker-grid button:hover,
 .icon-picker-grid button:focus-visible { background: var(--surface-2); }
-.icon-picker-grid button.on { border-color: var(--pink, #f0a0b0); }
+.icon-picker-grid button.on { border-color: var(--accent); }
 .icon-picker-own { display: flex; gap: 6px; margin-top: 8px; }
 .icon-picker-own input {
   flex: 1;
@@ -1328,14 +1326,14 @@ button.open-ext {
 
 /* ─── Scrollbars ─── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: #111217; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: var(--ground); }
 ::-webkit-scrollbar-thumb {
-  background: #514c59;
+  background: var(--t4);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: #6d6678; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--t3); }
 
 /* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
@@ -1404,7 +1402,7 @@ button.open-ext {
   appearance: none;
   text-overflow: ellipsis;
 }
-.c3d-select:hover { border-color: rgba(240, 160, 176, 0.4); }
+.c3d-select:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .c3d-select:focus-visible { outline: 1px solid var(--pink); outline-offset: 1px; }
 /* The open list is drawn by the OS, not by us. It ignores background on
    `option` and inherits the closed control's colour, which gave pale pink on
@@ -1549,7 +1547,7 @@ button.open-ext {
 .c3d-toggle:hover { color: var(--text-dim); background: var(--surface-2); }
 .c3d-toggle.on {
   color: var(--green);
-  border-color: rgba(110, 231, 160, 0.4);
+  border-color: color-mix(in srgb, var(--st-done) 40%, transparent);
   background: var(--green-dim);
 }
 
@@ -1677,13 +1675,13 @@ button.open-ext {
   font-size: 0.66rem;
   padding: 1px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(234, 181, 110, 0.35);
+  border: 1px solid color-mix(in srgb, var(--st-needs) 35%, transparent);
   background: var(--amber-dim);
   color: var(--amber);
   white-space: nowrap;
 }
 .c3d-quads.trusted {
-  border-color: rgba(110, 231, 160, 0.35);
+  border-color: color-mix(in srgb, var(--st-done) 35%, transparent);
   background: var(--green-dim);
   color: var(--green);
 }
@@ -1780,9 +1778,9 @@ button.open-ext {
   z-index: 50;
   padding: 10px 12px;
   border: 1px solid var(--hairline);
-  border-left: 3px solid var(--amber, #e0a33a);
+  border-left: 3px solid var(--st-needs);
   border-radius: var(--radius-sm, 8px);
-  background: color-mix(in srgb, var(--amber, #e0a33a) 10%, transparent);
+  background: color-mix(in srgb, var(--st-needs) 10%, transparent);
   font-size: 0.8rem;
   color: var(--text);
 }
@@ -1888,3 +1886,6 @@ button.open-ext {
   }
   .app-layout:has(.hub-tabs) .content { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
+
+/* Numbers that must line up: counts, times, sizes. */
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
