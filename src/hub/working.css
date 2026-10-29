@@ -1,0 +1,33 @@
+/* Working now rows and the Gaming PC tile on Today. M0 tokens only. */
+.wn-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+h3 + .wn-row { border-top: 0; padding-top: 4px; }
+.wn-sprite { flex: none; display: grid; place-items: center; width: 36px; height: 36px; background: var(--s2); border-radius: 10px; }
+.wn-sprite .px { image-rendering: pixelated; }
+.wn-text { flex: 1; min-width: 0; }
+.wn-text b { display: block; font-weight: 500; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wn-text b a { color: inherit; text-decoration: none; }
+.wn-text b a:hover { text-decoration: underline; }
+.wn-text small { display: block; font-size: 12px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wn-bead { color: var(--t2); font-family: var(--mono); text-decoration: none; }
+a.wn-bead:hover { text-decoration: underline; }
+.wn-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; text-align: right; }
+.wn-meta small { font-size: 12px; color: var(--t3); }
+.wn-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--t2); }
+.wn-open { font-size: 12px; color: var(--t2); text-decoration: none; }
+.wn-open:hover { color: var(--t1); text-decoration: underline; }
+.wn-idle { margin-top: 6px; border-top: 1px solid var(--line); }
+.wn-idle > summary { cursor: pointer; padding: 10px 0 4px; font-size: 12px; color: var(--t3); list-style: none; }
+.wn-idle > summary::-webkit-details-marker { display: none; }
+.wn-idle > summary::before { content: '▸ '; }
+.wn-idle[open] > summary::before { content: '▾ '; }
+
+.pc-head { margin: 2px 0 8px; font-size: 14px; font-weight: 600; color: var(--t1); }
+.pc-line { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--t3); }
+.pc-line b { font-weight: 500; color: var(--t1); font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.pc-chip { display: inline-block; margin-top: 10px; padding: 2px 10px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11px; color: var(--t2); }
+.pc-updated { display: block; margin-top: 8px; font-size: 12px; color: var(--t3); }
+
+@media (max-width: 520px) {
+  .wn-row { flex-wrap: wrap; }
+  .wn-meta { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 10px; width: 100%; padding-left: 48px; text-align: left; }
+}
