@@ -5,9 +5,14 @@ import { authHeaders } from '../local/client'
 import type { PcSummary, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
 
-export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'review' | 'blocked' | 'session'
+export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'review' | 'blocked' | 'session'
 export interface Item {
   kind: ItemKind
+  /** A Hermes approval row: the command Hermes asks to run, its reason, the answers it takes, and when it denies by itself. */
+  command?: string
+  description?: string
+  choices?: string[]
+  expiresAt?: string
   id: string
   project?: string
   title: string

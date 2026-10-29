@@ -13,7 +13,7 @@ import NextNote from './NextNote'
 import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
 import NeedsItem from './NeedsItem'
-import type { SettleVerb } from './NeedsItem'
+import type { SettleExtra, SettleVerb } from './NeedsItem'
 import { itemKey, takeFocus } from './needsFocus'
 import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
@@ -91,7 +91,7 @@ export default function Needs({ filter }: { filter?: string }) {
   const shown = [...base]
   for (const ghost of leaving) shown.splice(Math.min(ghost.index, shown.length), 0, ghost.item)
 
-  function handleSettled(item: Item, verb: SettleVerb) {
+  function handleSettled(item: Item, verb: SettleVerb, extra?: SettleExtra) {
     const key = itemKey(item)
     const order = shown.filter(other => !leaving.some(ghost => itemKey(ghost.item) === itemKey(other)) || itemKey(other) === key)
     const index = Math.max(0, order.findIndex(other => itemKey(other) === key))
@@ -104,7 +104,7 @@ export default function Needs({ filter }: { filter?: string }) {
     const elsewhere = !next && active !== 'all' && !isHistory ? Math.max(0, (data?.counts?.all ?? 0) - (data?.counts?.[active] ?? 0)) : 0
     const plural = KIND_PLURAL[active as NeedsKind] as string | undefined
     setNote({
-      handoff: { verb: NOTE_VERB[verb], title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? hubHash('needs', 'unstick') },
+      handoff: { verb: NOTE_VERB[verb], ...(extra?.detail ? { detail: extra.detail } : {}), ...(extra?.link ? { link: extra.link } : {}), title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? hubHash('needs', 'unstick') },
       index, nextKey: next ? itemKey(next) : null,
     })
     window.setTimeout(() => setLeaving(previous => previous.filter(ghost => itemKey(ghost.item) !== key)), reducedMotion() ? 0 : LEAVE_MS)

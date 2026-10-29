@@ -6,6 +6,7 @@ import { reviewHash } from '../lib/route'
 import AskBody from './AskBody'
 import { ApprovalBody } from './ApprovalView'
 import ChecklistBody from './ChecklistBody'
+import HermesApprovalView from './HermesApprovalView'
 import { ReviewActions } from './ItemRow'
 import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
@@ -13,6 +14,9 @@ import { useHubData } from './useHub'
 
 /** What the owner did to take an item off the queue, as `onSettled` reports it. */
 export type SettleVerb = SettledVerb
+
+/** What an action can add to the note after it: plain words, and a link to what it made. */
+export interface SettleExtra { detail?: string; link?: { label: string; hash: string } }
 
 const VERDICT_LEG: Record<string, string> = { smoke: 'Smoke', review: 'Review', qa: 'QA' }
 
@@ -67,7 +71,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
   /** When the list last arrived: a checklist body keeps its own newer tick answer until then. */
   at: Date | null
   reload: () => void
-  onSettled: (item: Item, verb: SettleVerb) => void
+  onSettled: (item: Item, verb: SettleVerb, extra?: SettleExtra) => void
   leaving?: boolean
 }) {
   const kind = needsKind(item)
@@ -89,7 +93,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
           <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
           <div className="ni-hm">
             <h3 className="ni-t" id={`ni-${key}`} tabIndex={-1}>{page ? <a href={page}>{item.title}</a> : item.title}</h3>
-            <div className="ni-meta"><span className="ni-chip">{KIND_LABEL[kind]}</span>{meta.map(part => <span key={part}>{part}</span>)}</div>
+            <div className="ni-meta"><span className="ni-chip">{item.kind === 'hermes-approval' ? 'Hermes approval' : KIND_LABEL[kind]}</span>{meta.map(part => <span key={part}>{part}</span>)}</div>
           </div>
         </header>
         {info && (
@@ -106,6 +110,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
         {item.kind === 'approval' && <ApprovalBody id={item.id} onSettled={verb => onSettled(item, verb)} />}
         {item.kind === 'review' && <ReviewBody item={item} onSettled={() => onSettled(item, 'done')} />}
         {item.kind === 'blocked' && <BlockedBody item={item} onSettled={() => onSettled(item, 'done')} />}
+        {item.kind === 'hermes-approval' && <HermesApprovalView item={item} onSettled={(verb, extra) => onSettled(item, verb, extra)} />}
       </article>
     </div>
   )

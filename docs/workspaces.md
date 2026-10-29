@@ -337,6 +337,8 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/requests/:id/stop` | `{ reason? }`: a signed `stop.json`, in `approved`, `expired`, `taken`, `running` or `lost`; a Hermes run is stopped too |
 | `POST /api/hub/requests/:id/again` | `{ target?, text?, title? }`: for an `expired`, `failed`, `lost` or `proposed` request. Makes a new request that `replaces` it, approves that one, and retires the old: a proposal gets `declined.json`, the others a signed stop naming the new id. Answers `{ id, state, approved, waiting? }` |
 | `GET /api/hub/requests/:id/events` | Server-sent events of a Hermes request run: `message.delta`, `tool.started`, `tool.completed`, `approval.request`, `approval.settled`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted`, then `state { state }` and the end. The site's follower feeds it (recent events are replayed); closing the page never stops the run. 409 when the request has no Hermes run; a finished request answers `state` at once |
+| `GET /api/hub/hermes-approvals/:id` | One Hermes approval: `{ approval, answer?, state }` (`open`, `answered` or `expired`) |
+| `POST /api/hub/hermes-approvals/:id/answer` | `{ choice: once \| deny }`: forwards the answer to the Hermes run, then writes `answer.json` `{ choice, at, by, forwarded: true }`. Needs a signed-in user. After the 5 minutes, or when the run has ended, or when Hermes no longer waits, it writes `forwarded: false` with the reason and answers 409. A second answer is 409 |
 | `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
 | `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
@@ -418,6 +420,15 @@ follower stops a run at `limits.minutes` (`time-limit`). At most 3 Hermes runs g
 signed and waits in `approved` (`waiting` in the answer); a run that ends, and a sweep every 60 s, start the oldest
 waiting one. After a restart, the hub and the page loads (at most once per 30 s) re-attach to every run without a
 result. `HERMES_URL` and `HERMES_API_KEY` must be set; without them an approval waits.
+
+Hermes approvals: Hermes asks before it writes a protected instruction file (in practice the only thing that asks in
+Hermes's sandbox). Each ask becomes `hermes-approvals/<yyyymmdd>-hermes-<4>-<4>/approval.json` (`runId`, `requestId` and
+`promptId` = Hermes's prompt id, `executionGeneration`, `request`, `chat`, `title`, `detail`, `command`,
+`description`, `choices`, `createdAt`, `expiresAt` = 300 seconds on). The id comes from a hash of the run and the
+prompt, so a replayed event writes nothing and pings nothing. `#needs-you` gets one ping per approval, ending
+"Answer within 5 minutes." (`HUB_DISCORD_NEEDS_YOU`, silent without it). An open approval is a Needs you row of kind
+`hermes-approval` (needs kind `approval`, label "Hermes approval"); it leaves when it is answered, when its run
+has a result, or at `expiresAt`, because Hermes denies it on its own after 300 seconds.
 
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
