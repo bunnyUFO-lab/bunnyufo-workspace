@@ -31,6 +31,13 @@ function Icon({ name }: { name: string }) {
 
 const PROJECT_KEY = 'buw.hub.project'
 
+/** "Research and docs may be signed by policy." for the kinds the server signs without a tap. */
+const policyLine = (kinds: string[]) => {
+  const words = kinds.map(kind => kind.charAt(0).toUpperCase() + kind.slice(1))
+  const list = words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words[words.length - 1].toLowerCase()}` : words[0]
+  return `${list} may be signed by policy.`
+}
+
 const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within 5 minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
@@ -217,6 +224,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                         </ol>
                       )}
                       <p className="sp-faint sp-caps">{CAPS_LINE}</p>
+                      {host.policy.length > 0 && <p className="sp-faint sp-caps" data-spawn-policy>{policyLine(host.policy)}</p>}
                     </div>
                     <select className="sp-pick" aria-label="Change where it runs" value={choice} onChange={event => setOverride(event.target.value as SpawnTarget | '')} data-spawn-target>
                       <option value="">Auto</option>

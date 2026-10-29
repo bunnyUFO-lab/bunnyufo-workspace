@@ -2,11 +2,19 @@ import { useState } from 'react'
 import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
 import { hubHash, reviewHash } from '../lib/route'
+import { openRun } from './runStore'
 import { useMarkDone } from './useMarkDone'
 
 const EVENT_DOT: Record<string, string> = {
   'session-started': 'g', 'session-ended': 'g', blocked: 'y', 'ready-for-review': 'p', 'pr-opened': 'b', 'pr-merged': 'g',
   'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g',
+}
+
+/** A plain click opens the run drawer; a modified click or a middle click is left to the browser (the request's own page). */
+export function openFromClick(event: { button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void }, id: string) {
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  openRun(id)
 }
 
 const KIND_LABEL: Record<string, string> = { ask: 'Ask', checklist: 'To do', request: 'Request', review: 'Review', blocked: 'Blocked', session: 'Running' }
@@ -96,6 +104,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     )
     if (item.kind === 'ask') return <a className="hub-row click" href={hubHash('ask', item.id)}>{body}</a>
     if (item.kind === 'checklist') return <a className="hub-row click" href={hubHash('checklist', item.id)} data-checklist-open>{body}</a>
+    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id}>{body}</a>
     return <div className="hub-row">{body}</div>
   }
   if (!event) return null

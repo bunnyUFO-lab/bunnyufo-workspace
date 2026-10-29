@@ -132,8 +132,8 @@ try {
 
   step('A request signed by policy says so, and a link opens the item page');
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.policy)}`);
-  await page.locator('[data-request-state="approved"]').waitFor();
-  assert.match(await page.locator('[data-request-state]').innerText(), /Signed by policy/);
+  await page.locator('[data-run-view]').waitFor();
+  assert.match(await page.locator('[data-run-by]').innerText(), /Signed by policy/);
   assert.equal(await page.locator('[data-approval-approve]').count(), 0, 'An approved request has no Approve.');
   assert.match(await page.locator('[data-approval-text]').innerText(), /signed without a tap/);
 

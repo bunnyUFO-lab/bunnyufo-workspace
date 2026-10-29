@@ -8,6 +8,7 @@ import type { SettledVerb } from '../lib/nextItem.mjs'
 import { hubHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
+import { RunView } from './RunDrawer'
 import { loadPresets } from './spawnData'
 import { openSpawn } from './spawnStore'
 import { goNext, useQueueOrder } from './useGoNext'
@@ -193,8 +194,8 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
         </div>
         <p className="ap-text" data-approval-text>{request.text}</p>
         {request.doneWhen && <p className="hub-muted">Done when: {request.doneWhen}</p>}
-        {!actionable && <RequestState detail={detail} />}
-        {page && !actionable && <p className="hub-muted">The run's timeline appears here once the run view is built.</p>}
+        {!actionable && page && <RunView id={id} onGone={next => { window.location.hash = hubHash('request', next) }} />}
+        {!actionable && !page && <RequestState detail={detail} />}
         {loadError && <p className="hub-error" role="alert">{loadError}</p>}
       </div>
       {actionable && preset && <div className="ni-b ap-rest"><ApprovalActions detail={detail} preset={preset} onSettled={onSettled} /></div>}

@@ -76,6 +76,8 @@ export interface HubEvent {
   appUrl?: string
   card?: string
   review?: string
+  /** An alert made from a request (`source: 'request'`): the request's id. */
+  request?: string
   summary?: string
   file: string
   prs?: string[]

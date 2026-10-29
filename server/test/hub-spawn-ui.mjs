@@ -129,7 +129,7 @@ try {
   const signed = await open({ width: 1280, height: 900 });
   await signed.route('**/api/capabilities', async route => {
     const response = await route.fetch();
-    await route.fulfill({ response, json: { ...(await response.json()), approve: true } });
+    await route.fulfill({ response, json: { ...(await response.json()), approve: true, policy: ['research', 'docs'] } });
   });
   const approvals = [];
   await signed.route('**/api/hub/requests/*/approve', async route => {
@@ -138,6 +138,11 @@ try {
     await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ state: 'approved', approved: {}, ...waiting }) });
   });
   await signed.goto(`${fixture.url}#/~hub/today`);
+  await signed.locator('[data-spawn-open]').click();
+  await signed.locator('[data-spawn-policy]').waitFor();
+  assert.equal(await signed.locator('[data-spawn-policy]').innerText(), 'Research and docs may be signed by policy.');
+  await signed.keyboard.press('Escape');
+  assert.equal(await page.locator('[data-spawn-policy]').count(), 0, 'Without a policy the line is absent.');
   const approve = async (preset, text, toast, target) => {
     await signed.locator('[data-spawn-open]').click();
     await signed.locator('[data-spawn-project]').selectOption('magic-loops');
@@ -160,7 +165,7 @@ try {
   await approve('research', 'Fourth', 'Saved, but not approved. It waits in Needs you: The signing key is not set.');
 
   step('Approve for real: with a signing key the button reads Approve and writes a signed approved.json');
-  const keyed = await startHubFixture({ signing: true });
+  const keyed = await startHubFixture({ signing: true, hermes: true });
   fixtures.push(keyed);
   await new Promise(resolve => setTimeout(resolve, 100));
   const real = await open({ width: 1280, height: 900 });
