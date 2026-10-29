@@ -607,12 +607,18 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
    */
   const WORKTREE_NAME = /-[0-9a-f]{6}$/;
 
+  /** Table projects take the table's name, order and runsOn and come first in table order; the rest follow alphabetically. */
+  function orderProjects(rows) {
+    return rows
+      .map(row => { const known = defaultsOf(row.id); return known ? { ...row, name: known.name, order: known.order, runsOn: known.runsOn } : row; })
+      .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.id < b.id ? -1 : 1));
+  }
+
   async function projects(at) {
     const found = new Map();
     const add = (id, patch = {}) => {
       if (!validProject(id)) return;
-      const known = defaultsOf(id);
-      found.set(id, { id, name: known?.name ?? titleCase(id), beads: false, ...(known ? { order: known.order, runsOn: known.runsOn } : {}), ...found.get(id), ...patch });
+      found.set(id, { id, name: titleCase(id), beads: false, ...found.get(id), ...patch });
     };
     const { objects } = await bucket.list(folder('beads'));
     await pool(POOL, objects.filter(object => object.key.endsWith('.meta.json')), async object => {
@@ -625,7 +631,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     for (const row of checklists) add(row.checklist.project);
     for (const item of requests) add(item.project);
     for (const event of window.events) add(event.project);
-    return [...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)).sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.id < b.id ? -1 : 1));
+    return orderProjects([...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)));
   }
 
   async function serveFile(response, rel) {
