@@ -49,7 +49,7 @@ const open = async (viewport, options = {}) => {
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   const current = { sheet: SHEET_ID };
-  await page.route('**/api/hub/file?path=team*', route => route.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+  await page.route('**/api/hub/file?path=team/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
   await page.route('**/api/hub/team/*/sheets', route => route.fulfill({
     json: { sheets: [
       { sheet: SHEET_ID, at: new Date(Date.now() - 3600_000).toISOString(), rows: rows([4, 6, 6, 4, 6, 3, 2, 6, 4]), url: `/hub/file?path=team/claude/${SHEET_ID}.png`, current: current.sheet === SHEET_ID },
