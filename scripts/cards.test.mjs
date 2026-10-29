@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -15,6 +15,7 @@ import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha = text => createHash('sha256').update(text).digest('hex');
+const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** The handler behind a local HTTP server; `flaky.fail` is how many requests answer 503 first (Infinity: always). */
@@ -69,11 +70,12 @@ async function setup() {
   /** Run the CLI; resolves { code, stdout, stderr } whether or not it exits 0. */
   const cli = (via, ...args) => new Promise(resolve => {
     const env = { ...(via === 's3' ? { ...base, ...direct } : base), ...cli.env };
-    execFile(process.execPath, [path.join(repo, 'scripts/cards.mjs'), ...args, ...(via ? ['--via', via] : [])], { env }, (error, stdout, stderr) => {
+    execFile(process.execPath, [path.join(repo, 'scripts/cards.mjs'), ...args, ...(via ? ['--via', via] : [])], { env, ...(cli.cwd ? { cwd: cli.cwd } : {}) }, (error, stdout, stderr) => {
       resolve({ code: error ? error.code : 0, stdout, stderr });
     });
   });
   cli.env = {};
+  cli.cwd = null;
   const keys = prefix => [...fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/${prefix}`)).sort();
   const close = async () => { server.close(); await fake.close(); await rm(dir, { recursive: true, force: true }); };
   return { fake, cli, keys, flaky, dir, spool, close };
@@ -298,17 +300,62 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
-  test(`beads push (${via}): both files, with the count`, async () => {
-    const { fake, cli, dir, close } = await setup();
+  test(`beads push (${via}): this worktree's copy, both files, with the count`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
     try {
       await writeFile(path.join(dir, 'beads.jsonl'), '{"id":"bd-1"}\n{"id":"bd-2"}\n\n{"id":"bd-3"}\n');
       const pushed = await cli(via, 'beads', 'push', '--project', 'probe', '--from', path.join(dir, 'beads.jsonl'));
       assert.equal(pushed.code, 0, pushed.stderr);
-      assert.equal(fake.text('sections/inbox/beads/probe.jsonl'), '{"id":"bd-1"}\n{"id":"bd-2"}\n\n{"id":"bd-3"}\n');
-      const meta = fake.json('sections/inbox/beads/probe.meta.json');
+      const root = git('rev-parse', '--show-toplevel').replace(/[\\]/g, '/').replace(/\/+$/, '');
+      const copy = `${os.hostname().toLowerCase().replace(/[^a-z0-9-]/g, '-')}-${sha(root.toLowerCase()).slice(0, 10)}`;
+      assert.equal(pushed.stdout.trim(), `beads/probe/${copy}.jsonl (3 issue(s))`);
+      assert.deepEqual(keys('beads/'), [`sections/inbox/beads/probe/${copy}.jsonl`, `sections/inbox/beads/probe/${copy}.meta.json`], 'No legacy file is written.');
+      assert.equal(fake.text(`sections/inbox/beads/probe/${copy}.jsonl`), '{"id":"bd-1"}\n{"id":"bd-2"}\n\n{"id":"bd-3"}\n');
+      const meta = fake.json(`sections/inbox/beads/probe/${copy}.meta.json`);
+      assert.deepEqual(Object.keys(meta).sort(), ['branch', 'count', 'host', 'main', 'pushedAt', 'repo', 'root', 'v', 'worktree']);
+      assert.equal(meta.v, 2);
       assert.equal(meta.count, 3);
-      assert.deepEqual(Object.keys(meta).sort(), ['count', 'host', 'pushedAt', 'repo']);
+      assert.equal(meta.root, root);
+      assert.equal(meta.worktree, root.split('/').pop());
+      assert.equal(typeof meta.main, 'boolean');
+      assert.equal(meta.branch, git('rev-parse', '--abbrev-ref', 'HEAD'));
       assert.equal((await cli(via, 'beads', 'push', '--project', 'probe', '--from', path.join(dir, 'beads.jsonl'))).code, 0, 'A plain put replaces.');
+      assert.equal(keys('beads/').length, 2, 'The same worktree writes the same copy.');
+    } finally { await close(); }
+  });
+
+  test(`beads push (${via}): --copy names the copy; two copies sit side by side; a bad name is refused`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
+    try {
+      await writeFile(path.join(dir, 'a.jsonl'), '{"id":"bd-1"}\n');
+      await writeFile(path.join(dir, 'b.jsonl'), '{"id":"bd-1"}\n{"id":"bd-2"}\n');
+      assert.equal((await cli(via, 'beads', 'push', '--project', 'probe', '--from', path.join(dir, 'a.jsonl'), '--copy', 'test-pc-aaaaaaaaaa')).code, 0);
+      assert.equal((await cli(via, 'beads', 'push', '--project', 'probe', '--from', path.join(dir, 'b.jsonl'), '--copy', 'test-pc-bbbbbbbbbb')).code, 0);
+      assert.deepEqual(keys('beads/').map(key => key.replace('sections/inbox/beads/probe/', '')), [
+        'test-pc-aaaaaaaaaa.jsonl', 'test-pc-aaaaaaaaaa.meta.json', 'test-pc-bbbbbbbbbb.jsonl', 'test-pc-bbbbbbbbbb.meta.json']);
+      assert.equal(fake.json('sections/inbox/beads/probe/test-pc-bbbbbbbbbb.meta.json').count, 2);
+      for (const bad of ['legacy', 'Has Space', '../x', 'my-token-1']) {
+        const refused = await cli(via, 'beads', 'push', '--project', 'probe', '--from', path.join(dir, 'a.jsonl'), '--copy', bad);
+        assert.equal(refused.code, 1, `${bad} is refused`);
+      }
+      assert.equal(keys('beads/').length, 4, 'A refused push writes nothing.');
+    } finally { await close(); }
+  });
+
+  test(`beads push (${via}): outside a git repository the folder is the root, not main, with no repo`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
+    try {
+      const work = path.join(dir, 'plain');
+      await mkdir(work);
+      await writeFile(path.join(work, 'x.jsonl'), '{"id":"bd-1"}\n');
+      cli.cwd = work;
+      const pushed = await cli(via, 'beads', 'push', '--project', 'probe', '--from', 'x.jsonl');
+      assert.equal(pushed.code, 0, pushed.stderr);
+      const metaKey = keys('beads/probe/').find(key => key.endsWith('.meta.json'));
+      const meta = fake.json(metaKey);
+      assert.equal(meta.repo, '');
+      assert.equal(meta.main, false);
+      assert.equal(meta.worktree, 'plain');
     } finally { await close(); }
   });
 }

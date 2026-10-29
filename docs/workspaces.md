@@ -330,7 +330,7 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
-| `GET /api/hub/beads/:project`, `/map/:project` | The Beads copy, and the progress map built from it |
+| `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
 | `GET /api/hub/discord/asks`, `POST /api/hub/discord/answer` | The Asks bot only, with its own bearer token and no `Remote-User` (see Answers from Discord) |
 | `GET /api/hub/chat`, `/chat/:id` | The newest 30 conversations, and one conversation's lines. Chat needs `HERMES_URL` and `HERMES_API_KEY`, and a signed-in user where writes need `Remote-User` (503 when off, 401 without a user) |
@@ -346,6 +346,20 @@ into the session; the bare `https://claude.ai/code` counts as no link) and `appU
 app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to open the Claude app.
 
 A `ready-for-review` event may also carry `prs` (GitHub pull request links), `cardDir` (`<section>/<card folder>`), `cardFiles` (`.md` paths inside that folder, such as `briefs/x.md`), `screenshots` (https image links), `deployUrl` (an https build link) and `verdicts` (`{ leg: smoke|review|qa, result: pass|fail|noted, text }`, at most three). The review view (`#/~hub/review/<file>`) checks each field again, shows what is there and an empty line for what is not, and reads the card files from the site's `/w/<cardDir>/<path>`. On the local service, which has no `/w/` route, a file shows as not here and the view offers the card instead.
+
+### Beads copies
+
+Every worktree pushes its own Beads export (`cards beads push --project <p>`, run in the worktree), so a stale checkout cannot roll the roadmap back. The inbox holds:
+
+```
+beads/<project>/<copy>.jsonl       bd export output, one issue per line
+beads/<project>/<copy>.meta.json   { v: 2, pushedAt, host, count, repo, worktree, main, root, branch }
+beads/<project>.jsonl + .meta.json  the older single copy: still read, never written again
+```
+
+`<copy>` is `<host>-<first 10 hex of sha256 of the worktree root>`: the root is lower-cased with forward slashes, so one worktree always writes the same copy. A hash stands in for the worktree name because the card API refuses a `.json` file whose name contains `token`, `secret`, `password` or `credential`. `--copy <id>` names the copy by hand. `root` is for the hub-hooks mod's own clean-up and is not shown in the UI.
+
+The site reads the newest 30 copies of a project (by `pushedAt`) and the older single copy, and keeps for each issue the version with the greatest `updated_at` (a missing or bad date is oldest; a tie goes to the later push). `meta` is the newest copy's `pushedAt`, `host` and `repo` plus `count` and `copies` (`copy`, `host`, `worktree`, `main`, `pushedAt`, `count` for each). A project with only the older file answers as before, with its own `meta`. A project is listed when it has any copy. An issue removed with `bd delete` stays in other copies until they are pruned.
 
 ### Checklists
 
