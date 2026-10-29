@@ -49,7 +49,7 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     if (request.method === 'GET' || request.method === 'HEAD') {
       const object = objects.get(key);
       if (!object) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
-      const headers = { 'Content-Type': object.contentType, 'Content-Length': object.body.length, ETag: `"${object.etag}"`, 'Last-Modified': object.lastModified };
+      const headers = { 'Content-Type': object.contentType, 'Content-Length': object.body.length, ETag: `"${object.etag}"`, 'Last-Modified': object.lastModified, ...Object.fromEntries(Object.entries(object.metadata ?? {}).map(([name, value]) => [`x-amz-meta-${name}`, value])) };
       if (request.headers['if-none-match'] === `"${object.etag}"`) { response.writeHead(304, headers); return response.end(); }
       response.writeHead(200, headers);
       return response.end(request.method === 'HEAD' ? undefined : object.body);
@@ -65,7 +65,8 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       if (ifMatch && (!existing || `"${existing.etag}"` !== ifMatch)) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
       if (ifNoneMatch === '*' && existing) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
       const etag = createHash('md5').update(body).digest('hex');
-      objects.set(key, { body, etag, contentType: request.headers['content-type'] || 'binary/octet-stream', lastModified: new Date().toUTCString() });
+      const metadata = Object.fromEntries(Object.entries(request.headers).filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value]));
+      objects.set(key, { body, etag, contentType: request.headers['content-type'] || 'binary/octet-stream', lastModified: new Date().toUTCString(), metadata });
       response.writeHead(200, { ETag: `"${etag}"`, 'Content-Length': 0 });
       return response.end();
     }
@@ -88,9 +89,9 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     text: key => objects.get(key)?.body.toString('utf8') ?? null,
     json: key => { const text = objects.get(key)?.body.toString('utf8'); return text === undefined ? null : JSON.parse(text); },
     /** Seed an object straight into the store. */
-    seed(key, body, contentType = 'application/octet-stream') {
+    seed(key, body, contentType = 'application/octet-stream', metadata = {}) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-      objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString() });
+      objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata });
     },
     close: () => new Promise(resolve => server.close(resolve)),
   };

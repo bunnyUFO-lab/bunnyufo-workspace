@@ -46,6 +46,9 @@ async function setup() {
     `cloud-magic-loops=${sha('tok-cloud-ml')}:read=*;write=inbox|inbox-dev`,
     `cloud-sprite-studio=${sha('tok-cloud-ss')}:read=*;write=inbox`,
     `cloud-magic=${sha('tok-cloud-m')}:read=*;write=inbox`,
+    `agent-session=${sha('tok-agent')}:read=*;write=inbox|inbox-dev`,
+    `hermes-main=${sha('tok-hermes-main')}:read=*;write=inbox|assistant`,
+    `agentish=${sha('tok-agentish')}:read=*;write=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
   const call = async (method, rawPath, { token = 'tok-all', body, query, base64, headers = {} } = {}) => {
@@ -739,6 +742,42 @@ test('inbox: request.json is create-only for a limited writer, which cannot clai
     assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 412, 'not twice');
     assert.equal((await call('DELETE', url, { token: 'tok-deleter' })).status, 403, 'a limited deleter keeps off it');
     assert.equal((await write('tok-all', owner)).status, 200, 'the passphrase may replace, and may write origin owner');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: request.json written by an agent-session token carries writer: agent; no other token, and no client header, sets it', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    const body = JSON.stringify({ id: 'w-1', project: 'magic-loops', origin: { kind: 'agent', name: 'x' } });
+    const write = (inbox, token, id, headers = {}) => call('PUT', `/sections/${inbox}/files/requests/${id}/request.json`, { token, body: Buffer.from(body), base64: true, headers: { 'If-None-Match': '*', ...headers } });
+    const writerOf = (inbox, id) => fake.objects.get(`sections/${inbox}/requests/${id}/request.json`).metadata?.writer;
+    for (const inbox of ['inbox', 'inbox-dev']) {
+      assert.equal((await write(inbox, 'tok-agent', 'a-1')).status, 200);
+      assert.equal(writerOf(inbox, 'a-1'), 'agent', `${inbox}: agent session`);
+      // A client trying to set it on its own, with any case or with a second value, gets nothing from a non-agent token.
+      for (const [token, id] of [['tok-pc-runner', 'p-1'], ['tok-cloud-ml', 'c-1']]) {
+        assert.equal((await write(inbox, token, id, { 'x-amz-meta-writer': 'agent', 'X-Amz-Meta-Origin': 'owner' })).status, 200, `${inbox} ${token}`);
+        assert.equal(writerOf(inbox, id), undefined, `${inbox} ${token}: no writer`);
+        assert.deepEqual(fake.objects.get(`sections/${inbox}/requests/${id}/request.json`).metadata, {}, 'no metadata at all');
+      }
+    }
+    for (const [token, id] of [['tok-hermes-main', 'h-1'], ['tok-hermes', 'h-2'], ['tok-cloud', 'o-1'], ['tok-cloud-ss', 'o-2'], ['tok-agentish', 'o-3']]) {
+      assert.equal((await write('inbox', token, id, { 'x-amz-meta-writer': 'agent' })).status, 200, token);
+      assert.equal(writerOf('inbox', id), undefined, `${token}: no writer`);
+    }
+    // An agent token's own header cannot add anything else, nor change its value.
+    assert.equal((await write('inbox', 'tok-agent', 'a-2', { 'x-amz-meta-writer': 'owner', 'x-amz-meta-extra': 'y' })).status, 200);
+    assert.deepEqual(fake.objects.get('sections/inbox/requests/a-2/request.json').metadata, { writer: 'agent' });
+    // Other files an agent writes carry nothing, and the passphrase's own request.json carries nothing.
+    assert.equal((await call('PUT', '/sections/inbox/files/events/e.json', { token: 'tok-agent', body: Buffer.from('{}'), base64: true, headers: { 'x-amz-meta-writer': 'agent' } })).status, 200);
+    assert.deepEqual(fake.objects.get('sections/inbox/events/e.json').metadata, {});
+    assert.equal((await write('inbox', 'tok-all', 'z-1', { 'x-amz-meta-writer': 'agent' })).status, 200);
+    assert.equal(writerOf('inbox', 'z-1'), undefined);
+    // A BOM-less owner claim is still refused for the agent token, and an agent token still cannot replace.
+    assert.equal((await call('PUT', '/sections/inbox/files/requests/a-1/request.json', { token: 'tok-agent', body: Buffer.from(body), base64: true })).status, 403);
   } finally {
     await fake.close();
   }

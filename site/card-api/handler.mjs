@@ -191,6 +191,16 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     }
     throw new HttpError(403, 'Only a run writes run files.');
   };
+  /**
+   * Who wrote a request.json, kept as object metadata (`x-amz-meta-writer`), never in the body: `agent` for a token that
+   * is an agent session (named `agent` or `agent-<name>`), nothing for anyone else (pc-runner, cloud-<project>,
+   * hermes-main, the old shared tokens, the passphrase). Only this function sets it; a caller's own `x-amz-meta-*`
+   * headers are never forwarded. The site API's policy approval signs only when the stored `origin` and this agree.
+   */
+  const writerMetadata = (caller, sectionId, file) => (
+    INBOXES.has(sectionId) && caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
+      ? { writer: 'agent' } : undefined
+  );
   /** A limited writer cannot claim a request as the owner's. */
   const noOwnerOrigin = (caller, sectionId, file, body) => {
     if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^requests\/[^/]+\/request\.json$/i.test(file)) return;
@@ -324,7 +334,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       noOwnerOrigin(caller, sectionId, file, body);
       let put;
       try {
-        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch });
+        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch, metadata: writerMetadata(caller, sectionId, file) });
       } catch (error) {
         if (error.status === 412) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
         throw error;
