@@ -1212,7 +1212,7 @@ test('Beads copies: three copies and the legacy file merge to the newest state o
     const { issues } = cujTwo({ now: NOW });
     const at = minutes => minutesAgo(NOW, minutes).toISOString();
     const edited = (issue, updated, status) => ({ ...issue, updated_at: updated, status });
-    const taskId = 'ml-wj-t1';
+    const taskId = 'ml-wj-t4';
     const target = issues.find(issue => issue.id === taskId);
     assert.ok(target, 'The fixture has the task.');
     // The legacy file is old; the main copy is the newest push but stale for the task; the worktree copy pushed
@@ -1241,6 +1241,10 @@ test('Beads copies: three copies and the legacy file merge to the newest state o
     assert.equal(beads.meta.pushedAt, at(10));
     const map = (await get('/hub/map/magic-loops')).body;
     assert.equal(map.ageMinutes, 10);
+    const tasks = Object.fromEntries(map.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).map(task => [task.id, task.state]));
+    assert.equal(tasks[taskId], 'done', 'The map shows the newer edit (closed) although the newest push held it open.');
+    assert.equal(tasks['ml-only-here'], 'next', 'A task from only one copy is on the map.');
+    assert.deepEqual([tasks['ml-wj-t1'], tasks['ml-wj-t3'], tasks['ml-wj-t5'], tasks['ml-wj-t6']], ['done', 'doing', 'doing', 'later']);
     const found = (await get('/hub/projects')).body.projects;
     assert.deepEqual(found.map(item => [item.id, item.beads]), [['magic-loops', true], ['probe', true]]);
     assert.equal(found.find(item => item.id === 'probe').pushedAt, at(5));
@@ -1262,5 +1266,30 @@ test('Beads copies: a legacy-only project answers as before (same map, same issu
     const map = (await get('/hub/map/magic-loops')).body;
     assert.equal(map.ageMinutes, 20);
     assert.deepEqual(map.meta, beads.meta);
+  } finally { await close(); }
+});
+
+test('Beads copies: files whose copy name the client would refuse are ignored (legacy, odd names, secret words)', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const { issues } = cujTwo({ now: NOW });
+    const at = minutes => minutesAgo(NOW, minutes).toISOString();
+    const good = beadsCopy({ issues, pushedAt: at(30) });
+    seed.put('beads/magic-loops/test-pc-5555555555.jsonl', good.text, 'application/x-ndjson');
+    seed.put('beads/magic-loops/test-pc-5555555555.meta.json', good.meta);
+    const rogue = beadsCopy({ issues: [{ ...issues[0], id: 'ml-rogue', updated_at: at(1) }], pushedAt: at(1) });
+    for (const name of ['legacy', 'Bad_Name', 'my-token-1']) {
+      seed.put(`beads/magic-loops/${name}.jsonl`, rogue.text, 'application/x-ndjson');
+      seed.put(`beads/magic-loops/${name}.meta.json`, rogue.meta);
+    }
+    // A project made only of refused names is not listed.
+    seed.put('beads/ghost/legacy.jsonl', rogue.text, 'application/x-ndjson');
+    seed.put('beads/ghost/legacy.meta.json', rogue.meta);
+    const beads = (await get('/hub/beads/magic-loops')).body;
+    assert.ok(!beads.issues.some(issue => issue.id === 'ml-rogue'));
+    assert.deepEqual(beads.meta.copies.map(row => row.copy), ['test-pc-5555555555']);
+    assert.equal(beads.meta.pushedAt, at(30));
+    assert.deepEqual((await get('/hub/projects')).body.projects.map(item => item.id), ['magic-loops']);
+    assert.deepEqual((await get('/hub/beads/ghost')).body, { meta: null, issues: [] });
   } finally { await close(); }
 });

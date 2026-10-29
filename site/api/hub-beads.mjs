@@ -9,6 +9,9 @@ import { createHash } from 'node:crypto';
 export const MAX_COPIES = 30;
 export const LEGACY_COPY = 'legacy';
 
+/** A copy name the client could have written: what `--copy` accepts. Anything else in the folder is ignored. */
+export const validCopyName = name => /^[a-z0-9][a-z0-9-]*$/.test(name) && name !== LEGACY_COPY && !/token|secret|password|credential/.test(name);
+
 /** A worktree root, in the form that is hashed and stored: forward slashes, no trailing slash. */
 export const normalizeRoot = root => String(root ?? '').replace(/[\\]/g, '/').replace(/\/+$/, '');
 
@@ -101,6 +104,7 @@ export function createBeadsReader({ bucket, key }) {
       const rel = object.key.slice(base.length);
       let match;
       if ((match = new RegExp(`^${project}/([^/]+?)(\\.meta\\.json|\\.jsonl)$`).exec(rel))) {
+        if (!validCopyName(match[1])) continue;
         const row = copies.get(match[1]) ?? {};
         row[match[2] === '.jsonl' ? 'data' : 'meta'] = object;
         copies.set(match[1], row);
@@ -137,8 +141,8 @@ export function createBeadsReader({ bucket, key }) {
       const metas = [];
       for (const object of objects) {
         const rel = object.key.slice(base.length);
-        const match = /^([^/]+?)(?:\/[^/]+)?\.meta\.json$/.exec(rel);
-        if (match) metas.push({ id: match[1], object });
+        const match = /^([^/]+?)(?:\/([^/]+))?\.meta\.json$/.exec(rel);
+        if (match && (match[2] === undefined || validCopyName(match[2]))) metas.push({ id: match[1], object });
       }
       await Promise.all(metas.map(async ({ id, object }) => {
         const meta = await readMeta(object);
