@@ -150,6 +150,30 @@ try {
   const atPcWidths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(atPcWidths.scroll <= atPcWidths.inner, 'The request page does not scroll sideways.');
 
+  step('A Hermes approval for a run Hermes no longer has leaves the queue in plain words, Declined, with no raw error');
+  const gone = await startHubFixture({ hermes: true });
+  fixtures.push(gone);
+  const goneId = `${day}-hermes-k3m9-q7x2`;
+  const asked = minutesAgo(gone.now, 0);
+  gone.seed.put(`hermes-approvals/${goneId}/approval.json`, {
+    runId: 'run_gone', requestId: 'p-gone', promptId: 'p-gone', executionGeneration: 1, request: null, chat: null, title: 'Write to AGENTS.md',
+    detail: '<write to AGENTS.md>', command: '<write to AGENTS.md>', description: 'Write to protected agent-instruction file(s): AGENTS.md.', choices: ['once', 'deny'],
+    createdAt: asked.toISOString(), expiresAt: new Date(asked.getTime() + 300_000).toISOString(),
+  });
+  const gonePage = await open({ width: 1280, height: 900 });
+  await gonePage.goto(`${gone.url}#/~hub/needs`);
+  const goneCard = gonePage.locator(`[data-need="hermes-approval-${goneId}"]`);
+  await goneCard.waitFor();
+  await goneCard.locator('[data-answer="deny"]').click();
+  await gonePage.locator('[data-next-note]').waitFor();
+  const goneNote = await gonePage.locator('[data-next-note]').innerText();
+  assert.match(goneNote, /^Declined/);
+  assert.match(goneNote, /Hermes no longer has this run, so nothing was sent\./);
+  await goneCard.waitFor({ state: 'detached' });
+  assert.doesNotMatch(await gonePage.locator('body').innerText(), /run not found|run_gone/i, 'No raw Hermes text on screen.');
+  const goneAnswer = gone.fake.json(`sections/inbox/hermes-approvals/${goneId}/answer.json`);
+  assert.deepEqual([goneAnswer.choice, goneAnswer.forwarded], ['deny', false]);
+
   console.log('hub-approval-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

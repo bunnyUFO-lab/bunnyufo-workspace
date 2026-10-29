@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Item } from '../lib/hub'
 import { hubPost } from '../lib/hub'
 import { host } from '../lib/host'
+import type { SettleExtra, SettleVerb } from './NeedsItem'
 
 /** Seconds left before Hermes denies the ask on its own, or 0. */
 function secondsLeft(expiresAt: string | undefined, now: number) {
@@ -13,7 +14,7 @@ function secondsLeft(expiresAt: string | undefined, now: number) {
  * A Hermes approval in Needs you: what Hermes wants to run and why, verbatim, and two answers. Hermes denies the ask
  * itself after five minutes, so the card says how long is left and the answers turn off when it is over.
  */
-export default function HermesApprovalView({ item, onSettled }: { item: Item; onSettled: () => void }) {
+export default function HermesApprovalView({ item, onSettled }: { item: Item; onSettled: (verb: SettleVerb, extra?: SettleExtra) => void }) {
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState<'once' | 'deny' | null>(null)
   const [error, setError] = useState('')
@@ -29,8 +30,8 @@ export default function HermesApprovalView({ item, onSettled }: { item: Item; on
     setBusy(choice)
     setError('')
     try {
-      await hubPost(`/hermes-approvals/${encodeURIComponent(item.id)}/answer`, { choice })
-      onSettled()
+      const answered = await hubPost<{ note?: string }>(`/hermes-approvals/${encodeURIComponent(item.id)}/answer`, { choice })
+      onSettled(choice === 'once' ? 'approved' : 'declined', answered?.note ? { detail: answered.note } : undefined)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not send the answer.')
       setBusy(null)

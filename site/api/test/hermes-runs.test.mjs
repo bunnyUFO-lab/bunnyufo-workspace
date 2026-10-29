@@ -640,3 +640,31 @@ test('only once and deny are forwarded, whatever Hermes lists; copied choices an
     assert.deepEqual(JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${bare}/approval.json`)).choices, ['once', 'deny']);
   } finally { await s.close(); }
 });
+
+// --- QA fixes: Hermes no longer has the run ---
+
+test('an answer for a run Hermes no longer has settles the item in plain words (200, forwarded false, one answer.json)', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['x ', { hold: true }] } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    const gone = await api.hub.approvals.copyApproval({ runId: 'run_gone', request: null, startedAt: new Date(s.clock.at).toISOString(), prompt: { prompt_id: 'p-gone', command: 'write AGENTS.md', timestamp: s.clock.at / 1000 } });
+    const answered = await api.post(`/hub/hermes-approvals/${gone}/answer`, { choice: 'deny' });
+    assert.equal(answered.status, 200, JSON.stringify(answered.body));
+    assert.deepEqual(answered.body, { state: 'answered', choice: 'deny', forwarded: false, note: 'Hermes no longer has this run, so nothing was sent.' });
+    assert.doesNotMatch(JSON.stringify(answered.body), /not found|run_/i, 'No raw Hermes text.');
+    const written = JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${gone}/answer.json`));
+    assert.deepEqual([written.choice, written.forwarded, written.error], ['deny', false, 'Hermes no longer has this run, so nothing was sent.']);
+    assert.equal((await api.post(`/hub/hermes-approvals/${gone}/answer`, { choice: 'deny' })).status, 409, 'A second click is refused; the item is already gone.');
+    assert.equal((await api.get('/hub/inbox?filter=needs-you')).body.items.some(item => item.id === gone), false);
+
+    // A prompt Hermes is no longer waiting on (409 from Hermes) reads the same way.
+    const stale = await api.hub.approvals.copyApproval({ runId: s.hermes.runs[0].id, request: null, startedAt: new Date(s.clock.at).toISOString(), prompt: { prompt_id: 'p-stale', command: 'x', timestamp: s.clock.at / 1000 } });
+    const refused = await api.post(`/hub/hermes-approvals/${stale}/answer`, { choice: 'once' });
+    assert.equal(refused.status, 200, JSON.stringify(refused.body));
+    assert.equal(refused.body.note, 'Hermes stopped waiting for this answer.');
+    assert.equal(refused.body.forwarded, false);
+  } finally { await s.close(); }
+});

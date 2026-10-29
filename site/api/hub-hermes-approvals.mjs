@@ -105,9 +105,10 @@ export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail
   }
 
   /**
-   * `POST /hub/hermes-approvals/:id/answer { choice }`. Forwards to the run. When Hermes can no longer take it (it
-   * denied after 300 seconds, or the run ended) the answer is still written, with `forwarded: false`, and the
-   * route answers 409 with the reason.
+   * `POST /hub/hermes-approvals/:id/answer { choice }`. Forwards to the run. When Hermes can no longer take it the
+   * answer is still written, with `forwarded: false`: after its own 300 seconds, or when the run ended, the route answers 409
+   * with the reason; when Hermes says it no longer has the run (404) or no longer waits (409) the item is settled all the
+   * same, and the route answers 200 `{ state: 'answered', choice, forwarded: false, note }` in plain words.
    */
   async function answer(id, raw, user, at) {
     if (!validId(id)) throw fail('No such approval.', 404);
@@ -132,7 +133,12 @@ export function createHermesApprovals({ cached, putCreateOnly, listFolders, fail
         await runs().answer(approval.runId, { requestId: approval.requestId, executionGeneration: approval.executionGeneration, choice });
       } catch (error) {
         log(`[hub] Hermes did not take an approval answer: ${scrub(error.message, 120)}`);
-        await refuse(error.status === 409 ? 'Hermes is no longer waiting for this answer.' : `Hermes did not take the answer: ${scrub(error.message, 120)}`);
+        if (error.status === 404 || error.status === 409) {
+          const note = error.status === 404 ? 'Hermes no longer has this run, so nothing was sent.' : 'Hermes stopped waiting for this answer.';
+          if (!await writeAnswer(id, { ...base, forwarded: false, error: note })) throw fail('That was already answered.', 409);
+          return { status: 200, body: { state: 'answered', choice, forwarded: false, note } };
+        }
+        await refuse(`Hermes did not take the answer: ${scrub(error.message, 120)}`);
       }
       if (!await writeAnswer(id, { ...base, forwarded: true })) throw fail('That was already answered.', 409);
       return { status: 201, body: { state: 'answered', choice } };

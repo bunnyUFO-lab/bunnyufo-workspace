@@ -9,7 +9,9 @@ export default function NextNote({ note }: { note: Handoff }) {
   return (
     <div className="nq-next" role="status" data-next-note>
       <span className="nq-next-text">
-        <b className="nq-next-v">{note.verb}{note.next ? '' : '.'}</b>
+        <b className="nq-next-v">{note.verb}{note.next || note.detail || note.link ? '' : '.'}</b>
+        {note.detail ? <span className="nq-next-n" data-next-detail><span aria-hidden="true"> · </span>{note.detail}</span> : null}
+        {note.link ? <span className="nq-next-n"><span aria-hidden="true"> · </span><a href={note.link.hash} data-next-link>{note.link.label}</a></span> : null}
         {note.next ? <span className="nq-next-n"><span aria-hidden="true"> · </span>next: <i>{note.next}</i></span> : null}
         {note.nothingLeft ? <span className="nq-next-n"> Nothing else waits on you.</span> : null}
         {!note.next && !note.nothingLeft && note.elsewhere ? (
