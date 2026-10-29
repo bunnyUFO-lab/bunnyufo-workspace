@@ -16,7 +16,7 @@
 import { Readable } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
-import { IMAGE_FILE, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
+import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
 const MB = 1024 * 1024;
@@ -186,6 +186,16 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const current = pictures.length
       ? [...(text ? [{ type: 'text', text }] : []), ...pictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))]
       : text;
+    if (context) {   // help: the context pictures yield to the owner's own, so one message stays within the usual limits
+      let room = MAX_IMAGES - pictures.length;
+      let bytes = MAX_TOTAL_BYTES - pictures.reduce((sum, picture) => sum + picture.buffer.length, 0);
+      const kept = context.pictures.filter(picture => { if (room > 0 && picture.buffer.length <= bytes) { room -= 1; bytes -= picture.buffer.length; return true; } return false; });
+      if (kept.length < context.pictures.length) {
+        context.text += `
+(${context.pictures.length - kept.length} of the item's pictures are not included in this turn.)`;
+        context.pictures = kept;
+      }
+    }
     const contextPictures = context?.pictures ?? [];
     const spent = [...pictures, ...contextPictures].reduce((sum, picture) => sum + picture.buffer.length, 0);
     // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.

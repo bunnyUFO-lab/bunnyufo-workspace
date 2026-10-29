@@ -517,3 +517,17 @@ test('help works for a design Ask and a blocked session, and a cross-origin POST
     assert.equal(upstream.requests.length, 2);
   } finally { await close(); }
 });
+
+test('on a help chat\'s first turn the owner\'s pictures come first and the item\'s yield to the limit', async () => {
+  const { fake, upstream, call, close } = await fixture();
+  try {
+    const { list } = stepsList(fake);
+    const pictures = Array.from({ length: 4 }, () => ({ type: 'image/png', data: solidPng(16, 16).toString('base64') }));
+    const sent = await chat(call, { text: 'See these', images: pictures, about: { kind: 'checklist', id: list.id, step: '02' } });
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    const content = upstream.requests[0].messages[0].content;
+    assert.equal(typeof content === 'string' ? 0 : content.filter(part => part.type === 'image_url').length, 0, 'No room left for the item\'s picture.');
+    assert.match(typeof content === 'string' ? content : content[0].text, /not included in this turn/);
+    assert.equal(upstream.requests[0].messages.at(-1).content.filter(part => part.type === 'image_url').length, 4);
+  } finally { await close(); }
+});
