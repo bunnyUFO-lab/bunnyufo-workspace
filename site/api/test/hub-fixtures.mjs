@@ -112,6 +112,11 @@ export function cujTwo({ now = new Date(), prefix = 'ml' } = {}) {
   return { issues, events };
 }
 
+/** A playtest checklist.json: a build link, the platform, what to look for, and the steps to try. */
+export function playtestJson({ build = 'https://example.test/build/web', platform = 'web', lookFor = 'Any moment where it gets hard all at once.', title = 'Play the wall-jump build', items = [{ text: 'Reach the first ledge' }, { text: 'Chain three wall-jumps' }, { text: 'Beat the tutorial' }], ...rest } = {}) {
+  return { ...checklistJson({ title, items, context: 'Ten minutes is enough.', ...rest }), kind: 'playtest', build, platform, lookFor };
+}
+
 /** Put an object per call into fake S3 under sections/inbox/. */
 export function seeder(fake, prefix = INBOX) {
   const put = (rel, body, type = 'application/json') => fake.seed(`${prefix}/${rel}`, typeof body === 'string' || Buffer.isBuffer(body) ? body : `${JSON.stringify(body, null, 2)}\n`, type);

@@ -415,6 +415,23 @@ shows it as its own kind (picture left, decisions right), and it never gets Disc
   When the Ask has decisions every id needs a verdict (`approve`, `change` or `skip`); a `note` is at most 1000
   characters. `choice`, `note` and `drawing` keep their meaning.
 
+### Playtests
+
+A checklist is a **Playtest** when its `checklist.json` has `"kind": "playtest"`. Needs you shows it as its own kind: the build link, the
+steps to try, what to look for, and a report.
+
+```json
+{ "kind": "playtest", "build": "https://example.test/build", "platform": "web", "lookFor": "Any moment where it gets hard all at once." }
+```
+
+- `build`: an `https://` link of at most 2000 characters, required. `platform`: `web` (default), `windows`, `mac`, `linux`, `android` or
+  `ios`. `lookFor`: at most 2000 characters. A list that is not a playtest takes none of these.
+- The items are the "what to try" steps and tick as in any checklist.
+- `submit.json` of a playtest also holds `rating` (1 to 5), `verdict` (`ship`, `fix-first` or `rethink`) and `issues` (up to 30 of
+  `{ text, shot? }`, `text` 1 to 500 characters, `shot` a `shot-...` picture already stored in the folder through `POST .../files`
+  with `for: "issue"`). A playtest needs `rating` and `verdict`; a steps list refuses all three (400 "Only a playtest takes a rating.").
+- The `checklist-submitted` event's summary reads "Rating 4/5 · Fix first · 2 issues".
+
 ### Answers from Discord
 
 A simple multiple-choice Ask also arrives as a Discord direct message with one button per option, and a

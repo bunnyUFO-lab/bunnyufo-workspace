@@ -7,6 +7,8 @@ import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import { goNext, useQueueOrder } from './useGoNext'
 import Md from './Md'
+import HubImage from './HubImage'
+import { VERDICT_LABEL } from './playtest'
 import { useHubData } from './useHub'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
@@ -42,12 +44,23 @@ export default function ChecklistView({ id }: { id: string }) {
 
       <ChecklistBody
         data={detail} loadedAt={loadedAt} reload={reload}
-        onSubmitted={() => void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, 'submitted', queue(), hubHash('checklist', detail.id))}
+        onSubmitted={() => void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, detail.kind === 'playtest' ? 'reported' : 'submitted', queue(), hubHash('checklist', detail.id))}
       />
 
       {submitted && detail.submit && (
         <section className="hub-panel" aria-label="Submitted" data-submitted>
           <p><b>Submitted {ago(detail.submit.at)}</b>{text(detail.submit.by) ? ` by ${text(detail.submit.by)}` : ''}.</p>
+          {detail.kind === 'playtest' && detail.submit.rating && <p data-report-summary>Rating {detail.submit.rating}/5 · {VERDICT_LABEL.find(([value]) => value === detail.submit?.verdict)?.[1] ?? text(detail.submit.verdict)} · {(detail.submit.issues ?? []).length} {(detail.submit.issues ?? []).length === 1 ? 'issue' : 'issues'}</p>}
+          {Array.isArray(detail.submit.issues) && detail.submit.issues.length > 0 && (
+            <ul className="pt-issues">
+              {detail.submit.issues.map((issue, index) => (
+                <li key={index} className="pt-issue">
+                  {issue.shot && <span className="hub-cl-thumb"><HubImage path={`checklists/${detail.id}/${issue.shot}`} alt={`Screenshot for issue ${index + 1}`} open /></span>}
+                  <span className="pt-issue-text">{text(issue.text)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {typeof detail.submit.note === 'string' && detail.submit.note && <p className="hub-note-text">{detail.submit.note}</p>}
           {detail.state === 'picked-up' && detail.pickup && <p className="hub-muted">Picked up {ago(detail.pickup.at)}{text(detail.pickup.host) ? ` on ${text(detail.pickup.host)}` : ''}.</p>}
         </section>
