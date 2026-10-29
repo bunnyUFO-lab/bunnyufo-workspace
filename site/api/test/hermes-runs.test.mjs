@@ -668,3 +668,32 @@ test('an answer for a run Hermes no longer has settles the item in plain words (
     assert.equal(refused.body.forwarded, false);
   } finally { await s.close(); }
 });
+
+test('a bare 404 from Hermes (a wrong HERMES_URL) is not read as "no longer has this run": the scrubbed error stays', async () => {
+  const lines = [];
+  const s = await stack({ hermesOptions: { runScript: ['x ', { hold: true }] } });
+  try {
+    const api = await s.addHub({
+      log: line => lines.push(line),
+      fetchImpl: async (url, init) => (String(url).endsWith('/approval')
+        ? new Response('<html>404 Not Found https://hermes.internal.example/v1/runs/x/approval</html>', { status: 404, headers: { 'Content-Type': 'text/html' } })
+        : fetch(url, init)),
+    });
+    const made = await api.hub.approvals.copyApproval({ runId: 'run_x', request: null, startedAt: new Date(s.clock.at).toISOString(), prompt: { prompt_id: 'p-bare', command: 'x', timestamp: s.clock.at / 1000 } });
+    const answered = await api.post(`/hub/hermes-approvals/${made}/answer`, { choice: 'once' });
+    assert.equal(answered.status, 409, JSON.stringify(answered.body));
+    assert.match(answered.body.error, /^Hermes did not take the answer: /);
+    assert.doesNotMatch(answered.body.error, /no longer has this run|hermes\.internal|https?:/);
+    for (const line of lines) assert.doesNotMatch(line, /hermes\.internal|https?:/);
+    const written = JSON.parse(s.fake.text(`sections/inbox/hermes-approvals/${made}/answer.json`));
+    assert.equal(written.forwarded, false);
+    assert.doesNotMatch(written.error, /no longer has this run|https?:/);
+
+    // The same 404 with Hermes's own code is the plain-words case.
+    const plain = await s.addHub({ fetchImpl: async (url, init) => (String(url).endsWith('/approval') ? new Response(JSON.stringify({ error: { message: 'Run not found', type: 'invalid_request_error', code: 'run_not_found' } }), { status: 404, headers: { 'Content-Type': 'application/json' } }) : fetch(url, init)) });
+    const other = await plain.hub.approvals.copyApproval({ runId: 'run_y', request: null, startedAt: new Date(s.clock.at).toISOString(), prompt: { prompt_id: 'p-code', command: 'x', timestamp: s.clock.at / 1000 } });
+    const ok = await plain.post(`/hub/hermes-approvals/${other}/answer`, { choice: 'deny' });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.note, 'Hermes no longer has this run, so nothing was sent.');
+  } finally { await s.close(); }
+});
