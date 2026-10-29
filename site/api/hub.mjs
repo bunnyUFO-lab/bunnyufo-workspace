@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, INBOX_FILTERS, monthPrefixes, newDrawingId,
+  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistProgress, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -33,6 +33,8 @@ const LIMITS = { big: 8 * MB, chat: 64 * 1024, small: 256 * 1024 };
 const CACHE_MAX = 5000;
 const EVENT_CAP = 2000;
 const POOL = 16;
+/** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
+const INBOX_DETAIL_CAP = 30;
 
 const fail = (message, status = 400, extra) => Object.assign(new Error(message), { status, ...(extra ? { extra } : {}) });
 
@@ -822,9 +824,21 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status });
           } else if (route === '/hub/inbox') {
-            const filter = INBOX_FILTERS.includes(query.get('filter')) ? query.get('filter') : 'needs-you';
+            const filter = inboxFilter(query.get('filter'));
             const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
-            reply({ items: buildInbox({ filter, asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, events: window.events, now: at }) });
+            const askItems = asks.map(row => row.item);
+            const listItems = checklists.map(row => row.item);
+            const items = buildInbox({ filter, asks: askItems, checklists: listItems, requests, events: window.events, now: at });
+            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, events: window.events, now: at }).needsYou);
+            // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
+            // screen can show the options and the steps without a second request each. The rest come without.
+            const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);
+            const rows = await pool(POOL, items, async item => {
+              const row = { ...item, needs: needsKindOf(item), describe: describeItem(item, at) };
+              if (!withDetail.has(item)) return row;
+              try { return { ...row, detail: item.kind === 'ask' ? await askDetail(item.id, at) : await checklistDetail(item.id) }; } catch { return row; }
+            });
+            reply({ items: rows, counts });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/checklists\/([^/]+)$/.exec(route))) {
