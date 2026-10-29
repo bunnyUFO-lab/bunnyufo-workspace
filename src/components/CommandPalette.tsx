@@ -6,6 +6,7 @@ import { hubRows } from '../lib/hubNav'
 import { hubGet, type HubProject, type Item } from '../lib/hub'
 import { entityHash, hubHash, mapHash, reviewHash } from '../lib/route'
 import { openSpawn } from '../hub/spawnStore'
+import { askHermes } from '../hub/askHermes'
 import './palette.css'
 
 /** One row of the palette: a group, a label, an optional hint on the right, and where it goes. */
@@ -112,8 +113,10 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
       : []
     // An empty query shows where to go and what waits; Roadmaps and Cards need a word.
     if (!words.length) return [...goTo, ...pick(needs, 8), ...spawn]
+    // Whatever is typed can be asked of Hermes: a new Chat conversation that sends it.
+    const ask: Row[] = host.chat ? [{ group: 'Ask', label: `Ask Hermes: ${query.trim()}`, icon: '✎', run: () => askHermes(query, () => { window.location.hash = hubHash('chat') }) }] : []
     const rest = [...pick(goTo, 12), ...pick(needs, 8), ...pick(maps, 8), ...pick(found, 8)]
-    return /^spawn\b/i.test(query.trim()) ? [...spawn, ...rest] : [...rest, ...spawn]
+    return /^spawn\b/i.test(query.trim()) ? [...spawn, ...rest, ...ask] : [...rest, ...spawn, ...ask]
   }, [query, cards, items, projects, waiting, onHome])
 
   const at = Math.min(selected, Math.max(rows.length - 1, 0))

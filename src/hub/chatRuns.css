@@ -1,0 +1,10 @@
+/* Chat on Hermes runs: the tool lines under a streaming answer and the inline approval card. */
+.hub-tools { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.hub-tool { font-family: var(--mono, ui-monospace, monospace); font-size: 0.75rem; color: var(--muted); opacity: 0.85; overflow-wrap: anywhere; }
+.hub-tool[data-state='running']::before { content: '… '; }
+.hub-tool[data-state='done']::before { content: '✓ '; }
+.hub-tool[data-state='failed']::before { content: '✕ '; }
+.hub-chat-approval { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface-solid); display: flex; flex-direction: column; gap: 6px; }
+.hub-chat-approval pre { margin: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hub-chat-approval-a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+@media (max-width: 640px) { .hub-chat-approval-a .hub-btn { flex: 1 1 40%; } }

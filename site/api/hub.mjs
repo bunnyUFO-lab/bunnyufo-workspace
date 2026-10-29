@@ -872,7 +872,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return LIMITS.small;
   };
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, copyApproval: hermesApprovals.copyApproval });
 
   const self = {
     enabled: on,

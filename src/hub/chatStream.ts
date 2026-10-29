@@ -1,4 +1,4 @@
-import type { ChatLine, Item } from '../lib/hub'
+import type { ChatApproval, ChatLine, ChatTool, Item } from '../lib/hub'
 import { HubError } from '../lib/hub'
 import { authHeaders } from '../local/client'
 
@@ -7,6 +7,9 @@ export interface ChatHandlers {
   onCreated: (items: Item[]) => void
   onDone: (conversation: string, user?: ChatLine) => void
   onError: (message: string) => void
+  onTool?: (tool: ChatTool) => void
+  onApproval?: (approval: ChatApproval) => void
+  onApprovalSettled?: () => void
 }
 
 /**
@@ -38,6 +41,9 @@ export async function streamChat(body: { conversation?: string; text: string; im
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
     else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined)
+    else if (event === 'tool' && typeof value.name === 'string') handlers.onTool?.(value as unknown as ChatTool)
+    else if (event === 'approval' && typeof value.id === 'string') handlers.onApproval?.(value as unknown as ChatApproval)
+    else if (event === 'approval-settled') handlers.onApprovalSettled?.()
     else if (event === 'error') handlers.onError(typeof value.error === 'string' ? value.error : 'The reply stopped.')
   }
   for (;;) {

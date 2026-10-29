@@ -1250,6 +1250,31 @@ try {
       await refusing.close();
     }
 
+    step('chat on runs: a tool line streams, an inline approval card shows and is answered, and the turn finishes');
+    const running = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { askApproval: true, runScript: ['Updating. ', { tool: 'write_file', preview: 'AGENTS.md' }, 'All done.'] } });
+    try {
+      const runCtx = await chatBrowser.newContext({ viewport: { width: 1280, height: 900 } });
+      const ran = await runCtx.newPage();
+      ran.setDefaultTimeout(15000);
+      ran.on('pageerror', error => { throw error; });
+      await ran.goto(running.url);
+      await ran.locator('[data-hub-link="chat"]').click();
+      await ran.locator('textarea[aria-label="Message"]').fill('Update the agent file');
+      await ran.keyboard.press('Enter');
+      await ran.locator('[data-chat-approval]').waitFor();
+      await ran.locator('[data-chat-approval] [data-approval-command]').waitFor();
+      assert.equal(await ran.locator('[data-chat-approval] [data-answer]').count(), 2);
+      await ran.locator('[data-chat-approval] [data-answer="once"]').click();
+      await ran.locator('.hub-bubble.assistant', { hasText: 'All done.' }).waitFor();
+      assert.equal(await ran.locator('[data-chat-approval]').count(), 0, 'The card goes once it is answered.');
+      assert.deepEqual(running.hermes.approvals.map(item => item.choice), ['once']);
+      assert.equal(running.hermes.requests.length, 0, 'The turn ran on /v1/runs.');
+      await ran.locator('.hub-tool[data-tool="write_file"]').waitFor();
+      await runCtx.close();
+    } finally {
+      await running.close();
+    }
+
     step('chat at phone width: the drawer opens and the message box fits');
     const small = await chatBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const phoneChat = await small.newPage();
