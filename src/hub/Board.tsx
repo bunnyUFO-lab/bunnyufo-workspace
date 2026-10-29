@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Sign } from '../lib/hub'
 import { hubPost } from '../lib/hub'
 import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
+import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { useHubData } from './useHub'
 import { useProject } from './useProject'
@@ -92,12 +93,23 @@ export default function Board({ project: wanted }: { project?: string }) {
   const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
   const data = work.data
   const active = picked ?? (data ? defaultLane(data.counts) : 'running')
+  // Each scroller that can hide something shows a fade at its cut edge (the Roadmap's pattern).
+  const projectChips = useRef<HTMLDivElement>(null)
+  const laneChips = useRef<HTMLDivElement>(null)
+  const laneGrid = useRef<HTMLDivElement>(null)
+  const projectEdges = useOverflowEdges(projectChips, [list.length, project, all])
+  const laneChipEdges = useOverflowEdges(laneChips, [data])
+  const laneEdges = useOverflowEdges(laneGrid, [project, data])
+  useEffect(() => { projectChips.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [list.length, project, all])
+  useEffect(() => { laneChips.current?.querySelector('.wk-lane-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [active, data])
 
   return (
     <div className="work">
-      <div className="hub-chips" aria-label="Project">
-        <a className={`hub-chip${all ? ' on' : ''}`} href={hubHash('work', 'all')}>All</a>
-        {list.map(item => <a key={item.id} className={`hub-chip${!all && item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
+      <div className="hub-chips-wrap" data-overflow={projectEdges}>
+        <div className="hub-chips one-row" aria-label="Project" ref={projectChips}>
+          <a className={`hub-chip${all ? ' on' : ''}`} href={hubHash('work', 'all')}>All</a>
+          {list.map(item => <a key={item.id} className={`hub-chip${!all && item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
+        </div>
       </div>
       {project && host.write && <RequestForm project={project} />}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
@@ -107,14 +119,17 @@ export default function Board({ project: wanted }: { project?: string }) {
       {(work.error || listError) && <p className="hub-error" role="alert">{work.error ?? listError}</p>}
       {data && (
         <>
-          <div className="wk-lane-chips" role="group" aria-label="Lane">
+          <div className="wk-chips-wrap" data-overflow={laneChipEdges}>
+          <div className="wk-lane-chips" role="group" aria-label="Lane" ref={laneChips}>
             {LANES.map(([lane, label]) => (
               <button key={lane} type="button" className={`wk-lane-chip${lane === active ? ' on' : ''}`} aria-pressed={lane === active} data-lane-chip={lane} onClick={() => setPicked(lane)}>
                 {label} <span className="n">{data.counts[lane]}</span>
               </button>
             ))}
           </div>
-          <div className="wk-lanes" data-active={active}>
+          </div>
+          <div className="wk-lanes-wrap" data-overflow={laneEdges}>
+          <div className="wk-lanes" data-active={active} ref={laneGrid}>
             {LANES.map(([lane, label]) => {
               const cards = data.lanes[lane]
               const collapsible = (lane === 'backlog' || lane === 'done') && cards.length > COLLAPSE
@@ -133,6 +148,7 @@ export default function Board({ project: wanted }: { project?: string }) {
                 </section>
               )
             })}
+          </div>
           </div>
         </>
       )}

@@ -54,6 +54,15 @@ try {
   assert.equal(await page.locator('.wk-lane[data-lane="ready"] .wk-card .wk-project').count(), 0, 'One project: no project chip on its cards.');
   await noSideways(page, 'Work at 1920 px');
 
+  step('desktop 1280: the sixth lane is cut off, so the grid fades at the right edge, then only the left once scrolled to the end');
+  const narrow = await open({ width: 1280, height: 800 });
+  await narrow.goto(`${lanes.url}#/~hub/work/lanes`);
+  await narrow.locator('.wk-lane').first().waitFor();
+  await narrow.waitForFunction(() => document.querySelector('.wk-lanes-wrap')?.getAttribute('data-overflow') === 'end');
+  await narrow.locator('.wk-lanes').evaluate(el => { el.scrollLeft = el.scrollWidth; });
+  await narrow.waitForFunction(() => document.querySelector('.wk-lanes-wrap')?.getAttribute('data-overflow') === 'start');
+  assert.ok(await narrow.locator('.wk-lane').first().evaluate(el => el.getBoundingClientRect().width) >= 240, 'A lane is never narrower than 240 px.');
+
   step('cards: title first, the id, a source icon, why in amber on Blocked, a live dot only on the working card, each a link');
   const doing = page.locator('[data-card="bead:ws-doing"]');
   assert.equal(await doing.evaluate(card => card.tagName), 'A');
@@ -108,6 +117,12 @@ try {
   const chip = await phone.locator('[data-lane-chip="done"]').boundingBox();
   assert.ok(chip.height >= 44, `A lane chip is at least 44 px high (${chip.height}).`);
   await phone.waitForTimeout(250);
+  assert.match(await phone.locator('.wk-chips-wrap').getAttribute('data-overflow'), /end/, 'The lane chips fade at the cut edge.');
+  await phone.locator('[data-lane-chip="done"]').tap();
+  await phone.locator('[data-lane-chip="review"]').tap();
+  assert.deepEqual(await visibleLanes(phone), ['review'], 'Review is reachable on a phone.');
+  const rows = await phone.locator('.work > .hub-chips-wrap .hub-chips').evaluate(el => ({ height: el.getBoundingClientRect().height, chip: el.querySelector('.hub-chip').getBoundingClientRect().height }));
+  assert.ok(rows.height <= rows.chip + 2, `The project chips are one row (${rows.height} vs ${rows.chip}).`);
   await noSideways(phone, 'Work at 390 px');
   await go(phone, '#/~hub/work/all');
   await phone.locator('.wk-lane:visible .wk-card .wk-project').first().waitFor();
@@ -118,7 +133,7 @@ try {
   await noSideways(phone, 'Activity at 390 px');
   assert.equal(await phone.locator('[data-hub-tab="work"]').getAttribute('class').then(value => value.includes('active')), true, 'The phone bar lights Work on Activity.');
   await phone.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['map', 'library', 'sketch']);
+  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'sketch']);
 
   step('phone: with nothing running, Blocked is the lane that opens');
   const quiet = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -170,9 +185,16 @@ try {
   assert.deepEqual([stored.project, stored.when, stored.text], ['magic-loops', 'next-sprint', 'Add wall-slide dust particles']);
 
   step('Work cards lead with the title; the id is a small selectable line after it');
-  const [answer] = await Promise.all([desk.waitForResponse(response => response.url().includes('/api/hub/work')), desk.reload()]);
-  const work = await answer.json();
+  // The body is read inside the route, so a later navigation cannot discard it.
+  let work = null;
+  await desk.route('**/api/hub/work*', async route => {
+    const response = await route.fetch();
+    work = await response.json();
+    await route.fulfill({ response, json: work });
+  });
+  await desk.reload();
   await desk.locator('.wk-card').first().waitFor();
+  await desk.unroute('**/api/hub/work*');
   const first = desk.locator('.wk-card').first();
   const key = await first.getAttribute('data-card');
   const card = Object.values(work.lanes).flat().find(item => item.key === key);

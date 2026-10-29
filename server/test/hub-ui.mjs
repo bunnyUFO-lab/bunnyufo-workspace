@@ -203,7 +203,7 @@ try {
   const boxes = await phone.locator('.hub-option').evaluateAll(list => list.map(item => item.getBoundingClientRect().top));
   assert.ok(boxes[1] > boxes[0] && boxes[2] > boxes[1], 'The options stack on a phone.');
 
-  step('phone tab bar: Today, Needs you, Work, Team, More and Search; Library is under More with the menu shut; no bar over a card or on desktop');
+  step('phone tab bar: Today, Needs you, Work, Team, Roadmap and More (Search is under More); Library is under More with the menu shut; no bar over a card or on desktop');
   const tabs = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await tabs.goto(`${fixture.url}#/`);
   await tabs.locator('nav.hub-tabs').waitFor();
@@ -212,7 +212,7 @@ try {
   // 3 seeded, plus the phone Ask added above.
   assert.equal(await tabs.locator('[data-hub-tab-badge]').innerText(), '4');
   assert.equal(await tabs.locator('[data-hub-tab="chat"]').count(), 0, 'No Chat tab without Hermes.');
-  assert.deepEqual(await tabs.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'more', 'search']);
+  assert.deepEqual(await tabs.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'map', 'more']);
   assert.equal(await tabs.locator('[data-hub-tab="more"]').getAttribute('class').then(c => c.includes('active')), true, 'More is the active tab on Home, where the Library lives.');
   assert.equal(await tabs.locator('[data-hub-tab="cards"]').count(), 0, 'No Cards tab any more.');
   await noSideways(tabs, 'Home with the tab bar');
@@ -235,13 +235,15 @@ try {
   await tabs.locator('.hub[data-screen="needs"]').waitFor();
   // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at six.
   assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 6, 'Six items in the bar.');
+  assert.equal(await tabs.locator('[data-hub-tab="search"]').count(), 0, 'No Search tab: Search is under More.');
   await tabs.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['map', 'library', 'sketch']);
-  assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Plan', 'Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
-  await tabs.locator('[data-hub-more="map"]').tap();
+  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'sketch']);
+  assert.equal(await tabs.locator('[data-hub-more-search]').count(), 1, 'Search is the last row of More.');
+  assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
+  await tabs.locator('[data-hub-tab="map"]').tap();
   await tabs.locator('.hub[data-screen="map"]').waitFor();
-  assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a choice.');
-  assert.equal(await tabs.locator('[data-hub-tab="more"]').getAttribute('class').then(c => c.includes('active')), true);
+  assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a move.');
+  assert.equal(await tabs.locator('[data-hub-tab="map"]').getAttribute('aria-current'), 'page', 'Roadmap is lit on its own tab.');
   await noSideways(tabs, 'Roadmap with the tab bar');
   await tabs.locator('[data-hub-tab="work"]').tap();
   await tabs.locator('.hub[data-screen="work"]').waitFor();
@@ -249,7 +251,8 @@ try {
   await tabs.locator('[data-hub-more="library"]').tap();
   await tabs.locator('.entity-card, .home-grid, [data-home]').first().waitFor();
   assert.equal(await tabs.locator('.hub').count(), 0);
-  await tabs.locator('[data-hub-tab="search"]').tap();
+  await tabs.locator('[data-hub-tab="more"]').tap();
+  await tabs.locator('[data-hub-more-search]').tap();
   await tabs.locator('dialog.pal input').waitFor();
   assert.ok(await tabs.locator('dialog.pal input').evaluate(el => el === document.activeElement), 'Search opens the palette and focuses its field.');
   await tabs.keyboard.press('Escape');

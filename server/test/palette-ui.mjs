@@ -136,11 +136,12 @@ try {
   await calm.locator('dialog.pal').waitFor();
   assert.equal(await calm.locator('dialog.pal').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
 
-  step('375 px: the Search tab opens it and the rows fit and are 44 px tall');
+  step('375 px: Search under More opens it and the rows fit and are 44 px tall');
   const phone = await open({ width: 375, height: 800 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/today`);
   await phone.locator('.hub[data-screen="today"]').waitFor();
-  await phone.locator('[data-hub-tab="search"]').click();
+  await phone.locator('[data-hub-tab="more"]').click();
+  await phone.locator('[data-hub-more-search]').click();
   await phone.locator('dialog.pal').waitFor();
   const box = await phone.locator('dialog.pal').boundingBox();
   assert.ok(box.x >= 0 && box.x + box.width <= 375, `The palette fits the screen (${box.x}, ${box.width}).`);

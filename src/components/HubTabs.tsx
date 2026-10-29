@@ -4,11 +4,11 @@ import { HUB_SHORT, hubGroups, hubRows } from '../lib/hubNav'
 import { homeLink, hubHash, type HubScreen } from '../lib/route'
 
 /**
- * The tabs the phone's bar shows, then More and Search. Team is listed ahead of its screen: it joins the
- * bar when `hubRows` offers it. The rest of the Hub (Roadmap, Sketch, Chat) and Library are under More,
- * under the same group headings as the sidebar.
+ * The tabs the phone's bar shows, then More. Team is listed ahead of its screen: it joins the bar when
+ * `hubRows` offers it. The rest of the Hub (Sketch, Chat), Library and Search are under More, under the
+ * same group headings as the sidebar.
  */
-const TABS: string[] = ['today', 'needs', 'work', 'team']
+const TABS: string[] = ['today', 'needs', 'work', 'team', 'map']
 
 /**
  * The Hub on a phone: a bottom bar, one tap from Home and from any Hub screen, so the menu does not
@@ -54,10 +54,6 @@ export default function HubTabs({ screen, needsYou, onHome, onSearch }: { screen
         <span className="hub-tab-icon" aria-hidden="true">⋯</span>
         <span className="hub-tab-label">More</span>
       </button>
-      <button type="button" className="hub-tab" aria-label="Search" data-hub-tab="search" onClick={() => { setOpenOn(null); onSearch() }}>
-        <span className="hub-tab-icon" aria-hidden="true">⌕</span>
-        <span className="hub-tab-label">Search</span>
-      </button>
       {sheet && (
         <div className="hub-more" role="menu" aria-label="More of the Hub">
           {moreGroups.map(group => (
@@ -74,6 +70,9 @@ export default function HubTabs({ screen, needsYou, onHome, onSearch }: { screen
               ))}
             </div>
           ))}
+          <button type="button" role="menuitem" className="hub-more-search" data-hub-more-search onClick={() => { setOpenOn(null); onSearch() }}>
+            <span aria-hidden="true">⌕</span> Search
+          </button>
         </div>
       )}
     </nav>

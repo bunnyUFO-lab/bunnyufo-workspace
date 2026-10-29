@@ -5,7 +5,14 @@
 .wk-tab.on { color: var(--t1); border-bottom-color: var(--t1); }
 .wk-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 
+.wk-chips-wrap { display: none; }
 .wk-lane-chips { display: none; }
+/* A lane cut off at an edge shows a fade there, as the Roadmap's chips do. */
+.wk-lanes-wrap { position: relative; max-width: 100%; }
+.wk-lanes-wrap[data-overflow~="start"] > .wk-lanes { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
+.wk-lanes-wrap[data-overflow~="end"] > .wk-lanes { -webkit-mask-image: linear-gradient(to left, transparent, #000 28px); mask-image: linear-gradient(to left, transparent, #000 28px); }
+.wk-lanes-wrap[data-overflow~="start"][data-overflow~="end"] > .wk-lanes { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+@media (hover: hover) { .wk-lanes { scrollbar-width: thin; } }
 .wk-lanes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap: 12px; overflow-x: auto; max-width: 100%; padding-bottom: 8px; align-items: start; }
 .wk-lane { background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3); padding: 12px; min-width: 0; }
 .wk-lane > h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); }
@@ -25,7 +32,11 @@
 .wk-dot.working { background: var(--st-working); box-shadow: 0 0 8px var(--st-working); }
 
 @media (max-width: 639px) {
-  .wk-lane-chips { display: flex; gap: 6px; margin: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+  .wk-chips-wrap { display: block; position: relative; max-width: 100%; margin: 0 0 12px; }
+  .wk-chips-wrap[data-overflow~="start"] > .wk-lane-chips { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
+  .wk-chips-wrap[data-overflow~="end"] > .wk-lane-chips { -webkit-mask-image: linear-gradient(to left, transparent, #000 28px); mask-image: linear-gradient(to left, transparent, #000 28px); }
+  .wk-chips-wrap[data-overflow~="start"][data-overflow~="end"] > .wk-lane-chips { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+  .wk-lane-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
   .wk-lane-chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 999px; background: var(--s1); border: 1px solid var(--line); color: var(--t2); font: inherit; font-size: 13px; cursor: pointer; }
   .wk-lane-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
   .wk-lane-chip.on { background: var(--s3); border-color: var(--t2); color: var(--t1); }

@@ -136,7 +136,7 @@ try {
     const phone = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
     await phone.goto(`${fixture.url}#/~hub/team`);
     await phone.locator('.team-card').first().waitFor();
-    assert.deepEqual(await phone.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'more', 'search']);
+    assert.deepEqual(await phone.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'map', 'more']);
     assert.equal(await phone.locator('[data-hub-tab="team"]').getAttribute('aria-current'), 'page');
     const tabs = await phone.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => {
       const label = item.querySelector('.hub-tab-label');
@@ -156,6 +156,23 @@ try {
     for (const target of await phone.locator('dialog.sprite-sheet button').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A button in the sheet is ${target} px high.`);
     await phone.keyboard.press('Escape');
   }
+
+  step('a visitor who cannot write sees why there is no Sprite button');
+  assert.equal(await desk.locator('[data-sprite-signin]').count(), 0, 'With write, no sign-in note.');
+  const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  contexts.push(guestContext);
+  await guestContext.route('**/api/capabilities', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), write: false } });
+  });
+  const guest = await guestContext.newPage();
+  guest.setDefaultTimeout(15000);
+  await guest.goto(`${fixture.url}#/~hub/team`);
+  await guest.locator('.team-card').first().waitFor();
+  assert.equal(await guest.locator('[data-sprite-open]').count(), 0, 'No Sprite button without write.');
+  assert.equal(await guest.locator('[data-sprite-signin]').count(), 3, 'Each card says why.');
+  assert.equal(await guest.locator('[data-sprite-signin]').first().innerText(), 'Sign in to change sprites');
+  assert.equal(await guest.locator('[data-sprite-signin]').first().isVisible(), true);
 
   console.log('hub-team-ui: passed');
 } finally {
