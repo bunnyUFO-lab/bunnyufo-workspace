@@ -7,9 +7,9 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, buildInbox, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { png } from './png.mjs';
+import { jpeg, png, solidPng } from './png.mjs';
 import { askJson, beadsCopy, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
@@ -954,6 +954,148 @@ test('the item route writes one create-only mark file per change, none for a rep
     assert.equal((await post(`/hub/checklists/${list.id}/items/01`, { done: 'yes' })).status, 400);
     assert.equal((await post(`/hub/checklists/${list.id}/items/01`, {})).status, 400);
     assert.equal((await post(`/hub/checklists/${listId('gone', 'z999')}/items/01`, { done: true })).status, 404);
+  } finally { await close(); }
+});
+
+const b64 = buffer => buffer.toString('base64');
+const picture = (buffer, type = 'image/png') => ({ type, data: b64(buffer) });
+const EVIDENCE_FILE = /^evidence-(\d{2})-\d{8}T\d{9}Z-[a-z0-9]{4}\.(png|jpg)$/;
+
+test('checklistEvidence: the newest picture per step, counts, and screenshots oldest first', () => {
+  const names = ['checklist.json', 'evidence-01-20261027T143000000Z-aaaa.png', 'evidence-01-20261027T143000000Z-bbbb.jpg', 'evidence-01-20261027T142000000Z-zzzz.png',
+    'evidence-02-20261027T140000000Z-aaaa.png', 'evidence-03-20261027T140000000Z-aaaa.webp', 'evidence-1-20261027T140000000Z-aaaa.png', 'shot-20261027T150000000Z-aaaa.png', 'shot-20261027T145000000Z-aaaa.jpg', 'shot-bad.png'];
+  const { evidence, shots } = checklistEvidence(names);
+  assert.deepEqual([...evidence].map(([item, row]) => [item, row.file, row.count]), [['01', 'evidence-01-20261027T143000000Z-bbbb.jpg', 3], ['02', 'evidence-02-20261027T140000000Z-aaaa.png', 1]]);
+  assert.deepEqual(shots.map(row => row.file), ['shot-20261027T145000000Z-aaaa.jpg', 'shot-20261027T150000000Z-aaaa.png']);
+  assert.equal(evidence.get('02').at, '2026-10-27T14:00:00.000Z');
+});
+
+test('the files route stores a PNG or JPEG for a step, create-only, in the checklist folder, and the detail shows the newest', async () => {
+  const { fake, seed, get, post, call, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('evid', 'e111'), now: at(-30) });
+    seed.checklist(list);
+    fake.log.length = 0;
+    const first = await post(`/hub/checklists/${list.id}/files`, { for: '02', image: picture(solidPng(8, 6)) });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    assert.match(first.body.file, EVIDENCE_FILE);
+    assert.match(first.body.at, /^\d{4}-\d\d-\d\dT/);
+    assert.deepEqual(putKeys(fake), [`sections/inbox/checklists/${list.id}/${first.body.file}`], 'One file, in the checklist folder and nowhere else.');
+    assert.equal(fake.log.find(entry => entry.method === 'PUT').headers['if-none-match'], '*');
+    assert.equal(fake.objects.get(putKeys(fake)[0]).contentType, 'image/png');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const second = await post(`/hub/checklists/${list.id}/files`, { for: '02', image: picture(jpeg(8, 6, { exif: false }), 'image/jpeg') });
+    assert.equal(second.status, 201, JSON.stringify(second.body));
+    assert.match(second.body.file, /\.jpg$/);
+    assert.equal(fake.objects.get(`sections/inbox/checklists/${list.id}/${second.body.file}`).contentType, 'image/jpeg');
+    const detail = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.deepEqual(detail.evidence, { '02': { file: second.body.file, at: second.body.at } }, 'The newest picture is the one shown.');
+    assert.deepEqual(detail.shots, []);
+    assert.ok(detail.files.includes(first.body.file));
+    assert.equal(fake.log.filter(entry => entry.method === 'DELETE').length, 0);
+
+    const shot = await post(`/hub/checklists/${list.id}/files`, { for: 'issue', image: picture(solidPng(8, 6)) });
+    assert.equal(shot.status, 201);
+    assert.match(shot.body.file, /^shot-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+    assert.deepEqual((await get(`/hub/checklists/${list.id}`)).body.shots.map(row => row.file), [shot.body.file]);
+
+    // Served back with the sandbox header and the right type; other names in the folder are not served.
+    const served = await call('GET', `/hub/file?path=checklists/${list.id}/${second.body.file}`);
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get('content-type'), 'image/jpeg');
+    assert.match(served.headers.get('content-security-policy'), /^sandbox;/);
+    assert.equal(served.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/checklist.json`)).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.webp`)).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/../../asks/x/ask.json`)).status, 400);
+    assert.equal((await call('GET', `/hub/file?path=checklists/${list.id}/evidence-02-20261027T143000000Z-aaaa.png`)).status, 404);
+  } finally { await close(); }
+});
+
+test("the files route strips a JPEG's EXIF and a PNG's text before storing", async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('strip', 'e222'), now: at(-30) });
+    seed.checklist(list);
+    const withExif = jpeg(8, 6, { exif: true });
+    assert.ok(withExif.includes('GPS 51.5N'), 'The test picture carries a location marker.');
+    const stored = await post(`/hub/checklists/${list.id}/files`, { for: '01', image: picture(withExif, 'image/jpeg') });
+    assert.equal(stored.status, 201);
+    const bytes = Buffer.from(fake.objects.get(`sections/inbox/checklists/${list.id}/${stored.body.file}`).body);
+    assert.ok(!bytes.includes('GPS'), 'No location in the stored JPEG.');
+    assert.ok(!bytes.includes('Exif'), 'No EXIF segment in the stored JPEG.');
+    assert.ok(bytes.includes('JFIF'), 'The rest is kept.');
+    const text = solidPng(8, 6, 0x90, [['tEXt', Buffer.from('Author\x00someone', 'latin1')]]);
+    const second = await post(`/hub/checklists/${list.id}/files`, { for: '01', image: picture(text) });
+    assert.equal(second.status, 201);
+    assert.ok(!Buffer.from(fake.objects.get(`sections/inbox/checklists/${list.id}/${second.body.file}`).body).includes('someone'));
+  } finally { await close(); }
+});
+
+test('the files route refuses what it should and writes nothing', async () => {
+  const { fake, seed, post, call, origin, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('refuse', 'e333'), now: at(-30) });
+    const submitted = checklistJson({ id: listId('refsub', 'e444'), now: at(-30) });
+    const cancelled = checklistJson({ id: listId('refcan', 'e555'), now: at(-30) });
+    seed.checklist(list);
+    seed.checklist(submitted); seed.submit(submitted.id);
+    seed.checklist(cancelled); seed.put(`checklists/${cancelled.id}/cancel.json`, { at: at().toISOString(), by: 'pc' });
+    fake.log.length = 0;
+    const route = `/hub/checklists/${list.id}/files`;
+    const good = picture(solidPng(8, 6));
+    const refused = (label, status, answer) => assert.equal(answer.status, status, `${label}: ${JSON.stringify(answer.body)}`);
+
+    refused('WebP', 415, await post(route, { for: '01', image: { type: 'image/webp', data: b64(Buffer.from('RIFFxxxxWEBP')) } }));
+    refused('GIF', 415, await post(route, { for: '01', image: { type: 'image/gif', data: b64(Buffer.from('GIF89a')) } }));
+    refused('JPEG type, PNG bytes', 415, await post(route, { for: '01', image: { type: 'image/jpeg', data: good.data } }));
+    refused('PNG type, JPEG bytes', 415, await post(route, { for: '01', image: { type: 'image/png', data: b64(jpeg(8, 6)) } }));
+    refused('a data URL as data', 415, await post(route, { for: '01', image: { type: 'image/png', data: `data:image/png;base64,${good.data}` } }));
+    refused('no image', 415, await post(route, { for: '01' }));
+    refused('image as a string', 415, await post(route, { for: '01', image: `data:image/png;base64,${good.data}` }));
+    refused('too many pixels', 400, await post(route, { for: '01', image: picture(png(2049, 10)) }));
+    refused('zero pixels', 400, await post(route, { for: '01', image: picture(png(0, 10)) }));
+    refused('1.5 MB + 1', 413, await post(route, { for: '01', image: picture(png(10, 10, 1.5 * 1024 * 1024 + 1 - 24)) }));
+    refused('missing for', 400, await post(route, { image: good }));
+    refused('for is not a step', 400, await post(route, { for: '1', image: good }));
+    refused('for climbs out', 400, await post(route, { for: '../asks', image: good }));
+    refused('for is a number', 400, await post(route, { for: 1, image: good }));
+    refused('a step that does not exist', 404, await post(route, { for: '09', image: good }));
+    refused('a list that does not exist', 404, await post(`/hub/checklists/${listId('nope', 'z999')}/files`, { for: '01', image: good }));
+    refused('a bad id', 404, await post('/hub/checklists/..%2Fasks%2Fx/files', { for: '01', image: good }));
+    refused('submitted', 409, await post(`/hub/checklists/${submitted.id}/files`, { for: '01', image: good }));
+    refused('cancelled', 409, await post(`/hub/checklists/${cancelled.id}/files`, { for: '01', image: good }));
+    refused('not JSON', 400, await post(route, '{nope'));
+    assert.deepEqual(putKeys(fake), [], 'Nothing was written by any refusal.');
+
+    // The same guards as every Hub write: our origin, JSON, and a signed-in user.
+    const body = { for: '01', image: good };
+    const noOrigin = await fetch(`${origin}/api${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify(body) });
+    assert.equal(noOrigin.status, 403, 'No Origin is refused.');
+    const foreign = await call('POST', route, body, { 'Remote-User': 'owner', Origin: 'https://evil.example' });
+    assert.equal(foreign.status, 403, 'A foreign Origin is refused.');
+    const anonymous = await call('POST', route, body, {});
+    assert.ok([401, 403].includes(anonymous.status), `no user: ${anonymous.status}`);
+    const plain = await call('POST', route, 'for=01', { 'Remote-User': 'owner', 'Content-Type': 'text/plain' });
+    assert.ok(plain.status >= 400 && plain.status < 500, `not JSON: ${plain.status}`);
+    assert.deepEqual(putKeys(fake), [], 'Nor by the guards.');
+  } finally { await close(); }
+});
+
+test('a step takes five pictures and a list thirty screenshots, then 409', async () => {
+  const { seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('caps', 'e666'), now: at(-30) });
+    seed.checklist(list);
+    for (let n = 0; n < 5; n += 1) seed.put(`checklists/${list.id}/evidence-01-20261027T10000${n}000Z-a00${n}.png`, png(4, 4));
+    for (let n = 0; n < 30; n += 1) seed.put(`checklists/${list.id}/shot-20261027T1000${String(n).padStart(2, '0')}000Z-a${String(n).padStart(3, '0')}.png`, png(4, 4));
+    const route = `/hub/checklists/${list.id}/files`;
+    const good = picture(solidPng(8, 6));
+    const sixth = await post(route, { for: '01', image: good });
+    assert.equal(sixth.status, 409, JSON.stringify(sixth.body));
+    assert.equal((await post(route, { for: '02', image: good })).status, 201, 'Another step is not affected.');
+    const thirty = await post(route, { for: 'issue', image: good });
+    assert.equal(thirty.status, 409, JSON.stringify(thirty.body));
   } finally { await close(); }
 });
 

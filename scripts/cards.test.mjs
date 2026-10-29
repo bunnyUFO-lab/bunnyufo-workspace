@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -232,6 +232,25 @@ for (const via of ['api', 's3']) {
       assert.deepEqual(asJson.items[0], { id: '01', text: 'Create the bot', done: true, at: '2026-10-27T14:31:00.000Z' });
       assert.deepEqual(asJson.items[1], { id: '02', text: 'Invite it', done: false, at: '2026-10-27T14:45:00.000Z' });
       assert.equal(asJson.submit, undefined);
+      // Pictures: the newest per step shows under the step, and --into downloads every one, byte for byte.
+      const shotBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+      const jpgBytes = Buffer.from([0xff, 0xd8, 0xff, 9, 8, 7]);
+      fake.seed(`${folder(id)}evidence-02-20261027T150000000Z-aaaa.png`, shotBytes, 'image/png');
+      fake.seed(`${folder(id)}evidence-02-20261027T151000000Z-bbbb.jpg`, jpgBytes, 'image/jpeg');
+      fake.seed(`${folder(id)}shot-20261027T152000000Z-cccc.png`, shotBytes, 'image/png');
+      const pictured = await cli(via, 'checklist', 'get', id);
+      assert.match(pictured.stdout, /\[ \] 02 Invite it\n {5}evidence: evidence-02-20261027T151000000Z-bbbb\.jpg\n/, 'The newest picture of a step.');
+      assert.match(pictured.stdout, /screenshot: shot-20261027T152000000Z-cccc\.png/);
+      assert.deepEqual(JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout).items[1].evidence, 'evidence-02-20261027T151000000Z-bbbb.jpg');
+      const into = path.join(dir, 'pictures');
+      const saved = await cli(via, 'checklist', 'get', id, '--into', into);
+      assert.equal(saved.code, 0, saved.stderr);
+      assert.deepEqual((await readdir(into)).sort(), ['evidence-02-20261027T150000000Z-aaaa.png', 'evidence-02-20261027T151000000Z-bbbb.jpg', 'shot-20261027T152000000Z-cccc.png']);
+      assert.deepEqual(await readFile(path.join(into, 'evidence-02-20261027T151000000Z-bbbb.jpg')), jpgBytes);
+      assert.deepEqual(await readFile(path.join(into, 'shot-20261027T152000000Z-cccc.png')), shotBytes);
+      assert.match(saved.stdout, /saved: .*evidence-02-20261027T151000000Z-bbbb\.jpg/);
+      assert.equal((await cli(via, 'checklist', 'get', id, '--into')).code, 1, '--into needs a folder.');
+      for (const name of ['evidence-02-20261027T150000000Z-aaaa.png', 'evidence-02-20261027T151000000Z-bbbb.jpg', 'shot-20261027T152000000Z-cccc.png']) fake.objects.delete(`${folder(id)}${name}`);
       assert.equal((await cli(via, 'checklist', 'get', '20990101-probe-nothing-a1b2')).code, 1);
 
       const early = await cli(via, 'checklist', 'pickup', id);

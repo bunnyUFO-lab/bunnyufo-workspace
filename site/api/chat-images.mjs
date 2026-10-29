@@ -102,6 +102,24 @@ export function stripPng(buffer) {
 }
 
 /**
+ * Check one picture `{ type, data }` (base64, no data-URL head) and return what to store:
+ * `{ buffer, type, ext, width, height, bytes }` with the metadata already stripped; `bytes` is the size before stripping.
+ */
+export function checkOneImage(image, fail) {
+  if (!image || typeof image !== 'object' || typeof image.data !== 'string' || !(image.type in EXTENSION)) throw fail('Send pictures as JPEG or PNG.', 415);
+  if (image.data.length > MAX_IMAGE_BYTES * 1.4) throw fail('A picture is at most 1.5 MB.', 413);
+  const bytes = Buffer.from(image.data, 'base64');
+  if (bytes.length > MAX_IMAGE_BYTES) throw fail('A picture is at most 1.5 MB.', 413);
+  const png = image.type === 'image/png';
+  if (!(png ? isPng(bytes) : isJpeg(bytes))) throw fail('Send pictures as JPEG or PNG.', 415);
+  const size = png ? pngSize(bytes) : jpegSize(bytes);
+  if (!size || size.some(side => side < 1 || side > MAX_SIDE)) throw fail(`A picture is 1 to ${MAX_SIDE} pixels on each side.`);
+  const buffer = png ? stripPng(bytes) : stripJpeg(bytes);
+  if (!buffer) throw fail('That picture is damaged.');
+  return { buffer, type: image.type, ext: EXTENSION[image.type], width: size[0], height: size[1], bytes: bytes.length };
+}
+
+/**
  * Validate the `images` of a chat message and return what to store and send:
  * `[{ buffer, type, ext, width, height }]` with the metadata already stripped.
  */
@@ -112,19 +130,10 @@ export function checkChatImages(images, fail) {
   const checked = [];
   let total = 0;
   for (const image of images) {
-    if (!image || typeof image !== 'object' || typeof image.data !== 'string' || !(image.type in EXTENSION)) throw fail('Send pictures as JPEG or PNG.', 415);
-    if (image.data.length > MAX_IMAGE_BYTES * 1.4) throw fail('A picture is at most 1.5 MB.', 413);
-    const bytes = Buffer.from(image.data, 'base64');
-    if (bytes.length > MAX_IMAGE_BYTES) throw fail('A picture is at most 1.5 MB.', 413);
-    total += bytes.length;
+    const { bytes, ...one } = checkOneImage(image, fail);
+    total += bytes;
     if (total > MAX_TOTAL_BYTES) throw fail('The pictures together are at most 5 MB.', 413);
-    const png = image.type === 'image/png';
-    if (!(png ? isPng(bytes) : isJpeg(bytes))) throw fail('Send pictures as JPEG or PNG.', 415);
-    const size = png ? pngSize(bytes) : jpegSize(bytes);
-    if (!size || size.some(side => side < 1 || side > MAX_SIDE)) throw fail(`A picture is 1 to ${MAX_SIDE} pixels on each side.`);
-    const buffer = png ? stripPng(bytes) : stripJpeg(bytes);
-    if (!buffer) throw fail('That picture is damaged.');
-    checked.push({ buffer, type: image.type, ext: EXTENSION[image.type], width: size[0], height: size[1] });
+    checked.push(one);
   }
   return checked;
 }
