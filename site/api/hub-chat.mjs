@@ -201,7 +201,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.
     const recent = history[0]?.role === 'context' ? [history[0], ...history.slice(1).slice(-20)] : history.slice(-20);
     // Runs carry text only: a turn that has to carry a picture (its own, or the pictures of a help chat's context) stays on completions.
-    const runTurn = runsOn && !pictures.length && !contextPictures.length && !recent[0]?.images?.length;
+    const runTurn = runsOn && !pictures.length && !contextPictures.length && !(recent[0]?.role === 'context' && recent[0].images?.length);
     const contextMessage = context && {   // help: a new help chat sends its context as the first user message
       role: 'user',
       content: contextPictures.length ? [{ type: 'text', text: context.text }, ...contextPictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))] : context.text,

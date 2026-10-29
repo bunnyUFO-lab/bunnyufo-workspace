@@ -577,3 +577,15 @@ test('runs on: a help chat whose context carries a picture stays on completions,
     assert.equal(upstream.requests[1].messages[0].content[1].type, 'image_url', 'The stored picture goes back on later turns.');
   } finally { await close(); }
 });
+
+test('runs on: a plain chat whose first turn had a picture sends its later text turns to runs', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const first = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    assert.equal(upstream.requests.length, 1, 'the picture turn went to completions');
+    const second = await chatLive(call, { text: 'and now text', conversation: first.events.at(-1).data.conversation });
+    assert.equal(second.events.at(-1).event, 'done');
+    assert.equal(upstream.requests.length, 1, 'the text turn did not go to completions');
+    assert.equal(upstream.runs.length, 1);
+  } finally { await close(); }
+});
