@@ -610,3 +610,192 @@ test('BUW_INBOX_SECTION=inbox-dev writes under sections/inbox-dev, touches nothi
     assert.equal((await cli('api', 'event', 'deployed', '--title', 'x')).code, 2);
   } finally { await hook.close(); await close(); }
 });
+
+// --- the Needs-you kinds from flags: Design review (--decision) and Playtest (--playtest --build) ---
+
+for (const via of ['api', 's3']) {
+  test(`ask create (${via}): a Design review from flags only; the picture goes up before ask.json`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
+    try {
+      await writeFile(path.join(dir, 'frame.png'), Buffer.from([137, 80, 78, 71]));
+      const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Card frame',
+        '--decision', 'Warm oak, not dark walnut|Matches the Wood board', '--decision', 'Counter top-right', '--image', path.join(dir, 'frame.png'));
+      assert.equal(made.code, 0, made.stderr);
+      const id = made.stdout.trim().split('\n').at(-1);
+      const ask = fake.json(`sections/inbox/asks/${id}/ask.json`);
+      assert.equal(ask.question, 'Card frame');
+      assert.deepEqual(ask.decisions, [{ id: 'd1', text: 'Warm oak, not dark walnut', detail: 'Matches the Wood board' }, { id: 'd2', text: 'Counter top-right' }]);
+      assert.equal(ask.image, 'frame.png', 'One picture and no options: the decisions are about it.');
+      assert.equal(ask.allowDrawing, true);
+      assert.equal(ask.options, undefined);
+      assert.deepEqual(keys(`asks/${id}/`), [`sections/inbox/asks/${id}/ask.json`, `sections/inbox/asks/${id}/frame.png`]);
+      const order = [...fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/asks/${id}/`));
+      assert.deepEqual(order.map(key => key.split('/').at(-1)), ['frame.png', 'ask.json'], 'The picture is stored before the ask.');
+    } finally { await close(); }
+  });
+
+  test(`ask create (${via}): --decision with a file that has decisions, bad decisions and a missing picture are refused and write nothing`, async () => {
+    const { cli, keys, dir, close } = await setup();
+    try {
+      const file = path.join(dir, 'ask.json');
+      await writeFile(file, JSON.stringify({ question: 'Frame?', decisions: [{ id: 'd1', text: 'Oak' }] }));
+      const both = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file, '--decision', 'Walnut');
+      assert.equal(both.code, 1);
+      assert.match(both.stderr, /decisions already/);
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe', '--file', file, '--question', 'Frame?')).code, 1, 'A file and --question together.');
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe')).code, 1, 'Neither.');
+      const long = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', '--decision', 'x'.repeat(201));
+      assert.equal(long.code, 1);
+      assert.match(long.stderr, /text is 1 to 200/);
+      const detail = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', '--decision', `Oak|${'y'.repeat(501)}`);
+      assert.match(detail.stderr, /detail is at most 500/);
+      const many = [];
+      for (const name of 'abcdefghijk') many.push('--decision', name);
+      const eleven = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', ...many);
+      assert.match(eleven.stderr, /1 to 10/);
+      const empty = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', '--decision', ' |only a detail');
+      assert.match(empty.stderr, /text is 1 to 200/);
+      await writeFile(file, JSON.stringify({ question: 'Frame?', decisions: [{ id: 'd2', text: 'Oak' }], image: 'missing.png' }));
+      const wrong = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file);
+      assert.match(wrong.stderr, /id is d1/);
+      assert.match(wrong.stderr, /missing\.png/);
+      assert.deepEqual(keys('asks/'), [], 'A refused ask writes nothing.');
+    } finally { await close(); }
+  });
+
+  test(`ask create (${via}): --option with and without a picture; two pictures leave the image to the file; the file's own image and allowDrawing stay`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      await writeFile(path.join(dir, 'a.png'), Buffer.from([137, 80, 78, 71]));
+      await writeFile(path.join(dir, 'b.png'), Buffer.from([137, 80, 78, 71]));
+      const idOf = made => made.stdout.trim().split('\n').at(-1);
+      const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which arc?', '--option', 'high=High arc @ the top@a.png', '--option', 'low=Low', '--image', path.join(dir, 'a.png'));
+      assert.equal(made.code, 0, made.stderr);
+      const ask = fake.json(`sections/inbox/asks/${idOf(made)}/ask.json`);
+      assert.deepEqual(ask.options, [{ id: 'high', label: 'High arc @ the top', image: 'a.png' }, { id: 'low', label: 'Low' }]);
+      assert.equal(ask.image, undefined, 'No decisions: no Design review picture.');
+      assert.equal(ask.allowDrawing, false);
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which?', '--option', 'nolabel')).code, 1);
+      assert.match((await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which?', '--option', 'x=X@zzz.png')).stderr, /zzz\.png/);
+
+      const two = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', '--decision', 'Oak', '--image', path.join(dir, 'a.png'), '--image', path.join(dir, 'b.png'));
+      assert.equal(two.code, 0, two.stderr);
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(two)}/ask.json`).image, undefined, 'Two pictures: the CLI does not guess.');
+
+      const file = path.join(dir, 'ask.json');
+      await writeFile(file, JSON.stringify({ question: 'Frame?', image: 'b.png', allowDrawing: false }));
+      const fromFile = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file, '--decision', 'Oak', '--image', path.join(dir, 'a.png'), '--image', path.join(dir, 'b.png'));
+      assert.equal(fromFile.code, 0, fromFile.stderr);
+      const kept = fake.json(`sections/inbox/asks/${idOf(fromFile)}/ask.json`);
+      assert.equal(kept.image, 'b.png');
+      assert.equal(kept.allowDrawing, false, 'The file says otherwise.');
+      assert.equal(kept.decisions.length, 1);
+    } finally { await close(); }
+  });
+
+  test(`ask get (${via}): a Design review answer prints one line per decision`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Frame?', '--decision', 'Oak', '--decision', 'Counter', '--decision', 'Shadow');
+      const id = made.stdout.trim().split('\n').at(-1);
+      fake.seed(`sections/inbox/asks/${id}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', decisions: { d2: { verdict: 'change', note: 'Bottom-left' }, d1: { verdict: 'approve' }, d3: { verdict: 'skip' } } }), 'application/json');
+      const got = await cli(via, 'ask', 'get', id);
+      assert.equal(got.code, 0, got.stderr);
+      assert.match(got.stdout, /== answer\.json[\s\S]*== decisions\nd1 approve\nd2 change: Bottom-left\nd3 skip\n?$/);
+      const plain = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Just a question');
+      const plainId = plain.stdout.trim().split('\n').at(-1);
+      fake.seed(`sections/inbox/asks/${plainId}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', choice: 'x' }), 'application/json');
+      assert.doesNotMatch((await cli(via, 'ask', 'get', plainId)).stdout, /== decisions/);
+    } finally { await close(); }
+  });
+
+  test(`checklist create (${via}): --playtest from flags; the file keeps kind, build, platform and lookFor`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--playtest', '--build', 'https://example.test/build?v=1', '--look-for', 'Any moment it gets hard all at once.', '--title', 'Try the build', '--item', 'Play act 1', '--item', 'Open the menu');
+      assert.equal(made.code, 0, made.stderr);
+      const id = made.stdout.trim();
+      const list = fake.json(`sections/inbox/checklists/${id}/checklist.json`);
+      assert.equal(list.kind, 'playtest');
+      assert.equal(list.build, 'https://example.test/build?v=1');
+      assert.equal(list.platform, 'web', 'The default is written out.');
+      assert.equal(list.lookFor, 'Any moment it gets hard all at once.');
+      assert.deepEqual(list.items.map(item => item.id), ['01', '02']);
+      const other = await cli(via, 'checklist', 'create', '--project', 'probe', '--playtest', '--build', 'https://example.test/b', '--platform', 'android', '--title', 'On a phone', '--item', 'Start');
+      assert.equal(fake.json(`sections/inbox/checklists/${other.stdout.trim()}/checklist.json`).platform, 'android');
+      const steps = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Plain steps', '--item', 'One');
+      const plain = fake.json(`sections/inbox/checklists/${steps.stdout.trim()}/checklist.json`);
+      assert.equal(plain.kind, undefined, 'Steps stay without a kind.');
+      assert.equal(plain.build, undefined);
+    } finally { await close(); }
+  });
+
+  test(`checklist create (${via}): a playtest without --build, with an http:// build, a bad platform or --build on steps is refused and writes nothing`, async () => {
+    const { cli, keys, dir, close } = await setup();
+    try {
+      const base = ['checklist', 'create', '--project', 'probe', '--title', 'Try it', '--item', 'Play'];
+      const missing = await cli(via, ...base, '--playtest');
+      assert.equal(missing.code, 1);
+      assert.match(missing.stderr, /needs --build/);
+      const http = await cli(via, ...base, '--playtest', '--build', 'http://example.test/build');
+      assert.equal(http.code, 1);
+      assert.match(http.stderr, /https/);
+      assert.equal((await cli(via, ...base, '--playtest', '--build', 'ftp://example.test/build')).code, 1);
+      assert.equal((await cli(via, ...base, '--playtest', '--build', 'https://')).code, 1);
+      assert.match((await cli(via, ...base, '--playtest', '--build', `https://example.test/${'a'.repeat(2000)}`)).stderr, /at most 2000/);
+      assert.match((await cli(via, ...base, '--playtest', '--build', 'https://example.test/b', '--platform', 'dos')).stderr, /one of: web, windows/);
+      assert.match((await cli(via, ...base, '--playtest', '--build', 'https://example.test/b', '--look-for', 'x'.repeat(2001))).stderr, /at most 2000/);
+      assert.match((await cli(via, ...base, '--build', 'https://example.test/b')).stderr, /belongs to a playtest/);
+      const file = path.join(dir, 'checklist.json');
+      await writeFile(file, JSON.stringify({ title: 'Try it', kind: 'playtest', items: [{ text: 'Play' }] }));
+      assert.match((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file)).stderr, /needs --build/);
+      assert.match((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file, '--build', 'http://example.test/b')).stderr, /belongs to a playtest/, 'A build flag without --playtest.');
+      assert.deepEqual(keys('checklists/'), [], 'A refused list writes nothing.');
+      await writeFile(file, JSON.stringify({ title: 'Try it', kind: 'playtest', build: 'https://example.test/b', items: [{ text: 'Play' }] }));
+      assert.equal((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file)).code, 0, 'A file may carry the playtest fields itself.');
+    } finally { await close(); }
+  });
+
+  test(`checklist get (${via}): a playtest prints its build, rating, verdict and issues`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--playtest', '--build', 'https://example.test/b', '--look-for', 'Hard spikes.', '--title', 'Try it', '--item', 'Play');
+      const id = made.stdout.trim();
+      const opened = await cli(via, 'checklist', 'get', id);
+      assert.match(opened.stdout, /playtest: https:\/\/example\.test\/b \(web\); look for: Hard spikes\./);
+      assert.doesNotMatch(opened.stdout, /rating:/);
+      fake.seed(`sections/inbox/checklists/${id}/submit.json`, JSON.stringify({ at: new Date().toISOString(), rating: 4, verdict: 'fix-first', issues: [{ text: 'Goop builds up off-screen', shot: 'shot-20261028T101500123Z-k3d9.png' }, { text: 'Menu is slow' }] }), 'application/json');
+      const done = await cli(via, 'checklist', 'get', id);
+      assert.match(done.stdout, /rating: 4\/5, verdict: fix-first, 2 issue\(s\)\n {2}1\. Goop builds up off-screen \[shot-20261028T101500123Z-k3d9\.png\]\n {2}2\. Menu is slow\n?/);
+    } finally { await close(); }
+  });
+}
+
+test('checklist create --playtest pings "Playtest: <title>" with the Hub link and no build address', async () => {
+  const { cli, close } = await setup();
+  const hook = await webhook();
+  try {
+    cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/' };
+    const made = await cli('api', 'checklist', 'create', '--project', 'magic-loops', '--playtest', '--build', 'https://secret-build.example.test/x', '--title', 'Try the build', '--item', 'One', '--item', 'Two');
+    assert.equal(made.code, 0, made.stderr);
+    const id = made.stdout.trim();
+    assert.equal(hook.posts.length, 1);
+    assert.equal(hook.posts[0].body.content, `**Agent needs you · Magic Loops**\nPlaytest: Try the build\nhttps://hub.example.test/#/~hub/checklist/${id}`);
+    assert.ok(!hook.posts[0].body.content.includes('secret-build'), 'The build address stays out of Discord.');
+  } finally { await hook.close(); await close(); }
+});
+
+test('ask create: --option with an unusable picture after @ is refused with a clear error and writes nothing', async () => {
+  const { cli, keys, dir, close } = await setup();
+  try {
+    await writeFile(path.join(dir, 'x.png'), Buffer.from([137, 80, 78, 71]));
+    for (const bad of ['a=A@dir/x.png', 'a=A@x.bmp', 'a=A@_x.png', `a=A@${'n'.repeat(120)}.png`]) {
+      const refused = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--option', bad, '--image', path.join(dir, 'x.png'));
+      assert.equal(refused.code, 1, bad);
+      assert.match(refused.stderr, /the picture after @ is a file name like x\.png \(pass the path with --image\)/);
+    }
+    const name = await cli('api', 'ask', 'create', '--project', 'probe', '--question', 'Q', '--decision', 'Oak', '--image', path.join(dir, 'x.png'));
+    assert.equal(name.code, 0, name.stderr);
+    assert.deepEqual(keys('asks/').filter(key => key.endsWith('ask.json')).length, 1, 'Only the good ask was written.');
+  } finally { await close(); }
+});

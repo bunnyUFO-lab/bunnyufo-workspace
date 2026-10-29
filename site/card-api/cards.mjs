@@ -35,7 +35,8 @@
 //   cards event <kind> --title <t> [--project <p> --bead <b> --ask <id> --review <file> --url <u> --summary <s> --source <s>]
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
-//   cards ask create --project <p> [--bead <b>] --file ask.json [--image <file>]... [--require-passkey]
+//   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
+//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey]
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
@@ -45,16 +46,25 @@
 //        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where a
 //        passkey signs the answer: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
+//        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
+//        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
+//        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
+//        --image and no options, that picture is the one the decisions are about; allowDrawing is on unless the file says no.
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
-//   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json
+//   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json; for a design
+//        review also one line per decision ("d1 approve", "d2 change: Bottom-left")
 //   cards ask pickup <id> | cards ask cancel <id>                     exit 3 when someone else already did
 //   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]
+//        [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
 //        put a checklist for the owner to tick off in the Hub (a list of steps, each with an optional guide) and post a
 //        checklist-created event; prints its id, then pings #needs-you like an Ask. The Hub writes ticks and the submission
 //        (owner-only files); nothing is ever overwritten. --file takes the checklist.json shape without id, project,
 //        createdAt, from and the item ids (the CLI adds them): title, context?, card?, items[{ text, group?, guide?, link? }].
+//        --playtest makes it a Playtest: the items are what to try, --build (https only) is the build to open, --platform
+//        defaults to web, --look-for says what to watch for. The #needs-you ping reads "Playtest: <title>".
 //   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
-//   cards checklist get <id> [--json] [--into <dir>]                        progress, the items, submit.json; --into downloads the
+//   cards checklist get <id> [--json] [--into <dir>]                        progress, the items, submit.json (for a playtest also its
+//        build, rating, verdict and issues in plain lines); --into downloads the
 //        owner's pictures (evidence-<step>-….png|jpg per step, shot-….png|jpg per playtest issue) and prints their paths
 //   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
 //        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
@@ -81,7 +91,9 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create | beads push --project <p>';
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create | beads push --project <p>\n'
+  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
+  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** The cards bucket this machine knows of: BUW_S3_BUCKET, else the first one the registry names. */
@@ -658,11 +670,73 @@ function askFromFile(raw, flags, id) {
     question: raw.question,
     ...(raw.context ? { context: raw.context } : {}),
     ...(raw.options ? { options: raw.options } : {}),
+    ...(raw.decisions ? { decisions: raw.decisions } : {}),
+    ...(raw.image ? { image: raw.image } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
     ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
   };
   return ask;
+}
+
+/** An Ask picture's file name: the server's rule. */
+const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
+
+/** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
+function decisionsFromFlags(values) {
+  return values.map((value, index) => {
+    const bar = value.indexOf('|');
+    const text = (bar < 0 ? value : value.slice(0, bar)).trim();
+    const detail = bar < 0 ? '' : value.slice(bar + 1).trim();
+    return { id: `d${index + 1}`, text, ...(detail ? { detail } : {}) };
+  });
+}
+
+/** `--option <id>=<label>[@<image file name>]` → { id, label, image? }. */
+function optionFromFlag(value) {
+  const equals = value.indexOf('=');
+  if (equals < 1) throw new Error(`--option ${value}: write it as <id>=<label>, or <id>=<label>@<image file>.`);
+  let label = value.slice(equals + 1).trim();
+  // Text after the last "@" with no white space is a picture reference: a bare image file name, or an error.
+  const tail = /@(\S*)$/.exec(label);
+  let image;
+  if (tail) {
+    if (!ASK_IMAGE_RE.test(tail[1]) || !/\.(?:png|jpe?g|gif|webp|svg)$/i.test(tail[1])) {
+      throw new Error(`--option ${value}: the picture after @ is a file name like x.png (pass the path with --image).`);
+    }
+    image = tail[1];
+    label = label.slice(0, tail.index).trim();
+  }
+  return { id: value.slice(0, equals).trim(), label, ...(image ? { image } : {}) };
+}
+
+/** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
+async function askInput(flags) {
+  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey]';
+  if (!flags.project || (!flags.file && !flags.question)) throw new Error(usage);
+  if (flags.file && flags.question) throw new Error(`Give --file, or --question, not both. ${usage}`);
+  const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { question: flags.question };
+  const images = flags.image ?? [];
+  if (flags.option) {
+    if (raw.options !== undefined) throw new Error('The file has options already: give options in the file or with --option, not both.');
+    raw.options = flags.option.map(optionFromFlag);
+  }
+  if (flags.decision) {
+    if (raw.decisions !== undefined) throw new Error('The file has decisions already: give decisions in the file or with --decision, not both.');
+    raw.decisions = decisionsFromFlags(flags.decision);
+    if (raw.allowDrawing === undefined) raw.allowDrawing = true;
+  }
+  if (raw.decisions !== undefined && raw.image === undefined && images.length === 1 && !(Array.isArray(raw.options) && raw.options.length)) raw.image = path.basename(images[0]);
+  return raw;
+}
+
+/** The decisions' one-line summary of an answer: "d1 approve", "d2 change: Bottom-left". */
+function decisionLines(answer) {
+  const verdicts = answer?.decisions;
+  if (!verdicts || typeof verdicts !== 'object') return [];
+  return Object.keys(verdicts).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+    .map(id => `${id} ${verdicts[id]?.verdict ?? '?'}${verdicts[id]?.note ? `: ${String(verdicts[id].note).replace(/\s+/g, ' ')}` : ''}`);
 }
 
 function validateAsk(ask, imageNames) {
@@ -681,6 +755,23 @@ function validateAsk(ask, imageNames) {
         if (option?.image !== undefined && !imageNames.includes(option.image)) problems.push(`option ${option?.id} names image ${option.image}, which is not among the --image files`);
       }
     }
+  }
+  if (ask.decisions !== undefined) {
+    const L = DECISION_LIMITS;
+    if (!Array.isArray(ask.decisions) || ask.decisions.length < 1 || ask.decisions.length > L.count) problems.push(`decisions is a list of 1 to ${L.count}`);
+    else {
+      ask.decisions.forEach((decision, index) => {
+        const at = `decision ${index + 1}`;
+        if (!decision || typeof decision !== 'object' || Array.isArray(decision)) { problems.push(`${at} is not an object`); return; }
+        if (decision.id !== `d${index + 1}`) problems.push(`${at}: id is d${index + 1}`);
+        if (typeof decision.text !== 'string' || !decision.text.trim() || decision.text.length > L.text) problems.push(`${at}: text is 1 to ${L.text} characters`);
+        if (decision.detail !== undefined && (typeof decision.detail !== 'string' || decision.detail.length > L.detail)) problems.push(`${at}: detail is at most ${L.detail} characters`);
+      });
+    }
+  }
+  if (ask.image !== undefined) {
+    if (typeof ask.image !== 'string' || !ASK_IMAGE_RE.test(ask.image)) problems.push('image is a file name of letters, digits, . _ - (up to 120, starting with a letter or digit)');
+    else if (!imageNames.includes(ask.image)) problems.push(`image names ${ask.image}, which is not among the --image files`);
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
   if (typeof ask.allowNote !== 'boolean' || typeof ask.allowDrawing !== 'boolean') problems.push('allowNote and allowDrawing are true or false');
@@ -728,8 +819,7 @@ async function pingNeedsYou({ project, text, path: link }) {
 }
 
 async function askCreate(flags) {
-  if (!flags.project || !flags.file) throw new Error('Usage: ask create --project <p> [--bead <b>] --file ask.json [--image <file>]... [--require-passkey]');
-  const raw = JSON.parse(await readFile(flags.file, 'utf8'));
+  const raw = await askInput(flags);
   const id = newId(flags.project, raw.question);
   const ask = askFromFile(raw, flags, id);
   const images = flags.image ?? [];
@@ -776,7 +866,14 @@ async function askGet(id) {
   const shown = ['ask.json', 'answer.json', 'pickup.json', 'cancel.json'];
   for (const name of shown) {
     if (!names.includes(name)) continue;
-    console.log(`== ${name}\n${(await readInbox(inboxPath('asks', id, name))).trim()}`);
+    const text = (await readInbox(inboxPath('asks', id, name))).trim();
+    console.log(`== ${name}\n${text}`);
+    if (name === 'answer.json') {
+      let answer = null;
+      try { answer = JSON.parse(text); } catch { /* shown as it is */ }
+      const lines = decisionLines(answer);
+      if (lines.length) console.log(`== decisions\n${lines.join('\n')}`);
+    }
   }
   const others = names.filter(name => !shown.includes(name));
   if (others.length) console.log(`== other files\n${others.join('\n')}`);
@@ -800,7 +897,8 @@ const pickupBody = flags => ({ at: isoNow(), ...(process.env.CLAUDE_SESSION_ID ?
 // pickup.json and cancel.json (this command). The state is read from the file names alone.
 
 const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
-const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024 };
+const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024, build: 2000, lookFor: 2000 };
+const PLAYTEST_PLATFORMS = ['web', 'windows', 'mac', 'linux', 'android', 'ios'];
 
 /** cancel.json → cancelled, pickup.json → picked-up, submit.json → submitted, else open. */
 const checklistState = names => (names.has('cancel.json') ? 'cancelled' : names.has('pickup.json') ? 'picked-up' : names.has('submit.json') ? 'submitted' : 'open');
@@ -820,6 +918,8 @@ function checklistMarks(names) {
   return new Map([...best].map(([item, { done, at }]) => [item, { done, at }]));
 }
 
+const isHttps = value => { try { return new URL(value).protocol === 'https:' && /^https:\/\//i.test(value); } catch { return false; } };
+
 /** The problems with a checklist input (the shape of checklist.json without id, project, createdAt, from and item ids). */
 function validateChecklist(raw) {
   const L = CHECKLIST_LIMITS;
@@ -831,6 +931,15 @@ function validateChecklist(raw) {
   if (!text(raw.title, L.title)) problems.push(`title is 1 to ${L.title} characters`);
   if (!optional(raw.context, L.context)) problems.push(`context is at most ${L.context} characters`);
   if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
+  if (raw.kind !== undefined && raw.kind !== 'playtest') problems.push('kind is "playtest", or left out for steps');
+  if (raw.kind === 'playtest') {
+    if (typeof raw.build !== 'string' || !raw.build) problems.push('a playtest needs --build, the https link of the build');
+    else if (raw.build.length > L.build || !isHttps(raw.build)) problems.push(`--build is an https:// link of at most ${L.build} characters`);
+    if (raw.platform !== undefined && !PLAYTEST_PLATFORMS.includes(raw.platform)) problems.push(`--platform is one of: ${PLAYTEST_PLATFORMS.join(', ')}`);
+    if (!optional(raw.lookFor, L.lookFor)) problems.push(`--look-for is at most ${L.lookFor} characters`);
+  } else if (raw.build !== undefined || raw.platform !== undefined || raw.lookFor !== undefined) {
+    problems.push('build, platform and lookFor belong to a playtest: add --playtest');
+  }
   if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > L.items) problems.push(`items is a list of 1 to ${L.items}`);
   else {
     raw.items.forEach((item, index) => {
@@ -856,6 +965,7 @@ function checklistFromInput(raw, flags, id) {
     title: raw.title.trim(),
     ...(raw.context ? { context: raw.context } : {}),
     ...(card ? { card } : {}),
+    ...(raw.kind === 'playtest' ? { kind: 'playtest', build: raw.build, platform: raw.platform ?? 'web', ...(raw.lookFor ? { lookFor: raw.lookFor } : {}) } : {}),
     items: raw.items.map((item, index) => ({
       id: String(index + 1).padStart(2, '0'), text: item.text.trim(),
       ...(item.group ? { group: item.group } : {}), ...(item.guide ? { guide: item.guide } : {}), ...(item.link ? { link: item.link } : {}),
@@ -920,15 +1030,32 @@ function printChecklist(view, asJson) {
     if (item.evidence) console.log(`     evidence: ${item.evidence}`);
   }
   for (const shot of view.shots ?? []) console.log(`screenshot: ${shot}`);
+  if (checklist.kind === 'playtest') {
+    console.log(`playtest: ${checklist.build} (${checklist.platform ?? 'web'})${checklist.lookFor ? `; look for: ${String(checklist.lookFor).replace(/\s+/g, ' ')}` : ''}`);
+    const report = view.submit;
+    if (report) {
+      const issues = Array.isArray(report.issues) ? report.issues : [];
+      console.log(`rating: ${report.rating ?? '?'}/5, verdict: ${report.verdict ?? '?'}, ${issues.length} issue(s)`);
+      issues.forEach((issue, index) => console.log(`  ${index + 1}. ${String(issue?.text ?? '').replace(/\s+/g, ' ')}${issue?.shot ? ` [${issue.shot}]` : ''}`));
+    }
+  }
   for (const name of ['submit', 'pickup', 'cancel']) if (view[name]) console.log(`== ${name}.json\n${JSON.stringify(view[name], null, 2)}`);
 }
 
 async function checklistCreate(flags) {
-  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]';
+  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
   if (!flags.project || (!flags.file && !flags.title)) throw new Error(usage);
   if (flags.file && (flags.title || flags.item)) throw new Error(`Give --file, or --title with --item, not both. ${usage}`);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is lower-case letters, digits and dashes');
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { title: flags.title, items: (flags.item ?? []).map(text => ({ text })) };
+  for (const name of ['build', 'platform', 'look-for']) if (flags[name] !== undefined && !flags.playtest) throw new Error(`--${name} belongs to a playtest: add --playtest. ${usage}`);
+  if (flags.playtest) {
+    if (raw.kind !== undefined && raw.kind !== 'playtest') throw new Error(`The file is not a playtest (kind ${JSON.stringify(raw.kind)}), so --playtest does not fit. ${usage}`);
+    raw.kind = 'playtest';
+    if (flags.build !== undefined) raw.build = flags.build;
+    if (flags.platform !== undefined) raw.platform = flags.platform;
+    if (flags['look-for'] !== undefined) raw.lookFor = flags['look-for'];
+  }
   const problems = validateChecklist(raw);
   if (flags.card !== undefined && !/^https?:\/\//i.test(flags.card)) problems.push('--card is an http:// or https:// link');
   if (problems.length) throw new Error(`checklist.json is not valid: ${problems.join('; ')}.`);
@@ -939,8 +1066,8 @@ async function checklistCreate(flags) {
   const file = inboxPath('checklists', id, 'checklist.json');
   if (await mustPut(file, body, { createOnly: true }) === 'exists') throw new Error(`${file} already exists; run it again.`);
   const steps = checklist.items.length;
-  await postEvent({ kind: 'checklist-created', title: clip(checklist.title, 80), project: checklist.project, bead: checklist.bead, checklist: id, source: 'cards', summary: `${steps} steps for you.` }, { out: console.error }).catch(error => console.error(`(checklist-created event skipped: ${error.message})`));
-  await pingNeedsYou({ project: checklist.project, text: `${checklist.title} (${steps} steps)`, path: `/#/~hub/checklist/${id}` }).catch(() => {});
+  await postEvent({ kind: 'checklist-created', title: clip(checklist.title, 80), project: checklist.project, bead: checklist.bead, checklist: id, source: 'cards', summary: checklist.kind === 'playtest' ? `A build to try: ${steps} things to look at.` : `${steps} steps for you.` }, { out: console.error }).catch(error => console.error(`(checklist-created event skipped: ${error.message})`));
+  await pingNeedsYou({ project: checklist.project, text: checklist.kind === 'playtest' ? `Playtest: ${checklist.title}` : `${checklist.title} (${steps} steps)`, path: `/#/~hub/checklist/${id}` }).catch(() => {});
   console.log(id);
 }
 
@@ -1111,7 +1238,7 @@ async function beadsPush(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey']);
+const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -1124,6 +1251,8 @@ function parseFlags(args) {
     at += 1;
     if (name === 'image') (flags.image ??= []).push(value);
     else if (name === 'item') (flags.item ??= []).push(value);
+    else if (name === 'option') (flags.option ??= []).push(value);
+    else if (name === 'decision') (flags.decision ??= []).push(value);
     else flags[name] = value;
   }
   return flags;

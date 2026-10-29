@@ -127,11 +127,11 @@ times, 500 ms doubling). Only `event` is spooled when the API stays down: the li
 
 ```bash
 npm run cards -- event <kind> --title <t> [--project --bead --ask --url --summary --source]
-npm run cards -- ask create --project <p> [--bead <b>] --file ask.json [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
+npm run cards -- ask create --project <p> [--bead <b>] (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
 npm run cards -- ask get <id>
 npm run cards -- ask pickup <id>      # also: ask cancel <id>; exit 3 if someone already did
-npm run cards -- checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]   # prints the id; pings #needs-you
+npm run cards -- checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]   # prints the id; pings #needs-you
 npm run cards -- checklist list [--project <p>] [--open | --submitted] [--all]   # id, state, done/total, project, title
 npm run cards -- checklist get <id> [--json]
 npm run cards -- checklist wait <id> [--timeout <min, 30, max 240>] [--every <s, 20, min 5>]   # 0 on submit, 3 on cancel, 4 on timeout
