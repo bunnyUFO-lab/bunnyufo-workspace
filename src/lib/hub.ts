@@ -32,6 +32,10 @@ export interface Item {
   /** A review row: each leg's result, and the screenshots that came with it. */
   verdicts?: { leg: Verdict['leg']; result: Verdict['result'] }[]
   shots?: number
+  /** An Ask row that is a Design review, with its decisions (or, for a pick, its pictures) counted. */
+  design?: boolean
+  decisions?: number
+  takes?: number
   /** Needs you rows only: the kind, four plain sentences, and (with `detail=1`) the Ask or list itself. */
   needs?: NeedsKind
   describe?: Described
@@ -115,7 +119,9 @@ export interface Today {
 }
 
 export interface AskOption { id: string; label: string; image?: string }
-export interface AskAnswer { at: string; by: string; via?: string; choice?: string; note?: string; drawing?: { excalidraw: string; png: string } }
+export type DecisionVerdict = 'approve' | 'change' | 'skip'
+export interface AskDecision { id: string; text: string; detail?: string }
+export interface AskAnswer { at: string; by: string; via?: string; choice?: string; note?: string; drawing?: { excalidraw: string; png: string }; decisions?: Record<string, { verdict: DecisionVerdict; note?: string }> }
 export type AskState = 'open' | 'snoozed' | 'answered' | 'picked-up' | 'cancelled' | 'expired'
 export interface Ask {
   id: string
@@ -130,6 +136,9 @@ export interface Ask {
   allowNote: boolean
   requirePasskey?: boolean
   allowDrawing: boolean
+  /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
+  image?: string
+  decisions?: AskDecision[]
   state: AskState
   snoozedUntil?: string
   answer?: AskAnswer

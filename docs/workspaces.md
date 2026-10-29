@@ -391,6 +391,30 @@ Two events go to the Activity feed: `checklist-created` (from the CLI) and `chec
 `submit.json`). Nothing derives a checklist's state from events. The card API refuses ticks, unticks and `submit.json`
 from a limited token (they are the Hub's) and lets one create `checklist.json` only with `If-None-Match: *`.
 
+### Design reviews
+
+An Ask is a **Design review** when its `ask.json` has `decisions`, an `image`, or an option with an `image`. Needs you
+shows it as its own kind (picture left, decisions right), and it never gets Discord buttons (`discordEligible()` refuses it).
+
+```json
+{
+  "image": "card-wood-v2.png",
+  "decisions": [
+    { "id": "d1", "text": "Frame: warm oak, not dark walnut", "detail": "Matches the Wood board" },
+    { "id": "d2", "text": "Stack counter in the top-right corner" }
+  ]
+}
+```
+
+- `image`: a file name in the Ask's folder (letters, digits, `.`, `_`, `-`; at most 120 characters), shown at the left and the
+  background of the owner's drawing.
+- `decisions`: 1 to 10, ids `d1`..`dN` in order, `text` 1 to 200 characters, `detail` at most 500. A malformed `decisions`
+  or `image` is dropped when the Ask is read, so it shows as a plain Question (one log line per Ask).
+- An Ask with options that have pictures and no decisions is the **pick** variant: a 2x2 grid, one option chosen.
+- The answer gains `decisions`: `{ "d1": { "verdict": "approve" }, "d2": { "verdict": "change", "note": "Bottom-left" } }`.
+  When the Ask has decisions every id needs a verdict (`approve`, `change` or `skip`); a `note` is at most 1000
+  characters. `choice`, `note` and `drawing` keep their meaning.
+
 ### Answers from Discord
 
 A simple multiple-choice Ask also arrives as a Discord direct message with one button per option, and a

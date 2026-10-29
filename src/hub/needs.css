@@ -85,3 +85,35 @@
   .ni { transition: none; }
   .ni > .ni-card { transition: none; }
 }
+
+/* Design review: the picture at the left, the decisions at the right; one column under 760 px. */
+.dr { display: grid; grid-template-columns: minmax(0, 290px) minmax(0, 1fr); gap: 16px; align-items: start; margin: 4px 0 12px; }
+.dr-pic { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dr-thumb { aspect-ratio: 4 / 3; width: 100%; }
+.dr-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.dr-side { min-width: 0; }
+.dr-decisions { display: flex; flex-direction: column; }
+.dr-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.dr-row:first-child { border-top: 0; padding-top: 0; }
+.dr-text { margin: 0; font-size: 14px; color: var(--t1); font-weight: 600; overflow-wrap: anywhere; }
+.dr-detail { margin: 3px 0 0; font-size: 12px; color: var(--t3); overflow-wrap: anywhere; }
+.dr-seg { display: inline-flex; margin-top: 8px; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; max-width: 100%; }
+.dr-pill { min-height: 36px; min-width: 76px; padding: 0 14px; background: none; border: 0; border-left: 1px solid var(--line); color: var(--t2); font: 600 12.5px var(--font); cursor: pointer; }
+.dr-pill:first-child { border-left: 0; }
+.dr-pill:focus-visible { outline: none; box-shadow: var(--focus-ring); position: relative; }
+.dr-pill:disabled { cursor: default; opacity: 0.75; }
+.dr-pill[aria-pressed="true"] { color: var(--t1); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.dr-row[data-verdict="approve"] .dr-pill[aria-pressed="true"] { background: color-mix(in srgb, var(--st-done) 18%, transparent); color: var(--st-done); }
+.dr-row[data-verdict="change"] .dr-pill[aria-pressed="true"] { background: color-mix(in srgb, var(--st-needs) 18%, transparent); color: var(--st-needs); }
+.dr-note { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; min-height: 38px; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--s2); color: var(--t1); font: inherit; font-size: 13px; }
+.dr-use { font-size: 12px; color: var(--t3); }
+.hub-option[data-option] .hub-option-pick[aria-checked="true"] .dr-use { color: var(--accent); }
+.ni .hub-options.pick, .hub-options.pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dr-summary { margin: 0 0 8px; padding-left: 18px; font-size: 13px; color: var(--t2); }
+@media (max-width: 760px) {
+  .dr { grid-template-columns: minmax(0, 1fr); }
+  .dr-pill { min-height: 44px; flex: 1 1 0; min-width: 0; }
+  .dr-seg { display: flex; }
+  .dr-note { min-height: 44px; }
+  .dr-tools .hub-btn { min-height: 44px; flex: 1 1 auto; }
+}

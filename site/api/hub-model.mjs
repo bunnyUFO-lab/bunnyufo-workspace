@@ -190,9 +190,51 @@ export function checkChecklist(raw) {
 
 const clip = (value, length = 160) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
+// --- Design reviews: an Ask with an image and decisions (see docs/workspaces.md, "Asks") ---
+
+export const DECISION_LIMITS = { count: 10, text: 200, detail: 500, note: 1000 };
+export const VERDICTS = ['approve', 'change', 'skip'];
+export const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+
+/** The decisions of an Ask when they are valid (1 to 10, ids d1..dN in order, text and detail within limits); null when absent or malformed. */
+export function validDecisions(ask) {
+  const list = ask?.decisions;
+  if (!Array.isArray(list) || list.length < 1 || list.length > DECISION_LIMITS.count) return null;
+  const ok = list.every((item, index) => item && typeof item === 'object' && !Array.isArray(item) && item.id === `d${index + 1}`
+    && typeof item.text === 'string' && item.text.trim().length >= 1 && item.text.length <= DECISION_LIMITS.text
+    && (item.detail === undefined || (typeof item.detail === 'string' && item.detail.length <= DECISION_LIMITS.detail)));
+  return ok ? list : null;
+}
+
+/** Whether an Ask is a Design review: it has decisions, a picture, or an option with a picture. */
+export function isDesignReview(ask) {
+  if (!ask || typeof ask !== 'object') return false;
+  if (validDecisions(ask)) return true;
+  if (typeof ask.image === 'string' && ASK_IMAGE_RE.test(ask.image)) return true;
+  return Array.isArray(ask.options) && ask.options.some(option => option && typeof option === 'object' && typeof option.image === 'string' && option.image);
+}
+
+/**
+ * An Ask file is an agent's, so `decisions` and `image` are checked when it is read: a malformed field is dropped and the
+ * Ask shows as a plain Question. `bad` names what was dropped, for one log line.
+ */
+export function cleanAsk(ask) {
+  const bad = [];
+  let out = ask;
+  if (ask.decisions !== undefined && !validDecisions(ask)) { const { decisions: _drop, ...rest } = out; out = rest; bad.push('decisions'); }
+  if (ask.image !== undefined && !(typeof ask.image === 'string' && ASK_IMAGE_RE.test(ask.image))) { const { image: _drop, ...rest } = out; out = rest; bad.push('image'); }
+  return { ask: out, bad };
+}
+
 export function askItem(ask, state) {
+  const decisions = validDecisions(ask);
+  const design = isDesignReview(ask);
+  const takes = design && !decisions && Array.isArray(ask.options) ? ask.options.length : 0;
   return {
     kind: 'ask', id: ask.id, project: ask.project, title: clip(ask.question), at: ask.createdAt, state: state.state,
+    ...(design ? { design: true } : {}),
+    ...(decisions ? { decisions: decisions.length } : {}),
+    ...(takes ? { takes } : {}),
     ...(ask.bead ? { bead: ask.bead } : {}),
     ...(state.snoozedUntil ? { summary: `Snoozed until ${state.snoozedUntil}` } : {}),
     ...(ask.from?.host ? { host: ask.from.host } : {}),
@@ -318,6 +360,7 @@ export function needsKindOf(item) {
     case 'review': return 'pr';
     case 'blocked': return 'unstick';
     case 'request': return 'approval';
+    case 'ask': return item.design === true ? 'design' : 'question';
     default: return 'question';
   }
 }
@@ -373,6 +416,15 @@ export function describeItem(item, now) {
     }
     case 'unstick':
       return { ...base, what: 'A session waiting on you', state: /\?\s*$/.test(item.summary ?? '') ? 'Asked a question' : 'Paused at a prompt', next: 'Open the session', blocker: 'Your answer in the session' };
+    case 'design': {
+      const picks = !item.decisions && item.takes > 0;
+      return {
+        ...base,
+        what: item.decisions ? `${item.decisions} ${item.decisions === 1 ? 'decision' : 'decisions'} on one design` : picks ? `${item.takes} takes to pick from` : 'A design to look over',
+        state: item.state === 'snoozed' ? item.summary || 'Snoozed' : 'Waiting for your review',
+        next: picks ? 'Pick one, or draw on them' : 'Approve, change or skip each one', blocker: 'Your review',
+      };
+    }
     default:
       return {
         ...base, what: `A question from ${where}`,
@@ -385,7 +437,21 @@ export function describeItem(item, now) {
 /** What a posted answer must hold, checked against the Ask. Throws a 400 with a plain reason. */
 export function checkAnswer(ask, data) {
   const fail = message => Object.assign(new Error(message), { status: 400 });
-  const { choice, note, drawing } = data ?? {};
+  const { choice, note, drawing, decisions } = data ?? {};
+  const asked = validDecisions(ask);
+  if (decisions !== undefined && decisions !== null) {
+    if (!asked) throw fail('This Ask has no decisions.');
+    if (typeof decisions !== 'object' || Array.isArray(decisions)) throw fail('Decisions are an object of verdicts by decision id.');
+    for (const id of Object.keys(decisions)) if (!asked.some(item => item.id === id)) throw fail(`There is no decision ${id}.`);
+    for (const item of asked) {
+      const entry = decisions[item.id];
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw fail(`Give a verdict for decision ${item.id}.`);
+      if (!VERDICTS.includes(entry.verdict)) throw fail(`The verdict for ${item.id} is approve, change or skip.`);
+      if (entry.note !== undefined && entry.note !== null && (typeof entry.note !== 'string' || entry.note.length > DECISION_LIMITS.note)) throw fail(`A note on a decision is text of at most ${DECISION_LIMITS.note} characters.`);
+    }
+  } else if (asked) {
+    throw fail('Give a verdict for every decision.');
+  }
   if (choice !== undefined && choice !== null) {
     const options = Array.isArray(ask.options) ? ask.options : [];
     if (typeof choice !== 'string' || (options.length && !options.some(option => option.id === choice)) || (!options.length)) {
@@ -400,7 +466,7 @@ export function checkAnswer(ask, data) {
     if (!ask.allowDrawing) throw fail('This Ask takes no drawing.');
   }
   const has = value => value !== undefined && value !== null && value !== '';
-  if (!has(choice) && !has(note) && !has(drawing)) throw fail('Choose an option, write a note or draw something.');
+  if (!has(choice) && !has(note) && !has(drawing) && !asked) throw fail('Choose an option, write a note or draw something.');
 }
 
 // --- Discord buttons ---
@@ -422,6 +488,8 @@ export function discordEligible(ask) {
   if (!ask || typeof ask !== 'object') return no('not an Ask');
   if (ask.requirePasskey === true) return no('This Ask requires a passkey.');
   if (ask.allowDrawing === true) return no('This Ask takes a drawing.');
+  if (ask.decisions !== undefined && ask.decisions !== null) return no('A design review stays in the Hub.');
+  if (ask.image !== undefined && ask.image !== null) return no('An Ask with a picture stays in the Hub.');
   const options = ask.options;
   if (!Array.isArray(options) || options.length < 2 || options.length > DISCORD_MAX_OPTIONS) return no(`Buttons need 2 to ${DISCORD_MAX_OPTIONS} options.`);
   const seen = new Set();
