@@ -68,8 +68,53 @@ export function askState(names, ask, now, snooze = null) {
 
 export const canAnswer = state => state === 'open' || state === 'snoozed';
 
-/** What a request says about itself plus whether an agent took it. */
-export const requestState = names => ((names instanceof Set ? names.has('taken.json') : names.includes('taken.json')) ? 'taken' : 'open');
+/** A run that has said nothing for this long is not running; a request taken this long ago with no run is lost. */
+export const RUN_STALE_MS = 20 * 60 * 1000;
+
+/** The time a run file's name carries: `run-<yyyymmddThhmmssmmmZ>-<rand4>.json`, or null. */
+export function runFileTime(name) {
+  const match = /^run-(\d{8}T\d{9}Z)-[a-z0-9]{4}\.json$/.exec(String(name));
+  const time = match ? new Date(stampIso(match[1])).getTime() : NaN;
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * The state of a request.
+ *
+ * Called with a Set or an array of file names it answers as it always did for a request made the old way:
+ * `taken` when taken.json is there, else `open`. Called with
+ * `{ names, request, approved, taken, result, newestRunAt, hermesLive, pcBusy, now }` it applies the table in
+ * docs/workspaces.md ("Requests"), the first match winning. A request without a `preset` is a legacy one and
+ * only ever reads `declined`, `taken` or `open`. `newestRunAt` is a Date or a time in ms, `hermesLive` says a
+ * follower is on the request's Hermes run, `pcBusy(session)` says the PC report shows that session busy.
+ */
+export function requestState(input) {
+  if (input instanceof Set || Array.isArray(input)) return (input instanceof Set ? input.has('taken.json') : input.includes('taken.json')) ? 'taken' : 'open';
+  const { names = [], request = null, approved = null, taken = null, result = null, newestRunAt = null, hermesLive = false, pcBusy = () => false, now = new Date() } = input ?? {};
+  const has = name => (names instanceof Set ? names.has(name) : names.includes(name));
+  const nowMs = now.getTime();
+  const isTaken = has('taken.json');
+  if (has('declined.json')) return 'declined';
+  if (!request?.preset) return isTaken ? 'taken' : 'open';
+  const hasResult = has('result.json');
+  const lastRun = newestRunAt == null ? NaN : newestRunAt instanceof Date ? newestRunAt.getTime() : Number(newestRunAt);
+  const running = isTaken && !hasResult && ((Number.isFinite(lastRun) && nowMs - lastRun < RUN_STALE_MS) || hermesLive === true || pcBusy(taken?.session) === true);
+  const takenAt = new Date(taken?.at ?? '').getTime();
+  const lost = isTaken && !hasResult && !running && Number.isFinite(takenAt) && nowMs - takenAt > RUN_STALE_MS;
+  if (has('stop.json')) return hasResult || !isTaken || lost ? 'stopped' : 'stopping';
+  if (hasResult) {
+    if (result?.outcome === 'question') return 'asking';
+    return result?.outcome === 'failed' ? 'failed' : 'done';
+  }
+  if (running) return 'running';
+  if (lost) return 'lost';
+  if (isTaken) return 'taken';
+  if (has('approved.json')) {
+    const expires = new Date(approved?.expires ?? '').getTime();
+    return Number.isFinite(expires) && nowMs > expires ? 'expired' : 'approved';
+  }
+  return 'proposed';
+}
 
 // --- Checklists: state comes from file names alone (see docs/workspaces.md, "Checklists") ---
 
@@ -256,11 +301,23 @@ export function askItem(ask, state) {
   };
 }
 
-export function requestItem(request, state, taken) {
+/**
+ * A request as a list row. `extra` carries what the state needed: `approved` and `result` (their `target`,
+ * `outcome` and `at`). A request still waiting for the owner's approval is a Needs you row of kind `approval`.
+ * `since` is when it reached a state that wants a look (failed, lost, expired).
+ */
+export function requestItem(request, state, taken, extra = {}) {
+  const { approved = null, result = null } = extra;
+  const target = approved?.target ?? request.target;
+  const since = state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
   return {
-    kind: 'request', id: request.id, project: request.project, title: clip(request.text), at: request.createdAt, state,
+    kind: state === 'proposed' ? 'approval' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
     ...(taken?.bead ? { bead: taken.bead } : {}),
     ...(request.by ? { by: request.by } : {}),
+    ...(request.preset ? { preset: request.preset } : {}),
+    ...(target ? { target } : {}),
+    ...(request.origin ? { origin: request.origin } : {}),
+    ...(typeof since === 'string' ? { since } : {}),
   };
 }
 
@@ -338,15 +395,20 @@ export function deriveEventItems(events) {
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], events, now }) {
+export function buildToday({ asks, checklists = [], requests = [], events, now }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
   const openChecklists = checklists.filter(item => item.state === 'open').sort(newest);
-  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked];
+  // A request that waits for the owner's approval is Needs you; one that failed, was lost or expired is an alert.
+  const approvals = requests.filter(item => item.kind === 'approval').sort(newest);
+  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals];
   const since = now.getTime() - DAY;
   const recent = events.filter(event => new Date(event.ts).getTime() >= since);
-  const alerts = recent.filter(event => event.kind === 'alert');
+  const requestAlerts = requests
+    .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)
+    .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, title: `Request ${item.state}: ${item.title}` }));
+  const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts];
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),
@@ -365,7 +427,7 @@ export function reviewDone({ review, event, user, at }) {
 }
 
 // The kind of a row on Needs you. src/lib/needsKinds.ts mirrors these rules: change both together.
-export const NEEDS_KINDS = ['question', 'design', 'steps', 'playtest', 'unstick', 'pr'];
+export const NEEDS_KINDS = ['question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'approval'];
 
 export function needsKindOf(item) {
   switch (item.kind) {
@@ -373,6 +435,7 @@ export function needsKindOf(item) {
     case 'review': return 'pr';
     case 'blocked': return 'unstick';
     case 'request': return 'approval';
+    case 'approval': return 'approval';
     case 'ask': return item.design === true ? 'design' : 'question';
     default: return 'question';
   }
@@ -396,7 +459,7 @@ export function buildInbox({ filter: raw, asks, checklists = [], requests, event
   if (filter === 'answered') {
     return [...asks.filter(item => item.state === 'answered' || item.state === 'picked-up'), ...checklists.filter(item => item.state === 'submitted' || item.state === 'picked-up')].sort(newest);
   }
-  const needs = buildToday({ asks, checklists, events, now }).needsYou;
+  const needs = buildToday({ asks, checklists, requests, events, now }).needsYou;
   return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);
 }
 
@@ -420,7 +483,8 @@ export function describeItem(item, now) {
   const who = (item.kind === 'ask' || item.kind === 'checklist' ? [item.tool, item.host] : [item.host]).filter(Boolean).join(' · ');
   const minutes = Math.max(0, Math.floor((now.getTime() - new Date(item.at).getTime()) / 60000));
   const base = { kind, who, age: Number.isFinite(minutes) ? minutes : 0 };
-  switch (kind) {
+  // A request made the old way is listed under the requests filter and reads as before; only a proposal to approve is an approval.
+  switch (kind === 'approval' && item.kind !== 'approval' ? 'question' : kind) {
     case 'steps':
       return { ...base, what: 'Steps only you can do', state: `${item.done ?? 0} of ${item.total ?? 0} done`, next: 'Tick each step, then Submit', blocker: 'Your hands' };
     case 'playtest':
@@ -434,6 +498,8 @@ export function describeItem(item, now) {
     }
     case 'unstick':
       return { ...base, what: 'A session waiting on you', state: /\?\s*$/.test(item.summary ?? '') ? 'Asked a question' : 'Paused at a prompt', next: 'Open the session', blocker: 'Your answer in the session' };
+    case 'approval':
+      return { ...base, what: item.preset ? `A ${item.preset} job to approve` : 'A job to approve', state: item.target ? `Proposed for ${item.target}` : 'Waiting for your approval', next: 'Approve, edit or decline it', blocker: 'Your approval' };
     case 'design': {
       const picks = !item.decisions && item.takes > 0;
       return {

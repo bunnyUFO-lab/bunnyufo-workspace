@@ -1,0 +1,358 @@
+// Requests in the Hub: the state table, the schema check, the detail route, Decline and Mark done.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createSiteApi } from '../server.mjs';
+import { createBucket } from '../s3.mjs';
+import { createHub, inboxKey } from '../hub.mjs';
+import { buildToday, markStamp, needsKindOf, requestItem, requestState, runFileTime } from '../hub-model.mjs';
+import { checkRequest } from '../hub-requests.mjs';
+import { startFakeS3 } from './fake-s3.mjs';
+import { requestJson, seeder } from './hub-fixtures.mjs';
+
+const SITE = 'https://site.example';
+const NOW = new Date();
+const MIN = 60000;
+const ago = minutes => new Date(NOW.getTime() - minutes * MIN);
+const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
+const rid = (slug, n = 'a1b2') => `${day}-probe-${slug}-${n}`;
+const runName = (date, rand = 'r001') => `run-${markStamp(date)}-${rand}.json`;
+const fireName = (date, rand = 'f001') => `fire-${markStamp(date)}-${rand}.json`;
+
+async function fixture() {
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-reqs-'));
+  const fake = await startFakeS3();
+  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
+  fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
+  fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
+  const hub = createHub({ bucket, enabled: true, now: () => NOW });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const call = async (method, route, data, headers = {}) => {
+    const answer = await fetch(`${origin}/api${route}`, {
+      method, headers: { ...(method === 'GET' ? {} : { Origin: SITE, 'Content-Type': 'application/json' }), ...headers },
+      body: method === 'GET' ? undefined : JSON.stringify(data ?? {}),
+    });
+    const text = await answer.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { /* not JSON */ }
+    return { status: answer.status, body, headers: answer.headers, text };
+  };
+  const get = route => call('GET', route);
+  const post = (route, data, headers = { 'Remote-User': 'owner' }) => call('POST', route, data, headers);
+  const seed = seeder(fake);
+  /** A preset request and any of the files beside it: `files` maps a file name to its body. */
+  const put = (request, files = {}) => {
+    seed.request(request);
+    for (const [name, body] of Object.entries(files)) seed.put(`requests/${request.id}/${name}`, body);
+  };
+  return { fake, get, post, put, seed, close: async () => { server.close(); await fake.close(); } };
+}
+
+const preset = (id, extra = {}) => ({ ...requestJson({ id, now: NOW }), preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'owner' }, ...extra });
+const approvedFor = (id, extra = {}) => ({ v: 1, request: id, target: 'pc', limits: { minutes: 30 }, expires: new Date(NOW.getTime() + 72 * 60 * MIN).toISOString(), nonce: 'n'.repeat(22), at: NOW.toISOString(), by: 'owner', run: { preset: 'research', brief: 'Do the job.' }, ...extra });
+
+// --- the state table ---
+
+const state = (names, extra = {}) => requestState({ names, request: { preset: 'research' }, now: NOW, ...extra });
+
+test('requestState: a legacy call with a Set or an array still answers open or taken', () => {
+  assert.equal(requestState(new Set(['request.json'])), 'open');
+  assert.equal(requestState(new Set(['taken.json'])), 'taken');
+  assert.equal(requestState(['request.json', 'taken.json']), 'taken');
+  assert.equal(requestState([]), 'open');
+});
+
+test('requestState: a request without a preset is only declined, taken or open', () => {
+  const legacy = names => requestState({ names, request: { when: 'nightly' }, now: NOW });
+  assert.equal(legacy(['request.json']), 'open');
+  assert.equal(legacy(['request.json', 'taken.json']), 'taken');
+  assert.equal(legacy(['request.json', 'declined.json']), 'declined');
+  assert.equal(legacy(['request.json', 'approved.json', 'result.json']), 'open', 'Files of a preset request mean nothing to a legacy one.');
+});
+
+test('requestState: one case per row of the table, first match winning', () => {
+  const takenAgo = minutes => ({ at: ago(minutes).toISOString(), session: 's1' });
+  const future = new Date(NOW.getTime() + 60 * MIN).toISOString();
+  const past = new Date(NOW.getTime() - 60 * MIN).toISOString();
+  const rows = [
+    ['declined', state(['declined.json', 'approved.json', 'result.json'])],
+    ['stopped (stop + result)', state(['stop.json', 'taken.json', 'result.json'], { taken: takenAgo(5), result: { outcome: 'pr' } }), 'stopped'],
+    ['stopped (stop, never taken)', state(['stop.json', 'approved.json'], { approved: { expires: future } }), 'stopped'],
+    ['stopped (stop, taken, lost)', state(['stop.json', 'taken.json'], { taken: takenAgo(30) }), 'stopped'],
+    ['stopping (stop, taken, no result)', state(['stop.json', 'taken.json'], { taken: takenAgo(5) }), 'stopping'],
+    ['stopping (stop, taken, run still fresh)', state(['stop.json', 'taken.json'], { taken: takenAgo(60), newestRunAt: ago(2) }), 'stopping'],
+    ['asking', state(['taken.json', 'result.json'], { taken: takenAgo(5), result: { outcome: 'question', question: 'Which one?' } }), 'asking'],
+    ['failed', state(['result.json'], { result: { outcome: 'failed' } }), 'failed'],
+    ['done (pr)', state(['result.json'], { result: { outcome: 'pr' } }), 'done'],
+    ['done (unknown outcome)', state(['result.json'], { result: { outcome: 'unknown' } }), 'done'],
+    ['done (manual, never taken)', state(['result.json'], { result: { outcome: 'manual' } }), 'done'],
+    ['running (fresh run file)', state(['taken.json'], { taken: takenAgo(60), newestRunAt: ago(5) }), 'running'],
+    ['running (hermes follower)', state(['taken.json'], { taken: takenAgo(60), hermesLive: true }), 'running'],
+    ['running (PC shows busy)', state(['taken.json'], { taken: takenAgo(60), pcBusy: session => session === 's1' }), 'running'],
+    ['lost', state(['taken.json'], { taken: takenAgo(21), newestRunAt: ago(21) }), 'lost'],
+    ['taken', state(['taken.json'], { taken: takenAgo(5) }), 'taken'],
+    ['expired', state(['approved.json'], { approved: { expires: past } }), 'expired'],
+    ['approved', state(['approved.json'], { approved: { expires: future } }), 'approved'],
+    ['proposed', state([]), 'proposed'],
+  ];
+  assert.equal(rows[0][1], 'declined');
+  for (const [name, got, want] of rows.slice(1)) assert.equal(got, want, name);
+});
+
+test('requestState: a run file of 19 minutes keeps a request running, one of 21 does not', () => {
+  const taken = { at: ago(40).toISOString() };
+  assert.equal(state(['taken.json'], { taken, newestRunAt: ago(19) }), 'running');
+  assert.equal(state(['taken.json'], { taken, newestRunAt: ago(21) }), 'lost');
+  assert.equal(state(['taken.json'], { taken: { at: ago(19).toISOString() } }), 'taken', 'Taken 19 minutes ago and silent is only taken.');
+  assert.equal(state(['taken.json'], { taken: { at: ago(21).toISOString() } }), 'lost');
+});
+
+test('runFileTime reads the stamp in a run file name and nothing else', () => {
+  assert.equal(runFileTime(runName(ago(3))), new Date(markStamp(ago(3)).replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)(\d{3})Z$/, '$1-$2-$3T$4:$5:$6.$7Z')).getTime());
+  for (const bad of ['run-x.json', 'fire-20261029T101010123Z-ab12.json', 'run-20261029T101010123Z.json', 'report.md']) assert.equal(runFileTime(bad), null, bad);
+});
+
+test('a proposed request is an approval row; the others are plain requests', () => {
+  const request = { id: rid('x'), project: 'probe', text: 'Look into it', createdAt: NOW.toISOString(), preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'o' } };
+  const proposed = requestItem(request, 'proposed', null);
+  assert.deepEqual([proposed.kind, proposed.preset, proposed.target, proposed.origin.kind], ['approval', 'research', 'hermes', 'owner']);
+  assert.equal(needsKindOf(proposed), 'approval');
+  assert.equal(requestItem(request, 'approved', null, { approved: { target: 'pc' } }).target, 'pc', 'The approved target wins over the proposal.');
+  assert.equal(requestItem(request, 'running', null).kind, 'request');
+  assert.equal(requestItem({ ...request, title: 'A short title' }, 'proposed', null).title, 'A short title');
+});
+
+test('buildToday: proposals are Needs you, failed, lost and expired requests are alerts', () => {
+  const item = (slug, state, extra = {}) => ({ kind: state === 'proposed' ? 'approval' : 'request', id: rid(slug), project: 'probe', title: slug, at: ago(30).toISOString(), state, ...extra });
+  const today = buildToday({
+    asks: [], events: [], now: NOW,
+    requests: [item('prop', 'proposed'), item('bad', 'failed', { since: ago(10).toISOString() }), item('lost', 'lost'), item('old', 'expired', { since: ago(3000).toISOString() }), item('fine', 'running')],
+  });
+  assert.deepEqual(today.needsYou.map(row => row.id), [rid('prop')]);
+  assert.deepEqual(today.alerts.map(alert => alert.request).sort(), [rid('bad'), rid('lost')].sort(), 'An expiry older than a day is no alert.');
+  assert.equal(today.counts.alerts, 2);
+});
+
+// --- the schema ---
+
+test('checkRequest: a legacy body, a preset body, and what is refused', () => {
+  assert.deepEqual(checkRequest({ project: 'probe', text: ' Do it ', when: 'nightly', junk: 1 }), { project: 'probe', text: 'Do it', when: 'nightly' });
+  const full = checkRequest({
+    project: 'probe', text: 'Research tugs', preset: 'research', title: 'Tugs', repo: 'example/probe', needs: ['gpu', 'gpu', 'lan'], target: 'hermes', doneWhen: 'a card',
+    replaces: rid('old'), origin: { kind: 'owner', name: 'owner' }, followUp: { from: rid('old'), question: 'Which?', answer: 'This one', summary: 'Earlier' },
+  }, { fromOwner: true });
+  assert.deepEqual(full.needs, ['gpu', 'lan']);
+  assert.deepEqual([full.preset, full.title, full.repo, full.target, full.origin.kind, full.followUp.from], ['research', 'Tugs', 'example/probe', 'hermes', 'owner', rid('old')]);
+  assert.equal('when' in full, false, 'A preset request carries no `when`.');
+  const bad = [
+    [{ project: 'Bad Project', text: 'x', when: 'nightly' }, /Name the project/],
+    [{ project: 'probe', text: '', when: 'nightly' }, /1 to 4000/],
+    [{ project: 'probe', text: 'x'.repeat(4001), when: 'nightly' }, /1 to 4000/],
+    [{ project: 'probe', text: 'x', when: 'someday' }, /Say when/],
+    [{ project: 'probe', text: 'x' }, /Say when/],
+    [{ project: 'probe', text: 'x', preset: 'Bad Preset' }, /preset/],
+    [{ project: 'probe', text: 'x', preset: 'research', title: 'y'.repeat(121) }, /1 to 120/],
+    [{ project: 'probe', text: 'x', preset: 'research', repo: 'not a repo' }, /owner\/name/],
+    [{ project: 'probe', text: 'x', preset: 'research', needs: ['teleporter'] }, /Needs are/],
+    [{ project: 'probe', text: 'x', preset: 'research', target: 'moon' }, /target/],
+    [{ project: 'probe', text: 'x', preset: 'research', doneWhen: 'd'.repeat(401) }, /1 to 400/],
+    [{ project: 'probe', text: 'x', preset: 'research', replaces: '../x' }, /request id/],
+    [{ project: 'probe', text: 'x', preset: 'research', origin: { kind: 'robot' } }, /origin/],
+  ];
+  for (const [body, message] of bad) assert.throws(() => checkRequest(body, { fromOwner: true }), message, JSON.stringify(body).slice(0, 80));
+});
+
+test('checkRequest: only the site may claim origin owner or add a follow-up', () => {
+  const base = { project: 'probe', text: 'x', preset: 'research' };
+  assert.throws(() => checkRequest({ ...base, origin: { kind: 'owner', name: 'me' } }), /Only the site/);
+  assert.throws(() => checkRequest({ ...base, followUp: { from: rid('old'), question: 'q', answer: 'a' } }), /Only the site/);
+  assert.deepEqual(checkRequest({ ...base, origin: { kind: 'agent', name: 'hermes' } }).origin, { kind: 'agent', name: 'hermes' });
+  assert.deepEqual(checkRequest({ ...base, origin: { kind: 'run', name: rid('old') } }).origin.kind, 'run');
+  assert.throws(() => checkRequest({ ...base, followUp: { from: rid('old'), question: 'q'.repeat(601), answer: 'a' } }, { fromOwner: true }), /1 to 600/);
+  assert.throws(() => checkRequest({ ...base, followUp: { from: rid('old'), question: 'q', answer: 'a'.repeat(2001) } }, { fromOwner: true }), /1 to 2000/);
+  assert.throws(() => checkRequest({ ...base, followUp: { from: rid('old'), question: 'q', answer: 'a', summary: 's'.repeat(501) } }, { fromOwner: true }), /1 to 500/);
+});
+
+// --- the routes ---
+
+test('the Hub knows the hermes-approvals folder', () => {
+  assert.equal(inboxKey('hermes-approvals/20261029-probe-x-a1b2/approval.json'), 'sections/inbox/hermes-approvals/20261029-probe-x-a1b2/approval.json');
+  assert.throws(() => inboxKey('hermes-approvals'));
+});
+
+test('GET /hub/requests/:id: the request, its state and the files beside it', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const id = rid('detail');
+    const runs = Array.from({ length: 25 }, (_, index) => ({ name: runName(ago(60 - index), `r${String(index).padStart(3, '0')}`), body: { v: 1, request: id, state: 'working', lastAction: `step ${index}`, at: ago(60 - index).toISOString() } }));
+    const fires = [30, 20, 10].map((minutes, index) => ({ name: fireName(ago(minutes), `f${index}00`), body: { v: 1, request: id, at: ago(minutes).toISOString(), outcome: index === 2 ? 'ok' : 'error' } }));
+    put(preset(id, { target: 'pc' }), {
+      'approved.json': approvedFor(id), 'taken.json': { runner: 'pc', host: 'test-pc', nonce: 'n'.repeat(22), at: ago(50).toISOString() },
+      'hermes-run.json': { runId: 'run_1', at: ago(50).toISOString() }, 'hermes-retry.json': { runId: 'run_2', at: ago(40).toISOString(), provider: 'anthropic', model: 'm', reason: 'quota' },
+      'report.md': '# Report\n', 'result.json': { v: 1, outcome: 'card', summary: 'Done', by: 'run', at: ago(1).toISOString() },
+      ...Object.fromEntries([...runs, ...fires].map(({ name, body }) => [name, body])),
+    });
+    const { status, body } = await get(`/hub/requests/${id}`);
+    assert.equal(status, 200);
+    assert.equal(body.state, 'done');
+    assert.equal(body.request.id, id);
+    assert.equal(body.approved.target, 'pc');
+    assert.equal(body.approved.run.brief, undefined, 'The signed brief is long and stays out of the detail.');
+    assert.equal(body.approved.run.preset, 'research');
+    assert.equal(body.taken.runner, 'pc');
+    assert.equal(body.hermesRun.runId, 'run_1');
+    assert.equal(body.retry.reason, 'quota');
+    assert.equal(body.result.outcome, 'card');
+    assert.equal(body.report, true);
+    assert.equal(body.runs.length, 20);
+    assert.equal(body.runs[0].lastAction, 'step 24', 'Newest first.');
+    assert.deepEqual(body.fires.map(fire => fire.outcome), ['ok', 'error', 'error']);
+    assert.ok(body.files.includes('request.json') && body.files.includes('report.md') && !body.files.some(name => name.includes('/')));
+    assert.equal('stop' in body || 'declined' in body, false);
+  } finally { await close(); }
+});
+
+test('GET /hub/requests/:id: a proposal, a missing id, a bad id, and a legacy request', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const id = rid('prop');
+    put(preset(id));
+    const proposal = (await get(`/hub/requests/${id}`)).body;
+    assert.equal(proposal.state, 'proposed');
+    assert.deepEqual([proposal.runs, proposal.fires, proposal.report], [[], [], false]);
+    assert.equal((await get(`/hub/requests/${rid('none')}`)).status, 404);
+    assert.equal((await get('/hub/requests/..%2Fx')).status, 404);
+    const legacy = rid('legacy', 'l111');
+    put(requestJson({ id: legacy, now: NOW }));
+    assert.equal((await get(`/hub/requests/${legacy}`)).body.state, 'open');
+  } finally { await close(); }
+});
+
+test('a request with a fresh run file lists as running; with a stale one it is lost', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const live = rid('live', 'l111');
+    const stale = rid('stale', 's111');
+    const taken = { runner: 'pc', host: 'test-pc', nonce: 'n'.repeat(22), at: ago(60).toISOString() };
+    put(preset(live, { target: 'pc' }), { 'approved.json': approvedFor(live), 'taken.json': taken, [runName(ago(19))]: { v: 1, state: 'working' } });
+    put(preset(stale, { target: 'pc' }), { 'approved.json': approvedFor(stale), 'taken.json': taken, [runName(ago(21))]: { v: 1, state: 'working' } });
+    const rows = (await get('/hub/inbox?filter=requests')).body.items;
+    assert.deepEqual(Object.fromEntries(rows.map(row => [row.id, row.state])), { [live]: 'running', [stale]: 'lost' });
+  } finally { await close(); }
+});
+
+test('Needs you lists a proposed preset request as an approval; the filter, the counts and Today agree', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const id = rid('need');
+    put(preset(id, { title: 'Look at tugs' }));
+    put(preset(rid('appr', 'b111')), { 'approved.json': approvedFor(rid('appr', 'b111')) });
+    const all = (await get('/hub/inbox')).body;
+    assert.deepEqual(all.items.map(item => [item.id, item.kind, item.needs]), [[id, 'approval', 'approval']]);
+    assert.equal(all.items[0].title, 'Look at tugs');
+    assert.equal(all.items[0].describe.kind, 'approval');
+    assert.equal(all.counts.all, 1);
+    assert.equal(all.counts.approval, 1);
+    assert.deepEqual((await get('/hub/inbox?filter=approval')).body.items.map(item => item.id), [id]);
+    assert.deepEqual((await get('/hub/inbox?filter=question')).body.items, []);
+    const today = (await get('/hub/today')).body;
+    assert.deepEqual(today.needsYou.map(item => item.id), [id]);
+    assert.equal(today.counts.needsYou, 1);
+  } finally { await close(); }
+});
+
+test('Decline writes declined.json once; a second decline, a taken, a done and an approved request are 409', async () => {
+  const { fake, get, post, put, close } = await fixture();
+  try {
+    const id = rid('decl');
+    put(preset(id));
+    const first = await post(`/hub/requests/${id}/decline`, { reason: 'Not now' });
+    assert.equal(first.status, 201);
+    assert.deepEqual(fake.json(`sections/inbox/requests/${id}/declined.json`), { at: NOW.toISOString(), by: 'owner', reason: 'Not now' });
+    assert.equal((await get(`/hub/requests/${id}`)).body.state, 'declined');
+    assert.equal((await get(`/hub/requests/${id}`)).body.declined.reason, 'Not now');
+    assert.equal((await post(`/hub/requests/${id}/decline`, {})).status, 409);
+    assert.equal(fake.json(`sections/inbox/requests/${id}/declined.json`).reason, 'Not now', 'The first decline stays.');
+
+    const blocked = {
+      taken: { 'approved.json': approvedFor(rid('t')), 'taken.json': { runner: 'pc', host: 'h', nonce: 'n', at: ago(1).toISOString() } },
+      done: { 'result.json': { v: 1, outcome: 'pr', by: 'run', at: NOW.toISOString() } },
+      approved: { 'approved.json': approvedFor(rid('a')) },
+    };
+    let n = 0;
+    for (const [name, files] of Object.entries(blocked)) {
+      const other = rid(name, `c${++n}00`);
+      put(preset(other), files);
+      const answer = await post(`/hub/requests/${other}/decline`, {});
+      assert.equal(answer.status, 409, `${name}: ${JSON.stringify(answer.body)}`);
+      assert.equal(fake.text(`sections/inbox/requests/${other}/declined.json`), null);
+    }
+    const expired = rid('exp', 'e111');
+    put(preset(expired), { 'approved.json': approvedFor(expired, { expires: ago(5).toISOString() }) });
+    assert.equal((await post(`/hub/requests/${expired}/decline`, {})).status, 201, 'An expired approval can be declined.');
+    const legacy = rid('old', 'd111');
+    put(requestJson({ id: legacy, now: NOW }));
+    assert.equal((await post(`/hub/requests/${legacy}/decline`, {})).status, 201);
+    assert.equal((await post(`/hub/requests/${rid('none')}/decline`, {})).status, 404);
+  } finally { await close(); }
+});
+
+test('Decline and Mark done need a signed-in user even where the host does not require one', async () => {
+  const { fake, post, put, close } = await fixture();
+  try {
+    const id = rid('anon');
+    put(preset(id, { target: 'at-pc' }));
+    assert.equal((await post(`/hub/requests/${id}/decline`, {}, {})).status, 401);
+    assert.equal((await post(`/hub/requests/${id}/done`, {}, {})).status, 401);
+    assert.equal((await post(`/hub/requests/${id}/decline`, {}, { 'Remote-User': '  ' })).status, 401);
+    assert.equal(fake.text(`sections/inbox/requests/${id}/declined.json`), null);
+    assert.equal(fake.text(`sections/inbox/requests/${id}/result.json`), null);
+    assert.equal((await post(`/hub/requests/${id}/nonsense`, {})).status, 404);
+  } finally { await close(); }
+});
+
+test('Mark done: an at-pc request gets a manual result, once; any other request is refused', async () => {
+  const { fake, get, post, put, close } = await fixture();
+  try {
+    const id = rid('atpc');
+    put(preset(id, { project: 'bunnylink', preset: 'code-task', target: 'at-pc' }));
+    const done = await post(`/hub/requests/${id}/done`, { summary: 'Did it by hand' });
+    assert.equal(done.status, 201);
+    assert.deepEqual(fake.json(`sections/inbox/requests/${id}/result.json`), { v: 1, outcome: 'manual', summary: 'Did it by hand', by: 'hub', at: NOW.toISOString() });
+    assert.equal((await get(`/hub/requests/${id}`)).body.state, 'done');
+    assert.equal((await post(`/hub/requests/${id}/done`, {})).status, 409);
+    assert.equal(fake.json(`sections/inbox/requests/${id}/result.json`).summary, 'Did it by hand');
+
+    const pc = rid('pc', 'p111');
+    put(preset(pc, { target: 'pc' }));
+    assert.equal((await post(`/hub/requests/${pc}/done`, {})).status, 400);
+    const legacy = rid('legacy', 'd222');
+    put(requestJson({ id: legacy, now: NOW }));
+    assert.equal((await post(`/hub/requests/${legacy}/done`, {})).status, 400);
+    const declined = rid('dd', 'd333');
+    put(preset(declined, { target: 'at-pc' }), { 'declined.json': { at: 'x', by: 'o' } });
+    assert.equal((await post(`/hub/requests/${declined}/done`, {})).status, 409);
+  } finally { await close(); }
+});
+
+test('POST /hub/requests keeps the legacy body, refuses a preset for now, and the report is served', async () => {
+  const { fake, get, post, put, close } = await fixture();
+  try {
+    const made = await post('/hub/requests', { project: 'probe', text: 'Add a token vault for the secret password', when: 'next-sprint' });
+    assert.equal(made.status, 201);
+    assert.deepEqual(Object.keys(fake.json(`sections/inbox/requests/${made.body.id}/request.json`)).sort(), ['by', 'createdAt', 'id', 'project', 'text', 'when']);
+    assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', preset: 'research' })).status, 400);
+
+    const id = rid('rep');
+    put(preset(id), { 'report.md': '# Findings\n\nSome text.\n' });
+    const served = await get(`/hub/file?path=requests/${id}/report.md`);
+    assert.equal(served.status, 200);
+    assert.match(served.headers.get('content-type'), /^text\/markdown/);
+    assert.match(served.headers.get('content-security-policy'), /^sandbox/);
+    assert.match(served.text, /Findings/);
+  } finally { await close(); }
+});

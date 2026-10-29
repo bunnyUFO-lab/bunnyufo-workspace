@@ -1442,7 +1442,7 @@ test('the old filter names answer through the API with the same rows as the new 
     }
     const all = (await get('/hub/inbox')).body;
     assert.deepEqual(all.items.map(item => item.needs), ['question', 'steps', 'pr', 'unstick'], 'The default is all, in the order Today uses.');
-    assert.deepEqual(all.counts, { all: 4, question: 1, design: 0, steps: 1, playtest: 0, unstick: 1, pr: 1 });
+    assert.deepEqual(all.counts, { all: 4, question: 1, design: 0, steps: 1, playtest: 0, unstick: 1, pr: 1, approval: 0 });
   } finally { await close(); }
 });
 
