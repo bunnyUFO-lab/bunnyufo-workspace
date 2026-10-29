@@ -86,13 +86,17 @@ const REQUEST_LANE = {
   open: 'backlog', proposed: 'backlog',
   approved: 'ready', taken: 'ready',
   running: 'running',
-  lost: 'blocked', failed: 'blocked', 'at-pc': 'blocked',
+  stopping: 'running',
+  lost: 'blocked', failed: 'blocked', 'at-pc': 'blocked', asking: 'blocked', expired: 'blocked',
   done: 'done',
 };
 const REQUEST_WHY = {
   lost: 'lost: no word from the run for 20 minutes',
   failed: 'the run failed',
   'at-pc': 'waiting for the PC',
+  asking: 'asked you a question',
+  expired: 'the approval ran out',
+  stopping: 'stopping',
 };
 
 function requestCards({ requests, events }) {
@@ -107,7 +111,7 @@ function requestCards({ requests, events }) {
       key: `request:${request.id}`, source: 'request', id: request.id, project: request.project ?? '', title: request.title,
       lane, state: request.state === 'open' ? 'proposed' : request.state,
       ...(REQUEST_WHY[request.state] ? { why: REQUEST_WHY[request.state] } : {}), signs: [],
-      updatedAt: request.at ?? '', href: '#/~hub/needs/requests',
+      updatedAt: request.at ?? '', href: `#/~hub/request/${encodeURIComponent(request.id)}`,
     });
   }
   return cards;

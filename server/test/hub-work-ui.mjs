@@ -81,7 +81,7 @@ try {
   assert.equal(await page.locator('[data-card^="request:"]').count(), 1);
   const request = page.locator('[data-card^="request:"]');
   assert.equal(await request.evaluate(card => card.closest('.wk-lane').getAttribute('data-lane')), 'backlog', 'An open request is proposed work in the Backlog.');
-  assert.equal(await request.getAttribute('href'), '#/~hub/needs/requests');
+  assert.match(await request.getAttribute('href'), /^#\/~hub\/request\/\d{8}-lanes-/);
 
   step('All shows every project, with the project on each card');
   await page.locator('.hub-chip', { hasText: /^All$/ }).click();
@@ -223,6 +223,46 @@ try {
   await go(none, '#/~hub/work');
   await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
   assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
+
+  step('requests: one card per lane by state; a click opens the run drawer, a proposal opens its page');
+  const reqs = await startHubFixture({ work: true });
+  fixtures.push(reqs);
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const rid = (slug, tail) => `${day}-lanes-${slug}-${tail}`;
+  const asOf = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
+  const requestBase = (id, extra = {}) => ({ id, project: 'lanes', createdAt: asOf(60), by: 'owner', text: `Text of ${id}`, preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'owner' }, ...extra });
+  const approvedFile = (id, expires = '2099-01-01T00:00:00.000Z') => ({ v: 1, request: id, project: 'lanes', repo: null, target: 'hermes', limits: { minutes: 30 }, expires, at: asOf(50), by: 'local', signature: 'x' });
+  const seedFiles = { proposed: rid('proposed', 'a1a1'), approved: rid('approved', 'b2b2'), asking: rid('asking', 'c3c3'), expired: rid('expired', 'd4d4'), done: rid('finished', 'e5e5'), stopped: rid('stopped', 'f6f6') };
+  reqs.seed.request(requestBase(seedFiles.proposed));
+  reqs.seed.request(requestBase(seedFiles.approved)); reqs.seed.put(`requests/${seedFiles.approved}/approved.json`, approvedFile(seedFiles.approved));
+  reqs.seed.request(requestBase(seedFiles.asking)); reqs.seed.put(`requests/${seedFiles.asking}/approved.json`, approvedFile(seedFiles.asking));
+  reqs.seed.put(`requests/${seedFiles.asking}/hermes-run.json`, { runId: 'r', at: asOf(40) });
+  reqs.seed.put(`requests/${seedFiles.asking}/result.json`, { v: 1, outcome: 'question', question: 'Which game do you mean?', by: 'hub', at: asOf(30) });
+  reqs.seed.request(requestBase(seedFiles.expired)); reqs.seed.put(`requests/${seedFiles.expired}/approved.json`, approvedFile(seedFiles.expired, asOf(10)));
+  reqs.seed.request(requestBase(seedFiles.done)); reqs.seed.put(`requests/${seedFiles.done}/approved.json`, approvedFile(seedFiles.done));
+  reqs.seed.put(`requests/${seedFiles.done}/result.json`, { v: 1, outcome: 'card', card: 'assistant/finished', summary: 'Done', by: 'hub', at: asOf(5) });
+  reqs.seed.request(requestBase(seedFiles.stopped)); reqs.seed.put(`requests/${seedFiles.stopped}/approved.json`, approvedFile(seedFiles.stopped));
+  reqs.seed.put(`requests/${seedFiles.stopped}/stop.json`, { v: 1, request: seedFiles.stopped, reason: 'replaced by another', at: asOf(20), by: 'local', nonce: 'n', signature: 'x' });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const lanePage = await open({ width: 1920, height: 1080 });
+  await lanePage.goto(`${reqs.url}#/~hub/work/lanes`);
+  await lanePage.locator('.wk-lane').first().waitFor();
+  const laneOf = key => lanePage.locator(`[data-card="request:${key}"]`).evaluate(card => card.closest('.wk-lane').getAttribute('data-lane'));
+  assert.equal(await laneOf(seedFiles.proposed), 'backlog');
+  assert.equal(await laneOf(seedFiles.approved), 'ready');
+  assert.equal(await laneOf(seedFiles.asking), 'blocked');
+  assert.equal(await laneOf(seedFiles.expired), 'blocked');
+  assert.equal(await laneOf(seedFiles.done), 'done');
+  assert.equal(await lanePage.locator(`[data-card="request:${seedFiles.stopped}"]`).count(), 0, 'A stopped request is hidden.');
+  assert.equal((await lanePage.locator(`[data-card="request:${seedFiles.asking}"] .wk-why`).innerText()).trim(), 'asked you a question');
+  assert.equal(await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).getAttribute('href'), `#/~hub/request/${seedFiles.asking}`);
+  await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).click();
+  await lanePage.locator('[data-run-drawer] [data-run-asking]').waitFor();
+  assert.match(await lanePage.locator('[data-run-drawer]').innerText(), /Which game do you mean\?/);
+  await lanePage.keyboard.press('Escape');
+  await lanePage.locator(`[data-card="request:${seedFiles.proposed}"]`).click();
+  await lanePage.waitForFunction(id => location.hash === `#/~hub/request/${id}`, seedFiles.proposed);
+  await lanePage.locator('[data-approval-body]').waitFor();
 
   console.log('hub-work-ui: passed');
 } finally {
