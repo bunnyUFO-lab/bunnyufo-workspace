@@ -32,6 +32,7 @@ try {
   fixtures.push(fixture);
   const issues = [beadsIssue({ id: 'bl-1', title: 'A task', created: '2026-10-01T10:00:00Z' })];
   fixture.seed.beads('bunnylink', issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: 1, repo: 'example/bunnylink' });
+  for (const [project, repo] of [['magic-loops', 'example/magic-loops'], ['sprite-studio', 'example/sprite-studio']]) fixture.fake.seed(`sections/${project}/workspace.json`, JSON.stringify({ name: project, tracked: { repo }, entities: [] }), 'application/json');
   await new Promise(resolve => setTimeout(resolve, 100));
 
   step('Today: the Spawn button opens the sheet with eight preset chips and focus in the text box');
@@ -69,10 +70,21 @@ try {
   step('A code task shows the repo field; a bad repo blocks the button; Auto and the machine choice');
   await page.locator('[data-spawn-project]').selectOption('magic-loops');
   await page.locator('[data-preset="code-task"]').click();
-  await page.locator('[data-spawn-repo]').waitFor();
-  await page.locator('[data-spawn-repo]').fill('not a repo');
+  await page.locator('[data-spawn-repo-pick]').waitFor();
+  const pick = page.locator('[data-spawn-repo-pick]');
+  assert.match(await pick.locator('option:checked').innerText(), /^example\/magic-loops \(this project's\)$/, 'The own repo of the project is the default.');
+  assert.deepEqual(await pick.locator('option').allInnerTexts(), ["example/magic-loops (this project's)", 'example/sprite-studio · sprite-studio', 'Another repo…']);
+  await pick.selectOption({ label: 'example/sprite-studio · sprite-studio' });
+  assert.equal(await pick.inputValue(), 'example/sprite-studio');
+  assert.equal(await page.locator('input[data-spawn-repo]').count(), 0, 'A known repo needs no typing.');
+  await pick.selectOption('__other');
+  await page.locator('input[data-spawn-repo]').fill('not a repo');
   assert.equal(await page.locator('[data-spawn-go]').isDisabled(), true);
-  await page.locator('[data-spawn-repo]').fill('');
+  assert.equal(await page.locator('[data-spawn-note]').innerText(), 'The repo is owner/name.');
+  await page.locator('input[data-spawn-repo]').fill('Some-Org/other.repo');
+  assert.equal(await page.locator('[data-spawn-go]').isDisabled(), false, 'A well-formed repo is accepted.');
+  await pick.selectOption('');
+  assert.equal(await page.locator('input[data-spawn-repo]').count(), 0);
   await page.locator('[data-spawn-machine]', { hasText: 'The PC' }).waitFor();
   await page.locator('[data-spawn-target]').selectOption('cloud');
   await page.locator('[data-spawn-why]').getByText('your choice').waitFor();
