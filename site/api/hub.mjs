@@ -235,7 +235,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   let signingKey = null;
   let approveReason = 'Approvals are signed on the server; open mission control on the site.';
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason });
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log });
   const { loadRequests } = requestFiles;
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -858,7 +858,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
       return {
         hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }),
-        approve: on && !!signingKey && signedIn, ...(on && !(signingKey && signedIn) ? { approveReason: signingKey ? 'Sign in to approve.' : approveReason } : {}), policy: [],
+        // Only a host with the Hub on says anything about approving: the local service (no Hub) keeps its old answer.
+        ...(on ? { approve: !!signingKey && signedIn, ...(signingKey && signedIn ? {} : { approveReason: signingKey ? 'Sign in to approve.' : approveReason }), policy: [] } : {}),
       };
     },
     /**

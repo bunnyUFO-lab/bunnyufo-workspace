@@ -109,7 +109,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '' }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {} }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
@@ -304,13 +304,32 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   const withoutBrief = approved => (approved?.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved);
 
   /**
+   * The body of a stored request.json as the signer reads it: parsed after any BOM, then checked again with `checkRequest`.
+   * Whether the request counts as the site's is decided by its own `origin.kind`: only `owner` (which the card API refuses
+   * from an agent, and the site API sets itself) may carry a `followUp`. An agent's follow-up is refused, never signed
+   * into a brief as "The owner answered". Returns the clean fields plus `id`.
+   */
+  function checkedRequest(id, buffer) {
+    let stored;
+    try { stored = JSON.parse(buffer.toString('utf8').replace(/^﻿/, '')); } catch { throw fail('That request is not valid JSON.', 400); }
+    if (!stored || typeof stored !== 'object') throw fail('That request is not valid JSON.', 400);
+    const fromOwner = stored.origin?.kind === 'owner';
+    return { ...checkRequest(stored, { fromOwner }), id };
+  }
+
+  /**
    * Sign and store `approved.json` for a proposed request, then hand it to its target. The one path that signs
    * an approval: the Approve route, Approve again, a follow-up and policy approval (`by: 'policy'`) all use it.
    * There is no cap check: a full target makes the request wait in `approved`, and `waiting` says why.
    */
   async function approveRequest(id, { target, by, at }) {
     needKey();
-    const { request, state } = await loadOne(id, at);
+    const { state, names } = await loadOne(id, at);
+    if (!names.has('request.json')) throw fail('No such request.', 404);
+    // Read request.json once, as bytes: the hash covers exactly these bytes, and the checks and the brief are made from the same body.
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    const request = checkedRequest(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
@@ -318,20 +337,25 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
     if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
-    // The hash is of the bytes as stored, so a request.json changed after approval no longer matches.
-    const stored = await bucket.getText(key(`requests/${id}/request.json`));
-    if (!stored) throw fail('No such request.', 404);
     const body = {
       v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
-      requestSha256: sha256Hex(Buffer.from(stored.text, 'utf8')), limits: { minutes: minutesOf(preset) },
+      requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
       expires: new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by,
       run: runBlock({ preset, request }),
     };
     const approved = sign(body, signingKey);
     await writeSigned(id, 'approved.json', approved, 'That request is already approved.');
-    const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
-    const after = await loadOne(id, at);
-    return { state: after.state, approved: withoutBrief(approved), ...(handed?.waiting ? { waiting: handed.waiting } : {}) };
+    // The approval is signed and stored. A target that cannot start it now makes the request wait; it never fails the approval.
+    let waiting;
+    try {
+      const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
+      if (handed?.waiting) waiting = handed.waiting;
+    } catch (error) {
+      log(`[hub] hand-off to ${chosen} failed for ${id}: ${String(error.message).slice(0, 120)}`);
+      waiting = `Could not start yet: ${String(error.message).replace(/\s+/g, ' ').slice(0, 80)}`;
+    }
+    const after = await loadOne(id, at).catch(() => null);
+    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}) };
   }
 
   /** The signed stop of a request, allowed only in the given states. */
@@ -368,13 +392,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    */
   async function againRoute(id, raw, user, at) {
     needKey();
-    const { request, parts, state } = await loadOne(id, at);
+    const { parts, state } = await loadOne(id, at);
     if (!['expired', 'failed', 'lost', 'proposed'].includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
+    const { id: _id, ...request } = checkedRequest(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { id: _id, createdAt: _at, by: _by, origin: _origin, drawing: _drawing, followUp, ...copy } = request;
+    const { origin: _origin, followUp, ...copy } = request;
     const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
@@ -383,9 +411,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     try {
       approval = await approveRequest(made.id, { target, by: user, at });
     } catch (error) {
-      // Leave no stray proposal behind when the approval fails.
-      await writeSigned(made.id, 'declined.json', { at: at.toISOString(), by: user, reason: `approval failed: ${error.message}`.slice(0, 400) }, 'declined').catch(() => {});
-      throw error;
+      // Decline the copy only when nothing was signed. Once approved.json exists the approval stands and the old request is retired.
+      const signed = (await loadOne(made.id, at).catch(() => null))?.names.has('approved.json');
+      if (!signed) {
+        await writeSigned(made.id, 'declined.json', { at: at.toISOString(), by: user, reason: `approval failed: ${error.message}`.slice(0, 400) }, 'declined').catch(() => {});
+        throw error;
+      }
+      approval = { state: 'approved', waiting: 'Could not finish the hand-off; it will start when it can.' };
     }
     const reason = `replaced by ${made.id}`;
     if (state === 'proposed') await writeSigned(id, 'declined.json', { at: at.toISOString(), by: user, reason }, 'That request is already declined.');
