@@ -1,0 +1,30 @@
+{
+  "note": "Made once with a throwaway key; the private key was discarded. Verify canonical(rest) against signature with the public key.",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA/3vnHFL+51Gkzk6EvgzdTWhEc6hnUnXFjtPdOpdaglU=\n-----END PUBLIC KEY-----\n",
+  "requestJson": "{\n  \"id\": \"20261029-example-research-tugs-a1b2\",\n  \"text\": \"Research tug games\"\n}\n",
+  "approved": {
+    "v": 1,
+    "request": "20261029-example-research-tugs-a1b2",
+    "project": "example",
+    "repo": null,
+    "target": "hermes",
+    "requestSha256": "0c09c244c7c2db3c791c345c3cd4f61d245fa5cd94a051736ab18d3292dc7074",
+    "limits": {
+      "minutes": 30
+    },
+    "expires": "2026-11-01T10:00:00.000Z",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+    "at": "2026-10-29T10:00:00.000Z",
+    "by": "example-owner",
+    "run": {
+      "preset": "research",
+      "model": null,
+      "permissionMode": null,
+      "opensWindows": false,
+      "allow": [],
+      "brief": "Research tugs.\nCafé ✓ \"quoted\""
+    },
+    "signature": "BMF0eKSzagjhbxS32qRRu+GHNiDyxD0IP70ZJfio4+gXH5AhXaLNFxtLYN2JF+biLeAvAN9KSlanDIaguKAZBw=="
+  },
+  "canonical": "{\"at\":\"2026-10-29T10:00:00.000Z\",\"by\":\"example-owner\",\"expires\":\"2026-11-01T10:00:00.000Z\",\"limits\":{\"minutes\":30},\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"project\":\"example\",\"repo\":null,\"request\":\"20261029-example-research-tugs-a1b2\",\"requestSha256\":\"0c09c244c7c2db3c791c345c3cd4f61d245fa5cd94a051736ab18d3292dc7074\",\"run\":{\"allow\":[],\"brief\":\"Research tugs.\\nCafé ✓ \\\"quoted\\\"\",\"model\":null,\"opensWindows\":false,\"permissionMode\":null,\"preset\":\"research\"},\"target\":\"hermes\",\"v\":1}"
+}

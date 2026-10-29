@@ -333,6 +333,9 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
 | `GET /api/hub/presets`, `/presets/route?preset=&project=&repo=`, `/presets/brief?request=` | The eight presets for the Spawn sheet (no templates) with the five routing rules; where a job would run (`{ target, rule, why }`); the rendered brief of a request the owner starts at the PC (400 for any other) |
 | `GET /api/hub/requests/:id` | One request: `{ request, state, approved?, taken?, runs, result?, hermesRun?, retry?, fires, stop?, declined?, files, report }`. `runs` and `fires` are the newest 20 `run-*` and `fire-*` files, newest first; `approved` comes without `run.brief`; 404 for an id that is not a request |
+| `POST /api/hub/requests/:id/approve` | `{ target? }`: sign `approved.json` (Ed25519, key `HUB_SIGNING_KEY`) and hand the request to its target. 201 `{ state, approved (without run.brief), waiting? }`. 503 without a key, 400 for a target the preset does not allow, an `at-pc` request or a cloud run without a repo, 409 unless the state is `proposed`. No cap is checked: a full target makes the request wait in `approved` and `waiting` says why |
+| `POST /api/hub/requests/:id/stop` | `{ reason? }`: a signed `stop.json`, in `approved`, `expired`, `taken`, `running` or `lost`; a Hermes run is stopped too |
+| `POST /api/hub/requests/:id/again` | `{ target?, text?, title? }`: for an `expired`, `failed`, `lost` or `proposed` request. Makes a new request that `replaces` it, approves that one, and retires the old: a proposal gets `declined.json`, the others a signed stop naming the new id. Answers `{ id, state, approved, waiting? }` |
 | `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
 | `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
@@ -391,6 +394,14 @@ comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the 
 something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
 `project-defaults.mjs` is `pc`: `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
 targets becomes its first target, and `cloud` without a cloud routine for the repo becomes `pc`.
+
+Signed files (`approved.json`, `stop.json`) carry `signature`: base64 Ed25519 over the canonical JSON of the rest
+of the file (keys sorted at every depth, no whitespace). `approved.json` holds `request`, `project`, `repo`,
+`target` (never `at-pc`), `requestSha256` (of `request.json` as stored), `limits.minutes` (at most 120), `expires`
+(72 hours on), `nonce`, `at`, `by` and a `run` block (`preset`, `model`, `permissionMode`, `opensWindows`, `allow`,
+`brief`). The private key is made on the site server and never leaves it; runners keep the public key.
+`site/api/test/fixtures/signing-vector.json` is a signed sample made with a throwaway key for every verifier to
+check against. `/api/capabilities` reports `approve` (a key and a signed-in user), `approveReason` and `policy`.
 
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.

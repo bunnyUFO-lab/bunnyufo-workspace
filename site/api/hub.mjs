@@ -19,6 +19,7 @@ import {
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
+import { loadSigningKey } from './signing.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -230,7 +231,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /** The repo a project's section tracks (`workspace.json` `tracked.repo`), if any. */
   const projectRepo = async project => trackedRepo((await bucket.getJson(`${prefix}/${project}/workspace.json`).catch(() => null))?.value?.tracked?.repo);
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo });
+  // Approvals are signed with HUB_SIGNING_KEY. A key that does not parse turns Approve off (and says so) instead of stopping the API.
+  let signingKey = null;
+  let approveReason = 'Approvals are signed on the server; open mission control on the site.';
+  try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason });
   const { loadRequests } = requestFiles;
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -845,9 +850,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   const self = {
     enabled: on,
+    /** The request module, for the later items that sign (follow-ups, policy) and for the Hermes follower to plug its hooks into. */
+    requests: requestFiles,
+    requestHooks: requestFiles.hooks,
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
-      return { hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }) };
+      // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
+      return {
+        hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }),
+        approve: on && !!signingKey && signedIn, ...(on && !(signingKey && signedIn) ? { approveReason: signingKey ? 'Sign in to approve.' : approveReason } : {}), policy: [],
+      };
     },
     /**
      * `/hub/discord/*`, for the Asks bot: exactly `GET /hub/discord/asks` and `POST /hub/discord/answer`, each with a

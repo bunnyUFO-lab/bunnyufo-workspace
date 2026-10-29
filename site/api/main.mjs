@@ -17,6 +17,8 @@
 //                           Reads are open on the LAN, writes need Remote-User like every other write.
 //   HUB_DISCORD_TOKEN_SHA256, HUB_DISCORD_OWNER_ID   turn on the Asks bot's two routes (/api/hub/discord/…): the sha256 of its bearer token
 //                           and the owner's Discord user id. Without both, those routes answer 404 to everyone (the kill switch).
+//   HUB_SIGNING_KEY         the Ed25519 private key that signs approvals and stops (base64 PKCS8 DER, one line). Made on this host and never copied
+//                           to the PC; without it Approve is off. HUB_DISCORD_NEEDS_YOU: the #needs-you webhook (read by the notify module)
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
 //                           Chat stays off, and hidden in the UI, until its keys are here.
 //   BUW_SITE_ORIGINS        comma list of origins writes may come from; default: the origin of BUW_SITE_URL
