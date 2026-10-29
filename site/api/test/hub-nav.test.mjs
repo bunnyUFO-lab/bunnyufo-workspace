@@ -17,7 +17,7 @@ test('every screen hubRows offers sits in exactly one group', () => {
 
 test('the groups and their rows, in order', () => {
   const shape = hubGroups(FULL).map(group => [group.label, group.rows.map(([key]) => key)]);
-  assert.deepEqual(shape, [['Operate', ['today', 'needs', 'work']], ['Plan', ['map', 'chat']], ['Know', ['library', 'sketch']]]);
+  assert.deepEqual(shape, [['Operate', ['today', 'needs', 'work', 'team']], ['Plan', ['map', 'chat']], ['Know', ['library', 'sketch']]]);
 });
 
 test('without writes or the assistant there is no Sketch, no Chat and no empty group', () => {

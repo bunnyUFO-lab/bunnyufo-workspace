@@ -11,6 +11,7 @@ import Chat from './Chat'
 import Needs from './Needs'
 import Sketch from './Sketch'
 import ProgressMap from './ProgressMap'
+import Team from './Team'
 import Today from './Today'
 import WorkTabs from './WorkTabs'
 
@@ -29,6 +30,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={route.id} /></WorkTabs>}
+      {route.screen === 'team' && <Team />}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}

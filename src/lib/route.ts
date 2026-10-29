@@ -2,7 +2,7 @@
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'activity', 'sketch', 'chat'] as const
+export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'team', 'activity', 'sketch', 'chat'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */

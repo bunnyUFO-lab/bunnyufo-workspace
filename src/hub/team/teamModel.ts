@@ -1,0 +1,64 @@
+// Pure logic for the Team screen and its Sprite sheet. Kept out of the .tsx files so Node can test it.
+import type { AgentStatus, AvatarChoice, AvatarSprite, TeamAgent } from '../../lib/hubTeam'
+import { BUILTIN_KEYS, genSprite } from './sprites.ts'
+
+export const STATUS_LABEL: Record<AgentStatus, string> = {
+  working: 'Working', 'needs-you': 'Needs you', failed: 'Failed', idle: 'Idle', offline: 'Offline',
+}
+
+/** The state class the dot and the glow use (the shared `st-*` colours). */
+export const STATUS_DOT: Record<AgentStatus, 'working' | 'needs' | 'failed' | 'idle'> = {
+  working: 'working', 'needs-you': 'needs', failed: 'failed', idle: 'idle', offline: 'idle',
+}
+
+export function rosterCounts(agents: Pick<TeamAgent, 'status'>[]) {
+  return {
+    total: agents.length,
+    online: agents.filter(agent => agent.status !== 'offline').length,
+    working: agents.filter(agent => agent.status === 'working').length,
+  }
+}
+
+export const sameSprite = (a: AvatarSprite, b: AvatarSprite): boolean =>
+  a.kind === 'builtin' ? b.kind === 'builtin' && a.key === b.key : b.kind === 'random' && a.salt === b.salt && a.name === b.name
+
+/** The body of the avatar POST for a sprite. */
+export const choiceOf = (sprite: AvatarSprite): AvatarChoice =>
+  sprite.kind === 'builtin' ? { kind: 'builtin', key: sprite.key } : { kind: 'random', salt: sprite.salt }
+
+export const SALT_MAX = 9999
+
+/** The salt Randomize starts from: the current random sprite's, else 0. The first press draws salt + 1. */
+export const startSalt = (current: AvatarSprite): number => (current.kind === 'random' ? current.salt : 0)
+
+export const nextSalt = (salt: number): number => (salt >= SALT_MAX ? 1 : salt + 1)
+
+export const randomOf = (name: string, salt: number): AvatarSprite => ({ kind: 'random', salt, name })
+
+/** "Randomized from the name: <label>" for a drawn sprite. */
+export const randomLabel = (name: string, salt: number): string => `Randomized from the name: ${genSprite(name, salt).label}`
+
+export const spriteKey = (sprite: AvatarSprite): string => (sprite.kind === 'builtin' ? `b:${sprite.key}` : `r:${sprite.salt}`)
+
+/** A readable name for a built-in key: `lib_b` is "lib b". */
+export const builtinLabel = (key: string): string => key.replace(/_/g, ' ')
+
+/**
+ * The tiles of the Quick picker: the current sprite first, then the one just randomized (if it is
+ * not the current one), then every built-in that is not already shown.
+ */
+export function quickTiles(current: AvatarSprite, randomized: AvatarSprite | null): AvatarSprite[] {
+  const tiles: AvatarSprite[] = [current]
+  if (randomized && !sameSprite(randomized, current)) tiles.push(randomized)
+  for (const key of BUILTIN_KEYS) {
+    const tile: AvatarSprite = { kind: 'builtin', key }
+    if (!tiles.some(existing => sameSprite(existing, tile))) tiles.push(tile)
+  }
+  return tiles
+}
+
+/** The line under the preview. */
+export function sheetNote(name: string, current: AvatarSprite, selected: AvatarSprite): string {
+  if (sameSprite(current, selected)) return 'This is the current sprite'
+  return selected.kind === 'random' ? randomLabel(name, selected.salt) : 'Built in. Use this applies it now, no job.'
+}
