@@ -1,13 +1,10 @@
 // The Hub's chat: a relay to Hermes's OpenAI-compatible API server, the conversations it keeps in
-// the inbox (`chat/<id>.jsonl`, one line per message), and speech-to-text for push-to-talk.
+// the inbox (`chat/<id>.jsonl`, one line per message).
 //
 // Env (all optional; chat is off without the first two):
 //   HERMES_URL      base URL of Hermes's API server, without /v1
 //   HERMES_API_KEY  its bearer key
 //   HERMES_MODEL    the `model` field, default hermes-agent
-//   STT_URL         a full OpenAI-compatible …/audio/transcriptions endpoint
-//   STT_API_KEY     its bearer key
-//   STT_MODEL       default whisper-large-v3-turbo
 //
 // The Hub sends no system message (Hermes owns its prompt) and sends the history as `messages`.
 // Keys are never logged, stored or echoed.
@@ -23,17 +20,14 @@ const NO_PICTURE = '[An earlier picture is not included.]';
 const TOTAL_MS = 120_000;
 const IDLE_MS = 60_000;
 const KEEPALIVE_MS = 15_000;
-const AUDIO = /^audio\/(webm|ogg|mp4|mpeg)\s*(;.*)?$/i;
-const EXTENSION = { webm: 'webm', ogg: 'ogg', mp4: 'mp4', mpeg: 'mp3' };
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
-export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/') || route === '/hub/transcribe';
+export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readBody, readJson, json, fail, now }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now }) {
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
-  const sttConfigured = !!env.STT_URL && !!env.STT_API_KEY;
   const titles = new Map();   // etag → { title, count }
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
@@ -258,36 +252,15 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     return undefined;
   }
 
-  async function transcribe(request) {
-    const type = String(request.headers['content-type'] ?? '');
-    if (!AUDIO.test(type)) throw fail('Send audio/webm, audio/ogg, audio/mp4 or audio/mpeg.', 415);
-    const buffer = await readBody(request, 2 * 1024 * 1024);
-    if (!buffer.length) throw fail('That recording is empty.');
-    const form = new FormData();
-    form.append('file', new Blob([buffer], { type: type.split(';')[0].trim() }), `speech.${EXTENSION[type.split(';')[0].split('/')[1].trim().toLowerCase()]}`);
-    form.append('model', env.STT_MODEL || 'whisper-large-v3-turbo');
-    let answer;
-    try {
-      answer = await fetchImpl(env.STT_URL, { method: 'POST', headers: { authorization: `Bearer ${env.STT_API_KEY}` }, body: form, signal: AbortSignal.timeout(60_000) });
-    } catch {
-      throw fail('The transcription service did not answer.', 502);
-    }
-    if (!answer.ok) throw fail(`The transcription service did not answer (${answer.status}).`, 502);
-    const result = await answer.json().catch(() => null);
-    if (typeof result?.text !== 'string') throw fail('The transcription service sent no text.', 502);
-    return { text: result.text.trim() };
-  }
-
   return {
     capabilities({ enabled, signedIn, requireRemoteUser }) {
       const allowed = enabled && (!requireRemoteUser || signedIn);
-      return { chat: allowed && chatConfigured, transcribe: allowed && sttConfigured };
+      return { chat: allowed && chatConfigured };
     },
-    /** Answers the chat and transcribe routes; the caller has checked that the route is one of them. */
+    /** Answers the chat routes; the caller has checked that the route is one of them. */
     async handle({ request, response, method, route, user, requireRemoteUser }) {
       if (requireRemoteUser && !user) throw fail('Chat needs a signed-in user.', 401);
-      const speech = route === '/hub/transcribe';
-      if (speech ? !sttConfigured : !chatConfigured) throw fail(speech ? 'Speech to text is not set up on this host.' : 'Chat is not set up on this host.', 503);
+      if (!chatConfigured) throw fail('Chat is not set up on this host.', 503);
       if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list() });
       let match;
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
@@ -298,7 +271,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/images\/([^/]+)$/.exec(route))) return serveImage(response, match[1], match[2]);
       if (method === 'POST' && route === '/hub/chat') return relay(request, response, user);
-      if (method === 'POST' && speech) return json(response, 200, await transcribe(request));
       throw fail('Not found', 404);
     },
   };

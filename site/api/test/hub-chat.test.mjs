@@ -1,4 +1,4 @@
-// The Hub's chat and transcribe routes, against a fake Hermes, over the stand-in S3.
+// The Hub's chat routes, against a fake Hermes, over the stand-in S3.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
@@ -19,7 +19,7 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {})
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', STT_URL: `${upstream.url}/v1/audio/transcriptions`, STT_API_KEY: 'k1', ...env };
+  const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', ...env };
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, allowedOrigins: ['https://site.example'], hub: createHub({ bucket, enabled: true, env: hubEnv }) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -100,7 +100,7 @@ test('configuration: unset URL → chat false and 503; a failing Hermes → 502 
   const off = await fixture({ env: { HERMES_URL: '' } });
   try {
     const caps = await (await off.call('GET', '/capabilities')).json();
-    assert.deepEqual([caps.chat, caps.transcribe], [false, true]);
+    assert.equal(caps.chat, false);
     assert.equal((await off.call('POST', '/hub/chat', { text: 'hi' })).status, 503);
     assert.equal((await off.call('GET', '/hub/chat')).status, 503);
   } finally { await off.close(); }
@@ -114,31 +114,11 @@ test('configuration: unset URL → chat false and 503; a failing Hermes → 502 
     assert.equal((await broken.call('GET', '/hub/chat', undefined, {})).status, 401, 'Even reads need Remote-User.');
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x' }, {})).status, 401);
     const anonymous = await (await broken.call('GET', '/capabilities', undefined, {})).json();
-    assert.deepEqual([anonymous.hub, anonymous.chat, anonymous.transcribe], [true, false, false]);
+    assert.deepEqual([anonymous.hub, anonymous.chat], [true, false]);
     assert.equal((await broken.call('POST', '/hub/chat', { text: '' })).status, 400);
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(70 * 1024) })).status, 400, 'Long text is refused by length.');
     assert.equal((await broken.call('POST', '/hub/chat', { text: 'x'.repeat(7.5 * 1024 * 1024) })).status, 413);
   } finally { await broken.close(); }
-});
-
-test('transcribe: type and size are checked, the text is trimmed, and without STT_URL it is off', async () => {
-  const { upstream, origin, owner, close } = await fixture();
-  const send = (type, body) => fetch(`${origin}/api/hub/transcribe`, { method: 'POST', headers: { ...owner, 'Content-Type': type }, body });
-  try {
-    assert.equal((await send('audio/webm', Buffer.alloc(2 * 1024 * 1024 + 1))).status, 413);
-    assert.equal((await send('text/plain', 'hello')).status, 415);
-    const ok = await send('audio/webm;codecs=opus', Buffer.from('fake-audio'));
-    assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { text: 'hello from the fake mic' });
-    assert.match(upstream.sttFiles[0].text, /name="file"; filename="speech\.webm"/);
-    assert.match(upstream.sttFiles[0].text, /whisper-large-v3-turbo/);
-    assert.equal((await send('audio/mp4', Buffer.from('m4a'))).status, 200);
-  } finally { await close(); }
-  const off = await fixture({ env: { STT_URL: '' } });
-  try {
-    assert.equal((await (await off.call('GET', '/capabilities')).json()).transcribe, false);
-    assert.equal((await fetch(`${off.origin}/api/hub/transcribe`, { method: 'POST', headers: { ...off.owner, 'Content-Type': 'audio/webm' }, body: 'x' })).status, 503);
-  } finally { await off.close(); }
 });
 
 test('a client that goes away mid-reply makes the relay hang up on Hermes within a second', async () => {
@@ -161,7 +141,6 @@ test('the chat routes write only under sections/inbox/chat/', async () => {
   try {
     fake.log.length = 0;
     await chat(call, { text: 'one' });
-    await fetch(`${origin}/api/hub/transcribe`, { method: 'POST', headers: { ...owner, 'Content-Type': 'audio/webm' }, body: 'x' });
     const writes = fake.log.filter(entry => entry.method === 'PUT' || entry.method === 'DELETE');
     assert.ok(writes.length >= 1);
     assert.deepEqual(writes.filter(entry => !entry.key.startsWith('sections/inbox/chat/')), []);

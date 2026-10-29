@@ -280,7 +280,7 @@ try {
   const dist = path.join(root, 'dist');
   const reviewId = '120000-pc-000001.json';
   const canned = {
-    '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, transcribe: false, reason: 'Read-only here: sign in at https://site.example.test to change cards.' },
+    '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, reason: 'Read-only here: sign in at https://site.example.test to change cards.' },
     '/api/card-state': { cards: {} },
     '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
     '/w/one/workspace.json': { entities: [] },

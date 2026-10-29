@@ -263,7 +263,7 @@ read-only message) and `BUW_CARD_API` (the card API's address, which pages learn
 
 Writes also need an `Origin` header that matches the site: the origin of `BUW_SITE_URL`, or the comma list in
 `BUW_SITE_ORIGINS` if you set it. A request with no `Origin`, or from another page, gets 403, and a write whose
-`Content-Type` is not `application/json` (`audio/*` for `/api/hub/transcribe`) gets 415. With `BUW_SITE_URL` unset or
+`Content-Type` is not `application/json` gets 415. With `BUW_SITE_URL` unset or
 malformed, every write is refused.
 
 Who may write is who has passed the passkey check. The service has no login of its own: writes
@@ -317,7 +317,7 @@ the stack there before asking for review.
 `HUB=1` in the site API's `api.env` turns on the Hub: `/api/hub/…` routes over the `inbox`
 section of the cards bucket (`site/api/hub.mjs`). The local service serves the same routes over
 its own bucket whenever it has one (`HUB=0` turns them off). `/api/capabilities` reports
-`hub`, `chat` and `transcribe`. Reads are open wherever the site is; writes need a signed-in
+`hub` and `chat`. Reads are open wherever the site is; writes need a signed-in
 user (`Remote-User`), like every other write.
 
 | Route | Does |
@@ -336,7 +336,8 @@ user (`Remote-User`), like every other write.
 | `GET /api/hub/chat`, `/chat/:id` | The newest 30 conversations, and one conversation's lines. Chat needs `HERMES_URL` and `HERMES_API_KEY`, and a signed-in user where writes need `Remote-User` (503 when off, 401 without a user) |
 | `GET /api/hub/chat/:id/images/:file` | A picture sent in a conversation, behind the same chat gate (not `/hub/file`). `Cache-Control: private`, `nosniff`, sandboxed |
 | `POST /api/hub/chat` | `{ conversation?, text, images? }`; the reply streams back as server-sent events (`delta`, `created`, `done` with the saved user line, `error`). `images` is up to 4 `{ type: 'image/jpeg' \| 'image/png', data: <base64> }`, each at most 1.5 MB decoded, 5 MB together, 1 to 2048 px a side; the bytes are checked, metadata (EXIF, GPS) is stripped, and `text` may be empty with a picture. They reach Hermes as `image_url` data URLs and are stored beside the conversation as `chat/<id>/<file>`. If Hermes refuses them: 422, nothing saved. The body limit is 7 MB |
-| `POST /api/hub/transcribe` | Push-to-talk: audio (webm, ogg, mp4 or mpeg, at most 2 MB) in, `{ text }` out, through `STT_URL` |
+
+Voice input was removed on 2026-10-29; see git history to bring it back.
 
 A blocked session stays in Needs you until any later event from the same session arrives (a
 `resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts
@@ -423,7 +424,7 @@ Reverting this feature leaves every existing `answer.json` valid; without the la
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,
-`HUB_DISCORD_TOKEN_SHA256` and `HUB_DISCORD_OWNER_ID` for the Asks bot, and for chat `HERMES_URL`, `HERMES_API_KEY`, `HERMES_MODEL`, `STT_URL`, `STT_API_KEY`, `STT_MODEL`.
+`HUB_DISCORD_TOKEN_SHA256` and `HUB_DISCORD_OWNER_ID` for the Asks bot, and for chat `HERMES_URL`, `HERMES_API_KEY`, `HERMES_MODEL`.
 
 ## Making a new workspace
 

@@ -26,7 +26,7 @@ const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings'
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
 
 const MB = 1024 * 1024;
-const LIMITS = { big: 8 * MB, chat: 64 * 1024, transcribe: 2 * MB, small: 256 * 1024 };
+const LIMITS = { big: 8 * MB, chat: 64 * 1024, small: 256 * 1024 };
 const CACHE_MAX = 5000;
 const EVENT_CAP = 2000;
 const POOL = 16;
@@ -101,7 +101,7 @@ const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(v
  * @param prefix   where the sections are in it
  * @param inbox    the inbox section's id: `inbox`, or `inbox-dev` on the development copy
  * @param enabled  `HUB=1` on the site, bucket-and-not-`HUB=0` on the local service
- * @param env      the merged environment (the chat routes read HERMES_* and STT_* from it)
+ * @param env      the merged environment (the chat routes read HERMES_* from it)
  */
 export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log } = {}) {
   const on = !!enabled && !!bucket;
@@ -721,11 +721,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     if (method !== 'POST') return 0;
     if (/^\/hub\/asks\/[^/]+\/answer$/.test(route) || route === '/hub/requests' || route.startsWith('/hub/drawings')) return LIMITS.big;
     if (route === '/hub/chat') return LIMITS.chat;
-    if (route === '/hub/transcribe') return LIMITS.transcribe;
     return LIMITS.small;
   };
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readBody, readJson, json, fail, now });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now });
 
   const self = {
     enabled: on,
@@ -826,7 +825,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         }
 
         if (method !== 'POST') throw fail('Not found', 404);
-        const raw = route === '/hub/transcribe' ? null : await readJson(request, limit);
+        const raw = await readJson(request, limit);
         if ((match = /^\/hub\/asks\/([^/]+)\/(answer|snooze|cancel)$/.exec(route))) {
           const id = decodeURIComponent(match[1]);
           if (!validId(id)) throw fail('No such Ask.', 404);

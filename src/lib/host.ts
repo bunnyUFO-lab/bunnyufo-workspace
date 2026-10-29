@@ -33,8 +33,6 @@ export interface HostCapabilities {
   hub: boolean
   /** The Hub's chat with the assistant is set up and this visitor may use it. */
   chat: boolean
-  /** Push-to-talk can turn speech into text here. */
-  transcribe: boolean
   /** Why this host is read-only, in its own words (it names where to sign in), or null. */
   reason: string | null
   /** The card API's address (http or https) when the host knows it, else null. */
@@ -46,7 +44,7 @@ export interface HostCapabilities {
 }
 
 const NONE: HostCapabilities = {
-  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, transcribe: false, reason: null, cardApi: null, contentOrigin: null,
+  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, reason: null, cardApi: null, contentOrigin: null,
 }
 
 export let host: HostCapabilities = NONE
@@ -85,7 +83,7 @@ export async function probeHost(): Promise<void> {
       write: !!answer.write, create: !!answer.create, cards: !!answer.cards, files: !!answer.files, mcp: !!answer.mcp, saves: !!answer.saves,
       settings: !!answer.settings, workspaces: !!answer.workspaces, live: !!answer.live,
       routes: answer.routes === 'hash' ? 'hash' : 'path',
-      hub: !!answer.hub, chat: !!answer.chat, transcribe: !!answer.transcribe,
+      hub: !!answer.hub, chat: !!answer.chat,
       reason: typeof answer.reason === 'string' ? answer.reason : null,
       cardApi: typeof answer.cardApi === 'string' && /^https?:\/\//.test(answer.cardApi) ? answer.cardApi : null,
       contentOrigin: typeof answer.contentOrigin === 'string' && /^https?:\/\//.test(answer.contentOrigin) ? new URL(answer.contentOrigin).origin : null,

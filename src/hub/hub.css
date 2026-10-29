@@ -306,10 +306,9 @@
 .hub-created-title { flex: 1; min-width: 0; font-size: 0.82rem; overflow-wrap: anywhere; }
 .hub-compose { display: flex; gap: 8px; align-items: flex-end; }
 .hub-compose textarea { flex: 1; min-width: 0; background: var(--surface-solid); color: var(--text); border: 1px solid var(--hairline-strong); border-radius: var(--radius); padding: 8px 10px; font: inherit; font-size: 0.9rem; resize: none; }
-.hub-mic, .hub-attach { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: var(--surface-2); font-size: 1.15rem; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.hub-attach { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; border: 1px solid var(--hairline-strong); background: var(--surface-2); font-size: 1.15rem; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .hub-attach { display: inline-flex; align-items: center; justify-content: center; padding: 0; color: var(--text); }
 .hub-attach:disabled { opacity: 0.5; cursor: default; }
-.hub-mic.on { background: var(--red-dim); border-color: var(--red); }
 /* Pictures in a message (ws-b1z.7): the tray above the compose row, the grid in a bubble, the drop outline. */
 .hub-chat-main.hub-drop { outline: 2px dashed var(--pink); outline-offset: -4px; border-radius: var(--radius-lg); }
 .hub-tray { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 8px; }
@@ -323,7 +322,6 @@
 .hub-bubble-images:first-child { margin-top: 0; }
 .hub-bubble-image { display: block; max-height: 200px; max-width: 100%; border-radius: var(--radius); object-fit: cover; }
 .hub-image-open { display: block; max-width: 100%; }
-.hub-listening { color: var(--red); font-size: 0.82rem; margin: 6px 0; }
 .hub-aloud { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
 @media (max-width: 720px) {

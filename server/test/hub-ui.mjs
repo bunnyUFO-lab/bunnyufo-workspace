@@ -2,7 +2,7 @@
 // with an Ask, events and a Beads copy, the local service on top, nothing else written.
 //
 // Part 2 (CUJ 2): the progress map at desktop and phone width.
-// Part 4: Chat and push-to-talk against a fake Hermes.
+// Part 4: Chat against a fake Hermes.
 // Part 3: ✎ on Ask options (CUJ 1 with a drawing) and Sketch.
 // Part 1: a card called "hub" still opens; Today, Needs you and Ask at desktop and phone width; CUJ 1
 // (answer an Ask, seen as Answered, then Picked up); the 409 path; CUJ 5 (a request from Work);
@@ -334,7 +334,7 @@ try {
   step('read-only: a host that says write: false shows the banner and no controls');
   const dist = path.join(root, 'dist');
   const canned = {
-    '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, transcribe: false, reason: 'Read-only here: sign in at https://site.example.test to change cards.' },
+    '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, reason: 'Read-only here: sign in at https://site.example.test to change cards.' },
     '/api/card-state': { cards: {} },
     '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
     '/w/one/workspace.json': { entities: [] },
@@ -1182,7 +1182,7 @@ try {
   assert.equal(await page.locator('.hub-row[data-blocked]', { hasText: 'Linked session' }).count(), 0, 'resumed clears it, even after a reload.');
   assert.equal(await page.locator('.hub-row[data-blocked]').count(), 1);
 
-  // Part 4: Chat against the fake Hermes, and push-to-talk with a fake microphone.
+  // Part 4: Chat against the fake Hermes.
   step('chat off: without Hermes there is no Chat row and the screen says so');
   assert.equal(await page.locator('[data-hub-link="chat"]').count(), 0);
   await go(page, '#/~hub/chat');
@@ -1200,9 +1200,9 @@ try {
       },
     },
   });
-  const micBrowser = await chromium.launch({ headless: true, channel, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+  const chatBrowser = await chromium.launch({ headless: true, channel });
   try {
-    const context = await micBrowser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ['microphone'] });
+    const context = await chatBrowser.newContext({ viewport: { width: 1280, height: 900 } });
     const talk = await context.newPage();
     talk.setDefaultTimeout(15000);
     talk.on('pageerror', error => { throw error; });
@@ -1228,20 +1228,6 @@ try {
     await talk.locator('.hub[data-screen="needs"]').waitFor();
     assert.match(talk.url(), /#\/~hub\/needs\/requests$/);
     await talk.locator('.hub-row', { hasText: 'Hermes filed this request' }).waitFor();
-
-    step('push-to-talk: holding the microphone for about a second puts the text in the box, unsent');
-    await go(talk, '#/~hub/chat');
-    const mic = talk.locator('.hub-mic');
-    await mic.waitFor();
-    const box = await mic.boundingBox();
-    assert.ok(box.width >= 44 && box.height >= 44, 'The microphone button is at least 44 px.');
-    await talk.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await talk.mouse.down();
-    await talk.locator('.hub-listening').waitFor();
-    await talk.waitForTimeout(1200);
-    await talk.mouse.up();
-    await talk.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]').value.includes('hello from the fake mic'));
-    assert.equal(await talk.locator('.hub-bubble.user').count(), 0, 'The text is not sent by itself.');
 
     step('chat pictures: attach, remove, attach again, send; Hermes sees an image part and the bubble shows the picture');
     await go(talk, '#/~hub/chat');
@@ -1300,8 +1286,8 @@ try {
       await refusing.close();
     }
 
-    step('chat at phone width: the drawer opens and the message box and microphone fit');
-    const small = await micBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, permissions: ['microphone'] });
+    step('chat at phone width: the drawer opens and the message box fits');
+    const small = await chatBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const phoneChat = await small.newPage();
     phoneChat.setDefaultTimeout(15000);
     phoneChat.on('pageerror', error => { throw error; });
@@ -1314,7 +1300,7 @@ try {
     await phoneChat.locator('button:has-text("Chats")').click();
     await phoneChat.locator('.hub-chat-list').waitFor();
     await phoneChat.locator('button:has-text("Chats")').click();
-    for (const selector of ['textarea[aria-label="Message"]', '.hub-mic']) {
+    for (const selector of ['textarea[aria-label="Message"]']) {
       const where = await phoneChat.locator(selector).boundingBox();
       assert.ok(where && where.x >= 0 && where.x + where.width <= 390 && where.y + where.height <= 844, `${selector} fits on screen.`);
     }
@@ -1328,14 +1314,14 @@ try {
       const where = await phoneChat.locator(selector).first().boundingBox();
       assert.ok(where.width >= 44 && where.height >= 44, `${selector} is at least 44 px.`);
     }
-    const row = await Promise.all(['.hub-attach', 'textarea[aria-label="Message"]', '.hub-mic', '.hub-compose .hub-btn'].map(selector => phoneChat.locator(selector).boundingBox()));
+    const row = await Promise.all(['.hub-attach', 'textarea[aria-label="Message"]', '.hub-compose .hub-btn'].map(selector => phoneChat.locator(selector).boundingBox()));
     for (const where of row) assert.ok(where && where.x >= 0 && where.x + where.width <= 390, 'The compose row fits.');
     assert.ok(row.every((where, at) => at === 0 || where.x >= row[at - 1].x + row[at - 1].width - 1), 'The row is in order, attach first.');
     await noSideways(phoneChat, 'Chat with pictures');
     await small.close();
     await context.close();
   } finally {
-    await micBrowser.close();
+    await chatBrowser.close();
     await chatFixture.close();
   }
 
