@@ -10,7 +10,7 @@ export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'arc
 
 /** Checked against the Hermes profile docs (services/assistant.md in the homelab repo) on 2026-10-29. */
 export const AGENTS = [
-  { id: 'hermes', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, DeepSeek fallback', role: 'chats, plans and dispatches' },
+  { id: 'hermes', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'chats, plans and dispatches' },
   { id: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests' },
   { id: 'claude', name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC' },
 ];
