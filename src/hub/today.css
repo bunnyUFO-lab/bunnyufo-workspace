@@ -1,0 +1,61 @@
+/* Today, after the mission-control mockup. Loaded after hub.css, so these win on equal weight. */
+.today-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 22px; }
+.today-eyebrow { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); font-variant-numeric: tabular-nums; }
+.hub .today-head h2 { font-family: var(--font); font-size: 34px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin-top: 6px; }
+.today-head p { margin: 8px 0 0; color: var(--t2); font-size: 0.95rem; }
+.today-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.today-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 999px; }
+.today-icon svg { width: 15px; height: 15px; }
+.hub-btn.today-primary { background: var(--t1); color: var(--ground); border-color: var(--t1); font-weight: 600; text-decoration: none; border-radius: 999px; height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 4px; }
+.hub-btn.today-primary:hover:not(:disabled) { background: var(--text-bright); }
+.hub .hub-btn.today-primary { color: var(--ground); }
+.today-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.today .hub-kpis { gap: 16px; margin-bottom: 16px; }
+.today .hub-kpi { gap: 0; padding: 18px; background: var(--s1); border-color: var(--line); border-radius: var(--r3); transition: border-color 0.2s, transform 0.2s; }
+.today .hub-kpi:hover { background: var(--s1); border-color: var(--line2); transform: translateY(-2px); }
+.kpi-label { gap: 8px; display: flex; align-items: center; justify-content: space-between; font: 600 11px var(--font); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); }
+.today .hub-kpi-v { font: 600 30px/1.1 var(--mono); letter-spacing: -0.03em; margin-top: 10px; font-variant-numeric: tabular-nums; color: var(--t1); }
+.kpi-sub { font-size: 12px; color: var(--t3); margin-top: 6px; }
+
+.today .dot { position: relative; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--t3)); flex: none; }
+.today .dot.st-needs { --c: var(--st-needs); }
+.today .dot.st-working { --c: var(--st-working); }
+.today .dot.st-failed { --c: var(--st-failed); }
+.today .dot.st-idle { --c: var(--st-idle); }
+.today .dot.live { box-shadow: 0 0 8px var(--c); }
+
+.today-cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.today-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.today .hub-panel { background: var(--s1); border-color: var(--line); border-radius: var(--r3); padding: 18px; margin-bottom: 0; }
+.today .hub-panel > h3 { align-items: center; justify-content: flex-start; gap: 10px; padding-bottom: 12px; margin: 0 0 8px; border-bottom: 1px solid var(--line); min-height: 28px; font-size: 13px; letter-spacing: -0.005em; text-transform: none; color: var(--t1); font-weight: 600; }
+.today .hub-panel > h3 > span:not(.dot) { margin-left: auto; font-size: 12px; }
+.today-all { margin-left: auto; font-size: 12.5px; font-weight: 400; color: var(--t3); text-decoration: none; }
+
+.nrow { display: flex; align-items: center; gap: 12px; padding: 10px 8px; margin: 0 -8px; border-radius: 10px; text-decoration: none; transition: background 0.15s; }
+.nrow:hover { background: var(--s2); }
+.nrow + .nrow { border-top: 1px solid var(--line); border-radius: 0; }
+.kind { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--s2); border: 1px solid var(--line); color: var(--t2); flex: none; }
+.kind svg, .nrow-go svg { width: 16px; height: 16px; }
+.nrow-text { flex: 1; min-width: 0; }
+.nrow-text b { display: block; font-weight: 500; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nrow-text small { display: block; font-size: 12px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nrow-go { color: var(--t3); display: grid; }
+
+.alert-row { display: flex; gap: 11px; padding: 11px 0; border-top: 1px solid var(--line); align-items: flex-start; }
+.alert-row:first-of-type { border-top: 0; padding-top: 0; }
+.alert-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--st-failed) 12%, transparent); color: var(--st-failed); flex: none; }
+.alert-icon svg { width: 15px; height: 15px; }
+.alert-row .nrow-text b, .alert-row .nrow-text small { white-space: normal; }
+
+.today .rise { animation: today-rise 0.2s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
+@keyframes today-rise { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .today .rise { animation: none; } .today .hub-kpi { transition: none; } }
+
+@media (max-width: 760px) {
+  .today-cols { grid-template-columns: minmax(0, 1fr); }
+  .today .hub-kpis { gap: 10px; }
+  .today .hub-kpi { padding: 14px; }
+  .kpi-label { gap: 8px; letter-spacing: 0.1em; }
+  .hub .today-head h2 { font-size: 28px; }
+}

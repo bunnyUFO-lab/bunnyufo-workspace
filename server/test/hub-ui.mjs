@@ -70,6 +70,34 @@ try {
   assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await page.locator('.hub-panel[aria-label="Running"]').innerText(), /running since \d\d:\d\d/);
   await noSideways(page, 'Today');
+  step('Today after the mockup: greeting, eyebrow, the top three of five Needs-you rows with kind labels, the Open button count, an alert row, stacked at 375 px');
+  const busy = await startHubFixture({ busyToday: true });
+  const busyPage = await open({ width: 1280, height: 800 });
+  await busyPage.goto(`${busy.url}#/~hub/today`);
+  await busyPage.locator('.today-head').waitFor();
+  assert.match(await busyPage.locator('.today-head h2').innerText(), /^Good (morning|afternoon|evening)$/);
+  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d$/);
+  assert.match(await busyPage.locator('.today-head p').innerText(), /^5 things wait on you\. 1 session is running\.$/);
+  assert.equal((await busyPage.locator('[data-today-open] .today-num').innerText()).trim(), '5', 'The Open button counts everything that needs you.');
+  assert.equal((await busyPage.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '5');
+  assert.match(await busyPage.locator('.today-all').innerText(), /^All 5/);
+  const kindRows = await busyPage.locator('.hub-panel[aria-label="Needs you"] .nrow small').allInnerTexts();
+  assert.equal(kindRows.length, 3, 'Today shows only the top three of five.');
+  for (const row of kindRows) assert.match(row, /^(Question|Steps|PR review|Unstick|Approval) · /, `Row "${row}" starts with its kind.`);
+  assert.equal((await busyPage.locator('.hub-kpi[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '1');
+  assert.match(await busyPage.locator('[data-alert]').innerText(), /Nightly brief failed[\s\S]*529/);
+  await busyPage.setViewportSize({ width: 375, height: 812 });
+  await busyPage.waitForTimeout(150);
+  const columns = (await busyPage.locator('.today-cols').evaluate(node => getComputedStyle(node).gridTemplateColumns)).trim().split(/\s+/);
+  assert.equal(columns.length, 1, 'At 375 px the columns stack.');
+  assert.ok(await busyPage.evaluate(() => document.documentElement.scrollWidth <= 375), 'Today does not scroll sideways at 375 px.');
+  const gap = await busyPage.locator('.hub-kpi[data-kpi="recent"]').evaluate(tile => {
+    const label = tile.querySelector('.kpi-label > span:first-child').getBoundingClientRect();
+    const dot = tile.querySelector('.kpi-label .dot').getBoundingClientRect();
+    return dot.left - label.right;
+  });
+  assert.ok(gap >= 6, `The "Since yesterday" label keeps room from its dot (${gap} px).`);
+  await busy.close();
   await page.locator('[data-hub-link="needs"]').click();
   await page.locator('.hub[data-screen="needs"]').waitFor();
   await page.locator('.hub-row', { hasText: 'Which jump arc feels right?' }).waitFor();
@@ -311,6 +339,7 @@ try {
     '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
     '/w/one/workspace.json': { entities: [] },
     '/api/hub/today': { counts: { needsYou: 2, running: 0, recent: 0, alerts: 0 }, needsYou: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }, { kind: 'review', id: '120000-pc-000001.json', title: 'A read-only review', at: new Date().toISOString(), project: 'probe' }], running: [], recent: [], alerts: [], at: new Date().toISOString() },
+    '/api/hub/inbox': { items: [{ kind: 'ask', id: 'x-a1b2', title: 'A read-only question', at: new Date().toISOString(), state: 'open', project: 'probe' }, { kind: 'review', id: '120000-pc-000001.json', title: 'A read-only review', at: new Date().toISOString(), project: 'probe' }] },
     '/api/hub/projects': { projects: [{ id: 'probe', name: 'Probe', beads: true }] },
     '/api/hub/map/probe': { project: 'probe', meta: { count: 1, pushedAt: new Date().toISOString() }, ageMinutes: 5, sprints: [], milestones: [{ id: 'm1', title: 'M1', state: 'next', features: [{ id: 'f1', title: 'F1', state: 'next', tasks: [{ id: 'bd-1', title: 'A task', state: 'next', status: 'open', signs: [], sprints: [], deps: [] }] }] }] },
     '/api/hub/asks/20261026-probe-x-a1b2': { id: '20261026-probe-x-a1b2', project: 'probe', createdAt: new Date().toISOString(), expiresAt: new Date().toISOString(), from: { host: 'h', tool: 'claude-code' }, question: 'A read-only question', options: [{ id: 'A', label: 'one' }], allowNote: true, allowDrawing: true, state: 'open', files: ['ask.json'] },
@@ -328,7 +357,7 @@ try {
   await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
   try {
     const guest = await open({ width: 1200, height: 800 });
-    await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/today`);
+    await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/needs`);
     await guest.locator('.hub-banner', { hasText: 'Read-only here' }).waitFor();
     assert.match(await guest.locator('.hub-banner a').getAttribute('href'), /^https:\/\/site\.example\.test/);
     assert.match(await guest.locator('.hub-banner').innerText(), /need you to be signed in/);
