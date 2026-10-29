@@ -43,8 +43,8 @@
 //        link to the Ask (`siteUrl` in hub.json or BUW_SITE_URL). A failed post is spooled for hub-hooks to
 //        replay and never changes the exit code; the webhook address is never printed or stored.
 //        A simple multiple-choice Ask (2 to 5 options, no pictures, no drawing) also gets Discord buttons once the
-//        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where a
-//        passkey signs the answer: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
+//        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where only you,
+//        signed in, can answer it: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
@@ -71,8 +71,14 @@
 //   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
 //   cards checklist cancel <id>     exit 3 when already cancelled or submitted
 //   cards request list [--project <p>] [--open]
-//   cards request take <id> --bead <b>                                exit 3 when already taken
+//   cards request take <id> --bead <b>                                exit 3 when already taken; exit 4 for a request with a
+//        preset (a dispatched run starts only from its approval)
 //   cards request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]
+//        [--preset <id> [--title <t>] [--repo owner/name] [--needs unity,gpu,comfyui,sprite-studio,lan,local-files]
+//        [--target pc|cloud|hermes|at-pc] [--done-when <t>] [--origin-run <id>]]
+//        --preset makes a request the owner approves in the Hub (no --when); it pings #needs-you like an Ask, linking
+//        /#/~hub/request/<id>. --target is only a proposal. origin is { kind: run } when --origin-run or BUW_REQUEST_ID
+//        is set, else { kind: agent }; never owner.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -91,7 +97,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create | beads push --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...] | beads push --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -1194,15 +1200,51 @@ async function requestList(flags) {
   }
 }
 
+/** The preset ids a request may name. A copy of Object.keys(PRESETS) in site/api/presets.mjs; a test keeps them equal. */
+const PRESET_IDS = ['code-task', 'research', 'market-research', 'game-teardown', 'playtest-build', 'sprite-set', 'agent-avatar', 'docs'];
+const REQUEST_NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-files'];
+const REQUEST_TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
+const REQUEST_USAGE = 'Usage: request create --project <p> --text <t> [--title <t>] [--preset <id>] [--repo owner/name] [--needs a,b] [--target pc|cloud|hermes|at-pc] [--done-when <t>] [--origin-run <id>] [--when next-sprint|nightly|record] [--by <name>]';
+
 async function requestCreate(flags) {
-  if (!flags.project || !flags.text) throw new Error('Usage: request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]');
+  if (!flags.project || !flags.text) throw new Error(REQUEST_USAGE);
+  const preset = flags.preset;
+  if (preset !== undefined && !PRESET_IDS.includes(preset)) throw new Error(`--preset is one of: ${PRESET_IDS.join(', ')}.`);
+  if (preset === undefined && (flags.title || flags.repo || flags.needs || flags.target || flags['done-when'])) {
+    throw new Error('--title, --repo, --needs, --target and --done-when need --preset.');
+  }
+  if (flags.text.length > 4000) throw new Error('--text is at most 4000 characters.');
+  if (flags.title !== undefined && (!flags.title.trim() || flags.title.length > 120)) throw new Error('--title is 1 to 120 characters.');
+  if (flags.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(flags.repo)) throw new Error('--repo is owner/name.');
+  if (flags['done-when'] !== undefined && flags['done-when'].length > 400) throw new Error('--done-when is at most 400 characters.');
+  if (flags.target !== undefined && !REQUEST_TARGETS.includes(flags.target)) throw new Error(`--target is one of: ${REQUEST_TARGETS.join(', ')}.`);
+  const needs = flags.needs === undefined ? undefined : [...new Set(flags.needs.split(',').map(item => item.trim()).filter(Boolean))];
+  if (needs?.some(item => !REQUEST_NEEDS.includes(item))) throw new Error(`--needs is a comma list of: ${REQUEST_NEEDS.join(', ')}.`);
   const when = flags.when ?? 'next-sprint';
   if (!WHEN.includes(when)) throw new Error(`--when is one of: ${WHEN.join(', ')}.`);
+  const by = flags.by || hostName();
+  const originRun = flags['origin-run'] ?? process.env.BUW_REQUEST_ID?.trim();
+  if (originRun && !/^[a-z0-9][a-z0-9-]{0,127}$/.test(originRun)) throw new Error('--origin-run is a request id.');
   const id = newId(flags.project, flags.text);
-  const request = { id, project: flags.project, createdAt: isoNow(), by: flags.by || hostName(), text: flags.text, when };
+  const request = {
+    id, project: flags.project, createdAt: isoNow(), by, text: flags.text,
+    ...(preset === undefined ? { when } : {
+      ...(flags.title ? { title: flags.title } : {}),
+      preset,
+      ...(flags.repo ? { repo: flags.repo } : {}),
+      needs: needs ?? [],
+      ...(flags.target ? { target: flags.target } : {}),
+      ...(flags['done-when'] ? { doneWhen: flags['done-when'] } : {}),
+      origin: originRun ? { kind: 'run', name: originRun } : { kind: 'agent', name: by },
+    }),
+  };
   const file = inboxPath('requests', id, 'request.json');
-  if (await mustPut(file, `${JSON.stringify(request, null, 2)}\n`, { createOnly: true }) === 'exists') throw new Error(`${file} already exists; run it again.`);
+  if (await mustPut(file, `${JSON.stringify(request, null, 2)}
+`, { createOnly: true }) === 'exists') throw new Error(`${file} already exists; run it again.`);
   console.log(id);
+  if (preset !== undefined) {
+    await pingNeedsYou({ project: flags.project, text: request.title ?? flags.text, path: `/#/~hub/request/${id}` }).catch(() => {});
+  }
 }
 
 // --- Beads ---
@@ -1294,6 +1336,11 @@ async function inbox(command, args) {
   if (command === 'request' && sub === 'list') return requestList(flags);
   if (command === 'request' && sub === 'create') return requestCreate(flags);
   if (command === 'request' && sub === 'take' && id) {
+    const wanted = await readJson(inboxPath('requests', idSafe(id), 'request.json'));
+    if (wanted?.preset) {
+      console.error('This request is for a dispatched run; it starts only from its approval.');
+      throw new Exit(4);
+    }
     if (!flags.bead) throw new Error('Usage: request take <id> --bead <bead id>');
     return claim('requests', idSafe(id), 'taken.json', pickupBody(flags));
   }
