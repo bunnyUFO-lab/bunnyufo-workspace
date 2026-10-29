@@ -125,6 +125,14 @@ try {
   assert.equal(files(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/tick-`).length, before + 1);
   await list.locator('[data-four]').getByText('2 of 4 done').waitFor();
 
+  step('a link with an event file in the filter place opens the list on that blocked item, flashed, and the address becomes needs/all');
+  const blockedFile = [...fixture.fake.objects.keys()].filter(key => key.includes('/events/')).find(key => fixture.fake.json(key).kind === 'blocked').split('/').pop();
+  const linkedPage = await open({ width: 1280, height: 800 });
+  await linkedPage.goto(`${fixture.url}#/~hub/needs/${blockedFile}`);
+  await linkedPage.locator('.ni[data-kind="unstick"].flash').waitFor();
+  assert.match(await linkedPage.evaluate(() => location.hash), /needs\/all$/);
+  assert.equal(await linkedPage.locator('.hub-chip.on').getAttribute('data-filter'), 'all');
+
   step('a picture is attached to a step: a thumbnail shows at once, one file is stored in the checklist folder, a reload keeps it');
   const folder = `sections/inbox/checklists/${FIXTURE_CHECKLIST}/`;
   assert.equal(files(`${folder}evidence-`).length, 0);
