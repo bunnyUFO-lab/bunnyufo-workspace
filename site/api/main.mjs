@@ -18,8 +18,7 @@
 //   HUB_DISCORD_TOKEN_SHA256, HUB_DISCORD_OWNER_ID   turn on the Asks bot's two routes (/api/hub/discord/…): the sha256 of its bearer token
 //                           and the owner's Discord user id. Without both, those routes answer 404 to everyone (the kill switch).
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
-//   STT_URL, STT_API_KEY, STT_MODEL            push-to-talk (an OpenAI-compatible …/audio/transcriptions)
-//                           Chat and speech stay off, and hidden in the UI, until their keys are here.
+//                           Chat stays off, and hidden in the UI, until its keys are here.
 //   BUW_SITE_ORIGINS        comma list of origins writes may come from; default: the origin of BUW_SITE_URL
 //   BUW_SITE_URL            the public address people sign in at; named in the read-only message
 //   BUW_CARD_API            the card API's address, told to pages in /api/capabilities (`cardApi`)

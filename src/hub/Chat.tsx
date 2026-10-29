@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import type { ChatLine, ChatSummary, Item } from '../lib/hub'
 import { HubError, hubGet, remember } from '../lib/hub'
@@ -10,7 +10,6 @@ import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
 import Md from './Md'
-import { canRecord, usePushToTalk } from './usePushToTalk'
 import { useHubData } from './useHub'
 
 const READ_KEY = 'buw.hub.readAloud'
@@ -103,11 +102,6 @@ function ChatView({ id }: { id?: string }) {
 
   const release = (list: string[]) => list.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
 
-  const append = useCallback((text: string) => {
-    setDraft(current => (current ? `${current} ${text}` : text))
-    input.current?.focus()
-  }, [])
-  const talk = usePushToTalk(append)
 
   const addFiles = async (files: File[]) => {
     if (streaming) { setTrayNote('Wait for the reply before adding pictures.'); return }
@@ -230,7 +224,6 @@ function ChatView({ id }: { id?: string }) {
   }
 
   const conversations = list.data?.conversations ?? []
-  const showMic = canRecord()
   const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
   return (
     <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
@@ -255,9 +248,6 @@ function ChatView({ id }: { id?: string }) {
           {pending !== null && <div className="hub-bubble assistant pending" data-pending>{pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}</div>}
         </div>
         {error && <p className="hub-error" role="alert">{error}</p>}
-        {talk.error && <p className="hub-error" role="alert">{talk.error}</p>}
-        {talk.recording && <p className="hub-listening" role="status">Listening… release to transcribe (max 2 min) · {talk.seconds} s</p>}
-        {talk.busy && <p className="hub-muted" role="status">Turning speech into text…</p>}
         {(images.length > 0 || preparing > 0 || trayNote) && (
           <div className="hub-tray" data-tray>
             {images.map((picture, index) => (
@@ -277,9 +267,6 @@ function ChatView({ id }: { id?: string }) {
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"
             onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
           />
-          {showMic && (
-            <button type="button" className={`hub-mic${talk.recording ? ' on' : ''}`} aria-label="Hold to talk" title="Hold to talk, or tap to start and stop" {...talk.handlers}>🎙</button>
-          )}
           {streaming
             ? <button type="button" className="hub-btn" onClick={() => abort.current?.abort()}>Stop</button>
             : <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>}

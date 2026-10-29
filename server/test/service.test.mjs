@@ -32,7 +32,7 @@ test('local authorization and report isolation protect the local service', async
     assert.equal((await fetch(service.origin + '/api/capabilities')).status, 401);
     delete process.env.BUW_CARD_API; process.env.BUW_CONFIG = path.join(repo, 'no-config.json');
     const capabilities = await (await request('/capabilities')).json();
-    assert.deepEqual(capabilities, { write: true, create: false, cards: true, files: true, mcp: true, saves: true, settings: true, workspaces: true, live: true, routes: 'hash', cardApi: null, hub: false, chat: false, transcribe: false });
+    assert.deepEqual(capabilities, { write: true, create: false, cards: true, files: true, mcp: true, saves: true, settings: true, workspaces: true, live: true, routes: 'hash', cardApi: null, hub: false, chat: false });
     await writeFile(path.join(repo, 'config.json'), JSON.stringify({ cardApi: 'https://api.example.net/' }));
     process.env.BUW_CONFIG = path.join(repo, 'config.json');
     assert.equal((await (await request('/capabilities')).json()).cardApi, 'https://api.example.net', 'From config.json, read per request.');

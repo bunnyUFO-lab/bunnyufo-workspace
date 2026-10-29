@@ -526,7 +526,6 @@ test('access: reads are open, writes need a signed-in user, capabilities say hub
     const open = await (await call('GET', '/capabilities')).json();
     assert.equal(open.hub, true);
     assert.equal(open.chat, false);
-    assert.equal(open.transcribe, false);
     assert.equal(open.write, false);
     const signed = await (await call('GET', '/capabilities', undefined, { 'Remote-User': 'owner' })).json();
     assert.equal(signed.hub, true);
@@ -545,7 +544,7 @@ test('with the Hub off every /hub/ route answers 404 and capabilities say so', a
     await new Promise(resolve => bare.listen(0, '127.0.0.1', resolve));
     const caps = await (await fetch(`http://127.0.0.1:${bare.address().port}/api/capabilities`)).json();
     bare.close();
-    assert.deepEqual([caps.hub, caps.chat, caps.transcribe], [false, false, false]);
+    assert.deepEqual([caps.hub, caps.chat], [false, false]);
   } finally { await close(); }
 });
 

@@ -12,7 +12,7 @@
 #   BUW_SITE_URL=…             the public address people sign in at; its origin is the only one a write may come from
 #   BUW_SITE_ORIGINS=…         optional comma list of origins instead (https://a.example,https://b.example); with sign-in on and neither set, every write is refused
 #   REQUIRE_REMOTE_USER=1      writes need the Remote-User header NPM sets after the passkey check
-#   HERMES_URL=…, HERMES_API_KEY=…, STT_URL=…, STT_API_KEY=…   chat and push-to-talk (optional)
+#   HERMES_URL=…, HERMES_API_KEY=…   chat (optional)
 #   HUB_INBOX=inbox-dev, BUW_STATE_KEY=dev-state.json, BUW_DEV=1   the development copy's settings (see docs/workspaces.md)
 #   HUB=1                      turns on the Hub routes (/api/hub/…, hub.mjs); anything else leaves them off
 #   HUB_DISCORD_TOKEN_SHA256=… the sha256 of the Asks bot's token, and

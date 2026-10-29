@@ -24,7 +24,7 @@ async function fixture({ allowedOrigins = [SITE], requireRemoteUser = true } = {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const server = createSiteApi({
     bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser,
-    hub: createHub({ bucket, enabled: true, env: { STT_URL: 'http://127.0.0.1:9/none', HUB_DISCORD_TOKEN_SHA256: 'a'.repeat(64), HUB_DISCORD_OWNER_ID: '100000000000000001' } }), allowedOrigins,
+    hub: createHub({ bucket, enabled: true, env: { HUB_DISCORD_TOKEN_SHA256: 'a'.repeat(64), HUB_DISCORD_OWNER_ID: '100000000000000001' } }), allowedOrigins,
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}/api`;
@@ -68,21 +68,6 @@ test('the Hub routes sit behind the same check', async () => {
     const passed = await send('/hub/asks/x/snooze', { headers: { ...user, ...json, Origin: SITE }, body: '{}' });
     assert.notEqual(passed.status, 403);
     assert.notEqual(passed.status, 415);
-  } finally { await close(); }
-});
-
-test('transcribe takes audio of any codec and nothing else', async () => {
-  const { send, close } = await fixture();
-  try {
-    const post = type => send('/hub/transcribe', { headers: { ...user, 'Content-Type': type, Origin: SITE }, body: 'x' });
-    assert.equal((await post('application/json')).status, 415);
-    assert.equal((await post('text/plain')).status, 415);
-    for (const type of ['audio/webm', 'audio/webm;codecs=opus', 'audio/mp4']) {
-      const got = await post(type);
-      assert.notEqual(got.status, 415, type);
-      assert.notEqual(got.status, 403, type);
-    }
-    assert.equal((await send('/hub/transcribe', { headers: { ...user, 'Content-Type': 'audio/webm' }, body: 'x' })).status, 403, 'Audio still needs the origin.');
   } finally { await close(); }
 });
 

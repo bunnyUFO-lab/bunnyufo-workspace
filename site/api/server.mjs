@@ -312,8 +312,7 @@ export function createSiteApi({
           return json(response, 403, { error: "Writes come only from this site's own pages." });
         }
         const type = String(request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-        const wanted = route === '/hub/transcribe' ? /^audio\/[a-z0-9.+-]+$/ : /^application\/json$/;
-        if (!wanted.test(type)) return json(response, 415, { error: 'Send JSON.' });
+        if (type !== 'application/json') return json(response, 415, { error: 'Send JSON.' });
       }
 
       // The site list the UI loads first: one entry per section in the bucket.
@@ -339,7 +338,7 @@ export function createSiteApi({
             cards: false,
             sections: [...known.keys()],
             store: cards.kind,
-            ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
+            ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false }),
             cardApi: cardApi || null,
             contentOrigin: contentOrigin || null,
             ...(dev ? { dev: await devInfo() } : {}),
@@ -358,7 +357,7 @@ export function createSiteApi({
           cardApi: cardApi || null,
           contentOrigin: contentOrigin || null,
           ...(dev ? { dev: await devInfo() } : {}),
-          ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false, transcribe: false }),
+          ...(hub?.capabilities({ signedIn, requireRemoteUser }) ?? { hub: false, chat: false }),
           ...(reason ? { reason } : {}),
         });
       }

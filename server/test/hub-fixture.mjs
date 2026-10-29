@@ -113,7 +113,7 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     bucketOptions: { endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' },
     hubOptions: { env: {
       BUW_S3_BUCKET: '',
-      ...(upstream ? { HERMES_URL: upstream.url, HERMES_API_KEY: 'fixture-key', STT_URL: `${upstream.url}/v1/audio/transcriptions`, STT_API_KEY: 'fixture-key' } : {}),
+      ...(upstream ? { HERMES_URL: upstream.url, HERMES_API_KEY: 'fixture-key' } : {}),
     } },
   });
   return {
