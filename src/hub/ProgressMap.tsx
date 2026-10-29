@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import type { ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
+import type { MapWayfinder, ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
@@ -53,8 +53,37 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
+      {model?.meta && project && model.wayfinder && <WayfinderHeader key={project} project={project} wayfinder={model.wayfinder} />}
       {model?.meta && project && <MapView key={project} model={model} project={project} nodeId={nodeId} />}
     </>
+  )
+}
+
+/** The Wayfinder destination above the map: one row, with the open questions as links to their nodes. Starts open on a wide box and closed on a narrow one; the state is not remembered. */
+function WayfinderHeader({ project, wayfinder }: { project: string; wayfinder: MapWayfinder }) {
+  const root = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 700) }, [])
+  const { destination, decisions, open: questions } = wayfinder
+  if (!destination && !decisions && !questions.length) return null
+  return (
+    <div className="hub-wayfinder" data-open={open} ref={root}>
+      <div className="hub-wayfinder-row">
+        <span className="hub-wayfinder-eyebrow">Destination</span>
+        {destination && <span className="hub-wayfinder-text">{destination}</span>}
+        {decisions > 0 && <span className="hub-wayfinder-count">{decisions} {decisions === 1 ? 'decision' : 'decisions'}</span>}
+        {questions.length > 0 && (
+          <button type="button" className="hub-wayfinder-toggle" aria-expanded={open} aria-controls="hub-wayfinder-list" onClick={() => setOpen(value => !value)}>
+            Open questions · {questions.length}
+          </button>
+        )}
+      </div>
+      {open && questions.length > 0 && (
+        <ul className="hub-wayfinder-list" id="hub-wayfinder-list">
+          {questions.map(item => <li key={item.id}><a href={mapHash(project, item.id)}><span className="hub-wayfinder-type">{item.type}</span> {item.title}</a></li>)}
+        </ul>
+      )}
+    </div>
   )
 }
 

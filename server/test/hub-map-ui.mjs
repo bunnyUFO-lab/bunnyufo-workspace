@@ -39,7 +39,7 @@ try {
   await desk.locator('.hub-map-wrap').waitFor();
   assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'A first visit opens the first project in table order.');
   const names = await desk.locator('.hub-map-chips .hub-chip').allInnerTexts();
-  assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Nosprint']);
+  assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Nosprint', 'Wayfind']);
 
   step('the Runs on chip: full text at desktop width, the rule as its title');
   const chip = desk.locator('.hub-runs');
@@ -68,6 +68,43 @@ try {
   await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
   await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Cloud');
+
+  step('the Wayfinder row: destination, decisions and open questions at desktop width');
+  await go(desk, '#/~hub/map/wayfind');
+  await desk.locator('.hub-wayfinder').waitFor();
+  assert.equal(await desk.locator('.hub-wayfinder-text').innerText(), 'A tidy Roadmap that tells the owner where to go next, and why, in one line.');
+  assert.equal(await desk.locator('.hub-wayfinder-count').innerText(), '3 decisions');
+  assert.equal(await desk.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true', 'The list starts open on a wide box.');
+  const links = desk.locator('.hub-wayfinder-list a');
+  assert.equal(await links.count(), 2);
+  assert.equal(await desk.locator('.hub-runs').count(), 0, 'The Runs on chip is not repeated in this row, and wayfind is not in the table.');
+  await links.first().click();
+  await desk.locator('.hub-map-panel').waitFor();
+  assert.match(await desk.locator('.hub-map-panel').innerText(), /Which project comes first\?/);
+  await go(desk, '#/~hub/map/magic-loops');
+  await desk.locator('.hub-map-wrap').waitFor();
+  assert.equal(await desk.locator('.hub-wayfinder').count(), 0, 'A project without a map issue has no row.');
+
+  step('the Wayfinder row at phone width: one line, collapsed, the map keeps the rest');
+  await go(phone, '#/~hub/map/wayfind');
+  await phone.locator('.hub-wayfinder').waitFor();
+  const row = () => phone.locator('.hub-wayfinder').boundingBox();
+  assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
+  const collapsed = await row();
+  assert.ok(collapsed.height < 50, `The collapsed row is one line (${collapsed.height}).`);
+  const fits = async what => {
+    const view = await phone.evaluate(() => ({ box: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, bar: document.querySelector('.hub').getBoundingClientRect().bottom }));
+    assert.ok(Math.abs(view.box - (view.bar - 8)) <= 10, `${what}: the map box still reaches the bottom (${view.box} vs ${view.bar}).`);
+  };
+  await fits('collapsed');
+  await noSideways(phone, 'Wayfinder row at 390 collapsed');
+  await phone.locator('.hub-wayfinder-toggle').click();
+  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 2);
+  await fits('expanded');
+  await noSideways(phone, 'Wayfinder row at 390 expanded');
+  const axis = await phone.locator('.hub-map-box').getAttribute('data-axis');
+  if (axis !== null) assert.equal(axis, 'y', 'The row does not change the axis.');
 
   console.log('hub-map-ui: passed');
 } finally {

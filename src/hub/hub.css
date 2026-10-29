@@ -164,12 +164,29 @@
 .hub[data-screen="map"] > .hub-map-chips { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .hub-map-chips > .hub-chips-wrap { flex: 1; min-width: 0; margin: 0; }
 /* Where the project's work runs: a pill beside the project chips, short text on a phone. */
+/* The Wayfinder destination: a row between the chips and the map, never over it, so the map box shrinks. */
+.hub-wayfinder { flex: none; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-md, 10px); background: var(--surface-1); font-size: 0.8rem; }
+.hub-wayfinder-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.hub-wayfinder-eyebrow { flex: none; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+.hub-wayfinder-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-wayfinder[data-open="true"] .hub-wayfinder-text { white-space: normal; overflow: visible; }
+.hub-wayfinder[data-open="true"] .hub-wayfinder-row { flex-wrap: wrap; }
+.hub-wayfinder-count { flex: none; margin-left: auto; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); color: var(--text-dim); white-space: nowrap; }
+.hub-wayfinder-text + .hub-wayfinder-count { margin-left: 0; }
+.hub-wayfinder-toggle { flex: none; padding: 2px 10px; border-radius: var(--radius-pill); border: 1px solid var(--pink); background: var(--pink-dim); color: var(--pink-bright); font: inherit; white-space: nowrap; cursor: pointer; }
+.hub-wayfinder-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-wayfinder-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.hub-wayfinder-list a { display: block; padding: 4px 0; color: inherit; text-decoration: none; }
+.hub-wayfinder-list a:hover { text-decoration: underline; }
+.hub-wayfinder-type { color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px; }
+@media (max-width: 600px) { .hub-wayfinder-eyebrow { display: none; } }
 .hub-runs { flex: none; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; cursor: help; }
 .hub-runs-short { display: none; }
 @media (max-width: 600px) {
   .hub-runs-full { display: none; }
   .hub-runs-short { display: inline; }
 }
+.hub[data-screen="map"] > .hub-wayfinder { flex: none; }
 .hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty { flex: none; }
 /* The map takes everything the chips leave; the toolbar, hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
 .hub-map-wrap { position: relative; flex: 1; min-height: 0; }

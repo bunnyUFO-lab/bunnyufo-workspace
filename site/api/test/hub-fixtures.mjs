@@ -55,13 +55,13 @@ export function eventJson({ kind, ts = new Date(), project = 'probe', bead, sess
 }
 
 /** One Beads 1.3.2 export line. `parent` and `blocks` become the dependencies the export holds. */
-export function beadsIssue({ id, title, status = 'open', type = 'task', parent, blocks = [], labels = [], created = '2026-10-01T10:00:00Z', closed } = {}) {
+export function beadsIssue({ id, title, status = 'open', type = 'task', parent, blocks = [], labels = [], created = '2026-10-01T10:00:00Z', closed, description, updated } = {}) {
   const dependencies = [];
   if (parent) dependencies.push({ issue_id: id, depends_on_id: parent, type: 'parent-child', created_at: created });
   for (const blocker of blocks) dependencies.push({ issue_id: id, depends_on_id: blocker, type: 'blocks', created_at: created });
   return {
     _type: 'issue', id, title: title ?? id, status, priority: 2, issue_type: type, labels: [...labels].sort(),
-    created_at: created, updated_at: created, ...(closed ? { closed_at: closed } : {}), dependencies,
+    created_at: created, updated_at: updated ?? created, ...(description ? { description } : {}), ...(closed ? { closed_at: closed } : {}), dependencies,
   };
 }
 

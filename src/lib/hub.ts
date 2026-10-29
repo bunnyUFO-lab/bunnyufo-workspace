@@ -176,7 +176,10 @@ export interface ProgressMap {
   ageMinutes: number | null
   milestones: MapMilestone[]
   sprints: { name: string; milestones: { id: string; count: number; total: number }[] }[]
+  /** The Wayfinder destination, when the project has an open `wayfinder:map` issue. */
+  wayfinder: MapWayfinder | null
 }
+export interface MapWayfinder { destination: string | null; decisions: number; open: { id: string; title: string; type: string }[] }
 
 export class HubError extends Error {
   status: number

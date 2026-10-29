@@ -94,6 +94,14 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
       beadsIssue({ id: 'ns-t1', title: 'First task', parent: 'ns-m1', created: '2026-10-01T11:00:00Z' }),
       beadsIssue({ id: 'ns-t2', title: 'Second task', parent: 'ns-m1', created: '2026-10-01T12:00:00Z' }),
     ];
+    // A project with a Wayfinder map issue: a destination, three decisions made and two questions open. Its own project, so magic-loops' counts hold.
+    const wayfind = [
+      beadsIssue({ id: 'wf-map', title: 'Wayfinder map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z', updated: '2026-10-20T10:00:00Z', description: '## Destination\n\nA **tidy** Roadmap that tells the owner where to go next, and why, in one line.\n\n## Notes\n\nLater.' }),
+      ...['one', 'two', 'three'].map((name, index) => beadsIssue({ id: `wf-d${index + 1}`, title: `Decision ${name}`, parent: 'wf-map', status: 'closed', closed: '2026-10-10T10:00:00Z', labels: ['wayfinder:decision'], created: `2026-10-02T1${index}:00:00Z` })),
+      beadsIssue({ id: 'wf-q1', title: 'Which project comes first?', parent: 'wf-map', labels: ['wayfinder:question'], created: '2026-10-03T10:00:00Z' }),
+      beadsIssue({ id: 'wf-q2', title: 'Where does the chip go?', parent: 'wf-map', labels: ['wayfinder:question'], created: '2026-10-03T11:00:00Z' }),
+    ];
+    seed.beads('wayfind', wayfind, { pushedAt: minutesAgo(now, 8).toISOString(), host: 'pc.example.test', count: wayfind.length, repo: 'example/wayfind' });
     seed.beads('nosprint', bare, { pushedAt: minutesAgo(now, 10).toISOString(), host: 'pc.example.test', count: bare.length, repo: 'example/nosprint' });
   }
 

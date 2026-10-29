@@ -46,6 +46,50 @@ export function orderSiblings(items, blockers) {
   return placed;
 }
 
+/** Markdown to the plain words it shows: links and images keep their text, emphasis and code marks go. */
+const plainText = text => String(text)
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+  .replace(/[*_`~]+/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+const DESTINATION_MAX = 280;
+
+/** The first paragraph under a `## Destination` heading, as plain text clipped to 280 characters; null when there is none. */
+export function destinationOf(description) {
+  const lines = String(description ?? '').split(/\r?\n/);
+  const at = lines.findIndex(line => /^#{2}\s+destination\s*#*\s*$/i.test(line.trim()));
+  if (at < 0) return null;
+  const paragraph = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^#{1,6}\s/.test(line.trim())) break;
+    if (!line.trim()) { if (paragraph.length) break; continue; }
+    paragraph.push(line);
+  }
+  const text = plainText(paragraph.join(' '));
+  if (!text) return null;
+  return text.length > DESTINATION_MAX ? `${text.slice(0, DESTINATION_MAX - 1).trimEnd()}…` : text;
+}
+
+/**
+ * The Wayfinder header: the open issue labelled `wayfinder:map` with the newest `updated_at`, the
+ * destination in its description, its closed children as decisions and its open children with a
+ * `wayfinder:<type>` label (not `:map`) as open questions, oldest first, at most 8. Null without a map.
+ */
+function wayfinderOf(issues, childrenOf) {
+  const maps = issues.filter(issue => issue.status !== 'closed' && (issue.labels ?? []).includes('wayfinder:map'));
+  if (!maps.length) return null;
+  const map = maps.reduce((best, issue) => (String(issue.updated_at ?? '') > String(best.updated_at ?? '') ? issue : best));
+  const kids = childrenOf.get(map.id) ?? [];
+  const open = kids
+    .filter(issue => issue.status !== 'closed')
+    .map(issue => ({ issue, type: (issue.labels ?? []).find(label => label.startsWith('wayfinder:') && label !== 'wayfinder:map')?.slice('wayfinder:'.length) }))
+    .filter(row => row.type)
+    .sort((a, b) => (created(a.issue) < created(b.issue) ? -1 : created(a.issue) > created(b.issue) ? 1 : a.issue.id < b.issue.id ? -1 : 1))
+    .slice(0, 8)
+    .map(({ issue, type }) => ({ id: issue.id, title: issue.title ?? issue.id, type }));
+  return { destination: destinationOf(map.description), decisions: kids.filter(issue => issue.status === 'closed').length, open };
+}
+
 /**
  * @param events chronological or not; only those naming a task's bead matter
  * @param asks   [{ id, bead?, state }] with the Ask's derived state
@@ -219,5 +263,6 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     project, meta,
     ageMinutes: Number.isNaN(pushed) ? null : Math.max(0, Math.floor((now.getTime() - pushed) / 60000)),
     milestones, sprints,
+    wayfinder: wayfinderOf(issues, childrenOf),
   };
 }
