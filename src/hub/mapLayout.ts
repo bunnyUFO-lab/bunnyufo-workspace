@@ -23,15 +23,15 @@ export interface At { x: number; y: number }
 export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number }
 interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; label: Label; center: At }
 export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean; countAt: At; chevronAt: At }
-/** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. `labelX` and `elbowX` are the horizontal layout's old fields. */
-export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; labelX: number; elbowX: number; elbow: At; countAt: At; chevronAt: At }
+/** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. */
+export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; elbow: At; countAt: At; chevronAt: At }
 export interface TaskNode extends Base { kind: 't'; milestone: string; feature: string; side: 1 | -1; slot: number; signs: Sign[]; lines: string[]; up: boolean }
 export type MapNode = MilestoneNode | FeatureNode | TaskNode
 
-/** `points` run from the spine to the end of the branch; `x0…x2` are the horizontal layout's old fields. */
-export interface Branch { id: string; milestone: string; points: [number, number][]; x0: number; y0: number; x1: number; y1: number; x2: number; col: string; lit: boolean }
-/** `rect` is the bar or pill, `labelAt` the sprint's name; `partsAt` the "4 of 7" text, drawn beside the name in the horizontal layout and left to the tooltip in the vertical one. `x1`, `x2`, `y` are the old fields. */
-export interface Band { name: string; rect: { x: number; y: number; w: number; h: number }; labelAt: At & { anchor: 'start' | 'end' }; partsAt: At | null; x1: number; x2: number; y: number; col: string; parts: string }
+/** `points` run from the spine to the end of the branch. */
+export interface Branch { id: string; milestone: string; points: [number, number][]; col: string; lit: boolean }
+/** `rect` is the bar or pill, `labelAt` the sprint's name; `partsAt` the "4 of 7" text, drawn beside the name in the horizontal layout and left to the tooltip in the vertical one. */
+export interface Band { name: string; rect: { x: number; y: number; w: number; h: number }; labelAt: At & { anchor: 'start' | 'end' }; partsAt: At | null; col: string; parts: string }
 /** The stretch of the layout axis a milestone owns: from the middle of the gap before it to the middle of the gap after it. The first slot runs on to -Infinity, the last to Infinity. */
 export interface Slot { id: string; from: number; to: number }
 export interface Layout {
@@ -44,9 +44,6 @@ export interface Layout {
   spine: { from: [number, number]; to: [number, number] }
   /** The point on the spine that marks now. */
   now: At
-  /** The horizontal layout's old fields: in 'y' both are 0. */
-  spineY: number
-  nowX: number
   nodes: MapNode[]
   branches: Branch[]
   bands: Band[]
@@ -125,9 +122,9 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           const bx = side * BR
           const cy = y2 + FR
           const lines = wrap(feature.title)
-          branches.push({ id: feature.id, milestone: milestone.id, points: [[0, y0], [bx, y1], [bx, y2]], x0: 0, y0, x1: bx, y1, x2: bx, col, lit: state !== 'later' })
+          branches.push({ id: feature.id, milestone: milestone.id, points: [[0, y0], [bx, y1], [bx, y2]], col, lit: state !== 'later' })
           nodes.push({
-            kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: bx, y: y2, side, state, col, open: featureOpen, labelX: bx, elbowX: bx,
+            kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: bx, y: y2, side, state, col, open: featureOpen,
             done: featureDone, total: feature.tasks.length, marks: featureMarks,
             center: { x: bx, y: cy }, elbow: { x: bx, y: y1 },
             label: { x: bx + side * (FR + 8), y: cy + 4 - (lines.length - 1) * 7, anchor: side < 0 ? 'end' : 'start', lines, step: 14 },
@@ -154,10 +151,10 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const by = SPINE_Y + side * level * LV
         const length = featureOpen ? BR + 34 + feature.tasks.length * TS : 120
         const ex = bx + BR + length
-        branches.push({ id: feature.id, milestone: milestone.id, points: [[bx, SPINE_Y], [bx + BR, by], [ex, by]], x0: bx, y0: SPINE_Y, x1: bx + BR, y1: by, x2: ex, col, lit: state !== 'later' })
+        branches.push({ id: feature.id, milestone: milestone.id, points: [[bx, SPINE_Y], [bx + BR, by], [ex, by]], col, lit: state !== 'later' })
         const cx = ex + FR
         nodes.push({
-          kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen, labelX: bx + BR + 6, elbowX: bx + BR,
+          kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen,
           done: featureDone, total: feature.tasks.length, marks: featureMarks,
           center: { x: cx, y: by }, elbow: { x: bx + BR, y: by },
           label: featureOpen ? { x: cx + FR + 8, y: by + 4, anchor: 'start' } : { x: bx + BR + 6, y: by + (side < 0 ? -10 : 18), anchor: 'start' },
@@ -180,7 +177,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         }
         span = Math.max(span, ex - x + (featureOpen ? 120 : 90))
       })
-      if (vertical) span = Math.max(span, cursor - x + 6)
+      // Clear of the last feature's chevron, which sits under its circle and would meet the next milestone's chevron.
+      if (vertical) span = Math.max(span, cursor - x + 36)
     }
     milestoneEnd.set(milestone.id, vertical && isOpen ? cursor : x + 30)
     x += span
@@ -217,7 +215,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const bar = -62 - k * BAND_GAP
         bands.push({
           name: sprint.name, rect: { x: bar - 4, y: top, w: 8, h: Math.max(...ends) - top }, labelAt: { x: bar + 4, y: top - 6, anchor: 'end' }, partsAt: null,
-          x1: bar - 4, x2: bar + 4, y: top, col: SPRINT_COLORS[k % SPRINT_COLORS.length], parts,
+          col: SPRINT_COLORS[k % SPRINT_COLORS.length], parts,
         })
         return
       }
@@ -229,7 +227,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
       bands.push({
         name: sprint.name, rect: { x: left, y: by, w: right - left, h: 22 }, labelAt: { x: left + 10, y: by + 15, anchor: 'start' },
         partsAt: { x: left + 12 + sprint.name.length * 6.4 + 10, y: by + 15 },
-        x1: left, x2: right, y: by, col: SPRINT_COLORS[k % SPRINT_COLORS.length], parts,
+        col: SPRINT_COLORS[k % SPRINT_COLORS.length], parts,
       })
     })
   }
@@ -242,7 +240,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   if (!vertical) {
     return {
       axis: 'x', slots, width: end, height: HEIGHT, spine: { from: [16, SPINE_Y], to: [end - 14, SPINE_Y] }, now: { x: nowAlong, y: SPINE_Y },
-      spineY: SPINE_Y, nowX: nowAlong, nodes, branches, bands,
+      nodes, branches, bands,
     }
   }
   // The drawing is as wide as the text and circles reach on both sides of the spine.
@@ -259,6 +257,6 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   for (const band of bands) left = Math.min(left, band.labelAt.x - band.name.length * 6.4, band.rect.x)
   return {
     axis: 'y', slots, width: right - left, height: end, spine: { from: [0, 16], to: [0, end - 14] }, now: { x: 0, y: nowAlong },
-    spineY: 0, nowX: 0, nodes, branches, bands,
+    nodes, branches, bands,
   }
 }

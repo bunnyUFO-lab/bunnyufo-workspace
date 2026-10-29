@@ -874,8 +874,8 @@ try {
   await go(phone, '#/~hub/map/magic-loops');
   await phone.locator('.hub-map-box svg').waitFor();
   await phone.waitForTimeout(300);
-  const wide = await phone.evaluate(() => ({ picture: document.querySelector('.hub-map-box svg').getBoundingClientRect().width / (Number(document.querySelector('.hub-map-box').dataset.view.split(',')[2]) || 1), frame: document.querySelector('.hub-map-box').clientWidth }));
-  assert.ok(wide.picture > wide.frame, 'The map is wider than the screen.');
+  const tall = await phone.evaluate(() => { const picture = document.querySelector('.hub-map-box svg').getBoundingClientRect(); return { axis: document.querySelector('.hub-map-box').dataset.axis, w: picture.width, h: picture.height }; });
+  assert.ok(tall.axis === 'y' && tall.h > tall.w, `The map is taller than it is wide, and vertical (${tall.axis}, ${tall.w} x ${tall.h}).`);
   await noSideways(phone, 'Progress map');
   const tops = await phone.evaluate(() => ({
     chips: [...document.querySelectorAll('.hub-chips a')].map(item => Math.round(item.getBoundingClientRect().top)),
@@ -899,10 +899,17 @@ try {
   await phone.locator('.hub-map-box svg').waitFor();
   assert.equal(await phone.locator('[data-hint]').count(), 0, 'And it stays gone after a reload.');
   await phone.locator('button:has-text("Fit")').tap();
+  // The vertical map fits at a readable size, close to the opening threshold: pinch in first, so the pinch out has room to zoom without opening anything.
+  const cdp = await phone.context().newCDPSession(phone);
+  const centre = { x: phoneBox.x + phoneBox.width / 2, y: phoneBox.y + phoneBox.height / 2 };
+  const squeeze = gap => [{ x: centre.x - gap, y: centre.y, id: 0 }, { x: centre.x + gap, y: centre.y, id: 1 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: squeeze(90) });
+  for (let at = 1; at <= 8; at += 1) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: squeeze(90 - at * 6) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await phone.waitForTimeout(400);
   const probeDot = phone.locator('[data-node="ml-m2"] > circle').first();
   await probeDot.evaluate(element => { element.__probe = 1; });
   const pinchFrom = await viewOf(phone);
-  const cdp = await phone.context().newCDPSession(phone);
   const mid = { x: phoneBox.x + phoneBox.width / 2, y: phoneBox.y + phoneBox.height / 2 };
   const touch = gap => [{ x: mid.x - gap, y: mid.y, id: 0 }, { x: mid.x + gap, y: mid.y, id: 1 }];
   // Below the opening threshold (1.5), so this pinch only zooms: how far depends on where the fit starts.
