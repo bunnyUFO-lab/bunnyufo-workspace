@@ -1,4 +1,8 @@
+import { useState } from 'react'
+import type { DragEvent } from 'react'
 import { host } from '../lib/host'
+import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
+import { setTarget } from './stepTarget'
 import HubImage from './HubImage'
 import { MAX_ISSUES, VERDICT_LABEL } from './playtest'
 import type { usePlaytestReport } from './playtest'
@@ -7,6 +11,17 @@ import type { usePlaytestReport } from './playtest'
 export default function PlaytestReport({ report, checklistId, live }: { report: ReturnType<typeof usePlaytestReport>; checklistId: string; live: boolean }) {
   const { rating, setRating, verdict, setVerdict, issues, draft, setDraft, shot, setShot, uploading, problem } = report
   const can = live && host.write
+  const [over, setOver] = useState(false)
+  const touch = () => setTarget({ checklist: checklistId, step: 'issue' })
+  const onDrag = (event: DragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.type !== 'drop') { setOver(true); return }
+    setOver(false)
+    touch()
+    void report.attach(pictureFiles(event.dataTransfer)[0] ?? event.dataTransfer.files[0])
+  }
   return (
     <div className="pt-report" data-playtest-report>
       <div className="pt-block">
@@ -35,7 +50,10 @@ export default function PlaytestReport({ report, checklistId, live }: { report: 
           </ul>
         )}
         {can && issues.length < MAX_ISSUES && (
-          <div className="pt-add">
+          <div
+            className={`pt-add${over ? ' hub-cl-drop' : ''}`} data-issue-row onPointerDown={touch} onFocus={touch}
+            onDragEnter={onDrag} onDragOver={onDrag} onDrop={onDrag} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false) }}
+          >
             <input
               className="pt-input" type="text" maxLength={500} value={draft} placeholder="What went wrong?" aria-label="Describe an issue" data-issue-input
               onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); report.add() } }}

@@ -3,6 +3,7 @@ import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import type { ChatLine, ChatSummary, Item } from '../lib/hub'
 import { HubError, hubGet, remember } from '../lib/hub'
 import { host } from '../lib/host'
+import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { plainText, streamChat } from './chatStream'
@@ -136,15 +137,14 @@ function ChatView({ id }: { id?: string }) {
   }
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files).filter(isPicture)
+    const files = pictureFiles(event.clipboardData)
     if (!files.length) return
     if (!event.clipboardData.getData('text/plain')) event.preventDefault()
     void addFiles(files)
   }
 
-  const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files')
   const onDrag = (event: DragEvent) => {
-    if (!hasFiles(event)) return
+    if (!hasFiles(event.dataTransfer)) return
     event.preventDefault()
     setDragging(true)
   }
@@ -152,7 +152,7 @@ function ChatView({ id }: { id?: string }) {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false)
   }
   const onDrop = (event: DragEvent) => {
-    if (!hasFiles(event)) return
+    if (!hasFiles(event.dataTransfer)) return
     event.preventDefault()
     setDragging(false)
     void addFiles(Array.from(event.dataTransfer.files))
