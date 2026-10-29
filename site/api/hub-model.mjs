@@ -307,9 +307,9 @@ export function askItem(ask, state) {
  * `since` is when it reached a state that wants a look (failed, lost, expired).
  */
 export function requestItem(request, state, taken, extra = {}) {
-  const { approved = null, result = null } = extra;
+  const { approved = null, result = null, cloud = null } = extra;
   const target = approved?.target ?? request.target;
-  const since = state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
+  const since = cloud?.since ? cloud.since : state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
   return {
     kind: state === 'proposed' ? 'approval' : state === 'asking' ? 'run-question' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
     ...(taken?.bead ? { bead: taken.bead } : {}),
@@ -317,6 +317,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(request.preset ? { preset: request.preset } : {}),
     ...(state === 'asking' && result?.question ? { question: result.question, ...(result.summary ? { summary: result.summary } : {}) } : {}),
     ...(target ? { target } : {}),
+    ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
     ...(typeof since === 'string' ? { since } : {}),
   };
@@ -396,7 +397,7 @@ export function deriveEventItems(events) {
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now }) {
+export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [] }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
@@ -410,7 +411,14 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   const requestAlerts = requests
     .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)
     .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, title: `Request ${item.state}: ${item.title}` }));
-  const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts];
+  // A cloud request that fired and never started, or whose fire stopped failing, stays an alert until it is dealt with; Retry is on its row.
+  const cloudAlerts = requests
+    .filter(item => item.cloud?.status === 'not-started' || item.cloud?.status === 'fire-failed')
+    .map(item => ({
+      ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, retry: true,
+      title: item.cloud.status === 'not-started' ? `Cloud run did not start: ${item.title}` : `Cloud run could not be fired: ${item.title}`,
+    }));
+  const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts, ...cloudAlerts, ...extraAlerts];
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),

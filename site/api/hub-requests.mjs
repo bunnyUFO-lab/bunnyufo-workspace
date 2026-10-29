@@ -129,7 +129,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
 export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
-  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
+  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
 
   const newestRun = names => {
@@ -162,7 +162,10 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       if (!request || typeof request.text !== 'string') return null;
       const full = { ...request, id };
       const parts = await readParts(id, names, full);
-      return requestItem(full, stateOf(id, names, full, parts, at), parts.taken, parts);
+      const state = stateOf(id, names, full, parts, at);
+      // Where a cloud request stands (queued, fired, waiting, fire-failed, not-started); null for everything else.
+      const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
+      return requestItem(full, state, parts.taken, { ...parts, cloud });
     });
     return rows.filter(Boolean);
   }
@@ -203,6 +206,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       newestFiles(id, names, 'run-'), newestFiles(id, names, 'fire-'),
     ]);
     const { approved } = parts;
+    const cloud = approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved }, at, { withFires: true }).catch(() => null) : null;
     const shown = approved && approved.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved;
     return {
       request,
@@ -212,6 +216,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       runs,
       ...(parts.result ? { result: parts.result } : {}),
       ...(hermesRun ? { hermesRun } : {}),
+      ...(cloud ? { cloud } : {}),
       ...(retry ? { retry } : {}),
       fires,
       ...(stop ? { stop } : {}),

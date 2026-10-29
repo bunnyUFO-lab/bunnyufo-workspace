@@ -469,6 +469,20 @@ fires. `HUB_ROUTINE_BETA` overrides the beta header. `HUB_ROUTINE_DRY_RUN=1` mak
 and sends nothing; the record carries `dryRun: true`, and it wins over real keys. The URL and the token are never logged
 or stored. `/api/capabilities` `cloudRepos` lists the repo keys that have a routine.
 
+The cloud fire queue (`routines.mjs`, `sweep()`): any valid approved cloud request is fired, however it was signed (a tap,
+a policy signature written straight to the bucket, a wait at the cap or after a 429). The sweep runs at start and every
+5 minutes (only with a routine key or the dry run, and a signing key), never twice at once. Candidates are approved, not
+taken, stopped, declined or finished, with no ok fire; the oldest approval goes first. Before a fire the sweep checks the
+approval with the server's public key (signature, `requestSha256` against the stored `request.json`, `expires`); a
+failure writes nothing, logs `skip <id>: <reason>` and raises a Today alert "Approval for <title> failed the server's
+check". At the daily cap a request waits until the owner's next midnight. A 429 from the Fire URL, or a request whose
+`result.json` has `reason: usage-limit`, pauses every cloud fire for 60 minutes (held in memory; a restart costs at most
+one more 429). A fire that failed is tried again 5, 15 and 45 minutes after the attempt before it, then the request
+stops and shows Retry; a 4xx other than 429 stops it at once. A 429 costs no retry. An ok fire 20 minutes old with no
+`taken.json` or `result.json` is "fired, not started": a Today alert with Retry, and never an automatic second fire.
+Request detail and list rows carry `cloud: { status, reason?, next? }` for an `approved` cloud request (detail adds
+`fires`): `status` is `queued`, `fired`, `waiting` (`daily-cap`, `usage-limit` or `retry`), `fire-failed` or `not-started`.
+
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
 
