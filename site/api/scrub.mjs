@@ -6,7 +6,8 @@ const SECRET_ENV = ['HERMES_API_KEY', 'HUB_SIGNING_KEY', 'HUB_DISCORD_NEEDS_YOU'
 
 /** `createScrub(env)` → `(value, max?) → string`: flattened to one line, scrubbed, clipped to `max` (default 300). */
 export function createScrub(env = {}) {
-  const secrets = SECRET_ENV.map(name => String(env[name] ?? '').trim()).filter(value => value.length >= 6);
+  const names = [...SECRET_ENV, ...Object.keys(env).filter(name => /^CLAUDE_ROUTINE_[A-Z0-9_]+_(TOKEN|URL)$/.test(name))];
+  const secrets = names.map(name => String(env[name] ?? '').trim()).filter(value => value.length >= 6);
   return (value, max = 300) => {
     let text = String(value ?? '').replace(/\s+/g, ' ').trim();
     for (const secret of secrets) text = text.split(secret).join('');

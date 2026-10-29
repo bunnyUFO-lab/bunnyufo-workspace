@@ -19,6 +19,7 @@ import {
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
+import { createRoutines, loadRoutines, repoKey } from './routines.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
@@ -243,11 +244,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   let approveReason = 'Approvals are signed on the server; open mission control on the site.';
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
   const scrub = createScrub(env);
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub,
+  // Cloud routines (CLAUDE_ROUTINE_<REPO_KEY>_URL/_TOKEN): which repos can run in the cloud, known before the request module is made.
+  const routineSet = loadRoutines(env);
+  const dryRun = String(env.HUB_ROUTINE_DRY_RUN ?? '').trim() === '1';
+  const hasCloud = repo => dryRun || (!!repo && routineSet.routines.has(repoKey(repo)));
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
     repoProjects: PROJECT_DEFAULTS.map(row => row.id),
     // Repos beyond the projects' own, for Spawn's picker: `HUB_KNOWN_REPOS=owner/name,owner/other`. Bad entries are dropped.
     extraRepos: String(env.HUB_KNOWN_REPOS ?? '').split(',').map(item => item.trim()).filter(Boolean),
   });
+  const routines = createRoutines({ env, fetchImpl, bucket, key, requests: requestFiles, listFolders, putCreateOnly, cached, fail, signingKey, now, log: line => log(scrub(line, 400)), scrub });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
@@ -938,6 +944,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The request module, for the later items that sign (follow-ups, policy) and for the Hermes follower to plug its hooks into. */
     requests: requestFiles,
     requestHooks: requestFiles.hooks,
+    /** The cloud routines module (fire, record, cap), for the tests. */
+    routines,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
@@ -950,7 +958,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       return {
         hub: on, ...chat.capabilities({ enabled: on, signedIn, requireRemoteUser }),
         // Only a host with the Hub on says anything about approving: the local service (no Hub) keeps its old answer.
-        ...(on ? { approve: !!signingKey && signedIn, ...(signingKey && signedIn ? {} : { approveReason: signingKey ? 'Sign in to approve.' : approveReason }), policy: policy.kinds } : {}),
+        ...(on ? { approve: !!signingKey && signedIn, ...(signingKey && signedIn ? {} : { approveReason: signingKey ? 'Sign in to approve.' : approveReason }), policy: policy.kinds, cloudRepos: routines.cloudRepos() } : {}),
       };
     },
     /**

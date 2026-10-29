@@ -454,7 +454,10 @@ test('approve refuses: no user 401, no key 503, a target outside the preset 400,
     assert.equal((await keyed.post(`/hub/requests/${noRepo.id}/approve`, { target: 'cloud' })).status, 400);
     const withRepo = preset(rid('repo', 'r555'), { preset: 'code-task', target: 'pc', repo: 'example/probe' });
     keyed.put(withRepo);
-    assert.equal((await keyed.post(`/hub/requests/${withRepo.id}/approve`, { target: 'cloud' })).status, 201, 'With a repo a cloud approval is signed; the hand-off decides when it starts.');
+    const noRoutine = await keyed.post(`/hub/requests/${withRepo.id}/approve`, { target: 'cloud' });
+    assert.equal(noRoutine.status, 400, 'A repo with no cloud routine is refused before anything is signed.');
+    assert.match(noRoutine.body.error, /No cloud routine for example\/probe/);
+    assert.equal(keyed.fake.text(`sections/inbox/requests/${withRepo.id}/approved.json`), null);
   } finally { await keyed.close(); await keyless.close(); }
 });
 

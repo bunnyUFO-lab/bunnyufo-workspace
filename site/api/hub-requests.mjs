@@ -119,16 +119,17 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param listFolders   `(root, at) → Map<id, Set<file name>>` for this month and the one before
  * @param pool          bounded parallel map
  * @param projectRepo  `(project) → 'owner/name' | undefined`: the repo the project's section tracks
- * @param cloudRepos   `() → string[]`: repos with a cloud routine (none until cloud runs exist)
+ * @param cloudRepos   `() → string[]`: repos with a cloud routine
+ * @param hasCloud     `(repo) → boolean`: whether a repo has a cloud routine (default: `cloudRepos()` holds it)
  * @param signingKey   the Ed25519 private key (signing.mjs `loadSigningKey`), or null: Approve and Stop then answer 503
  * @param approveReason  what the page says when there is no key
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
-  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
+  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
 
   const newestRun = names => {
@@ -236,7 +237,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const repo = clean.repo ?? (preset.fields.includes('repo') ? await projectRepo(clean.project) : undefined);
       const needs = clean.needs ?? (preset.needs.length ? preset.needs : undefined);
       if (clean.target && clean.target !== 'at-pc' && !preset.targets.includes(clean.target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-      const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: cloudRepos() });
+      const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: hasCloud });
       proposal = {
         ...(clean.title ? { title: clean.title } : {}), preset: preset.id, ...(repo ? { repo } : {}), ...(needs ? { needs } : {}),
         target: clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}),
@@ -292,7 +293,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const project = query.get('project') ?? '';
       if (!validProject(project)) throw fail('Name the project.', 400);
       const repo = query.get('repo') || (preset.fields.includes('repo') ? await projectRepo(project) : undefined);
-      return route({ preset, project, repo: repo || undefined, cloudRepos: cloudRepos() });
+      return route({ preset, project, repo: repo || undefined, cloudRepos: hasCloud });
     }
     if (path === '/hub/presets/brief') {
       const { request } = await loadOne(query.get('request') ?? '', at);
@@ -372,6 +373,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
     if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
+    if (chosen === 'cloud' && !hasCloud(request.repo)) throw fail(`No cloud routine for ${request.repo}.`, 400);
     const body = {
       v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
@@ -382,15 +384,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     await writeSigned(id, 'approved.json', approved, 'That request is already approved.');
     // The approval is signed and stored. A target that cannot start it now makes the request wait; it never fails the approval.
     let waiting;
+    let cloud;
     try {
       const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
       if (handed?.waiting) waiting = handed.waiting;
+      if (chosen === 'cloud' && handed) cloud = { fired: handed.fired === true, ...(handed.reason ? { reason: handed.reason } : {}), ...(handed.next ? { next: handed.next } : {}) };
     } catch (error) {
       log(`[hub] hand-off to ${chosen} failed for ${id}: ${scrub(error.message, 120)}`);
       waiting = `Could not start yet: ${scrub(error.message, 80)}`;
     }
     const after = await loadOne(id, at).catch(() => null);
-    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}) };
+    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(cloud ? { cloud } : {}) };
   }
 
   /** The signed stop of a request, allowed only in the given states. */
@@ -514,8 +518,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }
   }
 
+  /** `POST /hub/requests/:id/fire`: Retry for an approved cloud request. The routines module does the work. */
+  const fireRoute = (id, _raw, user, at) => live.retryFire(id, user, at);
+
   /** The POST routes under `/hub/requests/:id/`. Each needs a signed-in user, even where REQUIRE_REMOTE_USER is off. */
-  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'answer-run': answerRunRoute };
+  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'answer-run': answerRunRoute, fire: fireRoute };
 
   async function post(id, action, raw, user, at) {
     if (!Object.hasOwn(actions, action)) throw fail('Not found', 404);

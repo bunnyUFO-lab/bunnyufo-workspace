@@ -111,7 +111,7 @@ export const RULES = [
 
 /**
  * Where a request should run. First match wins; returns `{ target, rule, why }`. `cloudRepos` lists the repos
- * that have a cloud routine (empty until cloud runs exist). The result is always one of the preset's targets
+ * that have a cloud routine, or is a function `(repo) → boolean`. The result is always one of the preset's targets
  * or `at-pc`.
  */
 export function route({ preset: given, project, needs = [], repo, cloudRepos = [] }) {
@@ -130,7 +130,7 @@ export function route({ preset: given, project, needs = [], repo, cloudRepos = [
   if (found.target !== 'at-pc' && !preset.targets.includes(found.target)) {
     found = { ...found, target: preset.targets[0], why: `${found.why}; ${preset.label} runs on ${preset.targets[0]}` };
   }
-  if (found.target === 'cloud' && !cloudRepos.includes(repo)) {
+  if (found.target === 'cloud' && !(typeof cloudRepos === 'function' ? cloudRepos(repo) : cloudRepos.includes(repo))) {
     found = { ...found, target: 'pc', why: `no cloud routine for ${repo || 'this repo'} yet` };
   }
   return found;
