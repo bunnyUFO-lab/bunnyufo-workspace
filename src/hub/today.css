@@ -47,6 +47,10 @@
 .alert-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--st-failed) 12%, transparent); color: var(--st-failed); flex: none; }
 .alert-icon svg { width: 15px; height: 15px; }
 .alert-row .nrow-text b, .alert-row .nrow-text small { white-space: normal; }
+.today-head p.today-cloud { margin-top: 4px; font-size: 12.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.alert-row { flex-wrap: wrap; }
+.alert-row .alert-retry { min-height: 44px; margin-left: auto; }
+.alert-row [data-alert-retry-error] { flex-basis: 100%; }
 
 .today .rise { animation: today-rise 0.2s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
 @keyframes today-rise { from { opacity: 0; transform: translateY(8px); } }

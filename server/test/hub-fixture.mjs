@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, work = false, signing = false, chatRuns = false, sheets = false } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -152,7 +152,9 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
       // A throwaway Ed25519 key made for this run, so Approve can sign. Off by default: the service then only saves proposals.
       ...(signing ? { HUB_SIGNING_KEY: generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') } : {}),
       ...(upstream ? { HERMES_URL: upstream.url, HERMES_API_KEY: 'fixture-key', HUB_CHAT_RUNS: chatRuns ? '1' : '0' } : {}),
-    } },
+      // Cloud routines, the dry run and the like: a test sets them here, with a `fetchImpl` that stands in for the routine.
+      ...env,
+    }, ...(fetchImpl ? { fetchImpl } : {}) },
   });
   return {
     url: service.urls.workspace, origin: service.origin, service, fake, hermes: upstream, seed, now,

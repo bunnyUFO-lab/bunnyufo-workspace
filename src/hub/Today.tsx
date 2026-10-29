@@ -1,7 +1,7 @@
-import { useContext } from 'react'
+import { useContext, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Item, Today as TodayData } from '../lib/hub'
-import { ago, clock } from '../lib/hub'
+import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
@@ -39,6 +39,23 @@ function eyebrow(now: Date) {
   return `${day} · ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
+/** Retry on a cloud alert: fires the request again, then tells the other screens. */
+function AlertRetry({ request }: { request: string }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const retry = async () => {
+    setBusy(true)
+    setProblem(null)
+    try { await hubPost(`/requests/${encodeURIComponent(request)}/fire`, {}) } catch (failure) { setProblem(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false); window.dispatchEvent(new Event(HUB_WROTE)) }
+  }
+  return (
+    <>
+      <button type="button" className="hub-btn alert-retry" disabled={busy} onClick={() => void retry()} data-alert-retry={request}>Retry</button>
+      {problem && <small className="hub-error" role="alert" data-alert-retry-error>{problem}</small>}
+    </>
+  )
+}
+
 export default function Today() {
   const shared = useContext(TodayContext)
   const own = useHubData<TodayData>(shared ? null : '/today')
@@ -64,6 +81,7 @@ export default function Today() {
           <div className="today-eyebrow" data-today-eyebrow>{eyebrow(now)}</div>
           <h2>{greeting(now.getHours())}</h2>
           <p>{sentence}</p>
+          {data.cloud && <p className="today-cloud" data-today-cloud title={`Cloud runs fired today. The count starts again at ${clock(data.cloud.next)}.`}>Cloud: {data.cloud.used} of {data.cloud.cap} today</p>}
         </div>
         <div className="today-actions">
           <span className="hub-muted">Updated {at ? clock(at.toISOString()) : ''}</span>
@@ -112,6 +130,7 @@ export default function Today() {
               <div key={event.file} className="alert-row" data-alert>
                 <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
                 <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+                {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
               </div>
             )) : <p className="hub-empty">No alerts.</p>}
           </section>
