@@ -193,3 +193,8 @@ export function beadsCopy({ issues, pushedAt, host = 'test-pc', worktree = 'wt-a
     text: jsonl(issues),
   };
 }
+
+/** An avatar choice file the way the Hub writes it. */
+export function teamAvatarJson({ now = new Date(), kind = 'builtin', key = 'developer', salt = 3, by = 'owner' } = {}) {
+  return { kind, ...(kind === 'random' ? { salt } : { key }), at: now.toISOString(), by };
+}

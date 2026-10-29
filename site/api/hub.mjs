@@ -22,11 +22,12 @@ import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
+import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -260,6 +261,65 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     if (!newest) return null;
     const got = await fresh(`pc/${newest}`);
     return got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+  }
+
+  /** Hermes `/health` (no key, 1.5 s), cached for 60 s. `null` when HERMES_URL is not set. */
+  let hermesHealth = { at: 0, value: null };
+  async function hermesState() {
+    const base = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
+    if (!base) return null;
+    if (Date.now() - hermesHealth.at < 60000) return hermesHealth.value;
+    let ok = false;
+    try { ok = (await fetchImpl(`${base}/health`, { signal: AbortSignal.timeout(1500) })).ok; } catch { ok = false; }
+    hermesHealth = { at: Date.now(), value: { ok } };
+    return hermesHealth.value;
+  }
+
+  /** The ISO time of the newest chat file, or ''. */
+  async function lastChatAt() {
+    const { objects } = await bucket.list(folder('chat'));
+    const times = objects.filter(object => object.key.endsWith('.jsonl') && object.lastModified).map(object => new Date(object.lastModified).getTime()).filter(Number.isFinite);
+    return times.length ? new Date(Math.max(...times)).toISOString() : '';
+  }
+
+  /** The newest valid avatar choice file of each agent, or none. Names sort by their stamp, so the last is the newest. */
+  async function avatarChoices() {
+    const choices = {};
+    await Promise.all(AGENTS.map(async agent => {
+      const base = folder(`team/${agent.id}`);
+      const { objects } = await bucket.list(base);
+      const names = objects.map(object => object.key.slice(base.length)).filter(name => AVATAR_FILE_RE.test(name)).sort().reverse().slice(0, 5);
+      for (const name of names) {
+        const choice = checkAvatar((await fresh(`team/${agent.id}/${name}`))?.value);
+        if (choice) { choices[agent.id] = choice; return; }
+      }
+    }));
+    return choices;
+  }
+
+  async function teamView(at) {
+    const [window, status, hermes, lastChat, choices] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices()]);
+    const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
+    const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, at });
+    return { agents: buildTeam({ statuses, choices }) };
+  }
+
+  /** The owner's avatar choice: a create-only file the Hub alone writes (owner-only in the card API). */
+  async function chooseAvatar(agentId, raw, user, at) {
+    if (!AGENTS.some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
+    const choice = checkAvatar(raw);
+    if (!choice) throw fail('An avatar is a built-in key, or a random one with a whole number from 0 to 9999.', 400);
+    const body = `${JSON.stringify({ ...choice, at: at.toISOString(), by: user || 'local' }, null, 2)}
+`;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await bucket.put(key(`team/${agentId}/avatar-${markStamp(at)}-${randomId(4)}.json`), body, { contentType: 'application/json', ifNoneMatch: '*' });
+        break;
+      } catch (error) {
+        if (error.status !== 412 || attempt >= 2) throw error;
+      }
+    }
+    return { status: 200, body: { ok: true, ...choice } };
   }
 
   const stale = what => fail(`This ${what} changed while you were looking; reload and try again.`, 409);
@@ -919,6 +979,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const got = await fresh(`drawings/${match[1]}/drawing.excalidraw`);
             if (!got) throw fail('No such drawing.', 404);
             reply({ text: got.text, etag: got.etag });
+          } else if (route === '/hub/team') {
+            reply(await teamView(at));
           } else {
             throw fail('Not found', 404);
           }
@@ -951,6 +1013,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await deleteDrawing(match[1], user, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
           send(await saveDrawingOld(match[1], raw));
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {
+          send(await chooseAvatar(match[1], raw, user, at));
         } else {
           throw fail('Not found', 404);
         }
