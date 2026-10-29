@@ -42,6 +42,10 @@ async function setup() {
     `cloud=${sha('tok-cloud')}:read=*;write=inbox`,
     `devbot=${sha('tok-devbot')}:read=*;write=inbox-dev`,
     `deleter=${sha('tok-deleter')}:read=*;write=inbox;delete=inbox`,
+    `pc-runner=${sha('tok-pc-runner')}:read=*;write=inbox|inbox-dev`,
+    `cloud-magic-loops=${sha('tok-cloud-ml')}:read=*;write=inbox|inbox-dev`,
+    `cloud-sprite-studio=${sha('tok-cloud-ss')}:read=*;write=inbox`,
+    `cloud-magic=${sha('tok-cloud-m')}:read=*;write=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
   const call = async (method, rawPath, { token = 'tok-all', body, query, base64, headers = {} } = {}) => {
@@ -613,6 +617,122 @@ test('the Lambda entry point: the passphrase set at deploy opens every section',
     assert.equal((await ask('four random words')).statusCode, 401);
   } finally {
     process.env = saved;
+    await fake.close();
+  }
+});
+
+const HUB_ONLY = [
+  'requests/r-1/approved.json', 'requests/r-1/stop.json', 'requests/r-1/hermes-run.json', 'requests/r-1/hermes-retry.json',
+  'requests/r-1/fire-20261029T100000000Z-ab12.json', 'requests/r-1/answer-20261029T100000000Z-ab12.json',
+  'hermes-approvals/h-1/approval.json', 'hermes-approvals/h-1/answer.json',
+];
+const RUN_FILES = ['taken.json', 'run-20261029T100000000Z-ab12.json', 'result.json', 'report.md'];
+const bytes = text => Buffer.from(text);
+
+test('inbox: approvals, stops, Hermes runs, fire records, answers and Hermes approvals are written by the Hub only, in both inboxes', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    for (const inbox of ['inbox', 'inbox-dev']) {
+      const put = (token, file) => call('PUT', `/sections/${inbox}/files/${file}`, { token, body: bytes('{}'), base64: true });
+      for (const file of HUB_ONLY) {
+        for (const token of ['tok-pc-runner', 'tok-cloud-ml', ...(inbox === 'inbox' ? ['tok-hermes', 'tok-cloud'] : ['tok-devbot'])]) {
+          const refused = await put(token, file);
+          assert.equal(refused.status, 403, `${inbox} ${file} ${token}`);
+          assert.equal(refused.data.error, 'Only the Hub writes answers.');
+        }
+        assert.equal((await call('POST', `/sections/${inbox}/uploads`, { token: 'tok-pc-runner', body: { files: [{ path: file }] } })).status, 403, `${file} by upload URL`);
+        assert.equal(fake.text(`sections/${inbox}/${file}`), null);
+        assert.equal((await put('tok-all', file)).status, 200, `${file} by the passphrase`);
+        if (inbox === 'inbox') assert.equal((await call('DELETE', `/sections/${inbox}/files/${file}`, { token: 'tok-deleter' })).status, 403, `${file} delete`);
+        assert.ok(fake.text(`sections/${inbox}/${file}`), `${file} is still there`);
+      }
+    }
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: nothing else widened; other request files and other folders stay writable by a limited token', async () => {
+  const { fake, call } = await setup();
+  try {
+    const put = (token, file, headers) => call('PUT', `/sections/inbox/files/${file}`, { token, body: bytes('{}'), base64: true, headers });
+    for (const file of [
+      'events/e.json', 'asks/x/pickup.json', 'requests/r-1/fired.json', 'requests/r-1/running.json', 'requests/r-1/taken.json.bak',
+      'requests/r-1/sub/taken.json', 'requests/r-1/result.json.txt', 'requests/r-1/answers.json', 'requests/r-1/approved.jsonl',
+      'hermes-approvalsx/h-1/a.json', 'beads/p/c.jsonl',
+    ]) {
+      assert.equal((await put('tok-hermes', file)).status, 200, file);
+    }
+    assert.equal((await put('tok-cloud', 'requests/r-1/declined.json')).status, 403, 'still the Hub\'s');
+    assert.equal((await call('PUT', '/sections/inbox/cards/c', { token: 'tok-pc-runner', body: card('c') })).status, 403, 'a runner writes no cards');
+    assert.equal((await call('GET', '/sections', { token: 'tok-pc-runner' })).status, 200);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: run files go to pc-runner, to cloud-<project> for its own project\'s request, and to the passphrase, nobody else', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    for (const inbox of ['inbox', 'inbox-dev']) {
+      fake.seed(`sections/${inbox}/requests/m-1/request.json`, JSON.stringify({ id: 'm-1', project: 'magic-loops' }), 'application/json');
+      fake.seed(`sections/${inbox}/requests/s-1/request.json`, JSON.stringify({ id: 's-1', project: 'sprite-studio' }), 'application/json');
+      fake.seed(`sections/${inbox}/requests/bad-1/request.json`, 'not json', 'text/plain');
+      let n = 0;
+      const put = (token, id, file) => call('PUT', `/sections/${inbox}/files/requests/${id}/${file}`, { token, body: bytes(`{"n":${n += 1}}`), base64: true });
+      const upload = (token, id, file) => call('POST', `/sections/${inbox}/uploads`, { token, body: { files: [{ path: `requests/${id}/${file}` }] } });
+      for (const file of RUN_FILES) {
+        const label = `${inbox} ${file}`;
+        assert.equal((await put('tok-all', 'm-1', file)).status, 200, `${label} passphrase`);
+        assert.equal((await put('tok-pc-runner', 'm-1', file)).status, 200, `${label} pc-runner on any request`);
+        assert.equal((await put('tok-pc-runner', 'nothing-here', file)).status, 200, `${label} pc-runner, no request.json yet`);
+        assert.equal((await put('tok-cloud-ml', 'm-1', file)).status, 200, `${label} own project`);
+        assert.equal((await upload('tok-cloud-ml', 'm-1', file)).status, 200, `${label} own project by upload URL`);
+        for (const [token, id] of [['tok-cloud-ml', 's-1'], ['tok-cloud-ml', 'nothing-here'], ['tok-cloud-ml', 'bad-1']]) {
+          const refused = await put(token, id, file);
+          assert.equal(refused.status, 403, `${label} ${token} on ${id}`);
+          assert.equal(refused.data.error, 'Only a run writes run files.');
+        }
+        assert.equal((await upload('tok-cloud-ml', 's-1', file)).status, 403, `${label} wrong project by upload URL`);
+        if (inbox === 'inbox') {
+          assert.equal((await call('DELETE', `/sections/inbox/files/requests/m-1/${file}`, { token: 'tok-deleter' })).status, 403, `${label} delete`);
+          assert.equal((await upload('tok-deploy', 'm-1', file)).status, 403, `${label} deploy by upload URL`);
+          assert.equal((await put('tok-cloud-ss', 's-1', file)).status, 200, `${label} the other cloud token, its own project`);
+          assert.equal((await put('tok-cloud-ss', 'm-1', file)).status, 403, `${label} the other cloud token, wrong project`);
+          assert.equal((await put('tok-cloud-m', 'm-1', file)).status, 403, `${label} a name that is only a prefix of the project`);
+          for (const token of ['tok-hermes', 'tok-cloud', 'tok-deploy', 'tok-deleter']) {
+            const refused = await put(token, 'm-1', file);
+            assert.equal(refused.status, 403, `${label} ${token}`);
+            assert.equal(refused.data.error, 'Only a run writes run files.');
+          }
+        }
+      }
+    }
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: request.json is create-only for a limited writer, which cannot claim origin owner', async () => {
+  const { fake, call } = await setup();
+  try {
+    const url = '/sections/inbox/files/requests/q-1/request.json';
+    const write = (token, text, headers = {}) => call('PUT', url, { token, body: bytes(text), base64: true, headers });
+    const agent = JSON.stringify({ id: 'q-1', project: 'magic-loops', origin: { kind: 'agent', name: 'x' } });
+    assert.equal((await write('tok-cloud', agent)).status, 403, 'no condition');
+    assert.equal((await write('tok-cloud', agent, { 'If-Match': '"x"' })).status, 403, 'a replace');
+    assert.equal(fake.text('sections/inbox/requests/q-1/request.json'), null);
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: 'requests/q-1/request.json' }] } })).status, 403, 'by upload URL');
+    const owner = JSON.stringify({ id: 'q-1', project: 'magic-loops', origin: { kind: 'owner', name: 'me' } });
+    assert.equal((await write('tok-hermes', owner, { 'If-None-Match': '*' })).status, 403, 'origin owner');
+    assert.equal(fake.text('sections/inbox/requests/q-1/request.json'), null);
+    assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 200, 'created once');
+    assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 412, 'not twice');
+    assert.equal((await call('DELETE', url, { token: 'tok-deleter' })).status, 403, 'a limited deleter keeps off it');
+    assert.equal((await write('tok-all', owner)).status, 200, 'the passphrase may replace, and may write origin owner');
+  } finally {
     await fake.close();
   }
 });
