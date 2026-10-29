@@ -55,7 +55,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
             {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('map', item.id)}>{item.name}</a>)}
           </div>
         </div>
-        <RunsOnChip runsOn={list.find(item => item.id === project)?.runsOn} />
+        <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
@@ -81,7 +81,12 @@ function WayfinderHeader({ project, wayfinder }: { project: string; wayfinder: M
     <div className="hub-wayfinder" data-open={open} ref={root}>
       <div className="hub-wayfinder-row">
         <span className="hub-wayfinder-eyebrow">Destination</span>
-        {destination && <span className="hub-wayfinder-text">{destination}</span>}
+        {destination && (
+          <button type="button" className="hub-wayfinder-text" aria-expanded={open} aria-controls="hub-wayfinder-list" onClick={() => setOpen(value => !value)}>
+            <span className="hub-wayfinder-dest">{destination}</span>
+            <span className="hub-wayfinder-cue" aria-hidden="true">{open ? 'Less' : 'More ›'}</span>
+          </button>
+        )}
         {decisions > 0 && <span className="hub-wayfinder-count">{decisions} {decisions === 1 ? 'decision' : 'decisions'}</span>}
         {questions.length > 0 && (
           <button type="button" className="hub-wayfinder-toggle" aria-expanded={open} aria-controls="hub-wayfinder-list" onClick={() => setOpen(value => !value)}>
@@ -100,18 +105,31 @@ function WayfinderHeader({ project, wayfinder }: { project: string; wayfinder: M
 
 /** Where a project's work runs by default: full text and the rule in plain words, a short text on a phone. */
 const RUNS_ON: Record<RunsOn, { full: string; short: string; rule: string }> = {
-  pc: { full: 'Runs on: Gaming PC', short: 'PC', rule: 'Work for this project runs on the PC by default.' },
-  cloud: { full: 'Runs on: cloud', short: 'Cloud', rule: 'This project lives in a GitHub repository, so its work runs in the cloud.' },
-  'at-pc': { full: 'Started by you at the PC', short: 'At the PC', rule: 'This project is never started remotely; you start its work at the PC.' },
+  pc: { full: 'Runs on: Gaming PC', short: 'Runs on PC', rule: 'Work for this project runs on the PC by default.' },
+  cloud: { full: 'Runs on: cloud', short: 'Runs in cloud', rule: 'This project lives in a GitHub repository, so its work runs in the cloud.' },
+  'at-pc': { full: 'Started by you at the PC', short: 'You start it', rule: 'This project is never started remotely; you start its work at the PC.' },
 }
 
 function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
   const text = runsOn && RUNS_ON[runsOn]
+  const [shown, setShown] = useState(false)
+  const root = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!shown) return
+    const away = (event: Event) => { if (!root.current?.contains(event.target as Node)) setShown(false) }
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setShown(false) }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', escape) }
+  }, [shown])
   if (!text) return null
   return (
-    <span className="hub-runs" title={text.rule} aria-label={`${text.full}. ${text.rule}`} role="note">
-      <span className="hub-runs-full">{text.full}</span>
-      <span className="hub-runs-short" aria-hidden="true">{text.short}</span>
+    <span className="hub-runs-wrap" ref={root}>
+      <button type="button" className="hub-runs" title={text.rule} aria-label={`${text.full}. ${text.rule}`} aria-expanded={shown} aria-controls="hub-runs-rule" onClick={() => setShown(value => !value)}>
+        <span className="hub-runs-full">{text.full}</span>
+        <span className="hub-runs-short" aria-hidden="true">{text.short}</span>
+      </button>
+      {shown && <span className="hub-runs-rule" id="hub-runs-rule" role="note">{text.rule}</span>}
     </span>
   )
 }
