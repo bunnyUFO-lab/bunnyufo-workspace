@@ -208,7 +208,8 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           const done = isDone(item)
           const mark = pending[item.id]
           const link = safeUrl(item.link)
-          const more = !!item.guide || !!link
+          // Any step can fail, so with Chat every step opens to its Get help link.
+          const more = !!item.guide || !!link || host.chat
           const open = more && isExpanded(item)
           const labelId = `hub-cl-${detail.id}-${item.id}`
           // File names start with the step and a sortable stamp, so the greater name is the newer picture.

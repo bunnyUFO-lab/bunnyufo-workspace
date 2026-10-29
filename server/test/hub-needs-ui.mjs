@@ -688,6 +688,10 @@ try {
 
   step('get help: a step opens Chat on the item with the banner, the draft and what Hermes sees; the draft is not sent');
   await helpPage.goto(`${helpFx.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
+  await helpPage.locator('[data-item="03"]').waitFor();
+  assert.equal(await helpPage.locator('[data-item="03"] [data-toggle]').count(), 1, 'A step with no guide opens too.');
+  await helpPage.locator('[data-item="03"] [data-toggle]').click();
+  await helpPage.locator('[data-item="03"] [data-step-help]').waitFor();
   assert.equal(await helpPage.locator('[data-attach-help]').count(), 0, 'No help chat yet, no checkbox.');
   await helpPage.locator('[data-item="02"] [data-step-help]').click();
   await helpPage.locator('[data-help-banner]').waitFor();
