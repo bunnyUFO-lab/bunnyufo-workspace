@@ -17,14 +17,14 @@
 //   endWith        the final output (default: the deltas joined); end it with a question mark for a run that asks
 //   failWith       every run fails with this error text (the whole chain failed)
 //   chain          the fallback chain, default Codex gpt-6-sol, Anthropic Sonnet, DeepSeek. A run is served by the first
-//                  provider that is not in `providerFailures`; the answer's `runtime` names it.
+//                  provider that is not in `providerFailures`; with `reportServed: true` the answer's `runtime` names it (live Hermes reported empty strings).
 //   providerFailures  { 'openai-codex': '429 usage limit reached' }. A run whose body names `provider` uses only that one (no chain).
 //   forgetRuns     every run route answers 404
 //   dropBufferAfterMs  the events route answers 404 that long after a run ended while status still answers
 //   approvalTimeoutMs  an unanswered approval auto-denies (default 300000)
 //   busy           POST /v1/runs answers 429; maxConcurrent (default 10) answers 429 when that many runs are active
 //   dropStreamAfter n  each events connection closes after n events (reconnect with Last-Event-ID)
-//   keepaliveMs    default 10000
+//   keepaliveMs    default 10000; reportServed fills runtime.provider and model
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 
@@ -33,7 +33,7 @@ const DEFAULT_CHAIN = [
   { provider: 'anthropic', model: 'claude-sonnet-5-5' },
   { provider: 'deepseek', model: 'deepseek-chat' },
 ];
-const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 const openaiError = (message, type, code) => ({ error: { message, type, param: null, code } });
 const json = (response, status, body, headers = {}) => {
   response.writeHead(status, { 'Content-Type': 'application/json', ...headers });
@@ -44,7 +44,7 @@ const notFound = response => json(response, 404, openaiError('Run not found', 'i
 export async function startFakeHermes({
   key = 'test-key', chunks = ['Hel', 'lo ', 'there'], delayMs = 20, onTurn, fail = false, hold = false, refuseImages = false,
   runScript, askApproval = false, endWith, failWith, chain = DEFAULT_CHAIN, providerFailures = {}, forgetRuns = false,
-  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000,
+  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false,
 } = {}) {
   const requests = [];
   const state = { closedEarly: 0 };
@@ -56,6 +56,7 @@ export async function startFakeHermes({
   const byKey = new Map();
 
   const emit = (run, event, fields = {}) => {
+    if (TERMINAL.has(run.status)) return null; // a finished run emits nothing more (an interrupt ends it from outside)
     const entry = { event, run_id: run.id, timestamp: Date.now() / 1000, ...fields, seq: run.events.length };
     run.events.push(entry);
     for (const listener of [...run.listeners]) listener();
@@ -69,15 +70,22 @@ export async function startFakeHermes({
     if (run.stopped) done();
   });
   const wakeAll = run => { for (const wake of [...run.wakers]) wake(); };
+  // S4: provider and model read "" on every completed run. `reportServed: true` fills in the served pair for the fallback tests.
+  // `requested` is there only when the body named a provider or model; route_source is raw_request, model_routes or global.
+  const runtimeOf = run => ({
+    provider: reportServed ? run.servedBy?.provider ?? '' : '', model: reportServed ? run.servedBy?.model ?? '' : '', route_source: run.routeSource,
+    ...(run.requested.provider ? { requested: run.requested } : {}),
+  });
   const finish = (run, status) => {
+    if (TERMINAL.has(run.status)) return;
     run.status = status; run.endedAt = Date.now(); run.pending = [];
-    run.runtime = { provider: run.servedBy?.provider ?? '', model: run.servedBy?.model ?? '', route_source: run.routeSource, requested: run.requested };
+    run.runtime = runtimeOf(run);
     for (const listener of [...run.listeners]) listener();
   };
   const failRun = (run, error) => {
     run.error = error; run.usage = {};
     emit(run, 'error', { error });
-    emit(run, 'run.failed', { error });
+    emit(run, 'run.failed', { error, completed: false, partial: false, interrupted: false });
     finish(run, 'failed');
   };
   const askAndWait = async (run, step) => {
@@ -91,14 +99,14 @@ export async function startFakeHermes({
     emit(run, 'tool.started', { tool: 'write_file', preview: '/tmp/work/AGENTS.md', tool_call_id: toolCall });
     emit(run, 'approval.request', prompt);
     const answer = await new Promise(resolve => {
-      const timer = setTimeout(() => resolve('deny'), approvalTimeoutMs);
+      const timer = setTimeout(() => resolve('timeout'), approvalTimeoutMs);
       run.answer = choice => { clearTimeout(timer); resolve(choice); };
     });
     run.answer = null; run.pending = []; run.status = 'running';
     const toolDone = error => emit(run, 'tool.completed', { tool: 'write_file', duration: 0, error, tool_call_id: toolCall, preview: '' });
     const settled = () => emit(run, 'approval.settled', { prompt_id: prompt.prompt_id, execution_generation: 1 });
-    // S4: after a stop, tool.completed comes first; after an answer or a timeout, approval.settled does.
-    if (answer === 'stopped') { toolDone(true); settled(); return answer; }
+    // S4: after a stop or a timeout, tool.completed comes first; after an answer, approval.settled does.
+    if (answer !== 'once' && answer !== 'deny') { toolDone(true); settled(); return answer; }
     settled();
     toolDone(answer !== 'once');
     return answer;
@@ -110,7 +118,7 @@ export async function startFakeHermes({
     // The named provider alone, or the first of the chain that works.
     const candidates = requested.provider ? [{ provider: requested.provider, model: requested.model ?? '' }] : chain;
     const served = candidates.find(entry => !providerFailures[entry.provider]);
-    run.routeSource = requested.provider ? 'request' : (served && served !== candidates[0] ? 'fallback' : 'global');
+    run.routeSource = requested.provider ? 'raw_request' : 'global';
     if (failWith || !served) return failRun(run, failWith ?? providerFailures[candidates.at(-1).provider]);
     run.servedBy = served;
     let text = '';
@@ -152,7 +160,7 @@ export async function startFakeHermes({
     }
     const out = Math.max(1, Math.ceil(run.output.length / 4));
     run.usage = { input_tokens: 21749, output_tokens: out, total_tokens: 21749 + out };
-    run.runtime = { provider: served.provider, model: served.model, route_source: run.routeSource, requested };
+    run.runtime = runtimeOf(run);
     emit(run, 'run.completed', { output: run.output, usage: run.usage, runtime: run.runtime, completed: true, partial: false, interrupted: false });
     return finish(run, 'completed');
   };
@@ -161,7 +169,7 @@ export async function startFakeHermes({
     return {
       object: 'hermes.run', model: 'main', created_at: run.created, pending_controls: run.pending, run_id: run.id, status: run.status,
       session_id: run.id, admission_id: run.admission, execution_generation: 1,
-      output: done ? run.output : '', usage: done ? run.usage : {}, ...(done ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
+      output: done ? run.output : '', usage: done ? run.usage : {}, ...(run.status === 'completed' ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
     };
   };
   const activeRuns = () => runs.filter(run => !TERMINAL.has(run.status)).length;
@@ -182,7 +190,7 @@ export async function startFakeHermes({
         const entry = run.events[next++];
         const frame = `id: ${entry.seq}\ndata: ${JSON.stringify(entry)}\n\n`;
         sent += 1;
-        const terminal = ['run.completed', 'run.failed', 'run.cancelled'].includes(entry.event);
+        const terminal = ['run.completed', 'run.failed', 'run.cancelled', 'run.interrupted'].includes(entry.event);
         // Cut the connection a moment after the frame is flushed, or the client may never see it.
         if (dropStreamAfter && sent >= dropStreamAfter && !terminal) { stop(); return response.write(frame, () => setTimeout(() => response.destroy(), 15)); }
         response.write(frame);
@@ -223,7 +231,7 @@ export async function startFakeHermes({
     if (!action && request.method === 'GET') return json(response, 200, view(run));
     if (action === 'events' && request.method === 'GET') return streamEvents(request, response, url, run);
     if (action === 'stop' && request.method === 'POST') {
-      if (TERMINAL.has(run.status)) return json(response, 409, openaiError('stale_generation', 'invalid_request_error', 'stale_generation'));
+      if (TERMINAL.has(run.status)) return json(response, 200, view(run)); // already done: its status, as Hermes answers
       run.stopped = true;
       run.stopReason = run.status === 'waiting_for_approval' ? 'interrupted_by_user' : 'interrupted_during_api_call';
       stops.push(run.id);
@@ -234,13 +242,13 @@ export async function startFakeHermes({
       let body = null;
       try { body = JSON.parse(raw.toString('utf8')); } catch { /* answered below */ }
       approvals.push({ run_id: run.id, ...body });
-      if (typeof body?.request_id !== 'string' || !Number.isInteger(body.execution_generation) || !['once', 'deny'].includes(body.choice)) {
+      const exact = body && typeof body === 'object' && Object.keys(body).sort().join() === 'choice,execution_generation,request_id';
+      if (!exact || typeof body.request_id !== 'string' || !Number.isInteger(body.execution_generation) || !['once', 'deny'].includes(body.choice)) {
         return json(response, 400, openaiError('invalid_params', 'invalid_request_error', 'invalid_params'));
       }
       const prompt = run.pending[0];
-      if (!prompt || prompt.prompt_id !== body.request_id || body.execution_generation !== prompt.execution_generation) {
-        return json(response, 409, openaiError('stale_generation', 'invalid_request_error', 'stale_generation'));
-      }
+      if (!prompt || body.execution_generation !== prompt.execution_generation) return json(response, 409, openaiError('stale_generation', 'invalid_request_error', 'stale_generation'));
+      if (prompt.prompt_id !== body.request_id) return json(response, 409, openaiError('approval_not_pending', 'invalid_request_error', 'approval_not_pending'));
       run.approvals.push(body.choice);
       run.answer(body.choice);
       return json(response, 200, { run_id: run.id, status: 'resolved', prompt_id: prompt.prompt_id });
@@ -285,11 +293,23 @@ export async function startFakeHermes({
     url: `http://127.0.0.1:${server.address().port}`, requests, state, runs, approvals, stops,
     release: (id, output) => { const run = byId.get(id); run.released = { output }; wakeAll(run); },
     forget: id => { byId.delete(id); },
+    // A gateway shutdown: a live run ends `interrupted` (event run.interrupted), as Hermes does.
+    interrupt: id => {
+      const run = byId.get(id);
+      if (!run || TERMINAL.has(run.status)) return;
+      const error = 'Gateway shutdown interrupted the run.';
+      emit(run, 'run.interrupted', { error, completed: false, partial: true, interrupted: true });
+      run.error = error; run.output = ''; run.usage = {};
+      finish(run, 'interrupted');
+      run.stopped = true; wakeAll(run); run.answer?.('stopped');
+    },
     close: () => new Promise(resolve => { for (const run of runs) { run.stopped = true; wakeAll(run); run.answer?.('stopped'); } server.closeAllConnections(); server.close(resolve); }),
   };
 }
 
-// Guessed, not seen in S4: the 409 `stale_generation` for a stop on a finished run or an approval with a wrong prompt id, the 400 for a choice
-// that is neither once nor deny, `route_source: "fallback"` and a filled-in `runtime.provider` after a fallback (S4's runs showed empty strings),
-// and a running run's status `output` (S4 saw "" while it waited). Hermes has no wall-clock cap, only an idle timeout (1800 s);
+// Read from Hermes 0.22.5's source: stop on a finished run is 200 with its status; route_source is raw_request, model_routes or global; a prompt id
+// that is not pending is 409 approval_not_pending; the approval body must be exactly request_id, execution_generation, choice; `interrupted` is a
+// terminal status. Live Hermes sends only `run.failed` (no separate `error` event): do not end a run on `error`.
+// Guessed: the 400 for a choice that is neither once nor deny, a filled-in `runtime.provider` after a fallback (`reportServed`; S4's runs showed empty
+// strings), and a running run's status `output` (S4 saw "" while it waited). Hermes has no wall-clock cap, only an idle timeout (1800 s);
 // the 120-minute limit belongs to the site API, so test it with a `{ hold: true }` step and a fake clock in the follower.

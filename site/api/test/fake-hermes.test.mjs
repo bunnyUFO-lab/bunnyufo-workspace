@@ -77,7 +77,7 @@ test('an approval round trip: the body needs execution_generation, deny and once
 test('an unanswered approval auto-denies and the run still completes', () => fake({ askApproval: true, approvalTimeoutMs: 40 }, async hermes => {
   const { body } = await start(hermes);
   const { events } = await readEvents(hermes, body.run_id);
-  assert.deepEqual(events.map(event => event.event).filter(name => name.startsWith('approval') || name === 'tool.completed'), ['approval.request', 'approval.settled', 'tool.completed']);
+  assert.deepEqual(events.map(event => event.event).filter(name => name.startsWith('approval') || name === 'tool.completed'), ['approval.request', 'tool.completed', 'approval.settled']);
   assert.equal(events.find(event => event.event === 'tool.completed').error, true);
   assert.equal((await status(hermes, body.run_id)).status, 'completed');
 }));
@@ -91,7 +91,8 @@ test('stop answers stopping, ends the run cancelled with partial output, and wor
   assert.equal(events.at(-1).event, 'run.cancelled');
   const view = await status(hermes, body.run_id);
   assert.deepEqual([view.status, view.output], ['cancelled', 'one ']);
-  assert.equal((await post(hermes, body.run_id, 'stop', {})).status, 409);
+  const again = await post(hermes, body.run_id, 'stop', {});
+  assert.deepEqual([again.status, (await again.json()).status], [200, 'cancelled']);
 }));
 
 test('stop while waiting for approval cancels the run', () => fake({ askApproval: true }, async hermes => {
@@ -127,7 +128,7 @@ test('failures: failWith, the fallback chain, a named provider, busy and unknown
     const view = await status(hermes, body.run_id);
     assert.deepEqual([view.status, view.error], ['failed', '429 usage limit reached']);
   });
-  await fake({ providerFailures: { 'openai-codex': '429 quota' } }, async hermes => {
+  await fake({ reportServed: true, providerFailures: { 'openai-codex': '429 quota' } }, async hermes => {
     const { body } = await start(hermes);
     const { events } = await readEvents(hermes, body.run_id);
     assert.equal(events.at(-1).runtime.provider, 'anthropic');
@@ -186,4 +187,28 @@ test('keepalive comments arrive on a quiet stream', () => fake({ keepaliveMs: 20
   while (!text.includes(': keepalive')) text += new TextDecoder().decode((await reader.read()).value);
   await reader.cancel();
   assert.ok(text.startsWith(': open'));
+}));
+
+test('a wrong prompt id is 409 approval_not_pending, an extra body key is 400, and runtime reads empty by default', () => fake({ askApproval: true }, async hermes => {
+  const { body } = await start(hermes);
+  const waiting = await until(async () => { const view = await status(hermes, body.run_id); return view.status === 'waiting_for_approval' && view; });
+  const prompt = waiting.pending_controls[0];
+  const wrong = await post(hermes, body.run_id, 'approval', { request_id: 'nope', execution_generation: 1, choice: 'once' });
+  assert.deepEqual([wrong.status, (await wrong.json()).error.code], [409, 'approval_not_pending']);
+  const extra = await post(hermes, body.run_id, 'approval', { request_id: prompt.prompt_id, execution_generation: 1, choice: 'once', note: 'x' });
+  assert.equal(extra.status, 400);
+  await post(hermes, body.run_id, 'approval', { request_id: prompt.prompt_id, execution_generation: 1, choice: 'once' });
+  const done = await until(async () => { const view = await status(hermes, body.run_id); return view.status === 'completed' && view; });
+  assert.deepEqual(done.runtime, { provider: '', model: '', route_source: 'global' });
+}));
+
+test('interrupt ends a live run as interrupted with run.interrupted, and a named provider reports raw_request', () => fake({ runScript: ['x', { hold: true }] }, async hermes => {
+  const { body } = await start(hermes, { input: 'go', provider: 'anthropic', model: 'm' });
+  await until(() => hermes.runs[0].events.length > 0);
+  hermes.interrupt(body.run_id);
+  const { events } = await readEvents(hermes, body.run_id);
+  assert.equal(events.at(-1).event, 'run.interrupted');
+  assert.ok(events.at(-1).error);
+  assert.equal((await status(hermes, body.run_id)).status, 'interrupted');
+  assert.deepEqual(hermes.runs[0].runtime, { provider: '', model: '', route_source: 'raw_request', requested: { provider: 'anthropic', model: 'm' } });
 }));
