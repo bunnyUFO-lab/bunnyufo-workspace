@@ -2,6 +2,7 @@
 // helpers. Every request carries the local service's bearer token when there is one, so the same
 // code runs against the published site and the local app.
 import { authHeaders } from '../local/client'
+import type { PcSummary, WorkingItem } from './hubPc'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'review' | 'blocked' | 'session'
 export interface Item {
@@ -95,6 +96,9 @@ export interface Today {
   recent: HubEvent[]
   alerts: HubEvent[]
   at: string
+  /** From the PC's status, else from events. Absent from an older site API. */
+  working?: WorkingItem[]
+  pc?: PcSummary | null
 }
 
 export interface AskOption { id: string; label: string; image?: string }
