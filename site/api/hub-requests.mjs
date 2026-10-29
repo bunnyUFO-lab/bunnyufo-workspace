@@ -260,7 +260,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
           await putCreateOnly(`requests/${id}/request.png`, checked.pngBuffer, 'image/png', conflict);
           request.drawing = { excalidraw: 'request.excalidraw', png: 'request.png' };
         }
-        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', conflict);
+        // Who wrote the file is recorded as metadata: every request made here is the site's. Policy approval trusts this, not a field in the body.
+        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', conflict, { writer: 'site' });
         return { id, request };
       } catch (error) {
         if (error !== conflict || attempt === 2) throw error;

@@ -19,6 +19,7 @@
 #   HUB_DISCORD_OWNER_ID=…     the owner's Discord user id: both turn on /api/hub/discord/…; remove either and those routes answer 404
 #   HUB_SIGNING_KEY=…          the key that signs approvals (base64 PKCS8 DER); unset: Approve is off
 #   HUB_DISCORD_NEEDS_YOU=…    the #needs-you webhook for the approval link (optional)
+#   HUB_POLICY_APPROVE=research,docs   kinds the site signs without a tap (optional, default none); HUB_POLICY_PER_DAY=10 (per Pacific day)
 #
 # A second stack from this same folder (the development copy) sets BUW_COMPOSE_PROJECT,
 # BUW_SITE_API_CONTAINER and BUW_DOCKER_NETWORK, so compose sees a project of its own and

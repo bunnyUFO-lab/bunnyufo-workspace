@@ -439,6 +439,20 @@ first 500 characters of the output); the state is `asking` and the request is a 
 
 A copy the owner approves keeps who wrote the text (`textOrigin`) and, separately, who wrote the "done when" (`doneWhenOrigin`): rewriting the text does not make an agent's "done when" the owner's, and the signed brief marks it as written by that agent, on one line. Only a "done when" the owner changes carries no mark.
 
+Policy approval (`policy.mjs`, off by default): `HUB_POLICY_APPROVE` is a comma list of preset kinds, `research` and/or
+`docs` (anything else is ignored; the tap stays for code, build and art). With a signing key and at least one kind, the
+site API signs eligible proposals by itself: at start, every 60 seconds, and on page loads (at most every 30 seconds).
+It signs through the same path as a tap, for the target the request already proposes, with `by: "policy"`, so a full
+Hermes or cloud target makes the request wait. Who is eligible is decided from the object's user metadata `writer`,
+which the writer's token sets and the body cannot: `site` (the site API wrote it; the body says `origin.kind: owner`) or
+`agent` (the card API wrote it for an agent session's token; the body says `origin.kind: agent`). A request with no
+origin, no `writer`, a `writer` of `runner` or `hermes`, or a body that disagrees with its writer is never signed by
+policy and waits for a tap, so no run starts runs unattended. `HUB_POLICY_PER_DAY` (default 10) limits the policy
+signatures per Pacific day (`America/Los_Angeles`), counted from the day's `approved.json` files with `by: "policy"` (a
+tap does not count); over it a proposal stays with the note "Policy limit reached today" and a tap still signs it.
+`/api/capabilities` `policy` lists the active kinds. Until the card API leaves `writer: agent` on an agent session's
+`request.json`, only the site's own requests are signed.
+
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
 
