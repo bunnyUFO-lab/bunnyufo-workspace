@@ -106,7 +106,7 @@ export function stripPng(buffer) {
  * `{ buffer, type, ext, width, height, bytes }` with the metadata already stripped; `bytes` is the size before stripping.
  */
 export function checkOneImage(image, fail) {
-  if (!image || typeof image !== 'object' || typeof image.data !== 'string' || !(image.type in EXTENSION)) throw fail('Send pictures as JPEG or PNG.', 415);
+  if (!image || typeof image !== 'object' || typeof image.data !== 'string' || !Object.hasOwn(EXTENSION, image.type)) throw fail('Send pictures as JPEG or PNG.', 415);
   if (image.data.length > MAX_IMAGE_BYTES * 1.4) throw fail('A picture is at most 1.5 MB.', 413);
   const bytes = Buffer.from(image.data, 'base64');
   if (bytes.length > MAX_IMAGE_BYTES) throw fail('A picture is at most 1.5 MB.', 413);

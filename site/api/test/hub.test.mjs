@@ -1051,6 +1051,7 @@ test('the files route refuses what it should and writes nothing', async () => {
     refused('JPEG type, PNG bytes', 415, await post(route, { for: '01', image: { type: 'image/jpeg', data: good.data } }));
     refused('PNG type, JPEG bytes', 415, await post(route, { for: '01', image: { type: 'image/png', data: b64(jpeg(8, 6)) } }));
     refused('a data URL as data', 415, await post(route, { for: '01', image: { type: 'image/png', data: `data:image/png;base64,${good.data}` } }));
+    for (const type of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) refused(`type ${type}`, 415, await post(route, { for: '01', image: { type, data: b64(jpeg(8, 6)) } }));
     refused('no image', 415, await post(route, { for: '01' }));
     refused('image as a string', 415, await post(route, { for: '01', image: `data:image/png;base64,${good.data}` }));
     refused('too many pixels', 400, await post(route, { for: '01', image: picture(png(2049, 10)) }));

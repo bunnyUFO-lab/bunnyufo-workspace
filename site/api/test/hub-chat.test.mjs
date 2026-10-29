@@ -212,6 +212,9 @@ test('picture limits: count, size, total, type and dimensions; a picture alone i
     assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [big, big, big, big] })).status, 413);
     assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [{ type: 'image/gif', data: b64(Buffer.from('GIF89a......')) }] })).status, 415);
     assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [{ type: 'image/png', data: b64(jpeg(5, 5)) }] })).status, 415, 'Bytes must match the type.');
+    for (const type of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
+      assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [{ type, data: b64(jpeg(5, 5)) }] })).status, 415, `${type} is not an image type.`);
+    }
     assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [picture(jpeg(3000, 10), 'image/jpeg')] })).status, 400);
     assert.equal((await call('POST', '/hub/chat', { text: 'x', images: [picture(solidPng(10, 2049), 'image/png')] })).status, 400);
     assert.equal((await call('POST', '/hub/chat', { text: '', images: [] })).status, 400);
