@@ -19,7 +19,8 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {})
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', ...env };
+  // The completions tests below run with the run path off (the kill switch); the run tests turn it on.
+  const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', HUB_CHAT_RUNS: '0', ...env };
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, allowedOrigins: ['https://site.example'], hub: createHub({ bucket, enabled: true, env: hubEnv }) });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -257,4 +258,149 @@ test('when Hermes refuses the pictures the answer is 422 and nothing is written'
     assert.deepEqual([...fake.objects.keys()].filter(name => name.includes('/chat/')), []);
     assert.equal((await chat(call, { text: 'plain' })).status, 200, 'Text-only turns still work.');
   } finally { await close(); }
+});
+
+// --- Chat on Hermes runs -------------------------------------------------------------------------------------------
+
+const RUNS = { HUB_CHAT_RUNS: '1' };
+
+/** POST /hub/chat and hand each event to `onEvent` as it arrives; resolves with all of them. */
+async function chatLive(call, data, onEvent) {
+  const answer = await call('POST', '/hub/chat', data);
+  if (!(answer.headers.get('content-type') ?? '').startsWith('text/event-stream')) return { status: answer.status, body: await answer.json() };
+  const events = [];
+  const reader = answer.body.getReader();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += new TextDecoder().decode(value);
+    let cut;
+    while ((cut = buffer.indexOf('\n\n')) >= 0) {
+      const block = buffer.slice(0, cut);
+      buffer = buffer.slice(cut + 2);
+      const event = /^event: (.+)$/m.exec(block)?.[1];
+      const payload = /^data: (.+)$/m.exec(block)?.[1];
+      if (!event) continue;
+      const entry = { event, data: JSON.parse(payload) };
+      events.push(entry);
+      await onEvent?.(entry);
+    }
+  }
+  return { status: answer.status, events };
+}
+
+test('runs on: a turn streams deltas and a tool line, never names a provider, and saves the run and its tools', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Looking ', { tool: 'search_files', preview: 'cards/' }, 'it up. ', 'Done.'] } });
+  try {
+    const first = await chatLive(call, { text: 'Find the deckbuilder notes' });
+    assert.equal(first.status, 200);
+    assert.deepEqual(first.events.filter(item => item.event === 'delta').map(item => item.data.text).join(''), 'Looking it up. Done.');
+    const tools = first.events.filter(item => item.event === 'tool');
+    assert.deepEqual(tools.map(item => [item.data.name, item.data.state]), [['search_files', 'running'], ['search_files', 'done']]);
+    assert.equal(tools[0].data.summary, 'cards/');
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done');
+    assert.equal(upstream.requests.length, 0, 'nothing went to completions');
+    assert.deepEqual(upstream.runs[0].body, { input: 'Find the deckbuilder notes' });
+    const saved = lines(fake, done.data.conversation);
+    assert.equal(saved[1].text, 'Looking it up. Done.');
+    assert.equal(saved[1].run, upstream.runs[0].id);
+    assert.deepEqual(saved[1].tools, ['search_files']);
+    const second = await chatLive(call, { text: 'And the second?', conversation: done.data.conversation });
+    assert.equal(second.events.at(-1).event, 'done');
+    assert.deepEqual(upstream.runs[1].body, { input: 'And the second?', conversation_history: [{ role: 'user', content: 'Find the deckbuilder notes' }, { role: 'assistant', content: 'Looking it up. Done.' }] });
+    assert.ok(!('provider' in upstream.runs[1].body) && !('model' in upstream.runs[1].body));
+  } finally { await close(); }
+});
+
+test('runs on: an approval mid-turn arrives as an event, is answered through the route, and the turn completes', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { askApproval: true, runScript: ['Writing. ', 'Finished.'] } });
+  try {
+    let answered = null;
+    const result = await chatLive(call, { text: 'Update the agent file' }, async ({ event, data }) => {
+      if (event !== 'approval') return;
+      assert.match(data.id, /^\d{8}-hermes-/);
+      assert.ok(data.command);
+      answered = await call('POST', `/hub/hermes-approvals/${data.id}/answer`, { choice: 'once' });
+    });
+    assert.equal(answered.status, 201);
+    assert.deepEqual(upstream.approvals.map(item => item.choice), ['once']);
+    const names = result.events.map(item => item.event);
+    assert.ok(names.indexOf('approval') < names.indexOf('approval-settled') && names.indexOf('approval-settled') < names.indexOf('done'));
+    const stored = [...fake.objects.keys()].find(name => /hermes-approvals\/[^/]+\/approval\.json$/.test(name));
+    assert.equal(JSON.parse(fake.text(stored)).chat, result.events.at(-1).data.conversation);
+  } finally { await close(); }
+});
+
+test('runs on: a turn with a picture stays on completions, and a failed run ends the turn with an error', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const result = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    assert.equal(result.events.at(-1).event, 'done');
+    assert.equal(upstream.requests.length, 1);
+    assert.equal(upstream.runs.length, 0);
+  } finally { await close(); }
+  const failing = await fixture({ env: RUNS, hermes: { failWith: '429 usage limit reached' } });
+  try {
+    const result = await chat(failing.call, { text: 'hello' });
+    assert.equal(result.events.at(-1).event, 'error');
+    assert.match(result.events.at(-1).data.error, /429/);
+  } finally { await failing.close(); }
+  const busy = await fixture({ env: RUNS, hermes: { busy: true } });
+  try {
+    const result = await chat(busy.call, { text: 'hello' });
+    assert.equal(result.status, 502);
+  } finally { await busy.close(); }
+});
+
+test('runs on: a long quiet tool does not end the turn', async () => {
+  const quiet = await fixture({ env: { ...RUNS, HUB_CHAT_IDLE_MS: '250' }, hermes: { keepaliveMs: 50, runScript: ['Start. ', { tool: 'build' }, { wait: 900 }, 'Built.'] } });
+  try {
+    const result = await chat(quiet.call, { text: 'build it' });
+    assert.equal(result.events.at(-1).event, 'done', JSON.stringify(result.events.at(-1)));
+    assert.match(result.events.filter(item => item.event === 'delta').map(item => item.data.text).join(''), /Built\./);
+    assert.deepEqual(quiet.upstream.stops, []);
+  } finally { await quiet.close(); }
+});
+
+test('runs on: a dropped event stream stops the run', async () => {
+  const dropped = await fixture({ env: RUNS, hermes: { dropStreamAfter: 1, runScript: ['One. ', { hold: true }] } });
+  try {
+    const result = await chat(dropped.call, { text: 'go' });
+    assert.equal(result.events.at(-1).event, 'error');
+    assert.equal(dropped.upstream.stops.length, 1, 'The run was told to stop.');
+  } finally { await dropped.close(); }
+});
+
+test('runs on: an approval card counts its time from when Hermes asked and offers only once or deny', async () => {
+  const { call, close } = await fixture({ env: RUNS, hermes: { askApproval: true, approvalAgeMs: 200_000, approvalChoices: ['once', 'session', 'always', 'deny'], runScript: ['Writing. ', 'Done.'] } });
+  try {
+    let card = null;
+    await chatLive(call, { text: 'write it' }, async ({ event, data }) => {
+      if (event !== 'approval') return;
+      card = data;
+      await call('POST', `/hub/hermes-approvals/${data.id}/answer`, { choice: 'deny' });
+    });
+    assert.deepEqual(card.choices, ['once', 'deny']);
+    const left = (new Date(card.expiresAt).getTime() - Date.now()) / 1000;
+    assert.ok(left > 80 && left < 110, `about 100 s left, got ${left}`);
+  } finally { await close(); }
+});
+
+test('runs on: a failed run leaves no URL or token in the error, and saved tool names are clipped and capped', async () => {
+  const failing = await fixture({ env: RUNS, hermes: { failWith: 'Provider said no at https://api.provider.example/v1/x with Bearer sk-abc123' } });
+  try {
+    const result = await chat(failing.call, { text: 'hi' });
+    const error = result.events.at(-1);
+    assert.equal(error.event, 'error');
+    assert.doesNotMatch(error.data.error, /https?:|Bearer|sk-abc/);
+  } finally { await failing.close(); }
+  const many = await fixture({ env: RUNS, hermes: { runScript: [...Array.from({ length: 25 }, (_, index) => ({ tool: `${index}-${'t'.repeat(120)}` })), 'ok'] } });
+  try {
+    const result = await chat(many.call, { text: 'tools' });
+    const saved = lines(many.fake, result.events.at(-1).data.conversation)[1];
+    assert.equal(saved.tools.length, 20);
+    assert.ok(saved.tools.every(name => name.length <= 80));
+  } finally { await many.close(); }
 });

@@ -24,6 +24,7 @@
 //   approvalTimeoutMs  an unanswered approval auto-denies (default 300000)
 //   busy           POST /v1/runs answers 429; maxConcurrent (default 10) answers 429 when that many runs are active
 //   dropStreamAfter n  each events connection closes after n events (reconnect with Last-Event-ID)
+//   approvalAgeMs  approval.request timestamp is that far in the past; approvalChoices overrides its choices
 //   keepaliveMs    default 10000; reportServed fills runtime.provider and model
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -44,7 +45,7 @@ const notFound = response => json(response, 404, openaiError('Run not found', 'i
 export async function startFakeHermes({
   key = 'test-key', chunks = ['Hel', 'lo ', 'there'], delayMs = 20, onTurn, fail = false, hold = false, refuseImages = false,
   runScript, askApproval = false, endWith, failWith, chain = DEFAULT_CHAIN, providerFailures = {}, forgetRuns = false,
-  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false,
+  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false, approvalAgeMs = 0, approvalChoices,
 } = {}) {
   const requests = [];
   const state = { closedEarly: 0 };
@@ -92,12 +93,12 @@ export async function startFakeHermes({
     const prompt = {
       kind: 'approval', prompt_id: randomBytes(16).toString('hex'), execution_generation: 1, command: step.command ?? '<write to AGENTS.md>',
       description: step.description ?? 'Write to protected agent-instruction file(s): AGENTS.md. These files steer future agent behavior; approval is always required (not bypassed by auto-approve).',
-      choices: ['once', 'deny'],
+      choices: approvalChoices ?? ['once', 'deny'],
     };
     const toolCall = `toolu_${randomBytes(8).toString('hex')}`;
     run.pending = [prompt]; run.status = 'waiting_for_approval';
     emit(run, 'tool.started', { tool: 'write_file', preview: '/tmp/work/AGENTS.md', tool_call_id: toolCall });
-    emit(run, 'approval.request', prompt);
+    emit(run, 'approval.request', { ...prompt, timestamp: (Date.now() - approvalAgeMs) / 1000 });
     const answer = await new Promise(resolve => {
       const timer = setTimeout(() => resolve('timeout'), approvalTimeoutMs);
       run.answer = choice => { clearTimeout(timer); resolve(choice); };

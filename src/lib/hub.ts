@@ -310,5 +310,9 @@ export const sessionUrl = (value: string | undefined): string | undefined => (va
 export const appUrl = (value: string | undefined): string | undefined => (value && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(value) ? value : undefined)
 
 export interface ChatImage { file: string; type: string; width: number; height: number }
-export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[]; images?: ChatImage[] }
+export interface ChatLine { role: 'user' | 'assistant'; text: string; at: string; created?: Item[]; images?: ChatImage[]; run?: string; tools?: string[] }
+/** A tool Hermes is using (or used) during a turn. */
+export interface ChatTool { id: string; name: string; summary?: string; state: 'running' | 'done' | 'failed' }
+/** An approval Hermes asked for during a turn; the answer goes to `/hub/hermes-approvals/<id>/answer`. */
+export interface ChatApproval { id: string; title: string; command?: string; description?: string; choices: string[]; expiresAt: string }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number }

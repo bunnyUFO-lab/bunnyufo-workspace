@@ -4,12 +4,18 @@
 // Env (all optional; chat is off without the first two):
 //   HERMES_URL      base URL of Hermes's API server, without /v1
 //   HERMES_API_KEY  its bearer key
-//   HERMES_MODEL    the `model` field, default hermes-agent
+//   HERMES_MODEL    the `model` field, default hermes-agent (completions only)
+//   HUB_CHAT_RUNS   `0` turns the run path off: every turn then goes to /v1/chat/completions
 //
-// The Hub sends no system message (Hermes owns its prompt) and sends the history as `messages`.
+// A text turn runs as a Hermes run (`/v1/runs`): the answer streams, tool lines show, and an approval Hermes asks for
+// is copied into the inbox and answered from Chat. A turn with a picture stays on /v1/chat/completions (pictures on runs
+// were never tested). The run is started with `{ input, conversation_history }` and never names a provider or a model,
+// so Hermes's own default and fallback chain apply. The completions path sends no system message (Hermes owns its prompt)
+// and sends the history as `messages`.
 // Keys are never logged, stored or echoed.
 import { Readable } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
+import { createScrub } from './scrub.mjs';
 import { IMAGE_FILE, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 
 const MB = 1024 * 1024;
@@ -18,16 +24,19 @@ const MAX_FILE = 1024 * 1024;
 const HISTORY_IMAGE_BUDGET = 6 * MB;
 const NO_PICTURE = '[An earlier picture is not included.]';
 const TOTAL_MS = 120_000;
-const IDLE_MS = 60_000;
+const IDLE_MS_DEFAULT = 60_000;
+const MAX_TOOLS = 20;
 const KEEPALIVE_MS = 15_000;
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, readJson, json, fail, now, hermesRuns = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
+  const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
+  const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
   const titles = new Map();   // etag → { title, count }
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
@@ -126,20 +135,32 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       ? [...(text ? [{ type: 'text', text }] : []), ...pictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))]
       : text;
     const spent = pictures.reduce((sum, picture) => sum + picture.buffer.length, 0);
-    const messages = [...await historyMessages(id, history.slice(-20), spent), { role: 'user', content: current }];
+    const runTurn = runsOn && !pictures.length;
+    const messages = runTurn ? [] : [...await historyMessages(id, history.slice(-20), spent), { role: 'user', content: current }];
     const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
     const started = Date.now();
 
     const abort = new AbortController();
     let idle;
-    const touch = () => { clearTimeout(idle); idle = setTimeout(() => abort.abort(), IDLE_MS); };
-    const total = setTimeout(() => abort.abort(), TOTAL_MS);
+    // A run turn has no timer here: the event reader has its own 60 s idle limit, and Hermes's keepalives (which only it sees) reset it.
+    const touch = () => { if (runTurn) return; clearTimeout(idle); idle = setTimeout(() => abort.abort(), IDLE_MS); };
+    const total = runTurn ? null : setTimeout(() => abort.abort(), TOTAL_MS); // a run turn lives as long as Hermes keeps sending
     const finish = () => { clearTimeout(idle); clearTimeout(total); };
     response.on('close', () => { if (!response.writableFinished) abort.abort(); });
     touch();
 
     let upstream;
-    try {
+    let runId = null;
+    if (runTurn) {
+      // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
+      const earlier = history.slice(-20).map(line => ({ role: line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+      try {
+        ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}` }));
+      } catch (error) {
+        finish();
+        throw fail(error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`, 502);
+      }
+    } else try {
       upstream = await fetchImpl(`${hermesUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { authorization: `Bearer ${env.HERMES_API_KEY}`, 'content-type': 'application/json' },
@@ -150,7 +171,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       finish();
       throw fail(`Hermes did not answer (${error.name === 'AbortError' ? 'timed out' : 'unreachable'}).`, 502);
     }
-    if (!upstream.ok || !upstream.body) {
+    if (!runTurn && (!upstream.ok || !upstream.body)) {
       finish();
       let refusal = null;
       if (hasImages && [400, 413, 415].includes(upstream.status)) {
@@ -173,7 +194,49 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
 
     let reply = '';
     let failure = null;
-    try {
+    const tools = [];
+    let finishedByHermes = false;
+    if (runTurn) {
+      // The client leaving ends the run: nobody is reading it.
+      response.on('close', () => { if (!response.writableFinished) hermesRuns.stop(runId).catch(() => {}); });
+      try {
+        let ended = false;
+        for await (const event of hermesRuns.events(runId, { signal: abort.signal })) {
+          const data = event.data ?? {};
+          if (event.event === 'message.delta' && typeof data.delta === 'string' && data.delta) { reply += data.delta; emit('delta', { text: data.delta }); }
+          else if (event.event === 'tool.started') {
+            const name = clip(data.tool, 80);
+            if (name && !tools.includes(name) && tools.length < MAX_TOOLS) tools.push(name);
+            emit('tool', { id: clip(data.tool_call_id, 80), name, summary: clip(data.preview, 160), state: 'running' });
+          } else if (event.event === 'tool.completed') emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
+          else if (event.event === 'approval.request') {
+            // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
+            let stored = null;
+            let copied = null;
+            try {
+              copied = await copyApproval({ runId, chat: id, prompt: data, startedAt: new Date(started) });
+              if (copied) stored = await readApproval(copied);
+            } catch { /* stored stays null */ }
+            if (!stored) { failure = 'Hermes asked for approval, but the ask could not be saved.'; ended = true; }
+            else if (stored.state === 'open') {
+              const record = stored.approval;
+              emit('approval', { id: copied, title: record.title, command: record.command, description: record.description, choices: (record.choices ?? []).filter(choice => choice === 'once' || choice === 'deny'), expiresAt: record.expiresAt });
+            }
+          } else if (event.event === 'approval.settled') emit('approval-settled', { prompt: data.prompt_id ?? null });
+          else if (event.event === 'run.completed') {
+            if (!reply && typeof data.output === 'string' && data.output) { reply = data.output; emit('delta', { text: reply }); }
+            ended = true; finishedByHermes = true;
+          } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; }
+          else if (event.event === 'run.cancelled' || event.event === 'run.interrupted') { failure = 'The run was stopped.'; ended = true; finishedByHermes = true; }
+          if (ended) break;
+        }
+        if (!ended) failure = 'The connection to Hermes broke.';
+      } catch (error) {
+        failure = abort.signal.aborted ? 'Hermes stopped answering.' : error?.code === 'idle' ? 'Hermes stopped answering.' : 'The connection to Hermes broke.';
+      }
+      // Any exit that is not Hermes ending the run (idle, a dropped stream, an unsaved ask): nobody is reading it, so stop it.
+      if (!finishedByHermes) hermesRuns.stop(runId).catch(() => {});
+    } else try {
       const reader = upstream.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -210,7 +273,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
-    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(created.length ? { created } : {}) };
+    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}) };
     const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}) };
     try {
       // The pictures first, so a line never points at a missing file.

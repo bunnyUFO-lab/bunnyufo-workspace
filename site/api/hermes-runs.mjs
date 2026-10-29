@@ -47,10 +47,10 @@ export function createHermesRuns({ env = {}, fetchImpl = fetch, timeoutMs = TIME
 
     /**
      * Start a run. Sends `{ input }` only: no provider and no model, so Hermes's own default and fallback chain
-     * apply. Only the quota retry names a `provider` and `model`. `idempotencyKey` makes a repeat answer the same run.
+     * apply. Only the quota retry names a `provider` and `model`. `history` (Chat) is `[{ role, content }]`, sent as `conversation_history`. `idempotencyKey` makes a repeat answer the same run.
      */
-    async start({ input, idempotencyKey, provider, model }) {
-      const response = await call('POST', '/v1/runs', { input, ...(provider ? { provider } : {}), ...(provider && model ? { model } : {}) }, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {});
+    async start({ input, history, idempotencyKey, provider, model }) {
+      const response = await call('POST', '/v1/runs', { input, ...(Array.isArray(history) && history.length ? { conversation_history: history } : {}), ...(provider ? { provider } : {}), ...(provider && model ? { model } : {}) }, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {});
       if (response.status !== 202 && response.status !== 200) {
         const { message, code } = await reason(response);
         throw new HermesError(response.status === 429 ? 'Hermes is busy (too many runs).' : message, { status: response.status, code });

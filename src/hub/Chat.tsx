@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatLine, ChatSummary, Item } from '../lib/hub'
-import { HubError, hubGet, remember } from '../lib/hub'
+import type { ChatApproval, ChatLine, ChatSummary, ChatTool, Item } from '../lib/hub'
+import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash } from '../lib/route'
@@ -12,6 +12,8 @@ import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
 import Md from './Md'
 import { useHubData } from './useHub'
+import { onAsk, takeAsk } from './askHermes'
+import './chatRuns.css'
 
 const READ_KEY = 'buw.hub.readAloud'
 
@@ -34,6 +36,53 @@ function Created({ items }: { items: Item[] }) {
   )
 }
 
+/** Tools Hermes used or is using: one faint mono line each. */
+function ToolLines({ tools }: { tools: ChatTool[] }) {
+  if (!tools.length) return null
+  return (
+    <div className="hub-tools" data-tools>
+      {tools.map(tool => <span className="hub-tool" key={tool.id || tool.name} data-state={tool.state} data-tool={tool.name}>{tool.name}{tool.summary ? ` ${tool.summary}` : ''}</span>)}
+    </div>
+  )
+}
+
+/** Hermes asks before writing a protected file. It denies on its own after five minutes. */
+function ApprovalCard({ approval, onAnswered }: { approval: ChatApproval; onAnswered: () => void }) {
+  const [now, setNow] = useState(() => Date.now())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const left = Math.max(0, Math.ceil((new Date(approval.expiresAt).getTime() - now) / 1000))
+  const answer = async (choice: 'once' | 'deny') => {
+    if (!host.write) { setError('Sign in to answer.'); return }
+    setBusy(true)
+    setError('')
+    try {
+      await hubPost(`/hermes-approvals/${encodeURIComponent(approval.id)}/answer`, { choice })
+      onAnswered()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not send the answer.')
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="hub-chat-approval" data-chat-approval role="group" aria-label="Hermes asks for approval">
+      <strong>{approval.title || 'Hermes asks to write a protected file'}</strong>
+      {approval.command && <pre data-approval-command>{approval.command}</pre>}
+      {approval.description && approval.description !== approval.title && <pre>{approval.description}</pre>}
+      <div className="hub-chat-approval-a">
+        {approval.choices.includes('once') && <button type="button" className="hub-btn pri" disabled={busy || left === 0} onClick={() => void answer('once')} data-answer="once">Approve once</button>}
+        {approval.choices.includes('deny') && <button type="button" className="hub-btn" disabled={busy || left === 0} onClick={() => void answer('deny')} data-answer="deny">Deny</button>}
+        <span className="hub-muted">{left > 0 ? `Hermes denies it in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}.` : 'Hermes denied it after 5 minutes.'}</span>
+      </div>
+      {error && <span className="hub-error" role="alert">{error}</span>}
+    </div>
+  )
+}
+
 function Bubble({ line, conversation }: { line: Shown; conversation?: string }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
@@ -44,6 +93,7 @@ function Bubble({ line, conversation }: { line: Shown; conversation?: string }) 
           {urls.map((url, index) => <HubImage key={url} url={url} open className="hub-bubble-image" alt={`Picture ${index + 1}`} />)}
         </div>
       )}
+      {line.tools && line.tools.length > 0 && <ToolLines tools={line.tools.map(name => ({ id: name, name, state: 'done' as const }))} />}
       {line.created && line.created.length > 0 && <Created items={line.created} />}
     </div>
   )
@@ -73,6 +123,8 @@ function ChatView({ id }: { id?: string }) {
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
+  const [tools, setTools] = useState<ChatTool[]>([])
+  const [approval, setApproval] = useState<ChatApproval | null>(null)
   const [drawer, setDrawer] = useState(false)
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
   const abort = useRef<AbortController | null>(null)
@@ -158,17 +210,17 @@ function ChatView({ id }: { id?: string }) {
     void addFiles(Array.from(event.dataTransfer.files))
   }
 
-  const send = async () => {
-    const text = draft.trim()
-    const sending = images
+  const send = async (asked?: string) => {
+    const text = (asked ?? draft).trim()
+    const sending = asked === undefined ? images : []
     if ((!text && !sending.length) || streaming || preparing) return
     if (speaks) window.speechSynthesis.cancel()
     setError(null)
     setTrayNote(null)
     setStreaming(true)
-    setDraft('')
-    setImages([])
-    slots.current = MAX_IMAGES
+    if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
+    setTools([])
+    setApproval(null)
     setPending('')
     const before = messages
     const previews = sending.map(item => item.url)
@@ -181,11 +233,18 @@ function ChatView({ id }: { id?: string }) {
     let finished: string | null = null
     let saved: ChatLine | undefined
     let problem: string | null = null
+    const used: string[] = []
     try {
       const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
       await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
         onDelta: piece => { reply += piece; setPending(reply) },
         onCreated: items => { created = items },
+        onTool: tool => {
+          if (!used.includes(tool.name)) used.push(tool.name)
+          setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
+        },
+        onApproval: setApproval,
+        onApprovalSettled: () => setApproval(null),
         onDone: (name, user) => { finished = name; saved = user },
         onError: message => { problem = message },
       }, controller.signal)
@@ -193,9 +252,7 @@ function ChatView({ id }: { id?: string }) {
       if (!controller.signal.aborted) {
         // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
         setMessages(before)
-        setDraft(text)
-        setImages(sending)
-        slots.current = MAX_IMAGES - sending.length
+        if (asked === undefined) { setDraft(text); setImages(sending); slots.current = MAX_IMAGES - sending.length }
         setPending(null)
         setStreaming(false)
         setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
@@ -205,10 +262,12 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : optimistic
-    const lines: Shown[] = [...before, userLine, { role: 'assistant', text: stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(created.length ? { created } : {}) }]
+    const lines: Shown[] = [...before, userLine, { role: 'assistant', text: stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
+    setTools([])
+    setApproval(null)
     setStreaming(false)
     if (swapped) release(previews)
     if (problem) setError(problem)
@@ -218,6 +277,16 @@ function ChatView({ id }: { id?: string }) {
     }
     if (!stopped && !problem && readAloud && speaks && reply.trim()) window.speechSynthesis.speak(new SpeechSynthesisUtterance(plainText(reply)))
   }
+
+  // "Ask Hermes: <text>" from the palette: a new conversation that sends the text at once.
+  const sendRef = useRef(send)
+  useEffect(() => { sendRef.current = send })
+  const takeQueued = useCallback(() => {
+    if (id) return
+    const text = takeAsk()
+    if (text) void sendRef.current(text)
+  }, [id])
+  useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
@@ -245,7 +314,13 @@ function ChatView({ id }: { id?: string }) {
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">Ask the assistant anything, or tell it what to do.</p>}
           {messages.map((line, index) => <Bubble key={index} line={line} conversation={shownId} />)}
-          {pending !== null && <div className="hub-bubble assistant pending" data-pending>{pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}</div>}
+          {pending !== null && (
+            <div className="hub-bubble assistant pending" data-pending>
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}
+              <ToolLines tools={tools} />
+              {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}
+            </div>
+          )}
         </div>
         {error && <p className="hub-error" role="alert">{error}</p>}
         {(images.length > 0 || preparing > 0 || trayNote) && (
