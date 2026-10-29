@@ -198,6 +198,21 @@ What it refuses:
   `checklists/*/`, the `tick-*` and `untick-*` files and `submit.json`, from any token whose `write` right is limited: only the Hub (through the site API) or the
   passphrase writes answers. `ask.json` and `checklist.json` are create-only for such a token
   (`If-None-Match: *`, never an upload URL), and it cannot delete any of these files
+- in the `inbox` and `inbox-dev` sections, for a limited `write` right, the files only the Hub writes (same 403, same
+  rule, no delete): `requests/*/approved.json`, `stop.json`, `hermes-run.json`, `hermes-retry.json`, `fire-*.json`,
+  `answer-*.json`, and everything under `hermes-approvals/`
+- in the same sections, a run's files `requests/*/taken.json`, `run-*.json`, `result.json` and `report.md` (403 "Only a run
+  writes run files.", no delete), unless the token is named `pc-runner`, or named `cloud-<project>` and
+  `requests/<id>/request.json` exists with that `project` (one read, only for these writes). Any other limited token,
+  `hermes-main` and the old `cloud` token included, is refused; the passphrase is not limited. This means a session that
+  holds only a limited token can no longer `cards request take` a request: legacy takes need the passphrase or a runner token
+- `requests/*/request.json` is create-only for a limited writer like `ask.json`, and a limited writer's request whose
+  `origin.kind` is `owner` is refused: only the Hub marks a request as the owner's
+- `writer` metadata: a `request.json` put by a limited token named `agent` or `agent-<name>` is stored with the object
+  metadata `x-amz-meta-writer: agent`. No other token gets it (`pc-runner`, `cloud-<project>`, `hermes-main`, the old
+  shared tokens, the passphrase), and metadata sent by a caller is ignored: only the handler sets it. The Hub's policy
+  approval signs only when the stored `origin` and this `writer` agree, so policy never signs a request from a token
+  that is not named `agent` or `agent-*`
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB

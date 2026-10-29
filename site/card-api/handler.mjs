@@ -165,13 +165,49 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json and an agent's avatar choice (team/<agent>/avatar-*.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json)$/i;
-  const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist)\.json$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry.json, fire-*.json, answer-*.json) and everything under hermes-approvals/ are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*)$/i;
+  const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
+  /** The files a run writes: taken, progress, result and report. */
+  const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
   const ownerOnly = (caller, sectionId, file) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
     }
+  };
+  /**
+   * A limited writer may put a run's files (taken, run-*, result, report) in the inbox only as the token named
+   * `pc-runner`, or as `cloud-<project>` for a request of that project (one GET of its request.json). Everyone else,
+   * `hermes-main` and the old `cloud` token included, is refused. An unrestricted writer is not limited.
+   */
+  const runnerOnly = async (caller, sectionId, file) => {
+    const match = INBOXES.has(sectionId) && caller.rights.write !== null ? RUNNER_FILES.exec(file) : null;
+    if (!match) return;
+    if (caller.name === 'pc-runner') return;
+    const project = /^cloud-([a-z0-9][a-z0-9-]*)$/.exec(caller.name ?? '')?.[1];
+    if (project) {
+      const got = await bucket.getJson(keyOf(sectionId, `requests/${match[1]}/request.json`)).catch(() => null);
+      if (typeof got?.value?.project === 'string' && got.value.project === project) return;
+    }
+    throw new HttpError(403, 'Only a run writes run files.');
+  };
+  /**
+   * Who wrote a request.json, kept as object metadata (`x-amz-meta-writer`), never in the body: `agent` for a token that
+   * is an agent session (named `agent` or `agent-<name>`), nothing for anyone else (pc-runner, cloud-<project>,
+   * hermes-main, the old shared tokens, the passphrase). Only this function sets it; a caller's own `x-amz-meta-*`
+   * headers are never forwarded. The site API's policy approval signs only when the stored `origin` and this agree.
+   */
+  const writerMetadata = (caller, sectionId, file) => (
+    INBOXES.has(sectionId) && caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
+      ? { writer: 'agent' } : undefined
+  );
+  /** A limited writer cannot claim a request as the owner's. */
+  const noOwnerOrigin = (caller, sectionId, file, body) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^requests\/[^/]+\/request\.json$/i.test(file)) return;
+    let parsed;
+    // TextDecoder drops a leading BOM, as the site API's reader does; a file that does not parse is refused.
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { throw new HttpError(403, 'request.json must be valid JSON.'); }
+    if (parsed?.origin?.kind === 'owner') throw new HttpError(403, 'A request from the owner is written by the Hub only.');
   };
   /**
    * An Ask is written once. A limited writer may create ask.json (If-None-Match: *) and never replace it, so what the
@@ -180,13 +216,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    */
   const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'ask.json and checklist.json are create-only.');
+      throw new HttpError(403, 'ask.json, checklist.json and request.json are create-only.');
     }
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file))) {
-      throw new HttpError(403, 'Only the Hub removes asks, answers, checklists and ticks.');
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file))) {
+      throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks and request files.');
     }
   };
 
@@ -293,10 +329,12 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
       await section(caller, sectionId, 'write');
       ownerOnly(caller, sectionId, file);
+      await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
+      noOwnerOrigin(caller, sectionId, file, body);
       let put;
       try {
-        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch });
+        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch, metadata: writerMetadata(caller, sectionId, file) });
       } catch (error) {
         if (error.status === 412) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
         throw error;
@@ -320,6 +358,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        await runnerOnly(caller, sectionId, file);
         askCreateOnly(caller, sectionId, file, { upload: true });
         return { path: file, method: 'PUT', url: await bucket.presign('PUT', keyOf(sectionId, file), { expires: urlTtl }) };
       }));

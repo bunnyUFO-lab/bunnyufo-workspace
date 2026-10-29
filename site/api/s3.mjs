@@ -227,6 +227,8 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     contentType: response.headers.get('content-type') || null,
     size: Number(response.headers.get('content-length')) || 0,
     lastModified: response.headers.get('last-modified') || null,
+    // User metadata (`x-amz-meta-*`), by name: who wrote an object is recorded here, never in its body.
+    metadata: Object.fromEntries([...response.headers.entries()].filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value])),
   });
 
   return {
@@ -251,6 +253,16 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
         throw error;
       }
     },
+    /** Whole object as bytes, exactly as stored (a Buffer); null when it is not there. */
+    async getBytes(key) {
+      try {
+        const response = await send('GET', key, { stream: true });
+        return { ...meta(response), buffer: Buffer.from(await response.arrayBuffer()) };
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
+    },
     async getJson(key) {
       const got = await this.getText(key);
       return got ? { ...got, value: JSON.parse(got.text) } : null;
@@ -259,7 +271,7 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
      * Write an object. `ifMatch` (an ETag) refuses the write when someone else wrote since
      * (412), and `ifNoneMatch: '*'` refuses it when the key already exists.
      */
-    async put(key, body, { contentType, ifMatch, ifNoneMatch, cacheControl } = {}) {
+    async put(key, body, { contentType, ifMatch, ifNoneMatch, cacheControl, metadata } = {}) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
       const { response } = await send('PUT', key, {
         body: buffer,
@@ -270,6 +282,7 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
           'cache-control': cacheControl,
           'if-match': ifMatch ? `"${ifMatch}"` : undefined,
           'if-none-match': ifNoneMatch,
+          ...Object.fromEntries(Object.entries(metadata ?? {}).map(([name, value]) => [`x-amz-meta-${name}`, String(value)])),
         },
       });
       return meta(response);
