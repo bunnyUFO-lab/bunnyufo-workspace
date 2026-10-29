@@ -5,6 +5,7 @@
 // agent-written, so its words sit between <<agent>> and <</agent>> and the frame says they are
 // information, not the owner's instructions. Pure functions, except for the picture reads, which
 // come in as `readFile`.
+import { maskSecrets } from './hub-mask.mjs';
 import { checkOneImage } from './chat-images.mjs';
 import { ASK_IMAGE_RE, EVIDENCE_RE, SHOT_RE, validDecisions } from './hub-model.mjs';
 
@@ -202,7 +203,8 @@ export function helpExcerpt(stored) {
   const lines = (Array.isArray(stored) ? stored : []).filter(line => line && (line.role === 'user' || line.role === 'assistant'));
   const format = line => {
     const pictures = Array.isArray(line.images) ? line.images.map(() => '[picture]').join(' ') : '';
-    const text = String(line.text ?? '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
+    // Masked before it is cut, so a secret is never left half in view.
+    const text = maskSecrets(String(line.text ?? '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim());
     const cut = text.length > HELP_LIMITS.line ? `${text.slice(0, HELP_LIMITS.line - 1)}…` : text;
     return `${line.role === 'user' ? 'Owner' : 'Hermes'}: ${[cut, pictures].filter(Boolean).join(' ')}`.trimEnd();
   };

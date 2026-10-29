@@ -208,3 +208,24 @@ test('the control characters NEL and line separators fold to spaces in the excer
   assert.equal(excerpt.split('\n').length, 2);
   assert.doesNotMatch(excerpt, /[\u0085\u2028]/);
 });
+
+test('secret-shaped text in a chat is masked before it goes into the excerpt', () => {
+  const secrets = {
+    github: `ghp_${'a1B2'.repeat(9)}`,
+    anthropic: `sk-ant-api03-${'Ab_Cd-12'.repeat(5)}`,
+    jwt: `eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.${'sig_ok-1234'}`,
+    env: 'MY_API_KEY=hunter2hunter2',
+    password: 'password: swordfish',
+    hex: 'f'.repeat(40),
+  };
+  const { excerpt } = helpExcerpt([
+    { role: 'user', text: `My .env says ${secrets.env} and ${secrets.password}` },
+    { role: 'assistant', text: `Rotate ${secrets.github}, ${secrets.anthropic}, ${secrets.jwt} and ${secrets.hex}; the path /usr/local/bin and abc123 stay.` },
+  ]);
+  for (const secret of ['hunter2hunter2', 'swordfish', secrets.github, secrets.anthropic, secrets.jwt, secrets.hex]) assert.ok(!excerpt.includes(secret), `still shows ${secret.slice(0, 12)}`);
+  assert.match(excerpt, /MY_API_KEY=\[masked\]/);
+  assert.match(excerpt, /password: \[masked\]/);
+  assert.match(excerpt, /\/usr\/local\/bin and abc123 stay/);
+  const long = helpExcerpt([{ role: 'user', text: `${'x'.repeat(395)} ${secrets.github}` }]);
+  assert.ok(!long.excerpt.includes('ghp_'), 'A secret at the cut is masked before the cut.');
+});

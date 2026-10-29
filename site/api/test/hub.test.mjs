@@ -1652,3 +1652,21 @@ test('an Ask that takes no note still takes a help chat', async () => {
     assert.equal((await post(`/hub/asks/${ask.id}/answer`, { choice: 'C', help: { chat: CHAT } })).status, 201);
   } finally { await close(); }
 });
+
+test('the stored help excerpt is masked on the server', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('help', 'h555'), now: at(-30) });
+    seed.checklist(list);
+    const lines = [
+      { role: 'context', about: { kind: 'checklist', id: list.id, title: 'T' }, text: 'x', at: NOW.toISOString() },
+      { role: 'user', text: `GITHUB_TOKEN=ghp_${'a1B2'.repeat(9)} and API_KEY=abc123`, at: NOW.toISOString() },
+      { role: 'assistant', text: 'Set it in .env, never paste it.', at: NOW.toISOString() },
+    ];
+    fake.seed(`sections/inbox/chat/${CHAT}.jsonl`, `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, { help: { chat: CHAT } })).status, 201);
+    const stored = JSON.stringify(fake.json(`sections/inbox/checklists/${list.id}/submit.json`).help);
+    assert.ok(!stored.includes('ghp_') && !stored.includes('abc123'), stored);
+    assert.match(stored, /GITHUB_TOKEN=\[masked\]/);
+  } finally { await close(); }
+});
