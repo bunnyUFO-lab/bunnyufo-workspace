@@ -14,10 +14,11 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
-  newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
+import { createRequests } from './hub-requests.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -27,7 +28,7 @@ import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.m
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -203,18 +204,6 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return rows.filter(Boolean);
   }
 
-  async function loadRequests(at) {
-    const folders = await listFolders('requests', at);
-    const rows = await pool(POOL, [...folders], async ([id, names]) => {
-      if (!names.has('request.json') || !validId(id)) return null;
-      const request = await cached(`requests/${id}/request.json`);
-      if (!request || typeof request.text !== 'string') return null;
-      const taken = names.has('taken.json') ? await cached(`requests/${id}/taken.json`) : null;
-      return requestItem({ ...request, id }, requestState(names), taken);
-    });
-    return rows.filter(Boolean);
-  }
-
   /** The last `days` UTC days of events, newest first, capped. */
   async function loadEvents(at, days = WINDOW_DAYS) {
     const names = [];
@@ -238,6 +227,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   const beadsReader = createBeadsReader({ bucket, key });
+
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail });
+  const { loadRequests } = requestFiles;
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
   async function loadBeads(project) {
@@ -717,31 +709,6 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { card: { id: card.id, title: card.title }, section: card.section, cardDir, cardFiles, ...(card.repo ? { repo: card.repo } : {}) };
   }
 
-  async function createRequest(data, user, at) {
-    if (!validProject(data.project)) throw fail('Name the project (lower-case letters, digits and dashes).');
-    const text = typeof data.text === 'string' ? data.text.trim() : '';
-    if (!text || text.length > 4000) throw fail('A request is 1 to 4000 characters.');
-    if (!WHEN.includes(data.when)) throw fail('Say when: next-sprint, nightly or record.');
-    const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const id = newRequestId(data.project, text, at);
-      const clash = fail('Could not find a free id; try again.', 409);
-      try {
-        const request = { id, project: data.project, createdAt: at.toISOString(), by: user || 'local', text, when: data.when };
-        if (checked) {
-          await putCreateOnly(`requests/${id}/request.excalidraw`, checked.sceneText, 'application/json', clash);
-          await putCreateOnly(`requests/${id}/request.png`, checked.pngBuffer, 'image/png', clash);
-          request.drawing = { excalidraw: 'request.excalidraw', png: 'request.png' };
-        }
-        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', clash);
-        return { status: 201, body: { id } };
-      } catch (error) {
-        if (error !== clash || attempt === 2) throw error;
-      }
-    }
-    throw fail('Could not find a free id; try again.', 409);
-  }
-
   /**
    * A Claude Code session's worktree folder (adjective-name-<6 hex>, or a task slug and 6 hex). The
    * session hooks named a project after its folder when the repository's CLAUDE.md had no Beads
@@ -922,9 +889,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
         if (method === 'GET') {
           if (route === '/hub/today') {
-            const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
+            const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
             const status = await loadPcStatus(at);
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), events: window.events, now: at });
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, events: window.events, now: at });
             const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
@@ -937,7 +904,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const askItems = asks.map(row => row.item);
             const listItems = checklists.map(row => row.item);
             const items = buildInbox({ filter, asks: askItems, checklists: listItems, requests, events: window.events, now: at });
-            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, events: window.events, now: at }).needsYou);
+            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, requests, events: window.events, now: at }).needsYou);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.
             const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);
@@ -953,6 +920,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply(await checklistDetail(decodeURIComponent(match[1])));
           } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
+            reply(await requestFiles.detail(decodeURIComponent(match[1]), at));
           } else if (route === '/hub/events') {
             const floor = at.getTime() - WINDOW_DAYS * DAY;
             const wanted = sendTime(query.get('since'))?.getTime() ?? at.getTime() - DAY;
@@ -1024,7 +993,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
         } else if (route === '/hub/requests') {
-          send(await createRequest(raw, user, at));
+          send(await requestFiles.create(raw, user, at));
+        } else if ((match = /^\/hub\/requests\/([^/]+)\/([a-z-]+)$/.exec(route))) {
+          send(await requestFiles.post(decodeURIComponent(match[1]), match[2], raw, user, at));
         } else if (route === '/hub/drawings') {
           send(await saveDrawingNew(raw, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)\/delete$/.exec(route))) {

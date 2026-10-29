@@ -330,7 +330,10 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
-| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` |
+| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }` (see Requests) |
+| `GET /api/hub/requests/:id` | One request: `{ request, state, approved?, taken?, runs, result?, hermesRun?, retry?, fires, stop?, declined?, files, report }`. `runs` and `fires` are the newest 20 `run-*` and `fire-*` files, newest first; `approved` comes without `run.brief`; 404 for an id that is not a request |
+| `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
+| `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
 | `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
 | `GET /api/hub/discord/asks`, `POST /api/hub/discord/answer` | The Asks bot only, with its own bearer token and no `Remote-User` (see Answers from Discord) |
@@ -347,6 +350,40 @@ into the session; the bare `https://claude.ai/code` counts as no link) and `appU
 app's `claude://claude.ai/epitaxy/local_<uuid>`). With no `url` the row says to open the Claude app.
 
 A `ready-for-review` event may also carry `prs` (GitHub pull request links), `cardDir` (`<section>/<card folder>`), `cardFiles` (`.md` paths inside that folder, such as `briefs/x.md`), `screenshots` (https image links), `deployUrl` (an https build link) and `verdicts` (`{ leg: smoke|review|qa, result: pass|fail|noted, text }`, at most three). The review view (`#/~hub/review/<file>`) checks each field again, shows what is there and an empty line for what is not, and reads the card files from the site's `/w/<cardDir>/<path>`. On the local service, which has no `/w/` route, a file shows as not here and the view offers the card instead.
+
+### Requests
+
+A request is a folder `requests/<id>/` in the inbox. Every file in it is create-only. The state is never
+stored: it is the first row below that matches the files, so it cannot disagree with them. A request
+without a `preset` is a legacy one (`when` set, no approval) and is only ever `open`, `taken` or `declined`.
+
+| File | Written by | Holds |
+|---|---|---|
+| `request.json` | the site API, or an agent through the card API | `id`, `project`, `createdAt`, `by`, `text`, and `when` or `preset`; optional `title` (120), `repo`, `needs` (`unity`, `gpu`, `comfyui`, `sprite-studio`, `lan`, `local-files`), `target` (`pc`, `cloud`, `hermes`, `at-pc`: the proposal), `doneWhen` (400), `origin` (`{ kind: owner \| agent \| run, name }`), `replaces`, `followUp`. `origin.kind: owner` and `followUp` come only from the site API |
+| `approved.json`, `stop.json` | the site API | the signed approval and the signed stop |
+| `taken.json` | the runner | who took it and when |
+| `run-<stamp>.json` | the run | a progress line; the newest decides whether it still runs |
+| `fire-<stamp>.json` | the site API | one cloud-routine fire attempt |
+| `hermes-run.json`, `hermes-retry.json` | the site API | the Hermes run, and the one retry on quota |
+| `result.json`, `report.md` | the run (`hub` for Hermes and `at-pc`) | `outcome` (`pr`, `card`, `failed`, `manual`, `question`, `unknown`), `summary`, `question` (600) when it asks; the report is Markdown up to 256 KB, served at `/api/hub/file?path=requests/<id>/report.md` |
+| `declined.json` | the site API | `{ at, by, reason? }` |
+
+| # | State | Rule |
+|---|---|---|
+| 1 | `declined` | `declined.json` |
+| 2 | `stopped` | `stop.json`, and (`result.json`, or not taken, or lost by row 7) |
+| 3 | `stopping` | `stop.json`, taken, no `result.json` |
+| 4 | `asking` | `result.json` with outcome `question` and no `stop.json` |
+| 5 | `failed` / `done` | `result.json`: `failed` when the outcome is `failed`, else `done` |
+| 6 | `running` | taken, and the newest `run-*` is under 20 minutes old, or a Hermes follower is on it, or the PC report shows its session busy |
+| 7 | `lost` | taken more than 20 minutes ago, and not running |
+| 8 | `taken` | taken |
+| 9 | `expired` | `approved.json` past its `expires` |
+| 10 | `approved` | `approved.json` |
+| 11 | `proposed` | has a `preset`, none of the above |
+
+A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
+appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
 
 ### Beads copies
 
