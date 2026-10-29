@@ -195,7 +195,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   const noOwnerOrigin = (caller, sectionId, file, body) => {
     if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^requests\/[^/]+\/request\.json$/i.test(file)) return;
     let parsed;
-    try { parsed = JSON.parse(Buffer.from(body).toString('utf8')); } catch { return; }
+    // TextDecoder drops a leading BOM, as the site API's reader does; a file that does not parse is refused.
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { throw new HttpError(403, 'request.json must be valid JSON.'); }
     if (parsed?.origin?.kind === 'owner') throw new HttpError(403, 'A request from the owner is written by the Hub only.');
   };
   /**
@@ -205,7 +206,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    */
   const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'ask.json and checklist.json are create-only.');
+      throw new HttpError(403, 'ask.json, checklist.json and request.json are create-only.');
     }
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */

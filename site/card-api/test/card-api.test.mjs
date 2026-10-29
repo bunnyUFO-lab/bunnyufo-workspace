@@ -728,6 +728,13 @@ test('inbox: request.json is create-only for a limited writer, which cannot clai
     const owner = JSON.stringify({ id: 'q-1', project: 'magic-loops', origin: { kind: 'owner', name: 'me' } });
     assert.equal((await write('tok-hermes', owner, { 'If-None-Match': '*' })).status, 403, 'origin owner');
     assert.equal(fake.text('sections/inbox/requests/q-1/request.json'), null);
+    const bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes(owner)]);
+    const bomWrite = (token, body) => call('PUT', url, { token, body, base64: true, headers: { 'If-None-Match': '*' } });
+    assert.equal((await bomWrite('tok-hermes', bom)).status, 403, 'a BOM does not hide origin owner');
+    assert.equal((await bomWrite('tok-hermes', bytes('{ not json'))).status, 403, 'unparsable is refused');
+    const noCondition = await write('tok-cloud', agent);
+    assert.match(noCondition.data.error, /request\.json/);
+    assert.equal(fake.text('sections/inbox/requests/q-1/request.json'), null);
     assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 200, 'created once');
     assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 412, 'not twice');
     assert.equal((await call('DELETE', url, { token: 'tok-deleter' })).status, 403, 'a limited deleter keeps off it');
