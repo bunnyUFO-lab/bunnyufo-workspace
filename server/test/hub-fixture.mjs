@@ -10,7 +10,7 @@ import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
-import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
@@ -64,7 +64,7 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   const seed = seeder(fake);
   if (seedData) {
     // One open Ask with three pictures; a review and a blocked session: 3 need you. The one running session is the Beads task with a session started 5 minutes ago.
-    seed.ask(askJson({ id: FIXTURE_ASK, bead: 'bd-7f3c', now: minutesAgo(now, 12), options: threeOptions().map((option, index) => ({ ...option, label: ['snappy', 'floatier', 'Celeste-ish'][index] })), context: 'The **wall-jump** can use one of three arcs.\n\n- A matches the current dash\n- C is closest to Celeste' }));
+    seed.ask(askJson({ id: FIXTURE_ASK, bead: 'bd-7f3c', now: minutesAgo(now, 12), options: plainOptions().map((option, index) => ({ ...option, label: ['snappy', 'floatier', 'Celeste-ish'][index] })), context: 'The **wall-jump** can use one of three arcs.\n\n- A matches the current dash\n- C is closest to Celeste' }));
     seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(now, 30), bead: 'bd-7e19', title: 'PR ready for review: wall-jump', url: 'https://example.test/pr/41' }));
     seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 20), session: 'sess-blocked', title: 'Permission needed: run unity test' }));
     seed.event(eventJson({ kind: 'deployed', ts: minutesAgo(now, 90), title: 'Deployed the WebGL preview', host: 'pc.example.test' }));

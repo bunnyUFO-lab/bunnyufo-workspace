@@ -1,6 +1,6 @@
 // The kinds of thing that wait on the owner, shared by Today and the Needs you list.
 // site/api/hub-model.mjs (`needsKindOf`, `NEEDS_KINDS`, `INBOX_FILTER_ALIASES`) holds the server's copy of
-// these rules: change both together. Design review and playtest rows arrive with their own items.
+// these rules: change both together. A playtest row arrives with its own item.
 import type { Item } from './hub'
 
 export type NeedsKind = 'question' | 'design' | 'steps' | 'playtest' | 'unstick' | 'pr' | 'approval'
@@ -11,7 +11,8 @@ export function needsKind(item: Item): NeedsKind {
     case 'review': return 'pr'
     case 'blocked': return 'unstick'
     case 'request': return 'approval'
-    default: return 'question' // ask, and a session (which never reaches Needs you)
+    case 'ask': return item.design === true ? 'design' : 'question'
+    default: return 'question' // a session never reaches Needs you
   }
 }
 

@@ -7,10 +7,10 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
-import { askJson, beadsCopy, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsCopy, checklistJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -184,6 +184,75 @@ test('an answer is checked: a bad choice, a note when none is allowed, a drawing
     seed.ask(open);
     assert.equal((await post(`/hub/asks/${open.id}/answer`, { note: 'x'.repeat(4001) })).status, 400);
     assert.equal((await post(`/hub/asks/${open.id}/answer`, { note: 'fine' })).status, 201);
+  } finally { await close(); }
+});
+
+test('a design review: verdicts are stored, every decision needs one, and the checks refuse the rest', async () => {
+  const { fake, seed, post, get, close } = await fixture();
+  try {
+    const ask = designAskJson({ id: id('design', 'g111'), now: NOW });
+    seed.ask(ask);
+    const path = `/hub/asks/${ask.id}/answer`;
+    const all = { d1: { verdict: 'approve' }, d2: { verdict: 'change', note: ' Bottom-left ' }, d3: { verdict: 'skip' } };
+    assert.equal((await post(path, { decisions: { d1: all.d1, d2: all.d2 } })).status, 400, 'A missing verdict is refused.');
+    assert.equal((await post(path, {})).status, 400, 'No decisions at all is refused.');
+    assert.equal((await post(path, { decisions: { ...all, d2: { verdict: 'maybe' } } })).status, 400, 'An unknown verdict is refused.');
+    assert.equal((await post(path, { decisions: { ...all, d2: { verdict: 'change', note: 'x'.repeat(1001) } } })).status, 400, 'A long note is refused.');
+    assert.equal((await post(path, { decisions: { ...all, d9: { verdict: 'skip' } } })).status, 400, 'An unknown decision is refused.');
+    assert.equal(fake.text(`sections/inbox/asks/${ask.id}/answer.json`), null, 'Nothing was written by the refusals.');
+    const sent = await post(path, { decisions: all, note: 'Looks close.' });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    const stored = fake.json(`sections/inbox/asks/${ask.id}/answer.json`);
+    assert.deepEqual(stored.decisions, { d1: { verdict: 'approve' }, d2: { verdict: 'change', note: 'Bottom-left' }, d3: { verdict: 'skip' } });
+    assert.equal(stored.note, 'Looks close.');
+    assert.deepEqual((await get(`/hub/asks/${ask.id}`)).body.answer.decisions, stored.decisions);
+    // A plain Ask takes no decisions.
+    const plain = askJson({ id: id('plain', 'p111'), now: NOW });
+    seed.ask(plain);
+    assert.equal((await post(`/hub/asks/${plain.id}/answer`, { decisions: all })).status, 400);
+  } finally { await close(); }
+});
+
+test('a design review is its own kind in Needs you, with its own four sentences, and never has Discord buttons', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    seed.ask(designAskJson({ id: id('design', 'g111'), now: NOW }));
+    seed.ask(askJson({ id: id('pick', 'k111'), now: new Date(NOW.getTime() - 60000), options: threeOptions(), allowDrawing: false }));
+    seed.ask(askJson({ id: id('plain', 'p111'), now: new Date(NOW.getTime() - 120000), options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowDrawing: false }));
+    const all = (await get('/hub/inbox?filter=all')).body;
+    assert.deepEqual(Object.fromEntries(all.items.map(item => [item.id, item.needs])), { [id('design', 'g111')]: 'design', [id('pick', 'k111')]: 'design', [id('plain', 'p111')]: 'question' });
+    assert.equal(all.counts.design, 2);
+    assert.equal(all.counts.question, 1);
+    const design = all.items.find(item => item.id === id('design', 'g111'));
+    assert.equal(design.describe.what, '3 decisions on one design');
+    assert.equal(design.describe.state, 'Waiting for your review');
+    assert.equal(design.describe.next, 'Approve, change or skip each one');
+    assert.equal(design.describe.blocker, 'Your review');
+    assert.equal(all.items.find(item => item.id === id('pick', 'k111')).describe.what, '3 takes to pick from');
+    assert.deepEqual((await get('/hub/inbox?filter=design')).body.items.map(item => item.needs), ['design', 'design']);
+    assert.equal(discordEligible({ ...askJson({ id: 'x', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowDrawing: false }), decisions: threeDecisions() }).ok, false);
+    assert.equal(discordEligible({ ...askJson({ id: 'x', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowDrawing: false }), image: 'a.png' }).ok, false);
+  } finally { await close(); }
+});
+
+test('a malformed decisions or image field is dropped, so the Ask shows as a plain Question and logs once', async () => {
+  const lines = [];
+  const { seed, get, post, close } = await fixture({ hubOptions: { log: line => lines.push(line) } });
+  try {
+    const bad = { ...askJson({ id: id('bad', 'b111'), now: NOW }), decisions: [{ id: 'd2', text: 'out of order' }], image: '../x.png' };
+    seed.ask(bad);
+    const listed = (await get('/hub/inbox?filter=all')).body.items[0];
+    assert.equal(listed.needs, 'question');
+    await get('/hub/inbox?filter=all');
+    const detail = (await get(`/hub/asks/${bad.id}`)).body;
+    assert.equal(detail.decisions, undefined);
+    assert.equal(detail.image, undefined);
+    assert.equal(lines.filter(line => line.includes(bad.id)).length, 1, 'Logged once.');
+    assert.equal((await post(`/hub/asks/${bad.id}/answer`, { note: 'plain' })).status, 201, 'It answers like a plain Question.');
+    assert.equal(validDecisions({ decisions: [] }), null);
+    assert.equal(validDecisions({ decisions: Array.from({ length: 11 }, (_, n) => ({ id: `d${n + 1}`, text: 'x' })) }), null);
+    assert.equal(validDecisions({ decisions: [{ id: 'd1', text: 'x', detail: 'y'.repeat(501) }] }), null);
+    assert.deepEqual(cleanAsk({ question: 'q', decisions: 'no' }).bad, ['decisions']);
   } finally { await close(); }
 });
 

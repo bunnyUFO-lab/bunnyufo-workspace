@@ -39,6 +39,18 @@ export function checklistJson({ id, project = 'probe', bead, now = new Date(), t
   };
 }
 
+/** A design review: one picture and three decisions (the second has a detail line). */
+export const threeDecisions = () => [
+  { id: 'd1', text: 'Frame: warm oak, not dark walnut' },
+  { id: 'd2', text: 'Stack counter in the top-right corner', detail: 'Matches the Wood board' },
+  { id: 'd3', text: 'Drop the gold corner studs' },
+];
+export function designAskJson({ decisions = threeDecisions(), image = 'card-wood-v2.png', question = 'Review the wood card frame', ...rest } = {}) {
+  return { ...askJson({ question, context: 'The new frame, one picture.', ...rest }), image, decisions };
+}
+
+/** Three options with no pictures: a plain Question. With pictures (`threeOptions`) the Ask is a design review. */
+export const plainOptions = () => ['a', 'b', 'c'].map(letter => ({ id: letter.toUpperCase(), label: `Option ${letter.toUpperCase()}` }));
 export const threeOptions = () => ['a', 'b', 'c'].map(letter => ({ id: letter.toUpperCase(), label: `Option ${letter.toUpperCase()}`, image: `${letter}.png` }));
 
 export function requestJson({ id, project = 'probe', text = 'Add a wall-jump tutorial', when = 'next-sprint', by = 'owner', now = new Date() } = {}) {
@@ -108,6 +120,7 @@ export function seeder(fake, prefix = INBOX) {
     ask(ask, { files = {}, extra = {} } = {}) {
       const folder = `asks/${ask.id}`;
       put(`${folder}/ask.json`, ask);
+      if (typeof ask.image === 'string') put(`${folder}/${ask.image}`, solidPng(320, 240, 0x90), 'image/png');
       for (const option of ask.options ?? []) if (option.image) put(`${folder}/${option.image}`, solidPng(160, 120, 0x60 + option.id.charCodeAt(0) % 8 * 16), 'image/png');
       for (const [name, body] of Object.entries(extra)) put(`${folder}/${name}`, body);
       for (const [name, body] of Object.entries(files)) put(`${folder}/${name}`, body);

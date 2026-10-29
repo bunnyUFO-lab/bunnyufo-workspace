@@ -6,7 +6,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson, checklistJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, checklistJson, designAskJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -14,6 +14,7 @@ const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
 const fixture = await startHubFixture({ checklists: true });
 let second = null;
+let third = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -194,7 +195,7 @@ try {
   step('phone: no sideways scroll, targets of at least 44 px, the chips scroll sideways inside their row');
   fixture.seed.event(eventJson({ kind: 'blocked', ts: new Date(Date.now() - 4 * 60000), session: 'sess-phone', title: 'Phone session' }));
   fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 5 * 60000), title: 'Phone review' }));
-  fixture.seed.ask(askJson({ id: askId('phone', 'p1p1'), now: new Date(), question: 'Phone question?', options: threeOptions() }));
+  fixture.seed.ask(askJson({ id: askId('phone', 'p1p1'), now: new Date(), question: 'Phone question?', options: plainOptions() }));
   const phone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
   await phone.goto(`${fixture.url}#/~hub/needs`);
   await phone.locator('.ni', { hasText: 'Phone question?' }).waitFor();
@@ -306,10 +307,125 @@ try {
   assert.ok(back.x + back.width <= 375, 'Back is not pushed off screen.');
   assert.ok(await phoneNote.locator('.nq-next-text').evaluate(node => node.getBoundingClientRect().height < 70), 'The note is at most two lines.');
   await noSideways(phone2, 'the next-item note at 375 px');
+
+  // ---- Design reviews: a third fixture with one review (picture and three decisions) and one pick (three pictures). ----
+  third = await startHubFixture({ seedData: false });
+  const review = designAskJson({ id: askId('design', 'g1g1'), now: new Date(nowMs - 10 * 60000) });
+  const pick = askJson({ id: askId('pick', 'k1k1'), now: new Date(nowMs - 5 * 60000), question: 'Which card back?', options: threeOptions(), allowDrawing: true });
+  third.seed.ask(review);
+  third.seed.ask(pick);
+  const stroke = async target => {
+    const canvas = target.locator('.drawing-editor canvas.interactive');
+    await canvas.waitFor();
+    await target.waitForTimeout(700);
+    const box = await canvas.boundingBox();
+    await target.locator('.drawing-editor label[title^="Draw"]').click();
+    await target.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5);
+    await target.mouse.down();
+    await target.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.55, { steps: 6 });
+    await target.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.45, { steps: 6 });
+    await target.mouse.up();
+  };
+
+  step('design review: its own chip and kind, the four cells, the picture at the left and a verdict control per decision');
+  const designPage = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+  await designPage.goto(`${third.url}#/~hub/needs`);
+  await designPage.locator('.ni[data-kind="design"]').first().waitFor();
+  assert.deepEqual(await chips(designPage), [['all', '2'], ['design', '2'], ['answered', null]]);
+  const card1 = designPage.locator(`.ni[data-need="ask-${review.id}"]`);
+  assert.equal(await card1.getAttribute('data-kind'), 'design');
+  assert.deepEqual(await card1.locator('.four dd').allInnerTexts(), ['3 decisions on one design', 'Waiting for your review', 'Approve, change or skip each one', 'Your review']);
+  assert.match(await card1.locator('.ni-meta').innerText(), /^Design review/);
+  await card1.locator('[data-design-image] img').waitFor();
+  const sides = await card1.evaluate(node => ({ pic: node.querySelector('.dr-pic').getBoundingClientRect(), side: node.querySelector('.dr-side').getBoundingClientRect() }));
+  assert.ok(sides.pic.right <= sides.side.left + 1 && sides.pic.width <= 291, 'The picture is at the left, at most 290 px wide.');
+  assert.equal(await card1.locator('[data-decision]').count(), 3);
+  assert.equal(await card1.locator('[data-decision="d2"] .dr-detail').innerText(), 'Matches the Wood board');
+  assert.equal(await card1.locator('[data-decision="d1"] [role="group"]').count(), 1);
+
+  step('design review: Send review stays off until every decision has a verdict; Change shows its note box; Annotate attaches a drawing, Clear drops it');
+  const send = card1.getByRole('button', { name: 'Send review' });
+  assert.equal(await send.isDisabled(), true);
+  await card1.locator('[data-decision="d1"] [data-verdict-btn="approve"]').click();
+  assert.equal(await card1.locator('[data-decision="d1"] [data-verdict-btn="approve"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await card1.locator('[data-decision="d1"] [data-verdict-btn="skip"]').getAttribute('aria-pressed'), 'false');
+  assert.equal(await card1.locator('.dr-note').count(), 0, 'No note box until Change.');
+  await card1.locator('[data-decision="d2"] [data-verdict-btn="change"]').click();
+  await card1.locator('[data-decision="d2"] .dr-note').fill('Bottom-left');
+  assert.equal(await send.isDisabled(), true, 'Two of three is not enough.');
+  await card1.locator('[data-decision="d3"] [data-verdict-btn="skip"]').click();
+  assert.equal(await send.isDisabled(), false);
+  await card1.locator('[data-annotate]').click();
+  await stroke(designPage);
+  await designPage.locator('.drawing-bar button', { hasText: /^Done$/ }).click();
+  await card1.locator('[data-attached]').waitFor();
+  await card1.locator('[data-clear-drawing]').click();
+  assert.equal(await card1.locator('[data-attached]').count(), 0, 'Clear drops the drawing.');
+  await card1.locator('[data-annotate]').click();
+  await stroke(designPage);
+  await designPage.locator('.drawing-bar button', { hasText: /^Done$/ }).click();
+  await card1.locator('[data-attached]').waitFor();
+  await card1.locator('textarea').fill('Close. Fix the corner.');
+
+  step('design review: sending stores the three verdicts, the change note, the summary and the drawing; the note says "Review sent"');
+  await send.click();
+  await card1.waitFor({ state: 'detached' });
+  const stored = third.fake.json(`sections/inbox/asks/${review.id}/answer.json`);
+  assert.deepEqual(stored.decisions, { d1: { verdict: 'approve' }, d2: { verdict: 'change', note: 'Bottom-left' }, d3: { verdict: 'skip' } });
+  assert.equal(stored.note, 'Close. Fix the corner.');
+  assert.deepEqual(stored.drawing, { excalidraw: 'answer.excalidraw', png: 'answer.png' });
+  const scene = third.fake.json(`sections/inbox/asks/${review.id}/answer.excalidraw`);
+  assert.ok(scene.elements.some(element => element.type === 'image') && scene.elements.some(element => element.type === 'freedraw'), 'The picture is the background of the drawing.');
+  await designPage.locator('[data-next-note]', { hasText: 'Review sent · next: Which card back?' }).waitFor();
+  await designPage.locator('[data-next-back]').click();
+  await designPage.locator('[data-decisions-answer]').waitFor();
+  assert.match(await designPage.locator('[data-decisions-answer]').innerText(), /Approve · Frame: warm oak[\s\S]*Change · Stack counter[^\n]*\(Bottom-left\)[\s\S]*Skip · Drop the gold/);
+
+  step('design review, pick: a 2 by 2 grid labelled by letter, Send pick stays off until one is chosen');
+  await go(designPage, '#/~hub/needs/design');
+  const card2 = designPage.locator(`.ni[data-need="ask-${pick.id}"]`);
+  await card2.locator('.hub-options.pick').waitFor();
+  assert.deepEqual(await card2.locator('.four dd').allInnerTexts(), ['3 takes to pick from', 'Waiting for your review', 'Pick one, or draw on them', 'Your review']);
+  const grid = await card2.locator('.hub-option').evaluateAll(list => list.map(item => { const box = item.getBoundingClientRect(); return [Math.round(box.left), Math.round(box.top)]; }));
+  assert.equal(grid[0][1], grid[1][1], 'A and B share a row.');
+  assert.ok(grid[2][1] > grid[0][1] && grid[2][0] === grid[0][0], 'C starts the second row.');
+  assert.deepEqual(await card2.locator('.hub-option-label b').allTextContents(), ['A', 'B', 'C']);
+  const pickSend = card2.getByRole('button', { name: 'Send pick' });
+  assert.equal(await pickSend.isDisabled(), true);
+  await card2.locator('[data-option="C"] .hub-option-pick').click();
+  assert.equal(await card2.locator('[data-option="C"] .dr-use').innerText(), 'Chosen');
+  await pickSend.click();
+  await card2.waitFor({ state: 'detached' });
+  assert.equal(third.fake.json(`sections/inbox/asks/${pick.id}/answer.json`).choice, 'C');
+  assert.equal(third.fake.json(`sections/inbox/asks/${pick.id}/answer.json`).decisions, undefined);
+
+  step('design review at 375 px: one column, targets of 44 px, no sideways scroll, both variants');
+  const review2 = designAskJson({ id: askId('design2', 'g2g2'), now: new Date(nowMs - 3 * 60000), question: 'Review the second frame' });
+  const pick2 = askJson({ id: askId('pick2', 'k2k2'), now: new Date(nowMs - 2 * 60000), question: 'Which back, round two?', options: threeOptions(), allowDrawing: true });
+  third.seed.ask(review2);
+  third.seed.ask(pick2);
+  const small = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+  await small.goto(`${third.url}#/~hub/needs/design`);
+  await small.locator(`.ni[data-need="ask-${review2.id}"] [data-design-image] img`).waitFor();
+  await small.locator(`.ni[data-need="ask-${pick2.id}"] .hub-options.pick img`).first().waitFor();
+  await small.waitForTimeout(300);
+  await noSideways(small, 'design reviews at 375 px');
+  const phoneCard = small.locator(`.ni[data-need="ask-${review2.id}"]`);
+  const stack = await phoneCard.evaluate(node => ({ pic: node.querySelector('.dr-pic').getBoundingClientRect(), side: node.querySelector('.dr-side').getBoundingClientRect() }));
+  assert.ok(stack.side.top >= stack.pic.bottom - 1, 'The decisions sit under the picture.');
+  await tall(phoneCard.locator('.dr-pill'), 'verdict buttons');
+  await tall(phoneCard.locator('[data-annotate]'), 'Annotate');
+  await tall(small.locator(`.ni[data-need="ask-${pick2.id}"] .hub-option-pick`), 'pick options');
+  await phoneCard.locator('[data-decision="d1"] [data-verdict-btn="change"]').tap();
+  await tall(phoneCard.locator('.dr-note'), 'the change note');
+  await noSideways(small, 'a Change note at 375 px');
+  const pills = await phoneCard.locator('[data-decision="d1"] .dr-seg').boundingBox();
+  assert.ok(pills && pills.x >= 0 && pills.x + pills.width <= 375, 'The three buttons fit the width.');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   await fixture.close();
   await second?.close();
+  await third?.close();
 }
 console.log('hub-needs-ui: passed');

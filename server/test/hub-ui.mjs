@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson, eventJson, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -139,7 +139,7 @@ try {
   await page.locator('.hub-steps li.on', { hasText: 'Picked up' }).waitFor();
 
   step('409: an answer that lands first is shown, not overwritten');
-  const second = askJson({ id: askId('race', 'b2c3'), bead: 'bd-9', now: new Date(), options: threeOptions() });
+  const second = askJson({ id: askId('race', 'b2c3'), bead: 'bd-9', now: new Date(), options: plainOptions() });
   fixture.seed.ask(second);
   await go(page, `#/~hub/ask/${second.id}`);
   await page.locator('[data-option="A"] .hub-option-pick').click();
@@ -176,7 +176,7 @@ try {
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
   await phone.goto(fixture.url);
   await phone.locator('.sidebar-reopen, .sidebar').first().waitFor();
-  const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: threeOptions() });
+  const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: plainOptions() });
   fixture.seed.ask(phoneAsk);
   for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.wk-lanes'], ['#/~hub/activity', '.hub-chips']]) {
     await go(phone, hash);
@@ -220,7 +220,7 @@ try {
   await tabs.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3', null, { timeout: 5000 });
   assert.equal(await tabs.locator('[data-hub-badge]').count() ? await tabs.locator('[data-hub-badge]').innerText() : '3', '3', 'The sidebar count follows too.');
   // Later steps need an open Ask again.
-  fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: threeOptions() }));
+  fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: plainOptions() }));
   await tabs.locator('[data-hub-tab="needs"]').tap();
   await tabs.locator('.hub[data-screen="needs"]').waitFor();
   // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at five.
@@ -1007,7 +1007,7 @@ try {
     await target.locator('[data-attached]').waitFor();
     assert.match(await target.locator('[data-attached]').innerText(), /Drawing attached to option B/);
     assert.equal(await target.locator('[data-option="B"].sel').count(), 1, 'Drawing on an option selects it.');
-    await target.locator('button:has-text("Send answer")').click();
+    await target.locator('button:has-text("Send pick")').click();
     await answeredThenBack(target);
     const folder = `sections/inbox/asks/${ask.id}`;
     const answer = fixture.fake.json(`${folder}/answer.json`);

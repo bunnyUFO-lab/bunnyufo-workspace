@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import type { Ask, AskAnswer } from '../lib/hub'
 import { host } from '../lib/host'
 import type { AskVerb } from './askAnswer'
-import { optionList, text, useAskAnswer } from './askAnswer'
+import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer'
 import HubImage from './HubImage'
 import Md from './Md'
 
@@ -20,18 +20,79 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   view?: boolean
 }) {
   const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view })
-  const { choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io } = answer
+  const { choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
   const options = optionList(ask)
   const live = ask.state === 'open' || ask.state === 'snoozed'
   const writable = host.write && live
   const canDraw = writable && ask.allowDrawing
   const hasImages = options.some(option => !!option.image)
+  const image = imageName(ask)
+  const pick = kind === 'pick'
+  const noteField = ask.allowNote && writable && (
+    <label className="hub-field">{kind ? 'Summary note (optional)' : 'Note to the agent (optional)'}
+      <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={4000} />
+    </label>
+  )
+  const picture = image && (
+    <div className="dr-pic" data-design-image>
+      <span className="hub-thumb dr-thumb">
+        <HubImage
+          path={`asks/${ask.id}/${image}`} alt={`The design: ${text(ask.question)}`} open
+          onLoad={event => { const { naturalWidth: w, naturalHeight: h } = event.currentTarget; setSizes(previous => (previous.image?.w === w ? previous : { ...previous, image: { w, h } })) }}
+        />
+      </span>
+      {canDraw && (
+        <div className="dr-tools">
+          <button type="button" className="hub-btn" data-annotate onClick={() => setEditing({ optionId: null, image, w: sizes.image?.w ?? 1024, h: sizes.image?.h ?? 768, scene: drawing?.optionId === null ? drawing.scene : undefined })}>✎ Annotate</button>
+          {drawing && <button type="button" className="hub-btn" data-clear-drawing onClick={() => setDrawing(null)}>Clear</button>}
+        </div>
+      )}
+    </div>
+  )
+  const decisionRows = decisions.length > 0 && (
+    <div className="dr-decisions" role="list" aria-label="Decisions">
+      {decisions.map(item => {
+        const stored = ask.answer?.decisions?.[item.id]
+        const given = verdicts[item.id] ?? (stored ? { verdict: stored.verdict, note: text(stored.note) } : undefined)
+        return (
+          <div key={item.id} className="dr-row" role="listitem" data-decision={item.id} data-verdict={given?.verdict}>
+            <p className="dr-text" id={`dr-${ask.id}-${item.id}`}>{text(item.text)}</p>
+            {text(item.detail) && <p className="dr-detail">{text(item.detail)}</p>}
+            <div className="dr-seg" role="group" aria-labelledby={`dr-${ask.id}-${item.id}`}>
+              {VERDICTS.map(([verdict, label]) => (
+                <button
+                  key={verdict} type="button" className="dr-pill" data-verdict-btn={verdict} aria-pressed={given?.verdict === verdict}
+                  disabled={!writable} aria-disabled={writable ? undefined : true} title={writable ? undefined : 'Sign in to answer'}
+                  onClick={() => answer.setVerdict(item.id, verdict)}
+                >{label}</button>
+              ))}
+            </div>
+            {given?.verdict === 'change' && (live ? (
+              <input
+                className="dr-note" type="text" maxLength={1000} value={given.note} placeholder="What should change?" aria-label={`What should change: ${text(item.text)}`}
+                onChange={event => answer.setVerdictNote(item.id, event.target.value)}
+              />
+            ) : given.note && <p className="dr-detail">{given.note}</p>)}
+          </div>
+        )
+      })}
+    </div>
+  )
 
   return (
     <>
       {typeof ask.context === 'string' && ask.context && <Md text={ask.context} />}
+      {(picture || decisionRows) && (
+        <div className="dr" data-design>
+          {picture}
+          <div className="dr-side">
+            {decisionRows}
+            {noteField}
+          </div>
+        </div>
+      )}
       {options.length > 0 && (
-        <div className="hub-options" role="radiogroup" aria-label="Options">
+        <div className={`hub-options${pick ? ' pick' : ''}`} role="radiogroup" aria-label="Options">
           {options.map(option => (
             <div key={option.id} className={`hub-option${choice === option.id || ask.answer?.choice === option.id ? ' sel' : ''}`} data-option={option.id}>
               <button
@@ -47,6 +108,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
                   </span>
                 )}
                 <span className="hub-option-label"><b>{option.id}</b> · {text(option.label)}</span>
+                {pick && <span className="dr-use">{choice === option.id ? 'Chosen' : 'Use this one'}</span>}
               </button>
               {canDraw && option.image && (
                 <button
@@ -59,12 +121,8 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
         </div>
       )}
       {!host.write && live && <p className="hub-muted" data-readonly-note>You can read this Ask here. To answer it, open it on the signed-in site.</p>}
-      {ask.allowNote && writable && (
-        <label className="hub-field">Note to the agent (optional)
-          <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={4000} />
-        </label>
-      )}
-      {canDraw && !hasImages && !drawing && (
+      {!(picture || decisionRows) && noteField}
+      {canDraw && !hasImages && !image && !drawing && (
         <p><button type="button" className="hub-btn" onClick={() => setEditing({ optionId: null, w: 1024, h: 768 })}>Draw instead</button></p>
       )}
       {drawing && (
@@ -87,14 +145,14 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
             <>
               {view && <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirming(true)}>Cancel</button>}
               <button type="button" className="hub-btn" disabled={busy} onClick={() => void answer.snooze()}>Snooze a day</button>
-              <button type="button" className="hub-btn pri" disabled={busy || !answer.ready} onClick={() => void answer.send()}>Send answer</button>
+              <button type="button" className="hub-btn pri" data-send disabled={busy || !answer.ready} onClick={() => void answer.send()}>{pick ? 'Send pick' : kind ? 'Send review' : 'Send answer'}</button>
             </>
           )}
         </div>
       )}
       {editing && io && (
         <Suspense fallback={null}>
-          <DrawingEditor url="" title={editing.optionId ? `Option ${editing.optionId}` : 'Drawing'} io={io} onClose={() => setEditing(null)} />
+          <DrawingEditor url="" title={editing.optionId ? `Option ${editing.optionId}` : editing.image ? 'Annotate' : 'Drawing'} io={io} onClose={() => setEditing(null)} />
         </Suspense>
       )}
     </>

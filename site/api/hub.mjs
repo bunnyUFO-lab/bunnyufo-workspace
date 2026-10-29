@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -162,6 +162,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return found;
   };
 
+  /** An Ask as read: a malformed `decisions` or `image` is dropped so it shows as a plain Question, logged once per Ask. */
+  const warned = new Set();
+  const readAsk = (raw, id) => {
+    const { ask, bad } = cleanAsk(raw);
+    if (bad.length && !warned.has(id)) { warned.add(id); log(`[hub] Ask ${id} has a malformed ${bad.join(' and ')}; it shows as a plain question.`); }
+    return { ...ask, id };
+  };
+
   async function loadAsks(at) {
     const folders = await listFolders('asks', at);
     const rows = await pool(POOL, [...folders], async ([id, names]) => {
@@ -170,7 +178,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       if (!ask || typeof ask.question !== 'string') return null;
       const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
       const state = askState(names, ask, at, snooze);
-      return { ask: { ...ask, id }, names, state, item: askItem({ ...ask, id }, state) };
+      const clean = readAsk(ask, id);
+      return { ask: clean, names, state, item: askItem(clean, state) };
     });
     return rows.filter(Boolean);
   }
@@ -272,7 +281,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     if (!names.has('ask.json')) throw fail('No such Ask.', 404);
     const ask = await cached(`asks/${id}/ask.json`);
     if (!ask) throw fail('No such Ask.', 404);
-    return { ask: { ...ask, id }, names };
+    return { ask: readAsk(ask, id), names };
   }
 
   async function askDetail(id, at) {
@@ -476,6 +485,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const answer = { at: at.toISOString(), by: user || 'local' };
     if (data.choice) answer.choice = data.choice;
     if (data.note) answer.note = data.note;
+    if (data.decisions) {
+      answer.decisions = Object.fromEntries(Object.entries(data.decisions).map(([decision, entry]) => [decision, {
+        verdict: entry.verdict, ...(typeof entry.note === 'string' && entry.note.trim() ? { note: entry.note.trim() } : {}),
+      }]));
+    }
     if (checked) {
       // The drawing first, so an agent never sees an answer.json that points at a missing picture.
       await putDrawingFile(id, 'answer.excalidraw', checked.sceneText, 'application/json');

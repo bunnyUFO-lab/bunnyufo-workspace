@@ -5,7 +5,7 @@ import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import { goNext, useQueueOrder } from './useGoNext'
 import AskBody from './AskBody'
-import { optionList, text, when } from './askAnswer'
+import { VERDICTS, decisionList, designKind, optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
 import { useHubData } from './useHub'
 
@@ -17,6 +17,14 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
   return (
     <section className="hub-panel hub-answer" aria-label="The answer">
       <h3>Answer <span>by {text(answer.by) || 'someone'}{answer.via === 'discord' ? ' via Discord' : ''}, {when(answer.at)}</span></h3>
+      {decisionList(ask).length > 0 && answer.decisions && (
+        <ul className="dr-summary" data-decisions-answer>
+          {decisionList(ask).map(item => {
+            const given = answer.decisions?.[item.id]
+            return given && <li key={item.id}><b>{VERDICTS.find(([verdict]) => verdict === given.verdict)?.[1] ?? text(given.verdict)}</b> · {text(item.text)}{text(given.note) ? ` (${text(given.note)})` : ''}</li>
+          })}
+        </ul>
+      )}
       {answer.choice && <p><b>{option ? `${option.id} · ${text(option.label)}` : text(answer.choice)}</b></p>}
       {typeof answer.note === 'string' && answer.note && <p className="hub-note-text">{answer.note}</p>}
       {answer.drawing && <HubImage className="hub-drawing" path={`asks/${ask.id}/${answer.drawing.png}`} alt="The drawing sent with the answer" />}
@@ -56,7 +64,7 @@ export default function AskView({ id }: { id: string }) {
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
-      <p><a className="hub-btn" href={hubHash('needs', 'question')}>Back to Needs you</a></p>
+      <p><a className="hub-btn" href={hubHash('needs', designKind(ask) ? 'design' : 'question')}>Back to Needs you</a></p>
     </>
   )
 }

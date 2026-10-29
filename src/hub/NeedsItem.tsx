@@ -1,6 +1,7 @@
 import type { Ask, Checklist, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
+import type { SettledVerb } from '../lib/nextItem.mjs'
 import { reviewHash } from '../lib/route'
 import AskBody from './AskBody'
 import ChecklistBody from './ChecklistBody'
@@ -10,7 +11,7 @@ import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
 
 /** What the owner did to take an item off the queue, as `onSettled` reports it. */
-export type SettleVerb = 'answered' | 'snoozed' | 'submitted' | 'done' | 'cancelled'
+export type SettleVerb = SettledVerb
 
 const VERDICT_LEG: Record<string, string> = { smoke: 'Smoke', review: 'Review', qa: 'QA' }
 

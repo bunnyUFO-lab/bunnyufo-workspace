@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { Ask, AskAnswer } from '../lib/hub'
+import type { Ask, AskAnswer, AskDecision, DecisionVerdict } from '../lib/hub'
 import { HubError, fileUrl, hubPost } from '../lib/hub'
 import { authHeaders } from '../local/client'
 import type { DrawingIo } from '../components/DrawingEditor'
@@ -8,7 +8,10 @@ import { annotationScene, blankScene, takeHandoff } from './drawing'
 export interface Attached { scene: string; png: string; optionId: string | null }
 export interface Editing { optionId: string | null; image?: string; w: number; h: number; scene?: string }
 /** What the owner did to take an Ask off the queue. */
-export type AskVerb = 'answered' | 'snoozed' | 'cancelled'
+export type AskVerb = 'answered' | 'snoozed' | 'cancelled' | 'reviewed'
+
+export const VERDICTS: [DecisionVerdict, string][] = [['approve', 'Approve'], ['change', 'Change'], ['skip', 'Skip']]
+export interface Verdicts { [decision: string]: { verdict: DecisionVerdict; note: string } }
 
 // An Ask file is written by agents and tools, so every field here may be missing or the wrong type.
 export const when = (iso: unknown) => {
@@ -18,6 +21,15 @@ export const when = (iso: unknown) => {
 export const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 export const optionList = (ask: Ask): NonNullable<Ask['options']> => (Array.isArray(ask.options) ? ask.options.filter(item => item && typeof item === 'object' && typeof item.id === 'string') : [])
 
+/** The decisions of a Design review, as the server cleaned them; an Ask read by an older server may carry none. */
+export const decisionList = (ask: Ask): AskDecision[] => (Array.isArray(ask.decisions) ? ask.decisions.filter(item => item && typeof item.id === 'string' && typeof item.text === 'string') : [])
+export const imageName = (ask: Ask): string => (typeof ask.image === 'string' ? ask.image : '')
+/** `review`: a picture or decisions to go through; `pick`: options with pictures and nothing to decide; null: a plain Question. */
+export function designKind(ask: Ask): 'review' | 'pick' | null {
+  if (decisionList(ask).length || imageName(ask)) return 'review'
+  return optionList(ask).some(option => typeof option.image === 'string' && option.image) ? 'pick' : null
+}
+
 /**
  * Everything the owner does to one Ask: pick an option, write a note, draw, and then send, snooze or cancel.
  * The list card and the Ask's own view share it; only the own view (`handoff`) takes a drawing handed over from Sketch. `onSettled` runs after a write that took the Ask off the queue.
@@ -25,6 +37,7 @@ export const optionList = (ask: Ask): NonNullable<Ask['options']> => (Array.isAr
 export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false }: { reload: () => void; onSettled?: (verb: AskVerb) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean }) {
   const [choice, setChoice] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  const [verdicts, setVerdicts] = useState<Verdicts>({})
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -33,6 +46,8 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({})
 
   const askId = ask.id
+  const decisions = decisionList(ask)
+  const kind = designKind(ask)
   const io = useMemo<DrawingIo | null>(() => (editing ? {
     load: async () => ({ text: editing.scene ?? (editing.image ? annotationScene(editing.image, editing.w, editing.h) : blankScene()), etag: null }),
     save: async (scene, png) => {
@@ -69,10 +84,18 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   }
 
   const base = `/asks/${encodeURIComponent(askId)}`
+  const sentDecisions = () => Object.fromEntries(decisions.map(item => {
+    const given = verdicts[item.id]
+    return [item.id, { verdict: given.verdict, ...(given.verdict === 'change' && given.note.trim() ? { note: given.note.trim() } : {}) }]
+  }))
   return {
+    verdicts, kind, decisions,
+    setVerdict: (decision: string, verdict: DecisionVerdict) => setVerdicts(previous => ({ ...previous, [decision]: { verdict, note: previous[decision]?.note ?? '' } })),
+    setVerdictNote: (decision: string, text: string) => setVerdicts(previous => (previous[decision] ? { ...previous, [decision]: { ...previous[decision], note: text } } : previous)),
     choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
-    ready: !!choice || note.trim().length > 0 || !!drawing,
-    send: () => act(() => hubPost(`${base}/answer`, { ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}) }), 'answered'),
+    // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
+    ready: decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing,
+    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}) }), kind ? 'reviewed' : 'answered'),
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
   }
