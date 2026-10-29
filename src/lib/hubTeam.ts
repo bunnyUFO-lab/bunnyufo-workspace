@@ -20,6 +20,8 @@ export interface TeamAgent {
   runtime: string
   model: string
   role: string
+  /** Spawn presets this agent takes (the research agents); "Give work" opens Spawn on the first. */
+  presets?: string[]
   status: AgentStatus
   task: string
   sprite: AvatarSprite

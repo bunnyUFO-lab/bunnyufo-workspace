@@ -746,7 +746,7 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 | Source | Backlog | Ready | Running | Blocked | Review | Done |
 |---|---|---|---|---|---|---|
 | Beads issue | `deferred` | `open` with every blocker closed | `in_progress` | `blocked`; `open` with an open blocker; an open Ask on the bead or label `needs-owner` (why: "needs you") | not closed and an open `pr-opened` or `ready-for-review` event | `closed` |
-| Request | `open` (shown as proposed) and any unknown state | `approved`, `taken` | `running` | `lost`, `failed`, `at-pc` | `done` with an open PR on its bead | `done` |
+| Request | `open` and `proposed`, and any unknown state | `approved`, `taken` | `running`, `stopping` | `lost`, `failed`, `at-pc`, `asking` (why: "asked you a question"), `expired` | `done` with an open PR on its bead | `done` |
 | Hermes run | | | `running` | `waiting`, `waiting-approval` | | `completed` |
 
 Milestones and issues with children are left out (the map shows them). A task that only inherited the `milestone` label from its milestone is a task, by the same rule the map uses (`milestoneIssuesOf`). A busy or idle session in a fresh PC status whose branch names the bead gives the card `live: { host, session, state }`. `signs` are the map's (`issueSigns` in `hub-map.mjs`). `hermesRuns` is always empty for now: no store exists yet, and the mapping is tested with fixtures. A bead's `href` opens the map panel; a request's opens Needs you's requests filter.
@@ -767,7 +767,7 @@ A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.t
 
 ### Team
 
-The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs and Claude Code. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` runs on Codex gpt-6-sol with Sonnet, then DeepSeek, as fallbacks; `briefs` runs on Haiku 5.5 with the DeepSeek fallback).
+The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs, Claude Code, and the three research agents (Researcher, Market researcher, Teardown), which are Hermes runs and carry the Spawn `presets` they take. "Give work" on their card opens Spawn on the first preset. A request card on Work links to `#/~hub/request/<id>`; declined and stopped requests are hidden, and a click opens the run drawer. Later milestones add an entry when an agent gets work. The model labels follow the Hermes profile docs (`main` runs on Codex gpt-6-sol with Sonnet, then DeepSeek, as fallbacks; `briefs` runs on Haiku 5.5 with the DeepSeek fallback).
 
 | Route | Does |
 |---|---|

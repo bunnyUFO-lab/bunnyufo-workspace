@@ -47,20 +47,24 @@ test('requests map by state; unknown states go to Backlog; declined and stopped 
       item('r-open', 'open'), item('r-prop', 'proposed'), item('r-appr', 'approved'), item('r-take', 'taken'), item('r-run', 'running'),
       item('r-lost', 'lost'), item('r-fail', 'failed'), item('r-pc', 'at-pc'), item('r-done', 'done'),
       item('r-dec', 'declined'), item('r-stop', 'stopped'), item('r-new', 'from-the-future'),
-      item('r-pr', 'done', { bead: 'ws-pr' }),
+      item('r-pr', 'done', { bead: 'ws-pr' }), item('r-ask', 'asking'), item('r-exp', 'expired'), item('r-halt', 'stopping'),
     ],
     events: [eventJson({ kind: 'pr-opened', ts: minutesAgo(NOW, 5), bead: 'ws-pr' })], now: NOW,
   });
   const expected = {
     'r-open': 'backlog', 'r-prop': 'backlog', 'r-new': 'backlog', 'r-appr': 'ready', 'r-take': 'ready', 'r-run': 'running',
     'r-lost': 'blocked', 'r-fail': 'blocked', 'r-pc': 'blocked', 'r-done': 'done', 'r-pr': 'review',
+    'r-ask': 'blocked', 'r-exp': 'blocked', 'r-halt': 'running',
   };
   for (const [id, lane] of Object.entries(expected)) assert.equal(laneOf(work, `request:${id}`), lane, id);
   assert.equal(laneOf(work, 'request:r-dec'), undefined);
   assert.equal(laneOf(work, 'request:r-stop'), undefined);
   assert.equal(card(work, 'request:r-open').state, 'proposed');
   assert.equal(card(work, 'request:r-lost').why, 'lost: no word from the run for 20 minutes');
-  assert.equal(card(work, 'request:r-open').href, '#/~hub/needs/requests');
+  assert.equal(card(work, 'request:r-open').href, '#/~hub/request/r-open');
+  assert.equal(card(work, 'request:r-ask').why, 'asked you a question');
+  assert.equal(card(work, 'request:r-exp').why, 'the approval ran out');
+  assert.equal(card(work, 'request:r-halt').why, 'stopping');
 });
 
 test('a task that inherited the milestone label is a task; the milestone itself stays out', () => {

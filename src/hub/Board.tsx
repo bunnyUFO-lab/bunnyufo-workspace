@@ -4,6 +4,7 @@ import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
+import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
@@ -20,7 +21,7 @@ const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'B
 function Card({ card, showProject, projectName }: { card: WorkCard; showProject: boolean; projectName: string }) {
   const [glyph, source] = SOURCE[card.source]
   return (
-    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}`} href={card.href} data-card={card.key}>
+    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}`} href={card.href} data-card={card.key} onClick={card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
       <span className="wk-title">{card.title}</span>
       {card.why && <span className="wk-why">{card.why}</span>}
       <span className="wk-meta">
