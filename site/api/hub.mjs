@@ -20,6 +20,7 @@ import {
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { loadSigningKey } from './signing.mjs';
+import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -112,9 +113,10 @@ const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(v
  * @param prefix   where the sections are in it
  * @param inbox    the inbox section's id: `inbox`, or `inbox-dev` on the development copy
  * @param enabled  `HUB=1` on the site, bucket-and-not-`HUB=0` on the local service
- * @param env      the merged environment (the chat routes read HERMES_* from it)
+ * @param env      the merged environment (the chat routes and the Hermes request runs read HERMES_* from it)
+ * @param hermesTiming  intervals of the Hermes followers and sweep, for tests (see hermes-dispatch.mjs)
  */
-export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log } = {}) {
+export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log, hermesTiming = {} } = {}) {
   const on = !!enabled && !!bucket;
   const key = rel => inboxKey(rel, prefix, inbox);
   const cache = new Map();
@@ -237,6 +239,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log });
   const { loadRequests } = requestFiles;
+  // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
+  const hermesDispatch = createHermesDispatch({ env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming });
+  if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${error.message}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
   async function loadBeads(project) {
@@ -697,7 +702,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       const repo = trackedRepo(got.value.tracked?.repo);
       return entities
         .filter(entity => entity && typeof entity.id === 'string' && typeof entity.title === 'string')
-        .map(entity => ({ section, id: entity.id, title: entity.title, folder: typeof entity.folder === 'string' ? entity.folder : entity.id, repo }));
+        .map(entity => ({
+          section, id: entity.id, title: entity.title, folder: typeof entity.folder === 'string' ? entity.folder : entity.id, repo,
+          ...(typeof entity.created === 'string' ? { created: entity.created } : {}), ...(typeof entity.updated === 'string' ? { updated: entity.updated } : {}),
+        }));
     });
     return lists.flat();
   }
@@ -853,6 +861,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The request module, for the later items that sign (follow-ups, policy) and for the Hermes follower to plug its hooks into. */
     requests: requestFiles,
     requestHooks: requestFiles.hooks,
+    hermes: hermesDispatch,
+    /** Stops the followers and the sweep (shutdown, tests). */
+    close: () => hermesDispatch.close(),
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
@@ -903,6 +914,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') hermesDispatch.pageLoad(at);
           if (route === '/hub/today') {
             const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
             const status = await loadPcStatus(at);
@@ -935,6 +947,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply(await checklistDetail(decodeURIComponent(match[1])));
           } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/requests\/([^/]+)\/events$/.exec(route))) {
+            await hermesDispatch.streamEvents(response, decodeURIComponent(match[1]));
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
             reply(await requestFiles.detail(decodeURIComponent(match[1]), at));
           } else if (route.startsWith('/hub/presets')) {

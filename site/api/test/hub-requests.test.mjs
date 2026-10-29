@@ -403,7 +403,7 @@ test('approve writes a verifying approved.json with the right run block and the 
     assert.equal(answer.status, 201, JSON.stringify(answer.body));
     assert.equal(answer.body.state, 'approved');
     assert.equal(answer.body.approved.run.brief, undefined, 'The answer comes without the brief.');
-    assert.equal(answer.body.waiting, undefined);
+    assert.equal(answer.body.waiting, 'Hermes is not set up on this host.', 'This fixture has no Hermes: the approval waits.');
     const stored = fake.json(`sections/inbox/requests/${request.id}/approved.json`);
     assert.equal(verify(stored, PUB), true);
     assert.deepEqual([stored.v, stored.request, stored.project, stored.repo, stored.target, stored.by], [1, request.id, 'probe', null, 'hermes', 'owner']);
