@@ -3,7 +3,9 @@
 //
 // The agent list is app code (a later milestone adds an entry when an agent gets work). The only
 // stored data is the owner's avatar choice: create-only `team/<agent>/avatar-<stamp>-<rand4>.json`
-// files, written by the Hub (owner-only in the card API), newest name wins.
+// files, written by the Hub (owner-only in the card API), newest name wins. A choice may name a
+// custom pet sheet (hub-sheets.mjs) with its sha256; it counts only while that sheet still passes.
+import { SHEET_ID_RE } from './hub-sheets.mjs';
 
 /** Mirrors `BUILTIN_KEYS` in src/hub/team/sprites.ts; site/api/test/hub-team.test.mjs keeps them equal. */
 export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'architect', 'developer', 'reviewer', 'qa', 'artist', 'lib_b', 'lib_c', 'lib_d', 'dev_teal', 'qa_violet', 'owl_snow', 'artist_blue', 'arch_red'];
@@ -32,12 +34,18 @@ export function checkAvatar(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   if (raw.kind === 'builtin') return typeof raw.key === 'string' && BUILTIN_KEYS.includes(raw.key) ? { kind: 'builtin', key: raw.key } : null;
   if (raw.kind === 'random') return Number.isInteger(raw.salt) && raw.salt >= 0 && raw.salt <= 9999 ? { kind: 'random', salt: raw.salt } : null;
+  if (raw.kind === 'custom') {
+    if (typeof raw.sheet !== 'string' || !SHEET_ID_RE.test(raw.sheet)) return null;
+    // A request names only the sheet; the Hub adds the hash it computed. A stored file carries it.
+    return typeof raw.sha256 === 'string' && /^[0-9a-f]{64}$/.test(raw.sha256) ? { kind: 'custom', sheet: raw.sheet, sha256: raw.sha256 } : { kind: 'custom', sheet: raw.sheet };
+  }
   return null;
 }
 
-/** The sprite a stored choice file gives this agent, or the default. `choice` is already checked. */
+/** The sprite a stored choice file gives this agent, or the default. `choice` is already checked; a custom one carries its resolved `sprite`. */
 export function spriteOf(agent, choice) {
   if (!choice) return defaultSprite(agent);
+  if (choice.kind === 'custom') return choice.sprite ?? defaultSprite(agent);
   return choice.kind === 'builtin' ? { kind: 'builtin', key: choice.key } : { kind: 'random', salt: choice.salt, name: agent.name };
 }
 

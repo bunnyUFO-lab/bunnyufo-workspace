@@ -30,6 +30,7 @@ import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
+import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
@@ -326,7 +327,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       const names = objects.map(object => object.key.slice(base.length)).filter(name => AVATAR_FILE_RE.test(name)).sort().reverse().slice(0, 5);
       for (const name of names) {
         const choice = checkAvatar((await fresh(`team/${agent.id}/${name}`))?.value);
-        if (choice) { choices[agent.id] = choice; return; }
+        if (choice?.kind === 'custom') {
+          // Counts only while the sheet is still listed and is the very file the owner chose.
+          const sheet = choice.sha256 ? await sheets.find(agent.id, choice.sheet).catch(() => null) : null;
+          if (sheet && sheet.sha256 === choice.sha256) { choices[agent.id] = { ...choice, sprite: sheetSprite(agent.id, sheet) }; return; }
+        } else if (choice) { choices[agent.id] = choice; return; }
       }
     }));
     return choices;
@@ -339,11 +344,27 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { agents: buildTeam({ statuses, choices }) };
   }
 
+  /** The sheets reader; the keys come from `inboxKey` like every other. */
+  const sheets = createSheets({ bucket, folderKey: agentId => folder(`team/${agentId}`), agents: AGENTS.map(agent => agent.id) });
+
+  /** An agent's listed sheets, newest first, each marked `current` when it is the sprite now. */
+  async function sheetList(agentId, at) {
+    if (!AGENTS.some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
+    const [list, choices] = await Promise.all([sheets.listSheets(agentId), avatarChoices()]);
+    const current = choices[agentId]?.kind === 'custom' ? choices[agentId].sheet : '';
+    return { sheets: list.map(sheet => ({ sheet: sheet.sheet, at: sheet.at, rows: sheet.rows, url: sheetSprite(agentId, sheet).url, current: sheet.sheet === current })) };
+  }
+
   /** The owner's avatar choice: a create-only file the Hub alone writes (owner-only in the card API). */
   async function chooseAvatar(agentId, raw, user, at) {
     if (!AGENTS.some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
-    const choice = checkAvatar(raw);
-    if (!choice) throw fail('An avatar is a built-in key, or a random one with a whole number from 0 to 9999.', 400);
+    let choice = checkAvatar(raw);
+    if (!choice) throw fail('An avatar is a built-in key, a random one with a whole number from 0 to 9999, or a custom sheet.', 400);
+    if (choice.kind === 'custom') {
+      const sheet = await sheets.find(agentId, choice.sheet);
+      if (!sheet) throw fail("That sheet isn't ready or failed its check.", 400);
+      choice = { kind: 'custom', sheet: sheet.sheet, sha256: sheet.sha256 };
+    }
     const body = `${JSON.stringify({ ...choice, at: at.toISOString(), by: user || 'local' }, null, 2)}
 `;
     for (let attempt = 0; ; attempt += 1) {
@@ -778,8 +799,15 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   async function serveFile(response, rel) {
     const segments = String(rel ?? '').split('/');
+    let listedSheet = null;
+    if (segments[0] === 'team' && segments.length === 3) {
+      // Only a PNG that passes the sheet check is served from team/; avatar files and everything else are not.
+      const id = SHEET_PNG_RE.exec(segments[2] ?? '')?.[1];
+      listedSheet = id && AGENTS.some(agent => agent.id === segments[1]) ? await sheets.find(segments[1], id) : null;
+      if (!listedSheet) throw fail('That file is not served.', 400);
+    }
     const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? ''));
-    if (segments.length !== 3 || !(picture || ['asks', 'requests', 'drawings'].includes(segments[0]))) throw fail('That file is not served.', 400);
+    if (segments.length !== 3 || !(picture || listedSheet || ['asks', 'requests', 'drawings'].includes(segments[0]))) throw fail('That file is not served.', 400);
     let object;
     try {
       object = await bucket.get(key(rel));
@@ -787,6 +815,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       if (error.status === 404) throw fail('Not found', 404);
       throw error;
     }
+    if (listedSheet && object.etag !== listedSheet.etag) throw fail('That file is not served.', 400);
     const headers = {
       'Content-Type': contentTypeOf(rel),
       'Cache-Control': 'private, max-age=300',
@@ -1026,6 +1055,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/sheets$/.exec(route))) {
+            reply(await sheetList(match[1], at));
           } else {
             throw fail('Not found', 404);
           }

@@ -783,3 +783,17 @@ The agent list is app code (`AGENTS` in `site/api/hub-team.mjs`): Hermes, Briefs
 Statuses: Claude Code is `needs-you` if a session is, else `working` if one is, else `idle` when sessions exist or the PC status is fresh, else `offline`. Hermes asks `HERMES_URL` `/health` (no key, 1.5 s, cached 60 s): healthy is `idle` with "Last chat <ago>", otherwise `offline`; with no `HERMES_URL` it is `offline`, "Not set up". Briefs is always `idle`.
 
 An avatar choice is the owner's. The site writes it as a create-only file, `inbox/team/<agent>/avatar-<YYYYMMDDTHHMMSSZ>-<rand4>.json` = `{ kind, key | salt, at, by }`, and the newest name is the current sprite; none means the default. Undo posts the previous choice again. The write is guarded in two places: the route needs a signed-in user and an allowed origin like every Hub write, and the card API refuses `team/<agent>/avatar-*.json` to any token that is not unrestricted (`OWNER_FILES`, for PUT, upload URLs and DELETE), so an agent cannot set or clear an avatar. `BUILTIN_KEYS` is a copy of the client list in `src/hub/team/sprites.ts`; `site/api/test/hub-team.test.mjs` fails if the two differ.
+
+### Custom sprites
+
+A custom sprite is a pet sheet an agent made on the Gaming PC: `inbox/team/<agent>/sheet-<YYYYMMDDTHHMMSSZ>-<rand4>.png` and a `.json` of the same name. The PNG is 1536 x 1872 (8 columns by 9 rows of 192 x 208 frames, art drawn at 48 x 52 and scaled x4); the rows are `idle`, `run-right`, `run-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review`. The JSON is `{ v: 1, agent, frame, cols, rows: [{ state, frames, fps }], source?, sha256, at }`.
+
+The site never serves or uses a sheet it has not checked. A sheet is listed only when the JSON is under 16 KB and parses with `v: 1`, the `agent` of the folder, frame 192 x 208, 8 columns and nine rows in the fixed order with `frames` 1 to 8 and `fps` 1 to 24, and the PNG is at most 4 MB, 1536 x 1872 by its header, and hashes to the JSON's `sha256`. The verdict is cached by key and ETag, so a PNG is hashed once. `source` is provenance only and is never trusted.
+
+| Route | Does |
+|---|---|
+| `GET /api/hub/team/:agent/sheets` | `{ sheets: [{ sheet, at, rows, url, current }] }`, newest first, at most 20, only checked sheets. 404 for an agent not in the list |
+| `POST /api/hub/team/:agent/avatar` with `{ kind: 'custom', sheet }` | The sheet must be listed now. The site writes the owner-only avatar file `{ kind: 'custom', sheet, sha256, at, by }` with the hash it computed. 400 "That sheet isn't ready or failed its check." otherwise; 401 signed out |
+| `GET /api/hub/file?path=team/<agent>/sheet-<stamp>.png` | Serves a listed sheet's PNG with the usual sandbox headers. No other file under `team/` is served |
+
+Putting a sheet in the folder changes nothing by itself. A sheet is an agent's sprite only while the newest avatar choice names it and the sheet is still listed with that same `sha256`; if the bytes change or the files go, the Team screen falls back to the newest older choice that still resolves, then the default. In `GET /api/hub/team` the sprite is `{ kind: 'custom', sheet, url, frame, cols, rows }`, where `url` is a path under the API base.

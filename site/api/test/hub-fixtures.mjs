@@ -1,6 +1,7 @@
 // Builders for the Hub's tests and for the UI fixture service: Asks, requests, events and Beads
 // lines, plus a seeder that puts them into the stand-in S3. Nothing here is real data; hosts are
 // example.test and projects are made up.
+import { createHash } from 'node:crypto';
 import { solidPng } from './png.mjs';
 
 export const iso = date => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -216,4 +217,22 @@ export function beadsCopy({ issues, pushedAt, host = 'test-pc', worktree = 'wt-a
 /** An avatar choice file the way the Hub writes it. */
 export function teamAvatarJson({ now = new Date(), kind = 'builtin', key = 'developer', salt = 3, by = 'owner' } = {}) {
   return { kind, ...(kind === 'random' ? { salt } : { key }), at: now.toISOString(), by };
+}
+
+const SHEET_STATES = ['idle', 'run-right', 'run-left', 'waving', 'jumping', 'failed', 'waiting', 'running', 'review'];
+
+/**
+ * A custom pet sheet for `team/<agent>/`: `{ id, png, json, files }` where `files` maps the two names to bodies, ready for
+ * `seed.put`. A real PNG (solid grey, so it stays small). `width`, `height`, `pad` (bytes added in a private chunk),
+ * `rows`, `jsonAgent` and `sha256` let a test break one rule at a time.
+ */
+export function teamSheet(agent, { stamp = '20261029T100000Z', rand = 'ab12', width = 1536, height = 1872, pad = 0, rows, jsonAgent, sha256: hash, shade = 0x90, at = new Date('2026-10-29T10:00:00Z') } = {}) {
+  const id = `sheet-${stamp}-${rand}`;
+  const png = solidPng(width, height, shade, pad ? [['bnYu', Buffer.alloc(pad, 5)]] : []);
+  const json = {
+    v: 1, agent: jsonAgent ?? agent, frame: { w: 192, h: 208 }, cols: 8,
+    rows: rows ?? SHEET_STATES.map((state, index) => ({ state, frames: 1 + (index % 8), fps: 6 })),
+    source: { subject: 'test subject' }, sha256: hash ?? createHash('sha256').update(png).digest('hex'), at: at.toISOString(),
+  };
+  return { id, png, json, files: { [`${id}.png`]: png, [`${id}.json`]: json } };
 }
