@@ -12,6 +12,7 @@ export function needsKind(item: Item): NeedsKind {
     case 'blocked': return 'unstick'
     case 'request': return 'approval'
     case 'approval': return 'approval'
+    case 'hermes-approval': return 'approval'
     case 'ask': return item.design === true ? 'design' : 'question'
     default: return 'question' // a session never reaches Needs you
   }

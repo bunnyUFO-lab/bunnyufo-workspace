@@ -395,14 +395,15 @@ export function deriveEventItems(events) {
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], requests = [], events, now }) {
+export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
   const openChecklists = checklists.filter(item => item.state === 'open').sort(newest);
   // A request that waits for the owner's approval is Needs you; one that failed, was lost or expired is an alert.
   const approvals = requests.filter(item => item.kind === 'approval').sort(newest);
-  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals];
+  const hermes = [...hermesApprovals].sort(newest);
+  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
   const since = now.getTime() - DAY;
   const recent = events.filter(event => new Date(event.ts).getTime() >= since);
   const requestAlerts = requests
@@ -436,6 +437,7 @@ export function needsKindOf(item) {
     case 'blocked': return 'unstick';
     case 'request': return 'approval';
     case 'approval': return 'approval';
+    case 'hermes-approval': return 'approval';
     case 'ask': return item.design === true ? 'design' : 'question';
     default: return 'question';
   }
@@ -453,13 +455,13 @@ export function inboxFilter(raw) {
 }
 
 /** The Needs you list for one filter. `all` keeps the order Today uses: open Asks, open checklists, reviews, blocked sessions. */
-export function buildInbox({ filter: raw, asks, checklists = [], requests, events, now }) {
+export function buildInbox({ filter: raw, asks, checklists = [], requests, hermesApprovals = [], events, now }) {
   const filter = inboxFilter(raw);
   if (filter === 'requests') return [...requests].sort(newest);
   if (filter === 'answered') {
     return [...asks.filter(item => item.state === 'answered' || item.state === 'picked-up'), ...checklists.filter(item => item.state === 'submitted' || item.state === 'picked-up')].sort(newest);
   }
-  const needs = buildToday({ asks, checklists, requests, events, now }).needsYou;
+  const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now }).needsYou;
   return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);
 }
 
@@ -484,7 +486,7 @@ export function describeItem(item, now) {
   const minutes = Math.max(0, Math.floor((now.getTime() - new Date(item.at).getTime()) / 60000));
   const base = { kind, who, age: Number.isFinite(minutes) ? minutes : 0 };
   // A request made the old way is listed under the requests filter and reads as before; only a proposal to approve is an approval.
-  switch (kind === 'approval' && item.kind !== 'approval' ? 'question' : kind) {
+  switch (kind === 'approval' && item.kind === 'request' ? 'question' : kind) {
     case 'steps':
       return { ...base, what: 'Steps only you can do', state: `${item.done ?? 0} of ${item.total ?? 0} done`, next: 'Tick each step, then Submit', blocker: 'Your hands' };
     case 'playtest':
@@ -499,6 +501,9 @@ export function describeItem(item, now) {
     case 'unstick':
       return { ...base, what: 'A session waiting on you', state: /\?\s*$/.test(item.summary ?? '') ? 'Asked a question' : 'Paused at a prompt', next: 'Open the session', blocker: 'Your answer in the session' };
     case 'approval':
+      if (item.kind === 'hermes-approval') {
+        return { ...base, what: 'Hermes asks to write a protected file', state: 'Waiting; Hermes denies it after 5 minutes', next: 'Approve once or deny', blocker: 'Your answer' };
+      }
       return { ...base, what: item.preset ? `A ${item.preset} job to approve` : 'A job to approve', state: item.target ? `Proposed for ${item.target}` : 'Waiting for your approval', next: 'Approve, edit or decline it', blocker: 'Your approval' };
     case 'design': {
       const picks = !item.decisions && item.takes > 0;

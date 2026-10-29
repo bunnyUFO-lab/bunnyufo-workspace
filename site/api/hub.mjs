@@ -22,6 +22,8 @@ import { createRequests } from './hub-requests.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
+import { createHermesApprovals } from './hub-hermes-approvals.mjs';
+import { createNotify } from './notify.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -242,7 +244,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub });
   const { loadRequests } = requestFiles;
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
-  const hermesDispatch = createHermesDispatch({ env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming, scrub });
+  const notify = createNotify({ env, fetchImpl, log: line => log(scrub(line, 400)) });
+  /** What an approval needs to know about the request it belongs to: its project, and whether the run has ended. */
+  const requestInfo = async id => {
+    const { request, parts } = await requestFiles.loadOne(id, now());
+    return { project: request.project, hasResult: !!parts.result };
+  };
+  const hermesApprovals = createHermesApprovals({ cached, putCreateOnly, listFolders, fail, now, runs: () => hermesDispatch.runs, notify, requestInfo, log: line => log(scrub(line, 400)), scrub });
+  const hermesDispatch = createHermesDispatch({
+    env, fetchImpl, requests: requestFiles, listFolders, putCreateOnly, cached, fail, allCards, now, log, timing: hermesTiming, scrub,
+    onApproval: (context, prompt, runId, options) => hermesApprovals.copyApproval({ runId, request: context.id, prompt, startedAt: context.startedAt, polled: options?.polled === true }),
+  });
   if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -918,9 +930,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         if (method === 'GET') {
           if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') hermesDispatch.pageLoad(at);
           if (route === '/hub/today') {
-            const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
+            const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
             const status = await loadPcStatus(at);
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, events: window.events, now: at });
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
             const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
@@ -929,11 +941,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ pc: status ? pcSummary(status, at) : null, status });
           } else if (route === '/hub/inbox') {
             const filter = inboxFilter(query.get('filter'));
-            const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
+            const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
             const askItems = asks.map(row => row.item);
             const listItems = checklists.map(row => row.item);
-            const items = buildInbox({ filter, asks: askItems, checklists: listItems, requests, events: window.events, now: at });
-            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, requests, events: window.events, now: at }).needsYou);
+            const items = buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at });
+            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at }).needsYou);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.
             const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);
@@ -949,6 +961,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply(await checklistDetail(decodeURIComponent(match[1])));
           } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
+          } else if ((match = /^\/hub\/hermes-approvals\/([^/]+)$/.exec(route))) {
+            reply(await hermesApprovals.detail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/requests\/([^/]+)\/events$/.exec(route))) {
             await hermesDispatch.streamEvents(response, decodeURIComponent(match[1]));
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
@@ -1027,6 +1041,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
         } else if (route === '/hub/requests') {
           send(await requestFiles.create(raw, user, at));
+        } else if ((match = /^\/hub\/hermes-approvals\/([^/]+)\/answer$/.exec(route))) {
+          if (!user) throw fail('Sign in to answer.', 401);
+          send(await hermesApprovals.answer(decodeURIComponent(match[1]), raw, user, at));
         } else if ((match = /^\/hub\/requests\/([^/]+)\/([a-z-]+)$/.exec(route))) {
           send(await requestFiles.post(decodeURIComponent(match[1]), match[2], raw, user, at));
         } else if (route === '/hub/drawings') {

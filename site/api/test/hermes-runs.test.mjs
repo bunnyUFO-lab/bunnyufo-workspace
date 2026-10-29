@@ -463,4 +463,105 @@ test('no URL or token leaves in a hand-off error: waiting, result.json, the 409 
     assert.match(answer.body.waiting, /^Could not start yet: /);
     for (const text of [answer.body.waiting, ...lines]) assert.doesNotMatch(text, /hermes\.internal|https?:|abc123|sekret|Bearer/i, text);
   } finally { await s.close(); }
+
+// --- Hermes approvals ---
+
+import { createServer } from 'node:http';
+
+/** A stand-in for the #needs-you webhook: every post it gets. */
+async function startWebhook() {
+  const posts = [];
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    posts.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    response.writeHead(204);
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { posts, url: `http://127.0.0.1:${server.address().port}/hook-secret-path`, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }) };
+}
+
+test('a Hermes approval is copied once, pings once, is a Needs you row, and the answer reaches the run', async () => {
+  const hook = await startWebhook();
+  const s = await stack({ hermesOptions: { askApproval: true, endWith: 'Written.\nCARD: assistant/approved' }, env: { HUB_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://site.example' } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    const folder = await until(() => [...s.fake.objects.keys()].find(name => /\/hermes-approvals\/[^/]+\/approval\.json$/.test(name)), 'approval.json');
+    const approval = JSON.parse(s.fake.text(folder));
+    assert.match(folder, /\/hermes-approvals\/\d{8}-hermes-[a-z0-9]{4}-[a-z0-9]{4}\/approval\.json$/);
+    const [run] = s.hermes.runs;
+    assert.deepEqual([approval.runId, approval.request, approval.promptId, approval.requestId, approval.executionGeneration, approval.choices], [run.id, id, run.pending[0].prompt_id, run.pending[0].prompt_id, 1, ['once', 'deny']]);
+    assert.equal(approval.command, '<write to AGENTS.md>');
+    assert.match(approval.detail, /AGENTS\.md/);
+    assert.equal(new Date(approval.expiresAt).getTime() - new Date(approval.createdAt).getTime(), 300_000);
+    await until(() => hook.posts.length === 1, 'one ping');
+    assert.match(hook.posts[0].content, /^\*\*Agent needs you · Probe\*\*\n/);
+    assert.match(hook.posts[0].content, /Answer within 5 minutes\./);
+    assert.match(hook.posts[0].content, /https:\/\/site\.example\/#\/~hub\/needs\/approval$/);
+    assert.deepEqual(hook.posts[0].allowed_mentions, { parse: [] });
+
+    // A restarted hub replays the run's events and copies the same approval again: no second file, no second ping.
+    const second = await s.addHub();
+    await wait(150);
+    assert.equal(hook.posts.length, 1);
+    assert.equal([...s.fake.objects.keys()].filter(name => name.endsWith('/approval.json')).length, 1);
+
+    const inbox = (await second.get('/hub/inbox?filter=needs-you')).body;
+    const row = inbox.items.find(item => item.kind === 'hermes-approval');
+    assert.ok(row, JSON.stringify(inbox.items.map(item => item.kind)));
+    assert.deepEqual([row.needs, row.request, row.project], ['approval', id, 'probe']);
+    assert.equal(row.describe.what, 'Hermes asks to write a protected file');
+    assert.equal((await second.get('/hub/inbox?filter=approval')).body.items.some(item => item.kind === 'hermes-approval'), true);
+    assert.equal((await second.get('/hub/today')).body.needsYou.some(item => item.kind === 'hermes-approval'), true);
+    assert.equal((await second.get(`/hub/hermes-approvals/${row.id}`)).body.state, 'open');
+
+    assert.equal((await second.post(`/hub/hermes-approvals/${row.id}/answer`, { choice: 'once' }, {})).status, 401);
+    assert.equal((await second.post(`/hub/hermes-approvals/${row.id}/answer`, { choice: 'maybe' })).status, 400);
+    const answered = await second.post(`/hub/hermes-approvals/${row.id}/answer`, { choice: 'once' });
+    assert.equal(answered.status, 201, JSON.stringify(answered.body));
+    assert.deepEqual(s.hermes.approvals.map(({ run_id: runId, ...body }) => body), [{ request_id: approval.promptId, execution_generation: 1, choice: 'once' }]);
+    const written = JSON.parse(s.fake.text(folder.replace('approval.json', 'answer.json')));
+    assert.deepEqual([written.choice, written.forwarded, written.by], ['once', true, 'owner']);
+    assert.equal((await second.post(`/hub/hermes-approvals/${row.id}/answer`, { choice: 'deny' })).status, 409, 'Answering twice is a 409.');
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.card, 'assistant/approved');
+    assert.equal((await second.get('/hub/inbox?filter=needs-you')).body.items.some(item => item.kind === 'hermes-approval'), false, 'An answered approval leaves Needs you.');
+  } finally { await s.close(); await hook.close(); }
+});
+
+test('answering after the run ended, or after the 5 minutes, writes forwarded false and answers 409', async () => {
+  const s = await stack({ hermesOptions: { askApproval: true, approvalTimeoutMs: 120, endWith: 'Denied.\nCARD: assistant/denied' } });
+  const t = await stack({ hermesOptions: { askApproval: true } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    await approve(api, id);
+    const folder = await until(() => [...s.fake.objects.keys()].find(name => name.endsWith('/approval.json')), 'approval.json');
+    await until(() => s.resultOf(id), 'the run to end after Hermes denied it');
+    const approvalId = folder.split('/').at(-2);
+    assert.equal((await api.get('/hub/inbox?filter=needs-you')).body.items.some(item => item.kind === 'hermes-approval'), false, 'An item whose run ended leaves Needs you.');
+    const late = await api.post(`/hub/hermes-approvals/${approvalId}/answer`, { choice: 'once' });
+    assert.equal(late.status, 409);
+    assert.match(late.body.error, /already ended/);
+    const written = JSON.parse(s.fake.text(folder.replace('approval.json', 'answer.json')));
+    assert.deepEqual([written.choice, written.forwarded], ['once', false]);
+    assert.equal(s.hermes.approvals.length, 0, 'Nothing was forwarded.');
+
+    const other = await t.addHub();
+    const second = t.propose();
+    await approve(other, second);
+    const secondFolder = await until(() => [...t.fake.objects.keys()].find(name => name.endsWith('/approval.json')), 'approval.json');
+    const secondId = secondFolder.split('/').at(-2);
+    t.clock.at += 301_000;
+    assert.equal((await other.get('/hub/inbox?filter=needs-you')).body.items.some(item => item.kind === 'hermes-approval'), false, 'After 5 minutes the item is gone.');
+    assert.equal((await other.get(`/hub/hermes-approvals/${secondId}`)).body.state, 'expired');
+    const expired = await other.post(`/hub/hermes-approvals/${secondId}/answer`, { choice: 'once' });
+    assert.equal(expired.status, 409);
+    assert.match(expired.body.error, /denied it after 5 minutes/);
+    assert.equal(JSON.parse(t.fake.text(secondFolder.replace('approval.json', 'answer.json'))).forwarded, false);
+    assert.equal(t.hermes.approvals.length, 0);
+  } finally { await s.close(); await t.close(); }
 });
