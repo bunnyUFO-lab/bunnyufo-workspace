@@ -30,6 +30,7 @@ function Icon({ name }: { name: string }) {
 }
 
 const PROJECT_KEY = 'buw.hub.project'
+const OTHER = '__other'
 
 /** "Research and docs may be signed by policy." for the kinds the server signs without a tap. */
 const policyLine = (kinds: string[]) => {
@@ -51,6 +52,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [presetId, setPresetId] = useState(edit?.preset ?? options.preset ?? (options.text ? guessPreset(options.text) : 'code-task'))
   const [project, setProject] = useState(edit?.project ?? options.project ?? '')
   const [repo, setRepo] = useState(edit?.repo ?? '')
+  const [otherRepo, setOtherRepo] = useState(false)
+  const [known, setKnown] = useState<{ repo: string; project?: string }[]>([])
   const [text, setText] = useState(edit?.text ?? options.text ?? '')
   const [doneWhen, setDoneWhen] = useState(edit?.doneWhen ?? '')
   const [override, setOverride] = useState<SpawnTarget | ''>((edit?.target as SpawnTarget | undefined) ?? '')
@@ -76,6 +79,10 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Presets did not load.') },
       )
     }
+    hubGet<{ repos: { repo: string; project?: string }[] }>('/presets/repos', controller.signal).then(
+      answer => setKnown(answer.repos),
+      () => { /* no list: the field still takes owner/name */ },
+    )
     hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
       answer => {
         setProjects(answer.projects)
@@ -88,7 +95,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
 
   const preset = data?.presets.find(item => item.id === presetId) ?? data?.presets[0] ?? null
   const wantsRepo = !!preset?.fields.includes('repo')
-  const repoValid = !repo.trim() || /^[\w.-]+\/[\w.-]+$/.test(repo.trim())
+  const repoValid = !repo.trim() || /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/.test(repo.trim())
+  const projectRepo = known.find(item => item.project === project)
 
   // The server decides where it runs; ask again 150 ms after the last change.
   useEffect(() => {
@@ -198,9 +206,19 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                 </select>
               </label>
               {wantsRepo && (
-                <label className="sp-field" htmlFor={ids.repo}>Repo
-                  <input id={ids.repo} value={repo} disabled={!!edit} onChange={event => setRepo(event.target.value)} placeholder="owner/name (the project's repo)" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} data-spawn-repo />
-                </label>
+                <div className="sp-field">
+                  <label htmlFor={ids.repo}>Repo</label>
+                  {edit ? (
+                    <input id={ids.repo} value={repo} disabled readOnly data-spawn-repo />
+                  ) : (
+                    <select id={ids.repo} value={otherRepo ? OTHER : repo} onChange={event => { const value = event.target.value; setOtherRepo(value === OTHER); setRepo(value === OTHER ? '' : value) }} data-spawn-repo-pick>
+                      <option value="">{projectRepo ? `${projectRepo.repo} (this project's)` : "The project's repo"}</option>
+                      {known.filter(item => item.repo !== projectRepo?.repo).map(item => <option key={item.repo} value={item.repo}>{item.repo}{item.project ? ` · ${projects.find(row => row.id === item.project)?.name ?? item.project}` : ''}</option>)}
+                      <option value={OTHER}>Another repo…</option>
+                    </select>
+                  )}
+                  {!edit && otherRepo && <input value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/name" aria-label="Repo as owner/name" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} autoFocus data-spawn-repo />}
+                </div>
               )}
             </div>
             <p className="sp-agent" data-spawn-agent>Agent · <b>{preset.agent}</b></p>

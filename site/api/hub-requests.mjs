@@ -17,7 +17,9 @@ export const NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
 export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
-const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+/** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
+const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
+export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
 const PRESET_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** How many run and fire files the detail lists. */
 const LIST_CAP = 20;
@@ -123,7 +125,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
@@ -273,6 +275,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   /** `GET /hub/presets`, `/hub/presets/route?preset=&project=&repo=` and `/hub/presets/brief?request=<id>`. */
   async function presetRoutes(path, query, at) {
     if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES };
+    if (path === '/hub/presets/repos') {
+      // The repos Spawn offers: each project's own (its section's tracked repo, in the project table's order), then the ones the host lists.
+      const seen = new Set();
+      const repos = [];
+      for (const project of repoProjects) {
+        const repo = await projectRepo(project);
+        if (repo && validRepo(repo) && !seen.has(repo)) { seen.add(repo); repos.push({ repo, project }); }
+      }
+      for (const repo of extraRepos) if (validRepo(repo) && !seen.has(repo)) { seen.add(repo); repos.push({ repo }); }
+      return { repos };
+    }
     if (path === '/hub/presets/route') {
       const preset = presetOf(query.get('preset'));
       if (!preset) throw fail('There is no such preset.', 400);

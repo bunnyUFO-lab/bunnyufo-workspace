@@ -242,7 +242,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   let approveReason = 'Approvals are signed on the server; open mission control on the site.';
   try { signingKey = loadSigningKey(env); } catch (error) { approveReason = 'The signing key on the server is not valid.'; log(`[hub] ${error.message}`); }
   const scrub = createScrub(env);
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub });
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, signingKey, approveReason, log, scrub,
+    repoProjects: PROJECT_DEFAULTS.map(row => row.id),
+    // Repos beyond the projects' own, for Spawn's picker: `HUB_KNOWN_REPOS=owner/name,owner/other`. Bad entries are dropped.
+    extraRepos: String(env.HUB_KNOWN_REPOS ?? '').split(',').map(item => item.trim()).filter(Boolean),
+  });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
