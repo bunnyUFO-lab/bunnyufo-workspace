@@ -173,8 +173,8 @@
 .hub-wayfinder-dest { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hub-wayfinder-cue { flex: none; color: var(--pink-bright); font-size: 0.72rem; white-space: nowrap; }
 .hub-wayfinder[data-open="true"] .hub-wayfinder-dest { white-space: normal; overflow: visible; }
-.hub-wayfinder[data-open="true"] .hub-wayfinder-text { align-items: flex-start; }
-@media (max-width: 600px) { .hub-wayfinder-text, .hub-wayfinder-toggle { min-height: 44px; } .hub-wayfinder-text { align-items: center; } }
+.hub-wayfinder[data-open="true"] .hub-wayfinder-text { align-items: flex-start; flex: 1 1 100%; }
+@media (max-width: 600px) { .hub-wayfinder-text, .hub-wayfinder-toggle { min-height: 44px; } .hub-wayfinder-text { align-items: center; } .hub-wayfinder[data-open="false"] .hub-wayfinder-count { display: none; } }
 .hub-wayfinder[data-open="true"] .hub-wayfinder-row { flex-wrap: wrap; }
 .hub-wayfinder-count { flex: none; margin-left: auto; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); color: var(--text-dim); white-space: nowrap; }
 .hub-wayfinder-text + .hub-wayfinder-count { margin-left: 0; }
@@ -188,7 +188,7 @@
 .hub-runs-wrap { position: relative; flex: none; }
 .hub-runs { flex: none; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--hairline); background: none; font: inherit; font-size: 0.75rem; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
 .hub-runs:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.hub-runs-rule { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 8px 12px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md, 10px); background: var(--surface-1); color: var(--text); font-size: 0.75rem; line-height: 1.35; white-space: normal; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+.hub-runs-rule { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: max-content; max-width: min(260px, calc(100vw - 32px)); padding: 8px 12px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md, 10px); background: var(--surface-solid); color: var(--text); font-size: 0.75rem; line-height: 1.35; white-space: normal; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 .hub-runs-short { display: none; }
 @media (max-width: 600px) {
   .hub-runs-full { display: none; }
