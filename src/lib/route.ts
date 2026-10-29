@@ -2,7 +2,7 @@
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'team', 'activity', 'sketch', 'chat'] as const
+export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'team', 'activity', 'sketch', 'chat', 'request'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */
@@ -76,7 +76,7 @@ export function reviewHash(id: string, file?: string): string {
 }
 
 /** The screen the Hub's navigation marks as current: an Ask or a review is opened from Needs you, so Needs you stays lit. A checklist is the same. Activity is Work's second tab, so Work stays lit. */
-export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' ? 'needs' : screen === 'activity' ? 'work' : screen ?? null)
+export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' || screen === 'request' ? 'needs' : screen === 'activity' ? 'work' : screen ?? null)
 
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>

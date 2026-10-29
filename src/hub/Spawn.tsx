@@ -2,8 +2,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { host } from '../lib/host'
 import type { HubProject } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
-import type { ApproveAnswer, SpawnPreset, SpawnRoute, SpawnRule, SpawnTarget } from '../lib/hubSpawn'
+import type { ApproveAnswer, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
 import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, guessPreset } from '../lib/hubSpawn'
+import type { PresetList } from './spawnData'
+import { cachedPresets, loadPresets } from './spawnData'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
 import type { SpawnOptions } from './spawnStore'
 import './runs.css'
@@ -27,8 +29,6 @@ function Icon({ name }: { name: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name] ?? ICONS.spark }} />
 }
 
-/** The presets and the rule list, read once per page load. */
-let presetsCache: { presets: SpawnPreset[]; rules: SpawnRule[] } | null = null
 const PROJECT_KEY = 'buw.hub.project'
 
 const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within 5 minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
@@ -37,15 +37,16 @@ const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on He
 function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClose: () => void; onDone: (note: string) => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const uid = useId()
-  const [data, setData] = useState(presetsCache)
+  const edit = options.edit
+  const [data, setData] = useState<PresetList | null>(cachedPresets)
   const [projects, setProjects] = useState<HubProject[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [presetId, setPresetId] = useState(options.preset ?? (options.text ? guessPreset(options.text) : 'code-task'))
-  const [project, setProject] = useState(options.project ?? '')
-  const [repo, setRepo] = useState('')
-  const [text, setText] = useState(options.text ?? '')
-  const [doneWhen, setDoneWhen] = useState('')
-  const [override, setOverride] = useState<SpawnTarget | ''>('')
+  const [presetId, setPresetId] = useState(edit?.preset ?? options.preset ?? (options.text ? guessPreset(options.text) : 'code-task'))
+  const [project, setProject] = useState(edit?.project ?? options.project ?? '')
+  const [repo, setRepo] = useState(edit?.repo ?? '')
+  const [text, setText] = useState(edit?.text ?? options.text ?? '')
+  const [doneWhen, setDoneWhen] = useState(edit?.doneWhen ?? '')
+  const [override, setOverride] = useState<SpawnTarget | ''>((edit?.target as SpawnTarget | undefined) ?? '')
   const [route, setRoute] = useState<SpawnRoute | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -62,9 +63,9 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
 
   useEffect(() => {
     const controller = new AbortController()
-    if (!presetsCache) {
-      hubGet<{ presets: SpawnPreset[]; rules: SpawnRule[] }>('/presets', controller.signal).then(
-        answer => { presetsCache = answer; setData(answer) },
+    if (!cachedPresets()) {
+      loadPresets(controller.signal).then(
+        answer => setData(answer),
         (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Presets did not load.') },
       )
     }
@@ -113,13 +114,21 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     setError(null)
     let id: string | null = null
     try {
+      if (edit && canApprove) {
+        // One signed path: the server copies the request, approves the copy and retires the old one.
+        const again = await hubPost<ApproveAnswer & { id: string }>(`/requests/${encodeURIComponent(edit.id)}/again`, { target, text: trimmed })
+        onDone(approvedNote(target, again.waiting))
+        return
+      }
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
         project, text: trimmed, preset: preset.id,
         ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
         ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
         ...(choice ? { target: choice } : {}),
+        ...(edit ? { replaces: edit.id } : {}),
       })
       id = created.id
+      if (edit) await hubPost(`/requests/${encodeURIComponent(edit.id)}/decline`, { reason: `replaced by ${id}` })
       if (!canApprove) {
         onDone(atPc ? 'Added to Needs you. You start it at the PC.' : 'Saved as a proposal. It waits in Needs you.')
         return
@@ -133,7 +142,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, onDone])
+  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone])
 
   const machine = target ? MACHINE[target] : null
   const button = atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
@@ -150,7 +159,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     >
       <div className="sp-head">
         <Icon name="spark" />
-        <h2 id={`${uid}-title`}>Spawn work</h2>
+        <h2 id={`${uid}-title`}>{edit ? 'Edit the request' : 'Spawn work'}</h2>
         <button type="button" className="hub-btn sp-x" aria-label="Close" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
       </div>
       <div className="sp-body">
@@ -161,8 +170,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             <div>
               <div className="sp-label" id={`${uid}-tpl`}>Template</div>
               <div className="sp-tpls" role="group" aria-labelledby={`${uid}-tpl`}>
-                {data.presets.map(item => (
-                  <button key={item.id} type="button" className={`sp-tpl${item.id === preset.id ? ' on' : ''}`} aria-pressed={item.id === preset.id} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride('') }}>
+                {data.presets.filter(item => !edit || item.id === preset.id).map(item => (
+                  <button key={item.id} type="button" className={`sp-tpl${item.id === preset.id ? ' on' : ''}`} aria-pressed={item.id === preset.id} disabled={!!edit} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride('') }}>
                     <Icon name={item.icon} />{item.label}
                   </button>
                 ))}
@@ -170,13 +179,13 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             </div>
             <div className={wantsRepo ? 'sp-two' : 'sp-one'}>
               <label className="sp-field" htmlFor={ids.project}>Project
-                <select id={ids.project} value={project} onChange={event => { setProject(event.target.value); setOverride('') }} data-spawn-project>
+                <select id={ids.project} value={project} disabled={!!edit} onChange={event => { setProject(event.target.value); setOverride('') }} data-spawn-project>
                   {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </label>
               {wantsRepo && (
                 <label className="sp-field" htmlFor={ids.repo}>Repo
-                  <input id={ids.repo} value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/name (the project's repo)" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} data-spawn-repo />
+                  <input id={ids.repo} value={repo} disabled={!!edit} onChange={event => setRepo(event.target.value)} placeholder="owner/name (the project's repo)" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} data-spawn-repo />
                 </label>
               )}
             </div>
@@ -186,7 +195,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             </label>
             {preset.fields.includes('doneWhen') && (
               <label className="sp-field" htmlFor={ids.done}>Done when
-                <input id={ids.done} value={doneWhen} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
+                <input id={ids.done} value={doneWhen} disabled={!!edit} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
               </label>
             )}
             <div>

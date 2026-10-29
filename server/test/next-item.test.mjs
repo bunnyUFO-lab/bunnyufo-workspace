@@ -3,6 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NOTE_VERB, itemKey, itemLink, pickNext } from '../../src/lib/nextItem.mjs';
 
+test('an approval opens its request page and has verbs', () => {
+  assert.deepEqual(itemLink({ kind: 'approval', id: 'r1' }), { hash: '#/~hub/request/r1' });
+  assert.equal(NOTE_VERB.approved, 'Approved');
+  assert.equal(NOTE_VERB.declined, 'Declined');
+});
+
 const ask = id => ({ kind: 'ask', id, title: `Ask ${id}` });
 const list = id => ({ kind: 'checklist', id, title: `List ${id}` });
 const stuck = id => ({ kind: 'blocked', id, title: `Stuck ${id}` });
@@ -56,7 +62,7 @@ test('itemLink: each kind opens on its own page; a session goes to Unstick with 
 });
 
 test('NOTE_VERB: one word per action', () => {
-  assert.deepEqual(Object.keys(NOTE_VERB), ['answered', 'snoozed', 'submitted', 'done', 'cancelled', 'reviewed', 'reported']);
+  assert.deepEqual(Object.keys(NOTE_VERB), ['answered', 'snoozed', 'submitted', 'done', 'cancelled', 'reviewed', 'reported', 'approved', 'declined']);
   assert.equal(NOTE_VERB.done, 'Marked done');
   assert.equal(NOTE_VERB.reviewed, 'Review sent');
   assert.equal(NOTE_VERB.reported, 'Report sent');

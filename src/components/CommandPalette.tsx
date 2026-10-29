@@ -29,6 +29,7 @@ function itemHash(item: Item): string {
   if (item.kind === 'ask') return hubHash('ask', item.id)
   if (item.kind === 'checklist') return hubHash('checklist', item.id)
   if (item.kind === 'review') return reviewHash(item.id)
+  if (item.kind === 'approval' || item.kind === 'request') return hubHash('request', item.id)
   return hubHash('needs', 'unstick')
 }
 

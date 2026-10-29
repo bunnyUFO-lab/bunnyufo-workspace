@@ -5,6 +5,8 @@ export interface SpawnOptions {
   text?: string
   preset?: string
   project?: string
+  /** Edit a request: the sheet starts from it, locks everything but the text and the machine, and replaces the request. */
+  edit?: { id: string; project: string; preset: string; text: string; target: string; repo?: string; doneWhen?: string }
 }
 
 const EVENT = 'buw:spawn-open'

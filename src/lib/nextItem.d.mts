@@ -1,4 +1,4 @@
-export type SettledVerb = 'answered' | 'snoozed' | 'submitted' | 'done' | 'cancelled' | 'reviewed' | 'reported'
+export type SettledVerb = 'answered' | 'snoozed' | 'submitted' | 'done' | 'cancelled' | 'reviewed' | 'reported' | 'approved' | 'declined'
 export interface QueueItem { kind: string; id: string; title?: string }
 export const NOTE_VERB: Record<SettledVerb, string>
 export function itemKey(item: QueueItem): string

@@ -11,6 +11,7 @@ export function needsKind(item: Item): NeedsKind {
     case 'review': return 'pr'
     case 'blocked': return 'unstick'
     case 'request': return 'approval'
+    case 'approval': return 'approval'
     case 'ask': return item.design === true ? 'design' : 'question'
     default: return 'question' // a session never reaches Needs you
   }

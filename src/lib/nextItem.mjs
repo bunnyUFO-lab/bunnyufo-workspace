@@ -10,6 +10,8 @@ export const NOTE_VERB = {
   cancelled: 'Cancelled',
   reviewed: 'Review sent',
   reported: 'Report sent',
+  approved: 'Approved',
+  declined: 'Declined',
 };
 
 /** The key of an item in the queue: the kind and the id. */
@@ -39,5 +41,6 @@ export function itemLink(item) {
   if (item.kind === 'ask') return { hash: `#/~hub/ask/${id}` };
   if (item.kind === 'checklist') return { hash: `#/~hub/checklist/${id}` };
   if (item.kind === 'review') return { hash: `#/~hub/review/${id}` };
+  if (item.kind === 'approval' || item.kind === 'request') return { hash: `#/~hub/request/${id}` };
   return { hash: '#/~hub/needs/unstick', focus: itemKey(item) };
 }
