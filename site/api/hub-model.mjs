@@ -319,6 +319,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(target ? { target } : {}),
     ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
+    ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}) } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
   };
@@ -419,10 +420,15 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
       ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, retry: true,
       title: item.cloud.status === 'not-started' ? `Cloud run did not start: ${item.title}` : `Cloud run could not be fired: ${item.title}`,
     }));
+  // Offers: what the owner could do now. A PC request that has waited 6 hours may move to the cloud.
+  const offers = requests.filter(item => item.offer === 'move-to-cloud')
+    .map(item => ({ kind: 'move-to-cloud', request: item.id, project: item.project, title: item.title, since: item.approvedAt }))
+    .sort((a, b) => (a.since < b.since ? -1 : 1));
   const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts, ...cloudAlerts, ...extraAlerts];
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),
+    ...(offers.length ? { offers } : {}),
     // Cloud runs fired on the owner's day against the daily cap; absent when no cloud routine is set up.
     ...(cloud ? { cloud: { used: cloud.used, cap: cloud.cap, next: cloud.next } } : {}),
   };

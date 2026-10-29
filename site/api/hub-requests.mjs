@@ -14,6 +14,8 @@ import { WHEN, newRequestId, requestItem, requestState, runFileTime, validId, va
 /** The needs a request may name. */
 export const NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-files'];
 /** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
+/** How long a request waits for the PC before the cloud is offered. */
+export const MOVE_AFTER_MS = 6 * 3600 * 1000;
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
 export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
@@ -126,11 +128,30 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
+
+  /**
+   * Whether a request that waits for the PC can be moved to the cloud, and if not, why. It must be approved for the PC and
+   * not taken, for 6 hours or more; its preset must allow the cloud; neither the preset nor the request may need anything
+   * only the PC has; it needs a repo that has a routine; and its project may not be Bunnylink or in `HUB_CLOUD_NEVER`.
+   */
+  function moveEligibility(request, state, approved, at) {
+    const preset = presetOf(request.preset);
+    if (!preset) return 'Only a request made from a preset can move.';
+    if (state !== 'approved' || approved?.target !== 'pc') return 'Only a request approved for the PC that has not been taken can move to the cloud.';
+    if (at.getTime() - Date.parse(approved.at) < MOVE_AFTER_MS) return 'It has not waited 6 hours yet.';
+    if (!preset.targets.includes('cloud')) return `${preset.label} cannot run in the cloud.`;
+    if (preset.needs.length || (request.needs ?? []).length) return 'It needs something only the PC has.';
+    if (!request.repo) return 'A cloud run needs a repo.';
+    if (!hasCloud(request.repo)) return 'There is no cloud routine for that repo.';
+    if (request.project === 'bunnylink' || cloudNever.includes(request.project)) return 'That project does not run in the cloud.';
+    return null;
+  }
+  const moving = new Set();
 
   const newestRun = names => {
     let newest = null;
@@ -165,7 +186,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const state = stateOf(id, names, full, parts, at);
       // Where a cloud request stands (queued, fired, waiting, fire-failed, not-started); null for everything else.
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
-      return requestItem(full, state, parts.taken, { ...parts, cloud });
+      const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
+      return requestItem(full, state, parts.taken, { ...parts, cloud, offer });
     });
     return rows.filter(Boolean);
   }
@@ -437,11 +459,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * `POST /hub/requests/:id/again { target?, text?, title?, doneWhen? }`: for an expired, failed, lost or proposed request. Makes a
    * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
    * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
+   * `moved` is the cloud move (`move-to-cloud`): the request is still approved, for the PC, and the stop says where it went.
    */
-  async function againRoute(id, raw, user, at) {
+  async function againRoute(id, raw, user, at, { moved = false } = {}) {
     needKey();
     const { parts, state } = await loadOne(id, at);
-    if (!['expired', 'failed', 'lost', 'proposed'].includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
+    if (!(moved ? ['approved'] : ['expired', 'failed', 'lost', 'proposed']).includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
@@ -477,9 +500,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       }
       approval = { state: 'approved', waiting: 'Could not finish the hand-off; it will start when it can.' };
     }
-    const reason = `replaced by ${made.id}`;
+    const reason = moved ? `moved to the cloud: ${made.id}` : `replaced by ${made.id}`;
     if (state === 'proposed') await writeSigned(id, 'declined.json', { at: at.toISOString(), by: user, reason }, 'That request is already declined.');
-    else await writeStop(id, reason, user, at, ['expired', 'failed', 'lost']);
+    else await writeStop(id, reason, user, at, moved ? ['approved'] : ['expired', 'failed', 'lost']);
     return { status: 201, body: { id: made.id, ...approval } };
   }
 
@@ -527,11 +550,28 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }
   }
 
+  /**
+   * `POST /hub/requests/:id/move-to-cloud`: the owner's tap on the offer. The same as Approve again with the cloud as the target:
+   * a new request that replaces this one, a new signed approval, a hand-off (so the daily cap and a pause apply), and a signed stop
+   * on the old one. A second tap, or one on a request that is no longer eligible, is a 409.
+   */
+  async function moveRoute(id, _raw, user, at) {
+    needKey();
+    if (moving.has(id)) throw clash('It is being moved.');
+    moving.add(id);
+    try {
+      const { request, parts, state } = await loadOne(id, at);
+      const why = moveEligibility(request, state, parts.approved, at);
+      if (why) throw clash(why);
+      return await againRoute(id, { target: 'cloud' }, user, at, { moved: true });
+    } finally { moving.delete(id); }
+  }
+
   /** `POST /hub/requests/:id/fire`: Retry for an approved cloud request. The routines module does the work. */
   const fireRoute = (id, _raw, user, at) => live.retryFire(id, user, at);
 
   /** The POST routes under `/hub/requests/:id/`. Each needs a signed-in user, even where REQUIRE_REMOTE_USER is off. */
-  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'answer-run': answerRunRoute, fire: fireRoute };
+  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'move-to-cloud': moveRoute, 'answer-run': answerRunRoute, fire: fireRoute };
 
   async function post(id, action, raw, user, at) {
     if (!Object.hasOwn(actions, action)) throw fail('Not found', 404);

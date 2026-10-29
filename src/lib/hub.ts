@@ -136,7 +136,11 @@ export interface Today {
   pc?: PcSummary | null
   /** Cloud runs fired today against the daily cap; absent when no cloud routine is set up. */
   cloud?: { used: number; cap: number; next: string }
+  /** Things the owner could do now: a PC request that has waited 6 hours can move to the cloud. */
+  offers?: MoveOffer[]
 }
+
+export interface MoveOffer { kind: 'move-to-cloud'; request: string; project?: string; title: string; since?: string }
 
 export interface AskOption { id: string; label: string; image?: string }
 export type DecisionVerdict = 'approve' | 'change' | 'skip'

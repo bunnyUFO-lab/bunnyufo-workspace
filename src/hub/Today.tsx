@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Item, Today as TodayData } from '../lib/hub'
+import type { Item, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
@@ -10,6 +10,7 @@ import ItemRow, { openFromClick } from './ItemRow'
 import PcTile from './PcTile'
 import WorkingNow from './WorkingNow'
 import { itemKey, setFocus } from './needsFocus'
+import { openRun } from './runStore'
 import { openSpawn } from './spawnStore'
 import { TodayContext, useHubData } from './useHub'
 import './today.css'
@@ -53,6 +54,31 @@ function AlertRetry({ request }: { request: string }) {
       <button type="button" className="hub-btn alert-retry" disabled={busy} onClick={() => void retry()} data-alert-retry={request}>Retry</button>
       {problem && <small className="hub-error" role="alert" data-alert-retry-error>{problem}</small>}
     </>
+  )
+}
+
+/** A PC request that has waited 6 hours: one tap makes a new request for the cloud, which the owner's approval signs again. */
+function MoveTile({ offer }: { offer: MoveOffer }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const move = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(offer.request)}/move-to-cloud`, {})
+      window.dispatchEvent(new Event(HUB_WROTE))
+      openRun(made.id)
+    } catch (failure) { setProblem(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false) }
+  }
+  return (
+    <div className="move-tile" data-move-offer={offer.request}>
+      <span className="nrow-text">
+        <b>{offer.title}</b>
+        <small>Waited 6 h for the PC. Move it to the cloud? It only needs the repo.</small>
+      </span>
+      <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void move()} data-move-to-cloud>Move to the cloud</button>
+      {problem && <small className="hub-error" role="alert" data-move-error>{problem}</small>}
+    </div>
   )
 }
 
@@ -124,6 +150,12 @@ export default function Today() {
           </section>
         </div>
         <div className="today-stack">
+          {data.offers?.length && host.write ? (
+            <section className="hub-panel rise" style={stagger(3)} aria-label="Waiting for the PC">
+              <h3>Waiting for the PC <span>{data.offers.length}</span></h3>
+              {data.offers.slice(0, 3).map(offer => <MoveTile key={offer.request} offer={offer} />)}
+            </section>
+          ) : null}
           <section className="hub-panel rise" style={stagger(3)} aria-label="Alerts">
             <h3>Alerts <span>{counts.alerts ? `${counts.alerts} failed` : ''}</span></h3>
             {data.alerts.length ? data.alerts.slice(0, 5).map(event => (
