@@ -17,6 +17,8 @@
 #   HUB=1                      turns on the Hub routes (/api/hub/…, hub.mjs); anything else leaves them off
 #   HUB_DISCORD_TOKEN_SHA256=… the sha256 of the Asks bot's token, and
 #   HUB_DISCORD_OWNER_ID=…     the owner's Discord user id: both turn on /api/hub/discord/…; remove either and those routes answer 404
+#   HUB_SIGNING_KEY=…          the key that signs approvals (base64 PKCS8 DER); unset: Approve is off
+#   HUB_DISCORD_NEEDS_YOU=…    the #needs-you webhook for the approval link (optional)
 #
 # A second stack from this same folder (the development copy) sets BUW_COMPOSE_PROJECT,
 # BUW_SITE_API_CONTAINER and BUW_DOCKER_NETWORK, so compose sees a project of its own and

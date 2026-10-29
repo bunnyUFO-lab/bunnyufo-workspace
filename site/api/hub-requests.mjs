@@ -7,7 +7,8 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
-import { RULES, presetOf, presetsForClient, renderBrief, route } from './presets.mjs';
+import { RULES, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
+import { newNonce, sha256Hex, sign } from './signing.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, validId, validProject } from './hub-model.mjs';
 
 /** The needs a request may name. */
@@ -103,11 +104,15 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
  * @param pool          bounded parallel map
  * @param projectRepo  `(project) → 'owner/name' | undefined`: the repo the project's section tracks
  * @param cloudRepos   `() → string[]`: repos with a cloud routine (none until cloud runs exist)
+ * @param signingKey   the Ed25519 private key (signing.mjs `loadSigningKey`), or null: Approve and Stop then answer 503
+ * @param approveReason  what the page says when there is no key
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [] }) {
-  const live = { hermesLive: () => false, pcBusy: () => false, ...hooks };
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, cloudRepos = () => [], signingKey = null, approveReason = '', log = () => {} }) {
+  // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
+  // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
+  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
 
   const newestRun = names => {
@@ -224,20 +229,25 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       proposal.why = clean.target ? 'you chose it' : routed.why;
     }
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
+    const { why, ...stored } = proposal;
+    const made = await writeNew(clean.project, clean.text, at, id => ({ id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }) }), checked);
+    return { status: 201, body: { id: made.id, ...(preset ? { target: made.request.target, why } : {}) } };
+  }
+
+  /** Write a new request folder under a free id: `build(id)` gives its request.json body; a drawing is stored beside it. */
+  async function writeNew(project, text, at, build, checked = null) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const id = newRequestId(clean.project, clean.text, at);
+      const id = newRequestId(project, text, at);
       const conflict = fail('Could not find a free id; try again.', 409);
       try {
-        const { why, ...stored } = proposal;
-        const request = { id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }) };
+        const request = build(id);
         if (checked) {
           await putCreateOnly(`requests/${id}/request.excalidraw`, checked.sceneText, 'application/json', conflict);
           await putCreateOnly(`requests/${id}/request.png`, checked.pngBuffer, 'image/png', conflict);
           request.drawing = { excalidraw: 'request.excalidraw', png: 'request.png' };
         }
-        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}
-`, 'application/json', conflict);
-        return { status: 201, body: { id, ...(preset ? { target: request.target, why } : {}) } };
+        await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', conflict);
+        return { id, request };
       } catch (error) {
         if (error !== conflict || attempt === 2) throw error;
       }
@@ -289,8 +299,134 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { status: 201, body: { state: 'done' } };
   }
 
+  const needKey = () => { if (!signingKey) throw fail(approveReason, 503); };
+  const writeSigned = (id, file, doc, message) => putCreateOnly(`requests/${id}/${file}`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', clash(message));
+  const withoutBrief = approved => (approved?.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved);
+
+  /**
+   * The body of a stored request.json as the signer reads it: parsed after any BOM, then checked again with `checkRequest`.
+   * Whether the request counts as the site's is decided by its own `origin.kind`: only `owner` (which the card API refuses
+   * from an agent, and the site API sets itself) may carry a `followUp`. An agent's follow-up is refused, never signed
+   * into a brief as "The owner answered". Returns the clean fields plus `id`.
+   */
+  function checkedRequest(id, buffer) {
+    let stored;
+    try { stored = JSON.parse(buffer.toString('utf8').replace(/^﻿/, '')); } catch { throw fail('That request is not valid JSON.', 400); }
+    if (!stored || typeof stored !== 'object') throw fail('That request is not valid JSON.', 400);
+    const fromOwner = stored.origin?.kind === 'owner';
+    return { ...checkRequest(stored, { fromOwner }), id };
+  }
+
+  /**
+   * Sign and store `approved.json` for a proposed request, then hand it to its target. The one path that signs
+   * an approval: the Approve route, Approve again, a follow-up and policy approval (`by: 'policy'`) all use it.
+   * There is no cap check: a full target makes the request wait in `approved`, and `waiting` says why.
+   */
+  async function approveRequest(id, { target, by, at }) {
+    needKey();
+    const { state, names } = await loadOne(id, at);
+    if (!names.has('request.json')) throw fail('No such request.', 404);
+    // Read request.json once, as bytes: the hash covers exactly these bytes, and the checks and the brief are made from the same body.
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    const request = checkedRequest(id, stored.buffer);
+    const preset = presetOf(request.preset);
+    if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
+    if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
+    const chosen = target ?? request.target;
+    if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
+    if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
+    if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
+    const body = {
+      v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
+      requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
+      expires: new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by,
+      run: runBlock({ preset, request }),
+    };
+    const approved = sign(body, signingKey);
+    await writeSigned(id, 'approved.json', approved, 'That request is already approved.');
+    // The approval is signed and stored. A target that cannot start it now makes the request wait; it never fails the approval.
+    let waiting;
+    try {
+      const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
+      if (handed?.waiting) waiting = handed.waiting;
+    } catch (error) {
+      log(`[hub] hand-off to ${chosen} failed for ${id}: ${String(error.message).slice(0, 120)}`);
+      waiting = `Could not start yet: ${String(error.message).replace(/\s+/g, ' ').slice(0, 80)}`;
+    }
+    const after = await loadOne(id, at).catch(() => null);
+    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}) };
+  }
+
+  /** The signed stop of a request, allowed only in the given states. */
+  async function writeStop(id, reason, by, at, states) {
+    const { state } = await loadOne(id, at);
+    if (!states.includes(state)) throw fail(`That request is ${state}; it cannot be stopped.`, 409);
+    const body = sign({ v: 1, request: id, reason: reason ?? 'stopped by the owner', at: at.toISOString(), by, nonce: newNonce() }, signingKey);
+    await writeSigned(id, 'stop.json', body, 'That request is already stopped.');
+    return state;
+  }
+
+  const STOPPABLE = ['approved', 'expired', 'taken', 'running', 'lost'];
+
+  /** `POST /hub/requests/:id/approve { target? }` */
+  async function approveRoute(id, raw, user, at) {
+    if (raw?.target !== undefined && !TARGETS.includes(raw.target)) throw fail('The target is pc, cloud or hermes.', 400);
+    return { status: 201, body: await approveRequest(id, { target: raw?.target, by: user, at }) };
+  }
+
+  /** `POST /hub/requests/:id/stop { reason? }`: a signed stop; for a Hermes run it also stops the run. */
+  async function stopRoute(id, raw, user, at) {
+    needKey();
+    const reason = text(raw?.reason, REQUEST_LIMITS.reason, 'A reason');
+    const was = await writeStop(id, reason, user, at, STOPPABLE);
+    const after = await loadOne(id, at);
+    if (after.parts.approved?.target === 'hermes') { try { await live.stopRun(id); } catch { /* the stop is written; the follower sees it */ } }
+    return { status: 201, body: { state: after.state, was } };
+  }
+
+  /**
+   * `POST /hub/requests/:id/again { target?, text?, title? }`: for an expired, failed, lost or proposed request. Makes a
+   * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
+   * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
+   */
+  async function againRoute(id, raw, user, at) {
+    needKey();
+    const { parts, state } = await loadOne(id, at);
+    if (!['expired', 'failed', 'lost', 'proposed'].includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
+    const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const preset = presetOf(request.preset);
+    if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
+    const target = raw?.target ?? parts.approved?.target ?? request.target;
+    if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
+    const { origin: _origin, followUp, ...copy } = request;
+    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), target, replaces: id }, { fromOwner: true });
+    const made = await writeNew(clean.project, clean.text, at, newId => ({
+      id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
+    }));
+    let approval;
+    try {
+      approval = await approveRequest(made.id, { target, by: user, at });
+    } catch (error) {
+      // Decline the copy only when nothing was signed. Once approved.json exists the approval stands and the old request is retired.
+      const signed = (await loadOne(made.id, at).catch(() => null))?.names.has('approved.json');
+      if (!signed) {
+        await writeSigned(made.id, 'declined.json', { at: at.toISOString(), by: user, reason: `approval failed: ${error.message}`.slice(0, 400) }, 'declined').catch(() => {});
+        throw error;
+      }
+      approval = { state: 'approved', waiting: 'Could not finish the hand-off; it will start when it can.' };
+    }
+    const reason = `replaced by ${made.id}`;
+    if (state === 'proposed') await writeSigned(id, 'declined.json', { at: at.toISOString(), by: user, reason }, 'That request is already declined.');
+    else await writeStop(id, reason, user, at, ['expired', 'failed', 'lost']);
+    return { status: 201, body: { id: made.id, ...approval } };
+  }
+
   /** The POST routes under `/hub/requests/:id/`. Each needs a signed-in user, even where REQUIRE_REMOTE_USER is off. */
-  const actions = { decline: declineRequest, done: doneRequest };
+  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute };
 
   async function post(id, action, raw, user, at) {
     if (!Object.hasOwn(actions, action)) throw fail('Not found', 404);
@@ -298,5 +434,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return actions[action](id, raw, user, at);
   }
 
-  return { loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, loadOne, stateOf, hooks: live };
+  return { loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }
