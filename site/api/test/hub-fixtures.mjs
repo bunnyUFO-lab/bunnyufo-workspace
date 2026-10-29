@@ -185,3 +185,11 @@ export function workFixture({ now = new Date() } = {}) {
   const asks = [{ id: 'ask-1', bead: 'ws-ask', state: 'open' }];
   return { issues: issues.map(issue => ({ ...issue, project: 'ws' })), events, asks };
 }
+
+/** One worktree's Beads copy as the client writes it: `{ meta, text }` for `beads/<project>/<copy>.{meta.json,jsonl}`. */
+export function beadsCopy({ issues, pushedAt, host = 'test-pc', worktree = 'wt-a', main = false, root = `C:/work/${worktree}`, branch = 'main' } = {}) {
+  return {
+    meta: { v: 2, pushedAt, host, count: issues.length, repo: 'example/ml', worktree, main, root, branch },
+    text: jsonl(issues),
+  };
+}

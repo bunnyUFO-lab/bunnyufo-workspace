@@ -62,7 +62,7 @@
 //   cards request list [--project <p>] [--open]
 //   cards request take <id> --bead <b>                                exit 3 when already taken
 //   cards request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]
-//   cards beads push --project <p> [--from <file.jsonl>]              Beads copy (`bd export` by default)
+//   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -1016,9 +1016,23 @@ async function requestCreate(flags) {
 
 // --- Beads ---
 
+/** A worktree root as it is hashed and stored: forward slashes, no trailing slash. */
+const normalRoot = root => String(root ?? '').replace(/[\\]/g, '/').replace(/\/+$/, '');
+
+/** `<host>-<first 10 hex of sha256(root, lower case)>`. The same rule as `copyIdOf` in site/api/hub-beads.mjs. */
+const copyIdOf = (host, root) => `${host}-${sha256(normalRoot(root).toLowerCase()).slice(0, 10)}`;
+
+const gitOut = (...args) => {
+  const run = spawnSync('git', args, { encoding: 'utf8' });
+  return run.status === 0 ? run.stdout.trim() : '';
+};
+
 async function beadsPush(flags) {
   const project = flags.project;
-  if (!project || !/^[a-z0-9][a-z0-9-]*$/.test(project)) throw new Error('Usage: beads push --project <p> [--from <file.jsonl>]');
+  if (!project || !/^[a-z0-9][a-z0-9-]*$/.test(project)) throw new Error('Usage: beads push --project <p> [--from <file.jsonl>] [--copy <id>]');
+  if (flags.copy !== undefined && (!/^[a-z0-9][a-z0-9-]*$/.test(flags.copy) || flags.copy === 'legacy' || /token|secret|password|credential/.test(flags.copy))) {
+    throw new Error('--copy must be lower-case letters, digits and hyphens, not "legacy", and must not contain token, secret, password or credential.');
+  }
   let content;
   if (flags.from) {
     content = await readFile(flags.from, 'utf8');
@@ -1030,11 +1044,22 @@ async function beadsPush(flags) {
     content = run.stdout;
   }
   if (Buffer.byteLength(content) > MAX_INLINE) throw new Error('The Beads export is over 4 MB.');
-  const remote = spawnSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' });
-  const meta = { pushedAt: isoNow(), host: hostName(), count: content.split(/\r?\n/).filter(line => line.trim()).length, repo: remote.status === 0 ? remote.stdout.trim() : '' };
-  await mustPut(inboxPath('beads', `${project}.jsonl`), content, { contentType: 'application/x-ndjson' });
-  await mustPut(inboxPath('beads', `${project}.meta.json`), `${JSON.stringify(meta, null, 2)}\n`);
-  console.log(`beads/${project}.jsonl (${meta.count} issue(s))`);
+  const root = normalRoot(gitOut('rev-parse', '--show-toplevel') || process.cwd());
+  const gitDir = gitOut('rev-parse', '--path-format=absolute', '--git-dir');
+  const copy = flags.copy ?? copyIdOf(hostName(), root);
+  const meta = {
+    v: 2, pushedAt: isoNow(), host: hostName(),
+    count: content.split(/\r?\n/).filter(line => line.trim()).length,
+    repo: gitOut('remote', 'get-url', 'origin'),
+    worktree: root.split('/').pop() || '',
+    main: !!gitDir && normalRoot(gitDir) === normalRoot(gitOut('rev-parse', '--path-format=absolute', '--git-common-dir')),
+    root,
+    branch: gitOut('rev-parse', '--abbrev-ref', 'HEAD'),
+  };
+  // The data first, then the meta that announces it.
+  await mustPut(inboxPath('beads', project, `${copy}.jsonl`), content, { contentType: 'application/x-ndjson' });
+  await mustPut(inboxPath('beads', project, `${copy}.meta.json`), `${JSON.stringify(meta, null, 2)}\n`);
+  console.log(`beads/${project}/${copy}.jsonl (${meta.count} issue(s))`);
 }
 
 // --- argument parsing for the inbox commands ---

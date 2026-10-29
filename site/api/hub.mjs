@@ -19,6 +19,7 @@ import {
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { defaultsOf } from './project-defaults.mjs';
+import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
@@ -225,18 +226,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { events, truncated };
   }
 
+  const beadsReader = createBeadsReader({ bucket, key });
+
+  /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
   async function loadBeads(project) {
-    const meta = (await fresh(`beads/${project}.meta.json`))?.value ?? null;
-    const got = await bucket.getText(key(`beads/${project}.jsonl`));
-    const issues = [];
-    for (const line of (got?.text ?? '').split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      try {
-        const issue = JSON.parse(line);
-        if (issue && typeof issue === 'object' && (issue._type === undefined || issue._type === 'issue') && typeof issue.id === 'string') issues.push(issue);
-      } catch { /* a bad line is skipped */ }
-    }
-    return { meta, issues };
+    return beadsReader.load(project);
   }
 
   /**
@@ -654,11 +648,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       found.set(id, { id, name: titleCase(id), beads: false, ...found.get(id), ...patch });
     };
     const { objects } = await bucket.list(folder('beads'));
-    await pool(POOL, objects.filter(object => object.key.endsWith('.meta.json')), async object => {
-      const id = object.key.split('/').pop().replace(/\.meta\.json$/, '');
-      const meta = (await fresh(`beads/${id}.meta.json`))?.value;
-      add(id, { beads: true, ...(meta?.pushedAt ? { pushedAt: meta.pushedAt } : {}) });
-    });
+    for (const [id, pushedAt] of await beadsReader.projects(objects)) add(id, { beads: true, ...(pushedAt ? { pushedAt } : {}) });
     const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
     for (const row of asks) add(row.ask.project);
     for (const row of checklists) add(row.checklist.project);

@@ -10,7 +10,7 @@ import { createHub, inboxKey } from '../hub.mjs';
 import { askRev, askState, buildInbox, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
-import { askJson, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsCopy, checklistJson, cujTwo, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -1203,5 +1203,93 @@ test('detail=1 stops at 30 rows; the rest come without it', async () => {
     const rows = (await get('/hub/inbox?detail=1')).body.items;
     assert.equal(rows.length, 32);
     assert.equal(rows.filter(item => item.detail).length, 30);
+  } finally { await close(); }
+});
+
+test('Beads copies: three copies and the legacy file merge to the newest state of every task; projects list copy-only projects', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const { issues } = cujTwo({ now: NOW });
+    const at = minutes => minutesAgo(NOW, minutes).toISOString();
+    const edited = (issue, updated, status) => ({ ...issue, updated_at: updated, status });
+    const taskId = 'ml-wj-t4';
+    const target = issues.find(issue => issue.id === taskId);
+    assert.ok(target, 'The fixture has the task.');
+    // The legacy file is old; the main copy is the newest push but stale for the task; the worktree copy pushed
+    // earlier holds the newer edit; a third copy holds one extra task of its own.
+    seed.put('beads/magic-loops.jsonl', issues.map(line => JSON.stringify(line)).join('\n') + '\n', 'application/x-ndjson');
+    seed.put('beads/magic-loops.meta.json', { pushedAt: at(300), host: 'test-pc', count: issues.length, repo: 'example/ml' });
+    const copies = {
+      'test-pc-1111111111': beadsCopy({ issues, pushedAt: at(10), worktree: 'main', main: true }),
+      'test-pc-2222222222': beadsCopy({ issues: issues.map(issue => (issue.id === taskId ? edited(issue, at(30), 'closed') : issue)), pushedAt: at(60), worktree: 'wt-a' }),
+      'test-pc-3333333333': beadsCopy({ issues: [{ ...target, id: 'ml-only-here', title: 'Only in one worktree', updated_at: at(40) }], pushedAt: at(90), worktree: 'wt-b' }),
+    };
+    for (const [copy, row] of Object.entries(copies)) {
+      seed.put(`beads/magic-loops/${copy}.jsonl`, row.text, 'application/x-ndjson');
+      seed.put(`beads/magic-loops/${copy}.meta.json`, row.meta);
+    }
+    // A project that only has a copy.
+    const solo = beadsCopy({ issues: [{ ...target, id: 'pr-1' }], pushedAt: at(5) });
+    seed.put('beads/probe/test-pc-4444444444.jsonl', solo.text, 'application/x-ndjson');
+    seed.put('beads/probe/test-pc-4444444444.meta.json', solo.meta);
+
+    const beads = (await get('/hub/beads/magic-loops')).body;
+    assert.equal(beads.issues.find(issue => issue.id === taskId).status, 'closed', 'The older push with the newer edit wins.');
+    assert.ok(beads.issues.some(issue => issue.id === 'ml-only-here'), 'A task only in one copy is kept.');
+    assert.equal(beads.issues.length, issues.length + 1);
+    assert.equal(beads.meta.copies.length, 4);
+    assert.equal(beads.meta.pushedAt, at(10));
+    const map = (await get('/hub/map/magic-loops')).body;
+    assert.equal(map.ageMinutes, 10);
+    const tasks = Object.fromEntries(map.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).map(task => [task.id, task.state]));
+    assert.equal(tasks[taskId], 'done', 'The map shows the newer edit (closed) although the newest push held it open.');
+    assert.equal(tasks['ml-only-here'], 'next', 'A task from only one copy is on the map.');
+    assert.deepEqual([tasks['ml-wj-t1'], tasks['ml-wj-t3'], tasks['ml-wj-t5'], tasks['ml-wj-t6']], ['done', 'doing', 'doing', 'later']);
+    const found = (await get('/hub/projects')).body.projects;
+    assert.deepEqual(found.map(item => [item.id, item.beads]), [['magic-loops', true], ['probe', true]]);
+    assert.equal(found.find(item => item.id === 'probe').pushedAt, at(5));
+    assert.equal(found.find(item => item.id === 'magic-loops').pushedAt, at(10));
+    assert.equal((await get('/hub/beads/probe')).body.issues.length, 1);
+  } finally { await close(); }
+});
+
+test('Beads copies: a legacy-only project answers as before (same map, same issues)', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const { issues } = cujTwo({ now: NOW });
+    const pushedAt = minutesAgo(NOW, 20).toISOString();
+    seed.put('beads/magic-loops.jsonl', issues.map(line => JSON.stringify(line)).join('\n') + '\n', 'application/x-ndjson');
+    seed.put('beads/magic-loops.meta.json', { pushedAt, host: 'pc.example.test', count: issues.length, repo: 'example/ml' });
+    const beads = (await get('/hub/beads/magic-loops')).body;
+    assert.deepEqual(beads.issues, issues);
+    assert.deepEqual(beads.meta, { pushedAt, host: 'pc.example.test', count: issues.length, repo: 'example/ml' }, 'The legacy meta is passed through untouched.');
+    const map = (await get('/hub/map/magic-loops')).body;
+    assert.equal(map.ageMinutes, 20);
+    assert.deepEqual(map.meta, beads.meta);
+  } finally { await close(); }
+});
+
+test('Beads copies: files whose copy name the client would refuse are ignored (legacy, odd names, secret words)', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const { issues } = cujTwo({ now: NOW });
+    const at = minutes => minutesAgo(NOW, minutes).toISOString();
+    const good = beadsCopy({ issues, pushedAt: at(30) });
+    seed.put('beads/magic-loops/test-pc-5555555555.jsonl', good.text, 'application/x-ndjson');
+    seed.put('beads/magic-loops/test-pc-5555555555.meta.json', good.meta);
+    const rogue = beadsCopy({ issues: [{ ...issues[0], id: 'ml-rogue', updated_at: at(1) }], pushedAt: at(1) });
+    for (const name of ['legacy', 'Bad_Name', 'my-token-1']) {
+      seed.put(`beads/magic-loops/${name}.jsonl`, rogue.text, 'application/x-ndjson');
+      seed.put(`beads/magic-loops/${name}.meta.json`, rogue.meta);
+    }
+    // A project made only of refused names is not listed.
+    seed.put('beads/ghost/legacy.jsonl', rogue.text, 'application/x-ndjson');
+    seed.put('beads/ghost/legacy.meta.json', rogue.meta);
+    const beads = (await get('/hub/beads/magic-loops')).body;
+    assert.ok(!beads.issues.some(issue => issue.id === 'ml-rogue'));
+    assert.deepEqual(beads.meta.copies.map(row => row.copy), ['test-pc-5555555555']);
+    assert.equal(beads.meta.pushedAt, at(30));
+    assert.deepEqual((await get('/hub/projects')).body.projects.map(item => item.id), ['magic-loops']);
+    assert.deepEqual((await get('/hub/beads/ghost')).body, { meta: null, issues: [] });
   } finally { await close(); }
 });
