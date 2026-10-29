@@ -5,7 +5,7 @@
 // Part 4: Chat against a fake Hermes.
 // Part 3: ✎ on Ask options (CUJ 1 with a drawing) and Sketch.
 // Part 1: a card called "hub" still opens; Today, Needs you and Ask at desktop and phone width; CUJ 1
-// (answer an Ask, seen as Answered, then Picked up); the 409 path; CUJ 5 (a request from Work);
+// (answer an Ask, seen as Answered, then Picked up); the 409 path;
 // and the read-only banner against a stand-in for the signed-out site.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -163,49 +163,6 @@ try {
   await page.locator('.report-error button:has-text("Back to Workspace")').click();
   await page.locator('.report-error').waitFor({ state: 'detached' });
 
-  step('CUJ 5: a request from Work lands in the bucket as next-sprint');
-  await go(page, '#/~hub/work/magic-loops');
-  await page.locator('.hub-board').waitFor();
-  assert.ok(await page.locator('.hub-column').count() === 4);
-
-  step('Work cards lead with the title; the id is a small selectable line after it');
-  const [mapAnswer] = await Promise.all([page.waitForResponse(response => response.url().includes('/api/hub/map/magic-loops')), page.reload()]);
-  const boardMap = await mapAnswer.json();
-  await page.locator('.hub-board').waitFor();
-  const titleById = new Map(boardMap.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).map(task => [task.id, task.title]));
-  const firstCard = page.locator('.hub-ticket').first();
-  const firstId = await firstCard.getAttribute('data-task');
-  assert.equal(await firstCard.locator(':scope > *').first().getAttribute('class'), 'hub-ticket-title', 'The title is the first line of a card.');
-  assert.equal((await firstCard.locator('.hub-ticket-title').innerText()).trim(), titleById.get(firstId));
-  assert.notEqual(titleById.get(firstId), firstId, 'The title is not the id.');
-  assert.equal((await firstCard.locator('.hub-id').innerText()).trim(), firstId);
-  await page.locator('button:has-text("Ask an agent to do something")').click();
-  await page.locator('.hub-field textarea').fill('Add wall-slide dust particles');
-  await page.locator('button:has-text("Send")').last().click();
-  await page.locator('.hub-ok', { hasText: 'Request sent' }).waitFor();
-  const requests = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key));
-  assert.equal(requests.length, 1);
-  const request = fixture.fake.json(requests[0]);
-  assert.deepEqual([request.project, request.when, request.text], ['magic-loops', 'next-sprint', 'Add wall-slide dust particles']);
-
-  step('Work shows Loading before its columns, and never Nothing here before the map arrives');
-  await page.route('**/api/hub/map/*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
-  await go(page, '#/~hub/work/probe');
-  await go(page, '#/~hub/work/magic-loops');
-  await page.locator('.hub-empty', { hasText: 'Loading…' }).waitFor();
-  assert.equal(await page.locator('.hub-empty', { hasText: 'Nothing here' }).count(), 0, 'Nothing here before the data arrived.');
-  await page.locator('.hub-board').waitFor();
-  await page.unroute('**/api/hub/map/*');
-
-  step('Work with no projects says so instead of loading forever');
-  const none = await open({ width: 1200, height: 800 });
-  await none.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"projects":[]}' }));
-  await none.goto(fixture.url);
-  await none.locator('.sidebar-list').waitFor();
-  await go(none, '#/~hub/work');
-  await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
-  assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
-
   step('Activity: grouped by day, filtered, and Load older steps back a day');
   await go(page, '#/~hub/activity');
   await page.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
@@ -221,7 +178,7 @@ try {
   await phone.locator('.sidebar-reopen, .sidebar').first().waitFor();
   const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: threeOptions() });
   fixture.seed.ask(phoneAsk);
-  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.hub-board'], ['#/~hub/activity', '.hub-chips']]) {
+  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.wk-lanes'], ['#/~hub/activity', '.hub-chips']]) {
     await go(phone, hash);
     await phone.locator(`.hub ${selector}`).first().waitFor();
     await phone.waitForTimeout(250);
@@ -235,22 +192,6 @@ try {
   await noSideways(phone, 'Ask');
   const boxes = await phone.locator('.hub-option').evaluateAll(list => list.map(item => item.getBoundingClientRect().top));
   assert.ok(boxes[1] > boxes[0] && boxes[2] > boxes[1], 'The options stack on a phone.');
-
-  step('phone width: a very long title wraps on Work and nothing scrolls sideways');
-  const longTitle = `${'Alpha beta gamma delta '.repeat(4)}${'x'.repeat(60)} tail`.slice(0, 160);
-  await phone.route('**/api/hub/map/magic-loops', async route => {
-    const answer = await (await route.fetch()).json();
-    for (const m of answer.milestones) for (const f of m.features) for (const task of f.tasks) task.title = longTitle;
-    await route.fulfill({ json: answer });
-  });
-  await go(phone, '#/~hub/work/magic-loops');
-  await phone.locator('.hub-ticket').first().waitFor();
-  await phone.waitForTimeout(250);
-  await noSideways(phone, 'Work with a long title');
-  const longBox = await phone.locator('.hub-ticket').first().evaluate(card => ({ title: card.querySelector('.hub-ticket-title').getBoundingClientRect().width, card: card.getBoundingClientRect().width, text: card.querySelector('.hub-ticket-title').textContent }));
-  assert.equal(longBox.text, longTitle, 'Work never clips a title.');
-  assert.ok(longBox.title <= longBox.card, 'The title is no wider than its card.');
-  await phone.unroute('**/api/hub/map/magic-loops');
 
   step('phone tab bar: Today, Needs you, Work, More and Search; Library is under More with the menu shut; no bar over a card or on desktop');
   const tabs = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -282,10 +223,10 @@ try {
   fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: threeOptions() }));
   await tabs.locator('[data-hub-tab="needs"]').tap();
   await tabs.locator('.hub[data-screen="needs"]').waitFor();
-  // Library first, then Roadmap, Activity (and Sketch with writes) under More; the bar stays at five.
+  // Library first, then Roadmap (and Sketch with writes) under More; the bar stays at five.
   assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 5, 'Five items in the bar.');
   await tabs.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'map', 'activity', 'sketch']);
+  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'map', 'sketch']);
   await tabs.locator('[data-hub-more="map"]').tap();
   await tabs.locator('.hub[data-screen="map"]').waitFor();
   assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a choice.');

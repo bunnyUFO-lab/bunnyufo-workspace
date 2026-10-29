@@ -12,6 +12,7 @@ import Needs from './Needs'
 import Sketch from './Sketch'
 import ProgressMap from './ProgressMap'
 import Today from './Today'
+import WorkTabs from './WorkTabs'
 
 /** The Hub: one entry for every screen, with the banner that says when this visitor can only read. */
 export default function HubScreen({ route }: { route: HubRoute }) {
@@ -27,8 +28,8 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'ask' && (route.id ? <AskView key={route.id} id={route.id} /> : <Needs filter="question" />)}
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
-      {route.screen === 'work' && <Board project={route.id} />}
-      {route.screen === 'activity' && <Activity filter={route.id} />}
+      {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={route.id} /></WorkTabs>}
+      {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && <Chat id={route.id} />}

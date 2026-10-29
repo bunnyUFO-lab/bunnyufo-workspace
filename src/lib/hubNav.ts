@@ -11,7 +11,7 @@ export const HUB_SHORT: Partial<Record<HubScreen, string>> = {}
 export function hubRows(caps: Pick<HostCapabilities, 'write' | 'chat'>): [HubScreen, string, string][] {
   const rows: [HubScreen, string, string, boolean][] = [
     ['today', 'Today', '☀', true], ['needs', 'Needs you', '✉', true], ['work', 'Work', '▦', true], ['map', 'Roadmap', '◈', true],
-    ['activity', 'Activity', '≋', true], ['sketch', 'Sketch', '✎', caps.write], ['chat', 'Chat', '☁', caps.chat],
+    ['sketch', 'Sketch', '✎', caps.write], ['chat', 'Chat', '☁', caps.chat],
   ]
   return rows.filter(row => row[3]).map(([screen, label, icon]) => [screen, label, icon])
 }
