@@ -2,13 +2,16 @@
 // running the real handler) and straight to the bucket (--via s3), plus retries and the spool.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as signing from '../site/api/signing.mjs';
+import { sign, publicKeyPem, sha256Hex } from '../site/api/signing.mjs';
+import * as presets from '../site/api/presets.mjs';
 import { createBucket } from '../site/api/s3.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
@@ -887,3 +890,261 @@ test('PRESET_IDS in cards.mjs equals PRESET_IDS in site/api/presets.mjs', async 
   const presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href);
   assert.deepEqual([...ids].sort(), [...presets.PRESET_IDS].sort());
 });
+
+// --- runner commands (m3a-runner-cli) ---
+// Every key here is a throwaway made by the test; nothing is a real signing key.
+
+const RUN_ID = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-example-research-tugs-a1b2`;
+const runnerKeys = generateKeyPairSync('ed25519');
+const otherKeys = generateKeyPairSync('ed25519');
+const pubPem = publicKeyPem(runnerKeys.privateKey);
+const REQUEST_JSON = `${JSON.stringify({ id: RUN_ID, project: 'example', createdAt: '2026-10-29T10:00:00.000Z', by: 'tester', text: 'Research tug games', preset: 'research', origin: { kind: 'owner', name: 'tester' } }, null, 2)}\n`;
+
+/** Seed request.json and a signed approved.json (what `over` changes is signed, so the signature stays good unless `tamper`). */
+function seedApproved(fake, over = {}, { key = runnerKeys.privateKey, id = RUN_ID, requestText = REQUEST_JSON, tamper } = {}) {
+  const body = {
+    v: 1, request: id, project: 'example', repo: null, target: 'pc', requestSha256: sha256Hex(Buffer.from(requestText, 'utf8')),
+    limits: { minutes: 30 }, expires: new Date(Date.now() + 3600e3).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: new Date().toISOString(), by: 'tester',
+    run: { preset: 'research', model: null, permissionMode: null, opensWindows: false, allow: [], brief: 'Research tugs.\nCafé ✓' },
+    ...over,
+  };
+  const signed = sign(body, key);
+  fake.seed(`sections/inbox/requests/${id}/request.json`, requestText, 'application/json');
+  fake.seed(`sections/inbox/requests/${id}/approved.json`, JSON.stringify(tamper ? tamper(signed) : signed), 'application/json');
+  return signed;
+}
+
+const reasonOf = result => /^([a-z-]+):?/.exec(result.stderr.split('\n').find(line => !line.startsWith('(via')) ?? '')?.[1];
+
+for (const via of ['api', 's3']) {
+  test(`request verify (${via}): a good approval prints one JSON line; each bad one exits 5 with its reason`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem };
+      seedApproved(fake);
+      const good = await cli(via, 'request', 'verify', RUN_ID, '--target', 'pc');
+      assert.equal(good.code, 0, good.stderr);
+      assert.deepEqual(JSON.parse(good.stdout.trim()), { id: RUN_ID, project: 'example', repo: null, target: 'pc', limits: { minutes: 30 }, nonce: 'AAAAAAAAAAAAAAAAAAAAAA', preset: 'research' });
+      const brief = await cli(via, 'request', 'brief', RUN_ID);
+      assert.equal(brief.code, 0, brief.stderr);
+      assert.equal(brief.stdout, 'Research tugs.\nCafé ✓\n');
+
+      const cases = [
+        ['bad-signature', () => seedApproved(fake, {}, { key: otherKeys.privateKey })],
+        ['bad-signature', () => seedApproved(fake, {}, { tamper: doc => ({ ...doc, limits: { minutes: 31 } }) })],
+        ['bad-signature', () => seedApproved(fake, {}, { tamper: doc => ({ ...doc, signature: 'AAAA' }) })],
+        ['unsigned', () => seedApproved(fake, {}, { tamper: ({ signature, ...rest }) => rest })],
+        ['wrong-request', () => seedApproved(fake, { request: 'another-request-1234' })],
+        ['wrong-request', () => seedApproved(fake, { project: 'other' })],
+        ['hash-mismatch', () => seedApproved(fake, { requestSha256: sha256Hex(Buffer.from('else')) })],
+        ['hash-mismatch', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/request.json`, REQUEST_JSON.replace('tug', 'rug'), 'application/json'); }],
+        ['expired', () => seedApproved(fake, { expires: new Date(Date.now() - 1000).toISOString() })],
+        ['bad-limits', () => seedApproved(fake, { limits: { minutes: 121 } })],
+        ['bad-limits', () => seedApproved(fake, { limits: { minutes: 0 } })],
+        ['bad-limits', () => seedApproved(fake, { limits: {} })],
+        ['no-run-block', () => seedApproved(fake, { run: undefined })],
+        ['no-run-block', () => seedApproved(fake, { run: { preset: 'research' } })],
+        ['stopped', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/stop.json`, '{}', 'application/json'); }],
+        ['declined', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/declined.json`, '{}', 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ nonce: 'someone-else' }), 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ bead: 'bd-1' }), 'application/json'); }],
+        ['wrong-target', () => seedApproved(fake, { target: 'cloud' })],
+        ['wrong-target', () => seedApproved(fake, { target: 'moon' })],
+        ['finished', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/result.json`, '{}', 'application/json'); }],
+        ['finished', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ nonce: 'AAAAAAAAAAAAAAAAAAAAAA' }), 'application/json'); fake.seed(`sections/inbox/requests/${RUN_ID}/result.json`, '{}', 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{ broken')]), 'application/json'); }],
+        ['nonce-used', () => { seedApproved(fake); fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, 'null', 'application/json'); }],
+      ];
+      for (const [reason, arrange] of cases) {
+        for (const name of ['stop.json', 'declined.json', 'taken.json', 'result.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
+        arrange();
+        const bad = await cli(via, 'request', 'verify', RUN_ID, '--target', 'pc');
+        assert.equal(bad.code, 5, `${reason}: ${bad.stderr}`);
+        assert.equal(reasonOf(bad), reason, bad.stderr);
+        assert.equal(bad.stdout, '', 'nothing on stdout for a refusal');
+        if (reason !== 'wrong-target' || arrange.toString().includes('moon')) assert.equal((await cli(via, 'request', 'brief', RUN_ID)).code, 5, `${reason}: brief refuses too`);
+      }
+      for (const name of ['stop.json', 'declined.json', 'taken.json', 'result.json']) fake.objects.delete(`sections/inbox/requests/${RUN_ID}/${name}`);
+      // A hermes approval is never run by this CLI, with or without --target; brief checks target and repo too.
+      seedApproved(fake, { target: 'hermes' });
+      for (const args of [['verify'], ['verify', '--target', 'pc'], ['brief'], ['brief', '--target', 'pc']]) {
+        const refused = await cli(via, 'request', args[0], RUN_ID, ...args.slice(1));
+        assert.equal(refused.code, 5, args.join(' '));
+        assert.equal(reasonOf(refused), 'wrong-target');
+        assert.equal(refused.stdout, '', 'no brief printed');
+      }
+      seedApproved(fake, { target: 'cloud', repo: 'example/game' });
+      assert.equal(reasonOf(await cli(via, 'request', 'brief', RUN_ID, '--target', 'pc')), 'wrong-target');
+      assert.equal(reasonOf(await cli(via, 'request', 'brief', RUN_ID, '--repo', 'example/other')), 'wrong-repo');
+      assert.equal((await cli(via, 'request', 'brief', RUN_ID, '--target', 'cloud', '--repo', 'example/game')).code, 0);
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID, '--target', 'pc')).code, 5, 'wrong target');
+      assert.equal(reasonOf(await cli(via, 'request', 'verify', RUN_ID, '--repo', 'example/other')), 'wrong-repo');
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID, '--target', 'cloud', '--repo', 'example/game')).code, 0);
+      seedApproved(fake);
+      fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ nonce: 'AAAAAAAAAAAAAAAAAAAAAA' }), 'application/json');
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID)).code, 0, 'the run that took it may verify again');
+    } finally { await close(); }
+  });
+
+  test(`request verify (${via}): the public key as PEM, bare base64 or a file; none or a wrong one exits 5`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      seedApproved(fake);
+      const bare = pubPem.split('\n').filter(line => !line.startsWith('-----')).join('');
+      for (const env of [{ HUB_SIGNING_PUBKEY: pubPem }, { HUB_SIGNING_PUBKEY: bare }]) {
+        cli.env = env;
+        assert.equal((await cli(via, 'request', 'verify', RUN_ID)).code, 0, JSON.stringify(Object.keys(env)));
+      }
+      await writeFile(path.join(dir, 'key.pub'), pubPem);
+      cli.env = { HUB_SIGNING_PUBKEY: '', BUW_APPROVAL_PUBKEY: path.join(dir, 'key.pub') };
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID)).code, 0, 'a file path');
+      await mkdir(path.join(dir, '.buw', 'secrets'), { recursive: true });
+      await writeFile(path.join(dir, '.buw', 'secrets', 'approval-signing-key.pub'), pubPem);
+      cli.env = { HUB_SIGNING_PUBKEY: '', BUW_APPROVAL_PUBKEY: '' };
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID)).code, 0, 'the default secrets file');
+      await rm(path.join(dir, '.buw', 'secrets', 'approval-signing-key.pub'));
+      const none = await cli(via, 'request', 'verify', RUN_ID);
+      assert.equal(none.code, 5);
+      assert.match(none.stderr, /no public key/);
+      cli.env = { HUB_SIGNING_PUBKEY: publicKeyPem(otherKeys.privateKey) };
+      assert.equal(reasonOf(await cli(via, 'request', 'verify', RUN_ID)), 'bad-signature', 'an approval signed by another key');
+      cli.env = { HUB_SIGNING_PUBKEY: 'not a key' };
+      assert.equal((await cli(via, 'request', 'verify', RUN_ID)).code, 5);
+    } finally { await close(); }
+  });
+
+  test(`request take --runner (${via}): taken.json with the nonce and no bead, a second take exits 3, a wrong nonce 5, a bad runner 1`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem, CLAUDE_SESSION_ID: 'sess-1' };
+      seedApproved(fake);
+      assert.equal((await cli(via, 'request', 'take', RUN_ID, '--runner', 'evil', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA')).code, 1);
+      assert.equal((await cli(via, 'request', 'take', RUN_ID, '--runner', 'hermes', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA')).code, 1);
+      assert.equal((await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'wrong')).code, 5);
+      assert.equal(keys(`requests/${RUN_ID}/`).some(key => key.endsWith('taken.json')), false);
+      const took = await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA');
+      assert.equal(took.code, 0, took.stderr);
+      const taken = JSON.parse(fake.objects.get(`sections/inbox/requests/${RUN_ID}/taken.json`).body.toString());
+      assert.equal(taken.runner, 'pc');
+      assert.equal(taken.nonce, 'AAAAAAAAAAAAAAAAAAAAAA');
+      assert.equal(taken.session, 'sess-1');
+      assert.equal('bead' in taken, false);
+      assert.equal((await cli(via, 'request', 'take', RUN_ID, '--runner', 'pc', '--nonce', 'AAAAAAAAAAAAAAAAAAAAAA')).code, 3);
+    } finally { await close(); }
+  });
+
+  test(`request run and finish (${via}): run masks secrets; finish writes report.md then result.json once`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      cli.env = { BUW_REQUEST_ID: '' };
+      seedApproved(fake);
+      assert.equal((await cli(via, 'request', 'run', RUN_ID, '--state', 'sleeping')).code, 1);
+      const ran = await cli(via, 'request', 'run', RUN_ID, '--state', 'working', '--last', ['pushed with sk', 'ant-xxxxxxxxxxxxxxxxxxxx and gh' + 'p_abcdefghijklmnopqrstuvwxyz0123 and 0123456789abcdef0123456789abcdef done'].join('-'), '--link', 'https://example.test/s/1');
+      assert.equal(ran.code, 0, ran.stderr);
+      const file = ran.stdout.trim().split('\n').at(-1);
+      assert.match(file, new RegExp(`^requests/${RUN_ID}/run-\\d{8}T\\d{9}Z-[0-9a-f]{4}\\.json$`));
+      const doc = JSON.parse(fake.objects.get(`sections/inbox/${file}`).body.toString());
+      assert.deepEqual([doc.v, doc.request, doc.state, doc.sessionLink], [1, RUN_ID, 'working', 'https://example.test/s/1']);
+      assert.equal(doc.lastAction, 'pushed with [masked] and [masked] and [masked] done');
+      cli.env = { BUW_REQUEST_ID: RUN_ID };
+      assert.equal((await cli(via, 'request', 'run', '--state', 'turn-ended')).code, 0, 'the id defaults to BUW_REQUEST_ID');
+
+      await writeFile(path.join(dir, 'report.md'), '# Tugs\n\nFound three.\n');
+      const finished = await cli(via, 'request', 'finish', RUN_ID, '--outcome', 'card', '--summary', 'Three tug games', '--card', 'assistant/tugs', '--report', path.join(dir, 'report.md'));
+      assert.equal(finished.code, 0, finished.stderr);
+      const names = [...fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/requests/${RUN_ID}/`));
+      assert.ok(names.some(key => key.endsWith('/report.md')));
+      assert.equal(fake.objects.get(`sections/inbox/requests/${RUN_ID}/report.md`).body.toString(), '# Tugs\n\nFound three.\n');
+      const result = JSON.parse(fake.objects.get(`sections/inbox/requests/${RUN_ID}/result.json`).body.toString());
+      assert.deepEqual({ ...result, at: undefined }, { v: 1, outcome: 'card', card: 'assistant/tugs', summary: 'Three tug games', by: 'run', at: undefined });
+      assert.equal((await cli(via, 'request', 'finish', RUN_ID, '--outcome', 'failed', '--summary', 'again')).code, 3);
+      const second = RUN_ID.replace('a1b2', 'f7a8');
+      seedApproved(fake, {}, { id: second, requestText: REQUEST_JSON.replace(RUN_ID, second) });
+      const secret = ['sk', 'ant-api03-xxxxxxxxxxxxxxxxxxxxxxxx'].join('-');
+      assert.equal((await cli(via, 'request', 'finish', second, '--outcome', 'failed', '--summary', `leak ${secret}`, '--reason', `time-limit ${secret} ${'z '.repeat(60)}`)).code, 0);
+      const failed = JSON.parse(fake.objects.get(`sections/inbox/requests/${second}/result.json`).body.toString());
+      assert.equal(failed.reason.includes('ant-api03'), false, 'the reason is masked');
+      assert.match(failed.reason, /^time-limit \[masked\]/);
+      assert.ok(failed.reason.length <= 80, 'the reason is clipped');
+      assert.equal(failed.summary, 'leak [masked]');
+      assert.equal((await cli(via, 'request', 'finish', 'other-1234', '--outcome', 'win', '--summary', 'x')).code, 1);
+    } finally { await close(); }
+  });
+
+  test(`request list --approved --target and request state (${via})`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      const other = RUN_ID.replace('a1b2', 'c3d4');
+      const text2 = REQUEST_JSON.replace(RUN_ID, other);
+      seedApproved(fake);
+      seedApproved(fake, { target: 'cloud', repo: 'example/game' }, { id: other, requestText: text2 });
+      const plain = `${RUN_ID.replace('a1b2', 'e5f6')}`;
+      fake.seed(`sections/inbox/requests/${plain}/request.json`, JSON.stringify({ id: plain, project: 'example', text: 'x', preset: 'research' }), 'application/json');
+      const ids = out => out.stdout.trim().split('\n').filter(Boolean).map(line => line.split('\t')[0]);
+      assert.deepEqual(ids(await cli(via, 'request', 'list', '--approved')).sort(), [RUN_ID, other].sort());
+      assert.deepEqual(ids(await cli(via, 'request', 'list', '--approved', '--target', 'cloud')), [other]);
+      assert.deepEqual(ids(await cli(via, 'request', 'list', '--target', 'pc')), [RUN_ID]);
+      assert.match((await cli(via, 'request', 'list', '--approved', '--target', 'cloud')).stdout, /\tapproved\texample\t/);
+      assert.equal((await cli(via, 'request', 'state', RUN_ID)).stdout.trim(), 'approved');
+      assert.equal((await cli(via, 'request', 'state', plain)).stdout.trim(), 'proposed');
+      fake.seed(`sections/inbox/requests/${RUN_ID}/taken.json`, JSON.stringify({ runner: 'pc', nonce: 'x', at: new Date().toISOString() }), 'application/json');
+      assert.equal((await cli(via, 'request', 'state', RUN_ID)).stdout.trim(), 'taken');
+      assert.deepEqual(ids(await cli(via, 'request', 'list', '--approved')), [other], 'a taken one is no longer approved');
+      fake.seed(`sections/inbox/requests/${RUN_ID}/run-${new Date().toISOString().replace(/[-:]/g, '').replace('.', '')}-ab12.json`, '{}', 'application/json');
+      assert.equal((await cli(via, 'request', 'state', RUN_ID)).stdout.trim(), 'running');
+      fake.seed(`sections/inbox/requests/${RUN_ID}/stop.json`, '{}', 'application/json');
+      assert.equal((await cli(via, 'request', 'state', RUN_ID)).stdout.trim(), 'stopping');
+      fake.seed(`sections/inbox/requests/${RUN_ID}/result.json`, JSON.stringify({ outcome: 'failed' }), 'application/json');
+      assert.equal((await cli(via, 'request', 'state', RUN_ID)).stdout.trim(), 'stopped');
+      assert.equal((await cli(via, 'request', 'state', 'nothing-1234')).code, 2);
+    } finally { await close(); }
+  });
+}
+
+test('the verifier copied into cards.mjs agrees with signing.mjs, on the committed vector and on altered copies', async () => {
+  const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  const copy = source.slice(source.indexOf('// --- signature check'), source.indexOf('// --- end of the signature check ---'));
+  const file = path.join(await mkdtemp(path.join(os.tmpdir(), 'cards-copy-')), 'copy.mjs');
+  await writeFile(file, `import { createPublicKey, verify as edVerify } from 'node:crypto';\n${copy}\nexport { canonical, parsePublicKey, verifySigned };\n`);
+  const mine = await import(pathToFileURL(file).href);
+  const vector = JSON.parse(await readFile(path.join(repo, 'site/api/test/fixtures/signing-vector.json'), 'utf8'));
+  assert.equal(mine.canonical(vector.approved), signing.canonical(vector.approved));
+  const rest = Object.fromEntries(Object.entries(vector.approved).filter(([key]) => key !== 'signature'));
+  assert.equal(mine.canonical(rest), vector.canonical);
+  const key = mine.parsePublicKey(vector.publicKeyPem);
+  assert.equal(mine.verifySigned(vector.approved, key), true);
+  assert.equal(signing.verify(vector.approved, signing.parsePublicKey(vector.publicKeyPem)), true);
+  for (const altered of [{ ...vector.approved, by: 'x' }, { ...vector.approved, limits: { minutes: 31 } }, { ...vector.approved, signature: 'AAAA' }, { ...vector.approved, signature: undefined }]) {
+    assert.equal(mine.verifySigned(altered, key), signing.verify(altered, signing.parsePublicKey(vector.publicKeyPem)));
+    assert.equal(mine.verifySigned(altered, key), false);
+  }
+  const odd = { b: [undefined, null, { z: 1, a: undefined, y: 'é' }], a: 'x"y' };
+  assert.equal(mine.canonical(odd), signing.canonical(odd));
+  await rm(path.dirname(file), { recursive: true, force: true });
+});
+
+test('MAX_RUN_MINUTES in cards.mjs equals the one in presets.mjs', async () => {
+  const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  assert.equal(Number(/const MAX_RUN_MINUTES = (\d+);/.exec(source)[1]), presets.MAX_RUN_MINUTES);
+});
+
+for (const via of ['api', 's3']) {
+  test(`request verify (${via}): request.json with a BOM verifies when the hash is over the raw bytes, and not when it is over the text`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      cli.env = { HUB_SIGNING_PUBKEY: pubPem };
+      const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(REQUEST_JSON, 'utf8')]);
+      const seedBom = requestSha256 => {
+        seedApproved(fake, { requestSha256 });
+        fake.seed(`sections/inbox/requests/${RUN_ID}/request.json`, withBom, 'application/json');
+      };
+      seedBom(sha256Hex(withBom));
+      const good = await cli(via, 'request', 'verify', RUN_ID);
+      assert.equal(good.code, 0, good.stderr);
+      seedBom(sha256Hex(Buffer.from(REQUEST_JSON, 'utf8')));
+      const bad = await cli(via, 'request', 'verify', RUN_ID);
+      assert.equal(bad.code, 5);
+      assert.equal(reasonOf(bad), 'hash-mismatch');
+    } finally { await close(); }
+  });
+}
