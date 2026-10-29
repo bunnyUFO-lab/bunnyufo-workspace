@@ -118,7 +118,7 @@ try {
   await noSideways(phone, 'Activity at 390 px');
   assert.equal(await phone.locator('[data-hub-tab="work"]').getAttribute('class').then(value => value.includes('active')), true, 'The phone bar lights Work on Activity.');
   await phone.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'map', 'sketch']);
+  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['map', 'library', 'sketch']);
 
   step('phone: with nothing running, Blocked is the lane that opens');
   const quiet = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
