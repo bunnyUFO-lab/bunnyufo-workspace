@@ -818,6 +818,21 @@ async function pingNeedsYou({ project, text, path: link }) {
   }
 }
 
+/** Whether `body` starts with the bytes of the picture type its file extension names; null when the extension is not one of the known types. */
+function pictureProblem(name, body) {
+  const ext = path.extname(name).toLowerCase();
+  const starts = (...bytes) => bytes.every((byte, index) => body[index] === byte);
+  let ok;
+  let type;
+  if (ext === '.png') { type = 'PNG'; ok = starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a); }
+  else if (ext === '.jpg' || ext === '.jpeg') { type = 'JPEG'; ok = starts(0xff, 0xd8, 0xff); }
+  else if (ext === '.gif') { type = 'GIF'; ok = body.subarray(0, 4).toString('latin1') === 'GIF8'; }
+  else if (ext === '.webp') { type = 'WebP'; ok = body.subarray(0, 4).toString('latin1') === 'RIFF' && body.subarray(8, 12).toString('latin1') === 'WEBP'; }
+  else if (ext === '.svg') { type = 'SVG'; ok = /^(?:\uFEFF)?\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE[^>]*>\s*)?<(?:svg|\?xml)/i.test(body.subarray(0, 2048).toString('utf8')); }
+  else return null;
+  return ok ? null : `${name} is not a ${type} picture.`;
+}
+
 async function askCreate(flags) {
   const raw = await askInput(flags);
   const id = newId(flags.project, raw.question);
@@ -830,6 +845,8 @@ async function askCreate(flags) {
     if (!/^[\w.-]+$/.test(name) || name.startsWith('.')) throw new Error(`Image name ${name}: letters, digits, . _ - only.`);
     const body = await readFile(file);
     if (body.length > MAX_INLINE) throw new Error(`${name} is over 4 MB.`);
+    const wrong = pictureProblem(name, body);
+    if (wrong) throw new Error(wrong);
     uploads.push({ file: inboxPath('asks', id, name), body, contentType: IMAGE_TYPES[path.extname(name).toLowerCase()] ?? 'application/octet-stream' });
   }
   const askFile = inboxPath('asks', id, 'ask.json');
