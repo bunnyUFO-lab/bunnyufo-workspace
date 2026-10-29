@@ -48,6 +48,14 @@ test('it opens with the fixed line and carries its own text, not a command that 
   assert.ok(!/^\s*(cat|sed)\s/m.test(prompt));
 });
 
+test('free text goes in single quotes, with the escape explained, and other failures are handled', () => {
+  for (const c of commands(prompt)) assert.ok(!c.line.includes('"'), `double quotes in: ${c.line}`);
+  assert.ok(prompt.includes(String.raw`'\''`));
+  assert.match(prompt, /Any other failure/);
+  assert.match(prompt, /already taken/);
+  assert.ok(!doc.includes("cannot read\nother"), 'the token reads every project');
+});
+
 test('it is under 6000 characters', () => {
   assert.ok(prompt.length < 6000, `${prompt.length} characters`);
 });
@@ -102,7 +110,10 @@ test('its request id pattern accepts real ids and rejects the others', () => {
   const id = newRequestId('workspace-app', 'Fix the sort order', new Date('2026-10-29T10:00:00Z'));
   assert.ok(re.test(id), id);
   assert.ok(re.test('20261029-workspace-app-fix-the-sort-order-ab12'));
-  for (const bad of ['../x', '20261029-a b-ab12', 'x'.repeat(200), '', '20261029-app-ab', '2026-10-29-app-ab12']) assert.ok(!re.test(bad), bad);
+  for (const bad of ['../x', '20261029-a b-ab12', `20261029-${'a'.repeat(190)}-ab12`,'', '20261029-app-ab', '2026-10-29-app-ab12']) assert.ok(!(re.test(bad) && bad.length <= 120), bad);   // the prompt's own length rule applies too
+  const tooLong = `20261029-${'a'.repeat(190)}-ab12`;
+  assert.ok(re.test(tooLong), 'correctly shaped, so only the length rule refuses it');
+  assert.ok(tooLong.length > 120);
   assert.match(prompt, /at most 120 characters/);
 });
 
