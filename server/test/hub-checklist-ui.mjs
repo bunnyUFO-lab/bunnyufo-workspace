@@ -60,6 +60,7 @@ try {
   const row = page.locator('.ni', { hasText: 'Finish the Discord bot setup' });
   await row.waitFor();
   assert.match(await row.locator('[data-four]').innerText(), /1 of 4 done/);
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 1);
   assert.deepEqual(await page.locator('.ni .ni-t').allInnerTexts(), ['Finish the Discord bot setup'], 'Only open lists wait on you.');
   await page.locator('.hub-chip[data-filter="answered"]').tap();
   const history = page.locator('.hub-row', { hasText: 'Update the router settings' });
