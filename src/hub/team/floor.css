@@ -1,0 +1,93 @@
+/* The Floor view of Team: rooms, desks, a rotating ticker. Only the shared tokens; no new colour. */
+.team-view { display: inline-flex; flex-wrap: nowrap; }
+.team-view button { min-height: 44px; min-width: 44px; }
+
+.floor { position: relative; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--ground) 82%, transparent); padding: 22px 20px 18px; overflow: hidden; }
+.floor::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 40px 40px; opacity: 0.4; pointer-events: none; }
+.floor-sign { display: flex; justify-content: center; margin-bottom: 20px; position: relative; }
+.floor-sign > span { display: inline-flex; align-items: center; gap: 12px; padding: 8px 18px; border-radius: 999px; border: 1px solid var(--line2); background: var(--s1); font: 600 11px var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--t2); }
+.floor .dot { position: relative; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--st-idle)); flex: none; }
+.floor .dot.st-working { --c: var(--st-working); }
+.floor .dot.st-waiting { --c: var(--st-needs); }
+.floor .dot.st-failed { --c: var(--st-failed); }
+.floor .dot.st-idle { --c: var(--st-idle); }
+.floor .dot.st-offline { --c: var(--t4); }
+.floor .dot.live { box-shadow: 0 0 8px var(--c); }
+
+.floor-rooms { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.floor-room { grid-column: span var(--span, 1); min-width: 0; padding: 12px 12px 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-1); }
+.floor-room-h { display: flex; align-items: center; gap: 8px; margin-bottom: 46px; font: 600 10.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--t3); }
+.floor-room-h small { margin-left: auto; font: 500 10px var(--font); letter-spacing: 0.02em; text-transform: none; color: var(--t3); text-align: right; }
+.floor-desks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.floor-desk-item { display: flex; }
+
+.floor-desk { position: relative; width: 134px; height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 0 0 10px; border-radius: 16px; border: 1px solid var(--line); background: var(--s1); color: var(--t1); font: inherit; cursor: pointer; transition: box-shadow 0.3s, border-color 0.3s; }
+.floor-desk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.floor-desk.st-working { border-color: color-mix(in srgb, var(--st-working) 45%, transparent); box-shadow: 0 0 24px 2px color-mix(in srgb, var(--st-working) 24%, transparent); }
+.floor-desk.st-waiting { border-color: color-mix(in srgb, var(--st-needs) 42%, transparent); box-shadow: 0 0 16px 1px color-mix(in srgb, var(--st-needs) 18%, transparent); }
+.floor-desk.st-failed { border-color: color-mix(in srgb, var(--st-failed) 40%, transparent); }
+.floor-desk.st-offline { opacity: 0.5; border-style: dashed; }
+.floor-spr { position: absolute; left: 50%; bottom: 62px; display: grid; place-items: end center; width: 56px; height: 52px; margin-left: -28px; }
+.floor-spr.bob { animation: floor-bob 0.88s steps(2, jump-none) infinite; }
+.floor-spr svg { display: block; }
+.floor-mon { width: 30px; height: 19px; margin-bottom: 2px; border-radius: 3px; background: var(--s3); border: 1px solid var(--line2); }
+.floor-desk.st-working .floor-mon { background: color-mix(in srgb, var(--st-working) 40%, var(--s3)); box-shadow: 0 0 10px color-mix(in srgb, var(--st-working) 45%, transparent); }
+.floor-desk.st-failed .floor-mon { background: color-mix(in srgb, var(--st-failed) 35%, var(--s3)); }
+.floor-tbl { width: 100px; height: 9px; margin-bottom: 8px; border-radius: 3px; background: var(--s3); border: 1px solid var(--line); }
+.floor-plate { display: flex; align-items: center; gap: 6px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.floor-excl { position: absolute; top: 8px; right: 10px; font: 700 14px var(--mono); color: var(--st-needs); }
+
+/* The task bubble: on hover or focus. */
+.floor-bub { position: absolute; bottom: calc(100% - 6px); left: 50%; z-index: 3; display: block; width: 156px; padding: 7px 10px; border-radius: 10px; background: var(--s3); border: 1px solid var(--line2); font-size: 11px; line-height: 1.38; color: var(--t2); text-align: left; text-transform: none; letter-spacing: 0; font-weight: 400; opacity: 0; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.25s, transform 0.25s; overflow-wrap: anywhere; }
+.floor-bub b { display: block; font-weight: 600; color: var(--t1); }
+.floor-desk:hover .floor-bub, .floor-desk:focus-visible .floor-bub { opacity: 1; transform: translate(-50%, 0); }
+
+/* A walking sprite: three layers of the sheet take turns while the whole thing shifts a few pixels. */
+.floor-walk { position: relative; display: block; }
+.floor-layer { position: absolute; inset: 0; display: block; opacity: 0; }
+.floor-layer.idle { opacity: 1; }
+
+.floor-ticker { position: relative; margin-top: 16px; min-height: 26px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--t3); text-align: center; }
+.floor-tick { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; animation: floor-in 0.25s ease-out; }
+.floor-tick > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.floor-tick b { font-weight: 500; color: var(--t2); }
+.floor-tick-sprite { flex: none; display: grid; place-items: center; }
+.floor-ghost { color: var(--t3); }
+.floor-legend { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; margin-top: 12px; font-size: 11.5px; color: var(--t3); }
+.floor-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+
+@keyframes floor-bob { 50% { transform: translateY(-3px); } }
+@keyframes floor-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 0 to 20% of 12 s: run right; 20 to 40%: run left, back to the start; then stand idle for the rest. */
+@media (prefers-reduced-motion: no-preference) {
+  .floor-walk { animation: floor-walk 12s linear infinite; animation-delay: var(--walk-delay, 0s); }
+  .floor-layer.idle { animation: floor-idle 12s step-end infinite; animation-delay: var(--walk-delay, 0s); }
+  .floor-layer.right { animation: floor-right 12s step-end infinite; animation-delay: var(--walk-delay, 0s); }
+  .floor-layer.left { animation: floor-left 12s step-end infinite; animation-delay: var(--walk-delay, 0s); }
+}
+@keyframes floor-walk { 0% { transform: translateX(0); } 20% { transform: translateX(22px); } 40% { transform: translateX(0); } 100% { transform: translateX(0); } }
+@keyframes floor-idle { 0% { opacity: 0; } 40% { opacity: 1; } 100% { opacity: 1; } }
+@keyframes floor-right { 0% { opacity: 1; } 20% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes floor-left { 0% { opacity: 0; } 20% { opacity: 1; } 40% { opacity: 0; } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-spr.bob, .floor-tick { animation: none; }
+  .floor-bub { transition: none; }
+}
+
+@media (max-width: 1000px) {
+  .floor-rooms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .floor-room { grid-column: span 1; }
+}
+@media (max-width: 600px) {
+  .floor { padding: 16px 12px 14px; border-radius: 18px; }
+  .floor-rooms { grid-template-columns: minmax(0, 1fr); }
+  .floor-desks { gap: 10px; }
+  .floor-desk-item { width: calc(50% - 5px); max-width: 150px; }
+  .floor-desk { width: 100%; }
+  .floor-bub { width: min(156px, 100%); }
+  .floor-desk-item:nth-child(odd) .floor-bub { left: 0; transform: translate(0, 6px); }
+  .floor-desk-item:nth-child(even) .floor-bub { left: auto; right: 0; transform: translate(0, 6px); }
+  .floor-desk-item .floor-desk:hover .floor-bub, .floor-desk-item .floor-desk:focus-visible .floor-bub { transform: translate(0, 0); }
+}

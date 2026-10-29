@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ago, appUrl, hubPost, sessionUrl } from '../lib/hub'
+import { ago, appUrl, hubPost, remember, sessionUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
 import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
+import Floor from './team/Floor'
+import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
 import { openSpawn } from './spawnStore'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
@@ -74,10 +76,25 @@ export default function Team() {
   const [failure, setFailure] = useState<string | null>(null)
   const openers = useRef(new Map<string, HTMLButtonElement | null>())
   const timer = useRef(0)
+  // Roster or Floor: remembered in this browser only. Opening an agent from a desk shows its card without changing the choice.
+  const [view, setView] = useState<TeamViewMode>(() => viewOf(remember(VIEW_KEY)))
+  const focusId = useRef<string | null>(null)
   // The Done window ends on its own, so the clock ticks even when no new data arrives.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => { const tick = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(tick) }, [])
   useEffect(() => () => window.clearTimeout(timer.current), [])
+  // The Roster card of the agent a desk opened: scrolled to and focused once the Roster is drawn.
+  useEffect(() => {
+    if (!focusId.current || view !== 'roster') return
+    const card = document.querySelector<HTMLElement>(`.team-card[data-agent="${CSS.escape(focusId.current)}"]`)
+    if (card) {
+      card.tabIndex = -1
+      card.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      card.focus({ preventScroll: true })
+    }
+    focusId.current = null
+  }, [view, data])
+  const pick = (next: TeamViewMode) => { setView(next); remember(VIEW_KEY, next) }
 
   const say = useCallback((next: Toast | null) => {
     window.clearTimeout(timer.current)
@@ -121,14 +138,22 @@ export default function Team() {
           <div><dt>Online</dt><dd data-team-online>{counts.online}<span className="team-dim">/{counts.total}</span></dd></div>
           <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
         </dl>
+        <div className="hub-seg team-view" role="group" aria-label="View">
+          <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
+          <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
+        </div>
       </header>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {failure && <p className="hub-error" role="alert">{failure}</p>}
-      <div className="team-roster">
-        {data.agents.map(agent => (
-          <AgentCard key={agent.id} agent={agent} now={now} canPick={host.write} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(agent.id, node) }} />
-        ))}
-      </div>
+      {view === 'floor'
+        ? <Floor agents={data.agents} now={now} onOpen={id => { focusId.current = id; setView('roster') }} />
+        : (
+          <div className="team-roster">
+            {data.agents.map(agent => (
+              <AgentCard key={agent.id} agent={agent} now={now} canPick={host.write} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(agent.id, node) }} />
+            ))}
+          </div>
+        )}
       {sheetAgent && (
         <SpriteSheet
           key={sheetAgent.id}
