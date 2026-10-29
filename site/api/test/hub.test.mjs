@@ -7,10 +7,10 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
-import { askJson, beadsCopy, checklistJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsCopy, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -894,6 +894,83 @@ test('checklistMarks: the last stamp in the name wins, a tie goes to the greater
   }
   const progress = checklistProgress({ items: [{ id: '01' }, { id: '02' }, { id: '09' }] }, names);
   assert.deepEqual({ done: progress.done, total: progress.total }, { done: 1, total: 3 }, 'Only the list\'s own items count.');
+});
+
+test('checkChecklist: a playtest needs an https build; kind, platform and lookFor are checked, and steps take none of them', () => {
+  const ok = { title: 'T', items: [{ text: 'a' }] };
+  const play = { ...ok, kind: 'playtest', build: 'https://example.test/b' };
+  assert.deepEqual(checkChecklist(play), []);
+  assert.deepEqual(checkChecklist({ ...play, platform: 'android', lookFor: 'x'.repeat(2000) }), []);
+  assert.deepEqual(checkChecklist({ ...ok, kind: 'steps' }), []);
+  const bad = value => checkChecklist(value).length > 0;
+  assert.ok(bad({ ...ok, kind: 'playtest' }), 'No build.');
+  assert.ok(bad({ ...play, build: 'http://example.test/b' }) && bad({ ...play, build: `https://example.test/${'x'.repeat(2000)}` }));
+  assert.ok(bad({ ...play, platform: 'dos' }) && bad({ ...play, lookFor: 'x'.repeat(2001) }) && bad({ ...ok, kind: 'quiz' }));
+  assert.ok(bad({ ...ok, build: 'https://example.test/b' }) && bad({ ...ok, platform: 'web' }), 'Steps take no build or platform.');
+});
+
+test('a playtest is its own kind with its own four sentences', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const list = playtestJson({ id: listId('play', 'p111'), now: at(-30), platform: 'windows' });
+    seed.checklist(list);
+    seed.checklist(checklistJson({ id: listId('steps', 's111'), now: at(-40) }));
+    const all = (await get('/hub/inbox?filter=all')).body;
+    assert.deepEqual(Object.fromEntries(all.items.map(item => [item.id, item.needs])), { [list.id]: 'playtest', [listId('steps', 's111')]: 'steps' });
+    const row = all.items.find(item => item.id === list.id);
+    assert.deepEqual([row.describe.what, row.describe.state, row.describe.next, row.describe.blocker], ['A build to play on windows', 'Build is live', 'Play it, rate it, list issues', 'Your verdict']);
+    assert.equal(all.counts.playtest, 1);
+    assert.equal((await get('/hub/inbox?filter=playtest')).body.items.length, 1);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.build, 'https://example.test/build/web');
+    seed.checklist(list, []);
+    seed.put(`checklists/${list.id}/tick-01-20261027T143012123Z-a1b2.json`, { item: '01', done: true, at: 'x', by: 'owner' });
+    assert.equal((await get('/hub/inbox?filter=playtest')).body.items[0].describe.state, '1 of 3 tried');
+  } finally { await close(); }
+});
+
+test('submitting a playtest needs a rating and a verdict, keeps the issues with their screenshots, and words the event', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const list = playtestJson({ id: listId('play', 'p222'), now: at(-30) });
+    seed.checklist(list);
+    const path = `/hub/checklists/${list.id}/submit`;
+    const shot = await post(`/hub/checklists/${list.id}/files`, { for: 'issue', image: picture(solidPng(8, 6)) });
+    assert.equal(shot.status, 201);
+    assert.equal((await post(path, { verdict: 'ship' })).status, 400, 'No rating.');
+    assert.equal((await post(path, { rating: 6, verdict: 'ship' })).status, 400);
+    assert.equal((await post(path, { rating: 3.5, verdict: 'ship' })).status, 400);
+    assert.equal((await post(path, { rating: 4 })).status, 400, 'No verdict.');
+    assert.equal((await post(path, { rating: 4, verdict: 'toString' })).status, 400);
+    assert.equal((await post(path, { rating: 4, verdict: 'ship', issues: [{ text: 'Gone', shot: 'shot-20261027T143012123Z-zzzz.png' }] })).status, 400, 'A shot that does not exist.');
+    assert.equal((await post(path, { rating: 4, verdict: 'ship', issues: [{ text: '' }] })).status, 400);
+    assert.equal((await post(path, { rating: 4, verdict: 'ship', issues: Array.from({ length: 31 }, () => ({ text: 'x' })) })).status, 400);
+    assert.equal(fake.text(`sections/inbox/checklists/${list.id}/submit.json`), null, 'The refusals wrote nothing.');
+    const sent = await post(path, { rating: 4, verdict: 'fix-first', note: 'Fun.', issues: [{ text: ' Goop builds up off-screen ', shot: shot.body.file }, { text: 'Jump feels floaty' }] });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    const stored = fake.json(`sections/inbox/checklists/${list.id}/submit.json`);
+    assert.equal(stored.rating, 4);
+    assert.equal(stored.verdict, 'fix-first');
+    assert.deepEqual(stored.issues, [{ text: 'Goop builds up off-screen', shot: shot.body.file }, { text: 'Jump feels floaty' }]);
+    const events = [...fake.objects.keys()].filter(key => key.includes('/events/') && key.includes('-hub-'));
+    assert.equal(JSON.parse(Buffer.from(fake.objects.get(events[0]).body).toString()).summary, 'Rating 4/5 · Fix first · 2 issues');
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.submit.rating, 4);
+    assert.deepEqual(checkPlaytestSubmit({}, { rating: 1, verdict: 'rethink' }, new Set()), { rating: 1, verdict: 'rethink', issues: [] });
+  } finally { await close(); }
+});
+
+test('a steps checklist takes no rating, verdict or issues', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('steps', 's222'), now: at(-30) });
+    seed.checklist(list);
+    for (const extra of [{ rating: 4 }, { verdict: 'ship' }, { issues: [] }]) {
+      const refused = await post(`/hub/checklists/${list.id}/submit`, extra);
+      assert.equal(refused.status, 400);
+      assert.match(refused.body.error, /Only a playtest takes a rating\./);
+    }
+    assert.equal(fake.text(`sections/inbox/checklists/${list.id}/submit.json`), null);
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {})).status, 201);
+  } finally { await close(); }
 });
 
 test('checkChecklist: the contract limits', () => {

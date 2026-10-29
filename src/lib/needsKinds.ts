@@ -1,13 +1,13 @@
 // The kinds of thing that wait on the owner, shared by Today and the Needs you list.
 // site/api/hub-model.mjs (`needsKindOf`, `NEEDS_KINDS`, `INBOX_FILTER_ALIASES`) holds the server's copy of
-// these rules: change both together. A playtest row arrives with its own item.
+// these rules: change both together.
 import type { Item } from './hub'
 
 export type NeedsKind = 'question' | 'design' | 'steps' | 'playtest' | 'unstick' | 'pr' | 'approval'
 
 export function needsKind(item: Item): NeedsKind {
   switch (item.kind) {
-    case 'checklist': return 'steps'
+    case 'checklist': return item.playtest === true ? 'playtest' : 'steps'
     case 'review': return 'pr'
     case 'blocked': return 'unstick'
     case 'request': return 'approval'

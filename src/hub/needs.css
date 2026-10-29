@@ -117,3 +117,33 @@
   .dr-note { min-height: 44px; }
   .dr-tools .hub-btn { min-height: 44px; flex: 1 1 auto; }
 }
+
+/* Playtest: the build, what to try and what to look for at the left; rating, issues and verdict at the right. */
+.pt { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.pt-left, .pt-right { min-width: 0; }
+.pt-h { margin: 12px 0 6px; font: 600 9.5px var(--font); text-transform: uppercase; letter-spacing: 0.13em; color: var(--t3); }
+.pt-left > p:first-child + .pt-look, .pt-left > .pt-look { margin-top: 4px; }
+.pt-look p { margin: 0; font-size: 13px; color: var(--t2); overflow-wrap: anywhere; }
+.pt-block:first-child .pt-h { margin-top: 0; }
+.pt-stars { display: flex; gap: 4px; }
+.pt-star { width: 44px; height: 44px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: none; color: var(--t3); font-size: 22px; line-height: 1; cursor: pointer; }
+.pt-star[data-on="true"] { color: var(--st-needs); border-color: color-mix(in srgb, var(--st-needs) 40%, transparent); }
+.pt-star:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pt-star:disabled { cursor: default; opacity: 0.75; }
+.pt-issues { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pt-issue { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--t1); }
+.pt-issue-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pt-x { min-width: 44px; min-height: 44px; padding: 0; }
+.pt-add { display: flex; align-items: center; gap: 6px; }
+.pt-input { flex: 1; min-width: 0; min-height: 44px; box-sizing: border-box; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--s2); color: var(--t1); font: inherit; font-size: 13px; }
+.pt-pending { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; }
+.pt-verdict { display: flex; width: 100%; }
+.pt-verdict .dr-pill { flex: 1 1 0; min-height: 44px; }
+.pt-report { margin-bottom: 8px; }
+.pt-block { margin-bottom: 14px; }
+.ni .pt .hub-panel { margin-bottom: 8px; }
+@media (max-width: 760px) {
+  .pt { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .pt-add { flex-wrap: wrap; }
+  .pt-input { flex: 1 1 100%; }
+}

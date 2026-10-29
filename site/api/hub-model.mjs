@@ -74,6 +74,9 @@ export const requestState = names => ((names instanceof Set ? names.has('taken.j
 // --- Checklists: state comes from file names alone (see docs/workspaces.md, "Checklists") ---
 
 export const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
+export const PLATFORMS = ['web', 'windows', 'mac', 'linux', 'android', 'ios'];
+export const PLAYTEST_VERDICTS = { ship: 'Ship it', 'fix-first': 'Fix first', rethink: 'Rethink' };
+export const PLAYTEST_LIMITS = { look: 2000, issues: 30, issue: 500 };
 export const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024, note: 2000 };
 
 const nameList = names => (names instanceof Set ? [...names] : [...names]);
@@ -155,6 +158,7 @@ export function checklistItem(checklist, names) {
   const { done, total } = checklistProgress(checklist, names);
   return {
     kind: 'checklist', id: checklist.id, project: checklist.project, title: clip(checklist.title), at: checklist.createdAt, state, done, total,
+    ...(checklist.kind === 'playtest' ? { playtest: true, platform: PLATFORMS.includes(checklist.platform) ? checklist.platform : 'web' } : {}),
     ...(checklist.bead ? { bead: checklist.bead } : {}),
     ...(checklist.from?.host ? { host: checklist.from.host } : {}),
     ...(checklist.from?.tool ? { tool: clip(checklist.from.tool, 40) } : {}),
@@ -172,6 +176,15 @@ export function checkChecklist(raw) {
   if (!text(raw.title, 1, L.title)) problems.push(`title is 1 to ${L.title} characters`);
   if (raw.context !== undefined && !text(raw.context, 0, L.context)) problems.push(`context is at most ${L.context} characters`);
   if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
+  const playtest = raw.kind === 'playtest';
+  if (raw.kind !== undefined && raw.kind !== 'steps' && !playtest) problems.push('kind is "steps" or "playtest"');
+  if (playtest) {
+    if (typeof raw.build !== 'string' || !/^https:\/\//i.test(raw.build) || raw.build.length > L.link) problems.push('build is an https:// link of at most 2000 characters');
+    if (raw.platform !== undefined && !PLATFORMS.includes(raw.platform)) problems.push(`platform is one of ${PLATFORMS.join(', ')}`);
+    if (raw.lookFor !== undefined && !text(raw.lookFor, 0, PLAYTEST_LIMITS.look)) problems.push(`lookFor is at most ${PLAYTEST_LIMITS.look} characters`);
+  } else {
+    for (const name of ['build', 'platform', 'lookFor']) if (raw[name] !== undefined) problems.push(`${name} belongs to a playtest`);
+  }
   if (!Array.isArray(raw.items) || raw.items.length < 1 || raw.items.length > L.items) problems.push(`items is a list of 1 to ${L.items}`);
   else {
     raw.items.forEach((item, index) => {
@@ -356,7 +369,7 @@ export const NEEDS_KINDS = ['question', 'design', 'steps', 'playtest', 'unstick'
 
 export function needsKindOf(item) {
   switch (item.kind) {
-    case 'checklist': return 'steps';
+    case 'checklist': return item.playtest === true ? 'playtest' : 'steps';
     case 'review': return 'pr';
     case 'blocked': return 'unstick';
     case 'request': return 'approval';
@@ -410,6 +423,11 @@ export function describeItem(item, now) {
   switch (kind) {
     case 'steps':
       return { ...base, what: 'Steps only you can do', state: `${item.done ?? 0} of ${item.total ?? 0} done`, next: 'Tick each step, then Submit', blocker: 'Your hands' };
+    case 'playtest':
+      return {
+        ...base, what: `A build to play on ${item.platform ?? 'web'}`, state: item.done > 0 ? `${item.done} of ${item.total ?? 0} tried` : 'Build is live',
+        next: 'Play it, rate it, list issues', blocker: 'Your verdict',
+      };
     case 'pr': {
       const legs = Array.isArray(item.verdicts) ? item.verdicts.map(verdict => `${LEG_NAME[verdict.leg]} ${verdict.result}`).join(' · ') : '';
       return { ...base, what: 'A pull request ready for you', state: legs || 'Ready for review', next: 'Open it or mark it done', blocker: 'Merging stays yours' };
@@ -467,6 +485,30 @@ export function checkAnswer(ask, data) {
   }
   const has = value => value !== undefined && value !== null && value !== '';
   if (!has(choice) && !has(note) && !has(drawing) && !asked) throw fail('Choose an option, write a note or draw something.');
+}
+
+/**
+ * What a playtest's submission must hold, checked against its checklist and the file names in its folder: a rating of 1 to 5, a
+ * verdict, and up to 30 issues whose `shot` is a screenshot that exists. Throws a 400 with a plain reason.
+ * → { rating, verdict, issues }
+ */
+export function checkPlaytestSubmit(checklist, data, names) {
+  const fail = message => Object.assign(new Error(message), { status: 400 });
+  const { rating, verdict, issues } = data ?? {};
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw fail('A rating is a whole number from 1 to 5.');
+  if (typeof verdict !== 'string' || !Object.prototype.hasOwnProperty.call(PLAYTEST_VERDICTS, verdict)) throw fail('The verdict is ship, fix-first or rethink.');
+  const list = issues === undefined || issues === null ? [] : issues;
+  if (!Array.isArray(list) || list.length > PLAYTEST_LIMITS.issues) throw fail(`Issues are a list of at most ${PLAYTEST_LIMITS.issues}.`);
+  const have = new Set(names instanceof Set ? names : names ?? []);
+  const clean = list.map((issue, index) => {
+    if (!issue || typeof issue !== 'object' || Array.isArray(issue)) throw fail(`Issue ${index + 1} is not an object.`);
+    if (typeof issue.text !== 'string' || issue.text.trim().length < 1 || issue.text.length > PLAYTEST_LIMITS.issue) throw fail(`Issue ${index + 1}: text is 1 to ${PLAYTEST_LIMITS.issue} characters.`);
+    if (issue.shot !== undefined && issue.shot !== null) {
+      if (typeof issue.shot !== 'string' || !SHOT_RE.test(issue.shot) || !have.has(issue.shot)) throw fail(`Issue ${index + 1}: that screenshot is not in this checklist.`);
+    }
+    return { text: issue.text.trim(), ...(issue.shot ? { shot: issue.shot } : {}) };
+  });
+  return { rating, verdict, issues: clean };
 }
 
 // --- Discord buttons ---

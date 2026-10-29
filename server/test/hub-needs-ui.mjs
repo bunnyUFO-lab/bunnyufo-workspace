@@ -6,7 +6,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson, checklistJson, designAskJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, checklistJson, designAskJson, eventJson, playtestJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -15,6 +15,7 @@ const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 const fixture = await startHubFixture({ checklists: true });
 let second = null;
 let third = null;
+let fourth = null;
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -421,11 +422,84 @@ try {
   await noSideways(small, 'a Change note at 375 px');
   const pills = await phoneCard.locator('[data-decision="d1"] .dr-seg').boundingBox();
   assert.ok(pills && pills.x >= 0 && pills.x + pills.width <= 375, 'The three buttons fit the width.');
+
+  // ---- Playtests: a fourth fixture with one playtest checklist. ----
+  fourth = await startHubFixture({ seedData: false });
+  const play = playtestJson({ id: askId('play', 'y1y1'), now: new Date(nowMs - 10 * 60000), platform: 'windows', build: 'https://example.test/build/win' });
+  fourth.seed.checklist(play);
+  const playPage = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
+
+  step('playtest: its own chip and kind, the four cells, the build link, what to try and what to look for');
+  await playPage.goto(`${fourth.url}#/~hub/needs`);
+  const pcard = playPage.locator(`.ni[data-need="checklist-${play.id}"]`);
+  await pcard.waitFor();
+  assert.equal(await pcard.getAttribute('data-kind'), 'playtest');
+  assert.deepEqual(await chips(playPage), [['all', '1'], ['playtest', '1'], ['answered', null]]);
+  assert.deepEqual(await pcard.locator('.four dd').allInnerTexts(), ['A build to play on windows', 'Build is live', 'Play it, rate it, list issues', 'Your verdict']);
+  const open1 = pcard.locator('[data-open-build]');
+  assert.equal(await open1.getAttribute('href'), 'https://example.test/build/win');
+  assert.equal(await open1.getAttribute('target'), '_blank');
+  assert.match(await open1.getAttribute('rel'), /noopener/);
+  assert.match(await open1.innerText(), /Open build · windows/);
+  assert.match(await pcard.locator('[data-look-for]').innerText(), /Any moment where it gets hard all at once\./);
+  assert.equal(await pcard.locator('[data-item]').count(), 3, 'The steps to try are ticks.');
+  assert.equal(await pcard.locator('[data-attach]').count(), 0, 'Steps of a playtest take no evidence picture.');
+  await pcard.locator('[data-item="01"] [data-box]').click();
+  await pcard.locator('[data-item="01"][data-done="true"]').waitFor();
+
+  step('playtest: Send report stays off until a rating and a verdict; an issue takes a screenshot; the report is stored and the card leaves');
+  const report = pcard.getByRole('button', { name: 'Send report' });
+  assert.equal(await report.isDisabled(), true);
+  await pcard.locator('[data-star="4"]').click();
+  assert.equal(await pcard.locator('[data-star="4"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await report.isDisabled(), true, 'A rating alone is not enough.');
+  await pcard.locator('[data-issue-input]').fill('Goop builds up off-screen');
+  await pcard.locator('[data-shot-input]').setInputFiles({ name: 'goop.png', mimeType: 'image/png', buffer: solidPng(64, 48) });
+  await pcard.locator('[data-pending-shot]').waitFor();
+  assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 1, 'One screenshot is stored.');
+  await pcard.locator('[data-add-issue]').click();
+  await pcard.locator('[data-issue] [data-issue-shot] img').waitFor();
+  await pcard.locator('[data-issue-input]').fill('Jump feels floaty');
+  await pcard.locator('[data-add-issue]').click();
+  assert.equal(await pcard.locator('[data-issue]').count(), 2);
+  await pcard.locator('[data-verdict-btn="fix-first"]').click();
+  assert.equal(await report.isDisabled(), false);
+  await report.click();
+  await pcard.waitFor({ state: 'detached' });
+  const sentReport = fourth.fake.json(`sections/inbox/checklists/${play.id}/submit.json`);
+  assert.equal(sentReport.rating, 4);
+  assert.equal(sentReport.verdict, 'fix-first');
+  assert.equal(sentReport.issues.length, 2);
+  assert.match(sentReport.issues[0].shot, /^shot-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  assert.equal(sentReport.issues[1].shot, undefined);
+  assert.deepEqual(sentReport.done, ['01']);
+  await playPage.locator('[data-next-note]', { hasText: 'Report sent' }).waitFor();
+  await playPage.locator('[data-next-back]').click();
+  await playPage.locator('[data-report-summary]').waitFor();
+  assert.match(await playPage.locator('[data-report-summary]').innerText(), /Rating 4\/5 · Fix first · 2 issues/);
+
+  step('playtest at 375 px: one column, stars and verdict at 44 px, no sideways scroll');
+  const play2 = playtestJson({ id: askId('play2', 'y2y2'), now: new Date(nowMs - 5 * 60000), title: 'A second build' });
+  fourth.seed.checklist(play2);
+  const ptPhone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
+  await ptPhone.goto(`${fourth.url}#/~hub/checklist/${play2.id}`);
+  await ptPhone.locator('[data-playtest-report]').waitFor();
+  await ptPhone.waitForTimeout(300);
+  await noSideways(ptPhone, 'a playtest at 375 px');
+  await tall(ptPhone.locator('.pt-star'), 'stars');
+  await tall(ptPhone.locator('.pt-verdict .dr-pill'), 'verdict buttons');
+  await tall(ptPhone.locator('[data-open-build]'), 'Open build');
+  await ptPhone.locator('[data-issue-input]').fill('A long issue text that has to wrap on a narrow phone screen without pushing anything sideways at all');
+  await ptPhone.locator('[data-add-issue]').tap();
+  await noSideways(ptPhone, 'a playtest issue at 375 px');
+  const col = await ptPhone.evaluate(() => ({ left: document.querySelector('.pt-left').getBoundingClientRect(), right: document.querySelector('.pt-right').getBoundingClientRect() }));
+  assert.ok(col.right.top >= col.left.bottom - 1, 'The report sits under the steps.');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   await fixture.close();
   await second?.close();
   await third?.close();
+  await fourth?.close();
 }
 console.log('hub-needs-ui: passed');

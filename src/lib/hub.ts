@@ -32,6 +32,9 @@ export interface Item {
   /** A review row: each leg's result, and the screenshots that came with it. */
   verdicts?: { leg: Verdict['leg']; result: Verdict['result'] }[]
   shots?: number
+  /** A checklist row that is a playtest, and the platform of its build. */
+  playtest?: boolean
+  platform?: string
   /** An Ask row that is a Design review, with its decisions (or, for a pick, its pictures) counted. */
   design?: boolean
   decisions?: number
@@ -157,6 +160,8 @@ export interface ChecklistItem {
   /** When the winning tick or untick was written. */
   at?: string
 }
+export type PlaytestVerdict = 'ship' | 'fix-first' | 'rethink'
+export interface PlaytestIssue { text: string; shot?: string }
 export type ChecklistState = 'open' | 'submitted' | 'picked-up' | 'cancelled'
 /** GET /api/hub/checklists/:id: the list as the agent wrote it, with each item's state from the mark files. */
 export interface Checklist {
@@ -172,7 +177,12 @@ export interface Checklist {
   done: number
   total: number
   items: ChecklistItem[]
-  submit?: { at: string; by: string; note?: string; done: string[]; open: string[] }
+  /** A playtest: the build to open, its platform and what to look for. */
+  kind?: 'steps' | 'playtest'
+  build?: string
+  platform?: string
+  lookFor?: string
+  submit?: { at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
   pickup?: { at: string; host: string; session?: string }
   cancel?: { at: string; by: string }
   files: string[]

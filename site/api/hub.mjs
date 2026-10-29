@@ -14,7 +14,7 @@ import { Readable } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, WHEN, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   newRequestId, randomId, requestItem, requestState, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -451,10 +451,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     if (note !== undefined && note !== null && (typeof note !== 'string' || note.length > CHECKLIST_LIMITS.note)) throw fail(`A note is text of at most ${CHECKLIST_LIMITS.note} characters.`);
     const { done: doneCount, total, marks } = checklistProgress(checklist, names);
     const ids = checklist.items.map(item => item.id);
+    const playtest = checklist.kind === 'playtest';
+    if (!playtest && ['rating', 'verdict', 'issues'].some(name => data[name] !== undefined)) throw fail('Only a playtest takes a rating.');
+    const report = playtest ? checkPlaytestSubmit(checklist, data, names) : null;
     const submit = {
       at: at.toISOString(), by: user || 'local',
       ...(typeof note === 'string' && note.trim() ? { note: note.trim() } : {}),
       done: ids.filter(item => marks.get(item)?.done), open: ids.filter(item => !marks.get(item)?.done),
+      ...(report ?? {}),
     };
     try {
       await bucket.put(key(`checklists/${id}/submit.json`), `${JSON.stringify(submit, null, 2)}\n`, { contentType: 'application/json', ifNoneMatch: '*' });
@@ -465,7 +469,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     cache.delete(key(`checklists/${id}/submit.json`));
     const event = {
       ts: at.toISOString(), kind: 'checklist-submitted', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user || 'local',
-      title: `Submitted: ${clip(checklist.title, 80)}`, summary: `${doneCount} of ${total} done`,
+      title: `Submitted: ${clip(checklist.title, 80)}`, summary: report ? `Rating ${report.rating}/5 · ${PLAYTEST_VERDICTS[report.verdict]} · ${report.issues.length} ${report.issues.length === 1 ? 'issue' : 'issues'}` : `${doneCount} of ${total} done`,
     };
     try {
       await putHubEvent(event, at);

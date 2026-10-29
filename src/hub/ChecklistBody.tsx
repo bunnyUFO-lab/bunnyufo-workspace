@@ -5,6 +5,8 @@ import { host } from '../lib/host'
 import HubImage from './HubImage'
 import Md from './Md'
 import { prepareImage, toBase64 } from './chatImages'
+import PlaytestReport from './PlaytestReport'
+import { usePlaytestReport } from './playtest'
 
 const SIGN_IN = 'Sign in to tick items.'
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
@@ -33,6 +35,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   // Pictures stored in this view: shown at once, and kept over a read that does not have them yet.
   const [uploaded, setUploaded] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
+  const report = usePlaytestReport(data.id, data.state === 'open', reload)
   const firstGuide = useRef<string | null | undefined>(undefined)
 
   const detail = answer && (!loadedAt || answer.time > loadedAt.getTime()) ? answer.detail : data
@@ -42,6 +45,8 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const total = items.length
   const openCount = total - doneCount
   const live = detail.state === 'open'
+  const playtest = detail.kind === 'playtest'
+  const build = typeof detail.build === 'string' && /^https:\/\//i.test(detail.build) ? detail.build : undefined
   // The first item still to do that has a guide starts open; once the owner opens or closes anything, their choice rules.
   if (firstGuide.current === undefined) firstGuide.current = items.find(item => !item.done && item.guide)?.id ?? null
   const isExpanded = (item: ChecklistItem) => (expanded ? !!expanded[item.id] : item.id === firstGuide.current)
@@ -90,11 +95,12 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   async function submit() {
     if (!host.write) { setSignIn(true); return }
     if (!live || submitting) return
-    if (openCount > 0 && warnedAt !== openCount) { setWarnedAt(openCount); return }
+    if (playtest && !report.ready) return
+    if (!playtest && openCount > 0 && warnedAt !== openCount) { setWarnedAt(openCount); return }
     setSubmitting(true)
     setProblem(null)
     try {
-      await hubPost(`/checklists/${encodeURIComponent(detail.id)}/submit`, note.trim() ? { note: note.trim() } : {})
+      await hubPost(`/checklists/${encodeURIComponent(detail.id)}/submit`, { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}) })
       onSubmitted()
     } catch (failure) {
       if (failure instanceof HubError && failure.status === 409) reload()
@@ -104,12 +110,11 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   }
 
   const percent = total ? Math.round((doneCount / total) * 100) : 0
-  const warning = live && warnedAt === openCount && openCount > 0
+  const warning = live && !playtest && warnedAt === openCount && openCount > 0
   let group: string | undefined
 
-  return (
-    <>
-      <section className="hub-panel" aria-label="Steps">
+  const stepsSection = (
+      <section className="hub-panel" aria-label={playtest ? 'What to try' : 'Steps'}>
         <p className="hub-cl-count" data-progress aria-live="polite">{doneCount} of {total} done</p>
         <div className="hub-cl-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={total} aria-valuenow={doneCount}><span style={{ width: `${percent}%` }} /></div>
         {signIn && !host.write && <p className="hub-muted" data-readonly-note>{SIGN_IN}</p>}
@@ -154,7 +159,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                     <HubImage path={`checklists/${detail.id}/${stored}`} alt={`The picture for step ${Number(item.id)}`} open />
                   </span>
                 )}
-                {live && (
+                {live && !playtest && (
                   <label className="hub-cl-cam" data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
                     <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
                     <input
@@ -176,9 +181,11 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           )
         })}
       </section>
+  )
 
-      {live && (
-        <section className="hub-panel hub-cl-submit" aria-label="Submit">
+  const submitSection = live && (
+        <section className="hub-panel hub-cl-submit" aria-label={playtest ? 'Report' : 'Submit'}>
+          {playtest && <PlaytestReport report={report} checklistId={detail.id} live={live} />}
           <label className="hub-field">Note to the agent (optional)
             <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={2000} disabled={submitting} />
           </label>
@@ -186,13 +193,24 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           {problem && <p className="hub-error" role="alert">{problem}</p>}
           <div className="hub-actions">
             <button
-              type="button" className="hub-btn pri hub-cl-send" data-submit disabled={submitting || Object.keys(pending).length > 0}
+              type="button" className="hub-btn pri hub-cl-send" data-submit disabled={submitting || Object.keys(pending).length > 0 || (playtest && !report.ready)}
               aria-disabled={host.write ? undefined : true} onClick={() => void submit()}
-            >{warning ? `Submit with ${openCount} open` : 'Submit'}</button>
+            >{playtest ? 'Send report' : warning ? `Submit with ${openCount} open` : 'Submit'}</button>
           </div>
           {signIn && !host.write && <p className="hub-muted" data-readonly-note>{SIGN_IN}</p>}
         </section>
-      )}
-    </>
+  )
+
+  if (!playtest) return <>{stepsSection}{submitSection}</>
+  return (
+    <div className="pt" data-playtest>
+      <div className="pt-left">
+        {build ? <p><a className="hub-btn pri" href={build} target="_blank" rel="noopener noreferrer" data-open-build>Open build · {text(detail.platform) || 'web'}</a></p> : <p className="hub-muted">This playtest has no valid build link.</p>}
+        {text(detail.lookFor) && <div className="pt-look" data-look-for><h4 className="pt-h">Look for</h4><p>{text(detail.lookFor)}</p></div>}
+        <h4 className="pt-h">What to try</h4>
+        {stepsSection}
+      </div>
+      <div className="pt-right">{submitSection}</div>
+    </div>
   )
 }
