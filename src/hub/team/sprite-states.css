@@ -1,0 +1,37 @@
+/* Sprite states: what a sprite does while its agent works, waits, fails, finishes or sits idle.
+   Custom sheets play a row with steps(); built-in SVG sprites get a small CSS motion. No new colour. */
+
+.px-sheet { flex: none; background-repeat: no-repeat; background-position: 0 var(--spr-y, 0); image-rendering: auto; }
+.px-sheet.crisp { image-rendering: pixelated; }
+.px-sheet.play { animation: spr-play var(--spr-dur) steps(var(--spr-n)) infinite; }
+.px-sheet[data-greeting] { animation: spr-greet var(--spr-dur) steps(var(--spr-n)) 1; }
+@keyframes spr-play { from { background-position-x: 0; } to { background-position-x: calc(var(--spr-n) * var(--spr-w) * -1); } }
+@keyframes spr-greet { from { background-position-x: 0; } to { background-position-x: calc(var(--spr-n) * var(--spr-w) * -1); } }
+
+svg.px[data-state] { transform-origin: 50% 90%; }
+svg.px[data-state="working"] { animation: spr-bob 0.8s ease-in-out infinite; }
+svg.px[data-state="needs-you"] { animation: spr-pulse 2.4s ease-in-out infinite; }
+svg.px[data-state="failed"] { animation: spr-shake 0.5s ease-in-out 1; }
+svg.px[data-state="done"] { animation: spr-hop 0.7s ease-out 1; }
+svg.px[data-state="review"] { transform: rotate(-6deg); }
+svg.px[data-greeting] { animation: spr-wave 0.8s ease-in-out 1; }
+.px-sheet[data-state="offline"], svg.px[data-state="offline"] { opacity: 0.45; filter: grayscale(0.7); }
+
+@keyframes spr-bob { 50% { transform: translateY(-2px); } }
+@keyframes spr-pulse { 50% { filter: drop-shadow(0 0 4px var(--st-needs, #e6a23c)) brightness(1.12); } }
+@keyframes spr-shake { 20% { transform: translateX(-2px); } 40% { transform: translateX(2px); } 60% { transform: translateX(-1px); } 80% { transform: translateX(1px); } }
+@keyframes spr-hop { 40% { transform: translateY(-5px); } }
+@keyframes spr-wave { 25% { transform: rotate(-9deg); } 75% { transform: rotate(9deg); } }
+
+/* Reduced motion: hold frame 0 of the row; the static cues (tilt, dim) stay. */
+@media (prefers-reduced-motion: reduce) {
+  .px-sheet, .px-sheet.play, .px-sheet[data-greeting] { animation: none; background-position-x: 0; }
+  svg.px[data-state], svg.px[data-greeting] { animation: none; }
+}
+
+/* The Custom tab's list of sheets. */
+.sheet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sheet-item { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
+.sheet-item.on { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink); }
+.sheet-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 13px; }
+.sheet-item-text small { color: var(--t2); }

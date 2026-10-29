@@ -47,11 +47,8 @@ export interface TeamAgent {
   presets?: string[]
   status: AgentStatus
   task: string
-  /**
-   * Built-in or random today. After the owner picks a custom sheet the API sends a `CustomSprite`; m5-sprite-states
-   * widens this to `AvatarSprite | CustomSprite` together with the code that draws it.
-   */
-  sprite: AvatarSprite
+  /** Built-in or random, or a custom pet sheet once the owner has chosen one. */
+  sprite: AvatarSprite | CustomSprite
   /** Claude Code only: its sessions, as Working now lists them. */
   sessions?: WorkingItem[]
 }
