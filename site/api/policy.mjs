@@ -1,15 +1,23 @@
 // Policy approval: the site API signs proposed requests of some kinds by itself, so research starts without a tap.
 // Off by default. `HUB_POLICY_APPROVE` is a comma list of preset kinds, `research` and/or `docs`; nothing else is
-// accepted (the owner kept the tap for code, build and art). `HUB_POLICY_PER_DAY` caps the signatures per UTC day
-// (default 10). Only a request the owner or an agent session made is signed: a request that a run made is never
-// signed here, so no run spawns runs unattended. A signature goes through the one path that signs
-// (`approveRequest`, `by: 'policy'`), so a full Hermes or cloud target makes the request wait, as with a tap.
+// accepted (the owner kept the tap for code, build and art). `HUB_POLICY_PER_DAY` caps the signatures per Pacific day
+// (default 10). A signature goes through the one path that signs (`approveRequest`, `by: 'policy'`), so a full Hermes or
+// cloud target makes the request wait, as with a tap.
+//
+// Who may be signed is decided from a fact the writer cannot choose. A request's `origin` is a field the writer puts in
+// the body, so it is not trusted on its own: a run holds a card-API token too and could claim to be an agent, or leave the
+// field out. The token that wrote `request.json` leaves its kind as the object's user metadata, `writer`:
+//   `site`   the site API wrote it (the owner's own request), and the body says `origin.kind: owner`
+//   `agent`  the card API wrote it for an agent session's token, and the body says `origin.kind: agent`
+// Anything else (no metadata, `runner`, `hermes`, or a body that disagrees) is not signed: it fails closed, and waits for a
+// tap. So no run starts runs unattended.
 import { presetOf } from './presets.mjs';
-import { day8, validId } from './hub-model.mjs';
+import { validId } from './hub-model.mjs';
 
 export const POLICY_KINDS = ['research', 'docs'];
 const SWEEP_MS = 60_000;
 const NOTE = 'Policy limit reached today';
+const WRITER_FOR_ORIGIN = { owner: 'site', agent: 'agent' };
 
 /** The kinds a `HUB_POLICY_APPROVE` value turns on: known kinds only, in the order given, without repeats. */
 export function parsePolicyKinds(value) {
@@ -17,31 +25,44 @@ export function parsePolicyKinds(value) {
   return [...new Set(kinds)];
 }
 
+const pacific = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' });
+/** The calendar day in Pacific time, `yyyy-mm-dd`: what "a day" means for the owner and for the limit. */
+export const pacificDay = date => pacific.format(date);
+
 /**
  * @param requests  `createRequests()`: `approveRequest`
  * @param canSign   whether the host has a signing key
+ * @param writerOf  `(id) → Promise<string|null>`: the `writer` metadata of the request's request.json
  */
-export function createPolicy({ env = {}, requests, listFolders, cached, canSign = false, now = () => new Date(), log = () => {}, sweepMs = SWEEP_MS }) {
+export function createPolicy({ env = {}, requests, listFolders, cached, canSign = false, now = () => new Date(), log = () => {}, sweepMs = SWEEP_MS, writerOf = async () => null }) {
   const kinds = canSign ? parsePolicyKinds(env.HUB_POLICY_APPROVE) : [];
   const cap = Number.isInteger(Number(env.HUB_POLICY_PER_DAY)) && Number(env.HUB_POLICY_PER_DAY) > 0 ? Number(env.HUB_POLICY_PER_DAY) : 10;
   const state = { signedToday: 0, day: '' };
   let lastCheck = 0;
+  const writers = new Map(); // request.json never changes, and neither does its writer
 
-  /** Whether the request's preset kind is on policy and its origin is one policy trusts. */
-  const eligible = request => {
-    const preset = presetOf(request?.preset);
-    const origin = request?.origin?.kind ?? 'agent'; // a missing origin reads as an agent's
-    return !!preset && kinds.includes(preset.kind) && (origin === 'owner' || origin === 'agent');
+  const writerFor = async id => {
+    if (!writers.has(id)) writers.set(id, await writerOf(id));
+    return writers.get(id);
   };
 
-  /** Policy signatures made on this UTC day, counted from the approvals themselves. */
+  /** Whether the preset kind is on policy and the origin is one policy may sign (the writer is checked separately). */
+  const listed = request => {
+    const preset = presetOf(request?.preset);
+    return !!preset && kinds.includes(preset.kind) && Object.hasOwn(WRITER_FOR_ORIGIN, request?.origin?.kind);
+  };
+
+  /** Eligible: listed, an explicit origin, and the stored writer agrees with it. A missing origin or writer is not eligible. */
+  const eligible = async (id, request) => listed(request) && (await writerFor(id)) === WRITER_FOR_ORIGIN[request.origin.kind];
+
+  /** Policy signatures made on this Pacific day, counted from the approvals themselves. */
   async function signedOn(at) {
-    const today = day8(at);
+    const today = pacificDay(at);
     let count = 0;
     for (const [id, names] of await listFolders('requests', at)) {
       if (!names.has('approved.json')) continue;
       const approved = await cached(`requests/${id}/approved.json`);
-      if (approved?.by === 'policy' && typeof approved.at === 'string' && day8(new Date(approved.at)) === today) count += 1;
+      if (approved?.by === 'policy' && typeof approved.at === 'string' && pacificDay(new Date(approved.at)) === today) count += 1;
     }
     return count;
   }
@@ -50,31 +71,28 @@ export function createPolicy({ env = {}, requests, listFolders, cached, canSign 
   async function sweepNow(at) {
     if (!kinds.length) return [];
     const signed = [];
-    try {
-      let count = await signedOn(at);
-      const waiting = [];
-      for (const [id, names] of await listFolders('requests', at)) {
-        if (!names.has('request.json') || !validId(id)) continue;
-        if (['approved.json', 'declined.json', 'stop.json', 'result.json', 'taken.json'].some(file => names.has(file))) continue;
-        const request = await cached(`requests/${id}/request.json`);
-        if (!request?.preset || !eligible(request)) continue;
-        waiting.push({ id, request, createdAt: request.createdAt ?? '' });
-      }
-      waiting.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1));
-      for (const { id, request } of waiting) {
-        if (count >= cap) break;
-        try {
-          await requests.approveRequest(id, { target: request.target, by: 'policy', at });
-          count += 1;
-          signed.push(id);
-        } catch (error) {
-          log(`[hub] policy could not sign ${id}: ${String(error.message).slice(0, 120)}`);
-        }
-      }
-      state.signedToday = count;
-      state.day = day8(at);
-    } finally {
+    let count = await signedOn(at);
+    const waiting = [];
+    for (const [id, names] of await listFolders('requests', at)) {
+      if (!names.has('request.json') || !validId(id)) continue;
+      if (['approved.json', 'declined.json', 'stop.json', 'result.json', 'taken.json'].some(file => names.has(file))) continue;
+      const request = await cached(`requests/${id}/request.json`);
+      if (!request?.preset || !listed(request) || !(await eligible(id, request))) continue;
+      waiting.push({ id, request, createdAt: request.createdAt ?? '' });
     }
+    waiting.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1));
+    for (const { id, request } of waiting) {
+      if (count >= cap) break;
+      try {
+        await requests.approveRequest(id, { target: request.target, by: 'policy', at });
+        count += 1;
+        signed.push(id);
+      } catch (error) {
+        log(`[hub] policy could not sign ${id}: ${String(error.message).slice(0, 120)}`);
+      }
+    }
+    state.signedToday = count;
+    state.day = pacificDay(at);
     return signed;
   }
 
@@ -100,8 +118,8 @@ export function createPolicy({ env = {}, requests, listFolders, cached, canSign 
     },
     /** Adds the note to a proposal that policy would sign, once today's limit is reached; the tap still signs it. */
     annotate(items) {
-      if (!kinds.length || state.day !== day8(now()) || state.signedToday < cap) return items;
-      return items.map(item => (item.state === 'proposed' && eligible({ preset: item.preset, origin: item.origin }) ? { ...item, note: NOTE } : item));
+      if (!kinds.length || state.day !== pacificDay(now()) || state.signedToday < cap) return items;
+      return items.map(item => (item.state === 'proposed' && listed({ preset: item.preset, origin: item.origin }) ? { ...item, note: NOTE } : item));
     },
     close() { clearInterval(timer); },
   };

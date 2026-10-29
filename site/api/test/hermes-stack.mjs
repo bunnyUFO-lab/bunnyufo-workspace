@@ -62,9 +62,14 @@ export async function stack({ hermesOptions = {}, env = {}, timing = TIMING, noH
   };
   const seed = seeder(fake);
   /** A proposed research request, ready to approve. */
-  const propose = (slug = 'research', extra = {}) => {
+  const writers = {};
+  const propose = (slug = 'research', extra = {}, { writer } = {}) => {
     const id = newId(slug);
-    seed.request({ ...requestJson({ id, now: new Date(clock.at) }), preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'owner' }, ...extra });
+    const request = { ...requestJson({ id, now: new Date(clock.at) }), preset: 'research', target: 'hermes', origin: { kind: 'owner', name: 'owner' }, ...extra };
+    // The token that wrote the file leaves its kind as metadata: the site for the owner's, an agent session for an agent's, a runner for a run's.
+    if (writer !== undefined) writers[id] = writer;
+    const writerKind = id in writers ? writers[id] : { owner: 'site', agent: 'agent', run: 'runner' }[request.origin?.kind];
+    seed.request(request, writerKind ? { writer: writerKind } : {});
     return id;
   };
   const resultOf = id => fake.json(`sections/inbox/requests/${id}/result.json`);

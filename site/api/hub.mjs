@@ -258,7 +258,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     onApproval: (context, prompt, runId, options) => hermesApprovals.copyApproval({ runId, request: context.id, prompt, startedAt: context.startedAt, polled: options?.polled === true }),
   });
   // Policy approval (off unless HUB_POLICY_APPROVE names kinds): signs eligible proposals through the same path as a tap.
-  const policy = createPolicy({ env, requests: requestFiles, listFolders, cached, canSign: on && !!signingKey, now, log });
+  const policy = createPolicy({ env, requests: requestFiles, listFolders, cached, canSign: on && !!signingKey, now, log, writerOf: async id => (await bucket.head(key(`requests/${id}/request.json`)).catch(() => null))?.metadata?.writer ?? null });
   if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -517,9 +517,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     }
   }
 
-  async function putCreateOnly(rel, body, contentType, conflict) {
+  async function putCreateOnly(rel, body, contentType, conflict, metadata) {
     try {
-      return await bucket.put(key(rel), body, { contentType, ifNoneMatch: '*' });
+      return await bucket.put(key(rel), body, { contentType, ifNoneMatch: '*', ...(metadata ? { metadata } : {}) });
     } catch (error) {
       if (error.status === 412) throw conflict;
       throw error;

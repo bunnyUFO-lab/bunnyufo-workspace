@@ -125,3 +125,62 @@ test('the sweep and a request that waits at the Hermes cap: policy signs, the ru
     assert.equal(first.length, 3);
   } finally { await s.close(); }
 });
+
+// --- review fixes: who may be signed, and what a day is ---
+
+import { pacificDay } from '../policy.mjs';
+
+test('policy fails closed: no origin, no writer, a runner\'s writer or a body that disagrees with the writer stay proposed', async () => {
+  const s = await stack({ env: POLICY });
+  try {
+    const api = await s.addHub();
+    await api.hub.policy.ready;
+    const noOrigin = s.propose('noorigin', { origin: undefined }, { writer: 'agent' });
+    const noWriter = s.propose('nowriter', agent, { writer: null });
+    const runner = s.propose('runner', agent, { writer: 'runner' }); // a run's token claiming to be an agent
+    const hermes = s.propose('hermes', agent, { writer: 'hermes' });
+    const mismatch = s.propose('mismatch', { origin: { kind: 'owner', name: 'o' } }, { writer: 'agent' }); // an agent claiming to be the owner
+    const wrongSite = s.propose('wrongsite', agent, { writer: 'site' });
+    const ok = s.propose('fine', agent, { writer: 'agent' });
+    assert.deepEqual(await api.hub.policy.sweep(), [ok]);
+    for (const id of [noOrigin, noWriter, runner, hermes, mismatch, wrongSite]) assert.equal(s.file(id, 'approved.json'), null, id);
+    for (const id of [noOrigin, runner]) assert.equal((await api.get(`/hub/requests/${id}`)).body.state, 'proposed');
+  } finally { await s.close(); }
+});
+
+test('a request the site wrote carries the writer metadata and is signed by policy', async () => {
+  const s = await stack({ env: POLICY });
+  try {
+    const api = await s.addHub();
+    await api.hub.policy.ready;
+    const made = await api.post('/hub/requests', { project: 'probe', text: 'Research tug games', preset: 'research' });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(s.fake.objects.get(`sections/inbox/requests/${made.body.id}/request.json`).metadata.writer, 'site');
+    assert.deepEqual(await api.hub.policy.sweep(), [made.body.id]);
+    assert.equal(s.file(made.body.id, 'approved.json').by, 'policy');
+  } finally { await s.close(); }
+});
+
+test('a day is a Pacific day: 20 signatures cannot fall in one day by crossing UTC midnight', async () => {
+  assert.equal(pacificDay(new Date('2026-10-29T23:30:00Z')), '2026-10-29');
+  assert.equal(pacificDay(new Date('2026-10-30T02:00:00Z')), '2026-10-29', 'UTC has turned over; it is 7 PM in Pacific time.');
+  assert.equal(pacificDay(new Date('2026-10-30T08:00:00Z')), '2026-10-30');
+  assert.equal(pacificDay(new Date('2026-12-30T07:59:00Z')), '2026-12-29', 'Standard time: UTC-8.');
+  const s = await stack({ env: { ...POLICY, HUB_POLICY_PER_DAY: '2' } });
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    s.clock.at = new Date(`${day}T23:30:00Z`).getTime();
+    const api = await s.addHub();
+    await api.hub.policy.ready;
+    const first = ['a', 'b', 'c'].map(slug => s.propose(slug, agent));
+    assert.equal((await api.hub.policy.sweep()).length, 2);
+    s.clock.at += 90 * 60_000; // 01:00 UTC the next day, still the same Pacific day
+    assert.equal(pacificDay(new Date(s.clock.at)), pacificDay(new Date(`${day}T23:30:00Z`)));
+    assert.deepEqual(await api.hub.policy.sweep(), [], 'The limit holds across UTC midnight.');
+    const left = first.find(id => !s.file(id, 'approved.json'));
+    const row = (await api.get('/hub/inbox?filter=needs-you')).body.items.find(item => item.id === left);
+    assert.equal(row.note, 'Policy limit reached today');
+    s.clock.at += 8 * 3600_000; // 09:00 UTC: a new Pacific day
+    assert.deepEqual(await api.hub.policy.sweep(), [left]);
+  } finally { await s.close(); }
+});

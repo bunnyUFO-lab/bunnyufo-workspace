@@ -119,7 +119,7 @@ export function playtestJson({ build = 'https://example.test/build/web', platfor
 
 /** Put an object per call into fake S3 under sections/inbox/. */
 export function seeder(fake, prefix = INBOX) {
-  const put = (rel, body, type = 'application/json') => fake.seed(`${prefix}/${rel}`, typeof body === 'string' || Buffer.isBuffer(body) ? body : `${JSON.stringify(body, null, 2)}\n`, type);
+  const put = (rel, body, type = 'application/json', metadata = {}) => fake.seed(`${prefix}/${rel}`, typeof body === 'string' || Buffer.isBuffer(body) ? body : `${JSON.stringify(body, null, 2)}\n`, type, metadata);
   return {
     put,
     ask(ask, { files = {}, extra = {} } = {}) {
@@ -139,7 +139,8 @@ export function seeder(fake, prefix = INBOX) {
       }
     },
     submit(id, body = {}) { put(`checklists/${id}/submit.json`, { at: new Date().toISOString(), by: 'owner', done: [], open: [], ...body }); },
-    request(request) { put(`requests/${request.id}/request.json`, request); },
+    /** `writer` is the user metadata the writer's token leaves on request.json: `site`, `agent` or `runner`. */
+    request(request, { writer } = {}) { put(`requests/${request.id}/request.json`, request, 'application/json', writer ? { writer } : {}); },
     event(event, at = new Date(event.ts)) {
       const day = at.toISOString().slice(0, 10);
       counter += 1;
