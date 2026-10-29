@@ -2,9 +2,11 @@
 // pure TypeScript, imported straight by Node.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { clampView, fitScale, fitView, keepPoint, limitsFor, viewAt, zoomAround } from '../../../src/hub/panZoom.ts';
 import { layoutMap } from '../../../src/hub/mapLayout.ts';
-import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
+import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
+import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 
 const box = { w: 390, h: 300 };
 const near = (a, b, message) => assert.ok(Math.abs(a - b) < 1e-6, `${message ?? ''} ${a} != ${b}`);
@@ -199,4 +201,172 @@ test('the ancestors of the open panel are never folded', () => {
   assert.equal(zoomStep({ layout, open, auto, k: 0.9, dir: -1, at, keep: new Set(['m2', 'fb']) }), null, 'both kept');
   const step = zoomStep({ layout, open, auto, k: 0.9, dir: -1, at, keep: new Set(['m2']) });
   assert.deepEqual([...step.open], ['m2'], 'only the unkept feature folds');
+});
+
+// --- The horizontal layout does not move ---------------------------------------------------------
+
+/** What `layoutMap` returned for the snapshot model before the vertical layout was added (recorded from main). Infinity is spelled out. */
+const recorded = JSON.parse(readFileSync(new URL('./snapshots/hub-map-layout-x.json', import.meta.url), 'utf8'));
+const spelled = value => JSON.parse(JSON.stringify(value, (key, item) => (item === Infinity ? 'Infinity' : item === -Infinity ? '-Infinity' : item)));
+/** Keeps, at every level, only the keys the recorded value has: the layout may only add fields. */
+const onlyRecorded = (actual, wanted) => {
+  if (Array.isArray(wanted)) return wanted.map((item, k) => onlyRecorded(actual[k], item));
+  if (wanted && typeof wanted === 'object') return Object.fromEntries(Object.keys(wanted).map(key => [key, onlyRecorded(actual[key], wanted[key])]));
+  return actual;
+};
+
+test('the horizontal layout keeps every field it had; the new ones are only added', () => {
+  const m = snapshotModel();
+  const layouts = {
+    open: layoutMap(m, everythingOpen(m), true),
+    closed: layoutMap(m, new Set(), false),
+    partly: layoutMap(m, new Set(['m2', 'm2-a']), true),
+  };
+  for (const [name, layout] of Object.entries(layouts)) {
+    assert.deepEqual(onlyRecorded(spelled(layout), recorded[name]), recorded[name], name);
+    assert.deepEqual(layout.nodes.filter(item => !item.label || !item.center).map(item => item.id), [], `${name}: every node has a label and a centre`);
+  }
+});
+
+test('the horizontal layout describes what ProgressMap draws today', () => {
+  const m = snapshotModel();
+  const layout = layoutMap(m, everythingOpen(m), true);
+  assert.deepEqual(layout.spine, { from: [16, layout.spineY], to: [layout.width - 14, layout.spineY] });
+  assert.deepEqual(layout.now, { x: layout.nowX, y: layout.spineY });
+  for (const branch of layout.branches) assert.deepEqual(branch.points, [[branch.x0, branch.y0], [branch.x1, branch.y1], [branch.x2, branch.y1]], branch.id);
+  for (const band of layout.bands) {
+    assert.deepEqual(band.rect, { x: band.x1, y: band.y, w: band.x2 - band.x1, h: 22 });
+    assert.deepEqual(band.labelAt, { x: band.x1 + 10, y: band.y + 15, anchor: 'start' });
+  }
+  const milestoneNode = layout.nodes.find(item => item.id === 'm1');
+  assert.deepEqual(milestoneNode.label, { x: milestoneNode.x, y: milestoneNode.y + 34, anchor: 'middle' }, 'an open milestone titles below');
+  const featureNode = layout.nodes.find(item => item.id === 'm2-a');
+  assert.deepEqual(featureNode.elbow, { x: featureNode.elbowX, y: featureNode.y });
+  assert.deepEqual(featureNode.center, { x: featureNode.x + 22, y: featureNode.y });
+});
+
+// --- The vertical layout -------------------------------------------------------------------------
+
+const vertical = (m, open, sprints = false) => layoutMap(m, open, sprints, 'y');
+
+test('vertical: the busiest model, everything open and Sprints on, fits a phone', () => {
+  const m = snapshotModel();
+  const layout = vertical(m, everythingOpen(m), true);
+  assert.equal(layout.axis, 'y');
+  assert.ok(layout.width < 500, `${layout.width}`);
+  assert.deepEqual(layout.spine, { from: [0, 16], to: [0, layout.height - 14] });
+  assert.equal(layout.bands.length, 2);
+  assert.ok(layout.bands[1].rect.x === layout.bands[0].rect.x - 18, 'sprint bars are 18 units apart, further left');
+  assert.ok(layout.bands.every(band => band.rect.x < 0 && band.partsAt === null && band.labelAt.anchor === 'end'));
+});
+
+test('vertical: every node has a label; left-side features and their tasks end at it, right-side ones start from it, milestones start', () => {
+  const m = snapshotModel();
+  const layout = vertical(m, everythingOpen(m));
+  for (const item of layout.nodes) {
+    assert.ok(['start', 'middle', 'end'].includes(item.label.anchor), item.id);
+    assert.ok(Number.isFinite(item.label.x) && Number.isFinite(item.label.y), item.id);
+    if (item.kind === 'm') assert.equal(item.label.anchor, 'start', item.id);
+    else {
+      assert.equal(item.label.anchor, item.side < 0 ? 'end' : 'start', item.id);
+      assert.ok(item.side < 0 ? item.label.x < item.center.x : item.label.x > item.center.x, `${item.id}: text lies outside its run`);
+    }
+    if (item.kind !== 't') assert.ok(item.label.lines.length <= 2 && item.label.lines.every(line => line.length <= 24), item.id);
+  }
+  const sides = layout.nodes.filter(item => item.kind === 'f' && item.milestone === 'm2').map(item => item.side);
+  assert.deepEqual(sides, [-1, 1, -1, 1, -1], 'features alternate sides');
+  assert.ok(layout.nodes.filter(item => item.kind === 'm').every(item => item.x === 0), 'milestones sit on the spine');
+});
+
+test('vertical: milestones, features and tasks go down the page without overlapping, tasks 44 units apart', () => {
+  const m = snapshotModel();
+  const layout = vertical(m, everythingOpen(m));
+  const ms = layout.nodes.filter(item => item.kind === 'm').map(item => item.y);
+  assert.ok(ms.every((y, k) => k === 0 || y > ms[k - 1] + 90), `${ms}`);
+  const features = layout.nodes.filter(item => item.kind === 'f' && item.milestone === 'm2');
+  features.forEach((item, k) => {
+    if (k) assert.ok(item.y - features[k - 1].y >= 8 + 2 * 22, `${item.id} starts below the previous feature's circle`);
+    const branch = layout.branches.find(candidate => candidate.id === item.id);
+    assert.deepEqual(branch.points[0], [0, branch.points[0][1]], 'the branch leaves the spine');
+    assert.deepEqual(branch.points[1], [item.side * 40, branch.points[0][1] + 40], 'steps out BR');
+    assert.equal(branch.points[2][0], branch.points[1][0], 'and runs straight down');
+    assert.equal(branch.points[2][1], item.y);
+  });
+  const tasks = layout.nodes.filter(item => item.kind === 't' && item.feature === 'm2-a');
+  assert.deepEqual(tasks.map((item, k) => k && item.y - tasks[k - 1].y).slice(1), [44, 44]);
+  assert.ok(tasks.every(item => item.y < features[0].y), 'tasks sit on the run above the circle');
+  assert.ok(tasks.every(item => item.x === features[0].x));
+});
+
+test('vertical: slots cover y without gaps and increase, and slotAt finds the milestone for a point', () => {
+  const layout = vertical(zoomModel(), new Set(['m2']));
+  assert.deepEqual(layout.slots.map(slot => slot.id), ['m1', 'm2', 'm3']);
+  assert.equal(layout.slots[0].from, -Infinity);
+  assert.equal(layout.slots[2].to, Infinity);
+  assert.equal(layout.slots[0].to, layout.slots[1].from);
+  assert.equal(layout.slots[1].to, layout.slots[2].from);
+  assert.ok(layout.slots[1].from > layout.slots[0].to - 1 && layout.slots[2].from > layout.slots[1].from);
+  assert.equal(layout.slots[1].from, node(layout, 'm2').y - 40);
+  assert.equal(slotAt(layout, { x: 500, y: node(layout, 'm1').y }), 'm1');
+  assert.equal(slotAt(layout, { x: -500, y: node(layout, 'm2').y }), 'm2');
+  assert.equal(slotAt(layout, { x: 0, y: node(layout, 'fb').y }), 'm2', 'a feature of m2 lies in the slot of m2');
+  assert.equal(slotAt(layout, { x: 0, y: node(layout, 'm3').y + 5 }), 'm3');
+});
+
+test('vertical: "now" lies between its milestone and the next, and never under the circle', () => {
+  for (const opened of [new Set(), new Set(['m1']), new Set(['m1', 'm1-f'])]) {
+    const layout = vertical(model([milestone('m1', [task('a', 'next'), task('b', 'next')]), milestone('m2', [task('c', 'later')])]), opened);
+    const first = node(layout, 'm1');
+    const radius = opened.has('m1') ? 15 : 26;
+    assert.equal(layout.now.x, 0);
+    assert.ok(layout.now.y - first.y >= radius + 8, `${layout.now.y - first.y}`);
+    assert.ok(layout.now.y < node(layout, 'm2').y, 'before the next milestone');
+  }
+  const some = vertical(model([milestone('m1', [task('a', 'done'), task('b', 'done'), task('c', 'next')]), milestone('m2', [task('d', 'later')])]), new Set());
+  assert.ok(some.now.y > node(some, 'm1').y + 38, 'two of three done puts it well along the line');
+  const finished = vertical(model([milestone('m1', [task('a', 'done')])]), new Set());
+  assert.equal(finished.now.y, finished.height - 40, 'with nothing left, now is at the end');
+});
+
+test("vertical: a feature's elbow is the same closed and open, and is the corner of its branch", () => {
+  const closed = vertical(zoomModel(), new Set(['m2']));
+  const wide = vertical(zoomModel(), new Set(['m2', 'fa', 'fb']));
+  for (const id of ['fa']) {
+    assert.deepEqual(stableOf(node(closed, id)), stableOf(node(wide, id)), id);
+    const branch = closed.branches.find(item => item.id === id);
+    assert.deepEqual(stableOf(node(closed, id)), { x: branch.points[1][0], y: branch.points[1][1] });
+  }
+  assert.notEqual(node(closed, 'fb').elbow.y, node(wide, 'fb').elbow.y, 'fb moves down when fa opens above it');
+  const onlyFb = vertical(zoomModel(), new Set(['m2', 'fb']));
+  assert.deepEqual(stableOf(node(closed, 'fb')), stableOf(node(onlyFb, 'fb')), 'but not when it opens itself');
+  assert.notEqual(node(closed, 'fb').y, node(onlyFb, 'fb').y, 'while its circle moves');
+});
+
+test('vertical: zooming in opens the milestone under the pointer, then the nearest feature', () => {
+  const layout = vertical(zoomModel(), none);
+  const at = { x: 0, y: node(layout, 'm2').y };
+  const step = zoomStep({ layout, open: none, auto: none, k: 1.6, dir: 1, at, keep: none });
+  assert.deepEqual([...step.open], ['m2']);
+  assert.equal(step.anchor, 'm2');
+  assert.equal(zoomStep({ layout, open: none, auto: none, k: 1.4, dir: 1, at, keep: none }), null, 'below the threshold');
+  assert.equal(zoomStep({ layout, open: none, auto: none, k: 1.6, dir: 1, at: { x: 0, y: -500 }, keep: none }).anchor, 'm1', 'the first slot is open upwards');
+  assert.equal(zoomStep({ layout, open: none, auto: none, k: 1.6, dir: 1, at: { x: 0, y: 99999 }, keep: none }).anchor, 'm3', 'and the last downwards');
+
+  const open = new Set(['m2']);
+  const opened = vertical(zoomModel(), open);
+  const nearBranch = id => { const branch = opened.branches.find(item => item.id === id); return { x: branch.points[1][0] * 1.1, y: branch.points[1][1] + 4 }; };
+  assert.equal(zoomStep({ layout: opened, open, auto: new Set(['m2']), k: 1.6, dir: 1, at: nearBranch('fb'), keep: none }), null, 'no feature below 2.2');
+  assert.equal(zoomStep({ layout: opened, open, auto: new Set(['m2']), k: 2.3, dir: 1, at: nearBranch('fb'), keep: none }).anchor, 'fb');
+  assert.equal(zoomStep({ layout: opened, open, auto: none, k: 2.3, dir: 1, at: nearBranch('fa'), keep: none }).anchor, 'fa');
+});
+
+test('vertical: zooming out folds what zoom opened and holds a surviving feature or milestone still', () => {
+  const open = new Set(['m2', 'fa', 'fb']);
+  const layout = vertical(zoomModel(), open);
+  const at = { x: 0, y: node(layout, 'm2').y };
+  const step = zoomStep({ layout, open, auto: new Set(['m2', 'fb']), k: 1.7, dir: -1, at, keep: none });
+  assert.deepEqual([...step.open].sort(), ['fa', 'm2']);
+  assert.ok(step.anchor === 'fa' || step.anchor === 'fb');
+  const gone = zoomStep({ layout, open, auto: new Set(['m2', 'fb']), k: 1.1, dir: -1, at, keep: none });
+  assert.equal(gone.anchor, 'm2');
 });
