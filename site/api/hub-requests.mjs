@@ -23,6 +23,7 @@ export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 4
 /** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
+const AGENT_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const PRESET_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** How many run and fire files the detail lists. */
 const LIST_CAP = 20;
@@ -75,6 +76,11 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
   }
   const doneWhen = text(data.doneWhen, REQUEST_LIMITS.doneWhen, '"Done when"');
   if (doneWhen) out.doneWhen = doneWhen;
+  // The agent a job is for (the avatar presets): an agent id.
+  if (data.agent !== undefined && data.agent !== null && data.agent !== '') {
+    if (typeof data.agent !== 'string' || !AGENT_RE.test(data.agent)) throw fail('The agent is a name of lower-case letters, digits and dashes.');
+    out.agent = data.agent;
+  }
   if (data.replaces !== undefined && data.replaces !== null && data.replaces !== '') {
     if (!validId(data.replaces)) throw fail('"Replaces" is a request id.');
     out.replaces = data.replaces;
@@ -271,6 +277,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const clean = checkRequest(body, { fromOwner: true });
     const preset = clean.preset ? presetOf(clean.preset) : null;
     if (clean.preset && !preset) throw fail('There is no such preset.', 400);
+    if (preset?.hidden) throw fail('That preset is started by the Hub, not by a request.', 400);
     if (preset && !user) throw fail('Sign in to send a job.', 401);
     let proposal = {};
     if (preset) {
@@ -280,7 +287,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: hasCloud });
       proposal = {
         ...(clean.title ? { title: clean.title } : {}), preset: preset.id, ...(repo ? { repo } : {}), ...(needs ? { needs } : {}),
-        target: clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}),
+        target: clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}), ...(clean.agent ? { agent: clean.agent } : {}),
         origin: { kind: 'owner', name: user }, ...(clean.replaces ? { replaces: clean.replaces } : {}),
       };
       proposal.why = clean.target ? 'you chose it' : routed.why;

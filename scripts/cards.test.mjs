@@ -654,6 +654,49 @@ test('ask create: --require-passkey and the JSON field both set requirePasskey; 
   } finally { await close(); }
 });
 
+test('ask create: the avatar field of the sprite flow survives into ask.json; a malformed one is refused with the reason', async () => {
+  const { fake, cli, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'ask.json');
+    const made = async avatar => {
+      await writeFile(file, JSON.stringify({ question: 'Which avatar?', options: [{ id: 'a', label: 'A: round' }, { id: 'b', label: 'B: tall' }], requirePasskey: true, ...(avatar === undefined ? {} : { avatar }) }));
+      return cli('api', 'ask', 'create', '--project', 'sprite-studio', '--file', file);
+    };
+    const stored = result => fake.json(`sections/inbox/asks/${result.stdout.trim().split('\n').at(-1)}/ask.json`);
+
+    const pick = { agent: 'claude', request: '20261029-sprite-studio-x-a1b2', subject: 'subjects/claude-avatar' };
+    const variant = await made(pick);
+    assert.equal(variant.code, 0, variant.stderr);
+    assert.deepEqual(stored(variant).avatar, pick);
+    assert.equal(stored(variant).requirePasskey, true);
+
+    const sheet = await made({ agent: 'claude', sheet: 'sheet-20261029T100000Z-ab12' });
+    assert.equal(sheet.code, 0, sheet.stderr);
+    assert.deepEqual(stored(sheet).avatar, { agent: 'claude', sheet: 'sheet-20261029T100000Z-ab12' });
+
+    const none = await made(undefined);
+    assert.equal(none.code, 0, none.stderr);
+    assert.ok(!('avatar' in stored(none)), 'Without it nothing is written.');
+
+    const refused = [
+      ['a string', 'claude', /avatar is an object/],
+      ['no agent', { request: 'r-1' }, /avatar\.agent is an agent id/],
+      ['a bad agent', { agent: 'Bad Agent', request: 'r-1' }, /avatar\.agent is an agent id/],
+      ['neither request nor sheet', { agent: 'claude' }, /avatar needs a request id \(or a sheet\)/],
+      ['a bad sheet', { agent: 'claude', sheet: 'sheet-1' }, /avatar\.sheet is sheet-/],
+      ['both', { agent: 'claude', sheet: 'sheet-20261029T100000Z-ab12', request: 'r-1' }, /a sheet, or a request with its subject, not both/],
+      ['a long subject', { agent: 'claude', request: 'r-1', subject: 'x'.repeat(201) }, /avatar\.subject is 1 to 200 characters/],
+      ['an unknown field', { agent: 'claude', request: 'r-1', note: 'x' }, /avatar has no field note/],
+    ];
+    for (const [name, avatar, message] of refused) {
+      const result = await made(avatar);
+      assert.equal(result.code, 1, name);
+      assert.match(result.stderr, /ask\.json is not valid/, name);
+      assert.match(result.stderr, message, name);
+    }
+  } finally { await close(); }
+});
+
 test('BUW_INBOX_SECTION=inbox-dev writes under sections/inbox-dev, touches nothing in inbox, and sends no ping', async () => {
   const { fake, cli, keys, dir, close } = await setup();
   const hook = await webhook();

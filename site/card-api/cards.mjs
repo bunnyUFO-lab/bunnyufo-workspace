@@ -48,6 +48,8 @@
 //        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where only you,
 //        signed in, can answer it: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
+//        "avatar" in the file marks an Ask of the sprite flow: { agent, request, subject? } (pick one of four variants) or { agent, sheet }
+//        (use this sheet?); the Hub acts on the answer. Use it with --require-passkey.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
@@ -694,6 +696,7 @@ function askFromFile(raw, flags, id) {
     ...(raw.options ? { options: raw.options } : {}),
     ...(raw.decisions ? { decisions: raw.decisions } : {}),
     ...(raw.image ? { image: raw.image } : {}),
+    ...(raw.avatar !== undefined ? { avatar: raw.avatar } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
     ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
@@ -703,6 +706,10 @@ function askFromFile(raw, flags, id) {
 
 /** An Ask picture's file name: the server's rule. */
 const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+/** The `avatar` field of an Ask (the sprite flow): an agent id, and a request id or a sheet name. */
+const AVATAR_SLUG_RE = /^[a-z][a-z0-9-]{0,39}$/;
+const AVATAR_SHEET_RE = /^sheet-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}$/;
+const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -794,6 +801,22 @@ function validateAsk(ask, imageNames) {
   if (ask.image !== undefined) {
     if (typeof ask.image !== 'string' || !ASK_IMAGE_RE.test(ask.image)) problems.push('image is a file name of letters, digits, . _ - (up to 120, starting with a letter or digit)');
     else if (!imageNames.includes(ask.image)) problems.push(`image names ${ask.image}, which is not among the --image files`);
+  }
+  if (ask.avatar !== undefined) {
+    const avatar = ask.avatar;
+    if (!avatar || typeof avatar !== 'object' || Array.isArray(avatar)) problems.push('avatar is an object');
+    else {
+      const known = Object.keys(avatar).filter(name => !['agent', 'request', 'subject', 'sheet'].includes(name));
+      if (known.length) problems.push(`avatar has no field ${known.join(', ')}`);
+      if (typeof avatar.agent !== 'string' || !AVATAR_SLUG_RE.test(avatar.agent)) problems.push('avatar.agent is an agent id (lower-case letters, digits and dashes)');
+      if (avatar.sheet !== undefined) {
+        if (avatar.request !== undefined || avatar.subject !== undefined) problems.push('avatar names a sheet, or a request with its subject, not both');
+        if (typeof avatar.sheet !== 'string' || !AVATAR_SHEET_RE.test(avatar.sheet)) problems.push('avatar.sheet is sheet-<YYYYMMDDTHHMMSSZ>-<4 letters or digits>');
+      } else {
+        if (typeof avatar.request !== 'string' || !AVATAR_REQUEST_RE.test(avatar.request)) problems.push('avatar needs a request id (or a sheet)');
+        if (avatar.subject !== undefined && (typeof avatar.subject !== 'string' || !avatar.subject.trim() || avatar.subject.length > 200)) problems.push('avatar.subject is 1 to 200 characters');
+      }
+    }
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
   if (typeof ask.allowNote !== 'boolean' || typeof ask.allowDrawing !== 'boolean') problems.push('allowNote and allowDrawing are true or false');
