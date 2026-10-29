@@ -52,7 +52,9 @@ function AgentCard({ agent, canPick, onSprite, opener }: { agent: TeamAgent; can
       {agent.sessions && agent.sessions.length > 0 && <ul className="team-sessions" aria-label={`${agent.name} sessions`}>{agent.sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>}
       <footer className="team-card-foot">
         <span className="team-dim">{agent.role}</span>
-        {canPick && <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>}
+        {canPick
+          ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
+          : <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}
       </footer>
     </article>
   )
