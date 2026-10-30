@@ -10,7 +10,7 @@ import { createHub, inboxKey } from '../hub.mjs';
 import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
-import { askJson, beadsCopy, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -489,6 +489,28 @@ test('projects, Beads and the map', async () => {
     assert.deepEqual(map.sprints, [{ name: 'sprint-3', milestones: [{ id: 'ml-m2', count: 4, total: 7 }] }]);
     assert.deepEqual((await get('/hub/map/probe')).body.milestones, []);
     assert.equal((await get('/hub/map/Bad_Id')).status, 404);
+  } finally { await close(); }
+});
+
+test('the map names PRs and cards: the repo comes from the Beads meta, else from the tracked section; cards from the Library', async () => {
+  const { fake, seed, get, close } = await fixture();
+  try {
+    const issues = [
+      beadsIssue({ id: 'x-m', type: 'milestone' }), beadsIssue({ id: 'x-f', type: 'epic', parent: 'x-m' }),
+      { ...beadsIssue({ id: 'x-t', parent: 'x-f', status: 'closed', closed: '2026-10-01T10:00:00Z', description: 'Copy the weekly backups off the host.\n\nPR: #138 merged' }), external_ref: 'gh-138', metadata: { cards: 'alpha/2026-10-01_rocket-sprint' } },
+    ];
+    seed.put('beads/xproj.jsonl', issues.map(line => JSON.stringify(line)).join('\n') + '\n', 'application/x-ndjson');
+    seed.put('beads/xproj.meta.json', { pushedAt: minutesAgo(NOW, 5).toISOString(), count: 3, repo: 'git@github.com:from/meta.git' });
+    seedCardSections(fake);
+    fake.seed('sections/xproj/workspace.json', JSON.stringify({ name: 'X', tracked: { repo: 'from/tracked' }, entities: [] }), 'application/json');
+    const first = (await get('/hub/map/xproj')).body.milestones[0].features[0].tasks[0];
+    assert.equal(first.summary, 'Copy the weekly backups off the host.');
+    assert.equal(first.prs[0].url, 'https://github.com/from/meta/pull/138', 'The meta repo wins.');
+    assert.deepEqual(first.cards, [{ title: 'Rocket sprint', href: '/alpha#/rocket-sprint' }]);
+    // Without a repo in the meta the section's tracked repo is used.
+    seed.put('beads/xproj.meta.json', { pushedAt: minutesAgo(NOW, 5).toISOString(), count: 3 });
+    const again = (await get('/hub/map/xproj')).body.milestones[0].features[0].tasks[0];
+    assert.equal(again.prs[0].url, 'https://github.com/from/tracked/pull/138');
   } finally { await close(); }
 });
 

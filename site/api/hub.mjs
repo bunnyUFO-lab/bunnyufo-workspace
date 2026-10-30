@@ -804,20 +804,36 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return lists.flat();
   }
 
-  // The cards by `section/folder`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
-  let cardIndex = { at: 0, byFolder: new Map() };
+  // The cards by `section/folder` and `section#id`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
+  let cardIndex = { at: 0, byRef: new Map() };
+  const cardRow = row => ({ title: row.title, href: `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}` });
+  /** Make sure the index is no older than a minute (`maxAge` ms), listing the sections at most once per call. */
+  async function refreshCardIndex(maxAge = 60000) {
+    if (now().getTime() - cardIndex.at <= maxAge) return;
+    // A failed listing also counts as a try, so an S3 outage does not list every section for every lookup.
+    const at = now().getTime();
+    try {
+      const byRef = new Map();
+      for (const row of await allCards()) {
+        byRef.set(`${row.section}/${row.folder}`, cardRow(row));
+        if (!byRef.has(`${row.section}#${row.id}`)) byRef.set(`${row.section}#${row.id}`, cardRow(row));
+      }
+      cardIndex = { at, byRef };
+    } catch { cardIndex = { ...cardIndex, at }; }
+  }
   /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
   async function cardHrefOf(card) {
     if (typeof card !== 'string') return undefined;
-    const rebuild = async () => {
-      // A failed listing also counts as a try, so an S3 outage does not list every section for every lookup.
-      const at = now().getTime();
-      try { cardIndex = { at, byFolder: new Map((await allCards()).map(row => [`${row.section}/${row.folder}`, `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}`])) }; } catch { cardIndex = { ...cardIndex, at }; }
-    };
-    if (now().getTime() - cardIndex.at > 60000) await rebuild();
+    await refreshCardIndex();
     // A card a run has just written is not in an index built a moment ago: on a miss, look again once the index is 10 s old.
-    if (!cardIndex.byFolder.has(card) && now().getTime() - cardIndex.at > 10000) await rebuild();
-    return cardIndex.byFolder.get(card);
+    if (!cardIndex.byRef.has(card)) await refreshCardIndex(10000);
+    return cardIndex.byRef.get(card)?.href;
+  }
+  /** A resolver for the map: `section/folder` or `section#id` to `{ title, href }`, from the one-minute index (no listing of its own per request). */
+  async function cardResolver() {
+    await refreshCardIndex();
+    const index = cardIndex.byRef;
+    return ref => index.get(ref) ?? null;
   }
 
   /** The event window with the run events in it: started and finished, from the requests' own files. */
@@ -1136,9 +1152,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
-            const [{ meta, issues }, window, asks] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at)]);
+            const [{ meta, issues }, window, asks, cards] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), cardResolver()]);
+            const repo = meta?.repo || await projectRepo(project);
             reply(buildMap({
-              project, meta, issues, events: window.events,
+              project, meta, issues, events: window.events, repo, cards,
               asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), now: at,
             }));
           } else if (route === '/hub/file') {
