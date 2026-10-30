@@ -1,6 +1,8 @@
 // The `#needs-you` Discord ping from the site API, in the same shape `cards request create` and `cards ask create`
 // send (site/card-api/cards.mjs `pingNeedsYou`): a bold "Agent needs you · <Project>", the text clipped to 200
 // characters, and a link. Silent without `HUB_DISCORD_NEEDS_YOU`. Never throws, and never logs the webhook URL.
+// With `HUB_DISCORD_OWNER_ID` (the owner's Discord user id) the ping @mentions the owner, so it buzzes their phone;
+// `allowed_mentions` names only them, so text in a request can never ping anyone else.
 import { titleCase } from './hub-model.mjs';
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
@@ -8,16 +10,17 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 export function createNotify({ env = {}, fetchImpl = fetch, log = () => {} } = {}) {
   const webhook = String(env.HUB_DISCORD_NEEDS_YOU ?? '').trim();
   const site = String(env.BUW_SITE_URL ?? '').trim().replace(/\/+$/, '');
+  const owner = /^\d{15,25}$/.test(String(env.HUB_DISCORD_OWNER_ID ?? '').trim()) ? String(env.HUB_DISCORD_OWNER_ID).trim() : null;
   return {
     configured: !!webhook,
     /** Ping once. `link` is a path such as `/#/~hub/needs/all`; it gets the site URL in front. Resolves true when Discord took it. */
     async needsYou({ project, text, link }) {
       if (!webhook) return false;
-      const content = [`**Agent needs you · ${project ? titleCase(project) : 'Hermes'}**`, clip(text, 200), ...(site && link ? [`${site}${link}`] : [])].join('\n');
+      const content = [`${owner ? `<@${owner}> ` : ''}**Agent needs you · ${project ? titleCase(project) : 'Hermes'}**`, clip(text, 200), ...(site && link ? [`${site}${link}`] : [])].join('\n');
       try {
         const response = await fetchImpl(webhook, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ content, allowed_mentions: { parse: [] } }), signal: AbortSignal.timeout(5000),
+          body: JSON.stringify({ content, allowed_mentions: owner ? { parse: [], users: [owner] } : { parse: [] } }), signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) throw new Error(`Discord answered ${response.status}`);
         return true;

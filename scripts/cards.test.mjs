@@ -68,7 +68,7 @@ async function setup() {
   const spool = path.join(dir, 'spool.jsonl');
   const base = {
     ...process.env, HOME: dir, USERPROFILE: dir, BUW_REGISTRY: path.join(dir, 'none.json'), BUW_SPOOL: spool,
-    BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: '', BUW_CARDS_RETRY_MS: '5', CLAUDE_SESSION_ID: '',
+    BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: '', BUW_CARDS_RETRY_MS: '5', CLAUDE_SESSION_ID: '', BUW_DISCORD_OWNER_ID: '',
   };
   delete base.AWS_ACCESS_KEY_ID;
   delete base.AWS_PROFILE;
@@ -547,6 +547,31 @@ test('ask create pings #needs-you with a link to the Ask, from the environment',
   } finally { await hook.close(); await close(); }
 });
 
+test('the ping @mentions the owner when their Discord id is known, and only the owner can be pinged', async () => {
+  const { cli, dir, close } = await setup();
+  const hook = await webhook();
+  const owner = '123456789012345678';
+  try {
+    await writeFile(path.join(dir, 'ask.json'), JSON.stringify({ question: 'Ping <@999999999999999999> and @everyone?' }));
+    cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: '', BUW_DISCORD_OWNER_ID: owner };
+    assert.equal((await cli('api', 'ask', 'create', '--project', 'magic-loops', '--file', path.join(dir, 'ask.json'))).code, 0);
+    assert.ok(hook.posts[0].body.content.startsWith(`<@${owner}> **Agent needs you · Magic Loops**`), hook.posts[0].body.content);
+    assert.deepEqual(hook.posts[0].body.allowed_mentions, { parse: [], users: [owner] }, 'Only the owner can be pinged, whatever the Ask says.');
+    // From the secrets file when the environment has none.
+    await mkdir(path.join(dir, '.buw', 'secrets'), { recursive: true });
+    await writeFile(path.join(dir, '.buw', 'secrets', 'discord-owner-user-id'), `${owner}\n`);
+    cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: '', BUW_DISCORD_OWNER_ID: '' };
+    assert.equal((await cli('api', 'checklist', 'create', '--project', 'magic-loops', '--title', 'Two steps', '--item', 'One', '--item', 'Two')).code, 0);
+    assert.ok(hook.posts[1].body.content.startsWith(`<@${owner}> `), hook.posts[1].body.content);
+    assert.deepEqual(hook.posts[1].body.allowed_mentions, { parse: [], users: [owner] });
+    // A malformed id is ignored: no mention at all.
+    cli.env = { BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: '', BUW_DISCORD_OWNER_ID: '<@here>' };
+    assert.equal((await cli('api', 'ask', 'create', '--project', 'magic-loops', '--file', path.join(dir, 'ask.json'))).code, 0);
+    assert.ok(hook.posts[2].body.content.startsWith('**Agent needs you'), hook.posts[2].body.content);
+    assert.deepEqual(hook.posts[2].body.allowed_mentions, { parse: [] });
+  } finally { await hook.close(); await close(); }
+});
+
 test('the webhook and the site address can come from ~/.buw/hub.json or a secrets file', async () => {
   const { cli, dir, close } = await setup();
   const hook = await webhook();
@@ -573,13 +598,15 @@ test('a webhook that is down leaves exit 0 and one spooled discord line without 
   await hook.close();
   try {
     await writeFile(path.join(dir, 'ask.json'), JSON.stringify({ question: 'Anyone there?' }));
-    cli.env = { BUW_DISCORD_NEEDS_YOU: dead, BUW_SITE_URL: 'https://hub.example.test' };
+    cli.env = { BUW_DISCORD_NEEDS_YOU: dead, BUW_SITE_URL: 'https://hub.example.test', BUW_DISCORD_OWNER_ID: '123456789012345678' };
     const made = await cli('api', 'ask', 'create', '--project', 'probe', '--file', path.join(dir, 'ask.json'));
     assert.equal(made.code, 0, made.stderr);
     const lines = (await readFile(spool, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(line => line.kind === 'discord');
     assert.equal(lines.length, 1);
     assert.deepEqual([lines[0].v, lines[0].target], [1, 'needsYou']);
     assert.match(JSON.parse(lines[0].body).content, /Anyone there\?/);
+    assert.match(JSON.parse(lines[0].body).content, /^<@123456789012345678> /, 'The replayed ping still mentions the owner.');
+    assert.deepEqual(JSON.parse(lines[0].body).allowed_mentions, { parse: [], users: ['123456789012345678'] });
     assert.ok(!JSON.stringify(lines[0]).includes('127.0.0.1'), 'The address is not stored.');
     assert.ok(!made.stderr.includes(dead), made.stderr);
   } finally { await close(); }
@@ -643,9 +670,11 @@ test('BUW_INBOX_SECTION=inbox-dev writes under sections/inbox-dev, touches nothi
     assert.deepEqual(keys('').filter(key => !key.endsWith('/workspace.json')), [], 'Nothing was written to the real inbox.');
     assert.equal(hook.posts.length, 0);
     // A webhook is used only when it is named for this run.
-    cli.env = { BUW_INBOX_SECTION: 'inbox-dev', BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/' };
+    cli.env = { BUW_INBOX_SECTION: 'inbox-dev', BUW_DISCORD_NEEDS_YOU: hook.url, BUW_SITE_URL: 'https://hub.example.test/', BUW_DISCORD_OWNER_ID: '123456789012345678' };
     await cli('api', 'ask', 'create', '--project', 'magic-loops', '--file', path.join(dir, 'ask.json'));
     assert.equal(hook.posts.length, 1, 'An explicit webhook still pings.');
+    assert.doesNotMatch(hook.posts[0].body.content, /<@/, 'A dev inbox never mentions the owner.');
+    assert.deepEqual(hook.posts[0].body.allowed_mentions, { parse: [] });
     // A bad section name is refused before anything is sent.
     cli.env = { BUW_INBOX_SECTION: 'magic-loops' };
     assert.equal((await cli('api', 'event', 'deployed', '--title', 'x')).code, 2);

@@ -41,7 +41,9 @@
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
 //        link to the Ask (`siteUrl` in hub.json or BUW_SITE_URL). A failed post is spooled for hub-hooks to
-//        replay and never changes the exit code; the webhook address is never printed or stored.
+//        replay and never changes the exit code; the webhook address is never printed or stored. The note
+//        @mentions the owner, so it buzzes their phone, when their Discord user id is known (BUW_DISCORD_OWNER_ID,
+//        or ~/.buw/secrets/discord-owner-user-id); a dev inbox never mentions anyone.
 //        A simple multiple-choice Ask (2 to 5 options, no pictures, no drawing) also gets Discord buttons once the
 //        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where only you,
 //        signed in, can answer it: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
@@ -810,6 +812,13 @@ async function needsYouWebhook(hub) {
   try { return (await readFile(path.join(os.homedir(), '.buw', 'secrets', 'discord-webhook-needs-you'), 'utf8')).trim() || null; } catch { return null; }
 }
 
+/** The owner's Discord user id, for the @mention that makes a ping buzz their phone: BUW_DISCORD_OWNER_ID, then a secrets file. Only a well-formed id counts. */
+async function ownerDiscordId() {
+  let id = process.env.BUW_DISCORD_OWNER_ID?.trim();
+  if (!id) try { id = (await readFile(path.join(os.homedir(), '.buw', 'secrets', 'discord-owner-user-id'), 'utf8')).trim(); } catch { return null; }
+  return /^\d{15,25}$/.test(id) ? id : null;
+}
+
 const titleOf = id => String(id).split('-').filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
 
 /**
@@ -824,8 +833,10 @@ async function pingNeedsYou({ project, text, path: link }) {
   const webhook = await needsYouWebhook(hub);
   if (!webhook) return;
   const site = String(hub?.siteUrl || process.env.BUW_SITE_URL || '').replace(/\/+$/, '');
-  const content = [`**Agent needs you · ${titleOf(project)}**`, clip(text, 200), ...(site ? [`${site}${link}`] : [])].join('\n');
-  const body = JSON.stringify({ content, allowed_mentions: { parse: [] } });
+  // The owner is mentioned only from the real Inbox, and allowed_mentions names only them, so text in the Ask can never ping anyone.
+  const owner = INBOX === 'inbox' ? await ownerDiscordId() : null;
+  const content = [`${owner ? `<@${owner}> ` : ''}**Agent needs you · ${titleOf(project)}**`, clip(text, 200), ...(site ? [`${site}${link}`] : [])].join('\n');
+  const body = JSON.stringify({ content, allowed_mentions: owner ? { parse: [], users: [owner] } : { parse: [] } });
   try {
     const response = await fetch(webhook, { method: 'POST', headers: { 'content-type': 'application/json' }, body, signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error(`Discord answered ${response.status}`);
