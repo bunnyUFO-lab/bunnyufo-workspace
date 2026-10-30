@@ -17,6 +17,9 @@ export function staleLabel(since: string, now = Date.now()): string {
   return `No word since ${sameDay ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : at.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
 }
 
+/** A request's state in a list row or on its page: "No word since 2:37 AM" when it is silent, else the state's own word. */
+export const requestStateWord = (state: string, stale: string | undefined, words: Record<string, string>, now = Date.now()) => (stale && ['taken', 'running', 'stopping'].includes(state) ? staleLabel(stale, now) : words[state] ?? state)
+
 /** "for 12 min", "for 3 h 5 min", "for 2 days". Empty when the time is unknown. */
 export function duration(since: string, now = Date.now()): string {
   const start = new Date(since).getTime()

@@ -69,12 +69,23 @@ test('requestState: a legacy call with a Set or an array still answers open or t
   assert.equal(requestState([]), 'open');
 });
 
-test('requestState: a request without a preset is only declined, taken or open', () => {
-  const legacy = names => requestState({ names, request: { when: 'nightly' }, now: NOW });
+test('requestState: a request without a preset is declined, open, taken, or done or failed once taken with a result', () => {
+  const legacy = (names, extra = {}) => requestState({ names, request: { when: 'nightly' }, now: NOW, ...extra });
   assert.equal(legacy(['request.json']), 'open');
   assert.equal(legacy(['request.json', 'taken.json']), 'taken');
   assert.equal(legacy(['request.json', 'declined.json']), 'declined');
-  assert.equal(legacy(['request.json', 'approved.json', 'result.json']), 'open', 'Files of a preset request mean nothing to a legacy one.');
+  assert.equal(legacy(['request.json', 'approved.json']), 'open', 'approved.json means nothing to a legacy request.');
+  assert.equal(legacy(['request.json', 'approved.json', 'result.json'], { result: { outcome: 'pr' } }), 'open', 'A result on a request nobody took stays open.');
+  assert.equal(legacy(['request.json', 'result.json'], { result: { outcome: 'card' } }), 'open');
+  const taken = ['request.json', 'taken.json', 'result.json'];
+  assert.equal(legacy(taken, { result: { outcome: 'pr' } }), 'done');
+  assert.equal(legacy(taken, { result: { outcome: 'card' } }), 'done');
+  assert.equal(legacy(taken, { result: { outcome: 'failed', reason: 'boom' } }), 'failed');
+  assert.equal(legacy(taken, { result: { outcome: 'failed', reason: 'no-change' } }), 'done');
+  assert.equal(legacy(taken, { result: { outcome: 'question', question: 'Which?' } }), 'taken', 'A legacy request never asks.');
+  assert.equal(legacy(taken, { result: { outcome: 'manual' } }), 'taken');
+  assert.equal(legacy(['request.json', 'taken.json', 'approved.json', 'stop.json']), 'taken', 'Stop means nothing either.');
+  assert.equal(legacy([...taken, 'declined.json'], { result: { outcome: 'pr' } }), 'declined');
 });
 
 test('requestState: one case per row of the table, first match winning', () => {

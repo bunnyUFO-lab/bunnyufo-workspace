@@ -171,6 +171,28 @@ try {
   await finished.waitFor();
   assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');
 
+  step('a legacy request: taken with a result reads Done, taken and silent reads No word, never Running');
+  const legacy = await startHubFixture({ signing: true });
+  fixtures.push(legacy);
+  const old = { finished: id('legacy-done-c1c1'), silent: id('legacy-silent-d2d2') };
+  for (const [name, text] of [['finished', 'Add one line to docs/README.md'], ['silent', 'Taken and never heard of again']]) {
+    legacy.seed.request({ id: old[name], project: 'magic-loops', createdAt: minutesAgo(legacy.now, 400).toISOString(), by: 'owner', text, when: 'nightly' });
+    legacy.seed.put(`requests/${old[name]}/taken.json`, { runner: 'cloud', at: minutesAgo(legacy.now, 390).toISOString() });
+  }
+  legacy.seed.put(`requests/${old.finished}/result.json`, { outcome: 'pr', pr: 'https://github.com/example/repo/pull/1', summary: 'Created docs/README.md', at: minutesAgo(legacy.now, 380).toISOString() });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    const legacyPage = await open(viewport);
+    await legacyPage.goto(`${legacy.url}#/~hub/request/${old.finished}`);
+    const chip = legacyPage.locator('[data-run-state-chip]');
+    await chip.waitFor();
+    assert.equal((await chip.innerText()).trim(), 'Done');
+    await legacyPage.goto(`${legacy.url}#/~hub/request/${old.silent}`);
+    await legacyPage.locator('[data-run-view]').first().waitFor();
+    await legacyPage.locator(`[data-run-view="${old.silent}"] [data-run-state-chip]`).waitFor();
+    assert.match((await legacyPage.locator(`[data-run-view="${old.silent}"] [data-run-state-chip]`).innerText()).trim(), /^No word since /);
+  }
+
   console.log('hub-runs-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

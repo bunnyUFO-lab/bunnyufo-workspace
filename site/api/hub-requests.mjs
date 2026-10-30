@@ -12,7 +12,7 @@ import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, 
 import { createPublicKey } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
-import { WHEN, newRequestId, requestItem, requestState, runFileTime, validId, validProject } from './hub-model.mjs';
+import { WHEN, newRequestId, requestItem, requestState, runFileTime, staleSince, validId, validProject } from './hub-model.mjs';
 
 /** The needs a request may name. */
 export const NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-files'];
@@ -211,7 +211,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   async function readParts(id, names, request) {
     const read = file => (names.has(file) ? cached(`requests/${id}/${file}`) : null);
     const legacy = !request.preset;
-    const [taken, approved, result] = await Promise.all([read('taken.json'), legacy ? null : read('approved.json'), legacy ? null : read('result.json')]);
+    const [taken, approved, result] = await Promise.all([read('taken.json'), legacy ? null : read('approved.json'), !legacy || names.has('taken.json') ? read('result.json') : null]);
     return { taken, approved, result };
   }
 
@@ -233,7 +233,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
       const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
       // (The list pass skips the request hash; the route checks it.)
-      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names) });
+      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names), now: at });
     });
     return rows.filter(Boolean);
   }
@@ -280,9 +280,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const cloudFull = approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved }, at, { withFires: true }).catch(() => null) : null;
     const cloud = cloudFull?.fires ? { ...cloudFull, fires: cloudFull.fires.map(publicFire) } : cloudFull;
     const shown = approved && approved.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved;
+    const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names) }), at);
     return {
       request,
       state,
+      ...(stale ? { stale } : {}),
       ...(shown ? { approved: shown } : {}),
       ...(parts.taken ? { taken: parts.taken } : {}),
       runs,

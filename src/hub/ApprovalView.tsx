@@ -22,6 +22,8 @@ export interface RequestDetail {
     doneWhen?: string; agent?: string; model?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
+  /** When a taken run last gave word, if that is past its limit: the request is then silent, not running. */
+  stale?: string
   approved?: { target: SpawnTarget; by: string; at: string; expires: string; limits?: { minutes: number } }
   result?: { outcome: string; summary?: string; reason?: string }
   declined?: { at: string; by: string; reason?: string }

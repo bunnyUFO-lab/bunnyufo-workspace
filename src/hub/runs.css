@@ -109,6 +109,7 @@
 .rd-state.running, .rd-state.taken { color: var(--green); }
 .rd-state.failed, .rd-state.lost, .rd-state.expired { color: var(--red); }
 .rd-state.asking, .rd-state.stopping { color: var(--amber); }
+.rd-state.stale { color: var(--t3); }
 .rd-timeline { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 1px solid var(--line2); display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--t2); }
 .rd-timeline li { overflow-wrap: anywhere; }
 .rd-timeline b { color: var(--t1); font-weight: 600; }
