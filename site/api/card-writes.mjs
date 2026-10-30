@@ -252,7 +252,8 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
       if (!base) throw fail('That title has no letters or digits in it.');
       const date = today(now());
       return editList(async list => {
-        const id = unique(base, new Set(list.entities.map(item => item?.id)));
+        // A card in the Trash or moved away keeps its id: a new card must not take it, or Restore and the state key would clash.
+        const id = unique(base, new Set([...list.entities.map(item => item?.id), ...Object.keys(list.retired ?? {})]));
         const folder = `${date}_${id}`;
         const body = `# ${name}\n\n${about ? `${about}\n` : ''}`;
         // The page first, and only if the folder is new: a retried request makes one card, not two.
@@ -310,12 +311,13 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
       });
     },
 
-    /** Move a tab to another place in the card's tab bar. `defaultStep` keeps pointing at the same tab. */
-    async moveSection({ id, from, to }) {
+    /** Move a tab to another place in the card's tab bar. `path` (optional) must match the tab at `from`, else 409. `defaultStep` keeps pointing at the same tab. */
+    async moveSection({ id, from, to, path: file }) {
       return editList(async list => {
         const card = cardIn(list, id);
         const last = card.steps.length - 1;
         if (![from, to].every(n => Number.isInteger(n) && n >= 0 && n <= last)) throw fail('That card has no such section.', 404);
+        if (file !== undefined && card.steps[from].path !== file) throw fail('The card changed since you opened it; reload and try again.', 409);
         if (from === to) return card;
         const shown = Number.isInteger(card.defaultStep) ? card.steps[card.defaultStep] : null;
         const [step] = card.steps.splice(from, 1);
@@ -382,7 +384,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         if (at < 0) throw fail('No card with that id in this workspace.', 404);
         const [entity] = list.entities.splice(at, 1);
         const retired = list.retired && typeof list.retired === 'object' && !Array.isArray(list.retired) ? list.retired : {};
-        delete retired[id];
+        if (retired[id]?.kind === 'deleted') throw fail("A card with that id is already in the Trash.", 409);
         retired[id] = { kind: 'deleted', at: today(now()), entity };
         list.retired = capRetired(retired);
         return { id, retired: retired[id] };

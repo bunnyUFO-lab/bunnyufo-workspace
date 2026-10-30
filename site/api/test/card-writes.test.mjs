@@ -335,3 +335,45 @@ test('retired is capped at 500: moved records go first, deleted ones never', () 
   const onlyDeleted = Object.fromEntries(Array.from({ length: 502 }, (_, n) => [`d${n}`, { kind: 'deleted' }]));
   assert.equal(Object.keys(capRetired(onlyDeleted)).length, 502);
 });
+
+test('a new card never takes the id of one in the Trash, and Trash records are never overwritten', async () => {
+  const { writer, list, root } = await workspace();
+  const first = await writer.createCard({ title: 'Plan' });
+  await writer.deleteCard({ id: first.id });
+  const second = await writer.createCard({ title: 'Plan' });
+  assert.equal(second.id, 'plan-2');
+  await writer.deleteCard({ id: second.id });
+  const stored = await list();
+  assert.deepEqual(Object.keys(stored.retired).sort(), ['plan', 'plan-2']);
+  assert.equal(stored.retired.plan.entity.folder, first.folder, 'The first card is still in the Trash.');
+  assert.equal((await writer.restoreCard({ id: first.id })).card.id, 'plan');
+  // Old data: an entity and a Trash record under one id. A delete must not replace the record.
+  const hand = await list();
+  hand.entities.push({ id: 'plan-2', folder: 'x', steps: [] });
+  await writeFile(path.join(root, 'workspace.json'), JSON.stringify(hand));
+  await assert.rejects(writer.deleteCard({ id: 'plan-2' }), { status: 409 });
+  assert.equal((await list()).retired['plan-2'].entity.folder, second.folder);
+});
+
+test('a tab move that names a path is refused when the tab at that index is another', async () => {
+  const { writer, list, card } = await three();
+  await assert.rejects(writer.moveSection({ id: card.id, from: 1, to: 0, path: 'c.md' }), { status: 409 });
+  assert.deepEqual(await names(list), ['Overview', 'B', 'C']);
+  await writer.moveSection({ id: card.id, from: 1, to: 0, path: 'b.md' });
+  assert.deepEqual(await names(list), ['B', 'Overview', 'C']);
+});
+
+test('restoring the default tab puts defaultStep back on it, for a middle tab and for the last one', async () => {
+  for (const [index, file] of [[1, 'b.md'], [2, 'c.md']]) {
+    const { writer, list, card, root } = await three();
+    const stored = await list();
+    stored.entities[0].defaultStep = index;
+    await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+    await writer.deleteSection({ id: card.id, index, path: file });
+    assert.equal((await list()).entities[0].defaultStep, Math.min(index, 1), 'Clamped to the neighbour.');
+    await writer.restoreSection({ id: card.id, path: file });
+    const after = (await list()).entities[0];
+    assert.equal(after.defaultStep, index);
+    assert.equal(after.steps[after.defaultStep].path, file);
+  }
+});
