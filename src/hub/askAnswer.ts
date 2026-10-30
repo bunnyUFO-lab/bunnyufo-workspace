@@ -10,6 +10,15 @@ export interface Editing { optionId: string | null; image?: string; w: number; h
 /** What the owner did to take an Ask off the queue. */
 export type AskVerb = 'answered' | 'snoozed' | 'cancelled' | 'reviewed'
 
+/** What the server says an answer set going: the avatar flow's line, or null for any other answer. */
+export function avatarNotice(result: unknown): string | null {
+  const avatar = (result as { avatar?: { started?: boolean; message?: string; chosen?: boolean; why?: string } } | null)?.avatar
+  if (!avatar || typeof avatar !== 'object') return null
+  if (avatar.started === true) return text(avatar.message)
+  if (avatar.chosen === true) return 'This sheet is now the sprite.'
+  return avatar.started === false ? `The sprite sheet did not start: ${text(avatar.why)}` : `The sheet was not chosen: ${text(avatar.why)}`
+}
+
 export const VERDICTS: [DecisionVerdict, string][] = [['approve', 'Approve'], ['change', 'Change'], ['skip', 'Skip']]
 export interface Verdicts { [decision: string]: { verdict: DecisionVerdict; note: string } }
 
@@ -39,6 +48,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const [note, setNote] = useState('')
   const [verdicts, setVerdicts] = useState<Verdicts>({})
   const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [drawing, setDrawing] = useState<Attached | null>(() => { const handed = handoff ? takeHandoff() : null; return handed ? { ...handed, optionId: null } : null })
@@ -65,8 +75,9 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const act = async (run: () => Promise<unknown>, verb: AskVerb) => {
     setBusy(true)
     setProblem(null)
+    setNotice(null)
     try {
-      await run()
+      setNotice(avatarNotice(await run()))
       onSettled?.(verb)
       reload()
     } catch (failure) {
@@ -92,7 +103,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     verdicts, kind, decisions,
     setVerdict: (decision: string, verdict: DecisionVerdict) => setVerdicts(previous => ({ ...previous, [decision]: { verdict, note: previous[decision]?.note ?? '' } })),
     setVerdictNote: (decision: string, text: string) => setVerdicts(previous => (previous[decision] ? { ...previous, [decision]: { ...previous[decision], note: text } } : previous)),
-    choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
+    choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
     // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
     ready: decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing,
     send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}) }), kind ? 'reviewed' : 'answered'),

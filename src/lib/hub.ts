@@ -163,6 +163,8 @@ export interface Ask {
   /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
   image?: string
   decisions?: AskDecision[]
+  /** The sprite flow: what an avatar Ask points at (an agent's file; checked again where it is used). */
+  avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   state: AskState
   snoozedUntil?: string
   answer?: AskAnswer
