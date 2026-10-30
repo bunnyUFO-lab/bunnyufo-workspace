@@ -28,6 +28,10 @@ export default function StepTab({ card, index, active, activeIndex, onStep, edit
     try {
       await moveSection(ws, card.id, index, to, step.path)
       onStep(card.id, to)
+      showUndo(`Moved the “${step.name}” tab ${to < index ? 'left' : 'right'}`, async () => {
+        await moveSection(ws, card.id, to, index, step.path)
+        onStep(card.id, index)
+      })
     } catch (problem) { reportError(problem) }
   }
   const remove = async () => {
@@ -45,7 +49,10 @@ export default function StepTab({ card, index, active, activeIndex, onStep, edit
     const next = name.trim()
     setRenaming(false)
     if (!next || next === step.name) return
-    try { await renameSection(ws, card.id, index, next) } catch (problem) { reportError(problem) }
+    try {
+      await renameSection(ws, card.id, index, next)
+      showUndo(`Renamed the tab to “${next}”`, () => renameSection(ws, card.id, index, step.name))
+    } catch (problem) { reportError(problem) }
   }
 
   const items: MenuItem[] | null = editable ? [

@@ -47,7 +47,10 @@ export function Menu({ items, label, anchor, onClose }: MenuProps) {
     window.addEventListener('keydown', key, true)
     return () => { document.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', key, true) }
   }, [onClose])
-  useEffect(() => { box.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus() }, [])
+  // Focus the first item once the popover is placed: a hidden element cannot take the focus.
+  useEffect(() => {
+    if (asSheet || at) box.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+  }, [asSheet, at])
   const move = (event: React.KeyboardEvent) => {
     const buttons = [...(box.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement)

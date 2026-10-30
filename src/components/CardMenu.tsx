@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { WorkspaceCard } from '../types'
 import { deleteCard, restoreCard, updateCard } from '../lib/cards'
 import { reportError } from '../local/client'
-import { canManage, categoriesOf, useLibrary } from '../lib/library'
+import { canManage, categoriesOf, takesCards, useLibrary } from '../lib/library'
 import type { MenuItem } from './ItemMenu'
 import Dialog from './Dialog'
 import MoveCard from './MoveCard'
@@ -86,7 +86,7 @@ export function useCardMenu(card: WorkspaceCard): { items: MenuItem[] | null; di
   const { workspaces } = useLibrary()
   if (!canManage(card.workspace)) return { items: null, dialogs: null }
   const close = () => setDialog(null)
-  const others = workspaces.filter(w => w.id !== card.workspace.id && canManage(w))
+  const others = workspaces.filter(w => w.id !== card.workspace.id && takesCards(w))
   const remove = async () => {
     try {
       await deleteCard(card.workspace.id, card.id)

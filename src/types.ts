@@ -92,6 +92,9 @@ export interface CardWorkspace {
   active?: boolean
   /** The app's own starter examples: shown, never written to. Local app only. */
   builtin?: boolean
+  /** Hidden or archived workspaces take no moved cards. */
+  hidden?: boolean
+  archived?: boolean
   /** Cards moved away or in the Trash, from this workspace's card list. */
   retired?: Record<string, RetiredCard>
 }

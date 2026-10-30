@@ -11,6 +11,9 @@ export const useLibrary = () => useContext(LibraryContext)
 /** Cards and categories can be changed here, and not in the starter examples that ship with the app. */
 export const canManage = (workspace: CardWorkspace) => host.cards && host.write && !workspace.builtin
 
+/** Where a card may be moved: somewhere it could be managed, that is not hidden or archived. */
+export const takesCards = (workspace: CardWorkspace) => canManage(workspace) && !workspace.hidden && !workspace.archived
+
 /** The categories of one workspace as the Library shows them (`other` for a card with none), most used first. */
 export function categoriesOf(cards: WorkspaceCard[], workspace: string): { label: string; count: number }[] {
   const counts = new Map<string, number>()

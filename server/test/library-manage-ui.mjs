@@ -73,15 +73,48 @@ try {
   await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'rename wrote the tab name');
   assert.ok((await readFile(path.join(alpha, 'deck/overview.md'), 'utf8')).includes('Body of Overview'), 'the file keeps its name');
+  // Rename offers Undo, too.
+  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).waitFor();
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Overview', 'Rules', 'Art'], 'undo of the rename');
+  await page.locator('.step-tab-more').click();
+  await pick(page, 'Rename');
+  await page.locator('.step-tab-rename').fill('Intro');
+  await page.keyboard.press('Enter');
+  await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
 
   await page.locator('.step-tab-more').click();
   await pick(page, 'Move right');
   await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Intro' && document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'move wrote the order');
+  // Move offers Undo, too (and sends the tab's path).
+  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[0]?.textContent === 'Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'undo of the move');
+  await page.locator('.step-tab-more').click();
+  await pick(page, 'Move right');
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art']);
+
+  // The card menu by keyboard: Enter opens it, arrows move, Esc closes and gives the focus back.
+  const more = page.getByRole('button', { name: 'More for this card' });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menu').waitFor();
+  await page.waitForFunction(() => document.activeElement?.textContent === 'Rename…');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Category…');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Delete', 'the arrows wrap');
+  await page.keyboard.press('Escape');
+  await page.getByRole('menu').waitFor({ state: 'detached' });
+  assert.ok(await more.evaluate(el => el === document.activeElement), 'Esc returns the focus to the button');
+  assert.match(await page.locator('.crumb-current').innerText(), /Deck/, 'Esc did not leave the card');
 
   await page.getByRole('tab', { name: 'Rules', exact: true }).click({ button: 'right' });
   await pick(page, 'Delete');
-  await toast(page).waitFor();
+  await toast(page).filter({ hasText: 'Deleted the' }).waitFor();
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Art'], 'delete took the tab off');
   assert.ok((await readFile(path.join(alpha, 'deck/rules.md'), 'utf8')).includes('Body of Rules'), 'the file stays');
   await toast(page).getByRole('button', { name: 'Undo' }).click();
@@ -132,6 +165,33 @@ try {
   assert.equal((await listOf(alpha)).retired, undefined, 'restore emptied the Trash record');
   await page.keyboard.press('Escape');
 
+  // A link to a deleted card says so, and offers Restore.
+  await card('plan').getByRole('button', { name: /More for Plan/ }).click();
+  await pick(page, 'Delete');
+  await card('plan').waitFor({ state: 'detached' });
+  await page.evaluate(() => { location.hash = '#/plan'; });
+  const notice = page.locator('[data-trash-notice]');
+  await notice.waitFor();
+  assert.match(await notice.innerText(), /in the Trash of Alpha/);
+  await notice.getByRole('button', { name: 'Restore' }).click();
+  await page.evaluate(() => { location.hash = ''; });
+  await card('plan').waitFor();
+
+  // A Hub run names its card by folder: the card with that folder opens.
+  const list = await listOf(alpha);
+  list.entities.push({ ...entity('hubrun', 'Hub run', 'ideas', ['Overview']), folder: '2026-10-30_hub-run' });
+  await mkdir(path.join(alpha, '2026-10-30_hub-run'), { recursive: true });
+  await writeFile(path.join(alpha, '2026-10-30_hub-run/overview.md'), '# Hub run\n');
+  await writeFile(path.join(alpha, 'workspace.json'), JSON.stringify(list, null, 2));
+  await page.evaluate(() => { location.hash = '#/2026-10-30_hub-run'; });
+  await page.locator('.crumb-current', { hasText: 'Hub run' }).waitFor();
+  assert.equal(await page.evaluate(() => location.hash), '#/hubrun', 'the address is rewritten to the card id');
+  await page.evaluate(() => { location.hash = ''; });
+  await card('hubrun').waitFor();
+  const cleaned = await listOf(alpha);
+  cleaned.entities = cleaned.entities.filter(item => item.id !== 'hubrun');
+  await writeFile(path.join(alpha, 'workspace.json'), JSON.stringify(cleaned, null, 2));
+
   // 5. Move a card to the other workspace and open it from its old link.
   await card('deck').getByRole('button', { name: /More for Deck/ }).click();
   await pick(page, 'Move to workspace…');
@@ -171,6 +231,23 @@ try {
   await page.locator('.step-tab-more').tap();
   box = await page.locator('.item-menu.sheet').boundingBox();
   assert.ok(box && box.y + box.height >= 800, 'the tab menu is a sheet');
+  await page.keyboard.press('Escape');
+
+  // The Trash on a phone: a sheet with Restore.
+  await page.evaluate(() => { location.hash = ''; });
+  const phoneCard = id => page.locator(`.buw-card[data-entity="${id}"]`);
+  await phoneCard('brief').getByRole('button', { name: /More for Brief/ }).tap();
+  await pick(page, 'Delete');
+  await phoneCard('brief').waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: 'Show menu' }).tap();
+  await page.locator('[data-trash-link]').tap();
+  box = await page.locator('.lib-dialog').boundingBox();
+  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Trash is a sheet (${JSON.stringify(box)})`);
+  assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll in the Trash');
+  await page.locator('[data-trash="brief"]').getByRole('button', { name: 'Restore' }).tap();
+  await page.keyboard.press('Escape');
+  await phoneCard('brief').waitFor();
+  assert.equal((await listOf(alpha)).entities.some(item => item.id === 'brief'), true, 'Restore on the phone brought the card back');
   await phone.close();
 
   assert.deepEqual(errors, [], 'no page errors');

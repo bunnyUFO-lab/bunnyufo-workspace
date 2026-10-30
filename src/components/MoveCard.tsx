@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { moveCard } from '../lib/cards'
 import { entityHash } from '../lib/route'
-import { canManage, categoriesOf, useLibrary } from '../lib/library'
+import { categoriesOf, takesCards, useLibrary } from '../lib/library'
 import Dialog from './Dialog'
 import { showUndo } from '../lib/undo'
 
@@ -11,7 +11,7 @@ const message = (problem: unknown) => problem instanceof Error ? problem.message
 /** "Move to workspace…": pick where the card goes, and optionally its category there. */
 export default function MoveCard({ card, onClose }: { card: WorkspaceCard; onClose: () => void }) {
   const { workspaces, cards } = useLibrary()
-  const targets = workspaces.filter(w => w.id !== card.workspace.id && canManage(w))
+  const targets = workspaces.filter(w => w.id !== card.workspace.id && takesCards(w))
   const [to, setTo] = useState(targets[0]?.id ?? '')
   const [category, setCategory] = useState('')
   const [busy, setBusy] = useState(false)
