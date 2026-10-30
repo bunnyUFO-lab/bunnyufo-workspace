@@ -44,6 +44,7 @@ const open = async (viewport, options = {}) => {
     body.agents.push(
       { ...base, id: 'sx-needs', name: 'Needs desk', room: 'Review', status: 'needs-you', task: 'Waiting for your pick on the jump arc', sprite: { kind: 'builtin', key: 'qa' } },
       { ...base, id: 'sx-idle', name: 'Idle desk', room: 'Review', status: 'idle', task: 'Nothing to do', sprite: { kind: 'builtin', key: 'lib_b' } },
+      { ...base, id: 'sx-long', name: 'Market research and competitor analysis', room: 'Review', status: 'working', task: 'Reading the long report', sprite: { kind: 'builtin', key: 'qa' } },
       { ...base, id: 'sx-stray', name: 'Stray desk', room: 'Basement', status: 'working', task: 'In a room nobody drew', sprite: { kind: 'builtin', key: 'developer' } },
     );
     await route.fulfill({ response, json: body });
@@ -93,6 +94,12 @@ try {
   await desk.keyboard.press('Tab');
   assert.equal(await desk.evaluate(() => document.activeElement?.getAttribute('data-desk')), AGENTS[0].id, 'Tab goes to the first desk.');
   await desk.waitForFunction(id => getComputedStyle(document.querySelector(`[data-desk="${id}"] [data-desk-bubble]`)).opacity === '1', AGENTS[0].id);
+
+  step('a long desk name ends in an ellipsis, and a mouse sees no task line under it');
+  const longName = desk.locator('[data-desk="sx-long"] .floor-name');
+  const cut = await longName.evaluate(node => ({ over: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow, shown: node.getBoundingClientRect().right <= node.closest('.floor-desk').getBoundingClientRect().right }));
+  assert.deepEqual(cut, { over: true, overflow: 'ellipsis', shown: true }, 'The plate cuts the name with an ellipsis, inside the desk.');
+  assert.equal(await desk.locator('[data-desk="sx-needs"] [data-desk-task]').isVisible(), false, 'A mouse has the bubble, not the task line.');
 
   step('an idle custom-sheet agent walks under CSS only: three sheet layers and a floor-walk animation');
   await desk.locator('[data-team-view="roster"]').click();
@@ -169,6 +176,22 @@ try {
   await still.clock.runFor(9000);
   assert.equal(await tickerText(still), first);
 
+  step('the ticker still shows an event when claude is not on the team, without a name or a sprite');
+  const { page: bare } = await open({ width: 1280, height: 900 });
+  await bare.route('**/api/hub/team', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.agents = body.agents.filter(agent => agent.id !== 'claude');
+    await route.fulfill({ response, json: body });
+  });
+  await bare.goto(`${fixture.url}#/~hub/team`);
+  await bare.locator('[data-team-view="floor"]').click();
+  await bare.locator('[data-floor-ticker] .floor-tick').waitFor();
+  assert.equal(await bare.locator('[data-desk="claude"]').count(), 0, 'claude is not on this team.');
+  assert.match(await tickerText(bare), /^Wall-jump tutorial: session started · [12] min ago$/);
+  assert.doesNotMatch(await tickerText(bare), /Nothing has happened/);
+  assert.equal(await bare.locator('.floor-tick-sprite').count(), 0);
+
   step('phone widths: rooms stack and nothing scrolls sideways');
   for (const width of [375, 390]) {
     const { page: phone } = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
@@ -181,6 +204,12 @@ try {
     assert.ok(rooms.every(room => room.x === rooms[0].x && room.right <= width), 'One column, inside the screen.');
     assert.deepEqual([...rooms].map(room => room.y), [...rooms].map(room => room.y).sort((a, b) => a - b), 'Rooms stack top to bottom.');
     for (const target of await phone.locator('[data-desk], [data-team-view]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A target is ${target} px high.`);
+    const touch = await phone.locator('[data-desk="sx-needs"]').evaluate(node => {
+      const task = node.querySelector('[data-desk-task]'); const box = task.getBoundingClientRect(); const desk = node.getBoundingClientRect();
+      return { text: task.textContent, shown: getComputedStyle(task).display !== 'none' && box.height > 0, inside: box.left >= desk.left && box.right <= desk.right && box.bottom <= desk.bottom, bubble: getComputedStyle(node.querySelector('[data-desk-bubble]')).display };
+    });
+    assert.deepEqual(touch, { text: 'Waiting for your pick on the jump arc', shown: true, inside: true, bubble: 'none' }, `A touch screen shows the task under the name at ${width}.`);
+    assert.equal(await phone.locator('[data-desk="sx-long"] .floor-name').evaluate(node => node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis'), true, 'The long name is cut with an ellipsis.');
     await phone.locator('[data-desk="sx-needs"]').tap();
     await phone.locator('.team-card[data-agent="sx-needs"]').waitFor();
     await noSideways(phone, `Roster after a desk at ${width}`);
