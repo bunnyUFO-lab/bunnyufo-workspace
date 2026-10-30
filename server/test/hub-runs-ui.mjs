@@ -42,6 +42,7 @@ try {
   live.seed.put(`requests/${ids.retry}/approved.json`, { v: 1, request: ids.retry, project: 'magic-loops', repo: null, target: 'hermes', limits: { minutes: 30 }, expires: '2099-01-01T00:00:00.000Z', at: minutesAgo(live.now, 30).toISOString(), by: 'local', signature: 'x' });
   live.seed.put(`requests/${ids.retry}/hermes-run.json`, { runId: 'r1', at: minutesAgo(live.now, 29).toISOString() });
   live.seed.put(`requests/${ids.retry}/hermes-retry.json`, { runId: 'r2', at: minutesAgo(live.now, 28).toISOString(), provider: 'anthropic', model: 'claude-sonnet-5-5', reason: 'quota' });
+  live.fake.seed('sections/assistant/workspace.json', JSON.stringify({ name: 'Assistant', entities: [{ id: 'tug-games-card', title: 'Tug games', folder: 'tug-games' }, { id: 'retried-card', title: 'Retried', folder: 'retried' }] }), 'application/json');
   live.seed.put(`requests/${ids.retry}/result.json`, { v: 1, outcome: 'card', card: 'assistant/retried', summary: 'Done on the retry.', usage: { input_tokens: 1200, output_tokens: 300 }, by: 'hub', at: minutesAgo(live.now, 20).toISOString() });
   await new Promise(resolve => setTimeout(resolve, 100));
   const page = await open({ width: 1280, height: 900 });
@@ -59,7 +60,7 @@ try {
   await drawer.locator('[data-run-tool]', { hasText: 'web_search' }).waitFor();
   assert.match(await drawer.locator('[data-run-tool]').innerText(), /tug-of-war card games/);
   await drawer.locator('[data-run-card]').waitFor();
-  assert.equal(await drawer.locator('[data-run-card]').getAttribute('href'), '#/tug-games');
+  assert.equal(await drawer.locator('[data-run-card]').getAttribute('href'), '/assistant#/tug-games-card', 'The card is in the assistant section, under its id and not its folder');
   assert.equal((await drawer.locator('[data-run-state-chip]').innerText()).trim(), 'Done');
   assert.match(await drawer.locator('[data-run-by]').innerText(), /Approved by local/);
   assert.ok(await drawer.locator('[data-step]').count() >= 3, 'The timeline lists approved, the result and who wrote it.');
@@ -75,7 +76,7 @@ try {
   await page.locator('[data-run-retry]').waitFor();
   assert.equal(await page.locator('[data-run-retry]').innerText(), 'Codex quota reached; retried on Anthropic.');
   assert.match(await page.locator('[data-run-usage]').innerText(), /input tokens 1,200/);
-  assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '#/retried');
+  assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '/assistant#/retried-card');
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.asking)}`);
   await page.locator('[data-run-asking]').waitFor();
   assert.match(await page.locator('[data-run-asking]').innerText(), /Which of the two games do you mean\?/);

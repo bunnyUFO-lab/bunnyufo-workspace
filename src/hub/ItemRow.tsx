@@ -7,7 +7,7 @@ import { useMarkDone } from './useMarkDone'
 
 const EVENT_DOT: Record<string, string> = {
   'session-started': 'g', 'session-ended': 'g', blocked: 'y', 'ready-for-review': 'p', 'pr-opened': 'b', 'pr-merged': 'g',
-  'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g',
+  'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g', 'run-started': 'g', 'run-finished': 'b',
 }
 
 /** A plain click opens the run drawer; a modified click or a middle click is left to the browser (the request's own page). */
@@ -119,6 +119,28 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
       <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
     </>
   )
+  if (event.kind.startsWith('run-') && event.request) {
+    // A run event links to its pull request, else its card, else the run drawer. The drawer is one more link when it is not the main one.
+    const pr = safeUrl(event.url)
+    const card = event.cardHref && /^\/[\w%-]+#\/[\w%.~-]+$/.test(event.cardHref) ? event.cardHref : undefined
+    const drawer = hubHash('request', event.request)
+    const failed = event.kind === 'run-finished' && event.outcome === 'failed'
+    return (
+      <div className="hub-row" data-run-event={event.kind} data-outcome={event.outcome}>
+        <span className={`hub-dot ${failed ? 'r' : EVENT_DOT[event.kind]}`} aria-hidden="true" />
+        <span className="hub-row-text">
+          <span className="hub-row-title">{event.title}</span>
+          <span className="hub-row-meta">{[event.kind.replace(/-/g, ' '), event.project, event.summary].filter(Boolean).join(' · ')}</span>
+        </span>
+        <span className="hub-row-actions">
+          {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer" data-run-pr>Review on GitHub</a>}
+          {card && <a className="hub-btn" href={card} data-run-event-card>Open card</a>}
+          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open>Open run</a>
+        </span>
+        <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
+    )
+  }
   const eventLink = event.kind === 'blocked' ? sessionUrl(event.url) : safeUrl(event.url)
   return eventLink
     ? <a className="hub-row click" href={eventLink} target="_blank" rel="noopener noreferrer">{body}</a>

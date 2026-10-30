@@ -322,7 +322,32 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}), ...(request.repo ? { repo: request.repo } : {}) } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
+    ...runParts(request, approved, taken, result),
   };
+}
+
+const RUNNERS = ['hermes', 'cloud', 'pc'];
+const httpsOnly = value => (typeof value === 'string' && /^https:\/\//i.test(value) ? value.slice(0, 500) : undefined);
+
+/**
+ * What the dashboard needs of a run: `run` when the request was taken (who took it, when, and the PC session if
+ * known) and `finish` when it has a result (outcome, when, the pull request or the card). Nothing else of the
+ * two files leaves the server; the PR must be an https link.
+ */
+function runParts(request, approved, taken, result) {
+  const out = {};
+  const takenAt = typeof taken?.at === 'string' && !Number.isNaN(new Date(taken.at).getTime()) ? taken.at : '';
+  if (takenAt) {
+    const runner = RUNNERS.includes(taken.runner) ? taken.runner : RUNNERS.includes(approved?.target ?? request.target) ? (approved?.target ?? request.target) : '';
+    out.run = { ...(runner ? { runner } : {}), at: takenAt, ...(typeof taken.session === 'string' && taken.session ? { session: taken.session.slice(0, 120) } : {}) };
+  }
+  const resultAt = typeof result?.at === 'string' && !Number.isNaN(new Date(result.at).getTime()) ? result.at : '';
+  if (resultAt && typeof result.outcome === 'string') {
+    const pr = httpsOnly(result.pr);
+    const card = typeof result.card === 'string' && /^[a-z0-9-]+\/[A-Za-z0-9._-]+$/.test(result.card) ? result.card : undefined;
+    out.finish = { outcome: result.outcome.slice(0, 20), at: resultAt, ...(pr ? { pr } : {}), ...(card ? { card } : {}) };
+  }
+  return out;
 }
 
 const byTime = (a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : String(a.file ?? '') < String(b.file ?? '') ? -1 : 1);

@@ -6,10 +6,12 @@ import { hubHash, mapHash } from '../lib/route'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
 import { stateOf } from './team/spriteState'
-import { STATE_DOT, STATE_LABEL, duration } from './working'
+import { openFromClick } from './ItemRow'
+import { RUNNER_LABEL, STATE_DOT, duration, presetLabel, runStateLabel } from './working'
 import './working.css'
 
 const SPRITE = defaultSprite('claude', 'Claude Code')
+const HERMES_SPRITE = defaultSprite('hermes', 'Hermes')
 
 /** A needs-you row opens its blocked item; without a match it opens the list. */
 function needsHref(item: WorkingItem, blocked: Item[]) {
@@ -21,19 +23,29 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
   const link = sessionUrl(item.url) ?? safeApp(item.appUrl)
   const where = [item.project, item.branch].filter(Boolean).join(' · ')
   const since = duration(item.since, now)
+  const isRun = item.source === 'run'
+  const runHref = item.request ? hubHash('request', item.request) : ''
+  const sprite = item.agent === 'hermes' ? HERMES_SPRITE : SPRITE
+  const name = item.agent === 'hermes' ? 'Hermes' : 'Claude Code'
+  const what = isRun ? [item.preset ? presetLabel(item.preset) : '', item.project].filter(Boolean).join(' · ') : where
+  const title = item.state === 'needs-you' && !isRun
+    ? <a href={needsHref(item, blocked)}>{item.title}</a>
+    : runHref && isRun ? <a href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>{item.title}</a> : item.title
   return (
     <div className={`wn-row wn-${item.state}`} data-working={item.state} data-source={item.source}>
-      <span className="wn-sprite"><AgentSprite sprite={SPRITE} size={32} name="Claude Code" state={stateOf({ status: item.state === 'idle' ? 'idle' : item.state, now })} /></span>
+      <span className="wn-sprite"><AgentSprite sprite={sprite} size={32} name={name} state={stateOf({ status: item.state === 'idle' ? 'idle' : item.state === 'stopping' ? 'working' : item.state, now })} /></span>
       <span className="wn-text">
-        <b>{item.state === 'needs-you' ? <a href={needsHref(item, blocked)}>{item.title}</a> : item.title}</b>
+        <b>{title}</b>
         <small>
-          {where}
-          {item.bead && <>{where ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
+          {what}
+          {item.bead && <>{what ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
         </small>
       </span>
       <span className="wn-meta">
-        <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{STATE_LABEL[item.state]}</span>
+        <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{runStateLabel(item)}</span>
+        {item.runner && <span className="wn-runner" data-runner={item.runner}>{RUNNER_LABEL[item.runner]}</span>}
         {since && <small>{since}</small>}
+        {!isRun && item.request && <a className="wn-open" href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>Open run</a>}
         {link && <a className="wn-open" href={link} target="_blank" rel="noopener noreferrer">Open session</a>}
       </span>
     </div>

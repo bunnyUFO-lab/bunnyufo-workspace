@@ -61,7 +61,7 @@ export interface Item {
 export interface Described { kind: NeedsKind; who: string; age: number; what: string; state: string; next: string; blocker: string }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'run-started' | 'run-finished'
 export interface HubEvent {
   ts: string
   kind: EventKind
@@ -81,6 +81,9 @@ export interface HubEvent {
   request?: string
   /** A cloud alert whose request can fire again (`POST /hub/requests/:id/fire`). */
   retry?: boolean
+  /** A run event (`run-started`, `run-finished`): how it ended, and the site path of the card it wrote. */
+  outcome?: string
+  cardHref?: string
   summary?: string
   file: string
   prs?: string[]
