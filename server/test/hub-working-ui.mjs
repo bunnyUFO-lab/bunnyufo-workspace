@@ -49,6 +49,7 @@ try {
     assert.equal(await panel.locator('[data-working-idle]').getAttribute('open'), null, 'The idle fold starts shut.');
     await panel.locator('[data-working-idle] summary').click();
     assert.equal(await panel.locator('[data-working="idle"]').isVisible(), true, 'Tapping the fold shows the idle row.');
+    assert.doesNotMatch(await panel.locator('[data-working="idle"]').innerText(), /for \d+ (min|h|days)/, 'An idle row shows no running time: it is not working.');
 
     step(`${label}: the Gaming PC tile`);
     const tile = page.locator('[aria-label="Gaming PC"]');
@@ -114,6 +115,23 @@ try {
     assert.equal((await panel.locator('h3 span').last().innerText()).trim(), '2', `${label}: so does the Working now count.`);
     await noSideways(page, `stale Today at ${label} width`);
     if (process.env.BUW_SHOTS) await panel.screenshot({ path: `${process.env.BUW_SHOTS}-${label}.png` });
+  }
+
+  step('event sessions with no word for days read "No word since" when the PC is off, and are left out when its status is fresh');
+  for (const pc of ['stale', 'fresh']) {
+    const old = await startHubFixture({ pc, oldSessions: true });
+    fixtures.push(old);
+    const page = await open({ width: 1280, height: 900 }, old);
+    const panel = page.locator('[aria-label="Working now"]');
+    assert.equal(await panel.locator('[data-working="working"][data-source="events"]').count(), 2, 'Only the live event sessions work (the seeded one and the cloud one).');
+    const quiet = panel.locator('[data-working="stale"]');
+    if (pc === 'stale') {
+      assert.equal(await quiet.count(), 4, 'The four old sessions are stale rows.');
+      assert.match(await quiet.first().innerText(), /No word since/);
+      assert.doesNotMatch(await quiet.first().innerText(), /Working/);
+    } else assert.equal(await quiet.count(), 0, 'A fresh PC status is the truth for its host: the old sessions of that host are not listed.');
+    assert.equal(await page.locator('.today-head').count() > 0, true);
+    await page.close();
   }
 
   step('a fixture with no PC status shows no tile and "Nothing is running."');

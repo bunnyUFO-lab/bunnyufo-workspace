@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -120,6 +120,12 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   if (pc) {
     // Off by default. 'fresh': the PC reported a minute ago, with a busy and an idle session. 'stale': 40 minutes ago, so the PC counts as asleep or off.
     seedPcStatus(fake, pcStatusJson({ now, minutesOld: pc === 'stale' ? 40 : 1 }));
+  }
+
+  if (oldSessions) {
+    // Off by default. Four sessions that started 36 hours to 3 days ago and never ended, and one that started 20 minutes ago.
+    for (const [session, hours] of [['old-bot', 36], ['old-sheet', 48], ['old-loops', 60], ['old-link', 72]]) seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, hours * 60), session, host: 'test-pc', title: `${session} session`, project: 'probe' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, 20), session: 'live-one', host: 'cloud', title: 'Live cloud session', project: 'probe' }));
   }
 
   if (work) {
