@@ -105,7 +105,7 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
     return { published: false, pulled: !dryRun && result.written.length > 0, workspace, ...result };
   }
 
-  const result = await syncUp({ root, bucket: client, prefix, scope, dryRun, force, allowDeletes, log });
+  const result = await syncUp({ root, bucket: client, prefix, scope, dryRun, force, allowDeletes, listEtag: list.etag, log });
   const total = result.uploads.length + result.downloads.length + result.deletes.length;
   if (!total) {
     if (named.length) throw new Error(`Nothing published: nothing changed in ${named.join(', ')}.`);
