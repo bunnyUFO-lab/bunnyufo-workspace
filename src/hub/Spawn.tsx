@@ -46,10 +46,15 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const dialog = useRef<HTMLDialogElement>(null)
   const uid = useId()
   const edit = options.edit
+  // An avatar job is for one agent: Spawn offers it only when it was opened for an agent (Make a new one, or an edit of one).
+  const agent = edit?.agent ?? options.agent
   const [data, setData] = useState<PresetList | null>(cachedPresets)
   const [projects, setProjects] = useState<HubProject[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [presetId, setPresetId] = useState(edit?.preset ?? options.preset ?? (options.text ? guessPreset(options.text) : 'code-task'))
+  const [presetId, setPresetId] = useState(() => {
+    const wanted = edit?.preset ?? options.preset ?? (options.text ? guessPreset(options.text) : 'code-task')
+    return wanted === 'agent-avatar' && !agent ? 'code-task' : wanted
+  })
   const [project, setProject] = useState(edit?.project ?? options.project ?? '')
   const [repo, setRepo] = useState(edit?.repo ?? '')
   const [otherRepo, setOtherRepo] = useState(false)
@@ -95,7 +100,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     return () => controller.abort()
   }, [])
 
-  const preset = data?.presets.find(item => item.id === presetId) ?? data?.presets[0] ?? null
+  const offers = (item: { id: string }) => item.id !== 'agent-avatar' || !!agent
+  const preset = data?.presets.find(item => item.id === presetId && offers(item)) ?? data?.presets.find(offers) ?? null
   const wantsRepo = !!preset?.fields.includes('repo')
   const repoValid = !repo.trim() || /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/.test(repo.trim())
   const projectRepo = known.find(item => item.project === project)
@@ -147,7 +153,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
         project, text: trimmed, preset: preset.id,
         ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
-        ...(options.agent && preset.id === 'agent-avatar' && !edit ? { agent: options.agent } : {}),
+        ...(agent && preset.id === 'agent-avatar' ? { agent } : {}),
         ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
         ...(choice ? { target: choice } : {}),
         ...(edit ? { replaces: edit.id } : {}),
@@ -167,7 +173,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, options.agent])
+  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent])
 
   const machine = target ? MACHINE[target] : null
   const button = busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
@@ -195,7 +201,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             <div>
               <div className="sp-label" id={`${uid}-tpl`}>Template</div>
               <div className="sp-tpls" role="group" aria-labelledby={`${uid}-tpl`}>
-                {data.presets.filter(item => !edit || item.id === preset.id).map(item => (
+                {data.presets.filter(item => offers(item) && (!edit || item.id === preset.id)).map(item => (
                   <button key={item.id} type="button" className={`sp-tpl${item.id === preset.id ? ' on' : ''}`} aria-pressed={item.id === preset.id} disabled={!!edit} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride('') }}>
                     <Icon name={item.icon} />{item.label}
                   </button>
