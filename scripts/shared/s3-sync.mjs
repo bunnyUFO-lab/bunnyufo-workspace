@@ -111,27 +111,46 @@ function mergeCard(base, local, remote) {
   }
   // Tabs, three ways. Untouched here since the last sync: the site's tabs and their order, as they
   // are. Otherwise this folder's order, minus a tab the site removed on purpose (unless it was
-  // changed here since), plus a tab only the site has. The same file on both: a tab only the other
+  // changed here since), plus a tab only the site has, unless it was removed here on purpose (it
+  // is in the last sync and unchanged on the site). The same file on both: a tab only the other
   // side renamed takes its name, otherwise this folder's wins.
   const stepKey = step => `${step?.path}|${step?.url ?? ''}`;
   const wasStep = step => base?.steps?.find(item => stepKey(item) === stepKey(step));
   const theirSteps = Array.isArray(remote.steps) ? remote.steps : [];
+  const onSite = new Set(theirSteps.map(stepKey));
   if (base && Array.isArray(base.steps) && same(local.steps, base.steps) && Array.isArray(remote.steps)) {
     out.steps = [...theirSteps];
+    mergeRemovedTabs(out, local, remote);
     return out;
   }
-  const gone = new Set(theirSteps.map(stepKey));
   const steps = (Array.isArray(local.steps) ? local.steps : []).filter(step => {
     const was = wasStep(step);
-    return gone.has(stepKey(step)) || !was || !same(step, was);
+    return onSite.has(stepKey(step)) || !was || !same(step, was);
   });
   for (const step of theirSteps) {
     const index = steps.findIndex(item => stepKey(item) === stepKey(step));
-    if (index < 0) steps.push(step);
-    else if (base && same(steps[index], wasStep(step))) steps[index] = step;
+    if (index >= 0) {
+      if (base && same(steps[index], wasStep(step))) steps[index] = step;
+    } else if (!(wasStep(step) && same(step, wasStep(step)))) steps.push(step);
   }
   out.steps = steps;
+  mergeRemovedTabs(out, local, remote);
   return out;
+}
+
+/** Tabs deleted on either side: both lists together (newest record of a tab wins), at most 50, none that is back in the steps. */
+function mergeRemovedTabs(out, local, remote) {
+  if (!Array.isArray(local.removedTabs) && !Array.isArray(remote.removedTabs)) return;
+  const key = tab => `${tab?.path}|${tab?.url ?? ''}`;
+  const live = new Set(out.steps.map(key));
+  const byKey = new Map();
+  for (const tab of [...(Array.isArray(local.removedTabs) ? local.removedTabs : []), ...(Array.isArray(remote.removedTabs) ? remote.removedTabs : [])]) {
+    if (!tab || live.has(key(tab))) continue;
+    const have = byKey.get(key(tab));
+    if (!have || String(tab.at ?? '') >= String(have.at ?? '')) { byKey.delete(key(tab)); byKey.set(key(tab), tab); }
+  }
+  const merged = [...byKey.values()].slice(-50);
+  if (merged.length) out.removedTabs = merged; else delete out.removedTabs;
 }
 
 /**
@@ -147,16 +166,30 @@ export function mergeCardLists(base, local, remote) {
     if (key === 'entities' || key === 'retired') continue;
     if (base && same(local?.[key], base[key]) && !same(remote?.[key], base[key])) merged[key] = remote[key];
   }
-  // `retired` is the site's record of cards moved to another workspace or put in the Trash. It is
-  // only ever written there, so it always follows the bucket, and a card on it stays out of this
-  // list whatever the local copy says (its folder is left on disk and no longer published).
-  if (remote?.retired && typeof remote.retired === 'object') merged.retired = remote.retired; else delete merged.retired;
-  const retired = merged.retired ?? {};
+  // `retired` is the record of cards moved to another workspace or put in the Trash. Both the site
+  // and the local app write it, so it merges per card against the last sync: a record only one side
+  // added, changed or removed (a restore) takes that side; on a clash the bucket's wins. A card on
+  // it stays out of this list whatever the local copy says (its folder is left on disk and is no
+  // longer published).
+  const mergedRetired = {};
+  const LR = local?.retired ?? {}, RR = remote?.retired ?? {}, BR = base?.retired ?? {};
+  for (const id of new Set([...Object.keys(LR), ...Object.keys(RR), ...Object.keys(BR)])) {
+    const l = LR[id], r = RR[id], b = BR[id];
+    let value;
+    if (same(l, r)) value = l;
+    else if (same(l, b)) value = r;
+    else if (same(r, b)) value = l;
+    else value = r ?? l;
+    if (value !== undefined) mergedRetired[id] = value;
+  }
+  if (Object.keys(mergedRetired).length) merged.retired = mergedRetired; else delete merged.retired;
+  const retired = mergedRetired;
   const entities = [];
   for (const card of Array.isArray(local?.entities) ? local.entities : []) {
     if (!card?.id) { entities.push(card); continue; }
     const theirs = R.get(card.id), was = B.get(card.id);
-    if (!theirs && retired[card.id]) continue;
+    // A card made here (not in the last sync) that reuses a retired id is kept; mergeCardList says so.
+    if (!theirs && retired[card.id] && (was || !base)) continue;
     if (!theirs) {
       // Gone from the bucket: removed there. Untouched here since, so let it go.
       if (was && same(card, was)) continue;
@@ -179,18 +212,24 @@ export function mergeCardLists(base, local, remote) {
  * Bring the bucket's card list and this folder's together before anything else is compared, so a
  * card made on the site is in the scope (its folder comes down) and in what goes back up.
  *
- * @returns {{ merged: boolean, added: string[] }} whether the local list changed, and the cards it gained
+ * @returns {{ merged: boolean, added: string[], etag: string|null }} whether the local list changed, the cards it gained,
+ *   and the ETag of the bucket's list that was merged (the upload is conditional on it)
  */
 export async function mergeCardList({ root, bucket, prefix, dryRun = false, log = () => {} }) {
   const base = prefix ? `${prefix.replace(/\/+$/, '')}/` : '';
   const file = path.join(root, 'workspace.json');
   const localText = await readFile(file, 'utf8');
   const remote = await bucket.getJson(`${base}workspace.json`);
-  if (!remote || remote.etag === md5(Buffer.from(localText))) return { merged: false, added: [] };
+  if (!remote || remote.etag === md5(Buffer.from(localText))) return { merged: false, added: [], etag: remote?.etag ?? null };
   const record = await loadBase(root, placeOf(bucket, prefix));
   const local = JSON.parse(localText);
   const result = mergeCardLists(record.list, local, remote.value);
-  if (same(result, local)) return { merged: false, added: [] };
+  const live = new Set((remote.value?.entities ?? []).map(item => item?.id));
+  for (const item of result.entities ?? []) {
+    const record = item?.id && !live.has(item.id) ? result.retired?.[item.id] : null;
+    if (record) log(`  Warning: the card "${item.id}" made here reuses an id that was ${record.kind === 'moved' ? `moved to ${record.to ?? 'another workspace'}` : 'put in the Trash'} on the site. It is published, but pick another id or restore the old card there.`);
+  }
+  if (same(result, local)) return { merged: false, added: [], etag: remote.etag };
   const known = new Set((local.entities ?? []).map(item => item?.id));
   const added = (result.entities ?? []).filter(item => item?.id && !known.has(item.id)).map(item => item.id);
   const kept = new Set((result.entities ?? []).map(item => item?.id));
@@ -204,7 +243,7 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
     await writeFile(temp, `${JSON.stringify(result, null, 2)}\n`);
     await rename(temp, file);
   }
-  return { merged: true, added };
+  return { merged: true, added, etag: remote.etag };
 }
 
 /** More deletes than this in one publish of one workspace is refused without --allow-deletes. */
@@ -217,12 +256,16 @@ export const MAX_DELETES = 5;
  * folder that lost its files (a wrong path, a failed checkout) cannot empty the site. `allowDeletes`
  * is the "yes, I meant that".
  *
+ * `listEtag` is the ETag of the bucket's card list that `mergeCardList` merged. The list is uploaded only
+ * if the bucket still holds that version; if the site changed it meanwhile, it is merged again (twice at
+ * most) and the publish then stops with a message rather than overwrite the change.
+ *
  * A file changed only on the site comes down instead of being written over; one changed on both
  * sides is a conflict, left alone and reported, unless `force` (this folder's copy goes up).
  *
  * @returns {{ uploads: string[], downloads: string[], deletes: string[], conflicts: string[], unchanged: number, problems: string[] }}
  */
-export async function syncUp({ root, bucket, prefix, scope, dryRun = false, force = false, allowDeletes = false, maxDeletes = MAX_DELETES, log = () => {} }) {
+export async function syncUp({ root, bucket, prefix, scope, dryRun = false, force = false, allowDeletes = false, maxDeletes = MAX_DELETES, listEtag = null, log = () => {} }) {
   const base = prefix ? `${prefix.replace(/\/+$/, '')}/` : '';
   const where = placeOf(bucket, prefix);
   const record = await loadBase(root, where);
@@ -272,8 +315,24 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
 
   if (!dryRun) {
     for (const file of uploads) {
-      const body = await readFile(path.join(root, file));
-      await bucket.put(`${base}${toPosix(file)}`, body, { contentType: contentTypeOf(file) });
+      let body = await readFile(path.join(root, file));
+      if (file === 'workspace.json' && listEtag) {
+        let etag = listEtag;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            await bucket.put(`${base}${toPosix(file)}`, body, { contentType: contentTypeOf(file), ifMatch: etag });
+            break;
+          } catch (error) {
+            if (error.status !== 412) throw error;
+            if (attempt >= 2) throw new Error('The card list changed on the site during the publish, so it was not uploaded. Run the publish again.');
+            log('  the card list changed on the site meanwhile; merging again');
+            etag = (await mergeCardList({ root, bucket, prefix, log })).etag;
+            body = await readFile(path.join(root, file));
+          }
+        }
+      } else {
+        await bucket.put(`${base}${toPosix(file)}`, body, { contentType: contentTypeOf(file) });
+      }
       settled[file] = md5(body);
       log(`  up   ${file}`);
     }

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bucketFor, publish, publishAll } from './publish.mjs';
+import { defaultScope, mergeCardList, syncUp } from './shared/s3-sync.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -452,5 +453,147 @@ test('a tab order set on the site is kept when this folder\'s tabs are untouched
     assert.deepEqual(published.steps.map(item => item.name), ['Refs', 'Overview', 'Notes']);
     assert.equal(published.title, 'Hub, renamed here');
     assert.deepEqual((await localList(site)).entities[0].steps.map(item => item.name), ['Refs', 'Overview', 'Notes']);
+  } finally { await fake.close(); }
+});
+
+test('a card deleted in the local app keeps its Trash record, and one restored there stays restored', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withCards(fake);
+    const publishIt = () => publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    // The local app puts `a` in the Trash.
+    const local = await localList(site);
+    const a = local.entities.find(item => item.id === 'a');
+    local.entities = local.entities.filter(item => item.id !== 'a');
+    local.retired = { a: { kind: 'deleted', at: '2026-10-30', entity: a } };
+    await putLocal(site, local);
+    await publishIt();
+    assert.deepEqual(fake.json(LIST).entities.map(item => item.id).sort(), ['b', 'hub']);
+    assert.equal(fake.json(LIST).retired.a.kind, 'deleted', 'The Trash record was uploaded, not erased.');
+
+    // The site trashes `b`; a publish brings that down.
+    const remote = fake.json(LIST);
+    const b = remote.entities.find(item => item.id === 'b');
+    remote.entities = remote.entities.filter(item => item.id !== 'b');
+    remote.retired.b = { kind: 'deleted', at: '2026-10-30', entity: b };
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    await publishIt();
+    assert.deepEqual(Object.keys((await localList(site)).retired).sort(), ['a', 'b']);
+
+    // The local app restores `b`; it must not vanish again on the next publish.
+    const after = await localList(site);
+    after.entities.push(after.retired.b.entity);
+    delete after.retired.b;
+    await putLocal(site, after);
+    await publishIt();
+    await publishIt();
+    const published = fake.json(LIST);
+    assert.deepEqual(published.entities.map(item => item.id).sort(), ['b', 'hub']);
+    assert.deepEqual(Object.keys(published.retired), ['a']);
+    assert.deepEqual((await localList(site)).entities.map(item => item.id).sort(), ['b', 'hub']);
+  } finally { await fake.close(); }
+});
+
+/** A workspace whose hub card has the tabs Overview, a and b, published once. */
+async function withTabs(fake) {
+  const made = await workspace(fake);
+  const list = await localList(made.site);
+  list.entities[0].steps = [step('Overview', 'index.md'), step('A', 'a.md'), step('B', 'b.md')];
+  await putLocal(made.site, list);
+  await writeFile(path.join(made.site, 'hub', 'a.md'), '# A\n');
+  await writeFile(path.join(made.site, 'hub', 'b.md'), '# B\n');
+  await publish({ content: made.site, registryFile: made.registryFile, bucketOptions: made.bucketOptions, log: () => {} });
+  return made;
+}
+const removed = (file, index) => ({ name: file, path: file, at: '2026-10-30', index });
+
+test('a tab deleted here stays deleted when the site changed the card too, and the Removed tabs lists combine', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withTabs(fake);
+    // Here: tab A deleted. On the site: the title changed and tab B deleted.
+    const local = await localList(site);
+    local.entities[0].steps = local.entities[0].steps.filter(item => item.path !== 'a.md');
+    local.entities[0].removedTabs = [removed('a.md', 1)];
+    await putLocal(site, local);
+    const remote = fake.json(LIST);
+    remote.entities[0].title = 'Hub, from the site';
+    remote.entities[0].steps = remote.entities[0].steps.filter(item => item.path !== 'b.md');
+    remote.entities[0].removedTabs = [removed('b.md', 2)];
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const card = fake.json(LIST).entities[0];
+    assert.deepEqual(card.steps.map(item => item.path), ['index.md']);
+    assert.deepEqual(card.removedTabs.map(item => item.path).sort(), ['a.md', 'b.md']);
+    assert.equal(card.title, 'Hub, from the site');
+    assert.equal(await readFile(path.join(site, 'hub', 'a.md'), 'utf8'), '# A\n', 'No file is deleted.');
+  } finally { await fake.close(); }
+});
+
+test('a tab deleted here, with the site changing only the title, is not shown and removed at once', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withTabs(fake);
+    const local = await localList(site);
+    local.entities[0].steps = local.entities[0].steps.filter(item => item.path !== 'b.md');
+    local.entities[0].removedTabs = [removed('b.md', 2)];
+    await putLocal(site, local);
+    const remote = fake.json(LIST);
+    remote.entities[0].title = 'Hub, from the site';
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const card = fake.json(LIST).entities[0];
+    assert.deepEqual(card.steps.map(item => item.path), ['index.md', 'a.md']);
+    assert.deepEqual(card.removedTabs.map(item => item.path), ['b.md']);
+  } finally { await fake.close(); }
+});
+
+test('a site change to the card list during a publish is merged in, not overwritten', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, entry, bucketOptions } = await withCards(fake);
+    const { client, prefix } = bucketFor(entry, { env: {}, ...bucketOptions });
+    const local = await localList(site);
+    local.entities.find(item => item.id === 'hub').title = 'Hub, edited here';
+    await putLocal(site, local);
+    const merge = await mergeCardList({ root: site, bucket: client, prefix });
+    assert.ok(merge.etag);
+    // The site deletes `a` after the merge, before the upload.
+    const remote = fake.json(LIST);
+    const a = remote.entities.find(item => item.id === 'a');
+    remote.entities = remote.entities.filter(item => item.id !== 'a');
+    remote.retired = { a: { kind: 'deleted', at: '2026-10-30', entity: a } };
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    const lines = [];
+    await syncUp({ root: site, bucket: client, prefix, scope: await defaultScope(site), listEtag: merge.etag, log: line => lines.push(line) });
+    const published = fake.json(LIST);
+    assert.deepEqual(published.entities.map(item => item.id).sort(), ['b', 'hub'], 'The delete was not undone.');
+    assert.equal(published.retired.a.kind, 'deleted');
+    assert.equal(published.entities.find(item => item.id === 'hub').title, 'Hub, edited here', 'and this folder\'s edit still went up.');
+    assert.match(lines.join('\n'), /changed on the site meanwhile/);
+  } finally { await fake.close(); }
+});
+
+test('a new local card that reuses a retired id is kept and the publish says so', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withCards(fake);
+    const remote = fake.json(LIST);
+    remote.entities = remote.entities.filter(item => item.id !== 'a');
+    remote.retired = { a: { kind: 'moved', to: 'game-ideas', folder: 'a', at: '2026-10-30' } };
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    // Pull the site's move down first, then make a new card with the same id here.
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const local = await localList(site);
+    assert.ok(!local.entities.some(item => item.id === 'a'));
+    local.entities.push({ id: 'a', title: 'A again', folder: 'a2', steps: [step('Overview', 'index.md')] });
+    await mkdir(path.join(site, 'a2'), { recursive: true });
+    await writeFile(path.join(site, 'a2', 'index.md'), '# a again\n');
+    await putLocal(site, local);
+    const lines = [];
+    await publish({ content: site, registryFile, bucketOptions, log: line => lines.push(line) });
+    assert.ok((await localList(site)).entities.some(item => item.id === 'a'), 'The new card is not dropped.');
+    assert.match(lines.join('\n'), /"a" made here reuses an id that was moved to game-ideas/);
   } finally { await fake.close(); }
 });
