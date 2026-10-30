@@ -158,6 +158,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
+  /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
+  const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
 
   /**
    * Whether a request that waits for the PC can be moved to the cloud, and if not, why. It must be approved for the PC and
@@ -301,11 +303,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (preset) {
       const repo = clean.repo ?? (preset.fields.includes('repo') ? await projectRepo(clean.project) : undefined);
       const needs = clean.needs ?? (preset.needs.length ? preset.needs : undefined);
+      if (clean.project === 'bunnylink' && clean.target && clean.target !== 'at-pc') throw fail(BUNNYLINK_AT_PC, 400);
       if (clean.target && clean.target !== 'at-pc' && !preset.targets.includes(clean.target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
       const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: hasCloud });
       proposal = {
         ...(clean.title ? { title: clean.title } : {}), preset: preset.id, ...(repo ? { repo } : {}), ...(needs ? { needs } : {}),
-        target: clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}), ...(clean.agent ? { agent: clean.agent } : {}),
+        target: clean.project === 'bunnylink' ? 'at-pc' : clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}), ...(clean.agent ? { agent: clean.agent } : {}),
         origin: { kind: 'owner', name: user }, ...(clean.replaces ? { replaces: clean.replaces } : {}),
       };
       proposal.why = clean.target ? 'you chose it' : routed.why;
@@ -436,6 +439,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
     // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
     if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
+    // Second wall behind createRequest: whatever the target (also Approve again and a follow-up), a Bunnylink request is never signed.
+    if (request.project === 'bunnylink') throw fail(BUNNYLINK_AT_PC, 400);
     const chosen = target ?? request.target;
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
@@ -634,7 +639,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const preset = presetOf(clean.preset);
     if (!preset) throw fail('There is no such preset.', 400);
     const needs = preset.needs.length ? preset.needs : undefined;
-    const routed = route({ preset, project: clean.project, needs: needs ?? [], cloudRepos: cloudRepos() });
+    const routed = route({ preset, project: clean.project, needs: needs ?? [], repo: clean.repo, cloudRepos: hasCloud });
     return writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, ...(needs ? { needs } : {}), target: clean.target ?? routed.target,
       createdAt: at.toISOString(), by: user || 'local', origin: { kind: 'owner', name: user || 'local' },

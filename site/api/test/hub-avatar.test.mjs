@@ -1,9 +1,11 @@
 // The sprite flow: what answering an avatar Ask does (hub-avatar.mjs), over the stand-in S3 and a real signing key.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
@@ -15,6 +17,8 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, seeder, teamSheet } from './hub-fixtures.mjs';
 
 const SITE = 'https://site.example';
+const HOUR = 3600000;
+const CARDS = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../scripts/cards.mjs');
 const NOW = new Date();
 const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
 const keyPair = generateKeyPairSync('ed25519');
@@ -26,12 +30,13 @@ const SUBJECT = 'subjects/claude-avatar';
 const askId = tail => `${day}-sprite-studio-pick-${tail}`;
 
 async function fixture({ env = KEY_ENV } = {}) {
+  const clock = { time: NOW.getTime() };
   const root = await mkdtemp(path.join(tmpdir(), 'buw-avatar-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true, now: () => NOW, env });
+  const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -66,7 +71,7 @@ async function fixture({ env = KEY_ENV } = {}) {
     return ask.id;
   };
   const answer = (id, choice) => post(`/hub/asks/${id}/answer`, { choice });
-  return { askId, fake, hub, post, call, seed, sheetRequests, avatarRequest, pickAsk, sheetAsk, answer, close: async () => { server.close(); await fake.close(); } };
+  return { clock, askId, fake, hub, post, call, seed, sheetRequests, avatarRequest, pickAsk, sheetAsk, answer, close: async () => { server.close(); await fake.close(); } };
 }
 
 test('an answered variant pick makes one signed sheet request, and nothing else can make a second', async () => {
@@ -310,4 +315,59 @@ test('an Ask with no avatar field answers as before, and the pure helpers', asyn
   assert.ok(sheetRequestId(long).length <= 120 && validId(sheetRequestId(long)));
   assert.equal(sheetRequestId(long), sheetRequestId(long));
   assert.notEqual(sheetRequestId(`${day}-a-b2c3`), sheetRequestId(`${day}-a-b2c4`));
+});
+
+// --- ws-640.4: avatar requests never reach the cloud ---
+
+test('avatar requests route to the PC and never go to the cloud, even with a routine for every repo', async () => {
+  const f = await fixture({ env: { ...KEY_ENV, HUB_ROUTINE_DRY_RUN: '1' } });
+  const home = await mkdtemp(path.join(tmpdir(), 'buw-avatar-cli-'));
+  try {
+    // Dry run: every repo has a routine, so a code task would go to the cloud. An avatar request goes to the PC all the same.
+    const code = await f.post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Fix a tile', repo: 'example/probe' });
+    assert.equal(code.body.target, 'cloud', 'the control: with a routine a code task is routed to the cloud');
+    const made = await f.post('/hub/requests', { project: 'sprite-studio', preset: 'agent-avatar', text: 'Pixel sprite for claude', agent: 'claude', repo: 'example/sprite-studio' });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.target, 'pc');
+    const proposed = made.body.id;
+    // A cloud approval is refused before anything is signed.
+    const toCloud = await f.post(`/hub/requests/${proposed}/approve`, { target: 'cloud' });
+    assert.equal(toCloud.status, 400);
+    assert.equal(f.fake.text(`sections/inbox/requests/${proposed}/approved.json`), null);
+    assert.equal((await f.post(`/hub/requests/${proposed}/approve`, {})).status, 201);
+
+    // The sheet request is made by the Hub (createFixed), routed to the PC and approved for it.
+    const id = f.pickAsk('c3d4', { agent: 'claude', request: proposed, subject: SUBJECT });
+    assert.equal((await f.answer(id, 'b')).status, 201);
+    const [sheet] = f.sheetRequests();
+    assert.equal(sheet.target, 'pc');
+    assert.equal(f.fake.json(`sections/inbox/requests/${sheet.id}/approved.json`).target, 'pc');
+    // A second sheet request, proposed only, refuses a cloud approval too.
+    const loose = await f.hub.requests.createFixed({ project: 'sprite-studio', preset: 'agent-avatar-sheet', agent: 'claude', fromAsk: id, choice: 'c', subject: SUBJECT, text: 'Sprite sheet for claude, variant c' }, { id: `${day}-sprite-studio-sheet-loose-a1b2`, user: 'owner', at: NOW });
+    assert.equal(loose.request.target, 'pc');
+    const looseCloud = await f.post(`/hub/requests/${loose.id}/approve`, { target: 'cloud' });
+    assert.equal(looseCloud.status, 400);
+    assert.equal(f.fake.text(`sections/inbox/requests/${loose.id}/approved.json`), null);
+
+    // 6.5 hours on, the PC approvals are old enough for "Move to the cloud", and both are refused.
+    f.clock.time = NOW.getTime() + 6.5 * HOUR;
+    for (const request of [proposed, sheet.id]) {
+      const moved = await f.post(`/hub/requests/${request}/move-to-cloud`);
+      assert.equal(moved.status, 409, request);
+      assert.match(moved.body.error, /cannot run in the cloud|only the PC has/);
+    }
+    // The fire sweep never fires a PC approval.
+    const swept = await f.hub.routines.sweep();
+    assert.deepEqual(swept.fired, []);
+    assert.deepEqual([...f.fake.objects.keys()].filter(key => /\/fire-[^/]+\.json$/.test(key)), [], 'no fire-* file');
+
+    // The PC client refuses the sheet approval for the cloud: exit 5, wrong-target.
+    const env = { ...process.env, HOME: home, USERPROFILE: home, BUW_REGISTRY: path.join(home, 'none.json'), BUW_SPOOL: path.join(home, 'spool.jsonl'), AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test', BUW_S3_BUCKET: f.fake.bucket, BUW_S3_ENDPOINT: f.fake.endpoint, BUW_S3_REGION: 'us-east-1', BUW_CARDS_PASSWORD: '', HUB_SIGNING_PUBKEY: publicKeyPem(keyPair.privateKey) };
+    const cli = target => new Promise(resolve => execFile(process.execPath, [CARDS, 'request', 'verify', sheet.id, '--target', target, '--via', 's3'], { env }, (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr })));
+    const refused = await cli('cloud');
+    assert.equal(refused.code, 5, refused.stderr);
+    assert.match(refused.stderr, /wrong-target/);
+    assert.equal(refused.stdout, '');
+    assert.equal((await cli('pc')).code, 0, 'the control: the PC takes it');
+  } finally { await rm(home, { recursive: true, force: true }); await f.close(); }
 });

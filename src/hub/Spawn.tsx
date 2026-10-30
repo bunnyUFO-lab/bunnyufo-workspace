@@ -128,9 +128,11 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   }, [preset, project, repo, wantsRepo, repoValid])
 
   // A preset with fewer targets than the chosen one drops the choice.
+  // Bunnylink work is never sent anywhere: the only place is "You, at the PC", and there is nothing to choose.
+  const bunnylink = project === 'bunnylink'
   const allowed = preset?.targets ?? []
-  const choice = override && allowed.includes(override) ? override : ''
-  const target: SpawnTarget | null = choice || route?.target || null
+  const choice = !bunnylink && override && allowed.includes(override) ? override : ''
+  const target: SpawnTarget | null = bunnylink ? 'at-pc' : choice || route?.target || null
   const changed = !!choice && !!route && choice !== route.target
   const atPc = target === 'at-pc'
   const canApprove = host.approve && !atPc
@@ -266,9 +268,9 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                       <p className="sp-faint sp-caps">{CAPS_LINE}</p>
                       {host.policy.length > 0 && <p className="sp-faint sp-caps" data-spawn-policy>{policyLine(host.policy)}</p>}
                     </div>
-                    <select className="sp-pick" aria-label="Change where it runs" value={choice} onChange={event => setOverride(event.target.value as SpawnTarget | '')} data-spawn-target>
-                      <option value="">Auto</option>
-                      {allowed.map(item => <option key={item} value={item}>{MACHINE[item].name}</option>)}
+                    <select className="sp-pick" aria-label="Change where it runs" value={bunnylink ? 'at-pc' : choice} disabled={bunnylink} onChange={event => setOverride(event.target.value as SpawnTarget | '')} data-spawn-target>
+                      {bunnylink ? <option value="at-pc">{MACHINE['at-pc'].name}</option> : <option value="">Auto</option>}
+                      {!bunnylink && allowed.map(item => <option key={item} value={item}>{MACHINE[item].name}</option>)}
                     </select>
                   </>
                 ) : <p className="hub-muted" role={routeError ? 'alert' : undefined}>{routeError ?? 'Working out where it runs…'}</p>}
