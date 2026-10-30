@@ -782,3 +782,70 @@ test('inbox: request.json written by an agent-session token carries writer: agen
     await fake.close();
   }
 });
+
+test('moved and deleted cards: a write is refused, a read says where it went, resolve follows the move', async () => {
+  const { fake, call } = await setup();
+  try {
+    // The site moved `loops-plan` to bunnylink and put `loops-art` in the Trash of magic-loops.
+    const list = fake.json('sections/magic-loops/workspace.json');
+    const [plan, art] = list.entities;
+    fake.seed('sections/magic-loops/workspace.json', JSON.stringify({
+      ...list,
+      entities: [],
+      retired: {
+        'loops-plan': { kind: 'moved', to: 'bunnylink', folder: plan.folder, at: '2026-10-30' },
+        'loops-art': { kind: 'deleted', at: '2026-10-30', entity: art },
+      },
+    }), 'application/json');
+    const target = fake.json('sections/bunnylink/workspace.json');
+    fake.seed('sections/bunnylink/workspace.json', JSON.stringify({ ...target, entities: [...target.entities, plan] }), 'application/json');
+
+    const put = await call('PUT', '/sections/magic-loops/cards/loops-plan', { body: plan });
+    assert.equal(put.status, 409);
+    assert.deepEqual(put.data.movedTo, { section: 'bunnylink', folder: plan.folder });
+    assert.match(put.data.error, /moved to bunnylink/);
+    const trashed = await call('PUT', '/sections/magic-loops/cards/loops-art', { body: art });
+    assert.equal(trashed.status, 409);
+    assert.match(trashed.data.error, /Trash.*restore it first/);
+    assert.equal(fake.json('sections/magic-loops/workspace.json').entities.length, 0, 'Neither card was added back.');
+
+    const got = await call('GET', '/sections/magic-loops/cards/loops-plan');
+    assert.equal(got.status, 404);
+    assert.equal(got.data.movedTo.section, 'bunnylink');
+    assert.equal((await call('GET', `/sections/magic-loops/cards/${plan.folder}`)).data.movedTo.section, 'bunnylink', 'By folder too.');
+    const inTrash = await call('GET', '/sections/magic-loops/cards/loops-art');
+    assert.equal(inTrash.status, 404);
+    assert.equal(inTrash.data.movedTo, undefined);
+    assert.match(inTrash.data.error, /Trash/);
+
+    for (const ref of ['magic-loops/loops-plan', 'loops-plan', `https://workspaces.example.net/magic-loops#/loops-plan`]) {
+      const found = await call('GET', '/resolve', { query: { ref } });
+      assert.deepEqual(found.data.matches.map(match => `${match.section}/${match.id}:${match.movedFrom}`), ['bunnylink/loops-plan:magic-loops'], ref);
+    }
+    assert.equal((await call('GET', '/resolve', { query: { ref: 'magic-loops/loops-art' } })).status, 404);
+    assert.equal((await call('GET', '/resolve', { query: { ref: 'magic-loops/loops-plan' }, token: 'tok-loops' })).status, 404, 'A token that cannot read the new workspace is not sent there.');
+    // A token that cannot read the new workspace is not told its name.
+    const blindGet = await call('GET', '/sections/magic-loops/cards/loops-plan', { token: 'tok-loops' });
+    const blindPut = await call('PUT', '/sections/magic-loops/cards/loops-plan', { token: 'tok-loops', body: plan });
+    assert.equal(blindGet.status, 404);
+    assert.equal(blindPut.status, 409);
+    for (const blind of [blindGet, blindPut]) {
+      assert.equal(blind.data.movedTo, undefined);
+      assert.doesNotMatch(JSON.stringify(blind.data), /bunnylink/);
+      assert.match(blind.data.error, /moved to another workspace/);
+    }
+    // A new id cannot claim the folder of a moved or Trashed card.
+    const claimMoved = await call('PUT', '/sections/magic-loops/cards/other-one', { body: card('other-one', { folder: plan.folder }) });
+    assert.equal(claimMoved.status, 409);
+    assert.equal(claimMoved.data.movedTo.section, 'bunnylink');
+    const claimTrash = await call('PUT', '/sections/magic-loops/cards/other-two', { body: card('other-two', { folder: art.folder }) });
+    assert.equal(claimTrash.status, 409);
+    assert.match(claimTrash.data.error, /Trash/);
+    assert.equal(fake.json('sections/magic-loops/workspace.json').entities.length, 0);
+    // Live cards and other tokens are untouched.
+    assert.equal((await call('GET', '/sections/bunnylink/cards/loops-plan')).status, 200);
+    assert.equal((await call('PUT', '/sections/magic-loops/cards/loops-plan', { body: plan, token: 'tok-reader' })).status, 403);
+  } finally {
+    await fake.close();
+  }
+});

@@ -228,6 +228,37 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
   const findEntity = (registry, ref) => registry.entities.find(item => item?.id === ref) ?? registry.entities.find(item => item?.folder === ref);
 
+  /**
+   * The site's record of a card that was moved to another workspace or put in the Trash, by id or
+   * folder (`retired` in workspace.json, written only by the site). Null when the card is not retired.
+   */
+  const retiredBy = (registry, ref) => {
+    const records = registry.retired && typeof registry.retired === 'object' ? registry.retired : {};
+    const id = Object.keys(records).find(key => key === ref) ?? Object.keys(records).find(key => records[key]?.folder === ref || records[key]?.entity?.folder === ref);
+    return id ? { id, ...records[id] } : null;
+  };
+
+  /**
+   * The refusal for a retired card. The new workspace is named only to a token that may read it; any
+   * other token is told the card moved, not where.
+   */
+  function retiredError(caller, sectionId, record, verb) {
+    const status = verb === 'write' ? 409 : 404;
+    if (record.kind === 'moved') {
+      if (record.to && can(caller, 'read', record.to)) {
+        return new HttpError(status, `Card "${record.id}" was moved to ${record.to}; ${verb === 'write' ? 'update it there' : 'read it there'}.`, { movedTo: { section: record.to, folder: record.folder ?? null } });
+      }
+      return new HttpError(status, `Card "${record.id}" was moved to another workspace.`);
+    }
+    return new HttpError(status, `Card "${record.id}" is in the Trash of ${sectionId}; ${verb === 'write' ? 'restore it first' : 'restore it to read it'}.`);
+  }
+
+  /** The retired card a write would collide with: one with this id, or one that owns this folder. Null when a live card has the id. */
+  function retiredClaim(registry, id, folder) {
+    if (registry.entities.some(item => item?.id === id)) return null;
+    return registry.retired?.[id] ? { id, ...registry.retired[id] } : retiredBy(registry, folder);
+  }
+
   async function cardFiles(sectionId, folder) {
     const base = keyOf(sectionId, `${folder}/`);
     const { objects } = await bucket.list(base);
@@ -253,7 +284,11 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     async getCard(caller, sectionId, ref) {
       const { registry } = await section(caller, sectionId, 'read');
       const entity = findEntity(registry, ref);
-      if (!entity) throw new HttpError(404, `No card "${ref}" in ${sectionId}.`);
+      if (!entity) {
+        const record = retiredBy(registry, ref);
+        if (record) throw retiredError(caller, sectionId, record, 'read');
+        throw new HttpError(404, `No card "${ref}" in ${sectionId}.`);
+      }
       const files = await cardFiles(sectionId, entity.folder);
       const withUrls = await Promise.all(files.map(async file => ({ ...file, url: await bucket.presign('GET', keyOf(sectionId, file.path), { expires: urlTtl }) })));
       return { section: sectionId, entity, files: withUrls, urlsExpireIn: urlTtl };
@@ -268,7 +303,9 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         throw new HttpError(400, 'The entry needs a folder: one name, not starting with "_" or ".".');
       }
       if (INBOXES.has(sectionId) && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
-      await section(caller, sectionId, 'write');
+      const first = await section(caller, sectionId, 'write');
+      const claimed = retiredClaim(first.registry, id, entity.folder);
+      if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
       const files = await cardFiles(sectionId, entity.folder);
       if (!files.length) throw new HttpError(409, `${entity.folder}/ has no files yet: upload them first, then add the card.`);
       const refused = files.filter(file => SECRET.test(file.path) || file.size > MAX_FILE).map(file => file.path);
@@ -280,6 +317,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         const clash = registry.entities.find(item => item?.folder === entity.folder && item?.id !== id);
         if (clash) throw new HttpError(409, `Folder ${entity.folder} already belongs to card "${clash.id}".`);
         const index = registry.entities.findIndex(item => item?.id === id);
+        const taken = retiredClaim(registry, id, entity.folder);
+        if (taken) throw retiredError(caller, sectionId, taken, 'write');
         const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
         try {
           await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities }, { ifMatch: etag });
@@ -371,6 +410,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       const ids = wanted.section ? [wanted.section] : await sectionIds(caller);
       const needle = (wanted.card ?? '').toLowerCase();
       const matches = [];
+      const moved = [];
+      let trashed = null;
       for (const id of ids) {
         const { registry } = await section(caller, id, 'read').catch(error => {
           if (wanted.section) throw error;
@@ -383,7 +424,22 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
             : entity.id === wanted.card || entity.folder === wanted.card || entity.title?.toLowerCase() === needle;
           if (hit) matches.push({ section: id, ...summary(entity) });
         }
+        // A card the site moved: follow it into its new workspace. One in the Trash is only named.
+        if (!matches.some(match => match.section === id)) {
+          const record = retiredBy(registry, wanted.folder ?? wanted.card);
+          if (record?.kind === 'moved' && record.to) moved.push({ from: id, id: record.id, to: record.to });
+          else if (record) trashed ??= { section: id, id: record.id };
+        }
       }
+      for (const hop of moved) {
+        const target = await section(caller, hop.to, 'read').catch(() => null);
+        const entity = target?.registry.entities.find(item => item?.id === hop.id);
+        if (!entity) continue;
+        const known = matches.find(match => match.section === hop.to && match.id === hop.id);
+        if (known) known.movedFrom ??= hop.from;
+        else matches.push({ section: hop.to, ...summary(entity), movedFrom: hop.from });
+      }
+      if (!matches.length && trashed) throw new HttpError(404, `Card "${trashed.id}" is in the Trash of ${trashed.section}; restore it first.`);
       if (!matches.length) throw new HttpError(404, `Nothing matches "${ref}".`);
       return { matches };
     },
