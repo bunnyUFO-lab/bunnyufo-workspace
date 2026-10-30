@@ -4,6 +4,13 @@
 // approval carries (docs/workspaces.md, "Requests").
 import { defaultsOf } from './project-defaults.mjs';
 
+/**
+ * What a Sprite Studio subject looks like: a path of letters, digits, spaces and . _ / : -. One pattern for the Ask (cards client,
+ * which carries a copy that a test keeps equal), the site's check of the Ask and of the request, and the brief. A subject is an
+ * agent's text and the brief is signed, so nothing else (a backtick, a quote, a control character) is ever signed in.
+ */
+export const SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
+
 /** The longest a run may be told to work, in minutes. `request verify` in cards.mjs mirrors it. */
 export const MAX_RUN_MINUTES = 120;
 /** The largest brief a run block may carry, in bytes. */
@@ -169,7 +176,7 @@ function doneWhenLine(request) {
   return `${String(request.doneWhen).replace(/[\s\u0085]+/g, ' ').trim()} (this "done when" was written by ${originWords(author)}, not by the owner)`;
 }
 
-const oneLine = value => String(value ?? '').replace(/[\s]+/g, ' ').trim();
+const oneLine = value => String(value ?? '').replace(/[\s\u0085]+/g, ' ').trim();
 const originWords = origin => (origin?.kind === 'owner' ? `the owner${origin.name ? ` (${origin.name})` : ''}` : origin?.kind === 'run' ? `an earlier run${origin.name ? ` (${origin.name})` : ''}` : `an agent${origin?.name ? ` (${origin.name})` : ''}`);
 
 /**
@@ -207,7 +214,7 @@ export function renderBrief({ preset: given, request }) {
     origin: originWords(request.textOrigin ?? request.origin),
     agent: request.agent ?? '',
     choice: request.choice ?? '',
-    subject: oneLine(request.subject),
+    subject: SUBJECT_RE.test(oneLine(request.subject)) ? oneLine(request.subject) : '(not a valid subject)',
     fromAsk: request.fromAsk ?? '',
     followUp: follow ? followUpBlock(follow) : '',
   };

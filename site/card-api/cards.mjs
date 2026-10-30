@@ -709,6 +709,8 @@ const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 /** The `avatar` field of an Ask (the sprite flow): an agent id, and a request id or a sheet name. */
 const AVATAR_SLUG_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const AVATAR_SHEET_RE = /^sheet-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}$/;
+/** Keep equal to SUBJECT_RE in site/api/presets.mjs (a test does). */
+const AVATAR_SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
 const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
@@ -814,7 +816,7 @@ function validateAsk(ask, imageNames) {
         if (typeof avatar.sheet !== 'string' || !AVATAR_SHEET_RE.test(avatar.sheet)) problems.push('avatar.sheet is sheet-<YYYYMMDDTHHMMSSZ>-<4 letters or digits>');
       } else {
         if (typeof avatar.request !== 'string' || !AVATAR_REQUEST_RE.test(avatar.request)) problems.push('avatar needs a request id (or a sheet)');
-        if (avatar.subject !== undefined && (typeof avatar.subject !== 'string' || !avatar.subject.trim() || avatar.subject.length > 200)) problems.push('avatar.subject is 1 to 200 characters');
+        if (avatar.subject !== undefined && (typeof avatar.subject !== 'string' || !AVATAR_SUBJECT_RE.test(avatar.subject))) problems.push('avatar.subject is a path of up to 200 letters, digits, spaces and . _ / : - (no quotes or backticks)');
       }
     }
   }
