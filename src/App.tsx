@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, canonicalHubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, canonicalHubHash, hubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -56,6 +56,11 @@ const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen ===
 function readRoute(): Route {
   const canonical = canonicalHubHash()
   if (canonical) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + canonical)
+  // A phone opens on the Hub's Today, not the cards' home. Only a first load with no hash: a deep link, a card and the home link
+  // (which are not first loads) all keep their address. Replaced in place, so Back does not return to an empty address.
+  if (host.hub && !window.location.hash && window.matchMedia('(max-width: 640px)').matches) {
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + hubHash('today'))
+  }
   return parseHash()
 }
 
