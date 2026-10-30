@@ -1,0 +1,12 @@
+/* The Model menu under the compose row of Chat and Get help (ws-2oo). */
+.hub-chat-extras { display: flex; align-items: center; gap: 10px; margin-top: 8px; min-width: 0; flex-wrap: nowrap; }
+.hub-chat-extras .hub-aloud { margin-top: 0; margin-left: auto; white-space: nowrap; flex: 0 0 auto; }
+.hub-model { flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: 36px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.8rem; cursor: pointer; text-overflow: ellipsis; }
+.hub-model:disabled { opacity: 0.5; cursor: default; }
+.hub-model-note { font-size: 0.78rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-bubble-model { display: block; margin-top: 6px; font-size: 0.75rem; }
+.hub-chat-tag { padding: 0 6px; border-radius: 999px; border: 1px solid var(--hairline-strong); font-size: 0.72rem; }
+@media (max-width: 480px) {
+  .hub-model-note { display: none; }
+  .hub-model { min-height: 44px; }
+}

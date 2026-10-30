@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatLine, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatLine, ChatModel, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
@@ -16,10 +16,19 @@ import Md from './Md'
 import { useHubData } from './useHub'
 import { onAsk, takeAsk } from './askHermes'
 import './chatRuns.css'
+import './chatChoice.css'
+import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
 import { setFocus } from './needsFocus'
 
 const READ_KEY = 'buw.hub.readAloud'
+const JOB = '__job'
+const AUTO = 'auto'
+
+/** What the tags call a model: its label, or the bare id when the server no longer lists it. */
+const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
+/** The menu text: the paid ones say API. */
+const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? entry.label : `${entry.label} · API`)
 
 const openSameOrigin = (url: URL) => { window.location.assign(url.href) }
 
@@ -119,7 +128,7 @@ function HelpBanner({ about, text, pictures }: { about: { kind: HelpKind; id: st
   )
 }
 
-function Bubble({ line, conversation }: { line: Shown; conversation?: string }) {
+function Bubble({ line, conversation, models }: { line: Shown; conversation?: string; models: ChatModel[] }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
     <div className={`hub-bubble ${line.role}`}>
@@ -131,6 +140,7 @@ function Bubble({ line, conversation }: { line: Shown; conversation?: string }) 
       )}
       {line.tools && line.tools.length > 0 && <ToolLines tools={line.tools.map(name => ({ id: name, name, state: 'done' as const }))} />}
       {line.created && line.created.length > 0 && <Created items={line.created} />}
+      {line.role === 'assistant' && line.model && line.model !== AUTO && <span className="hub-muted hub-bubble-model" data-bubble-model>{nameOf(models, line.model)}</span>}
     </div>
   )
 }
@@ -141,17 +151,18 @@ export default function Chat({ id }: { id?: string }) {
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
-let carried: { id: string; lines: Shown[] } | null = null
+let carried: { id: string; lines: Shown[]; model: string } | null = null
 
-const carry = (id: string, lines: Shown[]) => { carried = { id, lines } }
+const carry = (id: string, lines: Shown[], model: string) => { carried = { id, lines, model } }
 
 const isPicture = (file: File) => file.type.startsWith('image/')
 
 function ChatView({ id }: { id?: string }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
-  const list = useHubData<{ conversations: ChatSummary[] }>('/chat')
-  const [initial] = useState<Shown[] | null>(() => { const hit = carried && carried.id === id ? carried.lines : null; carried = null; return hit })
+  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[] }>('/chat')
+  const [[initial, initialModel]] = useState<[Shown[] | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : AUTO] })
+  const [model, setModel] = useState(initialModel)   // model:
   const [messages, setMessages] = useState<Shown[]>(initial ?? [])
   const [pending, setPending] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : ''))
@@ -182,7 +193,7 @@ function ChatView({ id }: { id?: string }) {
     if (!id || initial || help) return undefined
     let stopped = false
     hubGet<{ messages: ChatLine[] }>(`/chat/${encodeURIComponent(id)}`)
-      .then(answer => { if (!stopped) setMessages(answer.messages) })
+      .then(answer => { if (!stopped) { setMessages(answer.messages); setModel([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO) } })   // model: an old chat opens on its last choice
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
   }, [id, initial, help])
@@ -272,6 +283,7 @@ function ChatView({ id }: { id?: string }) {
     setApproval(null)
     setPending('')
     const before = messages
+    const askedModel = model   // model: what this turn asks for
     const previews = sending.map(item => item.url)
     const optimistic: Shown = { role: 'user', text, at: new Date().toISOString(), ...(previews.length ? { previews } : {}) }
     setMessages([...before, optimistic])
@@ -291,7 +303,7 @@ function ChatView({ id }: { id?: string }) {
     try {
       const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
       const gone = !!help && !!preview.error && preview.data === null
-      await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
+      await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
         onDelta: piece => { reply += piece; setPending(reply) },
         onCreated: items => { created = items },
         onTool: tool => {
@@ -327,8 +339,8 @@ function ChatView({ id }: { id?: string }) {
     unhold()
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
-    const userLine: Shown = swapped ? saved as ChatLine : optimistic
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
+    const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}) }
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}) }]
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
@@ -340,7 +352,7 @@ function ChatView({ id }: { id?: string }) {
     if (cut) list.reload()
     if (finished) {
       list.reload()
-      if (finished !== id) { carry(finished, lines); window.location.assign(hubHash('chat', finished)) }
+      if (finished !== id) { carry(finished, lines, askedModel); window.location.assign(hubHash('chat', finished)) }
     }
     if (!stopped && !problem && readAloud && speaks && reply.trim()) window.speechSynthesis.speak(new SpeechSynthesisUtterance(plainText(reply)))
   }
@@ -360,6 +372,11 @@ function ChatView({ id }: { id?: string }) {
   }
 
   const conversations = list.data?.conversations ?? []
+  const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
+  const pick = (value: string) => {
+    if (value === JOB) { openSpawn({ text: draft.trim() || undefined }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project
+    setModel(value)
+  }
   // The banner: from the preview of a new help chat, or from the context line a stored one starts with.
   const stored = messages[0]?.role === 'context' && messages[0].about ? messages[0] : null
   const gone = !!help && !stored && !!preview.error && preview.data === null
@@ -374,7 +391,7 @@ function ChatView({ id }: { id?: string }) {
         {conversations.map(item => (
           <a key={item.id} className={`hub-chat-item${item.id === id ? ' on' : ''}`} href={hubHash('chat', item.id)} onClick={() => setDrawer(false)} data-conversation={item.id}>
             <span>{item.title}</span>
-            <span className="hub-muted">{item.count} messages</span>
+            <span className="hub-muted">{item.count} messages{item.model && item.model !== AUTO && <> · <span className="hub-chat-tag" data-conversation-model>{nameOf(models, item.model)}</span></>}</span>
           </a>
         ))}
         {!conversations.length && <p className="hub-empty">No conversations yet.</p>}
@@ -387,7 +404,7 @@ function ChatView({ id }: { id?: string }) {
         {banner}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">Ask the assistant anything, or tell it what to do.</p>}
-          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} />))}
+          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} />))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
               {pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}
@@ -420,10 +437,24 @@ function ChatView({ id }: { id?: string }) {
             ? <button type="button" className="hub-btn" onClick={stop}>Stop</button>
             : <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>}
         </div>
-        {speaks && (
-          <label className="hub-muted hub-aloud">
-            <input type="checkbox" checked={readAloud} onChange={event => { setReadAloud(event.target.checked); remember(READ_KEY, event.target.checked ? '1' : '0'); if (!event.target.checked) window.speechSynthesis.cancel() }} /> Read replies aloud
-          </label>
+        {(speaks || models.length > 0) && (
+          <div className="hub-chat-extras">
+            {models.length > 0 && (
+              <>
+                <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
+                  {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry)}</option>)}
+                  <option disabled>──────────</option>
+                  <option value={JOB}>Start a job instead…</option>
+                </select>
+                <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
+              </>
+            )}
+            {speaks && (
+              <label className="hub-muted hub-aloud">
+                <input type="checkbox" checked={readAloud} onChange={event => { setReadAloud(event.target.checked); remember(READ_KEY, event.target.checked ? '1' : '0'); if (!event.target.checked) window.speechSynthesis.cancel() }} /> Read replies aloud
+              </label>
+            )}
+          </div>
         )}
       </section>
     </div>
