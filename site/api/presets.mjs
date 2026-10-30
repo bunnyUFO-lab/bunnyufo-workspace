@@ -227,12 +227,16 @@ export function renderBrief({ preset: given, request }) {
   return brief;
 }
 
-/** The `run` block of an approval: what the runner is told and allowed. `model` is null on Hermes presets; `provider` is never sent. */
+/**
+ * The `run` block of an approval: what the runner is told and allowed. `model` is null on Hermes presets (Auto), or the
+ * chat-models id the owner chose for the job (`request.model`, Hermes only); the dispatcher turns the id into a provider
+ * and model from the fixed list. A provider string is never part of the block.
+ */
 export function runBlock({ preset: given, request }) {
   const preset = asPreset(given);
   if (!preset) throw Object.assign(new Error('No such preset.'), { status: 400 });
   return {
-    preset: preset.id, model: preset.model, permissionMode: preset.permissionMode, opensWindows: preset.opensWindows,
+    preset: preset.id, model: preset.model ?? request.model ?? null, permissionMode: preset.permissionMode, opensWindows: preset.opensWindows,
     allow: [...preset.allow], brief: renderBrief({ preset, request }),
   };
 }

@@ -37,6 +37,9 @@
 .sp-rules .hit { background: var(--pink-dim); color: var(--t1); }
 .sp-caps { font-size: 12px; margin-top: 8px; }
 .sp-pick { flex: none; max-width: 40%; min-height: 44px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--s2); color: var(--t1); font: inherit; font-size: 12.5px; }
+.sp-model { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sp-model .sp-pick { max-width: 100%; }
+.sp-model .sp-faint { font-size: 12px; min-width: 0; }
 .sp-est { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .sp-est > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--ground); min-width: 0; }
 .sp-est .wide { grid-column: 1 / -1; }

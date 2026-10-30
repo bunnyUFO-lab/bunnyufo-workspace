@@ -50,6 +50,35 @@ test('approve starts a run with the brief and no provider; with nobody watching,
   } finally { await s.close(); }
 });
 
+test('a run whose approval names a model starts with that provider and model; Auto is as before', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
+  try {
+    const api = await s.addHub();
+    const haiku = s.propose('haiku', { model: 'haiku' });
+    const flash = s.propose('flash', { model: 'deepseek-flash' });
+    const auto = s.propose('auto');
+    for (const id of [haiku, flash, auto]) assert.equal((await approve(api, id)).status, 201);
+    await until(() => [haiku, flash, auto].every(id => s.resultOf(id)), 'three results');
+    const bodyOf = id => s.hermes.runs.find(run => run.key === id).body;
+    assert.deepEqual([bodyOf(haiku).provider, bodyOf(haiku).model], ['anthropic', 'claude-haiku-5-5']);
+    assert.deepEqual([bodyOf(flash).provider, bodyOf(flash).model], ['deepseek', 'deepseek-flash']);
+    assert.deepEqual(Object.keys(bodyOf(auto)), ['input'], 'Auto names no provider and no model.');
+    assert.equal(s.file(haiku, 'approved.json').run.model, 'haiku');
+  } finally { await s.close(); }
+});
+
+test('a pinned run is not retried on Anthropic after a quota failure', async () => {
+  const s = await stack({ hermesOptions: { failWith: 'Codex provider quota exhausted (429)' } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose('pinned', { model: 'deepseek-flash' });
+    await approve(api, id);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.outcome, 'failed');
+    assert.equal(s.hermes.runs.length, 1, 'One run, no quota retry.');
+  } finally { await s.close(); }
+});
+
 test('the events route streams the run and ends with state done; a finished run answers state at once', async () => {
   const s = await stack({ hermesOptions: { runScript: ['one ', { wait: 120 }, 'two', { end: 'All set.\nCARD: assistant/x' }] } });
   try {
