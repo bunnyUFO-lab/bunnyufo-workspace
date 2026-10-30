@@ -824,6 +824,24 @@ test('moved and deleted cards: a write is refused, a read says where it went, re
     }
     assert.equal((await call('GET', '/resolve', { query: { ref: 'magic-loops/loops-art' } })).status, 404);
     assert.equal((await call('GET', '/resolve', { query: { ref: 'magic-loops/loops-plan' }, token: 'tok-loops' })).status, 404, 'A token that cannot read the new workspace is not sent there.');
+    // A token that cannot read the new workspace is not told its name.
+    const blindGet = await call('GET', '/sections/magic-loops/cards/loops-plan', { token: 'tok-loops' });
+    const blindPut = await call('PUT', '/sections/magic-loops/cards/loops-plan', { token: 'tok-loops', body: plan });
+    assert.equal(blindGet.status, 404);
+    assert.equal(blindPut.status, 409);
+    for (const blind of [blindGet, blindPut]) {
+      assert.equal(blind.data.movedTo, undefined);
+      assert.doesNotMatch(JSON.stringify(blind.data), /bunnylink/);
+      assert.match(blind.data.error, /moved to another workspace/);
+    }
+    // A new id cannot claim the folder of a moved or Trashed card.
+    const claimMoved = await call('PUT', '/sections/magic-loops/cards/other-one', { body: card('other-one', { folder: plan.folder }) });
+    assert.equal(claimMoved.status, 409);
+    assert.equal(claimMoved.data.movedTo.section, 'bunnylink');
+    const claimTrash = await call('PUT', '/sections/magic-loops/cards/other-two', { body: card('other-two', { folder: art.folder }) });
+    assert.equal(claimTrash.status, 409);
+    assert.match(claimTrash.data.error, /Trash/);
+    assert.equal(fake.json('sections/magic-loops/workspace.json').entities.length, 0);
     // Live cards and other tokens are untouched.
     assert.equal((await call('GET', '/sections/bunnylink/cards/loops-plan')).status, 200);
     assert.equal((await call('PUT', '/sections/magic-loops/cards/loops-plan', { body: plan, token: 'tok-reader' })).status, 403);

@@ -238,12 +238,25 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return id ? { id, ...records[id] } : null;
   };
 
-  /** Refuses a write or answers a read for a retired card with where it went; used only when no live card has the id. */
-  function retiredError(sectionId, record, verb) {
+  /**
+   * The refusal for a retired card. The new workspace is named only to a token that may read it; any
+   * other token is told the card moved, not where.
+   */
+  function retiredError(caller, sectionId, record, verb) {
+    const status = verb === 'write' ? 409 : 404;
     if (record.kind === 'moved') {
-      return new HttpError(verb === 'write' ? 409 : 404, `Card "${record.id}" was moved to ${record.to}; ${verb === 'write' ? 'update it there' : 'read it there'}.`, { movedTo: { section: record.to, folder: record.folder ?? null } });
+      if (record.to && can(caller, 'read', record.to)) {
+        return new HttpError(status, `Card "${record.id}" was moved to ${record.to}; ${verb === 'write' ? 'update it there' : 'read it there'}.`, { movedTo: { section: record.to, folder: record.folder ?? null } });
+      }
+      return new HttpError(status, `Card "${record.id}" was moved to another workspace.`);
     }
-    return new HttpError(verb === 'write' ? 409 : 404, `Card "${record.id}" is in the Trash of ${sectionId}; ${verb === 'write' ? 'restore it first' : 'restore it to read it'}.`);
+    return new HttpError(status, `Card "${record.id}" is in the Trash of ${sectionId}; ${verb === 'write' ? 'restore it first' : 'restore it to read it'}.`);
+  }
+
+  /** The retired card a write would collide with: one with this id, or one that owns this folder. Null when a live card has the id. */
+  function retiredClaim(registry, id, folder) {
+    if (registry.entities.some(item => item?.id === id)) return null;
+    return registry.retired?.[id] ? { id, ...registry.retired[id] } : retiredBy(registry, folder);
   }
 
   async function cardFiles(sectionId, folder) {
@@ -273,7 +286,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       const entity = findEntity(registry, ref);
       if (!entity) {
         const record = retiredBy(registry, ref);
-        if (record) throw retiredError(sectionId, record, 'read');
+        if (record) throw retiredError(caller, sectionId, record, 'read');
         throw new HttpError(404, `No card "${ref}" in ${sectionId}.`);
       }
       const files = await cardFiles(sectionId, entity.folder);
@@ -291,7 +304,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       }
       if (INBOXES.has(sectionId) && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
       const first = await section(caller, sectionId, 'write');
-      if (!first.registry.entities.some(item => item?.id === id) && first.registry.retired?.[id]) throw retiredError(sectionId, { id, ...first.registry.retired[id] }, 'write');
+      const claimed = retiredClaim(first.registry, id, entity.folder);
+      if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
       const files = await cardFiles(sectionId, entity.folder);
       if (!files.length) throw new HttpError(409, `${entity.folder}/ has no files yet: upload them first, then add the card.`);
       const refused = files.filter(file => SECRET.test(file.path) || file.size > MAX_FILE).map(file => file.path);
@@ -303,7 +317,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         const clash = registry.entities.find(item => item?.folder === entity.folder && item?.id !== id);
         if (clash) throw new HttpError(409, `Folder ${entity.folder} already belongs to card "${clash.id}".`);
         const index = registry.entities.findIndex(item => item?.id === id);
-        if (index < 0 && registry.retired?.[id]) throw retiredError(sectionId, { id, ...registry.retired[id] }, 'write');
+        const taken = retiredClaim(registry, id, entity.folder);
+        if (taken) throw retiredError(caller, sectionId, taken, 'write');
         const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
         try {
           await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities }, { ifMatch: etag });
