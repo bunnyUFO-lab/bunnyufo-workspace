@@ -11,7 +11,7 @@ export function registerServiceWorker() {
   // A page already under a worker that sees a new one take over is out of date: reload once. The
   // very first install also "takes control", and that page is up to date, so it is left alone. The
   // reload waits for a Chat reply that is streaming and for Hub writes in flight (reloadGate): a
-  // reload would abort them, and the server stops a reply nobody is reading.
+  // reload would cut the stream (the server would still save the reply, but the page would show nothing).
   const updating = !!navigator.serviceWorker.controller
   let reloaded = false
   navigator.serviceWorker.addEventListener('controllerchange', () => {

@@ -167,6 +167,7 @@ function ChatView({ id }: { id?: string }) {
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
   const abort = useRef<AbortController | null>(null)
   const run = useRef<string | null>(null)
+  const stopWanted = useRef(false)
   const input = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -195,8 +196,12 @@ function ChatView({ id }: { id?: string }) {
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
     const id = run.current
-    if (id) void hubPost('/chat/stop', { run: id }).catch(() => {})
-    abort.current?.abort()
+    if (id) { void hubPost('/chat/stop', { run: id }).catch(() => {}); abort.current?.abort(); return }
+    // Before `started` there is no run to name: hold the stop and send it from onStarted. A turn that
+    // never starts a run (a picture turn) is just aborted after a moment.
+    stopWanted.current = true
+    const controller = abort.current
+    window.setTimeout(() => { if (stopWanted.current) controller?.abort() }, 2000)
   }
 
   const release = (list: string[]) => list.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
@@ -275,6 +280,7 @@ function ChatView({ id }: { id?: string }) {
     const controller = new AbortController()
     abort.current = controller
     run.current = null
+    stopWanted.current = false
     let reply = ''
     let created: Item[] = []
     let finished: string | null = null
@@ -294,7 +300,11 @@ function ChatView({ id }: { id?: string }) {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
         },
-        onStarted: id => { run.current = id },
+        onStarted: (id, name) => {
+          run.current = id
+          if (name) conversation.current = name   // a resend joins this conversation, not a second one
+          if (stopWanted.current) stop()
+        },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
         onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },

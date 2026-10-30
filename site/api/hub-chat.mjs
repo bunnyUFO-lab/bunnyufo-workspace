@@ -165,7 +165,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   }
 
   // The runs this process started and is still relaying: Stop may end these and no others.
-  const active = new Set();
+  // Each maps to who started it and which conversation it writes to.
+  const active = new Map();
 
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
@@ -179,6 +180,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const context = asking ? null : (data.about !== undefined && data.about !== null ? await helpContext(data.about) : null);   // help:
     if (asking) {
       if (typeof id !== 'string' || !CHAT_ID.test(id)) throw fail('No such conversation.', 404);
+      // An earlier reply is still being written: a new turn now would miss it in the history and save out of order.
+      if ([...active.values()].some(carried => carried.conversation === id)) throw fail('Hermes is still answering in this conversation; wait for the reply.', 409);
       const got = await fresh(`chat/${id}.jsonl`);
       if (!got) throw fail('No such conversation.', 404);
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
@@ -264,7 +267,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       Connection: 'keep-alive',
     });
     const emit = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
-    if (runTurn) { active.add(runId); emit('started', { conversation: id, run: runId }); }
+    if (runTurn) { active.set(runId, { user: user ?? null, conversation: id }); emit('started', { conversation: id, run: runId }); }
     const keepalive = setInterval(() => { if (!response.destroyed) response.write(': keepalive\n\n'); }, KEEPALIVE_MS);
 
     let reply = '';
@@ -424,7 +427,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (method === 'POST' && route === '/hub/chat/stop') {
         const data = await readJson(request, 4096);
         const run = typeof data.run === 'string' ? data.run : '';
-        if (!active.has(run)) throw fail('No such reply is running.', 404);
+        const carried = active.get(run);
+        if (!carried || carried.user !== (user ?? null)) throw fail('No such reply is running.', 404);
         await hermesRuns.stop(run).catch(() => {});
         return json(response, 200, { stopped: true });
       }

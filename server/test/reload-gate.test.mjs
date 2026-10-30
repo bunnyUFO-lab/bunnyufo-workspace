@@ -44,13 +44,13 @@ const streamOf = (chunks, { fail } = {}) => {
     },
   });
 };
-const handlers = seen => ({ onDelta: text => seen.push(['delta', text]), onCreated() {}, onDone: name => seen.push(['done', name]), onError: message => seen.push(['error', message]), onStarted: run => seen.push(['started', run]) });
+const handlers = seen => ({ onDelta: text => seen.push(['delta', text]), onCreated() {}, onDone: name => seen.push(['done', name]), onError: message => seen.push(['error', message]), onStarted: (run, conversation) => seen.push(['started', run, conversation]) });
 const read = (chunks, seen, options, signal = new AbortController().signal) => readChatStream(streamOf(chunks, options), handlers(seen), signal);
 
 test('a stream that ends with done is not a cut', async () => {
   const seen = [];
-  await read(['event: started\ndata: {"run":"r1"}\n\n', 'event: delta\ndata: {"text":"Hi"}\n\n', 'event: done\ndata: {"conversation":"c1"}\n\n'], seen);
-  assert.deepEqual(seen, [['started', 'r1'], ['delta', 'Hi'], ['done', 'c1']]);
+  await read(['event: started\ndata: {"run":"r1","conversation":"c1"}\n\n', 'event: delta\ndata: {"text":"Hi"}\n\n', 'event: done\ndata: {"conversation":"c1"}\n\n'], seen);
+  assert.deepEqual(seen, [['started', 'r1', 'c1'], ['delta', 'Hi'], ['done', 'c1']]);
 });
 
 test('a server error event is an ending, not a cut', async () => {

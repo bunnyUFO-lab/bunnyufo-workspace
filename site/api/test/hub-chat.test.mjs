@@ -634,6 +634,24 @@ test('runs on: a browser that drops mid-turn does not stop the run, and the repl
   } finally { await close(); }
 });
 
+test('runs on: a new turn in a conversation whose reply is still being written is refused with 409, then accepted once it is saved', async () => {
+  const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'first', /Working/);
+    turn.controller.abort();
+    const early = await call('POST', '/hub/chat', { text: 'second', conversation: turn.conversation });
+    assert.equal(early.status, 409);
+    assert.match((await early.json()).error, /still answering/);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    upstream.release(turn.run, 'Working. Done.');
+    await savedLines(fake, turn.conversation, 2);
+    const controller = new AbortController();
+    const late = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'second', conversation: turn.conversation }), signal: controller.signal });
+    assert.equal(late.status, 200);
+    controller.abort();
+  } finally { await close(); }
+});
+
 test('runs on: Stop ends the run through its own route, which needs a signed-in user and a run this relay is carrying', async () => {
   const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
   try {
@@ -641,6 +659,7 @@ test('runs on: Stop ends the run through its own route, which needs a signed-in 
     assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { Origin: 'https://site.example' })).status, 401, 'No user, no stop.');
     assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { 'Remote-User': 'owner', Origin: 'https://evil.example' })).status, 403, 'A foreign Origin is refused.');
     assert.equal((await call('POST', '/hub/chat/stop', { run: 'run_not_mine' })).status, 404);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { 'Remote-User': 'someone-else', Origin: 'https://site.example' })).status, 404, 'Another user cannot stop it.');
     assert.deepEqual(upstream.stops, []);
     assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
     turn.controller.abort();
