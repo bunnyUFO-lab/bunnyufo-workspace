@@ -576,6 +576,23 @@ try {
   await leftCard.getByRole('button', { name: 'Send answer' }).tap();
   await endPage.locator('[data-next-note]', { hasText: 'Nothing else waits on you.' }).waitFor();
   assert.equal(await endPage.locator('[data-next-all]').count(), 0, 'With the whole queue empty there is nothing to link to.');
+  step('an Ask with options and decisions: Send stays off until an option is picked, and says so');
+  const both = designAskJson({ id: askId('both', 'b1b1'), now: new Date(), question: 'Review the frame and pick a size', options: plainOptions() });
+  fifth.seed.ask(both);
+  await endPage.reload();
+  const bothCard = endPage.locator(`.ni[data-need="ask-${both.id}"]`);
+  await bothCard.waitFor();
+  for (const id of ['d1', 'd2', 'd3']) await bothCard.locator(`[data-decision="${id}"] [data-verdict-btn="approve"]`).tap();
+  assert.equal(await bothCard.locator('[data-send]').isDisabled(), true, 'Every decision has a verdict, and Send is still off without an option.');
+  assert.match(await bothCard.locator('[data-pick-hint]').innerText(), /Pick one of the options/);
+  await bothCard.locator('[data-option="B"] .hub-option-pick').tap();
+  assert.equal(await bothCard.locator('[data-send]').isDisabled(), false, 'An option unlocks Send.');
+  assert.equal(await bothCard.locator('[data-pick-hint]').count(), 0, 'The hint goes with it.');
+  await bothCard.locator('[data-send]').tap();
+  await endPage.locator('[data-next-note]').waitFor();
+  const bothAnswer = fifth.fake.json(`sections/inbox/asks/${both.id}/answer.json`);
+  assert.equal(bothAnswer.choice, 'B');
+  assert.equal(bothAnswer.decisions.d1.verdict, 'approve');
 
   // ---- Playtests: a fourth fixture with one playtest checklist. ----
   fourth = await startHubFixture({ seedData: false });

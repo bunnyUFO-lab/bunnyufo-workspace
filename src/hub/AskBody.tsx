@@ -141,6 +141,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
       )}
       {problem && <p className="hub-error" role="alert">{problem}</p>}
       {notice && <p className="hub-muted" role="status" data-avatar-notice>{notice}</p>}
+      {writable && answer.needsOption && !choice && <p className="hub-muted" data-pick-hint>Pick one of the options to send.</p>}
       {writable && attachHelp.element}
       {writable && (
         <div className="hub-actions">

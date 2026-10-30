@@ -10,7 +10,7 @@ import { createHub, inboxKey } from '../hub.mjs';
 import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
-import { askJson, beadsCopy, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsCopy, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -210,6 +210,27 @@ test('a design review: verdicts are stored, every decision needs one, and the ch
     const plain = askJson({ id: id('plain', 'p111'), now: NOW });
     seed.ask(plain);
     assert.equal((await post(`/hub/asks/${plain.id}/answer`, { decisions: all })).status, 400);
+  } finally { await close(); }
+});
+
+test('an Ask with options and decisions needs a choice; an Ask with decisions only does not', async () => {
+  const { fake, seed, post, close } = await fixture();
+  try {
+    const both = designAskJson({ id: id('both', 'o111'), now: NOW, options: plainOptions() });
+    seed.ask(both);
+    const path = `/hub/asks/${both.id}/answer`;
+    const verdicts = { d1: { verdict: 'approve' }, d2: { verdict: 'skip' }, d3: { verdict: 'skip' } };
+    const refused = await post(path, { decisions: verdicts });
+    assert.equal(refused.status, 400, 'Decisions without an option are refused.');
+    assert.match(refused.body.error, /option/i);
+    assert.equal(fake.text(`sections/inbox/asks/${both.id}/answer.json`), null, 'Nothing was written by the refusal.');
+    assert.equal((await post(path, { decisions: verdicts, choice: 'Z' })).status, 400, 'An unknown option is refused too.');
+    const sent = await post(path, { decisions: verdicts, choice: 'B' });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    assert.equal(fake.json(`sections/inbox/asks/${both.id}/answer.json`).choice, 'B');
+    const only = designAskJson({ id: id('only', 'o222'), now: NOW });
+    seed.ask(only);
+    assert.equal((await post(`/hub/asks/${only.id}/answer`, { decisions: verdicts })).status, 201, 'Decisions alone still answer an Ask with no options.');
   } finally { await close(); }
 });
 
