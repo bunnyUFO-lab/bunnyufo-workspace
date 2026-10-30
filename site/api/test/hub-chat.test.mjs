@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { IDLE_MS_DEFAULT, TOTAL_MS_DEFAULT } from '../hub-chat.mjs';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
@@ -836,4 +837,26 @@ test('persona: a picture turn sends the text first on completions, with the mode
     assert.match(upstream.requests[0].messages[0].content, /Never download, decompile/);
     assert.deepEqual(lines(fake, done.data.conversation).map(line => [line.persona, line.model]), [['teardown', 'haiku'], ['teardown', 'haiku']]);
   } finally { await close(); }
+});
+
+test('ws-otk.1: a completions turn keeps its reply through a quiet tool, and the shipped limits allow long ones', async () => {
+  assert.ok(IDLE_MS_DEFAULT >= 5 * 60_000, 'A picture turn may be silent for 5 minutes (Hermes sends nothing while a tool runs).');
+  assert.ok(TOTAL_MS_DEFAULT >= 10 * 60_000, 'A picture turn may take 10 minutes in all.');
+  const quiet = await fixture({ env: { HUB_CHAT_IDLE_MS: '5000', HUB_CHAT_TOTAL_MS: '3000' }, hermes: { onTurn: () => new Promise(resolve => setTimeout(resolve, 700)) } });
+  try {
+    const result = await chat(quiet.call, { text: 'look' });
+    assert.equal(result.events.at(-1).event, 'done', JSON.stringify(result.events.at(-1)));
+    assert.deepEqual(lines(quiet.fake, result.events.at(-1).data.conversation).map(line => line.role), ['user', 'assistant']);
+  } finally { await quiet.close(); }
+});
+
+test('ws-otk.1: HUB_CHAT_TOTAL_MS ends a completions turn that runs too long, with the error and no assistant line', async () => {
+  const slow = await fixture({ env: { HUB_CHAT_IDLE_MS: '5000', HUB_CHAT_TOTAL_MS: '400' }, hermes: { chunks: ['Late.'], onTurn: () => new Promise(resolve => setTimeout(resolve, 1500)) } });
+  try {
+    const result = await chat(slow.call, { text: 'look' });
+    assert.equal(result.status, 502, 'No reply started before the total limit, so Hermes did not answer in time.');
+    assert.match(result.body.error ?? JSON.stringify(result.body), /timed out/);
+    const saved = [...slow.fake.objects.keys()].filter(key => key.startsWith('sections/inbox/chat/') && key.endsWith('.jsonl'));
+    for (const key of saved) assert.ok(!slow.fake.text(key).includes('"role":"assistant"'), 'No assistant line is saved.');
+  } finally { await slow.close(); }
 });
