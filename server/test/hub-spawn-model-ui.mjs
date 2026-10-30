@@ -47,6 +47,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   const menu = page.locator('[data-spawn-model]');
   assert.equal(await menu.inputValue(), 'auto');
+  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/, 'Auto keeps the Codex plan text.');
   assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Auto', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API']);
   assert.equal(await page.locator('[data-spawn-model-note]').count(), 1);
   assert.equal(await menu.getAttribute('id') !== null, true);
@@ -82,6 +83,8 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   await page.locator('[data-spawn-model]').selectOption('haiku');
   assert.match(await page.locator('[data-spawn-model-note]').innerText(), /Anthropic API/);
+  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Haiku · API key · about 40k tokens/);
+  assert.doesNotMatch(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/);
   await page.locator('[data-spawn-text]').fill('A look at how card games teach their rules');
   const [created] = await Promise.all([
     page.waitForRequest(request => request.method() === 'POST' && /\/api\/hub\/requests$/.test(request.url())),

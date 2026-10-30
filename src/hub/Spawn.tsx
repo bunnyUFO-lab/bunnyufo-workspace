@@ -297,7 +297,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
               </div>
             )}
             <div className="sp-est" data-spawn-estimate>
-              <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target)}</b></div>
+              <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target, sendModel ? picked?.label : undefined)}</b></div>
               <div><span>Time</span><b>{preset.estimate.time}</b></div>
               <div className="wide"><span>Result</span><b>{preset.produces}</b></div>
             </div>
