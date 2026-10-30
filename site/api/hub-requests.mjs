@@ -7,7 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
-import { RULES, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
+import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createPublicKey } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
@@ -20,7 +20,7 @@ export const MOVE_AFTER_MS = 6 * 3600 * 1000;
 /** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
-export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
+export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
 /** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
@@ -107,6 +107,22 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     if (typeof doneBy !== 'object' || Array.isArray(doneBy) || !ORIGIN_KINDS.includes(doneBy.kind)) throw fail('The "done when" origin is { kind: owner, agent or run, name }.');
     const doneByName = text(doneBy.name, REQUEST_LIMITS.name, 'The "done when" origin name');
     out.doneWhenOrigin = { kind: doneBy.kind, ...(doneByName ? { name: doneByName } : {}) };
+  }
+  // The avatar sheet request (the site API makes it after the owner picks a variant): the Ask, the pick and the subject it names.
+  if (data.fromAsk !== undefined && data.fromAsk !== null) {
+    if (!fromOwner) throw fail('Only the site can say which Ask a request came from.');
+    if (!validId(data.fromAsk)) throw fail('The Ask is an Ask id.');
+    out.fromAsk = data.fromAsk;
+  }
+  if (data.choice !== undefined && data.choice !== null) {
+    if (!fromOwner) throw fail('Only the site can record a pick.');
+    if (typeof data.choice !== 'string' || !/^[a-d]$/.test(data.choice)) throw fail('The pick is a to d.');
+    out.choice = data.choice;
+  }
+  if (data.subject !== undefined && data.subject !== null) {
+    if (!fromOwner) throw fail('Only the site can record a subject.');
+    if (typeof data.subject !== 'string' || !SUBJECT_RE.test(data.subject)) throw fail('The subject is a path of up to 200 letters, digits, spaces and . _ / : -.');
+    out.subject = data.subject;
   }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
@@ -418,6 +434,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
+    // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
+    if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
     const chosen = target ?? request.target;
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
@@ -606,5 +624,46 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return actions[action](id, raw, user, at);
   }
 
-  return { loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  /**
+   * A request the site makes itself, under an id it chooses (create-only: a second call is a 409). Used for the avatar sheet
+   * run, which a request body cannot ask for. `data` is checked like an owner's request; `origin` is the owner's.
+   */
+  async function createFixed(data, { id, user, at }) {
+    if (!validId(id)) throw fail('That is not a request id.', 400);
+    const clean = checkRequest(data, { fromOwner: true });
+    const preset = presetOf(clean.preset);
+    if (!preset) throw fail('There is no such preset.', 400);
+    const needs = preset.needs.length ? preset.needs : undefined;
+    const routed = route({ preset, project: clean.project, needs: needs ?? [], cloudRepos: cloudRepos() });
+    return writeNew(clean.project, clean.text, at, newId => ({
+      id: newId, ...clean, ...(needs ? { needs } : {}), target: clean.target ?? routed.target,
+      createdAt: at.toISOString(), by: user || 'local', origin: { kind: 'owner', name: user || 'local' },
+    }), null, id);
+  }
+
+  /** True when the site API wrote this request.json (its metadata says so; a body cannot). */
+  async function siteWrote(id) {
+    return (await bucket.head(key(`requests/${id}/request.json`)).catch(() => null))?.metadata?.writer === 'site';
+  }
+
+  /**
+   * The request and its approval, when the approval is the server's own: `approved.json` verifies with the public half of the
+   * signing key, names this request, covers the bytes of `request.json` as they are now, and carries the expected preset.
+   * Throws a 409 with the reason otherwise. Never reads an approval it did not sign.
+   */
+  async function verifiedRun(id, { preset: expected, at }) {
+    needKey();
+    const { names, request, state } = await loadOne(id, at);
+    if (!names.has('approved.json')) throw fail('That request was never approved.', 409);
+    if (names.has('stop.json') || names.has('declined.json') || ['stopped', 'stopping', 'declined', 'lost'].includes(state)) throw fail('That request was stopped or declined, so it cannot start a sheet run.', 409);
+    const [stored, signed] = await Promise.all([bucket.getBytes(key(`requests/${id}/request.json`)), bucket.getJson(key(`requests/${id}/approved.json`))]);
+    const approved = signed?.value;
+    if (!stored || !approved) throw fail('That request cannot be read.', 409);
+    if (!verify(approved, createPublicKey(signingKey))) throw fail('The approval of that request does not verify.', 409);
+    if (approved.request !== id || approved.requestSha256 !== sha256Hex(stored.buffer)) throw fail('The approval does not match that request.', 409);
+    if (approved.run?.preset !== expected || request.preset !== expected) throw fail(`That request is not a ${expected} request.`, 409);
+    return { request: checkedRequest(id, stored.buffer), approved };
+  }
+
+  return { createFixed, verifiedRun, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }

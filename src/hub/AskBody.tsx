@@ -2,6 +2,8 @@ import { lazy, Suspense } from 'react'
 import type { Ask, AskAnswer } from '../lib/hub'
 import { host } from '../lib/host'
 import type { AskVerb } from './askAnswer'
+import AvatarNote from './AvatarNote'
+import { isSheetCheck } from './avatarAsk'
 import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer'
 import HubImage from './HubImage'
 import Md from './Md'
@@ -23,13 +25,14 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   const live0 = ask.state === 'open' || ask.state === 'snoozed'
   const attachHelp = useAttachHelp('ask', ask.id, live0)
   const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view, help: attachHelp.help })
-  const { choice, setChoice, note, setNote, busy, problem, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
+  const { choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
   const options = optionList(ask)
+  const sheetCheck = isSheetCheck(ask)
   const live = ask.state === 'open' || ask.state === 'snoozed'
   const writable = host.write && live
   const canDraw = writable && ask.allowDrawing
-  const hasImages = options.some(option => !!option.image)
-  const image = imageName(ask)
+  const hasImages = !sheetCheck && options.some(option => !!option.image)
+  const image = sheetCheck ? '' : imageName(ask)
   const pick = kind === 'pick'
   const noteField = ask.allowNote && writable && (
     <label className="hub-field">{kind ? 'Summary note (optional)' : 'Note to the agent (optional)'}
@@ -85,6 +88,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   return (
     <>
       {typeof ask.context === 'string' && ask.context && <Md text={ask.context} />}
+      <AvatarNote ask={ask} />
       {(picture || decisionRows) && (
         <div className="dr" data-design>
           {picture}
@@ -102,7 +106,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
                 type="button" role="radio" aria-checked={choice === option.id} disabled={!writable} aria-disabled={writable ? undefined : true} title={writable ? undefined : 'Sign in to answer'}
                 className="hub-option-pick" onClick={() => setChoice(option.id)}
               >
-                {typeof option.image === 'string' && option.image && (
+                {!sheetCheck && typeof option.image === 'string' && option.image && (
                   <span className="hub-thumb">
                     <HubImage
                       path={`asks/${ask.id}/${option.image}`} alt={`Option ${option.id}: ${text(option.label)}`}
@@ -136,6 +140,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
         </div>
       )}
       {problem && <p className="hub-error" role="alert">{problem}</p>}
+      {notice && <p className="hub-muted" role="status" data-avatar-notice>{notice}</p>}
       {writable && attachHelp.element}
       {writable && (
         <div className="hub-actions">

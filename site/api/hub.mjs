@@ -20,6 +20,7 @@ import {
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
+import { createAvatar } from './hub-avatar.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
@@ -255,6 +256,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     extraRepos: String(env.HUB_KNOWN_REPOS ?? '').split(',').map(item => item.trim()).filter(Boolean),
   });
   const routines = createRoutines({ env, fetchImpl, bucket, key, requests: requestFiles, listFolders, putCreateOnly, cached, fail, signingKey, now, log: line => log(scrub(line, 400)), scrub });
+  // The sprite flow: an answer to an avatar Ask starts the sheet run or chooses the sheet (hub-avatar.mjs).
+  const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
@@ -629,7 +632,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     }
     if (help) answer.help = help;
     await writeAnswer(id, answer);
-    return { status: 201, body: { state: 'answered', answer } };
+    // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
+    const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
+    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}) } };
   }
 
   // --- Discord: the bot's two routes (see docs/workspaces.md, "Answers from Discord") ---
@@ -949,6 +954,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     requestHooks: requestFiles.hooks,
     /** The cloud routines module (fire, record, cap), for the tests. */
     routines,
+    avatar: avatarFlow,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
