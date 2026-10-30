@@ -589,3 +589,64 @@ test('runs on: a plain chat whose first turn had a picture sends its later text 
     assert.equal(upstream.runs.length, 1);
   } finally { await close(); }
 });
+
+// --- A browser that goes away mid-turn (ws-otk) --------------------------------------------------------------------
+
+/** Starts a run turn, reads until the `started` event, and hands back what it said and the open stream. */
+async function startTurn(origin, owner, text, waitFor = /started/) {
+  const controller = new AbortController();
+  const answer = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: controller.signal });
+  const reader = answer.body.getReader();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error('The stream ended before it started.');
+    buffer += new TextDecoder().decode(value);
+    const hit = /event: started\ndata: (.+)\n\n/.exec(buffer);
+    if (hit && waitFor.test(buffer)) return { ...JSON.parse(hit[1]), controller };
+  }
+}
+
+const savedLines = async (fake, conversation, count) => {
+  const started = Date.now();
+  while (Date.now() - started < 3000) {
+    try { const found = lines(fake, conversation); if (found.length >= count) return found; } catch { /* not saved yet */ }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error('The conversation was not saved.');
+};
+
+test('runs on: a browser that drops mid-turn does not stop the run, and the reply is saved when Hermes finishes', async () => {
+  const { fake, upstream, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'a long one', /Working/);
+    turn.controller.abort();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(upstream.stops, [], 'Hermes was not told to stop.');
+    upstream.release(turn.run, 'Working. Finished.');
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.equal(saved[0].text, 'a long one');
+    assert.equal(saved[1].role, 'assistant');
+    assert.match(saved[1].text, /^Working\./);
+    assert.ok(!saved[1].text.includes('[interrupted]'));
+    assert.equal(saved[1].run, turn.run);
+    assert.deepEqual(upstream.stops, []);
+  } finally { await close(); }
+});
+
+test('runs on: Stop ends the run through its own route, which needs a signed-in user and a run this relay is carrying', async () => {
+  const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me', /Working/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { Origin: 'https://site.example' })).status, 401, 'No user, no stop.');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { 'Remote-User': 'owner', Origin: 'https://evil.example' })).status, 403, 'A foreign Origin is refused.');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: 'run_not_mine' })).status, 404);
+    assert.deepEqual(upstream.stops, []);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.deepEqual(upstream.stops, [turn.run]);
+    assert.match(saved[1].text, /\[interrupted\]$/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 404, 'A finished turn cannot be stopped again.');
+  } finally { await close(); }
+});
