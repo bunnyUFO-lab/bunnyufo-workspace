@@ -87,7 +87,10 @@ function BlockedRow({ item, meta }: { item: Item; meta: string }) {
 /** One row for an Item (a thing that needs you or runs) or a HubEvent (a thing that happened). */
 export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent }) {
   if (item) {
-    const progress = item.kind === 'checklist' ? [`${item.done ?? 0} of ${item.total ?? 0}`, item.state === 'submitted' ? 'submitted' : item.state === 'picked-up' ? 'picked up' : ''].filter(Boolean).join(' · ') : ''
+    // A sent list says Submitted (or Picked up) and how many steps it left open; a list still waiting shows its progress.
+    const open = Math.max(0, (item.total ?? 0) - (item.done ?? 0))
+    const sent = item.state === 'submitted' ? 'Submitted' : item.state === 'picked-up' ? 'Picked up' : ''
+    const progress = item.kind === 'checklist' ? (sent ? (open > 0 ? `${sent} · ${open} open` : sent) : `${item.done ?? 0} of ${item.total ?? 0}`) : ''
     const state = item.kind === 'checklist' ? progress : item.kind === 'ask' ? (item.state ?? 'open').replace('-', ' ') : item.kind === 'request' ? (item.state === 'taken' ? `taken as ${item.bead ?? 'a task'}` : 'open') : ''
     const meta = [KIND_LABEL[item.kind], item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
     if (item.kind === 'review') return <ReviewRow item={item} meta={meta} />
