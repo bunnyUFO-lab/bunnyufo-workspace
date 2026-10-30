@@ -230,14 +230,27 @@ export interface HubProject { id: string; name: string; beads: boolean; pushedAt
 
 export type TaskState = 'done' | 'doing' | 'you' | 'next' | 'later'
 export type Sign = 'working' | 'idle' | 'new' | 'pr' | 'ci-failed' | 'review' | 'deployed'
-/** One pull request of a task: `prUrl` is only the open one; this keeps merged ones too. */
-export interface MapPr { url?: string; state: 'open' | 'merged'; at: string }
+/**
+ * One pull request of a task: `prUrl` is only the open one; this keeps merged ones too. A row from the
+ * events has a date and a state; one from Beads has a number, maybe a state, and the issue's date.
+ */
+export interface MapPr { url?: string; state?: 'open' | 'merged' | 'closed'; at: string; number?: number }
+/** A Library card the item names: its title and the site path that opens it. */
+export interface MapCard { title: string; href: string }
 export interface MapTask {
   id: string; title: string; state: TaskState; status: string; signs: Sign[]; sprints: string[]
   deps: string[]; ask?: string; prUrl?: string; prs?: MapPr[]; closedAt?: string
+  /** Why the task is yellow: an open Ask, or only the `needs-owner` label. */
+  you?: 'ask' | 'label'
+  /** One or two plain sentences saying what the work is, from the description. */
+  summary?: string
+  closeReason?: string
+  cards?: MapCard[]
+  commits?: { sha: string; url?: string }[]
 }
-export interface MapFeature { id: string; title: string; state: TaskState; tasks: MapTask[] }
-export interface MapMilestone { id: string; title: string; state: TaskState; features: MapFeature[] }
+export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
+export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }
+export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[] }
 export interface ProgressMap {
   project: string
   meta: { pushedAt: string; host: string; count: number; repo: string } | null

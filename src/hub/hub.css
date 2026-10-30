@@ -286,6 +286,9 @@
 .hub-map-panel-pr[data-pr-state="open"] { color: var(--amber); }
 .hub-map-panel-pr[data-pr-state="merged"] { color: var(--green); }
 .hub-map-panel-sign { font-size: 0.8rem; }
+.hub-map-panel p.hub-map-panel-summary { margin: 8px 0 6px; font-size: 0.9rem; line-height: 1.4; overflow-wrap: anywhere; }
+.hub-map-panel-cards a, .hub-map-panel [data-commits] a { overflow-wrap: anywhere; }
+.hub-map-panel [data-prs] .hub-btn, .hub-map-panel-cards a { display: inline-flex; align-items: center; min-height: 44px; }
 @media (max-width: 640px) {
   .hub-map-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.45); }
   .hub-map-panel {
