@@ -4,6 +4,7 @@
 import { authHeaders } from '../local/client'
 import type { PcSummary, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
+import { holdReload } from './reloadGate'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'review' | 'blocked' | 'session'
 export interface Item {
@@ -264,6 +265,7 @@ export const HUB_WROTE = 'buw:hub-wrote'
 
 export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal): Promise<T> {
   const changed = () => window.dispatchEvent(new Event(HUB_WROTE))
+  const release = holdReload()   // an update reload waits for this write
   try {
     const answer = await parse<T>(await fetch(`/api/hub${path}`, {
       method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal,
@@ -274,6 +276,8 @@ export async function hubPost<T>(path: string, data: unknown = {}, signal?: Abor
     // "Already answered" means the Hub moved on without this screen, so the counts have changed too.
     if (failure instanceof HubError && failure.status === 409) changed()
     throw failure
+  } finally {
+    release()
   }
 }
 
