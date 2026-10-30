@@ -134,7 +134,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
         </span>
         <span className="hub-row-actions">
           {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer" data-run-pr>Review on GitHub</a>}
-          {card && <a className="hub-btn" href={card} data-run-card>Open card</a>}
+          {card && <a className="hub-btn" href={card} data-run-event-card>Open card</a>}
           <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open>Open run</a>
         </span>
         <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

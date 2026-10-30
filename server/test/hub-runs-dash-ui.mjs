@@ -64,7 +64,7 @@ try {
     await since.locator('[data-run-event="run-finished"]').waitFor();
     assert.equal(await since.locator('[data-run-event="run-started"]').count(), 2);
     assert.match(await since.locator('[data-run-event="run-finished"]').innerText(), /Finished: Game ideas deck/);
-    assert.equal(await since.locator('[data-run-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
+    assert.equal(await since.locator('[data-run-event-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
 
     step(`${label}: Activity lists them under Agents`);
     await page.goto(`${fx.url}#/~hub/activity/agents`);
