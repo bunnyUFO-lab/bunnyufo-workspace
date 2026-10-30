@@ -121,8 +121,6 @@ export class S3Error extends Error {
   }
 }
 
-const REQUEST_TIMEOUT_MS = 120_000;
-
 /**
  * @param bucket      the bucket name
  * @param region      default from the CLI config, else us-east-1
@@ -169,9 +167,7 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
 
     const url = `${base}/${encodeKey(key)}${canonicalQuery ? `?${canonicalQuery}` : ''}`;
     const { host: _host, ...sendHeaders } = all;
-    const init = { method, headers: { ...sendHeaders, Authorization: authorization }, body: method === 'GET' || method === 'HEAD' ? undefined : payload,
-      // A stalled socket must fail the call, not hang the server or a test for ever.
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) };
+    const init = { method, headers: { ...sendHeaders, Authorization: authorization }, body: method === 'GET' || method === 'HEAD' ? undefined : payload };
     let response;
     try {
       response = await fetchImpl(url, init);

@@ -13,7 +13,7 @@
 // owner picked one from chat-models.mjs (the page sends an id); Auto names none, so Hermes's own default and fallback chain apply. The completions path sends no system message (Hermes owns its prompt)
 // and sends the history as `messages`.
 // Keys are never logged, stored or echoed.
-import { Readable } from 'node:stream';
+import { Readable, pipeline } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
@@ -404,7 +404,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       ...(object.size ? { 'Content-Length': object.size } : {}),
     });
     if (!object.body) return response.end();
-    Readable.fromWeb(object.body).pipe(response);
+    // pipeline, not pipe: a body error or a client that leaves ends this one response and never throws on the process.
+    pipeline(Readable.fromWeb(object.body), response, () => {});
     return undefined;
   }
 
