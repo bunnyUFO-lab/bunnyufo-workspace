@@ -724,3 +724,111 @@ test('again declines the copy only when nothing was signed', async () => {
     assert.ok([...fake.objects.keys()].filter(name => name.includes('/requests/')).length > before);
   } finally { await close(); }
 });
+
+// --- the model of a Hermes job (ws-2oo, T3) ---
+
+test('checkRequest: a model is an id from the chat list; Auto is not stored; an unknown id, a non-string or a legacy request is a 400', () => {
+  const base = { project: 'probe', text: 'Research tugs', preset: 'research' };
+  assert.equal(checkRequest({ ...base, model: 'haiku' }).model, 'haiku');
+  assert.equal(checkRequest({ ...base, model: 'deepseek-flash' }).model, 'deepseek-flash');
+  for (const none of [undefined, null, '', 'auto']) assert.equal('model' in checkRequest({ ...base, model: none }), false, `${none} is Auto and is not stored.`);
+  assert.deepEqual(checkRequest(base), checkRequest({ ...base, model: 'auto' }), 'Auto leaves the request as it was.');
+  for (const model of ['opus', 'claude-opus-5', 'anthropic/claude-haiku-5-5', 'Haiku', 7, {}, 'x'.repeat(2000)]) {
+    assert.throws(() => checkRequest({ ...base, model }), error => error.status === 400 && error.message === 'Unknown model.', String(model).slice(0, 20));
+  }
+  assert.throws(() => checkRequest({ project: 'probe', text: 'x', when: 'nightly', model: 'haiku' }), /preset job only/);
+});
+
+test('create: a model rides on a Hermes job; Opus, a PC or cloud target and a routed PC job are 400; Auto stores nothing', async () => {
+  const { fake, post, close } = await fixture({ env: KEY_ENV });
+  try {
+    const body = { project: 'probe', text: 'Look into tug-of-war card games', preset: 'research' };
+    const made = await post('/hub/requests', { ...body, model: 'haiku' });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.equal(made.body.target, 'hermes');
+    const stored = fake.json(`sections/inbox/requests/${made.body.id}/request.json`);
+    assert.deepEqual([stored.model, stored.target, stored.preset], ['haiku', 'hermes', 'research']);
+
+    const auto = await post('/hub/requests', { ...body, text: 'Another look at card games', model: 'auto' });
+    assert.equal(auto.status, 201);
+    assert.equal('model' in fake.json(`sections/inbox/requests/${auto.body.id}/request.json`), false, 'Auto stores no field.');
+
+    const before = [...fake.objects.keys()].length;
+    for (const bad of ['opus', 'claude-opus-5', 'anthropic/claude-haiku-5-5']) {
+      const refused = await post('/hub/requests', { ...body, model: bad });
+      assert.equal(refused.status, 400, bad);
+      assert.match(JSON.stringify(refused.body), /Unknown model/);
+    }
+    for (const target of ['pc', 'cloud']) assert.equal((await post('/hub/requests', { ...body, model: 'haiku', target })).status, 400, `${target} takes no model`);
+    // A job that routes to the PC (a code task) takes no model, with or without a target.
+    const code = await post('/hub/requests', { project: 'probe', text: 'Fix the thing', preset: 'code-task', model: 'sonnet' });
+    assert.equal(code.status, 400);
+    assert.match(JSON.stringify(code.body), /runs on Hermes/);
+    assert.equal([...fake.objects.keys()].length, before, 'Nothing was written for a refusal.');
+  } finally { await close(); }
+});
+
+test('approve signs the model into the run block and the hash; a request without one signs as before; a forged model fails the checks', async () => {
+  const { fake, post, put, close } = await fixture({ env: KEY_ENV });
+  try {
+    const plain = researchRequest('plainm');
+    const chosen = researchRequest('chosen', { model: 'haiku' });
+    put(plain);
+    put(chosen);
+    assert.equal((await post(`/hub/requests/${plain.id}/approve`, { target: 'hermes' })).status, 201);
+    assert.equal((await post(`/hub/requests/${chosen.id}/approve`, { target: 'hermes' })).status, 201);
+    const old = fake.json(`sections/inbox/requests/${plain.id}/approved.json`);
+    const signed = fake.json(`sections/inbox/requests/${chosen.id}/approved.json`);
+    assert.equal(verify(old, PUB), true);
+    assert.equal(verify(signed, PUB), true);
+    assert.equal(old.run.model, null, 'No choice: the block is what it always was.');
+    assert.equal(signed.run.model, 'haiku', 'The id is signed. The provider and model strings are not.');
+    assert.equal(JSON.stringify(signed.run).includes('claude-haiku'), false);
+    // The block is under the signature: changing it breaks the check.
+    assert.equal(verify({ ...signed, run: { ...signed.run, model: 'sonnet' } }, PUB), false);
+    assert.equal(verify({ ...signed, run: { ...signed.run, model: null } }, PUB), false);
+    // The request hash covers the model: the stored bytes with another model do not match the approval.
+    const hash = text => createHash('sha256').update(text).digest('hex');
+    const bytes = fake.text(`sections/inbox/requests/${chosen.id}/request.json`);
+    assert.equal(signed.requestSha256, hash(bytes));
+    assert.notEqual(signed.requestSha256, hash(bytes.replace('"haiku"', '"sonnet"')));
+  } finally { await close(); }
+});
+
+test('approve refuses a model on a PC job and a stored model that is not in the list', async () => {
+  const { fake, post, put, close } = await fixture({ env: KEY_ENV });
+  try {
+    const pc = preset(rid('pcm'), { project: 'probe', preset: 'code-task', target: 'pc', repo: 'example/probe', model: 'haiku' });
+    put(pc);
+    assert.equal((await post(`/hub/requests/${pc.id}/approve`, { target: 'pc' })).status, 400);
+    assert.equal(fake.text(`sections/inbox/requests/${pc.id}/approved.json`), null);
+    const bad = researchRequest('badm', { model: 'opus' });
+    put(bad);
+    assert.equal((await post(`/hub/requests/${bad.id}/approve`, { target: 'hermes' })).status, 400);
+    assert.equal(fake.text(`sections/inbox/requests/${bad.id}/approved.json`), null, 'Opus is never signed.');
+  } finally { await close(); }
+});
+
+test('approve again keeps the model, and the owner can change or drop it', async () => {
+  const { fake, post, put, close } = await fixture({ env: KEY_ENV });
+  try {
+    const request = researchRequest('againm', { model: 'haiku' });
+    put(request);
+    const kept = await post(`/hub/requests/${request.id}/again`, { target: 'hermes' });
+    assert.equal(kept.status, 201, JSON.stringify(kept.body));
+    assert.equal(fake.json(`sections/inbox/requests/${kept.body.id}/request.json`).model, 'haiku');
+    assert.equal(fake.json(`sections/inbox/requests/${kept.body.id}/approved.json`).run.model, 'haiku');
+    const second = researchRequest('againn', { model: 'haiku' });
+    put(second);
+    const changed = await post(`/hub/requests/${second.id}/again`, { target: 'hermes', model: 'deepseek-flash' });
+    assert.equal(fake.json(`sections/inbox/requests/${changed.body.id}/approved.json`).run.model, 'deepseek-flash');
+    const third = researchRequest('againo', { model: 'haiku' });
+    put(third);
+    const dropped = await post(`/hub/requests/${third.id}/again`, { target: 'hermes', model: 'auto' });
+    assert.equal('model' in fake.json(`sections/inbox/requests/${dropped.body.id}/request.json`), false);
+    assert.equal(fake.json(`sections/inbox/requests/${dropped.body.id}/approved.json`).run.model, null);
+    const refused = researchRequest('againp', { model: 'haiku' });
+    put(refused);
+    assert.equal((await post(`/hub/requests/${refused.id}/again`, { target: 'hermes', model: 'opus' })).status, 400);
+  } finally { await close(); }
+});

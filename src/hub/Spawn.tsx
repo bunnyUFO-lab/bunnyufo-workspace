@@ -42,6 +42,8 @@ const policyLine = (kinds: string[]) => {
   return `${list} may be signed by policy.`
 }
 
+const AUTO = 'auto'
+
 const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within the hour (its next hourly check).' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
@@ -67,6 +69,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [known, setKnown] = useState<{ repo: string; project?: string }[]>([])
   const [text, setText] = useState(edit?.text ?? options.text ?? '')
   const [doneWhen, setDoneWhen] = useState(edit?.doneWhen ?? '')
+  const [model, setModel] = useState(edit?.model ?? AUTO)
   const [override, setOverride] = useState<SpawnTarget | ''>((edit?.target as SpawnTarget | undefined) ?? '')
   const [route, setRoute] = useState<SpawnRoute | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
@@ -135,6 +138,10 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const target: SpawnTarget | null = bunnylink ? 'at-pc' : choice || route?.target || null
   const changed = !!choice && !!route && choice !== route.target
   const atPc = target === 'at-pc'
+  // The model menu is for Hermes jobs only; a PC, cloud or at-the-PC job shows none and sends none. Auto sends nothing.
+  const models = target === 'hermes' ? data?.models ?? [] : []
+  const picked = models.find(entry => entry.id === model) ?? models[0]
+  const sendModel = target === 'hermes' && picked && picked.id !== AUTO ? picked.id : undefined
   const canApprove = host.approve && !atPc
   const trimmed = text.trim()
   const ready = !!preset && !!project && !!trimmed && repoValid && !!target && !busy
@@ -153,6 +160,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         const again = await hubPost<ApproveAnswer & { id: string }>(`/requests/${encodeURIComponent(edit.id)}/again`, {
           target,
           ...(trimmed !== edit.text.trim() ? { text: trimmed } : {}),
+          ...(target === 'hermes' && (picked?.id ?? AUTO) !== (edit.model ?? AUTO) ? { model: picked?.id ?? AUTO } : {}),
           ...(doneWhen.trim() !== (edit.doneWhen ?? '').trim() ? { doneWhen: doneWhen.trim() } : {}),
         })
         onDone({ text: approvedNote(target, again.waiting, again.wake), run: again.id })
@@ -164,6 +172,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         ...(agent && preset.id === 'agent-avatar' ? { agent } : {}),
         ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
         ...(choice ? { target: choice } : {}),
+        ...(sendModel ? { model: sendModel } : {}),
         ...(edit ? { replaces: edit.id } : {}),
       })
       id = created.id
@@ -181,11 +190,11 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent])
+  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel])
 
   const machine = target ? MACHINE[target] : null
   const button = busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
-  const ids = { project: `${uid}-project`, repo: `${uid}-repo`, text: `${uid}-text`, done: `${uid}-done`, where: `${uid}-where` }
+  const ids = { project: `${uid}-project`, repo: `${uid}-repo`, text: `${uid}-text`, done: `${uid}-done`, where: `${uid}-where`, model: `${uid}-model` }
 
   return (
     <dialog
@@ -276,8 +285,19 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                 ) : <p className="hub-muted" role={routeError ? 'alert' : undefined}>{routeError ?? 'Working out where it runs…'}</p>}
               </div>
             </div>
+            {models.length > 0 && picked && (
+              <div className="sp-model-row" data-spawn-model-row>
+                <label className="sp-label" htmlFor={ids.model}>Model</label>
+                <div className="sp-model">
+                  <select id={ids.model} className="sp-pick" value={picked.id} onChange={event => setModel(event.target.value)} data-spawn-model>
+                    {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{entry.id === AUTO ? entry.label : `${entry.label} · API`}</option>)}
+                  </select>
+                  <span className="sp-faint" data-spawn-model-note>{picked.note}</span>
+                </div>
+              </div>
+            )}
             <div className="sp-est" data-spawn-estimate>
-              <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target)}</b></div>
+              <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target, sendModel ? picked?.label : undefined)}</b></div>
               <div><span>Time</span><b>{preset.estimate.time}</b></div>
               <div className="wide"><span>Result</span><b>{preset.produces}</b></div>
             </div>

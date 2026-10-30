@@ -9,7 +9,7 @@ import { hubHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import { RunView } from './RunDrawer'
-import { loadPresets } from './spawnData'
+import { cachedPresets, loadPresets } from './spawnData'
 import { openSpawn } from './spawnStore'
 import { goNext, useQueueOrder } from './useGoNext'
 import { useHubData } from './useHub'
@@ -19,7 +19,7 @@ import './runs.css'
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; agent?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; model?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   approved?: { target: SpawnTarget; by: string; at: string; expires: string; limits?: { minutes: number } }
@@ -34,6 +34,9 @@ const STATE_LABEL: Record<string, string> = {
 }
 
 const STARTS: Record<SpawnTarget, string> = { hermes: 'On Hermes right away', pc: 'On the PC within the hour (its next hourly check)', cloud: 'In the cloud', 'at-pc': 'When you start it at the PC' }
+
+/** The menu label of a model id, as Spawn shows it (the presets are loaded by the time a request with a preset is shown). */
+const modelLabel = (id: string) => { const label = cachedPresets()?.models?.find(entry => entry.id === id)?.label ?? id; return `${label} · API` }
 
 const sideEffect = (preset: SpawnPreset, repo?: string): string => {
   switch (preset.sideEffect) {
@@ -105,7 +108,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
       setBrief(answer.brief)
     }
   })
-  const edit = () => openSpawn({ edit: { id, project: request.project, preset: preset.id, text: request.text, target, ...(request.repo ? { repo: request.repo } : {}), ...(request.doneWhen ? { doneWhen: request.doneWhen } : {}), ...(request.agent ? { agent: request.agent } : {}) } })
+  const edit = () => openSpawn({ edit: { id, project: request.project, preset: preset.id, text: request.text, target, ...(request.repo ? { repo: request.repo } : {}), ...(request.doneWhen ? { doneWhen: request.doneWhen } : {}), ...(request.agent ? { agent: request.agent } : {}), ...(request.model ? { model: request.model } : {}) } })
 
   return (
     <>
@@ -194,6 +197,7 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
         </div>
         <p className="ap-text" data-approval-text>{request.text}</p>
         {request.doneWhen && <p className="hub-muted">Done when: {request.doneWhen}</p>}
+        {request.model && <p className="hub-muted" data-approval-model>Model: {modelLabel(request.model)}</p>}
         {!actionable && page && <RunView id={id} onGone={next => { window.location.hash = hubHash('request', next) }} />}
         {!actionable && !page && <RequestState detail={detail} />}
         {loadError && <p className="hub-error" role="alert">{loadError}</p>}

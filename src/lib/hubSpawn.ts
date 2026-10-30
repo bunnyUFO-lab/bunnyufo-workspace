@@ -60,4 +60,5 @@ export function approvedNote(target: SpawnTarget, waiting?: string, wake?: strin
 }
 
 /** The cost line of a preset for a machine: the PC always runs Opus, whatever the preset's cloud estimate names. */
-export const estimateCost = (cost: string, target: SpawnTarget | null): string => (target === 'pc' ? cost.replace(/Sonnet/g, 'Opus on the PC') : cost)
+/** A picked Hermes model (`pinned`, its label) replaces "Codex plan": the run is paid on that model's API key. */
+export const estimateCost = (cost: string, target: SpawnTarget | null, pinned?: string): string => (target === 'pc' ? cost.replace(/Sonnet/g, 'Opus on the PC') : pinned ? cost.replace(/Codex plan/g, `${pinned} · API key`) : cost)

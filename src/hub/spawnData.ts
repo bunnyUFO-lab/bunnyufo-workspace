@@ -1,7 +1,8 @@
 import { hubGet } from '../lib/hub'
+import type { ChatModel } from '../lib/hub'
 import type { SpawnPreset, SpawnRule } from '../lib/hubSpawn'
 
-export interface PresetList { presets: SpawnPreset[]; rules: SpawnRule[] }
+export interface PresetList { presets: SpawnPreset[]; rules: SpawnRule[]; models?: ChatModel[] }
 
 let cache: PresetList | null = null
 

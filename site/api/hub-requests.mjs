@@ -7,6 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
+import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createPublicKey } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
@@ -43,7 +44,7 @@ const text = (value, max, what, { required = false } = {}) => {
 /**
  * Check what a request is made from and return the clean fields. Throws a 400 in plain English. `raw` holds
  * `project`, `text` and either `when` (a legacy request) or `preset`; the optional fields are `title`, `repo`,
- * `needs`, `target`, `doneWhen`, `replaces`, `origin` and `followUp`. Unknown fields are dropped. The id, the
+ * `needs`, `target`, `model`, `doneWhen`, `replaces`, `origin` and `followUp`. Unknown fields are dropped. The id, the
  * time and the author are the server's to add.
  *
  * `fromOwner` is true only for the site API acting for a signed-in person: it alone may set `origin.kind`
@@ -79,6 +80,15 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
   if (data.target !== undefined && data.target !== null && data.target !== '') {
     if (!TARGETS.includes(data.target)) throw fail('The target is pc, cloud, hermes or at-pc.');
     out.target = data.target;
+  }
+  // The model of a Hermes job: an id from chat-models.mjs, 400 on any other. Auto is the default and is not stored, so a request
+  // without a choice keeps the bytes it always had.
+  if (data.model !== undefined && data.model !== null && data.model !== '') {
+    const picked = chatModelOf(data.model);
+    if (picked.provider) {
+      if (!out.preset) throw fail('A model can be chosen for a preset job only.');
+      out.model = picked.id;
+    }
   }
   const doneWhen = text(data.doneWhen, REQUEST_LIMITS.doneWhen, '"Done when"');
   if (doneWhen) out.doneWhen = doneWhen;
@@ -160,6 +170,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   const clash = message => fail(message, 409);
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
+  const MODEL_ON_HERMES = 'A model can be chosen for a job that runs on Hermes.';
 
   /**
    * Whether a request that waits for the PC can be moved to the cloud, and if not, why. It must be approved for the PC and
@@ -312,6 +323,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
         origin: { kind: 'owner', name: user }, ...(clean.replaces ? { replaces: clean.replaces } : {}),
       };
       proposal.why = clean.target ? 'you chose it' : routed.why;
+      if (clean.model && proposal.target !== 'hermes') throw fail(MODEL_ON_HERMES, 400);
+      if (clean.model) proposal.model = clean.model;
     }
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const { why, ...stored } = proposal;
@@ -343,7 +356,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
 
   /** `GET /hub/presets`, `/hub/presets/route?preset=&project=&repo=` and `/hub/presets/brief?request=<id>`. */
   async function presetRoutes(path, query, at) {
-    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES };
+    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES, models: chatModelsForClient() };
     if (path === '/hub/presets/repos') {
       // The repos Spawn offers: each project's own (its section's tracked repo, in the project table's order), then the ones the host lists.
       const seen = new Set();
@@ -444,6 +457,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const chosen = target ?? request.target;
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
+    if (request.model && chosen !== 'hermes') throw fail(MODEL_ON_HERMES, 400);
     if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
     if (chosen === 'cloud' && !hasCloud(request.repo)) throw fail(`No cloud routine for ${request.repo}.`, 400);
     const body = {
@@ -528,7 +542,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // Only a "done when" the owner changed (or removed) is the owner's; one sent back as it was keeps its author.
     const ownerChangedDone = raw?.doneWhen !== undefined && raw.doneWhen.trim() !== String(request.doneWhen ?? '').trim();
     const doneBy = ownerChangedDone ? null : doneWhenAuthor(request, oldOrigin);
-    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
+    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
     }), null, moved);

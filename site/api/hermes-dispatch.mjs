@@ -5,11 +5,13 @@
 //
 // Rules this module keeps (docs/workspaces.md, "Requests"):
 //  - An ordinary run is started with `{ input }` only: no provider, no model, so Hermes's own default and
-//    fallback chain apply. One exception: a run that failed on quota is started once more on Anthropic.
+//    fallback chain apply. Two exceptions: a run that failed on quota is started once more on Anthropic (Auto only),
+//    and a run whose approval names a model (`run.model`, an id from chat-models.mjs) is started with that pair.
 //  - At most 3 Hermes request runs go at a time. A fourth approval is signed and waits in `approved`; a run
 //    that ends, and a 60-second sweep, start the oldest waiting one.
 //  - Every file written is create-only. A 412 means another follower or process got there first.
 import { TERMINAL, createFollowers } from './hermes-follower.mjs';
+import { chatModelOf } from './chat-models.mjs';
 import { createHermesRuns } from './hermes-runs.mjs';
 import { createScrub } from './scrub.mjs';
 import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
@@ -87,7 +89,8 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
   async function launch(id, approved, at) {
     let runId;
     try {
-      ({ runId } = await runs.start({ input: approved.run.brief, idempotencyKey: id }));
+      const pick = chatModelOf(approved.run.model);   // the signed id; a value the list does not know fails the start
+      ({ runId } = await runs.start({ input: approved.run.brief, idempotencyKey: id, ...(pick.provider ? { provider: pick.provider, model: pick.model } : {}) }));
     } catch (error) {
       await writeResult(id, startFailedOutcome({ reason: scrub(error.status ? `${error.message} (${error.status})` : error.message), at: at.toISOString() }));
       return;
@@ -146,7 +149,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     try {
       if (unknown) {
         await writeResult(id, unknownOutcome({ card: await newestCardSince(context.startedAt), at: at.toISOString() }));
-      } else if (run.status === 'failed' && isQuotaError(run.error) && !context.retry && !names.has('hermes-retry.json') && !stopped && !follower.timedOut) {
+      } else if (run.status === 'failed' && isQuotaError(run.error) && !context.approved?.run?.model && !context.retry && !names.has('hermes-retry.json') && !stopped && !follower.timedOut) {
         await startRetry(context, at);
         return;
       } else {

@@ -152,6 +152,15 @@ test('runBlock: Hermes presets have model null and never a provider; limits stay
   assert.equal(runBlock({ preset: 'playtest-build', request: request() }).opensWindows, true);
 });
 
+test('runBlock: a Hermes job carries the id the owner chose; a preset with its own model keeps it', () => {
+  const block = runBlock({ preset: 'research', request: request({ model: 'haiku' }) });
+  assert.equal(block.model, 'haiku');
+  assert.equal('provider' in block, false);
+  assert.deepEqual(Object.keys(block).sort(), Object.keys(runBlock({ preset: 'research', request: request() })).sort(), 'The block has the same fields.');
+  assert.equal(runBlock({ preset: 'research', request: request() }).model, null);
+  assert.equal(runBlock({ preset: 'code-task', request: request({ model: 'haiku' }) }).model, 'sonnet');
+});
+
 test('agent-avatar routes to the PC and both avatar briefs name the request, the agent and the PC source', () => {
   const picked = route({ preset: 'agent-avatar', project: 'sprite-studio' });
   assert.deepEqual([picked.target, picked.rule], ['pc', 2]);
@@ -245,6 +254,8 @@ test('GET /hub/presets lists 8 and the rules; /hub/presets/route answers like ro
     assert.equal(status, 200);
     assert.equal(body.presets.length, 8);
     assert.equal(body.rules.length, 5);
+    assert.deepEqual(body.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash'], 'The Spawn menu list is the chat list.');
+    assert.equal(JSON.stringify(body.models).includes('claude-'), false, 'No provider or model string reaches the page.');
     assert.equal(JSON.stringify(body).includes('template'), false);
     const routed = await get('/hub/presets/route?preset=code-task&project=magic-loops');
     assert.deepEqual([routed.body.target, routed.body.rule], ['pc', 4]);
