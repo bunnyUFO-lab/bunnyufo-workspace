@@ -109,13 +109,26 @@ function mergeCard(base, local, remote) {
       if (key in remote) out[key] = remote[key]; else delete out[key];
     }
   }
-  // A section added on each side: keep both, this folder's first. The same file on both: a tab
-  // only the other side renamed takes its name, otherwise this folder's wins.
-  const steps = Array.isArray(local.steps) ? [...local.steps] : [];
-  for (const step of Array.isArray(remote.steps) ? remote.steps : []) {
-    const index = steps.findIndex(item => item?.path === step?.path && (item?.url ?? null) === (step?.url ?? null));
+  // Tabs, three ways. Untouched here since the last sync: the site's tabs and their order, as they
+  // are. Otherwise this folder's order, minus a tab the site removed on purpose (unless it was
+  // changed here since), plus a tab only the site has. The same file on both: a tab only the other
+  // side renamed takes its name, otherwise this folder's wins.
+  const stepKey = step => `${step?.path}|${step?.url ?? ''}`;
+  const wasStep = step => base?.steps?.find(item => stepKey(item) === stepKey(step));
+  const theirSteps = Array.isArray(remote.steps) ? remote.steps : [];
+  if (base && Array.isArray(base.steps) && same(local.steps, base.steps) && Array.isArray(remote.steps)) {
+    out.steps = [...theirSteps];
+    return out;
+  }
+  const gone = new Set(theirSteps.map(stepKey));
+  const steps = (Array.isArray(local.steps) ? local.steps : []).filter(step => {
+    const was = wasStep(step);
+    return gone.has(stepKey(step)) || !was || !same(step, was);
+  });
+  for (const step of theirSteps) {
+    const index = steps.findIndex(item => stepKey(item) === stepKey(step));
     if (index < 0) steps.push(step);
-    else if (base && same(steps[index], base.steps?.find(item => item?.path === step?.path))) steps[index] = step;
+    else if (base && same(steps[index], wasStep(step))) steps[index] = step;
   }
   out.steps = steps;
   return out;
@@ -131,13 +144,19 @@ export function mergeCardLists(base, local, remote) {
   const B = ids(base), L = ids(local), R = ids(remote);
   const merged = { ...local };
   for (const key of new Set([...Object.keys(local ?? {}), ...Object.keys(remote ?? {})])) {
-    if (key === 'entities') continue;
+    if (key === 'entities' || key === 'retired') continue;
     if (base && same(local?.[key], base[key]) && !same(remote?.[key], base[key])) merged[key] = remote[key];
   }
+  // `retired` is the site's record of cards moved to another workspace or put in the Trash. It is
+  // only ever written there, so it always follows the bucket, and a card on it stays out of this
+  // list whatever the local copy says (its folder is left on disk and no longer published).
+  if (remote?.retired && typeof remote.retired === 'object') merged.retired = remote.retired; else delete merged.retired;
+  const retired = merged.retired ?? {};
   const entities = [];
   for (const card of Array.isArray(local?.entities) ? local.entities : []) {
     if (!card?.id) { entities.push(card); continue; }
     const theirs = R.get(card.id), was = B.get(card.id);
+    if (!theirs && retired[card.id]) continue;
     if (!theirs) {
       // Gone from the bucket: removed there. Untouched here since, so let it go.
       if (was && same(card, was)) continue;
@@ -174,6 +193,11 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
   if (same(result, local)) return { merged: false, added: [] };
   const known = new Set((local.entities ?? []).map(item => item?.id));
   const added = (result.entities ?? []).filter(item => item?.id && !known.has(item.id)).map(item => item.id);
+  const kept = new Set((result.entities ?? []).map(item => item?.id));
+  for (const item of local.entities ?? []) {
+    const record = item?.id && !kept.has(item.id) ? result.retired?.[item.id] : null;
+    if (record) log(`  retired: ${item.id} (${record.kind === 'moved' ? `moved to ${record.to ?? 'another workspace'}` : 'in the Trash'}); its local folder is no longer published`);
+  }
   log(`  card list: ${added.length ? `${added.length} card(s) from the site (${added.join(', ')})` : 'changes from the site'} ${dryRun ? 'to merge in' : 'merged in'}`);
   if (!dryRun) {
     const temp = `${file}.${process.pid}.tmp`;

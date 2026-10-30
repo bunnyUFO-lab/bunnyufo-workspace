@@ -344,3 +344,113 @@ test('a workspace whose bucket is not under sections/<id> is refused', async () 
     assert.equal(fake.objects.size, 0);
   } finally { await fake.close(); }
 });
+
+const LIST = 'sections/my-workspace/workspace.json';
+const step = (name, file) => ({ name, path: file });
+const localList = async site => JSON.parse(await readFile(path.join(site, 'workspace.json'), 'utf8'));
+const putLocal = (site, list) => writeFile(path.join(site, 'workspace.json'), JSON.stringify(list, null, 2));
+
+/** A workspace with the hub plus cards `a` and `b`, published once. */
+async function withCards(fake) {
+  const made = await workspace(fake);
+  for (const id of ['a', 'b']) {
+    await mkdir(path.join(made.site, id), { recursive: true });
+    await writeFile(path.join(made.site, id, 'index.md'), `# ${id}\n`);
+  }
+  const list = await localList(made.site);
+  list.entities.push(
+    { id: 'a', title: 'A', folder: 'a', steps: [step('Overview', 'index.md')] },
+    { id: 'b', title: 'B', folder: 'b', steps: [step('Overview', 'index.md')] });
+  await putLocal(made.site, list);
+  await publish({ content: made.site, registryFile: made.registryFile, bucketOptions: made.bucketOptions, log: () => {} });
+  return made;
+}
+
+test('a card moved or deleted on the site stays out of a publish, though its local copy changed', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withCards(fake);
+    // On the site: `a` moved to another workspace, `b` put in the Trash.
+    const remote = fake.json(LIST);
+    const [a, b] = ['a', 'b'].map(id => remote.entities.find(item => item.id === id));
+    remote.entities = remote.entities.filter(item => item.id === 'hub');
+    remote.retired = { a: { kind: 'moved', to: 'game-ideas', folder: 'a', at: '2026-10-30' }, b: { kind: 'deleted', at: '2026-10-30', entity: b } };
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    // Here, meanwhile: both cards changed.
+    const local = await localList(site);
+    for (const card of local.entities) if (card.id !== 'hub') card.title = `${card.title}, edited`;
+    await putLocal(site, local);
+    await writeFile(path.join(site, 'a', 'index.md'), '# a, edited\n');
+    assert.ok(a);
+
+    const lines = [];
+    await publish({ content: site, registryFile, bucketOptions, log: line => lines.push(line) });
+    const published = fake.json(LIST);
+    assert.deepEqual(published.entities.map(item => item.id), ['hub'], 'Neither card came back.');
+    assert.equal(published.retired.a.kind, 'moved');
+    assert.equal(published.retired.b.kind, 'deleted', 'The Trash record survived the upload.');
+    assert.deepEqual((await localList(site)).entities.map(item => item.id), ['hub']);
+    assert.match(lines.join('\n'), /retired: a \(moved to game-ideas\); its local folder is no longer published/);
+    assert.match(lines.join('\n'), /retired: b \(in the Trash\)/);
+    // No local file is deleted, and the changed page was not uploaded over the site's copy.
+    assert.equal(await readFile(path.join(site, 'a', 'index.md'), 'utf8'), '# a, edited\n');
+    assert.equal(await readFile(path.join(site, 'b', 'index.md'), 'utf8'), '# b\n');
+    assert.equal(fake.text('sections/my-workspace/a/index.md'), '# a\n');
+  } finally { await fake.close(); }
+});
+
+test('a tab removed on the site stays removed, and a tab added here still goes up', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await workspace(fake);
+    const local = await localList(site);
+    local.entities[0].steps = [step('Overview', 'index.md'), step('Notes', 'notes.md'), step('Refs', 'refs.md')];
+    await putLocal(site, local);
+    await writeFile(path.join(site, 'hub', 'notes.md'), '# Notes\n');
+    await writeFile(path.join(site, 'hub', 'refs.md'), '# Refs\n');
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+
+    // On the site: Notes deleted (the file stays). Here: a new tab, Plan.
+    const remote = fake.json(LIST);
+    remote.entities[0].steps = remote.entities[0].steps.filter(item => item.path !== 'notes.md');
+    remote.entities[0].removedTabs = [{ name: 'Notes', path: 'notes.md', at: '2026-10-30', index: 1 }];
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    const edited = await localList(site);
+    edited.entities[0].steps.push(step('Plan', 'plan.md'));
+    await putLocal(site, edited);
+    await writeFile(path.join(site, 'hub', 'plan.md'), '# Plan\n');
+
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const names = list => list.entities[0].steps.map(item => item.name);
+    assert.deepEqual(names(fake.json(LIST)), ['Overview', 'Refs', 'Plan']);
+    assert.deepEqual(names(await localList(site)), ['Overview', 'Refs', 'Plan']);
+    assert.equal(fake.json(LIST).entities[0].removedTabs[0].path, 'notes.md');
+    assert.equal(await readFile(path.join(site, 'hub', 'notes.md'), 'utf8'), '# Notes\n', 'The tab\'s file stays on disk.');
+  } finally { await fake.close(); }
+});
+
+test('a tab order set on the site is kept when this folder\'s tabs are untouched, even if its title changed', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await workspace(fake);
+    const local = await localList(site);
+    local.entities[0].steps = [step('Overview', 'index.md'), step('Notes', 'notes.md'), step('Refs', 'refs.md')];
+    await putLocal(site, local);
+    await writeFile(path.join(site, 'hub', 'notes.md'), '# Notes\n');
+    await writeFile(path.join(site, 'hub', 'refs.md'), '# Refs\n');
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+
+    const remote = fake.json(LIST);
+    remote.entities[0].steps = [remote.entities[0].steps[2], remote.entities[0].steps[0], remote.entities[0].steps[1]];
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    const edited = await localList(site);
+    edited.entities[0].title = 'Hub, renamed here';
+    await putLocal(site, edited);
+
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const published = fake.json(LIST).entities[0];
+    assert.deepEqual(published.steps.map(item => item.name), ['Refs', 'Overview', 'Notes']);
+    assert.equal(published.title, 'Hub, renamed here');
+    assert.deepEqual((await localList(site)).entities[0].steps.map(item => item.name), ['Refs', 'Overview', 'Notes']);
+  } finally { await fake.close(); }
+});
