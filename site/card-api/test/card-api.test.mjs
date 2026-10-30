@@ -235,6 +235,40 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
   }
 });
 
+test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an applied note, once', async () => {
+  const { fake, call } = await setup();
+  try {
+    const base = 'bead-marks/probe/pb-1';
+    const put = (token, file, headers = { 'If-None-Match': '*' }) => call('PUT', `/sections/inbox/files/${base}/${file}`, { token, body: Buffer.from('{}'), base64: true, headers });
+    for (const verdict of ['done', 'not-needed', 'undo']) {
+      const refused = await put('tok-cloud', `20261030T100000000Z-${verdict}-ab12.json`);
+      assert.equal(refused.status, 403, verdict);
+      assert.equal(refused.data.error, 'Only the Hub writes answers.');
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${base}/20261030T100000000Z-${verdict}-ab12.json` }] } })).status, 403, `${verdict} by upload URL`);
+    }
+    assert.equal(fake.text(`sections/inbox/${base}/20261030T100000000Z-done-ab12.json`), null);
+    // The applied note: create-only, once.
+    const applied = '20261030T110000000Z-applied-cd34.json';
+    assert.equal((await put('tok-cloud', applied)).status, 200, 'An agent writes the applied note.');
+    assert.equal((await put('tok-cloud', applied)).status, 412, 'It is not overwritten.');
+    assert.equal((await put('tok-cloud', '20261030T120000000Z-applied-ef56.json', {})).status, 403, 'Without If-None-Match: * it is refused.');
+    assert.equal((await put('tok-cloud', 'notes.json')).status, 403, 'Any other name under bead-marks/ is refused.');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${base}/20261030T130000000Z-applied-gh78.json` }] } })).status, 403, 'An upload URL cannot be create-only.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${base}/${applied}`, { token: 'tok-deleter' })).status, 403, 'A limited deleter keeps off it.');
+    // Whatever this API writes there is tagged, so the Hub reads a verdict only from a file it wrote itself.
+    assert.equal(fake.objects.get(`sections/inbox/${base}/${applied}`).metadata.writer, 'card-api');
+    // The passphrase may put both kinds, and its verdict is tagged too.
+    assert.equal((await put('tok-all', '20261030T140000000Z-done-ij90.json')).status, 200);
+    assert.equal((await put('tok-all', '20261030T150000000Z-applied-kl12.json')).status, 200);
+    assert.equal(fake.objects.get(`sections/inbox/${base}/20261030T140000000Z-done-ij90.json`).metadata.writer, 'card-api');
+    // The development inbox follows the same rules.
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    assert.equal((await call('PUT', `/sections/inbox-dev/files/${base}/20261030T100000000Z-done-ab12.json`, { token: 'tok-devbot', body: Buffer.from('{}'), base64: true })).status, 403);
+  } finally {
+    await fake.close();
+  }
+});
+
 test('inbox: an avatar choice is written by the Hub, so a limited writer cannot put or remove one', async () => {
   const { fake, call } = await setup();
   try {

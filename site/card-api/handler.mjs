@@ -165,11 +165,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry.json, fire-*.json, answer-*.json) and everything under hermes-approvals/ are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|undo-<rand>.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|undo)-[^/]+\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
+  /** An agent's only file under bead-marks/: the note that it closed the issue the owner marked (create-only). */
+  const APPLIED_FILE = /^bead-marks\/[^/]+\/[^/]+\/[^/]+-applied-[^/]+\.json$/i;
+  const markFiles = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
+    if (INBOXES.has(sectionId) && caller.rights.write !== null && /^bead-marks\//i.test(file) && (!APPLIED_FILE.test(file) || upload || ifNoneMatch !== '*')) {
+      throw new HttpError(403, 'Agents write only applied marks, once.');
+    }
+  };
   const ownerOnly = (caller, sectionId, file) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
@@ -197,10 +204,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    * hermes-main, the old shared tokens, the passphrase). Only this function sets it; a caller's own `x-amz-meta-*`
    * headers are never forwarded. The site API's policy approval signs only when the stored `origin` and this agree.
    */
-  const writerMetadata = (caller, sectionId, file) => (
-    INBOXES.has(sectionId) && caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
-      ? { writer: 'agent' } : undefined
-  );
+  const writerMetadata = (caller, sectionId, file) => {
+    if (!INBOXES.has(sectionId)) return undefined;
+    // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
+    if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    return caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
+      ? { writer: 'agent' } : undefined;
+  };
   /** A limited writer cannot claim a request as the owner's. */
   const noOwnerOrigin = (caller, sectionId, file, body) => {
     if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^requests\/[^/]+\/request\.json$/i.test(file)) return;
@@ -221,8 +231,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file))) {
-      throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks and request files.');
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file))) {
+      throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks, marks and request files.');
     }
   };
 
@@ -368,6 +378,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
       await section(caller, sectionId, 'write');
       ownerOnly(caller, sectionId, file);
+      markFiles(caller, sectionId, file, { ifNoneMatch });
       await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
@@ -397,6 +408,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        markFiles(caller, sectionId, file, { upload: true });
         await runnerOnly(caller, sectionId, file);
         askCreateOnly(caller, sectionId, file, { upload: true });
         return { path: file, method: 'PUT', url: await bucket.presign('PUT', keyOf(sectionId, file), { expires: urlTtl }) };
