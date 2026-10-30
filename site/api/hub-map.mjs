@@ -147,15 +147,16 @@ const prNumberOf = url => { const match = /\/pull\/(\d+)(?:[/?#]|$)/.exec(String
 
 /**
  * The PRs the events saw merged with the ones Beads records: a row for the same number keeps the
- * event's state; a Beads-only row keeps its own, or is merged when the task is closed and says nothing.
+ * event's state; a Beads-only row keeps its own, or is merged when the task is closed and says nothing,
+ * and is dated with the issue (`at`: closed or last updated) since Beads holds no PR dates.
  */
-function mergePrs(eventRows, beadsRows, closed) {
+function mergePrs(eventRows, beadsRows, closed, at) {
   const rows = eventRows.map(row => { const number = prNumberOf(row.url); return number ? { ...row, number } : row; });
   const known = new Set(rows.map(row => row.number).filter(Boolean));
   const extra = beadsRows.filter(row => !known.has(row.number)).sort((a, b) => a.number - b.number)
     .map(row => {
       const state = row.state ?? (closed ? 'merged' : undefined);
-      return { number: row.number, ...(row.url ? { url: row.url } : {}), ...(state ? { state } : {}) };
+      return { number: row.number, ...(row.url ? { url: row.url } : {}), ...(state ? { state } : {}), at };
     });
   return [...extra, ...rows];
 }
@@ -232,7 +233,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
   const toTask = issue => {
     const state = taskState(issue);
     const { signs, prUrl, prs: eventPrs } = issueSigns(issue, state, { eventsByBead });
-    const prs = mergePrs(eventPrs, prsFromIssue(issue, repo), issue.status === 'closed');
+    const prs = mergePrs(eventPrs, prsFromIssue(issue, repo), issue.status === 'closed', issue.closed_at ?? issue.updated_at ?? '');
     const summary = summaryOf(issue.description);
     const commits = commitsFromIssue(issue, repo);
     const cardRows = cardsOf(issue);

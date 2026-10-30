@@ -259,7 +259,7 @@ test('notes: Beads PRs merge with event rows; the event keeps its state, a close
   ];
   const map = build(issues, { events, repo: 'git@github.com:someone/some_repo.git' });
   assert.deepEqual(task(map, 'both').prs.map(({ number, url, state }) => ({ number, url, state })), [{ number: 5, url: 'https://github.com/someone/some_repo/pull/5', state: 'merged' }], 'The event row wins the state and is not doubled.');
-  assert.deepEqual(task(map, 'old').prs, [{ number: 138, url: 'https://github.com/someone/some_repo/pull/138', state: 'merged' }]);
+  assert.deepEqual(task(map, 'old').prs, [{ number: 138, url: 'https://github.com/someone/some_repo/pull/138', state: 'merged', at: '2026-10-01T10:00:00Z' }], 'A Beads-only row is dated with the issue.');
   assert.equal(task(map, 'bare').prs[0].state, 'merged', 'A closed task with no stated state is merged.');
   assert.equal('state' in task(map, 'openbare').prs[0], false, 'An open one with no stated state has none.');
   const noRepo = build(issues);
