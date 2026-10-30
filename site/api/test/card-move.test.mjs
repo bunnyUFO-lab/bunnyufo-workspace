@@ -1,6 +1,6 @@
 // Moving a card between workspaces: on the bucket (fake S3) and on folders, with the card's
 // viewer data, its state, the failures a move has to survive, and the promise that nothing is deleted.
-import test from 'node:test';
+import baseTest from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,9 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { bucketStore, cardWriter, folderStore } from '../card-writes.mjs';
 import { moveCard } from '../card-move.mjs';
 import { createBucketCardStore, createCardStore } from '../card-state.mjs';
+
+// Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
+const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
 
 const now = () => new Date('2026-10-30T10:00:00Z');
 const entity = (id, extra = {}) => ({ id, folder: `2026-10-29_${id}`, title: id, category: 'ideas', created: '2026-10-29', updated: '2026-10-29', steps: [{ name: 'Overview', path: 'index.md' }, { name: 'Page', path: 'page.html' }], ...extra });

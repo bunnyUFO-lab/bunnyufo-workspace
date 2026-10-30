@@ -5,6 +5,7 @@ import type { DragItem, DropTarget } from '../lib/drag'
 import { cardKey } from '../lib/order'
 import { entityHash, homeLink, hubHash, type HubScreen } from '../lib/route'
 import { host } from '../lib/host'
+import { canManage } from '../lib/library'
 import { hubGroups } from '../lib/hubNav'
 import { categoryIcon, groupIcon } from '../lib/categories'
 import { useCollapsedSections } from '../lib/collapse'
@@ -311,6 +312,8 @@ export default function Sidebar({
   // Deleted cards of the workspace in view (all of them under "All").
   const trashed = trashOf(project ? workspaces.filter(w => w.id === project) : workspaces)
   const [trashOpen, setTrashOpen] = useState(false)
+  // A purge that stopped partway leaves a pending tombstone and maybe no card in the Trash. The link stays, so opening it retries.
+  const purgePending = host.purge && (project ? workspaces.filter(w => w.id === project) : workspaces).some(w => canManage(w) && Object.values(w.retired ?? {}).some(r => r.kind === 'purged' && r.pending))
   // Dragging is the mouse's way to pin; the card's own pin button is the keyboard's. Each
   // target below says what it is with `data-drop`, and lib/drag works out which one the
   // pointer is over — so a zone only has to say whether it would take the card in the air.
@@ -606,7 +609,7 @@ export default function Sidebar({
         </div>
       )}
 
-      {trashed.length > 0 && !query && (
+      {(trashed.length > 0 || purgePending) && !query && (
         <button type="button" className="sidebar-trash" data-trash-link onClick={() => setTrashOpen(true)}>
           Trash ({trashed.length})
         </button>

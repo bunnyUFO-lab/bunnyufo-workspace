@@ -124,6 +124,17 @@ export function claimExpired(list, today) {
 
   // Removed tabs: whole workspace, deleted cards or not.
   const liveKeys = protectedKeys([...entities, ...Object.values(retired).filter(record => record?.kind === 'deleted').map(record => record.entity)]);
+  // A removed tab that is not yet due still owns its file: two tabs on one path (a hand-edited or merged list) must not lose the newer one's.
+  for (const entity of entities) {
+    const folder = safeFolder(entity?.folder);
+    if (!folder || !Array.isArray(entity.removedTabs)) continue;
+    for (const tab of entity.removedTabs) {
+      const file = safeFile(tab?.path);
+      if (!file || tab?.pending === true || expired(tab?.at, todayMs)) continue;
+      liveKeys.add(posix.normalize(`${folder}/${file}`));
+      if (/\.excalidraw$/i.test(file)) liveKeys.add(posix.normalize(`${folder}/${file.replace(/\.excalidraw$/i, '.png')}`));
+    }
+  }
   for (const entity of entities) {
     if (!entity || !Array.isArray(entity.removedTabs)) continue;
     const folder = safeFolder(entity.folder);
