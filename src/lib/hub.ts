@@ -247,6 +247,8 @@ export interface MapTask {
   closeReason?: string
   cards?: MapCard[]
   commits?: { sha: string; url?: string }[]
+  /** The owner marked it on the Roadmap and no agent has closed it in Beads yet: it shows closed. */
+  mark?: { verdict: 'done' | 'not-needed'; at: string; pending: boolean }
 }
 export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
 export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }

@@ -1307,3 +1307,47 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 }
+
+for (const via of ['api', 's3']) {
+  test(`mark (${via}): list shows the owner's marks no agent applied, and applied clears one (BUW_INBOX_SECTION=inbox-dev)`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+      cli.env = { BUW_INBOX_SECTION: 'inbox-dev' };
+      const mark = (bead, stamp, verdict, at, extra = {}) => {
+        const file = `${stamp}-${verdict}-ab12.json`;
+        fake.seed(`sections/inbox-dev/bead-marks/dev-roadmap/${bead}/${file}`, JSON.stringify({ v: 1, project: 'dev-roadmap', bead, verdict, at, by: 'owner', ...extra }), 'application/json');
+        return file;
+      };
+      mark('dr-a', '20261030T100000000Z', 'done', '2026-10-30T10:00:00.000Z');
+      mark('dr-b', '20261030T090000000Z', 'done', '2026-10-30T09:00:00.000Z');
+      mark('dr-b', '20261030T091000000Z', 'undo', '2026-10-30T09:10:00.000Z');
+      mark('dr-c', '20261030T110000000Z', 'not-needed', '2026-10-30T11:00:00.000Z', { reason: 'Superseded' });
+      const shut = mark('dr-d', '20261030T080000000Z', 'done', '2026-10-30T08:00:00.000Z');
+      fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-d/20261030T081000000Z-applied-cd34.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-d', verdict: 'applied', at: '2026-10-30T08:10:00.000Z', by: 'pc', mark: shut }), 'application/json');
+      mark('dr-e', '20261030T120000000Z', 'done', '2026-10-30T12:00:00.000Z');
+      fake.seed('sections/inbox-dev/bead-marks/another/an-1/20261030T120000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'another', bead: 'an-1', verdict: 'done', at: '2026-10-30T12:00:00.000Z', by: 'owner' }), 'application/json');
+
+      const listed = await cli(via, 'mark', 'list', '--project', 'dev-roadmap');
+      assert.equal(listed.code, 0, listed.stderr);
+      assert.deepEqual(listed.stdout.trim().split('\n'), ['dr-a\tdone\t2026-10-30T10:00:00.000Z', 'dr-c\tnot-needed\t2026-10-30T11:00:00.000Z\tSuperseded', 'dr-e\tdone\t2026-10-30T12:00:00.000Z'], 'Oldest first; undone and applied marks are not listed.');
+      const json = JSON.parse((await cli(via, 'mark', 'list', '--project', 'dev-roadmap', '--json')).stdout);
+      assert.deepEqual(json.map(item => [item.bead, item.verdict, item.reason]), [['dr-a', 'done', undefined], ['dr-c', 'not-needed', 'Superseded'], ['dr-e', 'done', undefined]]);
+
+      const applied = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', 'dr-a');
+      assert.equal(applied.code, 0, applied.stderr);
+      assert.match(applied.stdout.trim(), /^bead-marks\/dev-roadmap\/dr-a\/\d{8}T\d{9}Z-applied-[0-9a-f]{4}\.json$/);
+      const note = fake.json(`sections/inbox-dev/${applied.stdout.trim()}`);
+      assert.deepEqual([note.v, note.verdict, note.bead, note.mark], [1, 'applied', 'dr-a', '20261030T100000000Z-done-ab12.json']);
+      assert.match(note.by, /^[a-z0-9-]+$/);
+      assert.deepEqual((await cli(via, 'mark', 'list', '--project', 'dev-roadmap')).stdout.trim().split('\n').map(line => line.split('\t')[0]), ['dr-c', 'dr-e']);
+      for (const bead of ['dr-a', 'dr-b', 'dr-d']) {
+        const none = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', bead);
+        assert.equal(none.code, 0, none.stderr);
+        assert.equal(none.stdout.trim(), 'nothing to apply', bead);
+      }
+      assert.equal((await cli(via, 'mark', 'applied', '--project', 'dev-roadmap')).code, 1, 'A bead is needed.');
+      assert.deepEqual(keys('').filter(key => !key.endsWith('/workspace.json')), [], 'Nothing was written to the real inbox.');
+    } finally { await close(); }
+  });
+}

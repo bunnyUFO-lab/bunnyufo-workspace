@@ -18,6 +18,7 @@ import {
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
+import { applyMarks, checkMarkRequest, markEntry, markKey, markState } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
@@ -40,7 +41,7 @@ import { createWake } from './pc-wake.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -284,6 +285,37 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
   async function loadBeads(project) {
     return beadsReader.load(project);
+  }
+
+  /**
+   * The owner's Roadmap marks (`bead-marks/<project>/<bead>/<file>`) of one project, or of all, as a Map of
+   * `<project>/<bead>` to entries. The files are create-only, so each is read once; the listing is live.
+   */
+  async function loadMarks(project) {
+    const base = folder('bead-marks');
+    const { objects } = await bucket.list(project ? `${base}${project}/` : base);
+    const entries = await pool(POOL, objects, async object => {
+      const rel = object.key.slice(base.length);
+      if (!/^[^/]+\/[^/]+\/\d{8}T\d{9}Z-[a-z-]+-[a-z0-9]{4}\.json$/.test(rel)) return null;
+      let hit = cache.get(object.key);
+      if (!hit) {
+        const got = await bucket.getText(object.key);
+        if (!got) return null;
+        let value = null;
+        try { value = JSON.parse(got.text); } catch { /* not JSON: markEntry refuses it */ }
+        hit = { value, writer: got.metadata?.writer ?? null };
+        remember(object.key, hit);
+      }
+      return markEntry(rel, hit.value, hit.writer);
+    });
+    const marks = new Map();
+    for (const entry of entries) {
+      if (!entry) continue;
+      const name = markKey(entry.project, entry.bead);
+      if (!marks.has(name)) marks.set(name, []);
+      marks.get(name).push(entry);
+    }
+    return marks;
   }
 
   /**
@@ -548,6 +580,54 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       log(`[hub] checklist ${id} was submitted but its event was not written: ${error.message}`);
     }
     return { status: 201, body: { state: 'submitted', submit } };
+  }
+
+  /** A create-only mark file `bead-marks/<project>/<bead>/<stamp>-<verdict>-<rand4>.json`, a new name on a clash, three tries. */
+  async function putMark({ project, bead, verdict, body, at }) {
+    const text = `${JSON.stringify(body, null, 2)}\n`;
+    for (let attempt = 0; ; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      try {
+        await putCreateOnly(`bead-marks/${project}/${bead}/${markStamp(at)}-${verdict}-${randomId(4)}.json`, text, 'application/json', clash);
+        return;
+      } catch (error) {
+        if (error !== clash || attempt >= 2) throw error;
+      }
+    }
+  }
+
+  /**
+   * The owner marks a task that waits on them, with nothing in Needs you, done or no longer needed (or takes it back).
+   * Only the Hub writes the verdict; an agent closes the issue in Beads later and writes `applied`.
+   */
+  async function markBead(project, raw, user, at) {
+    if (!validProject(project)) throw fail('No such project.', 404);
+    let request;
+    try { request = checkMarkRequest(raw); } catch (error) { throw fail(error.message, 400); }
+    const { bead, verdict, reason } = request;
+    const { meta, issues } = await loadBeads(project);
+    const issue = issues.find(item => item.id === bead);
+    if (!issue) throw fail('No such task in this project.', 404);
+    const closed = issue.status === 'closed';
+    const state = markState((await loadMarks(project)).get(markKey(project, bead)) ?? [], { closed });
+    const answer = (status, body) => ({ status, body });
+    if (verdict === 'undo') {
+      if (state && state.verdict !== 'undo' && (state.applied || closed)) throw fail('Already closed in Beads; reopen it there with bd reopen.', 409);
+      if (!state?.active) return answer(200, { state: 'unmarked' });
+    } else {
+      if (state?.active && state.verdict === verdict) return answer(200, { state: 'marked', verdict, at: state.at });
+      if (closed) throw fail('Already closed in Beads.', 409);
+      const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
+      if (asks.some(row => row.ask.bead === bead && (row.state.state === 'open' || row.state.state === 'snoozed'))) throw fail('This has an Ask; answer it in Needs you.', 409);
+      const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
+      if (waiting.some(item => item.bead === bead)) throw fail('This has an item in Needs you; finish it there.', 409);
+      const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), now: at });
+      const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
+      if (task?.state !== 'you') throw fail('This is not waiting on you.', 409);
+    }
+    const stamp = at.toISOString();
+    await putMark({ project, bead, verdict, at, body: { v: 1, project, bead, verdict, at: stamp, by: user, ...(reason ? { reason } : {}) } });
+    return answer(201, verdict === 'undo' ? { state: 'unmarked' } : { state: 'marked', verdict, at: stamp });
   }
 
   /** A create-only event file written by the Hub: `events/<day>/<hhmmss>-hub-<rand4>.json`, a new name on a clash, three tries. */
@@ -1141,11 +1221,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const only = query.get('project');
             if (only && !validProject(only)) throw fail('No such project.', 404);
             const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
-            const [loaded, requests, window, asks, status] = await Promise.all([
-              pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadPcStatus(at),
+            const [loaded, requests, window, asks, status, marks] = await Promise.all([
+              pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadPcStatus(at), loadMarks(only),
             ]);
             reply(buildWork({
-              issues: loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))),
+              issues: applyMarks(loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))), marks),
               requests: only ? requests.filter(item => item.project === only) : requests,
               events: window.events, asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), status, now: at,
             }));
@@ -1155,10 +1235,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
-            const [{ meta, issues }, window, asks, cards] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), cardResolver()]);
+            const [{ meta, issues }, window, asks, cards, marks] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), cardResolver(), loadMarks(project)]);
             const repo = meta?.repo || await projectRepo(project);
             reply(buildMap({
-              project, meta, issues, events: window.events, repo, cards,
+              project, meta, issues: applyMarks(issues, marks, project), events: window.events, repo, cards,
               asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), now: at,
             }));
           } else if (route === '/hub/file') {
@@ -1200,6 +1280,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
+        } else if ((match = /^\/hub\/map\/([^/]+)\/marks$/.exec(route))) {
+          if (!user) throw fail('Sign in to mark this.', 401);
+          send(await markBead(decodeURIComponent(match[1]), raw, user, at));
         } else if (route === '/hub/pc/wake') {
           if (!user) throw fail('Sign in to wake the PC.', 401);
           send(await wake.send({ by: user, at }));

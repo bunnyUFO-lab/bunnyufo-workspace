@@ -290,6 +290,10 @@
 .hub-map-panel-cards a, .hub-map-panel [data-commits] a { overflow-wrap: anywhere; color: var(--pink); text-decoration: underline; text-underline-offset: 2px; border-radius: 2px; }
 .hub-map-panel-cards a:hover, .hub-map-panel [data-commits] a:hover { text-decoration-thickness: 2px; }
 .hub-map-panel-cards a:focus-visible, .hub-map-panel [data-commits] a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-map-panel-mark { margin-top: 12px; }
+.hub-map-panel-mark .hub-btn, .hub-map-panel-reason input { min-height: 44px; }
+.hub-map-panel-reason { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.hub-map-panel-reason input { flex: 1 1 100%; box-sizing: border-box; min-width: 0; padding: 0 10px; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); }
 .hub-map-panel [data-prs] .hub-btn, .hub-map-panel-cards a { display: inline-flex; align-items: center; min-height: 44px; }
 @media (max-width: 640px) {
   .hub-map-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.45); }

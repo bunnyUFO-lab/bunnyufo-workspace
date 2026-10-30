@@ -19,7 +19,7 @@ export function finishedLine(closedAt: string | undefined): string {
 
 /** `Closed 18 Oct`, plus the reason unless it is a backfill stock phrase; null for a task that is not closed. */
 export function closedLine(task: MapTask): string | null {
-  if (task.state !== 'done') return null
+  if (task.state !== 'done' || task.mark) return null
   const date = shortDate(task.closedAt)
   const reason = task.closeReason?.trim()
   const why = reason && !STOCK_REASONS.has(reason.toLowerCase()) ? reason : null
