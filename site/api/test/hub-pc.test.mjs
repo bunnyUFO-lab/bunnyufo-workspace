@@ -117,14 +117,14 @@ test('GET /hub/pc and /hub/today read the newest status file', async () => {
     const before = (await get('/hub/today')).body;
     assert.equal(before.pc, null);
     assert.deepEqual(before.working, []);
-    assert.deepEqual((await get('/hub/pc')).body, { pc: null, status: null });
+    assert.deepEqual((await get('/hub/pc')).body, { pc: null, status: null, wake: { state: 'asleep-or-off', wakeAvailable: false } });
 
     seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 30), session: 'sess-old', host: 'other-host', title: 'Cloud', project: 'probe' }));
     const withEvents = (await get('/hub/today')).body;
     assert.equal(withEvents.pc, null);
     assert.deepEqual(withEvents.working.map(item => item.id), ['sess-old']);
     assert.equal(withEvents.counts.running, withEvents.running.length, 'With no status the count is the event-derived one.');
-    assert.deepEqual(Object.keys(withEvents), ['counts', 'needsYou', 'running', 'recent', 'alerts', 'at', 'working', 'pc'], 'Only working and pc are new.');
+    assert.deepEqual(Object.keys(withEvents), ['counts', 'needsYou', 'running', 'recent', 'alerts', 'at', 'working', 'pc', 'wake'], 'Only working, pc and wake are new.');
 
     seedPcStatus(fake, pcStatusJson({ now: NOW, minutesOld: 5, sessions: [{ id: 'old-one', name: 'Older file', status: 'idle' }] }));
     const newest = seedPcStatus(fake, pcStatusJson({ now: NOW, minutesOld: 1 }));

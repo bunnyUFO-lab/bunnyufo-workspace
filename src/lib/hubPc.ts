@@ -43,6 +43,12 @@ export interface PcSummary {
   sessions: { busy: number; idle: number }
 }
 
+/** The PC's wake state (site/api/pc-wake.mjs): `wakeAvailable` is false when no wake is set up on the server. */
+export interface PcWake {
+  state: 'awake' | 'woke' | 'asleep-or-off' | 'waking' | 'off'
+  wakeAvailable: boolean
+}
+
 export interface WorkingItem {
   id: string
   source: 'pc' | 'events' | 'run'

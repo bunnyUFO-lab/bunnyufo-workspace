@@ -33,7 +33,7 @@ const STATE_LABEL: Record<string, string> = {
   asking: 'Asking you', failed: 'Failed', lost: 'Lost', done: 'Done', declined: 'Declined', open: 'Open',
 }
 
-const STARTS: Record<SpawnTarget, string> = { hermes: 'On Hermes right away', pc: 'On the PC when the dispatcher next ticks', cloud: 'In the cloud', 'at-pc': 'When you start it at the PC' }
+const STARTS: Record<SpawnTarget, string> = { hermes: 'On Hermes right away', pc: 'On the PC within the hour (its next hourly check)', cloud: 'In the cloud', 'at-pc': 'When you start it at the PC' }
 
 const sideEffect = (preset: SpawnPreset, repo?: string): string => {
   switch (preset.sideEffect) {

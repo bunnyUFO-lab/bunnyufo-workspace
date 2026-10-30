@@ -172,7 +172,7 @@ try {
     await signed.locator('[data-spawn-toast]', { hasText: toast }).waitFor();
   };
   await approve('research', 'Why do runs end early', 'Approved. Hermes starts it now.');
-  await approve('code-task', 'Fix the tab order', 'Approved. It waits for the PC dispatcher.', 'pc');
+  await approve('code-task', 'Fix the tab order', "Approved. It starts at the PC's next hourly check.", 'pc');
   await approve('research', 'One more look', 'Approved. It waits: 3 Hermes runs are going.');
   assert.deepEqual(approvals.map(body => body.target), ['hermes', 'pc', 'hermes']);
   // A failed approve keeps the saved request and says so.
@@ -197,7 +197,7 @@ try {
     await real.locator('[data-spawn-toast]', { hasText: toast }).waitFor();
   };
   await spawnReal('research', 'Why do runs end early', 'Approved. Hermes starts it now.');
-  await spawnReal('code-task', 'Fix the tab order', 'Approved. It waits for the PC dispatcher.');
+  await spawnReal('code-task', 'Fix the tab order', "Approved. It starts at the PC's next hourly check.");
   const signed2 = requestsIn(keyed).map(key => key.replace('request.json', 'approved.json')).filter(key => keyed.fake.objects.has(key)).map(key => keyed.fake.json(key));
   assert.equal(signed2.length, 2, 'Both requests are approved.');
   assert.deepEqual(signed2.map(item => item.target).sort(), ['hermes', 'pc']);

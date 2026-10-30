@@ -23,11 +23,11 @@ export interface SpawnRule { rule: number; text: string }
 export interface SpawnRoute { target: SpawnTarget; rule: number; why: string }
 
 /** What `POST /hub/requests/:id/approve` answers: `waiting` says why an approved request has not started. */
-export interface ApproveAnswer { state: string; waiting?: string }
+export interface ApproveAnswer { state: string; waiting?: string; wake?: string }
 
 export const MACHINE: Record<SpawnTarget, { name: string; icon: string; starts: string }> = {
   hermes: { name: 'Hermes', icon: 'spark', starts: 'Starts on Hermes right away' },
-  pc: { name: 'The PC', icon: 'pc', starts: 'Starts on the PC when the dispatcher next ticks' },
+  pc: { name: 'The PC', icon: 'pc', starts: 'Starts on the PC within the hour (its next hourly check)' },
   cloud: { name: 'The cloud', icon: 'cloud', starts: 'Starts in the cloud' },
   'at-pc': { name: 'You, at the PC', icon: 'hand', starts: 'You start it at the PC' },
 }
@@ -51,9 +51,13 @@ export function guessPreset(text: string): string {
 }
 
 /** The toast after a successful Approve. */
-export function approvedNote(target: SpawnTarget, waiting?: string): string {
+export function approvedNote(target: SpawnTarget, waiting?: string, wake?: string): string {
   if (waiting) return `Approved. It waits: ${waiting.replace(/[.\s]+$/, '')}.`
   if (target === 'hermes') return 'Approved. Hermes starts it now.'
   if (target === 'cloud') return 'Approved. It starts in the cloud.'
-  return 'Approved. It waits for the PC dispatcher.'
+  if (wake === 'sent') return "Approved. Waking the PC; it starts at its next hourly check."
+  return "Approved. It starts at the PC's next hourly check."
 }
+
+/** The cost line of a preset for a machine: the PC always runs Opus, whatever the preset's cloud estimate names. */
+export const estimateCost = (cost: string, target: SpawnTarget | null): string => (target === 'pc' ? cost.replace(/Sonnet/g, 'Opus on the PC') : cost)

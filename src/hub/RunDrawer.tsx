@@ -12,6 +12,8 @@ import type { LiveLine } from './runLines'
 import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
 import { useHubData } from './useHub'
+import { usePcWake } from './usePcWake'
+import WakeButton from './WakeButton'
 import './runs.css'
 
 /** More of `GET /hub/requests/:id` than the approval view reads: the run files. */
@@ -210,6 +212,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
       <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>
       <p className="rd-body" data-run-request-text>{request.text}</p>
       {target && <p className="hub-muted" data-run-target>Runs on {MACHINE[target]?.name ?? target}{request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
+      {state === 'approved' && target === 'pc' && <PcStart />}
       {cloudShown && (
         <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
           <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
@@ -305,6 +308,17 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 /** Mounted once in the Hub screen: opens the drawer when `openRun` is called, and gives the focus back to what opened it. */
+/** An approved PC request waits for the PC's next hourly check; when the PC reads as asleep or off, it can be woken from here. */
+function PcStart() {
+  const wake = usePcWake()
+  return (
+    <div className="rd-pc" data-run-pc-start>
+      <p>Starts on the PC within the hour (its next hourly check).</p>
+      <WakeButton wake={wake} />
+    </div>
+  )
+}
+
 export default function RunDrawerHost() {
   const [id, setId] = useState<string | null>(null)
   const opener = useRef<HTMLElement | null>(null)

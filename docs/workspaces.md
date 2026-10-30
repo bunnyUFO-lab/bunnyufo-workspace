@@ -497,6 +497,15 @@ signed and handed to the fire queue (the daily cap and a pause apply, and a move
 old request stays stopped and the owner approves the work again by hand. `request take --runner` refuses (exit 5) a request with
 a stop, a decline or a result, before the claim and again after it.
 
+Wake the PC (`site/api/pc-wake.mjs`): `GET /hub/today` and `GET /hub/pc` carry `wake: { state, wakeAvailable }`. The state comes
+from the newest `pc/status-*` and `pc/wake-*` files only (nothing probes the PC): `awake` (a status in the last 12 minutes),
+`woke` (a status newer than a wake of the last 30 minutes), `waking` (a wake under 5 minutes old, no status since), `off` (a
+wake 5 to 60 minutes old, no status since) and `asleep-or-off`. `POST /hub/pc/wake` (signed-in user, Origin check) posts an empty
+body to the secret `HUB_WAKE_URL` with a 10 s limit, writes `pc/wake-<stamp>.json` `{ at, by }`, and answers 429 inside a
+minute of the last wake, 404 when `HUB_WAKE_URL` is unset (the kill switch) and 502 when the controller did not take the call.
+No answer, log line or file holds the URL. With `HUB_WAKE_ON_APPROVE=1`, Approve of a `pc` request sends the same wake when
+the state is `asleep-or-off`; the approval never fails because of it, and the answer carries `wake: "sent"` when one went.
+
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
 

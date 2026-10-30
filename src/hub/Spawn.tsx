@@ -3,7 +3,7 @@ import { host } from '../lib/host'
 import type { HubProject } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import type { ApproveAnswer, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
-import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, guessPreset } from '../lib/hubSpawn'
+import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, estimateCost, guessPreset } from '../lib/hubSpawn'
 import type { PresetList } from './spawnData'
 import { cachedPresets, loadPresets } from './spawnData'
 import { hubHash } from '../lib/route'
@@ -42,7 +42,7 @@ const policyLine = (kinds: string[]) => {
   return `${list} may be signed by policy.`
 }
 
-const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within 5 minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
+const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within the hour (its next hourly check).' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
 /** What the toast says after Spawn, and where the new run or item is: `run` is a started request, `needs` a request that waits in Needs you. */
@@ -155,7 +155,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
           ...(trimmed !== edit.text.trim() ? { text: trimmed } : {}),
           ...(doneWhen.trim() !== (edit.doneWhen ?? '').trim() ? { doneWhen: doneWhen.trim() } : {}),
         })
-        onDone({ text: approvedNote(target, again.waiting), run: again.id })
+        onDone({ text: approvedNote(target, again.waiting, again.wake), run: again.id })
         return
       }
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
@@ -173,7 +173,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         return
       }
       const signed = await hubPost<ApproveAnswer>(`/requests/${encodeURIComponent(id)}/approve`, { target })
-      onDone({ text: approvedNote(target, signed.waiting), run: id })
+      onDone({ text: approvedNote(target, signed.waiting, signed.wake), run: id })
     } catch (failure) {
       const reason = failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.'
       if (id) onDone({ text: `Saved, but not approved. It waits in Needs you: ${reason}`, needs: id })
@@ -277,7 +277,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
               </div>
             </div>
             <div className="sp-est" data-spawn-estimate>
-              <div><span>Estimated cost</span><b>{preset.estimate.cost}</b></div>
+              <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target)}</b></div>
               <div><span>Time</span><b>{preset.estimate.time}</b></div>
               <div className="wide"><span>Result</span><b>{preset.produces}</b></div>
             </div>

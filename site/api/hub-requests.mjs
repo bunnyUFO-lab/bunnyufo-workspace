@@ -156,7 +156,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
 export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
-  const live = { hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
+  const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
@@ -457,7 +457,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // The approval is signed and stored. A target that cannot start it now makes the request wait; it never fails the approval.
     let waiting;
     let cloud;
+    let woke = false;
     try {
+      if (chosen === 'pc') woke = (await live.wakeOnApprove({ by, at })) === true;
       const handed = chosen === 'pc' ? null : await live.handOff[chosen](id, { at });
       if (handed?.waiting) waiting = handed.waiting;
       if (chosen === 'cloud' && handed) cloud = { fired: handed.fired === true, ...(handed.reason ? { reason: handed.reason } : {}), ...(handed.next ? { next: handed.next } : {}) };
@@ -466,7 +468,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       waiting = `Could not start yet: ${scrub(error.message, 80)}`;
     }
     const after = await loadOne(id, at).catch(() => null);
-    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(cloud ? { cloud } : {}) };
+    return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(cloud ? { cloud } : {}), ...(woke ? { wake: 'sent' } : {}) };
   }
 
   /** The signed stop of a request, allowed only in the given states. */
