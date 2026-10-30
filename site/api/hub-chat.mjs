@@ -9,14 +9,15 @@
 //
 // A text turn runs as a Hermes run (`/v1/runs`): the answer streams, tool lines show, and an approval Hermes asks for
 // is copied into the inbox and answered from Chat. A turn with a picture stays on /v1/chat/completions (pictures on runs
-// were never tested). The run is started with `{ input, conversation_history }` and never names a provider or a model,
-// so Hermes's own default and fallback chain apply. The completions path sends no system message (Hermes owns its prompt)
+// were never tested). The run is started with `{ input, conversation_history }` and names a provider and a model only when the
+// owner picked one from chat-models.mjs (the page sends an id); Auto names none, so Hermes's own default and fallback chain apply. The completions path sends no system message (Hermes owns its prompt)
 // and sends the history as `messages`.
 // Keys are never logged, stored or echoed.
 import { Readable } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
+import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
 const MB = 1024 * 1024;
@@ -59,11 +60,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);
         const first = lines.find(line => line.role === 'user');
         const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;   // help:
-        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}) };
+        const asked = lines.findLast(line => line.role === 'user' && typeof line.model === 'string' && chatModelsForClient().some(entry => entry.id === line.model));   // model:
+        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && asked.model !== 'auto' ? { model: asked.model } : {}) };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
-      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}) });
+      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}), ...(info.model ? { model: info.model } : {}) });
     }
     return conversations;
   }
@@ -170,6 +172,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
 
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
+    const choice = chatModelOf(data.model);   // model: an id from the table, or a 400 before anything is written
     const text = typeof data.text === 'string' ? data.text.trim() : '';
     const pictures = checkChatImages(data.images, fail);
     if ((!text && !pictures.length) || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
@@ -232,7 +235,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
       const earlier = [...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
       try {
-        ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}` }));
+        ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}`, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));   // model:
       } catch (error) {
         finish();
         throw fail(error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`, 502);
@@ -241,7 +244,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       upstream = await fetchImpl(`${hermesUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { authorization: `Bearer ${env.HERMES_API_KEY}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: env.HERMES_MODEL || 'hermes-agent', messages, stream: true }),
+        body: JSON.stringify({ model: choice.model ?? (env.HERMES_MODEL || 'hermes-agent'), ...(choice.provider ? { provider: choice.provider } : {}), messages, stream: true }),   // model:
         signal: abort.signal,
       });
     } catch (error) {
@@ -351,8 +354,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
-    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}) };
-    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}) };
+    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}) };   // model:
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}) };   // model:
     let contextLine = null;   // help:
     try {
       if (context) {
@@ -416,7 +419,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list() });
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient() });   // model:
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);
