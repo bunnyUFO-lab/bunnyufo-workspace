@@ -17,6 +17,7 @@
 //                           Reads are open on the LAN, writes need Remote-User like every other write.
 //   HUB_DISCORD_TOKEN_SHA256, HUB_DISCORD_OWNER_ID   turn on the Asks bot's two routes (/api/hub/discord/…): the sha256 of its bearer token
 //                           and the owner's Discord user id. Without both, those routes answer 404 to everyone (the kill switch).
+//                           HUB_DISCORD_OWNER_ID alone also makes the #needs-you pings @mention the owner, so they buzz the phone.
 //   HUB_SIGNING_KEY         the Ed25519 private key that signs approvals and stops (base64 PKCS8 DER, one line). Made on this host and never copied
 //                           to the PC; without it Approve is off. HUB_DISCORD_NEEDS_YOU: the #needs-you webhook (read by the notify module)
 //   HUB_KNOWN_REPOS         extra `owner/name` repos Spawn offers beside each project's own (comma list, default none)
