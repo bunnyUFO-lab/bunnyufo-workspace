@@ -245,6 +245,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : 'label' } : {}),
       ...(summary ? { summary } : {}),
       ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
+      ...(issue._mark ? { mark: { verdict: issue._mark.verdict, at: issue._mark.at, pending: true } } : {}),
       ...(cardRows.length ? { cards: cardRows } : {}),
       ...(commits.length ? { commits } : {}),
       ...(prUrl ? { prUrl } : {}),
