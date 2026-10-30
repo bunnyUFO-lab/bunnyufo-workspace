@@ -92,6 +92,22 @@ const responseId = (value, what) => {
 
 const today = (now = new Date()) => now.toISOString().slice(0, 10);
 
+const MAX_RETIRED = 500;
+const MAX_REMOVED_TABS = 50;
+
+/**
+ * Keep `retired` (the card list's record of cards moved away or put in the Trash) to at most 500
+ * entries. The oldest `moved` records go first; `deleted` ones are the Trash and never drop.
+ */
+export function capRetired(retired, limit = MAX_RETIRED) {
+  let over = Object.keys(retired).length - limit;
+  for (const key of Object.keys(retired)) {
+    if (over <= 0) break;
+    if (retired[key]?.kind === 'moved') { delete retired[key]; over -= 1; }
+  }
+  return retired;
+}
+
 /** A store over a folder on disk: the local service's workspace. */
 export function folderStore(root) {
   const full = file => {
@@ -221,6 +237,9 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
   };
 
   return {
+    store,
+    section,
+
     /**
      * A new card with one Markdown section. Its folder is `<date>_<id>` like the cards agents make,
      * so the two kinds sort and read the same.
@@ -252,7 +271,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
     },
 
     /** Change a card's title or description. The folder and id stay, so links keep working. */
-    async updateCard({ id, title, description }) {
+    async updateCard({ id, title, description, category }) {
       return editList(async list => {
         const card = cardIn(list, id);
         if (title !== undefined) {
@@ -264,8 +283,126 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
           const about = text(description, 400, 'A description');
           if (about) card.description = about; else delete card.description;
         }
+        if (category !== undefined) card.category = slug(category) || 'notes';
         card.updated = today(now());
         return card;
+      });
+    },
+
+    /**
+     * Give every card of a category in this workspace another category. `from` is the category as the
+     * Library shows it (`other` for a card with none). Renaming onto a category that already exists
+     * is a merge; the answer says which it was.
+     */
+    async renameCategory({ from, to }) {
+      const old = String(from ?? '').trim();
+      const next = slug(to);
+      if (!old) throw fail('Say which category to rename.');
+      if (!next) throw fail('A category needs letters or digits in its name.');
+      if (next === old) throw fail('That is already the name of the category.');
+      return editList(async list => {
+        const moving = list.entities.filter(item => item && (item.category || 'other') === old);
+        if (!moving.length) throw fail('No card is in that category.', 404);
+        const merged = list.entities.some(item => item && !moving.includes(item) && (item.category || 'other') === next);
+        const date = today(now());
+        for (const item of moving) { item.category = next; item.updated = date; }
+        return { from: old, to: next, count: moving.length, merged };
+      });
+    },
+
+    /** Move a tab to another place in the card's tab bar. `defaultStep` keeps pointing at the same tab. */
+    async moveSection({ id, from, to }) {
+      return editList(async list => {
+        const card = cardIn(list, id);
+        const last = card.steps.length - 1;
+        if (![from, to].every(n => Number.isInteger(n) && n >= 0 && n <= last)) throw fail('That card has no such section.', 404);
+        if (from === to) return card;
+        const shown = Number.isInteger(card.defaultStep) ? card.steps[card.defaultStep] : null;
+        const [step] = card.steps.splice(from, 1);
+        card.steps.splice(to, 0, step);
+        if (shown) card.defaultStep = card.steps.indexOf(shown);
+        card.updated = today(now());
+        return card;
+      });
+    },
+
+    /**
+     * Take a tab off the card. The file stays in the folder and the tab is kept in `removedTabs` (50 at
+     * most, newest last) so it can be put back. `path` must match the tab at `index`: a card that changed
+     * since the page was drawn is a 409, not the wrong tab gone. The last tab cannot go.
+     */
+    async deleteSection({ id, index, path: file }) {
+      return editList(async list => {
+        const card = cardIn(list, id);
+        const step = Number.isInteger(index) ? card.steps[index] : undefined;
+        if (!step) throw fail('That card has no such section.', 404);
+        if (step.path !== file) throw fail('The card changed since you opened it; reload and try again.', 409);
+        if (card.steps.length < 2) throw fail('A card needs at least one section. Delete the card instead.', 409);
+        const wasDefault = card.defaultStep === index;
+        card.steps.splice(index, 1);
+        if (Number.isInteger(card.defaultStep)) {
+          if (card.defaultStep > index) card.defaultStep -= 1;
+          card.defaultStep = Math.min(card.defaultStep, card.steps.length - 1);
+        }
+        const removedTabs = Array.isArray(card.removedTabs) ? card.removedTabs : [];
+        removedTabs.push({ ...step, at: today(now()), index, ...(wasDefault ? { wasDefault: true } : {}) });
+        card.removedTabs = removedTabs.slice(-MAX_REMOVED_TABS);
+        card.updated = today(now());
+        return { card, removed: step };
+      });
+    },
+
+    /** Put a removed tab back where it was (or at the end if the card is shorter now). */
+    async restoreSection({ id, path: file }) {
+      return editList(async list => {
+        const card = cardIn(list, id);
+        const removed = Array.isArray(card.removedTabs) ? card.removedTabs : [];
+        const at = removed.map(item => item?.path).lastIndexOf(file);
+        if (at < 0) throw fail('That card has no removed section with that file.', 404);
+        if (card.steps.some(item => item?.path === file)) throw fail('A section with that file is already on the card.', 409);
+        const { at: _when, index, wasDefault, ...step } = removed[at];
+        const place = Math.min(Math.max(Number.isInteger(index) ? index : card.steps.length, 0), card.steps.length);
+        card.steps.splice(place, 0, step);
+        if (wasDefault) card.defaultStep = place;
+        else if (Number.isInteger(card.defaultStep) && card.defaultStep >= place) card.defaultStep += 1;
+        removed.splice(at, 1);
+        if (removed.length) card.removedTabs = removed; else delete card.removedTabs;
+        card.updated = today(now());
+        return { card, step: place };
+      });
+    },
+
+    /**
+     * Put a card in this workspace's Trash: it leaves the list and `retired[id]` keeps the whole entity.
+     * Its files, its viewers' data and its pins and tags stay where they are, so Restore is complete.
+     */
+    async deleteCard({ id }) {
+      return editList(async list => {
+        const at = list.entities.findIndex(item => item?.id === id);
+        if (at < 0) throw fail('No card with that id in this workspace.', 404);
+        const [entity] = list.entities.splice(at, 1);
+        const retired = list.retired && typeof list.retired === 'object' && !Array.isArray(list.retired) ? list.retired : {};
+        delete retired[id];
+        retired[id] = { kind: 'deleted', at: today(now()), entity };
+        list.retired = capRetired(retired);
+        return { id, retired: retired[id] };
+      });
+    },
+
+    /** Bring a card back from the Trash. Refused when a card with its id or folder is in the list again. */
+    async restoreCard({ id }) {
+      return editList(async list => {
+        const record = list.retired?.[id];
+        if (record?.kind !== 'deleted' || !record.entity) throw fail('That card is not in the Trash.', 404);
+        const entity = record.entity;
+        if (list.entities.some(item => item?.id === id || (entity.folder && item?.folder === entity.folder))) {
+          throw fail('A card with that id or folder is already here; rename or delete it first.', 409);
+        }
+        delete list.retired[id];
+        if (!Object.keys(list.retired).length) delete list.retired;
+        entity.updated = today(now());
+        list.entities.push(entity);
+        return { card: entity };
       });
     },
 
@@ -520,6 +657,12 @@ export async function cardRoute({ method, route, query, data, writerFor }) {
   if (route === '/cards') return { status: 201, body: { card: await writer.createCard(data) } };
   if (route === '/cards/update') return { status: 200, body: { card: await writer.updateCard(data) } };
   if (route === '/cards/section') return { status: 201, body: await writer.addSection(data) };
+  if (route === '/cards/category') return { status: 200, body: await writer.renameCategory(data) };
+  if (route === '/cards/section/move') return { status: 200, body: { card: await writer.moveSection(data) } };
+  if (route === '/cards/section/delete') return { status: 200, body: await writer.deleteSection(data) };
+  if (route === '/cards/section/restore') return { status: 200, body: await writer.restoreSection(data) };
+  if (route === '/cards/delete') return { status: 200, body: await writer.deleteCard(data) };
+  if (route === '/cards/restore') return { status: 200, body: await writer.restoreCard(data) };
   if (route === '/cards/section/rename') return { status: 200, body: { card: await writer.renameSection(data) } };
   if (route === '/cards/markdown') return { status: 200, body: await writer.saveMarkdown(data) };
   if (route === '/cards/drawing') return { status: 200, body: await writer.saveDrawing(data) };
