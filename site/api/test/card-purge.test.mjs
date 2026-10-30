@@ -264,6 +264,18 @@ test('a purge that stops while deleting viewer data is finished by the next run'
   } finally { await w.close(); }
 });
 
+test('viewer data of a purged id stays when a live card has the same id', async () => {
+  const w = await world({ entities: [entity('old', 'new-folder')], retired: { old: { kind: 'purged', at: '2026-11-01', folder: 'old-folder', pending: true } } });
+  try {
+    w.files('old-folder/index.md', 'new-folder/index.md', 'card-responses/old/notes.json');
+    const answer = await w.writer.purgeTrash();
+    assert.deepEqual(w.deleted(), ['sections/one/old-folder/index.md'], 'Only the old folder goes.');
+    assert.ok(w.fake.objects.has('sections/one/card-responses/old/notes.json'), 'The live card keeps the data of its viewers.');
+    assert.ok(answer.skipped.some(item => item.id === 'old' && /viewer data stays/.test(item.why)), 'The skip is recorded.');
+    assert.equal(w.list().retired.old.pending, undefined);
+  } finally { await w.close(); }
+});
+
 test('the claim is written before the first delete, restore after it is refused, and a restore before it wins', async () => {
   const w = await world({ entities: [], retired: { old: gone('old', 'old'), other: gone('other', 'other', '2026-11-25') } });
   try {

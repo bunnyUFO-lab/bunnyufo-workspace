@@ -119,7 +119,10 @@ export function claimExpired(list, today) {
     if (!folder || !freeToDelete(folder)) { out.skipped.push({ id, why: 'folder not safe to delete' }); const { pending: _gone, ...rest } = record; retired[id] = rest; out.claimed = true; continue; }
     if (seenFolders.has(folder)) continue;
     seenFolders.add(folder);
-    out.cards.push({ id, folder });
+    // card-responses/<id>/ is keyed by id: a live card that reuses this id (a hand-edited or merged list) owns that data now.
+    const idInUse = entities.some(entity => entity?.id === id);
+    if (idInUse) out.skipped.push({ id, why: 'a live card has this id; its viewer data stays' });
+    out.cards.push({ id, folder, ...(idInUse ? { keepResponses: true } : {}) });
   }
   if (Object.keys(retired).length) list.retired = retired;
 

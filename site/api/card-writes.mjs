@@ -480,7 +480,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
       }
       // Then the card's viewer data (responses and pins), by the owner's answer: its own prefix, one plain id, never another card's.
       for (const card of plan.cards) {
-        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(card.id) || card.id.includes('..')) continue;
+        if (card.keepResponses || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(card.id) || card.id.includes('..')) continue;
         for (const item of await store.list(`card-responses/${card.id}/`)) {
           if (item.file.startsWith(`card-responses/${card.id}/`)) keys.add(item.file);
         }
