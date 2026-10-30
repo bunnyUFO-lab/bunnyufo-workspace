@@ -224,7 +224,7 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
         // folder, so its writes queue behind each other. Not into the starter examples: those ship
         // with the app and an update would take a card made there away.
         const card = await cardRoute({
-          method, route: url.pathname.slice(4), query: url.searchParams, data,
+          method, route: url.pathname.slice(4), query: url.searchParams, data, state: cardState,
           writerFor: async id => {
             const found = (await allWorkspaces()).find(item => item.id === (id || active.id));
             if (!found) throw Object.assign(new Error(`No workspace "${id}" in this session.`), { status: 404 });

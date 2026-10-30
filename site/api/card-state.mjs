@@ -61,6 +61,19 @@ function merge(current, change) {
 }
 
 /**
+ * Move one card's entry from `from` to `to` in `cards` (changed in place). An entry already at `to`
+ * is the newer one and wins field by field; the moved entry only fills what it lacks. Returns whether
+ * anything changed.
+ */
+function moveEntry(cards, from, to) {
+  if (from === to || !cards[from]) return false;
+  const next = merge(cards[from], cards[to] ?? {});
+  delete cards[from];
+  if (next) cards[to] = next;
+  return true;
+}
+
+/**
  * The methods both stores share, over a `load()` that returns the cards object and a
  * `write(key, change)` that applies one change and returns the card's new state.
  */
@@ -147,7 +160,22 @@ export function createCardStore(file) {
     return done;
   };
 
-  return { kind: 'file', file, ...methods({ load, write }) };
+  /** Re-key one card's entry (a move to another workspace) in one write. */
+  const rekey = (from, to) => {
+    const done = writing.then(async () => {
+      const cards = await load();
+      if (!moveEntry(cards, from, to)) return cards[to] ?? null;
+      await mkdir(path.dirname(file), { recursive: true });
+      const temporary = `${file}.new`;
+      await writeFile(temporary, `${JSON.stringify({ version: 1, cards }, null, 2)}\n`, { mode: 0o644 });
+      await rename(temporary, file);
+      return cards[to] ?? null;
+    });
+    writing = done.catch(() => {});
+    return done;
+  };
+
+  return { kind: 'file', file, ...methods({ load, write }), rekey };
 }
 
 /**
@@ -189,5 +217,24 @@ export function createBucketCardStore(bucket, { key = 'state.json', ttl = 5000, 
     return done;
   };
 
-  return { kind: 'bucket', key, ...methods({ load, write }) };
+  /** Re-key one card's entry (a move to another workspace) in one conditional write. */
+  const rekey = (from, to) => {
+    const done = writing.then(async () => {
+      for (let attempt = 1; ; attempt += 1) {
+        const { cards, etag } = await fetchState();
+        if (!moveEntry(cards, from, to)) return cards[to] ?? null;
+        try {
+          const written = await bucket.putJson(key, { version: 1, cards }, etag ? { ifMatch: etag } : { ifNoneMatch: '*' });
+          cache = { cards, etag: written.etag, at: Date.now() };
+          return cards[to] ?? null;
+        } catch (error) {
+          if (error.status !== 412 || attempt >= retries) throw error;
+        }
+      }
+    });
+    writing = done.catch(() => {});
+    return done;
+  };
+
+  return { kind: 'bucket', key, ...methods({ load, write }), rekey };
 }

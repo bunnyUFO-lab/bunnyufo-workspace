@@ -7,6 +7,9 @@
 //                                   "only if nothing is there", and a mismatch throws status 412;
 //                                   the body is a string or a Buffer (a drawing's picture)
 //   exists(file)                  → true or false, without reading the file
+//   list(prefix)                  → [{ file, size, etag }] for every file under a folder prefix ("a/b/")
+//   copyFrom(source, file)        → { etag }; copies one file from another store of the same kind,
+//                                   keeping its path, without reading it into memory
 //
 // An etag is the md5 of the bytes, which is what S3 answers for anything put in one piece, so the
 // folder store computes the same thing and a client never has to know which host it is talking to.
@@ -14,8 +17,9 @@
 // The card list is read, changed and written back conditionally, and read again when someone else
 // wrote in between: two people adding cards from two devices both end up in it.
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { moveCard } from './card-move.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
 
@@ -136,6 +140,35 @@ export function folderStore(root) {
         throw error;
       }
     },
+    resolve: full,
+    async list(prefix) {
+      const trimmed = prefix.replace(/\/+$/, '');
+      const base = full(trimmed || '.');
+      const out = [];
+      const walk = async (dir, rel) => {
+        let entries;
+        try { entries = await readdir(dir, { withFileTypes: true }); } catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return; throw error; }
+        for (const entry of entries) {
+          const name = rel ? `${rel}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) await walk(path.join(dir, entry.name), name);
+          else if (entry.isFile() && !entry.name.endsWith('.tmp')) {
+            const body = await readFile(path.join(dir, entry.name));
+            out.push({ file: name, size: body.length, etag: md5(body) });
+          }
+        }
+      };
+      await walk(base, trimmed);
+      return out.sort((a, b) => (a.file < b.file ? -1 : 1));
+    },
+    async copyFrom(source, file) {
+      if (typeof source?.resolve !== 'function') throw fail('Cards can only be moved between workspaces of the same kind.', 501);
+      const target = full(file);
+      await mkdir(path.dirname(target), { recursive: true });
+      const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
+      await copyFile(source.resolve(file), temp);
+      await rename(temp, target);
+      return { etag: md5(await readFile(target)) };
+    },
     write(file, body, { ifMatch } = {}) {
       const done = queue.then(async () => {
         const target = full(file);
@@ -158,6 +191,16 @@ export function folderStore(root) {
 export function bucketStore(bucket, prefix) {
   const key = file => `${prefix}/${file}`;
   return {
+    bucket,
+    prefix,
+    async list(folder) {
+      const { objects } = await bucket.list(key(folder));
+      return objects.map(item => ({ file: item.key.slice(prefix.length + 1), size: item.size, etag: item.etag })).sort((a, b) => (a.file < b.file ? -1 : 1));
+    },
+    async copyFrom(source, file) {
+      if (source?.bucket !== bucket || typeof source.prefix !== 'string') throw fail('Cards can only be moved between workspaces of the same kind.', 501);
+      return bucket.copy(`${source.prefix}/${file}`, key(file));
+    },
     async read(file) {
       const got = await bucket.getText(key(file));
       return got ? { text: got.text, etag: got.etag } : null;
@@ -239,6 +282,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
   return {
     store,
     section,
+    now,
 
     /**
      * A new card with one Markdown section. Its folder is `<date>_<id>` like the cards agents make,
@@ -405,6 +449,45 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         entity.updated = today(now());
         list.entities.push(entity);
         return { card: entity };
+      });
+    },
+
+    /** The card list as it is now: `{ list, etag }`. Read-only; a change goes through one of the calls below. */
+    async readList() {
+      const got = await store.read('workspace.json');
+      if (!got) throw fail('This workspace has no card list (workspace.json).', 404);
+      let list;
+      try { list = JSON.parse(got.text); } catch { throw fail("This workspace's workspace.json is not valid JSON.", 409); }
+      if (!Array.isArray(list.entities)) list.entities = [];
+      return { list, etag: got.etag };
+    },
+
+    /** Add a whole card to this list (a card moved here), dropping its `retired` record if it has one. 409 when its id or folder is taken. */
+    async adoptCard({ entity }) {
+      return editList(async list => {
+        if (list.entities.some(item => item?.id === entity.id || (entity.folder && item?.folder === entity.folder))) {
+          throw fail('A card with that id or folder is already here.', 409);
+        }
+        if (list.retired?.[entity.id]?.kind === 'deleted') throw fail('A card with that id is in the Trash of this workspace; restore it first.', 409);
+        list.entities.push(entity);
+        if (list.retired) {
+          delete list.retired[entity.id];
+          if (!Object.keys(list.retired).length) delete list.retired;
+        }
+        return entity;
+      });
+    },
+
+    /** Take a card off this list because it moved to workspace `to`; `retired[id]` says where it went. */
+    async retireMoved({ id, to, folder }) {
+      return editList(async list => {
+        const at = list.entities.findIndex(item => item?.id === id);
+        if (at >= 0) list.entities.splice(at, 1);
+        const retired = list.retired && typeof list.retired === 'object' && !Array.isArray(list.retired) ? list.retired : {};
+        if (retired[id]?.kind === 'deleted') throw fail('A card with that id is in the Trash of this workspace; it cannot be recorded as moved.', 409);
+        retired[id] = { kind: 'moved', to, folder, at: today(now()) };
+        list.retired = capRetired(retired);
+        return retired[id];
       });
     },
 
@@ -640,7 +723,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
  * for the workspace a request names, or throws 404. Returns the answer, or undefined for a path
  * that is not one of these.
  */
-export async function cardRoute({ method, route, query, data, writerFor }) {
+export async function cardRoute({ method, route, query, data, writerFor, state }) {
   if (!route.startsWith('/cards')) return undefined;
   if (method === 'GET' && route === '/cards/markdown') {
     const writer = await writerFor(query.get('workspace'));
@@ -659,6 +742,11 @@ export async function cardRoute({ method, route, query, data, writerFor }) {
   if (route === '/cards') return { status: 201, body: { card: await writer.createCard(data) } };
   if (route === '/cards/update') return { status: 200, body: { card: await writer.updateCard(data) } };
   if (route === '/cards/section') return { status: 201, body: await writer.addSection(data) };
+  if (route === '/cards/move') {
+    if (!data.to || data.to === data.workspace) throw fail('Say which other workspace to move the card to.');
+    const target = await writerFor(data.to, { target: true });
+    return { status: 200, body: await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, now: writer.now }) };
+  }
   if (route === '/cards/category') return { status: 200, body: await writer.renameCategory(data) };
   if (route === '/cards/section/move') return { status: 200, body: { card: await writer.moveSection(data) } };
   if (route === '/cards/section/delete') return { status: 200, body: await writer.deleteSection(data) };

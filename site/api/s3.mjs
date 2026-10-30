@@ -290,6 +290,16 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     putJson(key, value, options = {}) {
       return this.put(key, `${JSON.stringify(value, null, 2)}\n`, { contentType: 'application/json', ...options });
     },
+    /**
+     * Copy one object inside this bucket (S3 CopyObject): the bytes never leave S3. Content type and
+     * user metadata come along. Answers the new object's ETag, read from the XML body.
+     */
+    async copy(fromKey, toKey) {
+      const { text } = await send('PUT', toKey, { headers: { 'x-amz-copy-source': `/${bucket}/${encodeKey(fromKey)}` } });
+      // S3 can answer 200 with an error in the body for a copy that failed halfway.
+      if (tag(text, 'Code')) throw new S3Error(tag(text, 'Message') || 'Copy failed', { status: 502, code: tag(text, 'Code'), key: toKey });
+      return { etag: (tag(text, 'ETag') || '').replace(/^"|"$/g, '') || null };
+    },
     async del(key) {
       await send('DELETE', key);
     },
