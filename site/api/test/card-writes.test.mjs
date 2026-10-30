@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { png } from './png.mjs';
-import { cardWriter, folderStore, md5, slug } from '../card-writes.mjs';
+import { capRetired, cardWriter, folderStore, md5, slug } from '../card-writes.mjs';
 
 async function workspace(entities = []) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-card-writes-'));
@@ -194,4 +194,186 @@ test('annotating again after the card list changed meanwhile leaves no scene wit
   assert.equal(made.path, 'take.annotated.excalidraw', 'The retry reuses the scene it wrote, not a -2.');
   assert.deepEqual((await list()).entities[0].steps.map(step => step.path), ['index.md', 'take.annotated.excalidraw']);
   assert.equal(await store.exists(`${card.folder}/take.annotated-2.excalidraw`), false);
+});
+
+const three = async () => {
+  const w = await workspace();
+  const card = await w.writer.createCard({ title: 'Plan' });
+  await w.writer.addSection({ id: card.id, name: 'B' });
+  await w.writer.addSection({ id: card.id, name: 'C' });
+  return { ...w, card };
+};
+const names = async list => (await list()).entities[0].steps.map(step => step.name);
+
+test('a card can be given another category; an empty one becomes notes', async () => {
+  const { writer, list } = await workspace([{ id: 'a', folder: 'a', title: 'A', category: 'brief', steps: [] }]);
+  await writer.updateCard({ id: 'a', category: 'Game Ideas' });
+  assert.equal((await list()).entities[0].category, 'game-ideas');
+  await writer.updateCard({ id: 'a', category: '' });
+  assert.equal((await list()).entities[0].category, 'notes');
+});
+
+test('renaming a category rewrites every card in it, counts a merge, and refuses a no-op or an empty one', async () => {
+  const entities = [
+    { id: 'a', folder: 'a', category: 'brief', steps: [] }, { id: 'b', folder: 'b', category: 'brief', steps: [] },
+    { id: 'c', folder: 'c', category: 'spend', steps: [] }, { id: 'd', folder: 'd', steps: [] },
+  ];
+  const { writer, list } = await workspace(entities);
+  assert.deepEqual(await writer.renameCategory({ from: 'brief', to: 'Briefs' }), { from: 'brief', to: 'briefs', count: 2, merged: false });
+  assert.deepEqual((await list()).entities.map(item => item.category), ['briefs', 'briefs', 'spend', undefined]);
+  assert.deepEqual(await writer.renameCategory({ from: 'briefs', to: 'spend' }), { from: 'briefs', to: 'spend', count: 2, merged: true });
+  assert.deepEqual(await writer.renameCategory({ from: 'other', to: 'misc' }), { from: 'other', to: 'misc', count: 1, merged: false });
+  await assert.rejects(writer.renameCategory({ from: 'spend', to: 'spend' }), { status: 400 });
+  await assert.rejects(writer.renameCategory({ from: 'spend', to: '??' }), { status: 400 });
+  await assert.rejects(writer.renameCategory({ from: 'nothing', to: 'x' }), { status: 404 });
+});
+
+test('a tab moves, defaultStep follows its tab, and a bad index is a 404', async () => {
+  const { writer, list, card, root } = await three();
+  await writer.moveSection({ id: card.id, from: 0, to: 2 });
+  assert.deepEqual(await names(list), ['B', 'C', 'Overview']);
+  const stored = await list();
+  stored.entities[0].defaultStep = 2;
+  await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+  await writer.moveSection({ id: card.id, from: 2, to: 0 });
+  assert.deepEqual(await names(list), ['Overview', 'B', 'C']);
+  assert.equal((await list()).entities[0].defaultStep, 0, 'The default tab is still Overview.');
+  await assert.rejects(writer.moveSection({ id: card.id, from: 0, to: 9 }), { status: 404 });
+});
+
+test('a deleted tab keeps its file, goes to removedTabs, fixes defaultStep, and comes back where it was', async () => {
+  const { writer, list, read, card, root } = await three();
+  const stored = await list();
+  stored.entities[0].defaultStep = 2;
+  await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+  const gone = await writer.deleteSection({ id: card.id, index: 1, path: 'b.md' });
+  assert.equal(gone.removed.name, 'B');
+  assert.deepEqual(await names(list), ['Overview', 'C']);
+  const after = (await list()).entities[0];
+  assert.equal(after.defaultStep, 1, 'The default tab is still C.');
+  assert.equal(after.removedTabs.length, 1);
+  assert.equal(await read(`${card.folder}/b.md`), '# B\n\n', 'The file stays.');
+  const back = await writer.restoreSection({ id: card.id, path: 'b.md' });
+  assert.equal(back.step, 1);
+  assert.deepEqual(await names(list), ['Overview', 'B', 'C']);
+  const restored = (await list()).entities[0];
+  assert.equal(restored.defaultStep, 2);
+  assert.equal(restored.removedTabs, undefined);
+  await assert.rejects(writer.restoreSection({ id: card.id, path: 'b.md' }), { status: 404 });
+});
+
+test('a tab delete with a stale index or path is a 409, the last tab is refused, a restore over a returned file is a 409', async () => {
+  const { writer, list, card, root } = await three();
+  await assert.rejects(writer.deleteSection({ id: card.id, index: 1, path: 'c.md' }), { status: 409 });
+  await assert.rejects(writer.deleteSection({ id: card.id, index: 7, path: 'c.md' }), { status: 404 });
+  assert.deepEqual(await names(list), ['Overview', 'B', 'C']);
+  await writer.deleteSection({ id: card.id, index: 2, path: 'c.md' });
+  await writer.deleteSection({ id: card.id, index: 1, path: 'b.md' });
+  await assert.rejects(writer.deleteSection({ id: card.id, index: 0, path: 'index.md' }), { status: 409, message: /Delete the card instead/ });
+  const stored = await list();
+  stored.entities[0].steps.push({ name: 'C again', path: 'c.md' });
+  await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+  await assert.rejects(writer.restoreSection({ id: card.id, path: 'c.md' }), { status: 409 });
+});
+
+test('removedTabs keeps the newest 50', async () => {
+  const steps = [{ name: 'Keep', path: 'keep.md' }, ...Array.from({ length: 55 }, (_, n) => ({ name: `T${n}`, path: `t${n}.md` }))];
+  const { writer, list } = await workspace([{ id: 'x', folder: 'x', title: 'X', steps }]);
+  for (let n = 0; n < 55; n += 1) await writer.deleteSection({ id: 'x', index: 1, path: `t${n}.md` });
+  const kept = (await list()).entities[0].removedTabs;
+  assert.equal(kept.length, 50);
+  assert.equal(kept[0].path, 't5.md');
+  assert.equal(kept.at(-1).path, 't54.md');
+});
+
+test('a deleted card goes to the Trash with its whole entity, and Restore puts it back', async () => {
+  const { writer, list, read } = await workspace();
+  const card = await writer.createCard({ title: 'Old brief', category: 'brief' });
+  await writer.createCard({ title: 'Other' });
+  const gone = await writer.deleteCard({ id: card.id });
+  assert.equal(gone.retired.kind, 'deleted');
+  const stored = await list();
+  assert.deepEqual(stored.entities.map(item => item.id), ['other']);
+  assert.deepEqual(stored.retired[card.id].entity, card);
+  assert.equal(stored.retired[card.id].at, '2026-10-23');
+  assert.equal(await read(`${card.folder}/index.md`), '# Old brief\n\n', 'The files stay.');
+  const back = await writer.restoreCard({ id: card.id });
+  assert.deepEqual(back.card.steps, card.steps);
+  const after = await list();
+  assert.deepEqual(after.entities.map(item => item.id), ['other', 'old-brief']);
+  assert.equal(after.retired, undefined);
+  await assert.rejects(writer.restoreCard({ id: card.id }), { status: 404 });
+  await assert.rejects(writer.deleteCard({ id: 'nope' }), { status: 404 });
+});
+
+test('Restore is refused when the id or the folder came back meanwhile', async () => {
+  const { writer, list, root } = await workspace();
+  const card = await writer.createCard({ title: 'Plan' });
+  await writer.deleteCard({ id: card.id });
+  const put = async entity => {
+    const stored = await list();
+    stored.entities = [entity];
+    await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+  };
+  await put({ id: 'plan', folder: 'elsewhere', steps: [] });
+  await assert.rejects(writer.restoreCard({ id: card.id }), { status: 409, message: /id or folder/ });
+  await put({ id: 'renamed', folder: card.folder, steps: [] });
+  await assert.rejects(writer.restoreCard({ id: card.id }), { status: 409 });
+  await put({ id: 'free', folder: 'free', steps: [] });
+  assert.equal((await writer.restoreCard({ id: card.id })).card.id, 'plan');
+});
+
+test('retired is capped at 500: moved records go first, deleted ones never', () => {
+  const retired = {};
+  for (let n = 0; n < 3; n += 1) retired[`d${n}`] = { kind: 'deleted' };
+  for (let n = 0; n < 501; n += 1) retired[`m${n}`] = { kind: 'moved' };
+  capRetired(retired);
+  assert.equal(Object.keys(retired).length, 500);
+  assert.ok(retired.d0 && retired.d2);
+  assert.equal(retired.m3, undefined);
+  assert.ok(retired.m4);
+  const onlyDeleted = Object.fromEntries(Array.from({ length: 502 }, (_, n) => [`d${n}`, { kind: 'deleted' }]));
+  assert.equal(Object.keys(capRetired(onlyDeleted)).length, 502);
+});
+
+test('a new card never takes the id of one in the Trash, and Trash records are never overwritten', async () => {
+  const { writer, list, root } = await workspace();
+  const first = await writer.createCard({ title: 'Plan' });
+  await writer.deleteCard({ id: first.id });
+  const second = await writer.createCard({ title: 'Plan' });
+  assert.equal(second.id, 'plan-2');
+  await writer.deleteCard({ id: second.id });
+  const stored = await list();
+  assert.deepEqual(Object.keys(stored.retired).sort(), ['plan', 'plan-2']);
+  assert.equal(stored.retired.plan.entity.folder, first.folder, 'The first card is still in the Trash.');
+  assert.equal((await writer.restoreCard({ id: first.id })).card.id, 'plan');
+  // Old data: an entity and a Trash record under one id. A delete must not replace the record.
+  const hand = await list();
+  hand.entities.push({ id: 'plan-2', folder: 'x', steps: [] });
+  await writeFile(path.join(root, 'workspace.json'), JSON.stringify(hand));
+  await assert.rejects(writer.deleteCard({ id: 'plan-2' }), { status: 409 });
+  assert.equal((await list()).retired['plan-2'].entity.folder, second.folder);
+});
+
+test('a tab move that names a path is refused when the tab at that index is another', async () => {
+  const { writer, list, card } = await three();
+  await assert.rejects(writer.moveSection({ id: card.id, from: 1, to: 0, path: 'c.md' }), { status: 409 });
+  assert.deepEqual(await names(list), ['Overview', 'B', 'C']);
+  await writer.moveSection({ id: card.id, from: 1, to: 0, path: 'b.md' });
+  assert.deepEqual(await names(list), ['B', 'Overview', 'C']);
+});
+
+test('restoring the default tab puts defaultStep back on it, for a middle tab and for the last one', async () => {
+  for (const [index, file] of [[1, 'b.md'], [2, 'c.md']]) {
+    const { writer, list, card, root } = await three();
+    const stored = await list();
+    stored.entities[0].defaultStep = index;
+    await writeFile(path.join(root, 'workspace.json'), JSON.stringify(stored));
+    await writer.deleteSection({ id: card.id, index, path: file });
+    assert.equal((await list()).entities[0].defaultStep, Math.min(index, 1), 'Clamped to the neighbour.');
+    await writer.restoreSection({ id: card.id, path: file });
+    const after = (await list()).entities[0];
+    assert.equal(after.defaultStep, index);
+    assert.equal(after.steps[after.defaultStep].path, file);
+  }
 });

@@ -495,3 +495,54 @@ test('the real site has no dev key in /capabilities and accepts writes to any se
     assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true })).status, 200);
   } finally { await close(); }
 });
+
+test('the category, tab and Trash routes work on the site and never send a DELETE to the bucket', async () => {
+  const { request, fake, entity, close } = await fixture();
+  try {
+    const made = await (await request('/cards', { workspace: 'one', title: 'Phone notes', category: 'brief' })).json();
+    const id = made.card.id;
+    await request('/cards/section', { workspace: 'one', id, name: 'Todo' });
+    await request('/cards/section', { workspace: 'one', id, name: 'Ideas' });
+
+    const renamed = await (await request('/cards/category', { workspace: 'one', from: 'brief', to: 'Briefs' })).json();
+    assert.deepEqual(renamed, { from: 'brief', to: 'briefs', count: 1, merged: false });
+    assert.equal(entity('one', id).category, 'briefs');
+    assert.equal((await (await request('/cards/update', { workspace: 'one', id, category: 'test' })).json()).card.category, 'test');
+
+    assert.equal((await request('/cards/section/move', { workspace: 'one', id, from: 2, to: 0 })).status, 200);
+    assert.deepEqual(entity('one', id).steps.map(step => step.path), ['ideas.md', 'index.md', 'todo.md']);
+    assert.equal((await request('/cards/section/delete', { workspace: 'one', id, index: 0, path: 'todo.md' })).status, 409, 'A stale index is refused.');
+    assert.equal((await request('/cards/section/delete', { workspace: 'one', id, index: 0, path: 'ideas.md' })).status, 200);
+    assert.equal(fake.text(`sections/one/${made.card.folder}/ideas.md`), '# Ideas\n\n', 'The file stays in the bucket.');
+    assert.equal((await request('/cards/section/restore', { workspace: 'one', id, path: 'ideas.md' })).status, 200);
+    assert.deepEqual(entity('one', id).steps.map(step => step.path), ['ideas.md', 'index.md', 'todo.md']);
+
+    assert.equal((await request('/cards/delete', { workspace: 'one', id })).status, 200);
+    assert.equal(entity('one', id), undefined);
+    assert.equal(fake.json('sections/one/workspace.json').retired[id].kind, 'deleted');
+    assert.match(fake.text(`sections/one/${made.card.folder}/index.md`), /Phone notes/);
+    assert.equal((await request('/cards/restore', { workspace: 'one', id })).status, 200);
+    assert.ok(entity('one', id));
+    assert.equal((await request('/cards/delete', { workspace: 'one', id: 'nope' })).status, 404);
+
+    assert.ok(!fake.log.some(entry => entry.method === 'DELETE'), 'Nothing was deleted from the bucket.');
+  } finally { await close(); }
+});
+
+test('the new write routes keep the Origin and dev-copy gates', async () => {
+  const gated = await fixture({ requireRemoteUser: true });
+  try {
+    for (const [route, body] of [['/cards/delete', { id: 'alpha' }], ['/cards/category', { from: 'test', to: 'x' }], ['/cards/section/delete', { id: 'alpha', index: 0, path: 'index.html' }]]) {
+      const noOrigin = await fetch(`${gated.origin}/api${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify({ workspace: 'one', ...body }) });
+      assert.equal(noOrigin.status, 403, route);
+    }
+    assert.ok(gated.entity('one', 'alpha'));
+  } finally { await gated.close(); }
+  const dev = await fixture({ dev: devOnly, stateKey: 'dev-state.json' });
+  try {
+    for (const [route, body] of [['/cards/delete', { id: 'alpha' }], ['/cards/restore', { id: 'alpha' }], ['/cards/category', { from: 'test', to: 'x' }], ['/cards/section/move', { id: 'alpha', from: 0, to: 0 }]]) {
+      assert.equal((await dev.request(route, { workspace: 'one', ...body })).status, 403, route);
+    }
+    assert.ok(dev.entity('one', 'alpha'));
+  } finally { await dev.close(); }
+});
