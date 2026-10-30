@@ -19,3 +19,11 @@
 .hub-bubble > .hub-who { display: flex; margin-bottom: 4px; }
 .hub-persona { min-height: 36px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; min-width: 0; max-width: 100%; }
 @media (max-width: 480px) { .hub-persona { min-height: 44px; } }
+
+/* The header stays on one row at every width: the Chats drawer opens at a fixed top and would cover a second row (ws-2oo.1). */
+.hub-chat-main > .hub-top { flex-wrap: nowrap; align-items: center; }
+.hub-chat-main > .hub-top h2 { flex: 0 0 auto; }
+.hub-chat-with { flex: 1 1 auto; justify-content: flex-end; margin-left: 0; overflow: hidden; }
+.hub-chat-with .hub-persona { flex: 0 1 auto; width: auto; }
+.hub-chat-main > .hub-top .hub-chat-toggle { flex: 0 0 auto; }
+.hub-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
