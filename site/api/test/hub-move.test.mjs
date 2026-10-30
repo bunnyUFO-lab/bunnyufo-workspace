@@ -145,8 +145,9 @@ test('not offered, and not moved, when it needs the PC, has no repo or routine, 
 test('Bunnylink work is never offered for the cloud', async () => {
   const f = await fixture();
   try {
-    // Bunnylink work is approved for the PC by hand here: its own routing sends it to the owner at the PC.
-    const request = await f.pcRequest({ project: 'bunnylink' });
+    // The site no longer signs Bunnylink work for the PC. This is an approval from before that wall, signed with the server's key.
+    const request = await f.pcRequest({ project: 'bunnylink' }, { sign: false });
+    f.reapprove(request, { privateKey: keyPair.privateKey });
     f.clock.time = START + 7 * HOUR;
     assert.deepEqual(await f.offers(), []);
     assert.equal((await f.post(`/hub/requests/${request.id}/move-to-cloud`)).status, 409);

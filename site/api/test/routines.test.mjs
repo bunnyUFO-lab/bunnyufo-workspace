@@ -339,6 +339,20 @@ test('route() sends a repo-only project to the cloud only when the repo has a ro
   } finally { await f.close(); }
 });
 
+test('createFixed routes like createRequest: a repo with a routine goes to the cloud, one without goes to the PC', async () => {
+  const f = await fixture();
+  try {
+    const at = new Date(START);
+    const made = (id, repo) => f.hub.requests.createFixed({ project: 'probe', preset: 'code-task', text: 'Fix a thing', repo }, { id, user: 'owner', at });
+    const withRoutine = await made('20261029-probe-fixed-a001', 'example/probe');
+    assert.equal(withRoutine.request.target, 'cloud');
+    const without = await made('20261029-probe-fixed-a002', 'example/other');
+    assert.equal(without.request.target, 'pc');
+    const viaRoute = await f.post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Fix a thing', repo: 'example/probe' });
+    assert.equal(viaRoute.body.target, withRoutine.request.target, 'the same answer as a request made through the route');
+  } finally { await f.close(); }
+});
+
 test('dry run: nothing is sent, every repo has a routine, the record says dryRun', async () => {
   const f = await fixture({ env: { HUB_ROUTINE_DRY_RUN: '1', CLAUDE_ROUTINE_PROBE_URL: '', CLAUDE_ROUTINE_PROBE_TOKEN: '' } });
   try {

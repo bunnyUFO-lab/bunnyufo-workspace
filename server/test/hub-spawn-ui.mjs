@@ -63,7 +63,10 @@ try {
   step('Bunnylink: the PC is yours to start, the button adds it to Needs you');
   await page.locator('[data-spawn-project]').selectOption('bunnylink');
   await page.locator('[data-spawn-machine]', { hasText: 'You, at the PC' }).waitFor();
+  await page.locator('[data-spawn-route] .sp-rules .hit[data-rule="1"]').waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').getAttribute('data-rule'), '1');
+  assert.deepEqual(await page.locator('[data-spawn-target] option').allInnerTexts(), ['You, at the PC'], 'Bunnylink has one place to run and no choice.');
+  assert.equal(await page.locator('[data-spawn-target]').isDisabled(), true);
   await page.locator('[data-spawn-text]').fill('Look into the odd tab order');
   assert.equal(await page.locator('[data-spawn-go]').innerText(), 'Add to Needs you');
   assert.match(await page.locator('[data-spawn-note]').innerText(), /start it at the PC/);

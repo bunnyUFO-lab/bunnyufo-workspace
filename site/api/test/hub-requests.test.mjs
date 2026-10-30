@@ -461,6 +461,47 @@ test('approve refuses: no user 401, no key 503, a target outside the preset 400,
   } finally { await keyed.close(); await keyless.close(); }
 });
 
+test('Bunnylink is never signed for the PC or the cloud: creating with another target is 400, approving with any target is 400', async () => {
+  const f = await fixture({ env: KEY_ENV });
+  try {
+    const requests = () => [...f.fake.objects.keys()].filter(name => name.endsWith('/request.json'));
+    for (const target of ['pc', 'cloud', 'hermes']) {
+      const refused = await f.post('/hub/requests', { project: 'bunnylink', preset: 'code-task', text: 'Fix the proxy rule', target });
+      assert.equal(refused.status, 400, target);
+      assert.equal(refused.body.error, 'Bunnylink work is started by you at the PC.');
+    }
+    assert.deepEqual(requests(), [], 'a refused request writes nothing');
+    // No target, or the one place it can go: the request is made, and it is at-pc.
+    for (const body of [{}, { target: 'at-pc' }]) {
+      const made = await f.post('/hub/requests', { project: 'bunnylink', preset: 'code-task', text: 'Fix the proxy rule', ...body });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      assert.equal(made.body.target, 'at-pc');
+    }
+    // Approve: the at-pc request, with or without a target, is refused and nothing is signed.
+    const atPc = preset(rid('atpc', 'b111'), { project: 'bunnylink', preset: 'code-task', target: 'at-pc' });
+    f.put(atPc);
+    for (const body of [{}, { target: 'pc' }, { target: 'cloud' }, { target: 'at-pc' }]) {
+      const refused = await f.post(`/hub/requests/${atPc.id}/approve`, body);
+      assert.equal(refused.status, 400, JSON.stringify(body));
+      assert.equal(refused.body.error, 'Bunnylink work is started by you at the PC.');
+    }
+    assert.equal(f.fake.text(`sections/inbox/requests/${atPc.id}/approved.json`), null);
+    // A Bunnylink request that was stored with target pc (an older or forged one) is refused the same way.
+    const stored = preset(rid('stored', 'b222'), { project: 'bunnylink', preset: 'code-task', target: 'pc' });
+    f.put(stored);
+    assert.equal((await f.post(`/hub/requests/${stored.id}/approve`, {})).status, 400);
+    assert.equal((await f.post(`/hub/requests/${stored.id}/approve`, { target: 'pc' })).status, 400);
+    assert.equal(f.fake.text(`sections/inbox/requests/${stored.id}/approved.json`), null);
+    // Approve again goes through approveRequest, so it is refused too.
+    assert.equal((await f.post(`/hub/requests/${stored.id}/again`, {})).status, 400);
+    assert.equal(f.fake.text(`sections/inbox/requests/${stored.id}/approved.json`), null);
+    // Another project is unaffected.
+    const other = preset(rid('other', 'b333'), { project: 'probe', preset: 'code-task', target: 'pc' });
+    f.put(other);
+    assert.equal((await f.post(`/hub/requests/${other.id}/approve`, {})).status, 201);
+  } finally { await f.close(); }
+});
+
 test('approve hands a request to its target after approved.json is written; a full target makes it wait, never refuse', async () => {
   const calls = [];
   const holder = {};
