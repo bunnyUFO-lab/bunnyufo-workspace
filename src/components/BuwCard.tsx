@@ -3,6 +3,8 @@ import type { WorkspaceCard } from '../types'
 import { entityHash } from '../lib/route'
 import { ICON_PRESETS, categoryIcon } from '../lib/categories'
 import { cardUrl } from '../local/client'
+import ItemMenu from './ItemMenu'
+import { useCardMenu } from './CardMenu'
 
 /**
  * The icon picker: the presets, a box for any other emoji, and a way back to the card's own
@@ -99,6 +101,7 @@ const sameWord = (a: string, b: string) =>
 
 export default function BuwCard({ entity, archived = false, showProject = false, onProject, onArchive, onPin, onIcon, onDragStart, afterDrag, order, busy = false }: BuwCardProps) {
   const steps = entity.steps.length
+  const { items: menu, dialogs } = useCardMenu(entity)
   const [picking, setPicking] = useState(false)
   const iconButton = useRef<HTMLButtonElement>(null)
   const closePicker = () => { setPicking(false); iconButton.current?.focus() }
@@ -171,6 +174,8 @@ export default function BuwCard({ entity, archived = false, showProject = false,
             {archived ? 'restore' : 'archive'}
           </button>
         )}
+        <ItemMenu label={`More for ${entity.title}`} items={menu} className="card-more" />
+        {dialogs}
       </div>
 
       <div className="card-project-title">

@@ -6,6 +6,15 @@ import { publishedCardUrl, repoFileUrl } from '../lib/links'
 import { AddSection, EditCard } from './CardEdits'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { homeLink } from '../lib/route'
+import ItemMenu from './ItemMenu'
+import { useCardMenu } from './CardMenu'
+import StepTab from './TabEdits'
+
+/** The ⋯ beside the pencil: Rename, Category, Move to workspace, Delete. */
+function CardMore({ card }: { card: WorkspaceCard }) {
+  const { items, dialogs } = useCardMenu(card)
+  return <><ItemMenu label="More for this card" items={items} className="crumb-more" />{dialogs}</>
+}
 
 interface TopbarProps {
   entity: WorkspaceCard | null
@@ -134,6 +143,7 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
             <span className="crumb-sep">/</span>
             <span className="crumb-current">{entity.title}</span>
             {editable && <EditCard key={entity.id} card={entity} />}
+            {editable && <CardMore key={`more-${entity.id}`} card={entity} />}
           </>
         )}
       </nav>
@@ -143,17 +153,8 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
           {entity.steps.length > 0 && (
             <div className="step-tabs-wrap" data-overflow={overflow}>
               <div className="step-tabs" role="tablist" ref={tabs}>
-                {entity.steps.map((s, i) => (
-                  <button
-                    key={i}
-                    role="tab"
-                    aria-selected={i === stepIndex}
-                    className={`step-tab${i === stepIndex ? ' active' : ''}`}
-                    onClick={() => onStep(entity.id, i)}
-                    title={s.name}
-                  >
-                    {s.name}
-                  </button>
+                {entity.steps.map((_, i) => (
+                  <StepTab key={i} card={entity} index={i} active={i === stepIndex} activeIndex={stepIndex} onStep={onStep} editable={editable} />
                 ))}
                 {editable && <AddSection key={entity.id} card={entity} onStep={onStep} onNaming={() => setAdding(n => n + 1)} />}
               </div>

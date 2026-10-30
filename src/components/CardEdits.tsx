@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { WorkspaceCard } from '../types'
-import { addSection, openForEditing, updateCard } from '../lib/cards'
+import { addSection, openForEditing, restoreSection, updateCard } from '../lib/cards'
 import type { SectionKind } from '../lib/cards'
 import './cards.css'
 
@@ -15,6 +15,7 @@ export function AddSection({ card, onStep, onNaming }: { card: WorkspaceCard; on
   const [kind, setKind] = useState<SectionKind>('markdown')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const removed = card.removedTabs ?? []
   const close = () => { setNaming(false); setName(''); setKind('markdown'); setError('') }
   // The name offered for a drawing is replaced by the user's own, but a name they typed is kept.
   const pick = (next: SectionKind) => {
@@ -40,6 +41,22 @@ export function AddSection({ card, onStep, onNaming }: { card: WorkspaceCard; on
     <input autoFocus value={name} onChange={event => setName(event.target.value)} maxLength={60} placeholder="Section name" aria-label="Section name" disabled={busy} />
     <button type="submit" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add'}</button>
     <button type="button" onClick={close} disabled={busy} aria-label="Cancel">✕</button>
+    {removed.length > 0 && (
+      <details className="removed-tabs">
+        <summary>Removed tabs ({removed.length})</summary>
+        <ul>
+          {removed.map(tab => (
+            <li key={tab.path}>
+              <span>{tab.name}</span>
+              <button type="button" disabled={busy} onClick={async () => {
+                setBusy(true); setError('')
+                try { const back = await restoreSection(card.workspace.id, card.id, tab.path); close(); onStep(card.id, back.step) } catch (problem) { setError(message(problem)) } finally { setBusy(false) }
+              }}>Restore</button>
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
     {error && <p className="card-form-error" role="alert">{error}</p>}
   </form>
 }
