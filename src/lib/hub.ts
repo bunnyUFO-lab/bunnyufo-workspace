@@ -331,8 +331,10 @@ export const appUrl = (value: string | undefined): string | undefined => (value 
 export interface ChatImage { file: string; type: string; width: number; height: number }
 /** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
 export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; model?: string }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; model?: string; persona?: string }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }
+/** An agent a new chat may talk to instead of Hermes: the id is all the page ever sends. */
+export interface ChatPersona { id: string; name: string; role: string; preset: string }
 /** A model the chat may ask Hermes for: the id is all the page ever sends. */
 export interface ChatModel { id: string; label: string; note: string }
 /** What Hermes will be given for an item, as the preview route shows it. */

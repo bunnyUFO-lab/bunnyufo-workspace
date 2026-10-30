@@ -18,6 +18,7 @@ import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
+import { chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
 const MB = 1024 * 1024;
@@ -61,11 +62,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const first = lines.find(line => line.role === 'user');
         const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;   // help:
         const asked = lines.findLast(line => line.role === 'user' && typeof line.model === 'string' && chatModelsForClient().some(entry => entry.id === line.model));   // model:
-        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && asked.model !== 'auto' ? { model: asked.model } : {}) };
+        const talking = lines.find(line => line.persona && storedPersona(line.persona))?.persona;   // persona:
+        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && asked.model !== 'auto' ? { model: asked.model } : {}), ...(talking ? { persona: talking } : {}) };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
-      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}), ...(info.model ? { model: info.model } : {}) });
+      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}), ...(info.model ? { model: info.model } : {}), ...(info.persona ? { persona: info.persona } : {}) });
     }
     return conversations;
   }
@@ -173,12 +175,16 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const choice = chatModelOf(data.model);   // model: an id from the table, or a 400 before anything is written
+    const asked = chatPersonaOf(data.persona);   // persona: an id from the table, or a 400 before anything is written
     const text = typeof data.text === 'string' ? data.text.trim() : '';
     const pictures = checkChatImages(data.images, fail);
     if ((!text && !pictures.length) || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
     let id = data.conversation;
     let history = [];
+    let persona = asked;   // persona: null is Hermes itself
     const asking = id !== undefined && id !== null && id !== '';
+    if (asked && asking) throw fail('persona opens a new conversation; a chat keeps the one it started with.');   // persona:
+    if (asked && data.about !== undefined && data.about !== null) throw fail('Get help stays with Hermes; send about without persona.');   // persona:
     if (data.about !== undefined && data.about !== null && asking) throw fail('about opens a new conversation; send it without conversation.');   // help:
     const context = asking ? null : (data.about !== undefined && data.about !== null ? await helpContext(data.about) : null);   // help:
     if (asking) {
@@ -189,6 +195,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (!got) throw fail('No such conversation.', 404);
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
       history = parse(got.text);
+      persona = storedPersona(history.find(line => line.persona)?.persona);   // persona: the one this conversation started with
     } else {
       id = `${day8(now())}-${randomId(6)}`;
     }
@@ -215,7 +222,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       role: 'user',
       content: contextPictures.length ? [{ type: 'text', text: context.text }, ...contextPictures.map(picture => ({ type: 'image_url', image_url: { url: toDataUrl(picture.type, picture.buffer) } }))] : context.text,
     };
-    const messages = runTurn ? [] : [...(contextMessage ? [contextMessage] : []), ...await historyMessages(id, recent, spent), { role: 'user', content: current }];
+    const messages = runTurn ? [] : [...(persona ? [{ role: 'user', content: persona.text }] : []), ...(contextMessage ? [contextMessage] : []), ...await historyMessages(id, recent, spent), { role: 'user', content: current }];
     const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
     const started = Date.now();
 
@@ -233,7 +240,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let runId = null;
     if (runTurn) {
       // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
-      const earlier = [...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+      const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
       try {
         ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}`, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));   // model:
       } catch (error) {
@@ -354,8 +361,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
-    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}) };   // model:
-    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}) };   // model:
+    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     let contextLine = null;   // help:
     try {
       if (context) {
@@ -419,7 +426,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient() });   // model:
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient() });   // model: persona:
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);
