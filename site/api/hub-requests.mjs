@@ -197,6 +197,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return bodies.filter(Boolean);
   }
 
+  /** A fire record as the page may see it: without `routine`, the repo key it was fired through. */
+  const publicFire = ({ routine: _routine, ...fire }) => fire;
+
   /** `GET /hub/requests/:id`. `approved` comes without its signed brief (`run.brief`): it is long and the run view does not show it. */
   async function requestDetail(id, at) {
     const { names, request, parts, state } = await loadOne(id, at);
@@ -206,7 +209,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       newestFiles(id, names, 'run-'), newestFiles(id, names, 'fire-'),
     ]);
     const { approved } = parts;
-    const cloud = approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved }, at, { withFires: true }).catch(() => null) : null;
+    const cloudFull = approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved }, at, { withFires: true }).catch(() => null) : null;
+    const cloud = cloudFull?.fires ? { ...cloudFull, fires: cloudFull.fires.map(publicFire) } : cloudFull;
     const shown = approved && approved.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved;
     return {
       request,
@@ -218,7 +222,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       ...(hermesRun ? { hermesRun } : {}),
       ...(cloud ? { cloud } : {}),
       ...(retry ? { retry } : {}),
-      fires,
+      fires: fires.map(publicFire),
       ...(stop ? { stop } : {}),
       ...(declined ? { declined } : {}),
       files: [...names].sort(),

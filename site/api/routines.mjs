@@ -306,7 +306,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     const checked = await verifyApproval(id, at);
     if (!checked.ok) throw fail('This approval failed the server\'s check.', 409);
     const { result, record } = await fireAndRecord(id, checked.approved, 'hub', at);
-    return { status: 200, body: { fired: result.ok === true, ...(result.ok ? {} : { reason: result.reason }), fire: record } };
+    return { status: 200, body: { fired: result.ok === true, ...(result.ok ? {} : { reason: result.reason }), fire: { ...record, routine: undefined } } };
   });
 
   /**
@@ -318,7 +318,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
   async function cloudStatus(id, { names, state, approved }, at = now(), { withFires = false } = {}) {
     if (state !== 'approved' || approved?.target !== 'cloud') return null;
     const fires = await readFires(id, names);
-    const out = status => ({ ...status, ...(withFires ? { fires } : {}) });
+    const out = status => ({ ...status, ...(dryRun ? { dryRun: true } : {}), ...(withFires ? { fires } : {}) });
     const okFire = fires.find(fire => fire.ok === true);
     if (okFire) {
       const age = at.getTime() - Date.parse(okFire.at);
@@ -329,7 +329,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     if (plan.wait) return out({ status: 'waiting', reason: 'retry', next: plan.next });
     if (paused(at)) return out({ status: 'waiting', reason: 'usage-limit', next: new Date(pausedUntil).toISOString() });
     const room = await capacity(at, { memo: true });
-    if (!room.under) return out({ status: 'waiting', reason: 'daily-cap', next: room.next });
+    if (!room.under) return out({ status: 'waiting', reason: 'daily-cap', next: room.next, cap: room.cap });
     return out({ status: 'queued' });
   }
 
@@ -421,7 +421,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     dryRun, cap, zone, hasRoutine, keys, fire, recordFire, firesToday, capacity, verifyApproval, handOff, retry, exclusive, cloudStatus, sweep, start, close,
     /** Today alerts for approvals the server's check refused, as `kind: alert` rows. */
     alerts: () => [...refused].map(([id, row]) => ({ ts: row.ts, kind: 'alert', source: 'request', request: id, project: row.project, title: `Approval for ${row.title} failed the server's check` })),
-    /** The repo keys that have a routine (never URLs). */
-    cloudRepos: () => keys(),
+    /** The repos (owner/name) that have a routine bound to one: what capabilities advertises. A routine without `_REPO` is refused, so it is not listed. Never URLs, tokens or env key names. */
+    cloudRepos: () => [...routines.values()].map(routine => routine.repo).filter(Boolean),
   };
 }

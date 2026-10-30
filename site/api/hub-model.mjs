@@ -319,6 +319,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(target ? { target } : {}),
     ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
+    ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
   };
 }
@@ -397,7 +398,7 @@ export function deriveEventItems(events) {
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [] }) {
+export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
@@ -410,7 +411,7 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   const recent = events.filter(event => new Date(event.ts).getTime() >= since);
   const requestAlerts = requests
     .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)
-    .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, title: `Request ${item.state}: ${item.title}` }));
+    .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, title: item.reason === 'approval-refused' ? `Cloud run refused the approval: ${item.title}` : `Request ${item.state}: ${item.title}` }));
   // A cloud request that fired and never started, or whose fire stopped failing, stays an alert until it is dealt with; Retry is on its row.
   const cloudAlerts = requests
     .filter(item => item.cloud?.status === 'not-started' || item.cloud?.status === 'fire-failed')
@@ -422,6 +423,8 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),
+    // Cloud runs fired on the owner's day against the daily cap; absent when no cloud routine is set up.
+    ...(cloud ? { cloud: { used: cloud.used, cap: cloud.cap, next: cloud.next } } : {}),
   };
 }
 

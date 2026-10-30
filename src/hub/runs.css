@@ -97,6 +97,10 @@
 .rd-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
 .rd-h { margin: 12px 0 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
 .rd-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--amber-dim); color: var(--amber); font-size: 13px; }
+.rd-cloud { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--s2); }
+.rd-cloud p { margin: 0; overflow-wrap: anywhere; }
+.rd-cloud[data-run-cloud="fire-failed"], .rd-cloud[data-run-cloud="not-started"] { border-color: var(--red); }
+.rd-cloud .hub-btn { min-height: 44px; }
 .rd-ask { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--pink); background: var(--pink-dim); }
 .rd-ask p { margin: 0; overflow-wrap: anywhere; }
 .rd-state.running, .rd-state.taken { color: var(--green); }

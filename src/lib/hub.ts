@@ -78,6 +78,8 @@ export interface HubEvent {
   review?: string
   /** An alert made from a request (`source: 'request'`): the request's id. */
   request?: string
+  /** A cloud alert whose request can fire again (`POST /hub/requests/:id/fire`). */
+  retry?: boolean
   summary?: string
   file: string
   prs?: string[]
@@ -132,6 +134,8 @@ export interface Today {
   /** From the PC's status, else from events. Absent from an older site API. */
   working?: WorkingItem[]
   pc?: PcSummary | null
+  /** Cloud runs fired today against the daily cap; absent when no cloud routine is set up. */
+  cloud?: { used: number; cap: number; next: string }
 }
 
 export interface AskOption { id: string; label: string; image?: string }

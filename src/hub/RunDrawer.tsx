@@ -23,12 +23,54 @@ interface RunDetail extends RequestDetail {
   retry?: { runId: string; at: string; provider: string; model: string; reason: string }
   stop?: { reason?: string; at?: string; by?: string }
   report?: boolean
+  /** Where an approved cloud request stands, from the site API's fire queue. */
+  cloud?: CloudState
+  fires?: CloudFire[]
 }
+
+interface CloudFire { at: string; ok: boolean; status?: number; session?: string; reason?: string; dryRun?: boolean }
+interface CloudState { status: 'queued' | 'fired' | 'waiting' | 'fire-failed' | 'not-started'; reason?: string; next?: string; cap?: number; dryRun?: boolean }
 
 const STATE_WORD: Record<string, string> = {
   proposed: 'Proposed', expired: 'Expired', approved: 'Approved', taken: 'Taken', running: 'Running', stopping: 'Stopping', stopped: 'Stopped',
   asking: 'Asking you', failed: 'Failed', lost: 'Lost', done: 'Done', declined: 'Declined', open: 'Open',
 }
+/** Why a fire failed, in words. The routine's address, token and repo name never reach this screen. */
+function fireReason(reason: string | undefined): string {
+  if (!reason) return 'the routine did not start'
+  if (reason === 'network') return 'the routine could not be reached'
+  if (reason === 'timeout') return 'the routine did not answer in time'
+  if (reason === 'routine-repo-unset') return "this repo's routine is not fully set up"
+  const code = /^http-(\d{3})$/.exec(reason)?.[1]
+  if (!code) return 'the routine did not start'
+  if (code === '401' || code === '403') return 'the routine refused the request'
+  if (code === '404') return 'the routine was not found'
+  return Number(code) >= 500 ? "the routine's service had an error" : `the routine answered ${code}`
+}
+
+/** A time for a line that points ahead: the clock today, the weekday and clock on another day. */
+function whenLabel(iso: string | undefined, now = new Date()): string {
+  const date = new Date(iso ?? '')
+  if (Number.isNaN(date.getTime())) return 'later'
+  return date.toDateString() === now.toDateString() ? clock(iso as string) : `${date.toLocaleDateString([], { weekday: 'short' })} ${clock(iso as string)}`
+}
+
+/** The drawer's line for a cloud request, and what it can do. */
+function cloudLine(cloud: CloudState, fires: CloudFire[]): { text: string; retry: boolean; session?: string } {
+  const okFire = fires.find(fire => fire.ok)
+  const session = sessionUrl(okFire?.session)
+  switch (cloud.status) {
+    case 'queued': return { text: 'Starting in the cloud…', retry: false }
+    case 'waiting':
+      if (cloud.reason === 'daily-cap') return { text: `Waiting: ${cloud.cap ?? 10} cloud ${(cloud.cap ?? 10) === 1 ? "run" : "runs"} today. Starts at ${whenLabel(cloud.next)}.`, retry: false }
+      if (cloud.reason === 'usage-limit') return { text: `Waiting: cloud usage limit. Tries again at ${whenLabel(cloud.next)}.`, retry: false }
+      return { text: `Could not start in the cloud yet (${fireReason(fires[0]?.reason)}). Tries again at ${whenLabel(cloud.next)}.`, retry: false }
+    case 'fired': return { text: `Started in the cloud at ${okFire ? clock(okFire.at) : 'an unknown time'}`, retry: false, session }
+    case 'fire-failed': return { text: `Could not start in the cloud: ${fireReason(cloud.reason ?? fires[0]?.reason)}`, retry: true }
+    default: return { text: `Fired at ${okFire ? clock(okFire.at) : 'an unknown time'} but the run has not started.`, retry: true, session }
+  }
+}
+
 const STOPPABLE = new Set(['approved', 'taken', 'running', 'lost', 'asking'])
 const AGAIN = new Set(['expired', 'failed', 'lost'])
 const LIVE_STATES = new Set(['approved', 'taken', 'running', 'stopping'])
@@ -142,7 +184,9 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   }, [reload])
 
   if (!detail) return <p className="hub-muted">{error ?? 'Loading…'}</p>
-  const { request, approved, taken, runs = [], result, retry, stop } = detail
+  const { request, approved, taken, runs = [], result, retry, stop, cloud, fires = [] } = detail
+  const cloudShown = cloud && state === 'approved' ? cloudLine(cloud, fires) : null
+  const dry = !!cloud?.dryRun || fires.some(fire => fire.dryRun)
   const target = (approved?.target ?? request.target) as SpawnTarget | undefined
   const by = approved ? (approved.by === 'policy' ? 'Signed by policy' : `Approved by ${approved.by}`) : null
   const stoppable = STOPPABLE.has(state) && host.write && !!approved
@@ -160,6 +204,15 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
       <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>
       <p className="rd-body" data-run-request-text>{request.text}</p>
       {target && <p className="hub-muted" data-run-target>Runs on {MACHINE[target]?.name ?? target}{request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
+      {cloudShown && (
+        <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
+          <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
+          <div className="rd-links">
+            {cloudShown.session && <a className="hub-btn" href={cloudShown.session} target="_blank" rel="noopener noreferrer" data-run-session>Open session</a>}
+            {cloudShown.retry && host.write && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/fire`, {}) })} data-run-fire-retry>Retry</button>}
+          </div>
+        </div>
+      )}
       {retry && <p className="rd-note" data-run-retry>Codex quota reached; retried on Anthropic.</p>}
       {state === 'asking' && (
         <div className="rd-ask" data-run-asking>
@@ -175,6 +228,9 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
         {result && <li data-step="result"><b>{result.outcome === 'failed' ? 'Failed' : 'Finished'}</b> {result.outcome}{result.reason ? ` (${result.reason})` : ''}{result.at ? ` · ${clock(result.at)}` : ''}</li>}
         {runs.map(run => (
           <li key={run.at} data-step="run"><b>{RUN_WORD[run.state] ?? run.state}</b> {run.lastAction ?? ''} · {clock(run.at)}{sessionUrl(run.sessionLink) && <> · <a href={sessionUrl(run.sessionLink)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
+        ))}
+        {fires.map(fire => (
+          <li key={fire.at + String(fire.ok)} data-step="fire"><b>{fire.ok ? 'Fired' : 'Fire failed'}</b> {fire.ok ? 'in the cloud' : fireReason(fire.reason)} · {clock(fire.at)}{fire.dryRun ? ' (dev: nothing was sent)' : ''}{fire.ok && sessionUrl(fire.session) && <> · <a href={sessionUrl(fire.session)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
         ))}
         {taken && <li data-step="taken"><b>Taken</b> by {taken.runner ?? taken.host ?? 'a runner'}{taken.host && taken.runner ? ` on ${taken.host}` : ''} · {clock(taken.at)}</li>}
         {approved && <li data-step="approved"><b data-run-by>{by}</b> · {clock(approved.at)}</li>}

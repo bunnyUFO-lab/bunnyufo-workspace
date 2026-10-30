@@ -333,7 +333,8 @@ test('route() sends a repo-only project to the cloud only when the repo has a ro
     const asked = await f.call('GET', '/hub/presets/route?preset=code-task&project=workspace-app&repo=example/probe');
     assert.equal(asked.body.target, 'cloud');
     const capabilities = f.hub.capabilities({ signedIn: true });
-    assert.deepEqual(capabilities.cloudRepos, ['PROBE']);
+    assert.deepEqual(capabilities.cloudRepos, ['example/probe']);
+    assert.ok(!JSON.stringify(capabilities).includes('PROBE'), 'No env key name.');
     assert.ok(!JSON.stringify(capabilities).includes('SECRET'));
   } finally { await f.close(); }
 });
@@ -706,4 +707,73 @@ test("a run's own result.json cannot pause the queue from the future or for long
     g.clock.time = START + 61 * MIN;
     assert.deepEqual((await g.hub.routines.sweep()).fired, [waiting.id], 'The pause never outlasts 60 minutes from now.');
   } finally { await g.close(); }
+});
+
+test('Today counts the cloud runs of the owner\'s day against the cap; the status carries the cap and the dry flag', async () => {
+  const f = await fixture({ env: { HUB_TIME_ZONE: 'America/Los_Angeles', HUB_CLOUD_DAILY: '2' } });
+  try {
+    assert.deepEqual((await f.call('GET', '/hub/today')).body.cloud, { used: 0, cap: 2, next: '2026-10-30T07:00:00.000Z' });
+    const first = f.proposeCloud();
+    await f.post(`/hub/requests/${first.id}/approve`, {});
+    f.seedFire('20261029-probe-old-o001', START - 5 * MIN);
+    const second = f.proposeCloud();
+    await f.post(`/hub/requests/${second.id}/approve`, {});
+    const today = (await f.call('GET', '/hub/today')).body;
+    assert.equal(today.cloud.used, 2);
+    assert.equal(today.cloud.cap, 2);
+    const waiting = (await f.detail(second.id)).cloud;
+    assert.equal(waiting.status, 'waiting');
+    assert.equal(waiting.cap, 2);
+    assert.equal(waiting.dryRun, undefined, 'A real routine is not a dry run.');
+  } finally { await f.close(); }
+  const none = await fixture({ env: { CLAUDE_ROUTINE_PROBE_URL: '', CLAUDE_ROUTINE_PROBE_TOKEN: '' } });
+  try {
+    assert.equal((await none.call('GET', '/hub/today')).body.cloud, undefined, 'No routine, no count.');
+  } finally { await none.close(); }
+  const dry = await fixture({ env: { HUB_ROUTINE_DRY_RUN: '1' } });
+  try {
+    const request = dry.proposeCloud();
+    await dry.post(`/hub/requests/${request.id}/approve`, {});
+    const detail = await dry.detail(request.id);
+    assert.equal(detail.cloud.dryRun, true);
+    assert.equal(detail.fires[0].dryRun, true);
+    assert.equal((await dry.call('GET', '/hub/today')).body.cloud.used, 1);
+  } finally { await dry.close(); }
+});
+
+test('a run that refused its approval is a Today alert that names the refusal and offers no Retry', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud({ title: 'Forged job' });
+    f.writeApproval(request);
+    const base = `sections/inbox/requests/${request.id}`;
+    f.fake.seed(`${base}/taken.json`, JSON.stringify({ v: 1, runner: 'cloud', host: 'cloud', at: new Date(START).toISOString() }), 'application/json');
+    f.fake.seed(`${base}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', reason: 'approval-refused', summary: 'approval refused: bad signature', by: 'cloud', at: new Date(START + MIN).toISOString() }), 'application/json');
+    const alert = (await f.call('GET', '/hub/today')).body.alerts.find(row => row.request === request.id);
+    assert.equal(alert.title, 'Cloud run refused the approval: Forged job');
+    assert.equal(alert.retry, undefined);
+    // A run that failed for another reason keeps the plain title.
+    const other = f.proposeCloud({ title: 'Broke' });
+    f.writeApproval(other);
+    f.fake.seed(`sections/inbox/requests/${other.id}/taken.json`, JSON.stringify({ v: 1, runner: 'cloud', host: 'cloud', at: new Date(START).toISOString() }), 'application/json');
+    f.fake.seed(`sections/inbox/requests/${other.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', reason: 'tests-failed', by: 'cloud', at: new Date(START + MIN).toISOString() }), 'application/json');
+    const plain = (await f.call('GET', '/hub/today')).body.alerts.find(row => row.request === other.id);
+    assert.equal(plain.title, 'Request failed: Broke');
+  } finally { await f.close(); }
+});
+
+test('the request detail never carries the routine key: neither on a fire record nor in the cloud status', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud();
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    assert.ok(f.fires(request.id)[0].routine, 'The stored record names the routine.');
+    const answer = await f.call('GET', `/hub/requests/${request.id}`);
+    assert.equal(answer.status, 200);
+    assert.ok(answer.body.fires.length >= 1 && answer.body.cloud.fires.length >= 1);
+    assert.ok(!JSON.stringify(answer.body).includes('PROBE'), JSON.stringify(answer.body));
+    assert.ok(!JSON.stringify(answer.body).includes('"routine"'));
+    assert.equal(answer.body.fires[0].ok, true);
+    assert.match(answer.body.fires[0].session, /^https:\/\/claude\.ai\//);
+  } finally { await f.close(); }
 });
