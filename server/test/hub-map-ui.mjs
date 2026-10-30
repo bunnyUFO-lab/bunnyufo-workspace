@@ -56,9 +56,9 @@ const freeCentre = page => page.evaluate(() => {
   return { x: box.left + box.width / 2, y: box.top + h / 2 };
 });
 
-/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256, as drawn by origin/main (407b036), before the vertical layout. */
-const DESKTOP_EXPANDED = '67b5f7049a9278bbe20b96a1965930506b3f47be60bb20261b29420291dfacc4';
-const DESKTOP_EXPANDED_NO_SPRINTS = '850cea9062b44b20e07c0196d481e4ff266643764352d44c887fe24e77d46ccc';
+/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-8x1 (one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
+const DESKTOP_EXPANDED = '28675ac95a75b45d4f4bfd15badc2cd3176dce3bcc15518dd9b727157531e71d';
+const DESKTOP_EXPANDED_NO_SPRINTS = '4c9d060d15873f69d509cd2c703f6392c0dd5560f55165b413fb2bcac0a1e7c4';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
 // The Wayfinder row of the project just opened: waits for the map under it (they mount together), then requires exactly one row. A second row is a double mount, never a timing slip.
@@ -188,11 +188,11 @@ try {
   await big.locator('button:has-text("Expand all")').click();
   await big.waitForTimeout(500);
   const plain = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
-  assert.equal(sha(plain), DESKTOP_EXPANDED_NO_SPRINTS, 'Expanded, without sprints, the svg is what main drew.');
+  assert.equal(sha(plain), DESKTOP_EXPANDED_NO_SPRINTS, 'Expanded, without sprints, the svg is the recorded drawing.');
   await big.locator('.hub-map-controls button:has-text("Sprints")').click();
   await big.waitForTimeout(500);
   const withSprints = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
-  assert.equal(sha(withSprints), DESKTOP_EXPANDED, 'Expanded, with sprints, the svg is what main drew.');
+  assert.equal(sha(withSprints), DESKTOP_EXPANDED, 'Expanded, with sprints, the svg is the recorded drawing.');
   await noSideways(big, 'Roadmap at 1920');
 }
 {
@@ -332,6 +332,48 @@ try {
   const calmOpen = await clipped();
   assert.ok(!calmOpen.clipped && calmOpen.height > calm.height, 'It expands.');
   assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
+}
+
+{
+  step('opening and closing a branch keeps the view still: the toggle and the map stay where they are, the scale does not change, and nothing glides');
+  // A Sprint 2 shaped project: one milestone, four features with long titles.
+  const features = [['Combat feel and runes', ['Hit stop and screen shake', 'Rune slot inventory', 'Rune effects pass one']], ['Hex map generator (pure C#)', ['Hex grid coordinates', 'Noise terrain pass', 'Region and biome assignment']], ['Enemy telegraphs', ['Wind-up animation set', 'Audio cue pass']], ['First contact encounter', ['Block out the arena', 'Spawn rules']]];
+  const issues = [
+    beadsIssue({ id: 'sp-m1', title: 'Sprint 1: moving', type: 'milestone', status: 'closed', closed: '2026-10-10T10:00:00Z', created: '2026-10-01T10:00:00Z' }),
+    beadsIssue({ id: 'sp-m2', title: 'Sprint 2: feel, first contact', type: 'milestone', blocks: ['sp-m1'], created: '2026-10-02T10:00:00Z' }),
+    beadsIssue({ id: 'sp-m3', title: 'Sprint 3: depth', type: 'milestone', blocks: ['sp-m2'], created: '2026-10-03T10:00:00Z' }),
+  ];
+  features.forEach(([title, tasks], i) => {
+    issues.push(beadsIssue({ id: `sp-f${i}`, title, type: 'epic', parent: 'sp-m2', created: `2026-10-02T11:0${i}:00Z` }));
+    tasks.forEach((name, j) => issues.push(beadsIssue({ id: `sp-f${i}-t${j}`, title: name, parent: `sp-f${i}`, created: `2026-10-02T12:${i}${j}:00Z` })));
+  });
+  fixture.seed.beads('sprint2', issues, { pushedAt: minutesAgo(fixture.now, 10).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sprint2' });
+  const close = (a, b, what) => assert.ok(Math.hypot(a.x - b.x, a.y - b.y) <= 2, `${what}: ${a.x},${a.y} to ${b.x},${b.y}`);
+  for (const [label, viewport, options] of [['desktop', { width: 1280, height: 800 }, {}], ['phone', { width: 390, height: 844 }, { hasTouch: true, isMobile: true }]]) {
+    const page = await open(viewport, options);
+    await showMap(page, '#/~hub/map/sprint2');
+    const toggle = id => page.locator(`[data-toggle="${id}"]`);
+    const press = async id => { await toggle(id).dispatchEvent('click'); await page.waitForTimeout(500); };
+    const circle = id => centreOf(page.locator(`[data-node="${id}"] > circle`).first());
+    const scale = async () => (await viewOf(page))[2];
+    await press('sp-m2');
+    const k = await scale();
+    // The first milestone does not move when the second opens and closes; the toggle and the node being toggled stay put.
+    for (const id of ['sp-f0', 'sp-f1', 'sp-m2']) {
+      const anchor = await centreOf(toggle(id));
+      const first = await circle('sp-m1');
+      const second = await circle('sp-m2');
+      await press(id);
+      close(await centreOf(toggle(id)), anchor, `${label}: ${id} toggle after the first press`);
+      close(await circle('sp-m1'), first, `${label}: the map did not move when ${id} changed`);
+      if (id !== 'sp-m2') close(await circle('sp-m2'), second, `${label}: ${id}: milestone 2 stays`);
+      assert.equal(await scale(), k, `${label}: ${id} did not zoom`);
+      await press(id);
+      close(await centreOf(toggle(id)), anchor, `${label}: ${id} toggle after the second press`);
+      close(await circle('sp-m1'), first, `${label}: the map is back where it was after closing ${id}`);
+      assert.equal(await scale(), k, `${label}: closing ${id} did not zoom`);
+    }
+  }
 }
 
   console.log('hub-map-ui: passed');

@@ -49,12 +49,14 @@ export interface Layout {
   bands: Band[]
 }
 
-/** Task titles wrap at 24 characters, at the last space before that: at most two lines; the second ends in … when it would run past 24 characters. */
-export function wrap(title: string): string[] {
-  if (title.length <= 24) return [title]
-  const cut = title.lastIndexOf(' ', 24)
-  const [first, second] = cut > 0 ? [title.slice(0, cut), title.slice(cut + 1)] : [title.slice(0, 24), title.slice(24)]
-  return [first, second.length > 24 ? `${second.slice(0, 23)}…` : second]
+/** A label is one line of at most this many characters; a longer title ends in … (the full title is in the node's tooltip). A second line would run under its node and into its neighbours. */
+export const LABEL_MAX = 28
+/** How far apart, along the spine, the branches of different levels leave it: a higher level leaves further left, so its diagonal passes to the left of the lower levels' elbows and labels. */
+export const LEVEL_STEP = 48
+
+/** A title as the one line of its label. Kept as a list of lines: a label has `lines`. */
+export function wrap(title: string, max = LABEL_MAX): string[] {
+  return [title.length <= max ? title : `${title.slice(0, max - 1)}…`]
 }
 
 const marksOf = (signsList: Sign[][]): Marks => ({
@@ -93,7 +95,10 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     milestoneX.set(milestone.id, x)
     const mx = vertical ? 0 : x
     const my = vertical ? x : SPINE_Y
-    const titleLines = vertical ? wrap(milestone.title) : [milestone.title]
+    const titleLines = vertical ? wrap(milestone.title, 40) : [milestone.title]
+    /** Horizontal: where the first branch leaves the spine, clear of the open milestone's title, which sits centred below the circle and would meet the diagonals. */
+    const first = isOpen && !vertical ? Math.max(34, (milestone.title.length * 6.8) / 2 + 6) : 34
+    const levels = Math.ceil(milestone.features.length / 2)
     nodes.push({
       kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen,
       done: tasks.filter(task => task.state === 'done').length, total: tasks.length, marks: marksOf(tasks.map(task => task.signs)),
@@ -102,7 +107,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         ? { x: radius + 10, y: my + 4 - (titleLines.length - 1) * 7, anchor: 'start', lines: titleLines, step: 14 }
         : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle' },
       countAt: { x: mx, y: my + 4 },
-      chevronAt: { x: mx - radius - 16, y: my },
+      chevronAt: { x: mx - 42, y: my },
     })
     let span = vertical ? 100 : Math.max(170, milestone.title.length * 7 + 30)
     // Vertical: the next feature's band starts here.
@@ -118,7 +123,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           // The branch leaves the spine, steps out BR and runs down; the circle hangs at its end, text goes outside it.
           const y0 = cursor
           const y1 = y0 + BR
-          const y2 = y1 + (featureOpen ? 28 + feature.tasks.length * VS : 8)
+          const y2 = y1 + (featureOpen ? 28 + feature.tasks.length * VS : 20)
           const bx = side * BR
           const cy = y2 + FR
           const lines = wrap(feature.title)
@@ -127,8 +132,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
             kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: bx, y: y2, side, state, col, open: featureOpen,
             done: featureDone, total: feature.tasks.length, marks: featureMarks,
             center: { x: bx, y: cy }, elbow: { x: bx, y: y1 },
-            label: { x: bx + side * (FR + 8), y: cy + 4 - (lines.length - 1) * 7, anchor: side < 0 ? 'end' : 'start', lines, step: 14 },
-            countAt: { x: bx, y: cy + 4 }, chevronAt: { x: bx, y: cy + FR + 14 },
+            label: { x: bx + side * (FR + 8), y: cy + 4, anchor: side < 0 ? 'end' : 'start', lines, step: 14 },
+            countAt: { x: bx, y: cy + 4 }, chevronAt: { x: bx, y: y1 },
           })
           if (featureOpen) {
             feature.tasks.forEach((task, slot) => {
@@ -147,9 +152,11 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           return
         }
         const level = 1 + Math.floor(k / 2)
-        const bx = x + 34 + k * 22
+        const bx = x + first + (levels - level) * LEVEL_STEP
         const by = SPINE_Y + side * level * LV
-        const length = featureOpen ? BR + 34 + feature.tasks.length * TS : 120
+        const lines = wrap(feature.title)
+        const width = lines[0].length * 6.8
+        const length = featureOpen ? BR + 34 + feature.tasks.length * TS : Math.max(120, width + 24)
         const ex = bx + BR + length
         branches.push({ id: feature.id, milestone: milestone.id, points: [[bx, SPINE_Y], [bx + BR, by], [ex, by]], col, lit: state !== 'later' })
         const cx = ex + FR
@@ -157,25 +164,25 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen,
           done: featureDone, total: feature.tasks.length, marks: featureMarks,
           center: { x: cx, y: by }, elbow: { x: bx + BR, y: by },
-          label: featureOpen ? { x: cx + FR + 8, y: by + 4, anchor: 'start' } : { x: bx + BR + 6, y: by + (side < 0 ? -10 : 18), anchor: 'start' },
-          countAt: { x: cx, y: by + 4 }, chevronAt: { x: cx, y: by + side * (FR + 16) },
+          label: featureOpen ? { x: cx + FR + 8, y: by + 4, anchor: 'start', lines, step: 14 } : { x: bx + BR + 16, y: by + (side < 0 ? -10 : 18), anchor: 'start', lines, step: 14 },
+          countAt: { x: cx, y: by + 4 }, chevronAt: { x: bx + BR, y: by },
         })
         if (featureOpen) {
           feature.tasks.forEach((task, slot) => {
             const tx = bx + BR + 36 + slot * TS
-            const lines = wrap(task.title)
+            const taskLines = wrap(task.title)
             const up = (slot % 2 === 0) === (side < 0)
             const ty = up ? by - 22 : by + 32
             nodes.push({
               kind: 't', id: task.id, milestone: milestone.id, feature: feature.id, title: task.title, x: tx, y: by, side, slot,
-              state: task.state, col, signs: task.signs, lines, up,
+              state: task.state, col, signs: task.signs, lines: taskLines, up,
               done: task.state === 'done' ? 1 : 0, total: 1, marks: marksOf([task.signs]),
               center: { x: tx, y: by },
-              label: { x: tx, y: up ? ty - (lines.length - 1) * 12 : ty, anchor: 'middle', lines, step: 12 },
+              label: { x: tx, y: ty, anchor: 'middle', lines: taskLines, step: 12 },
             })
           })
         }
-        span = Math.max(span, ex - x + (featureOpen ? 120 : 90))
+        span = Math.max(span, ex - x + (featureOpen ? Math.max(120, width + 92) : 90))
       })
       // Clear of the last feature's chevron, which sits under its circle and would meet the next milestone's chevron.
       if (vertical) span = Math.max(span, cursor - x + 36)

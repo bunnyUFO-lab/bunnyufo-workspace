@@ -419,13 +419,13 @@ try {
   assert.equal((await page.locator('.hub-map-panel .hub-id').first().innerText()).trim(), 'ml-wj-t5');
   assert.match(await page.locator('.hub-map-panel h3').innerText(), /^Wall-jump animation/, 'The details lead with the title.');
   const labelLengths = await page.locator('[data-kind="t"] text.hub-map-label').evaluateAll(list => list.map(item => item.textContent.length));
-  assert.ok(labelLengths.length > 0 && labelLengths.every(length => length <= 25), `Map task labels stay short (${labelLengths}).`);
+  assert.ok(labelLengths.length > 0 && labelLengths.every(length => length <= 28), `Map task labels are one short line (${labelLengths}).`);
   const tip = await page.locator('[data-node="ml-wj-t5"] > title').textContent();
   assert.ok(tip.includes('Wall-jump animation') && tip.includes('ml-wj-t5'), 'The node hover text has the title and the id.');
   const longLines = await page.locator('[data-node="ml-wj-t2"] text.hub-map-label').allTextContents();
-  assert.equal(longLines.length, 2, 'A long title takes two label lines.');
-  assert.ok(longLines.every(line => line.length <= 24), `Both lines fit 24 characters (${longLines}).`);
-  assert.ok(longLines[1].endsWith('…'), 'The second line ends in an ellipsis.');
+  assert.equal(longLines.length, 1, 'A long title stays on one label line.');
+  assert.ok(longLines[0].length <= 28, `The line fits 28 characters (${longLines}).`);
+  assert.ok(longLines[0].endsWith('…'), 'The line ends in an ellipsis.');
   const longTip = await page.locator('[data-node="ml-wj-t2"] > title').textContent();
   assert.ok(longTip.includes(wallTitle) && longTip.includes('ml-wj-t2'), 'The hover text keeps the full title and the id.');
   assert.ok((await page.locator('[data-node="ml-wj-t2"]').getAttribute('aria-label')).startsWith(wallTitle), 'The aria-label keeps the full title.');

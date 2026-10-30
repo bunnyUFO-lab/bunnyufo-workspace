@@ -21,8 +21,8 @@ const PAD = 16
 const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
 /** Where a node's circle is centred in the drawing (a feature's node sits right of the end of its branch). */
 const pointOf = (node: MapNode) => ({ ...node.center })
-/** After a relayout, one node's point goes back where it was on screen: tap and chevron toggles hold the node's circle, zoom holds its stable point (a feature's elbow). */
-interface Anchor { id: string; old: { x: number; y: number }; origin: { x: number; y: number }; how: 'circle' | 'stable' }
+/** After a relayout, one node's point goes back where it was on screen: a chevron toggle and zoom both hold the node's stable point (a feature's elbow, a milestone's circle). */
+interface Anchor { id: string; old: { x: number; y: number }; origin: { x: number; y: number }; how: 'stable'; /** A zoom step's: it starts the pause before the next one. */ byZoom: boolean }
 /** After the axis switches: put a node (else "now") in the middle of the free part of the box. */
 interface Centre { how: 'centre'; id: string | null }
 type Axis = 'x' | 'y'
@@ -225,10 +225,10 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
         const view = pz.current()
         const sx = view.x + (todo.old.x - todo.origin.x) * view.k
         const sy = view.y + (todo.old.y - todo.origin.y) * view.k
-        const at = toStage(todo.how === 'stable' ? stableOf(node) : pointOf(node))
+        const at = toStage(stableOf(node))
         pz.go({ k: view.k, x: sx - at.x * view.k, y: sy - at.y * view.k }, false)
         pz.rebase()
-        if (todo.how === 'stable') lastSemantic.current = performance.now()
+        if (todo.byZoom) lastSemantic.current = performance.now()
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,7 +256,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
       const node = byId.get(step.anchor)
       if (!node) return
       auto.current = step.auto
-      after.current = { id: node.id, old: stableOf(node), origin: { ...origin.current }, how: 'stable' }
+      after.current = { id: node.id, old: stableOf(node), origin: { ...origin.current }, how: 'stable', byZoom: true }
       relayoutPending.current = true
       lastSemantic.current = performance.now()
       setOpen(step.open)
@@ -336,7 +336,8 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     // The chevron is the user's: zoom does not undo it.
     auto.current.delete(node.id)
     if (node.kind === 'm') for (const feature of model.milestones.find(item => item.id === node.id)?.features ?? []) auto.current.delete(feature.id)
-    after.current = { id: node.id, old: pointOf(node), origin: { ...origin.current }, how: 'circle' }
+    // The view stays still: the node's stable point (a feature's elbow, where its chevron is; a milestone's circle) keeps its place on screen, and what opens or closes grows away from it.
+    after.current = { id: node.id, old: stableOf(node), origin: { ...origin.current }, how: 'stable', byZoom: false }
     setOpen(next)
   }, [open, model])
 
