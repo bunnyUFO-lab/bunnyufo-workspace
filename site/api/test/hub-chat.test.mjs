@@ -679,3 +679,92 @@ test('runs on: Stop ends the run through its own route, which needs a signed-in 
     assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 404, 'A finished turn cannot be stopped again.');
   } finally { await close(); }
 });
+
+// --- Model choice ---------------------------------------------------------------------------------------------------
+
+test('model: no model in the request leaves the run body and the stored lines as they were (Auto)', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    for (const extra of [{}, { model: 'auto' }, { model: null }]) {
+      const done = (await chatLive(call, { text: 'Hi', ...extra })).events.at(-1);
+      assert.equal(done.event, 'done');
+      assert.ok(lines(fake, done.data.conversation).every(line => !('model' in line)), 'Auto stores no model');
+    }
+    for (const run of upstream.runs) assert.deepEqual(run.body, { input: 'Hi' });
+  } finally { await close(); }
+});
+
+test('model: a text turn on Haiku names the pair on the run and stores the id on both lines', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const first = await chatLive(call, { text: 'Cheap please', model: 'haiku' });
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done');
+    assert.equal(upstream.runs[0].body.provider, 'anthropic');
+    assert.equal(upstream.runs[0].body.model, 'claude-haiku-5-5');
+    assert.deepEqual(lines(fake, done.data.conversation).map(line => line.model), ['haiku', 'haiku']);
+    assert.equal(done.data.user.model, 'haiku');
+    // The next turn goes back to Auto: the choice is per turn.
+    await chatLive(call, { text: 'Again', conversation: done.data.conversation });
+    assert.deepEqual(upstream.runs[1].body.provider, undefined);
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.equal(listed.conversations[0].model, 'haiku', 'the last line that carries a model (Auto stores none)');
+  } finally { await close(); }
+});
+
+test('model: a picture turn on DeepSeek Flash names the pair on completions', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const done = (await chatLive(call, { text: 'Look', model: 'deepseek-flash', images: [picture(solidPng(8, 8), 'image/png')] })).events.at(-1);
+    assert.equal(done.event, 'done', JSON.stringify(done.data));
+    assert.equal(upstream.runs.length, 0);
+    assert.equal(upstream.requests[0].provider, 'deepseek');
+    assert.equal(upstream.requests[0].model, 'deepseek-flash');
+    const auto = (await chatLive(call, { text: 'Look again', images: [picture(solidPng(8, 8), 'image/png')] })).events.at(-1);
+    assert.equal(auto.event, 'done');
+    assert.equal(upstream.requests[1].model, 'hermes-agent');
+    assert.ok(!('provider' in upstream.requests[1]));
+  } finally { await close(); }
+});
+
+test('model: an unlisted model is a 400 with nothing written and no call to Hermes', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    for (const model of ['opus', 'anthropic/claude-opus-5', 7, {}]) {
+      const answer = await chat(call, { text: 'Hi', model });
+      assert.equal(answer.status, 400);
+      assert.equal(answer.body.error, 'Unknown model.');
+    }
+    assert.equal(upstream.runs.length + upstream.requests.length, 0);
+    assert.equal([...fake.objects.keys()].filter(name => name.includes('/chat/')).length, 0);
+  } finally { await close(); }
+});
+
+test('model: a help chat on Sonnet stores the context line and sends the Sonnet pair', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    seeder(fake).event(eventJson({ kind: 'blocked', session: 'sess-model', title: 'Blocked: needs a login', summary: 'The deploy asks for a login.' }));
+    const first = await chatLive(call, { text: 'Help', model: 'sonnet', about: { kind: 'blocked', id: 'sess-model' } });
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done', JSON.stringify(first.body));
+    assert.equal(upstream.runs[0].body.provider, 'anthropic');
+    assert.equal(upstream.runs[0].body.model, 'claude-sonnet-5-5');
+    const saved = lines(fake, done.data.conversation);
+    assert.deepEqual(saved.map(line => [line.role, line.model]), [['context', undefined], ['user', 'sonnet'], ['assistant', 'sonnet']]);
+  } finally { await close(); }
+});
+
+test('model: GET /hub/chat lists the choices and a conversation last non-auto model', async () => {
+  const { call, close } = await fixture({ env: RUNS });
+  try {
+    const first = (await chatLive(call, { text: 'One', model: 'sonnet' })).events.at(-1).data.conversation;
+    const second = (await chatLive(call, { text: 'Two' })).events.at(-1).data.conversation;
+    await chatLive(call, { text: 'Three', conversation: first, model: 'haiku' });
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(listed.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash']);
+    assert.ok(listed.models.every(entry => !('provider' in entry) && !('model' in entry)));
+    const byId = new Map(listed.conversations.map(item => [item.id, item]));
+    assert.equal(byId.get(first).model, 'haiku');
+    assert.equal(byId.get(second).model, undefined);
+  } finally { await close(); }
+});
