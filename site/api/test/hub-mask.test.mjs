@@ -1,19 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { maskSecrets } from '../hub-mask.mjs';
+import cases from './fixtures/mask-vectors.mjs';
 
-// The same vectors live in bunnyUFO-lab/workspace-skills at mods/hub-hooks/hooks/mask-vectors.json. When you change this file, change
-// that one and the hash in mods/hub-hooks/hooks/mask.test.ts too.
-const MASK_VECTORS_SHA256 = 'c41c7d378b080fcca0ce2ac06888d20d10aafa0bab72b457cd16b54eb3d1cf23';
-const raw = readFileSync(new URL('./fixtures/mask-vectors.json', import.meta.url), 'utf8');
-const { cases } = JSON.parse(raw);
+// The same vectors live in bunnyUFO-lab/workspace-skills at mods/hub-hooks/hooks/mask-vectors.mjs. When you change fixtures/mask-vectors.mjs,
+// change that one and the hash in mods/hub-hooks/hooks/mask.test.ts too. The hash is of JSON.stringify(vectors), so line endings do not matter.
+const MASK_VECTORS_SHA256 = '77c17ab7eb1b40d86d3725f54b4b40ca2ddd955e631f3478a2b835509ad44fb5';
 const join = value => (Array.isArray(value) ? value.join('') : value);
 
 test('the shared mask vectors match the copy in the skills repository', () => {
-  assert.equal(createHash('sha256').update(raw.replace(/\r/g, '')).digest('hex'), MASK_VECTORS_SHA256);
+  assert.equal(createHash('sha256').update(JSON.stringify(cases)).digest('hex'), MASK_VECTORS_SHA256);
 });
 
 for (const vector of cases) {
