@@ -34,13 +34,23 @@
 .floor-desk.st-working .floor-mon { background: color-mix(in srgb, var(--st-working) 40%, var(--s3)); box-shadow: 0 0 10px color-mix(in srgb, var(--st-working) 45%, transparent); }
 .floor-desk.st-failed .floor-mon { background: color-mix(in srgb, var(--st-failed) 35%, var(--s3)); }
 .floor-tbl { width: 100px; height: 9px; margin-bottom: 8px; border-radius: 3px; background: var(--s3); border: 1px solid var(--line); }
-.floor-plate { display: flex; align-items: center; gap: 6px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.floor-plate { display: flex; align-items: center; gap: 6px; max-width: 120px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.floor-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.floor-task { display: none; }
 .floor-excl { position: absolute; top: 8px; right: 10px; font: 700 14px var(--mono); color: var(--st-needs); }
 
 /* The task bubble: on hover or focus. */
 .floor-bub { position: absolute; bottom: calc(100% - 6px); left: 50%; z-index: 3; display: block; width: 156px; padding: 7px 10px; border-radius: 10px; background: var(--s3); border: 1px solid var(--line2); font-size: 11px; line-height: 1.38; color: var(--t2); text-align: left; text-transform: none; letter-spacing: 0; font-weight: 400; opacity: 0; transform: translate(-50%, 6px); pointer-events: none; transition: opacity 0.25s, transform 0.25s; overflow-wrap: anywhere; }
 .floor-bub b { display: block; font-weight: 600; color: var(--t1); }
 .floor-desk:hover .floor-bub, .floor-desk:focus-visible .floor-bub { opacity: 1; transform: translate(-50%, 0); }
+
+/* No hover (a phone, a tablet): a tap opens the card, so the bubble never shows. The task is a line under the name instead. */
+@media (hover: none) {
+  .floor-bub { display: none; }
+  .floor-desk { height: 152px; }
+  .floor-spr { bottom: 82px; }
+  .floor-task { display: block; max-width: 118px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; line-height: 1.3; color: var(--t3); }
+}
 
 /* A walking sprite: three layers of the sheet take turns while the whole thing shifts a few pixels. */
 .floor-walk { position: relative; display: block; }

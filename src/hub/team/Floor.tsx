@@ -75,7 +75,9 @@ function Desk({ agent, now, seed, onOpen }: { agent: TeamAgent; now: number; see
         </span>
         <span className="floor-mon" aria-hidden="true" />
         <span className="floor-tbl" aria-hidden="true" />
-        <span className="floor-plate"><span className={`dot st-${kind}`} aria-hidden="true" />{agent.name}</span>
+        <span className="floor-plate"><span className={`dot st-${kind}`} aria-hidden="true" /><span className="floor-name">{agent.name}</span></span>
+        {/* A touch screen has no hover and a tap opens the card, so there the task shows under the name (see floor.css). */}
+        <span className="floor-task" aria-hidden="true" data-desk-task>{task}</span>
       </button>
     </li>
   )
@@ -119,11 +121,12 @@ function Ticker({ agents }: { agents: TeamAgent[] }) {
   const agent = line ? agents.find(item => item.id === line.agent) : null
   return (
     <div className="floor-ticker" data-floor-ticker aria-live="off">
-      {line && agent
+      {line
         ? (
-          <span className="floor-tick" key={reduced ? 'still' : line.key} data-ticker-agent={agent.id}>
-            <span className="floor-tick-sprite"><AgentSprite sprite={agent.sprite} size={agent.sprite.kind === 'custom' ? 26 : 24} /></span>
-            <span><b>{agent.name}</b> {line.text} <span className="floor-ghost">· {ago(line.ts)}</span></span>
+          // An event whose agent is not on the team (the hooks' events name none, and Claude Code may not be on it) still shows, without a sprite or a name.
+          <span className="floor-tick" key={reduced ? 'still' : line.key} data-ticker-agent={agent?.id ?? ''}>
+            {agent && <span className="floor-tick-sprite"><AgentSprite sprite={agent.sprite} size={agent.sprite.kind === 'custom' ? 26 : 24} /></span>}
+            <span>{agent && <><b>{agent.name}</b> </>}{line.text} <span className="floor-ghost">· {ago(line.ts)}</span></span>
           </span>
         )
         : <span className="floor-ghost">Nothing has happened lately.</span>}
