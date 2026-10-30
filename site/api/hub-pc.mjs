@@ -118,15 +118,36 @@ export function beadOfBranch(branch, prefix) {
   return new RegExp(`(?:^|/)(${prefix}-[a-z0-9]{3,8}(?:\\.\\d+)*)(?=-|$)`).exec(branch)?.[1] ?? null;
 }
 
-const RANK = { 'needs-you': 0, working: 1, idle: 2 };
+const RANK = { 'needs-you': 0, working: 1, stopping: 1, idle: 2 };
+
+/** A request state that is taken and not finished, as a Working now state. */
+const RUN_STATE = { taken: 'working', running: 'working', stopping: 'stopping', asking: 'needs-you' };
+
+/**
+ * The requests that are at work: approved, taken and not finished, whatever took them (Hermes, the cloud or the
+ * PC). `skip` holds the session ids the list already shows, so a PC run that is also a PC session shows once.
+ */
+function runItems(requests, skip) {
+  return requests
+    .filter(item => item.run && RUN_STATE[item.state] && !(item.run.session && skip.has(item.run.session)))
+    .map(item => ({
+      id: item.id, source: 'run', request: item.id, host: '', agent: item.run.runner === 'hermes' ? 'hermes' : 'claude',
+      ...(item.run.runner ? { runner: item.run.runner } : {}), ...(item.preset ? { preset: item.preset } : {}),
+      title: item.title, ...(item.project ? { project: item.project } : {}),
+      state: RUN_STATE[item.state], since: item.run.at,
+    }));
+}
 
 /**
  * The sessions at work now. With a fresh status the PC's sessions come from it (the events from
  * the PC's own host are dropped: the status is the truth there) and sessions on other hosts
- * come from `session-started` events. Without one it is today's event-derived list.
+ * come from `session-started` events. Without one it is today's event-derived list. Requests
+ * that were taken and have not finished (`requests`, the request list rows) join either way:
+ * a run whose PC session is already listed is not listed twice, and the session's row carries the
+ * request so it opens the run.
  * `defaults` is `PROJECT_DEFAULTS`; `events` is the whole window.
  */
-export function workingNow({ status = null, events, at, defaults = [] }) {
+export function workingNow({ status = null, events, requests = [], at, defaults = [] }) {
   const derived = deriveEventItems(events);
   const fromEvents = host => derived.running
     .filter(item => !host || item.host !== host)
@@ -135,8 +156,13 @@ export function workingNow({ status = null, events, at, defaults = [] }) {
       ...(item.project ? { project: item.project } : {}), ...(item.bead ? { bead: item.bead } : {}),
       state: 'working', since: item.at, ...(item.url ? { url: item.url } : {}),
     }));
+  const sort = list => list.sort((a, b) => RANK[a.state] - RANK[b.state] || (a.since < b.since ? 1 : a.since > b.since ? -1 : 0));
+  const requestOf = new Map(requests.filter(item => item.run?.session).map(item => [item.run.session, item.id]));
   const fresh = status && status.sessions && pcSummary(status, at).state === 'on';
-  if (!fresh) return fromEvents(null);
+  if (!fresh) {
+    const events = fromEvents(null).map(item => (requestOf.has(item.id) ? { ...item, request: requestOf.get(item.id) } : item));
+    return sort([...events, ...runItems(requests, new Set(events.map(item => item.id)))]);
+  }
 
   const blocked = new Map(derived.blocked.filter(item => item.session).map(item => [item.session, item]));
   const items = status.sessions.map(row => {
@@ -153,8 +179,9 @@ export function workingNow({ status = null, events, at, defaults = [] }) {
       since: row.startedAt ?? status.at,
       ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
       ...(url ? { url } : {}), ...(appUrl ? { appUrl } : {}),
+      ...(requestOf.has(row.id) ? { request: requestOf.get(row.id) } : {}),
     };
   });
-  return [...items, ...fromEvents(status.host)]
-    .sort((a, b) => RANK[a.state] - RANK[b.state] || (a.since < b.since ? 1 : a.since > b.since ? -1 : 0));
+  const other = fromEvents(status.host);
+  return sort([...items, ...other, ...runItems(requests, new Set([...items, ...other].map(item => item.id)))]);
 }

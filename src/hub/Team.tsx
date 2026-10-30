@@ -16,7 +16,7 @@ import { useHubData } from './useHub'
 interface Toast { text: string; undo?: () => void }
 
 const bare = (text: string) => text.replace(/ ago$/, '')
-const SESSION_STATE = { working: 'Working', 'needs-you': 'Needs you', idle: 'Idle' } as const
+const SESSION_STATE = { working: 'Working', 'needs-you': 'Needs you', stopping: 'Stopping', idle: 'Idle' } as const
 
 /** A Claude Code session, compact: state, title, where it runs, and a link to open it. */
 function SessionRow({ item }: { item: WorkingItem }) {
@@ -24,7 +24,7 @@ function SessionRow({ item }: { item: WorkingItem }) {
   const where = [item.project, item.branch].filter(Boolean).join(' · ')
   const body = (
     <>
-      <span className={`dot st-${item.state === 'needs-you' ? 'needs' : item.state}`} aria-hidden="true" />
+      <span className={`dot st-${item.state === 'needs-you' ? 'needs' : item.state === 'stopping' ? 'working' : item.state}`} aria-hidden="true" />
       <span className="team-session-text">
         <b>{item.title}</b>
         <small>{[where, SESSION_STATE[item.state], `for ${bare(ago(item.since))}`].filter(Boolean).join(' · ')}</small>

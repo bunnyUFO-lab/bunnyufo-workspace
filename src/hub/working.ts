@@ -1,8 +1,13 @@
 // Wording for Working now and the Gaming PC tile. Plain functions, so node can test them.
 import type { PcSummary, WorkingItem } from '../lib/hubPc'
 
-export const STATE_LABEL: Record<WorkingItem['state'], string> = { working: 'Working', 'needs-you': 'Needs you', idle: 'Idle' }
-export const STATE_DOT: Record<WorkingItem['state'], string> = { working: 'working', 'needs-you': 'needs', idle: 'idle' }
+export const STATE_LABEL: Record<WorkingItem['state'], string> = { working: 'Working', 'needs-you': 'Needs you', stopping: 'Stopping', idle: 'Idle' }
+export const STATE_DOT: Record<WorkingItem['state'], string> = { working: 'working', 'needs-you': 'needs', stopping: 'working', idle: 'idle' }
+/** A run that asked a question waits on the owner; the PC calls the same thing "Needs you". */
+export const runStateLabel = (item: WorkingItem) => (item.source === 'run' && item.state === 'needs-you' ? 'Waiting on you' : STATE_LABEL[item.state])
+export const RUNNER_LABEL = { hermes: 'Hermes', cloud: 'Cloud', pc: 'PC' } as const
+/** "research" is "Research"; "code-task" is "Code task". */
+export const presetLabel = (preset: string) => { const words = preset.replace(/[-_]+/g, ' ').trim(); return words ? words[0].toUpperCase() + words.slice(1) : '' }
 
 /** "for 12 min", "for 3 h 5 min", "for 2 days". Empty when the time is unknown. */
 export function duration(since: string, now = Date.now()): string {

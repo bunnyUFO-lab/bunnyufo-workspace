@@ -34,6 +34,7 @@ import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { withRunEvents } from './hub-run-events.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
@@ -779,6 +780,24 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return lists.flat();
   }
 
+  // The cards by `section/folder`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
+  let cardIndex = { at: 0, byFolder: new Map() };
+  /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
+  async function cardHrefOf(card) {
+    if (typeof card !== 'string') return undefined;
+    if (Date.now() - cardIndex.at > 60000) {
+      try { cardIndex = { at: Date.now(), byFolder: new Map((await allCards()).map(row => [`${row.section}/${row.folder}`, `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}`])) }; } catch { return undefined; }
+    }
+    return cardIndex.byFolder.get(card);
+  }
+
+  /** The event window with the run events in it: started and finished, from the requests' own files. */
+  async function eventsWithRuns(events, requests, at) {
+    const cards = new Map();
+    for (const card of new Set(requests.map(item => item.finish?.card).filter(Boolean))) cards.set(card, await cardHrefOf(card));
+    return withRunEvents(events, requests, { now: at, cardHref: card => cards.get(card) });
+  }
+
   /** The sprint card an old review belongs to, found from its title; its files are the ones the summary names that exist. */
   async function inferCard(detail) {
     const card = findSprintCard(detail.title, await allCards());
@@ -1017,9 +1036,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const status = await loadPcStatus(at);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
             const cloud = cloudOn ? await routines.capacity(at, { memo: true }).catch(() => null) : null;
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts(), cloud });
-            const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
-            // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list. `running` stays for old clients.
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud });
+            const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
+            // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
@@ -1051,7 +1070,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/requests\/([^/]+)\/events$/.exec(route))) {
             await hermesDispatch.streamEvents(response, decodeURIComponent(match[1]));
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
-            reply(await requestFiles.detail(decodeURIComponent(match[1]), at));
+            const detail = await requestFiles.detail(decodeURIComponent(match[1]), at);
+            const cardHref = await cardHrefOf(detail.result?.card);
+            reply(cardHref ? { ...detail, cardHref } : detail);
           } else if (route.startsWith('/hub/presets')) {
             reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {
@@ -1059,9 +1080,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const wanted = sendTime(query.get('since'))?.getTime() ?? at.getTime() - DAY;
             const since = Math.max(wanted, floor);
             const project = query.get('project');
-            const window = await loadEvents(at);
+            const [window, requests] = await Promise.all([loadEvents(at), loadRequests(at)]);
+            const events = await eventsWithRuns(window.events, requests, at);
             reply({
-              events: window.events.filter(event => new Date(event.ts).getTime() >= since && (!project || event.project === project)),
+              events: events.filter(event => new Date(event.ts).getTime() >= since && (!project || event.project === project)),
               truncated: window.truncated,
             });
           } else if (route === '/hub/projects') {

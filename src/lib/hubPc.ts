@@ -45,14 +45,18 @@ export interface PcSummary {
 
 export interface WorkingItem {
   id: string
-  source: 'pc' | 'events'
+  source: 'pc' | 'events' | 'run'
   host: string
-  agent: 'claude'
+  agent: 'claude' | 'hermes'
+  /** A request that was taken and has not finished (`source: 'run'`), or the request a PC session belongs to. Opens the run drawer. */
+  request?: string
+  runner?: 'hermes' | 'cloud' | 'pc'
+  preset?: string
   title: string
   project?: string
   branch?: string
   bead?: string
-  state: 'working' | 'needs-you' | 'idle'
+  state: 'working' | 'needs-you' | 'stopping' | 'idle'
   since: string
   updatedAt?: string
   url?: string

@@ -59,7 +59,7 @@ try {
   await drawer.locator('[data-run-tool]', { hasText: 'web_search' }).waitFor();
   assert.match(await drawer.locator('[data-run-tool]').innerText(), /tug-of-war card games/);
   await drawer.locator('[data-run-card]').waitFor();
-  assert.equal(await drawer.locator('[data-run-card]').getAttribute('href'), '#/tug-games');
+  assert.equal(await drawer.locator('[data-run-card]').getAttribute('href'), '/assistant#/tug-games', 'The card is in the assistant section, not the section the Hub is on');
   assert.equal((await drawer.locator('[data-run-state-chip]').innerText()).trim(), 'Done');
   assert.match(await drawer.locator('[data-run-by]').innerText(), /Approved by local/);
   assert.ok(await drawer.locator('[data-step]').count() >= 3, 'The timeline lists approved, the result and who wrote it.');
@@ -75,7 +75,7 @@ try {
   await page.locator('[data-run-retry]').waitFor();
   assert.equal(await page.locator('[data-run-retry]').innerText(), 'Codex quota reached; retried on Anthropic.');
   assert.match(await page.locator('[data-run-usage]').innerText(), /input tokens 1,200/);
-  assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '#/retried');
+  assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '/assistant#/retried');
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.asking)}`);
   await page.locator('[data-run-asking]').waitFor();
   assert.match(await page.locator('[data-run-asking]').innerText(), /Which of the two games do you mean\?/);

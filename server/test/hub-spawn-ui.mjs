@@ -101,7 +101,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   await page.locator('[data-spawn-go]').click();
   await page.locator('[data-spawn-toast]').waitFor();
-  assert.equal(await page.locator('[data-spawn-toast]').innerText(), 'Saved as a proposal. It waits in Needs you.');
+  assert.match(await page.locator('[data-spawn-toast]').innerText(), /^Saved as a proposal. It waits in Needs you. Open in Needs you$/);
   assert.equal(await page.locator('[data-spawn-sheet]').count(), 0, 'The sheet closed.');
   assert.equal(await page.evaluate(() => document.activeElement?.matches('[data-spawn-open]')), true, 'The focus went back to the Spawn button.');
   const keys = requestsIn(fixture);

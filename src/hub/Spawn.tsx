@@ -6,6 +6,9 @@ import type { ApproveAnswer, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
 import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, guessPreset } from '../lib/hubSpawn'
 import type { PresetList } from './spawnData'
 import { cachedPresets, loadPresets } from './spawnData'
+import { hubHash } from '../lib/route'
+import { openFromClick } from './ItemRow'
+import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
 import type { SpawnOptions } from './spawnStore'
 import './runs.css'
@@ -42,7 +45,10 @@ const policyLine = (kinds: string[]) => {
 const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within 5 minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
-function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClose: () => void; onDone: (note: string) => void }) {
+/** What the toast says after Spawn, and where the new run or item is: `run` is a started request, `needs` a request that waits in Needs you. */
+interface Note { text: string; run?: string; needs?: string }
+
+function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClose: () => void; onDone: (note: Note) => void }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const uid = useId()
   const edit = options.edit
@@ -147,7 +153,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
           ...(trimmed !== edit.text.trim() ? { text: trimmed } : {}),
           ...(doneWhen.trim() !== (edit.doneWhen ?? '').trim() ? { doneWhen: doneWhen.trim() } : {}),
         })
-        onDone(approvedNote(target, again.waiting))
+        onDone({ text: approvedNote(target, again.waiting), run: again.id })
         return
       }
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
@@ -161,14 +167,14 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       id = created.id
       if (edit) await hubPost(`/requests/${encodeURIComponent(edit.id)}/decline`, { reason: `replaced by ${id}` })
       if (!canApprove) {
-        onDone(atPc ? 'Added to Needs you. You start it at the PC.' : 'Saved as a proposal. It waits in Needs you.')
+        onDone({ text: atPc ? 'Added to Needs you. You start it at the PC.' : 'Saved as a proposal. It waits in Needs you.', needs: id })
         return
       }
       const signed = await hubPost<ApproveAnswer>(`/requests/${encodeURIComponent(id)}/approve`, { target })
-      onDone(approvedNote(target, signed.waiting))
+      onDone({ text: approvedNote(target, signed.waiting), run: id })
     } catch (failure) {
       const reason = failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.'
-      if (id) onDone(`Saved, but not approved. It waits in Needs you: ${reason}`)
+      if (id) onDone({ text: `Saved, but not approved. It waits in Needs you: ${reason}`, needs: id })
       else setError(reason)
     } finally {
       setBusy(false)
@@ -294,7 +300,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
 /** Mounted once in the Hub screen: opens the sheet when `openSpawn` is called, and says what happened after it closes. */
 export default function SpawnHost() {
   const [options, setOptions] = useState<SpawnOptions | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<Note | null>(null)
   const opener = useRef<HTMLElement | null>(null)
   const timer = useRef(0)
 
@@ -319,7 +325,7 @@ export default function SpawnHost() {
     opener.current = null
     if (back && document.contains(back)) back.focus({ preventScroll: true })
   }, [showing])
-  const done = useCallback((note: string) => {
+  const done = useCallback((note: Note) => {
     setToast(note)
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => setToast(null), 8000)
@@ -329,7 +335,13 @@ export default function SpawnHost() {
   return (
     <>
       {options && <SpawnSheet options={options} onClose={close} onDone={done} />}
-      {toast && <div className="runs-toast" role="status" data-spawn-toast>{toast}</div>}
+      {toast && (
+        <div className="runs-toast" role="status" data-spawn-toast>
+          <span>{toast.text}</span>
+          {toast.run && <> <span data-spawn-where>It shows in Working now once it starts.</span> <a href={hubHash('request', toast.run)} onClick={event => { openFromClick(event, toast.run as string); setToast(null) }} data-spawn-toast-link="run">Open run</a></>}
+          {toast.needs && <> <a href={hubHash('needs')} onClick={() => { setFocus(`approval-${toast.needs}`); setToast(null) }} data-spawn-toast-link="needs">Open in Needs you</a></>}
+        </div>
+      )}
     </>
   )
 }

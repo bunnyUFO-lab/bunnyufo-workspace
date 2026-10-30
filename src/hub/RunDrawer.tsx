@@ -20,6 +20,8 @@ interface RunDetail extends RequestDetail {
   runs?: { state: string; lastAction?: string; sessionLink?: string; at: string }[]
   result?: { outcome: string; summary?: string; reason?: string; pr?: string; card?: string; usage?: Record<string, unknown>; at?: string; question?: string }
   hermesRun?: { runId: string; at: string }
+  /** The result's card as a site path, when the site API found it. */
+  cardHref?: string
   retry?: { runId: string; at: string; provider: string; model: string; reason: string }
   stop?: { reason?: string; at?: string; by?: string }
   report?: boolean
@@ -79,11 +81,13 @@ const RUN_WORD: Record<string, string> = { started: 'Started', working: 'Working
 const usageLine = (usage?: Record<string, unknown>) => Object.entries(usage ?? {}).filter(([, value]) => typeof value === 'number').slice(0, 4).map(([name, value]) => `${name.replace(/_/g, ' ')} ${(value as number).toLocaleString()}`).join(' · ')
 
 /** The link to the card a run wrote: a site link as it is, `section/folder` as the card of that folder. */
-function cardLink(card: string): string | undefined {
+function cardLink(card: string, resolved?: string): string | undefined {
   const site = safeUrl(card)
   if (site) return site
-  const folder = /^[\w-]+\/([\w.-]+)$/.exec(card)?.[1]
-  return folder ? entityHash(folder) : undefined
+  // The site API finds the card's id in its section (a folder is not an id, and the card may be in another section).
+  if (resolved && /^\/[\w%-]+#\/[\w%.~-]+$/.test(resolved)) return resolved
+  const match = /^([\w-]+)\/([\w.-]+)$/.exec(card)
+  return match ? `/${encodeURIComponent(match[1])}${entityHash(match[2])}` : undefined
 }
 
 /** The running time of one tool step, ticking each second; only this span re-renders. */
@@ -191,7 +195,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   const by = approved ? (approved.by === 'policy' ? 'Signed by policy' : `Approved by ${approved.by}`) : null
   const stoppable = STOPPABLE.has(state) && host.write && !!approved
   const again = AGAIN.has(state) && host.write
-  const cardHref = result?.card ? cardLink(result.card) : undefined
+  const cardHref = result?.card ? cardLink(result.card, detail?.cardHref) : undefined
   const prHref = safeUrl(result?.pr)
 
   return (
