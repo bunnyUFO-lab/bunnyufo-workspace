@@ -330,7 +330,7 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
-| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
+| `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, agent?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
 | `GET /api/hub/presets`, `/presets/route?preset=&project=&repo=`, `/presets/brief?request=` | The eight presets for the Spawn sheet (no templates) with the five routing rules; where a job would run (`{ target, rule, why }`); the rendered brief of a request the owner starts at the PC (400 for any other) |
 | `GET /api/hub/requests/:id` | One request: `{ request, state, approved?, taken?, runs, result?, hermesRun?, retry?, fires, stop?, declined?, files, report }`. `runs` and `fires` are the newest 20 `run-*` and `fire-*` files, newest first; `approved` comes without `run.brief`; 404 for an id that is not a request |
 | `POST /api/hub/requests/:id/approve` | `{ target? }`: sign `approved.json` (Ed25519, key `HUB_SIGNING_KEY`) and hand the request to its target. 201 `{ state, approved (without run.brief), waiting?, cloud? }`. 503 without a key, 400 for a target the preset does not allow, an `at-pc` request, a cloud run without a repo or a repo with no cloud routine (nothing is signed), 409 unless the state is `proposed`. No cap is checked: a full target makes the request wait in `approved` and `waiting` says why. For `cloud`, `cloud` is `{ fired, reason?, next? }` (`reason` `daily-cap` with `next` the owner's next midnight, or the failure of the fire); a failed fire is still a 201 and the approval stands |
@@ -372,7 +372,7 @@ without a `preset` is a legacy one (`when` set, no approval) and is only ever `o
 
 | File | Written by | Holds |
 |---|---|---|
-| `request.json` | the site API, or an agent through the card API | `id`, `project`, `createdAt`, `by`, `text`, and `when` or `preset`; optional `title` (120), `repo`, `needs` (`unity`, `gpu`, `comfyui`, `sprite-studio`, `lan`, `local-files`), `target` (`pc`, `cloud`, `hermes`, `at-pc`: the proposal), `doneWhen` (400), `origin` (`{ kind: owner \| agent \| run, name }`), `replaces`, `followUp`. `origin.kind: owner` and `followUp` come only from the site API |
+| `request.json` | the site API, or an agent through the card API | `id`, `project`, `createdAt`, `by`, `text`, and `when` or `preset`; optional `title` (120), `repo`, `needs` (`unity`, `gpu`, `comfyui`, `sprite-studio`, `lan`, `local-files`), `target` (`pc`, `cloud`, `hermes`, `at-pc`: the proposal), `doneWhen` (400), `agent` (the agent an avatar job is for), `origin` (`{ kind: owner \| agent \| run, name }`), `replaces`, `followUp`. `origin.kind: owner` and `followUp` come only from the site API |
 | `approved.json`, `stop.json` | the site API | the signed approval and the signed stop |
 | `taken.json` | the runner | who took it and when |
 | `run-<stamp>.json` | the run | a progress line; the newest decides whether it still runs |
@@ -396,8 +396,9 @@ without a `preset` is a legacy one (`when` set, no approval) and is only ever `o
 | 11 | `proposed` | has a `preset`, none of the above |
 
 Presets live in `site/api/presets.mjs`, in code, so no inbox token can rewrite a template: `code-task`, `docs`,
-`research`, `market-research`, `game-teardown`, `playtest-build`, `sprite-set`, `agent-avatar`. A run is never
-longer than `MAX_RUN_MINUTES` (120): research kinds 30, `agent-avatar` and `docs` 60, the rest 120. Hermes
+`research`, `market-research`, `game-teardown`, `playtest-build`, `sprite-set`, `agent-avatar`, and the hidden
+`agent-avatar-sheet`, which only the Hub starts (after the owner picks a variant) and a request body cannot name. A run is never
+longer than `MAX_RUN_MINUTES` (120): research kinds and `agent-avatar` 30, `docs` 60, the rest and `agent-avatar-sheet` 120. Hermes
 presets have `model: null` and the site never sends a provider or model on an ordinary run. The target
 comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the preset or request needs
 something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
@@ -609,6 +610,8 @@ container beside the site API and calls it over the Docker network. Nothing here
 
 **Which Asks qualify.** `discordEligible()` in `site/api/hub-model.mjs` is the only place the rule lives: 2 to 5
 options, each with a label of 1 to 80 characters and no picture, no drawing, and `requirePasskey` is not `true`.
+
+**Avatar Asks.** The Agent avatar runs make two kinds of Ask, both with `requirePasskey`. `ask.json` may carry `avatar`: `{ agent, request, subject? }` for the pick of one of four variants (options `a` to `d`, with pictures), or `{ agent, sheet }` for the check of a finished sheet (options `use` and `skip`). `cards ask create` refuses a malformed `avatar` and names the field. The field is only a pointer: the Hub checks the request or the sheet itself before it acts on an answer.
 
 **Requiring a passkey.** An Ask opts out with `"requirePasskey": true` in `ask.json`, or `cards ask create
 --require-passkey`. Set it on every Ask that approves a merge, a deploy, spending, a deletion or secrets. A writer

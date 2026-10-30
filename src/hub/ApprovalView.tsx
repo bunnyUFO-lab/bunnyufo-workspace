@@ -19,7 +19,7 @@ import './runs.css'
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   approved?: { target: SpawnTarget; by: string; at: string; expires: string; limits?: { minutes: number } }
@@ -105,7 +105,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
       setBrief(answer.brief)
     }
   })
-  const edit = () => openSpawn({ edit: { id, project: request.project, preset: preset.id, text: request.text, target, ...(request.repo ? { repo: request.repo } : {}), ...(request.doneWhen ? { doneWhen: request.doneWhen } : {}) } })
+  const edit = () => openSpawn({ edit: { id, project: request.project, preset: preset.id, text: request.text, target, ...(request.repo ? { repo: request.repo } : {}), ...(request.doneWhen ? { doneWhen: request.doneWhen } : {}), ...(request.agent ? { agent: request.agent } : {}) } })
 
   return (
     <>
