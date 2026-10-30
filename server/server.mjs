@@ -154,10 +154,11 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
   const allCards = async () => ({
     active: active.id,
     workspaces: await Promise.all((await allWorkspaces()).map(async item => {
-      const { entities } = await readJson(path.join(item.root, 'workspace.json'), { entities: [] });
+      const { entities, retired } = await readJson(path.join(item.root, 'workspace.json'), { entities: [] });
       return {
         id: item.id, name: item.name, root: item.root, builtin: !!item.builtin, repo: item.repo || null,
         site: item.site || null, bucket: item.bucket || null, active: item.id === active.id,
+        ...(retired && typeof retired === 'object' && !Array.isArray(retired) ? { retired } : {}),
         contentBase: `${files.origin}/view/${files.cardGrant(item.root)}`,
         // What the file says, with what has been pinned or put away since laid over it.
         entities: await cardState.decorate(item.id, Array.isArray(entities) ? entities : []),

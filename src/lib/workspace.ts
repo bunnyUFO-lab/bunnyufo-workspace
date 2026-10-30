@@ -38,6 +38,7 @@ async function loadLocal(): Promise<WorkspaceData> {
     const workspace: CardWorkspace = {
       id: item.id, name: item.name, base: item.contentBase, root: item.root,
       repo: item.repo ?? null, site: item.site ?? null, bucket: item.bucket ?? null, active: item.active, builtin: !!item.builtin,
+      ...(item.retired && Object.keys(item.retired).length ? { retired: item.retired } : {}),
     }
     data.workspaces.push(workspace)
     data.cards.push(...tag(workspace, item.entities))
@@ -102,6 +103,7 @@ async function loadSite(): Promise<WorkspaceData> {
         repoPath: 'path' in site ? site.path : undefined,
         branch: 'branch' in site ? site.branch : undefined,
         active: site.id === (activeSite?.id ?? 'workspace'),
+        ...(parsed?.retired && typeof parsed.retired === 'object' && Object.keys(parsed.retired).length ? { retired: parsed.retired } : {}),
       }
       return { workspace, entities: Array.isArray(parsed?.entities) ? parsed.entities : [] }
     } catch {

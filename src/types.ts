@@ -45,10 +45,25 @@ export interface WorkspaceEntity {
   emoji?: string
   /** Starter examples remain visible until explicitly archived. */
   sample?: boolean
+  /** Tabs deleted from this card, newest last. The file stays in the folder; the "+" form can put one back. */
+  removedTabs?: RemovedTab[]
 }
+
+/** A tab taken off a card: the step as it was, when, and where it sat. */
+export interface RemovedTab extends WorkspaceStep {
+  at: string
+  index: number
+  wasDefault?: boolean
+}
+
+/** A workspace.json `retired` record: a card moved to another workspace, or in this one's Trash. */
+export type RetiredCard =
+  | { kind: 'moved'; to: string; folder: string; at: string }
+  | { kind: 'deleted'; at: string; entity: WorkspaceEntity }
 
 export interface WorkspaceState {
   entities: WorkspaceEntity[]
+  retired?: Record<string, RetiredCard>
 }
 
 /**
@@ -77,6 +92,11 @@ export interface CardWorkspace {
   active?: boolean
   /** The app's own starter examples: shown, never written to. Local app only. */
   builtin?: boolean
+  /** Hidden or archived workspaces take no moved cards. */
+  hidden?: boolean
+  archived?: boolean
+  /** Cards moved away or in the Trash, from this workspace's card list. */
+  retired?: Record<string, RetiredCard>
 }
 
 /** A card with the workspace it belongs to. The app works in these, not in bare entities. */

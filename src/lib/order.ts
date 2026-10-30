@@ -96,3 +96,15 @@ export function moveBy(list: string[], key: string, delta: -1 | 1): string[] {
   next.splice(to, 0, key)
   return next
 }
+
+/** A category was renamed: its saved place among the headings and its cards' order follow the new name. */
+export function renameCategoryOrder(from: string, to: string) {
+  const sections = current.sections.includes(to) ? current.sections.filter(label => label !== from) : current.sections.map(label => label === from ? to : label)
+  const cards = { ...current.cards }
+  const old = cards[`category:${from}`]
+  if (old) {
+    cards[`category:${to}`] = [...new Set([...(cards[`category:${to}`] ?? []), ...old])]
+    delete cards[`category:${from}`]
+  }
+  set({ ...current, sections, cards })
+}

@@ -11,6 +11,14 @@ import BrandLogo from './BrandLogo'
 import ProjectFilter from './ProjectFilter'
 import NewCard from './NewCard'
 import { host } from '../lib/host'
+import ItemMenu from './ItemMenu'
+import { useCategoryMenu } from './CategoryMenu'
+
+/** The ⋯ beside a category heading: Rename and Merge. Only where the sections are categories of one workspace. */
+function CategoryMore({ workspace, label }: { workspace: string | null; label: string }) {
+  const { items, dialogs } = useCategoryMenu(workspace, label)
+  return <><ItemMenu label={`More for the ${label.replace(/-/g, ' ')} category`} items={items} className="section-more" />{dialogs}</>
+}
 
 interface HomeGridProps {
   /** The header's counts for the project in view, ignoring the search: live, put away, categories. */
@@ -150,6 +158,7 @@ export default function HomeGrid({
         const mover = dragItem?.kind === 'card' ? dragItem.card : null
         return (
           <section key={label} className="home-section">
+            <div className="section-head-row">
             <button
               type="button"
               className={`section-head section-toggle${edge ? ` drop-${edge}` : ''}`}
@@ -166,6 +175,8 @@ export default function HomeGrid({
               </span>
               <span className="section-count">{list.length}</span>
             </button>
+            {groupBy === 'category' && <CategoryMore workspace={list[0]?.workspace.id ?? null} label={label} />}
+            </div>
             {open && (
               <div className="card-grid">
                 {list.map(e => {

@@ -11,6 +11,9 @@ import BrandLogo from './components/BrandLogo'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
 import HomeGrid from './components/HomeGrid'
+import UndoToast from './components/UndoToast'
+import { restore, trashOf } from './lib/trash'
+import { LibraryContext, canManage } from './lib/library'
 import ReportBoundary from './components/ReportBoundary'
 import Shortcuts from './components/Shortcuts'
 import CommandPalette from './components/CommandPalette'
@@ -123,14 +126,20 @@ export default function App() {
     () => applyOrder(data?.workspaces ?? [], w => w.id, order.projects, 'last'),
     [data, order.projects],
   )
-  const cards = data?.cards ?? []
+  const cards = useMemo(() => data?.cards ?? [], [data])
   // A project that is gone from the registry (unregistered, or a site that stopped publishing)
   // would otherwise filter every card away with no visible chip to undo it.
   const project = workspaces.some(w => w.id === chosenProject) ? chosenProject : ''
 
   // Card ids are unique inside a workspace, not across them: the active workspace wins a tie.
   const open = cards.filter(e => e.id === route.id)
-  const entity = open.find(e => e.workspace.active) ?? open[0] ?? null
+  // A Hub run names its card by folder (`assistant/<folder>`), and a move keeps the folder: when no card has
+  // that id, open the one whose folder matches.
+  const byFolder = open.length || !route.id ? [] : cards.filter(e => e.folder === route.id)
+  const entity = open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
+  // A link to a card that was deleted: say where it is, with a way back.
+  const inTrash = !entity && route.id ? trashOf(workspaces).find(t => t.id === route.id) ?? null : null
+  const library = useMemo(() => ({ workspaces, cards }), [workspaces, cards])
 
   // The palette finds every card; it ranks the open section's first (CommandPalette reads `workspace.active`).
   const paletteCards = cards
@@ -143,6 +152,12 @@ export default function App() {
   const liveUrl = step?.url && /^https?:\/\//i.test(step.url) ? step.url : null
   // A phone's header slides away while you read down the page (lib/chrome).
   useAutoHideHeader(`${entity?.id ?? ''}:${stepIndex}`)
+
+  // The address says what is open: a folder link is rewritten to the card's id.
+  const openId = entity?.id
+  useEffect(() => {
+    if (openId && route.id && openId !== route.id) history.replaceState(null, '', entityHash(openId, route.step) + '')
+  }, [openId, route.id, route.step])
 
   // Hash → state: entity links navigate natively; this also covers back/forward.
   useEffect(() => {
@@ -565,7 +580,9 @@ export default function App() {
   }
 
   return (
+    <LibraryContext.Provider value={library}>
     <TodayContext.Provider value={host.hub ? today : null}>
+    <UndoToast />
     {host.dev && (
       <div className="dev-banner" data-dev-banner role="status">
         <span>Development copy</span>
@@ -676,6 +693,13 @@ export default function App() {
               card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path } : undefined}
               stepIndex={stepIndex} onStep={index => selectStep(entity.id, index)} /></Suspense>
           ) : (
+            <>
+            {inTrash && (
+              <p className="home-filter lib-trash-notice" role="status" data-trash-notice>
+                This card is in the Trash of {inTrash.workspace.name}.{' '}
+                {canManage(inTrash.workspace) && <button type="button" className="home-filter-clear" onClick={() => void restore(inTrash)}>Restore</button>}
+              </p>
+            )}
             <HomeGrid
               hero={hero}
               grouped={grouped}
@@ -707,6 +731,7 @@ export default function App() {
               sectionItem={sectionItem}
               busyId={busyCard}
             />
+            </>
           )}
           </ReportBoundary>
           )}
@@ -715,5 +740,6 @@ export default function App() {
       {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} onSearch={() => setShowPalette(true)} />}
     </div>
     </TodayContext.Provider>
+    </LibraryContext.Provider>
   )
 }

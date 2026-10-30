@@ -13,6 +13,11 @@ import BrandLogo from './BrandLogo'
 import BuwText from './BuwText'
 import ProjectFilter from './ProjectFilter'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
+import { useContextMenu } from './ItemMenu'
+import { useCardMenu } from './CardMenu'
+import { useCategoryMenu } from './CategoryMenu'
+import TrashList from './TrashList'
+import { trashOf } from '../lib/trash'
 
 interface SidebarProps {
   /** The Hub screen on show, when one is. */
@@ -91,7 +96,10 @@ function Heading({
   cursor = false,
   id,
   move,
+  category,
 }: {
+  /** Category headings: right-click offers Rename and Merge (the workspace is the one the rows belong to). */
+  category?: { workspace: string | null; label: string }
   label: string
   /** Left out where a number would only count the rows below (the Hub group). */
   count?: number
@@ -104,9 +112,13 @@ function Heading({
   /** Dragging the heading rearranges the sections: where it starts, what it can land on, and the line shown. */
   move?: { onPointerDown?: (event: ReactPointerEvent) => void; drop?: { kind: string; key: string }; edge: 'before' | 'after' | null; afterDrag?: () => boolean }
 }) {
+  const { items, dialogs } = useCategoryMenu(category?.workspace ?? null, category?.label ?? '')
+  const context = useContextMenu(`Category ${category?.label ?? ''}`, category ? items : null)
   return (
+    <>
     <button
       type="button"
+      {...context.props}
       className={`sidebar-section sidebar-section-toggle${cursor ? ' cursor' : ''}${move?.edge ? ` drop-${move.edge}` : ''}`}
       onClick={() => { if (!move?.afterDrag?.()) onToggle() }}
       aria-expanded={open}
@@ -121,6 +133,9 @@ function Heading({
       </span>
       {count !== undefined && <span className="sidebar-count">{count}</span>}
     </button>
+    {context.menu}
+    {category && dialogs}
+    </>
   )
 }
 
@@ -184,6 +199,8 @@ function Item({
   /** The row the search box's arrow keys are on: Enter opens it. */
   cursor?: boolean
 }) {
+  const { items, dialogs } = useCardMenu(entity)
+  const context = useContextMenu(`Menu for ${entity.title}`, items)
   return (
     // A row, not a bare link: the archive button cannot live inside an <a>, and putting work
     // away should not mean going back to the grid to find the card again.
@@ -193,6 +210,7 @@ function Item({
       data-drop-index={dropIndex}
       data-drop-key={order ? cardKey(entity) : undefined}
       data-drop-section={order?.section}
+      {...context.props}
     >
     <a
       href={entityHash(entity.id)}
@@ -240,6 +258,8 @@ function Item({
         {archived ? '↩' : '⤓'}
       </button>
     )}
+    {context.menu}
+    {dialogs}
     </div>
   )
 }
@@ -288,6 +308,9 @@ export default function Sidebar({
   // Which sections are folded shut. A view preference, kept in this browser (lib/collapse).
   const { isClosed, toggle } = useCollapsedSections()
   const empty = pinned.length === 0 && grouped.size === 0
+  // Deleted cards of the workspace in view (all of them under "All").
+  const trashed = trashOf(project ? workspaces.filter(w => w.id === project) : workspaces)
+  const [trashOpen, setTrashOpen] = useState(false)
   // Dragging is the mouse's way to pin; the card's own pin button is the keyboard's. Each
   // target below says what it is with `data-drop`, and lib/drag works out which one the
   // pointer is over — so a zone only has to say whether it would take the card in the air.
@@ -543,6 +566,7 @@ export default function Sidebar({
                 cursor={onHead(label)}
                 id={label}
                 move={headMove(label)}
+                category={groupBy === 'category' ? { workspace: list[0]?.workspace.id ?? null, label } : undefined}
               />
               {!isClosed(label) && list.map(e => (
                 <Item
@@ -581,6 +605,13 @@ export default function Sidebar({
           </span>
         </div>
       )}
+
+      {trashed.length > 0 && !query && (
+        <button type="button" className="sidebar-trash" data-trash-link onClick={() => setTrashOpen(true)}>
+          Trash ({trashed.length})
+        </button>
+      )}
+      {trashOpen && <TrashList entries={trashed} onClose={() => setTrashOpen(false)} />}
 
       <footer className="sidebar-foot">
         <span className={`sync-dot${offline ? ' offline' : ''}`} />
