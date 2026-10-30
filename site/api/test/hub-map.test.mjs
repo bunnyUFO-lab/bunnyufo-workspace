@@ -223,3 +223,83 @@ test('wayfinder: the newest updated map wins, a closed map is ignored, and no ma
   assert.equal(build([closed]).wayfinder, null);
   assert.equal(build([issue({ id: 'm', type: 'milestone' })]).wayfinder, null);
 });
+
+// The sheet's notes: summary, Beads PRs, the reason a task is yellow, close info and Library cards.
+const withExtra = (base, extra) => ({ ...base, ...extra });
+const LIBRARY = {
+  'agent-plans/2026-10-27_plan': { title: 'Mission control', href: '/agent-plans#/mission-control' },
+  'agent-plans#mission-control': { title: 'Mission control', href: '/agent-plans#/mission-control' },
+  'magic-loops/own': { title: 'Own card', href: '/magic-loops#/own' },
+  'magic-loops/from-event': { title: 'Event card', href: '/magic-loops#/from-event' },
+};
+const lookup = ref => LIBRARY[ref] ?? null;
+
+test('notes: a task carries its summary, and none for a hash-only description', () => {
+  const map = build([
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    issue({ id: 'said', parent: 'f', description: 'Copy the weekly backups off the host so one dead disk loses nothing.\n\nBackfilled 2026-10-26 from git, PRs and cards.' }),
+    issue({ id: 'hash', parent: 'f', description: 'a62a2bb4\n\nBackfilled 2026-10-26 from git, PRs and cards.' }),
+  ]);
+  assert.equal(task(map, 'said').summary, 'Copy the weekly backups off the host so one dead disk loses nothing.');
+  assert.equal('summary' in task(map, 'hash'), false);
+  assert.deepEqual(task(map, 'hash').commits, [{ sha: 'a62a2bb4' }], 'The commit is listed, without a link when no repo is known.');
+});
+
+test('notes: Beads PRs merge with event rows; the event keeps its state, a closed task defaults to merged', () => {
+  const issues = [
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    withExtra(issue({ id: 'both', parent: 'f' }), { external_ref: 'gh-5', description: 'Do it.\n\nPR: #5 open' }),
+    withExtra(issue({ id: 'old', parent: 'f', status: 'closed', closed: '2026-10-01T10:00:00Z' }), { external_ref: 'gh-138', description: 'PR: #138 merged' }),
+    withExtra(issue({ id: 'bare', parent: 'f', status: 'closed', closed: '2026-10-01T10:00:00Z' }), { external_ref: 'gh-9' }),
+    withExtra(issue({ id: 'openbare', parent: 'f' }), { external_ref: 'gh-10' }),
+  ];
+  const events = [
+    eventJson({ kind: 'pr-opened', ts: minutesAgo(NOW, 30), bead: 'both', url: 'https://github.com/someone/some_repo/pull/5' }),
+    eventJson({ kind: 'pr-merged', ts: minutesAgo(NOW, 10), bead: 'both', url: 'https://github.com/someone/some_repo/pull/5' }),
+  ];
+  const map = build(issues, { events, repo: 'git@github.com:someone/some_repo.git' });
+  assert.deepEqual(task(map, 'both').prs.map(({ number, url, state }) => ({ number, url, state })), [{ number: 5, url: 'https://github.com/someone/some_repo/pull/5', state: 'merged' }], 'The event row wins the state and is not doubled.');
+  assert.deepEqual(task(map, 'old').prs, [{ number: 138, url: 'https://github.com/someone/some_repo/pull/138', state: 'merged', at: '2026-10-01T10:00:00Z' }], 'A Beads-only row is dated with the issue.');
+  assert.equal(task(map, 'bare').prs[0].state, 'merged', 'A closed task with no stated state is merged.');
+  assert.equal('state' in task(map, 'openbare').prs[0], false, 'An open one with no stated state has none.');
+  const noRepo = build(issues);
+  assert.equal('url' in task(noRepo, 'old').prs[0], false);
+});
+
+test('notes: you says why a task is yellow, an Ask first', () => {
+  const map = build([
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    issue({ id: 'label', parent: 'f', labels: ['needs-owner'] }), issue({ id: 'ask', parent: 'f', labels: ['needs-owner'] }), issue({ id: 'plain', parent: 'f' }),
+  ], { asks: [{ id: 'a1', bead: 'ask', state: 'open' }] });
+  assert.equal(task(map, 'label').you, 'label');
+  assert.equal(task(map, 'ask').you, 'ask');
+  assert.equal('you' in task(map, 'plain'), false);
+});
+
+test('notes: features and milestones that are issues carry summary, close info and cards; the made-up ones do not', () => {
+  const map = build([
+    withExtra(issue({ id: 'm', type: 'milestone', status: 'closed', closed: '2026-10-18T09:00:00Z', description: 'Everything needed to ship the first level.' }), { close_reason: 'Shipped' }),
+    issue({ id: 'f', type: 'epic', parent: 'm', description: 'Movement kit for the hero with jumps and slides.' }),
+    issue({ id: 'direct', parent: 'm' }),
+  ]);
+  const milestone = map.milestones[0];
+  assert.deepEqual([milestone.summary, milestone.closedAt, milestone.closeReason], ['Everything needed to ship the first level.', '2026-10-18T09:00:00Z', 'Shipped']);
+  assert.equal(milestone.features[0].summary, 'Movement kit for the hero with jumps and slides.');
+  const other = milestone.features.find(feature => feature.id === 'm~other');
+  assert.deepEqual(Object.keys(other).sort(), ['id', 'state', 'tasks', 'title']);
+});
+
+test('notes: cards resolve through the Library, own before events, unresolved dropped, five at most', () => {
+  const issues = [
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    withExtra(issue({ id: 't', parent: 'f' }), { metadata: { cards: 'magic-loops/own,nowhere/missing' }, description: 'https://site.example/agent-plans#/mission-control' }),
+    withExtra(issue({ id: 'many', parent: 'f' }), { metadata: { cards: ['a/1', 'a/2', 'a/3', 'a/4', 'a/5', 'a/6', 'a/7'] } }),
+  ];
+  const events = [eventJson({ kind: 'pr-opened', bead: 't', extra: { cardDir: 'magic-loops/from-event' } }), eventJson({ kind: 'pr-opened', bead: 't', extra: { cardDir: 'magic-loops/own' } })];
+  const map = build(issues, { events, cards: lookup });
+  assert.deepEqual(task(map, 't').cards.map(card => card.title), ['Own card', 'Mission control', 'Event card']);
+  assert.equal(task(map, 't').cards[1].href, '/agent-plans#/mission-control');
+  const crowded = build(issues, { cards: ref => ({ title: ref, href: `/${ref}` }) });
+  assert.equal(task(crowded, 'many').cards.length, 5);
+  assert.equal('cards' in task(build(issues), 't'), false, 'Without a resolver nothing is linked.');
+});

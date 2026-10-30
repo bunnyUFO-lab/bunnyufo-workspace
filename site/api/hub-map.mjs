@@ -6,6 +6,7 @@
 // depends_on_id, type }` with type `parent-child` (the child holds the link) or `blocks` (the
 // blocked issue holds it).
 import { chronological } from './hub-model.mjs';
+import { plainText, summaryOf, prsFromIssue, commitsFromIssue, cardRefsOf } from './hub-map-notes.mjs';
 
 export const isMilestoneIssue = issue => issue.issue_type === 'milestone' || (issue.labels ?? []).some(label => label === 'milestone' || label === 'wayfinder:map');
 const isGroupType = issue => issue.issue_type === 'epic' || issue.issue_type === 'feature';
@@ -46,12 +47,6 @@ export function orderSiblings(items, blockers) {
   return placed;
 }
 
-/** Markdown to the plain words it shows: links and images keep their text, emphasis and code marks go. */
-const plainText = text => String(text)
-  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-  .replace(/[*_`~]+/g, '')
-  .replace(/\s+/g, ' ')
-  .trim();
 const DESTINATION_MAX = 280;
 
 /** The first paragraph under a `## Destination` heading, as plain text clipped to 280 characters; null when there is none. */
@@ -147,11 +142,32 @@ export function issueSigns(issue, state, ctx) {
   return { signs, prUrl, prs };
 }
 
+const MAX_CARDS = 5;
+const prNumberOf = url => { const match = /\/pull\/(\d+)(?:[/?#]|$)/.exec(String(url ?? '')); return match ? Number(match[1]) : undefined; };
+
+/**
+ * The PRs the events saw merged with the ones Beads records: a row for the same number keeps the
+ * event's state; a Beads-only row keeps its own, or is merged when the task is closed and says nothing,
+ * and is dated with the issue (`at`: closed or last updated) since Beads holds no PR dates.
+ */
+function mergePrs(eventRows, beadsRows, closed, at) {
+  const rows = eventRows.map(row => { const number = prNumberOf(row.url); return number ? { ...row, number } : row; });
+  const known = new Set(rows.map(row => row.number).filter(Boolean));
+  const extra = beadsRows.filter(row => !known.has(row.number)).sort((a, b) => a.number - b.number)
+    .map(row => {
+      const state = row.state ?? (closed ? 'merged' : undefined);
+      return { number: row.number, ...(row.url ? { url: row.url } : {}), ...(state ? { state } : {}), at };
+    });
+  return [...extra, ...rows];
+}
+
 /**
  * @param events chronological or not; only those naming a task's bead matter
  * @param asks   [{ id, bead?, state }] with the Ask's derived state
+ * @param repo   the project's repository (a GitHub remote or `owner/name`), to link PRs and commits
+ * @param cards  `ref → { title, href } | null` for `section/folder` or `section#id`; unresolved refs are dropped
  */
-export function buildMap({ project, meta = null, issues = [], events = [], asks = [], now = new Date() }) {
+export function buildMap({ project, meta = null, issues = [], events = [], asks = [], repo = '', cards = () => null, now = new Date() }) {
   const byId = new Map(issues.map(issue => [issue.id, issue]));
   const parentOf = new Map();
   const childrenOf = new Map();
@@ -181,6 +197,31 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
   }
   const eventsByBead = eventsByBeadOf(events);
 
+  // The Library cards an issue names itself, then the ones its events came from, resolved and at most five.
+  const cardsOf = issue => {
+    const refs = [...cardRefsOf(issue), ...(eventsByBead.get(issue.id) ?? []).map(event => event.cardDir).filter(Boolean)];
+    const out = [];
+    for (const ref of new Set(refs)) {
+      let card = null;
+      try { card = cards(ref); } catch { card = null; }
+      if (card?.href && !out.some(row => row.href === card.href)) out.push({ title: card.title ?? ref, href: card.href });
+    }
+    return out.slice(0, MAX_CARDS);
+  };
+  // What a feature or milestone that is a real issue says about itself.
+  const notesOf = id => {
+    const issue = id.includes('~') ? null : byId.get(id);
+    if (!issue) return {};
+    const summary = summaryOf(issue.description);
+    const cardRows = cardsOf(issue);
+    return {
+      ...(summary ? { summary } : {}),
+      ...(issue.closed_at ? { closedAt: issue.closed_at } : {}),
+      ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
+      ...(cardRows.length ? { cards: cardRows } : {}),
+    };
+  };
+
   const taskState = issue => {
     if (issue.status === 'closed') return 'done';
     if (asksByBead.has(issue.id) || (issue.labels ?? []).includes('needs-owner')) return 'you';
@@ -191,12 +232,21 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
 
   const toTask = issue => {
     const state = taskState(issue);
-    const { signs, prUrl, prs } = issueSigns(issue, state, { eventsByBead });
+    const { signs, prUrl, prs: eventPrs } = issueSigns(issue, state, { eventsByBead });
+    const prs = mergePrs(eventPrs, prsFromIssue(issue, repo), issue.status === 'closed', issue.closed_at ?? issue.updated_at ?? '');
+    const summary = summaryOf(issue.description);
+    const commits = commitsFromIssue(issue, repo);
+    const cardRows = cardsOf(issue);
     return {
       id: issue.id, title: issue.title ?? issue.id, state, status: issue.status ?? 'open', signs,
       sprints: (issue.labels ?? []).filter(label => label.startsWith('sprint:')).map(label => label.slice(7)),
       deps: blockers(issue).filter(id => byId.has(id)),
       ...(asksByBead.has(issue.id) ? { ask: asksByBead.get(issue.id) } : {}),
+      ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : 'label' } : {}),
+      ...(summary ? { summary } : {}),
+      ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
+      ...(cardRows.length ? { cards: cardRows } : {}),
+      ...(commits.length ? { commits } : {}),
       ...(prUrl ? { prUrl } : {}),
       ...(prs.length ? { prs } : {}),
       ...(issue.closed_at ? { closedAt: issue.closed_at } : {}),
@@ -218,10 +268,10 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
 
   const makeFeature = (id, title, taskIssues) => {
     const tasks = taskIssues.map(toTask);
-    return { id, title, state: roll(tasks.map(task => task.state)), tasks };
+    return { id, title, state: roll(tasks.map(task => task.state)), ...notesOf(id), tasks };
   };
   const makeMilestone = (id, title, features) => ({
-    id, title, state: roll(features.flatMap(feature => feature.tasks.map(task => task.state))), features,
+    id, title, state: roll(features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), features,
   });
 
   const milestones = orderSiblings(milestoneIssues, blockers).map(milestone => {
