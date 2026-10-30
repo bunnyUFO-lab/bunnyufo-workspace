@@ -270,6 +270,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   });
   // Policy approval (off unless HUB_POLICY_APPROVE names kinds): signs eligible proposals through the same path as a tap.
   const policy = createPolicy({ env, requests: requestFiles, listFolders, cached, canSign: on && !!signingKey, now, log, writerOf: async id => (await bucket.head(key(`requests/${id}/request.json`)).catch(() => null))?.metadata?.writer ?? null });
+  // The cloud fire queue: sweeps approved cloud requests at start and every 5 minutes. Idle without a routine (or the dry run) and a key.
+  if (on) routines.start();
   if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
 
   /** Every copy of the project's Beads export, merged: the newest version of each issue wins. */
@@ -951,7 +953,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     approvals: hermesApprovals,
     /** Stops the followers and the sweep (shutdown, tests). */
     policy,
-    close: async () => { policy.close(); await hermesDispatch.close(); },
+    close: async () => { policy.close(); await routines.close(); await hermesDispatch.close(); },
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
@@ -1006,7 +1008,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
             const status = await loadPcStatus(at);
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() });
             const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
@@ -1019,7 +1021,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const askItems = asks.map(row => row.item);
             const listItems = checklists.map(row => row.item);
             const items = buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at });
-            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at }).needsYou);
+            const counts = inboxCounts(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.
             const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);

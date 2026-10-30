@@ -11,8 +11,8 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { markStamp } from '../hub-model.mjs';
 import { route } from '../presets.mjs';
-import { dayIn, fireFileTime, loadRoutines, nextMidnight, repoKey } from '../routines.mjs';
-import { sign } from '../signing.mjs';
+import { dayIn, fireFileTime, loadRoutines, nextMidnight, repoKey, retryPlan } from '../routines.mjs';
+import { sha256Hex, sign } from '../signing.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { createFakeRoutine } from './fake-routine.mjs';
 import { requestJson } from './hub-fixtures.mjs';
@@ -44,6 +44,7 @@ async function fixture({ env = {}, routine = createFakeRoutine() } = {}) {
   const hub = createHub({ bucket, enabled: true, now, env: { ...ENV, ...env }, fetchImpl: routine.fetchImpl, log: line => logs.push(String(line)) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await hub.routines.sweep(); // the sweep at start is over before a test seeds anything
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, url, data, headers = {}) => {
     const answer = await fetch(`${origin}/api${url}`, {
@@ -70,7 +71,18 @@ async function fixture({ env = {}, routine = createFakeRoutine() } = {}) {
     `sections/inbox/requests/${id}/fire-${markStamp(new Date(at))}-${rand}.json`,
     JSON.stringify({ v: 1, at: new Date(at).toISOString(), routine: 'PROBE', ok: true, status: 200, by: 'hub', ...body }), 'application/json',
   );
-  return { fake, hub, post, call, clock, logs, routine, proposeCloud, fires, seedFire, close: async () => { await hub.close(); server.close(); await fake.close(); } };
+  /** An approved.json as a policy signer would leave it: signed here and written straight to the bucket, no route call. */
+  const writeApproval = (request, { privateKey = keyPair.privateKey, at = clock.time, expiresIn = 72 * 60 * MIN, target = 'cloud' } = {}) => {
+    const bytes = fake.text(`sections/inbox/requests/${request.id}/request.json`);
+    const approved = sign({
+      v: 1, request: request.id, project: request.project, repo: request.repo ?? null, target, requestSha256: sha256Hex(Buffer.from(bytes)), limits: { minutes: 120 },
+      expires: new Date(at + expiresIn).toISOString(), nonce: 'n'.repeat(22), at: new Date(at).toISOString(), by: 'policy', run: { preset: 'code-task', brief: 'Do the job.' },
+    }, privateKey);
+    fake.seed(`sections/inbox/requests/${request.id}/approved.json`, `${JSON.stringify(approved, null, 2)}\n`, 'application/json');
+    return approved;
+  };
+  const detail = async id => (await call('GET', `/hub/requests/${id}`)).body;
+  return { fake, hub, post, call, clock, logs, routine, proposeCloud, fires, seedFire, writeApproval, detail, close: async () => { await hub.close(); server.close(); await fake.close(); } };
 }
 
 test('loadRoutines: a pair loads, a half pair names the missing key and no value, other keys are ignored', () => {
@@ -348,4 +360,350 @@ test('dry run wins over real keys and says so once', async () => {
     await f.post(`/hub/requests/${f.proposeCloud().id}/approve`, {});
     assert.equal(f.routine.calls.length, 0);
   } finally { await f.close(); }
+});
+
+// --- the fire queue ---
+
+test('retryPlan: 429 costs no retry, failures retry at 5, 15 and 45 minutes, a 4xx stops at once', () => {
+  const at = new Date(START);
+  const fail = (minutesAgo, extra = {}) => ({ ok: false, status: 500, reason: 'http-500', at: new Date(START - minutesAgo * MIN).toISOString(), ...extra });
+  assert.deepEqual(retryPlan([], at), { go: true });
+  assert.deepEqual(retryPlan([fail(1, { status: 429, reason: 'http-429' })], at), { go: true });
+  assert.equal(retryPlan([fail(4)], at).wait, true);
+  assert.deepEqual(retryPlan([fail(5)], at), { go: true });
+  assert.equal(retryPlan([fail(14), fail(19)], at).wait, true);
+  assert.deepEqual(retryPlan([fail(15), fail(20)], at), { go: true });
+  assert.equal(retryPlan([fail(44), fail(60), fail(70)], at).wait, true);
+  assert.deepEqual(retryPlan([fail(45), fail(60), fail(70)], at), { go: true });
+  assert.equal(retryPlan([fail(500), fail(600), fail(700), fail(800)], at).stop, true);
+  assert.deepEqual(retryPlan([fail(1, { status: 401, reason: 'http-401' })], at), { stop: true, reason: 'http-401' });
+});
+
+test('a policy-style approved.json written straight to the bucket is fired by the next sweep', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud();
+    f.writeApproval(request);
+    assert.equal(f.routine.calls.length, 0);
+    assert.equal((await f.detail(request.id)).cloud.status, 'queued');
+    const done = await f.hub.routines.sweep();
+    assert.deepEqual(done.fired, [request.id]);
+    assert.equal(f.routine.calls.length, 1);
+    assert.equal(f.routine.calls[0].body, JSON.stringify({ text: request.id }));
+    const [record] = f.fires(request.id);
+    assert.equal(record.by, 'sweep');
+    assert.equal(record.ok, true);
+    assert.equal((await f.detail(request.id)).cloud.status, 'fired');
+    assert.deepEqual((await f.hub.routines.sweep()).fired, [], 'A fired request is not fired again.');
+    assert.equal(f.routine.calls.length, 1);
+  } finally { await f.close(); }
+});
+
+test('a forged approved.json is never fired and raises an alert in Today', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud({ title: 'Forged job' });
+    f.writeApproval(request, { privateKey: otherPair.privateKey });
+    const done = await f.hub.routines.sweep();
+    assert.deepEqual(done.refused, [request.id]);
+    assert.equal(f.routine.calls.length, 0);
+    assert.equal(f.fires(request.id).length, 0, 'Nothing is written.');
+    assert.ok(f.logs.some(line => line.includes(`skip ${request.id}: bad signature`)));
+    const today = (await f.call('GET', '/hub/today')).body;
+    assert.ok(today.alerts.some(alert => alert.title === "Approval for Forged job failed the server's check" && alert.request === request.id), JSON.stringify(today.alerts));
+    // A request.json changed after signing fails too.
+    const changed = f.proposeCloud({ title: 'Changed job' });
+    f.writeApproval(changed);
+    f.fake.seed(`sections/inbox/requests/${changed.id}/request.json`, `${JSON.stringify({ ...changed, text: 'Something else entirely' }, null, 2)}\n`, 'application/json');
+    assert.deepEqual((await f.hub.routines.sweep()).refused.sort(), [request.id, changed.id].sort());
+    assert.equal(f.routine.calls.length, 0);
+    // Once the forged requests are stopped, the alert goes.
+    f.fake.seed(`sections/inbox/requests/${request.id}/stop.json`, '{}', 'application/json');
+    f.fake.seed(`sections/inbox/requests/${changed.id}/stop.json`, '{}', 'application/json');
+    await f.hub.routines.sweep();
+    assert.deepEqual(f.hub.routines.alerts(), []);
+  } finally { await f.close(); }
+});
+
+test("at the cap the 11th candidate waits with next at the owner's midnight; past it the oldest approvals fire first", async () => {
+  const f = await fixture({ env: { HUB_TIME_ZONE: 'America/Los_Angeles', HUB_CLOUD_DAILY: '10' } });
+  try {
+    for (let i = 0; i < 10; i += 1) f.seedFire(`20261029-probe-old${i}-o${String(i).padStart(3, '0')}`, Date.UTC(2026, 9, 29, 15, i));
+    const newer = f.proposeCloud();
+    const older = f.proposeCloud();
+    f.writeApproval(newer, { at: START - 10 * MIN });
+    f.writeApproval(older, { at: START - 30 * MIN });
+    const done = await f.hub.routines.sweep();
+    assert.deepEqual(done.fired, []);
+    assert.deepEqual(done.waiting.map(row => row.reason), ['daily-cap', 'daily-cap']);
+    const waiting = await f.detail(older.id);
+    assert.equal(waiting.cloud.status, 'waiting');
+    assert.equal(waiting.cloud.reason, 'daily-cap');
+    assert.equal(waiting.cloud.next, '2026-10-30T07:00:00.000Z');
+    f.clock.time = Date.UTC(2026, 9, 30, 7, 5);
+    const after = await f.hub.routines.sweep();
+    assert.deepEqual(after.fired, [older.id, newer.id]);
+    assert.equal(f.routine.calls.length, 2);
+  } finally { await f.close(); }
+});
+
+test('the oldest approval goes first when only one fits', async () => {
+  const f = await fixture({ env: { HUB_CLOUD_DAILY: '1' } });
+  try {
+    const newer = f.proposeCloud();
+    const older = f.proposeCloud();
+    f.writeApproval(newer, { at: START - 10 * MIN });
+    f.writeApproval(older, { at: START - 30 * MIN });
+    const done = await f.hub.routines.sweep();
+    assert.deepEqual(done.fired, [older.id]);
+    assert.deepEqual(done.waiting, [{ id: newer.id, reason: 'daily-cap' }]);
+  } finally { await f.close(); }
+});
+
+test('a 429 pauses every cloud fire for 60 minutes, then the waiting request fires', async () => {
+  const f = await fixture();
+  try {
+    f.routine.set({ status: 429 });
+    const request = f.proposeCloud();
+    const approved = await f.post(`/hub/requests/${request.id}/approve`, {});
+    assert.equal(approved.status, 201);
+    assert.equal(approved.body.cloud.fired, false);
+    assert.equal(approved.body.cloud.reason, 'usage-limit');
+    assert.equal(f.routine.calls.length, 1);
+    const waiting = await f.detail(request.id);
+    assert.equal(waiting.cloud.status, 'waiting');
+    assert.equal(waiting.cloud.reason, 'usage-limit');
+    assert.equal(waiting.cloud.next, new Date(START + 60 * MIN).toISOString());
+    // Other approvals wait too, and nothing is sent while paused.
+    f.routine.set({ status: 200 });
+    const other = f.proposeCloud();
+    f.writeApproval(other);
+    f.clock.time = START + 30 * MIN;
+    const during = await f.hub.routines.sweep();
+    assert.deepEqual(during.fired, []);
+    assert.equal(f.routine.calls.length, 1, 'Nothing is sent during the pause.');
+    f.clock.time = START + 61 * MIN;
+    const after = await f.hub.routines.sweep();
+    assert.deepEqual(after.fired.sort(), [request.id, other.id].sort());
+    assert.equal(f.routine.calls.length, 3);
+  } finally { await f.close(); }
+});
+
+test('a run that ended on a usage limit pauses the queue', async () => {
+  const f = await fixture();
+  try {
+    const ended = f.proposeCloud();
+    f.writeApproval(ended, { at: START - 90 * MIN });
+    f.fake.seed(`sections/inbox/requests/${ended.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', reason: 'usage-limit', at: new Date(START - 10 * MIN).toISOString(), by: 'run' }), 'application/json');
+    const waiting = f.proposeCloud();
+    f.writeApproval(waiting);
+    assert.deepEqual((await f.hub.routines.sweep()).fired, []);
+    assert.equal(f.routine.calls.length, 0);
+    f.clock.time = START + 51 * MIN;
+    assert.deepEqual((await f.hub.routines.sweep()).fired, [waiting.id]);
+  } finally { await f.close(); }
+});
+
+test('a failed fire retries at 5, 15 and 45 minutes, then stops and shows Retry', async () => {
+  const f = await fixture();
+  try {
+    f.routine.set({ status: 500 });
+    const request = f.proposeCloud();
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    assert.equal(f.routine.calls.length, 1);
+    const at = minutes => { f.clock.time = START + minutes * MIN; };
+    at(4);
+    assert.deepEqual((await f.hub.routines.sweep()).fired, []);
+    assert.equal((await f.detail(request.id)).cloud.status, 'waiting');
+    assert.equal((await f.detail(request.id)).cloud.reason, 'retry');
+    at(5);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 2);
+    at(19);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 2);
+    at(20);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 3);
+    at(64);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 3);
+    at(65);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 4);
+    at(600);
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 4, 'It stops after the third retry.');
+    const stopped = await f.detail(request.id);
+    assert.equal(stopped.cloud.status, 'fire-failed');
+    assert.equal(stopped.fires.length, 4);
+    assert.ok(f.fires(request.id).every(fire => fire.ok === false));
+    const today = (await f.call('GET', '/hub/today')).body;
+    assert.ok(today.alerts.some(alert => alert.request === request.id && /could not be fired/.test(alert.title) && alert.retry === true));
+    // Retry by hand still works.
+    f.routine.set({ status: 200 });
+    assert.equal((await f.post(`/hub/requests/${request.id}/fire`, {})).body.fired, true);
+  } finally { await f.close(); }
+});
+
+test('a routine with no _REPO is not retried by the queue', async () => {
+  const f = await fixture({ env: { CLAUDE_ROUTINE_PROBE_REPO: '' } });
+  try {
+    const request = f.proposeCloud();
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    f.clock.time = START + 100 * MIN;
+    await f.hub.routines.sweep();
+    assert.equal(f.fires(request.id).length, 1);
+    assert.equal((await f.detail(request.id)).cloud.reason, 'routine-repo-unset');
+  } finally { await f.close(); }
+});
+
+test('a 401 from the Fire URL does not retry', async () => {
+  const f = await fixture();
+  try {
+    f.routine.set({ status: 401 });
+    const request = f.proposeCloud();
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    f.clock.time = START + 100 * MIN;
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 1);
+    const stopped = await f.detail(request.id);
+    assert.equal(stopped.cloud.status, 'fire-failed');
+    assert.equal(stopped.cloud.reason, 'http-401');
+  } finally { await f.close(); }
+});
+
+test('an ok fire with no taken.json: fired at 19 minutes, not-started at 21, never fired again by itself', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud({ title: 'Quiet job' });
+    await f.post(`/hub/requests/${request.id}/approve`, {});
+    f.clock.time = START + 19 * MIN;
+    assert.equal((await f.detail(request.id)).cloud.status, 'fired');
+    f.clock.time = START + 21 * MIN;
+    assert.equal((await f.detail(request.id)).cloud.status, 'not-started');
+    await f.hub.routines.sweep();
+    f.clock.time = START + 300 * MIN;
+    await f.hub.routines.sweep();
+    assert.equal(f.routine.calls.length, 1, 'No second fire.');
+    const today = (await f.call('GET', '/hub/today')).body;
+    assert.ok(today.alerts.some(alert => alert.request === request.id && alert.title === 'Cloud run did not start: Quiet job' && alert.retry === true), JSON.stringify(today.alerts));
+    // Once the run takes it, there is nothing to flag.
+    f.fake.seed(`sections/inbox/requests/${request.id}/taken.json`, JSON.stringify({ runner: 'cloud', host: 'cloud', nonce: 'n'.repeat(22), at: new Date(f.clock.time).toISOString() }), 'application/json');
+    assert.equal((await f.detail(request.id)).cloud, undefined);
+  } finally { await f.close(); }
+});
+
+test('two sweeps at once fire once', async () => {
+  const f = await fixture();
+  try {
+    const request = f.proposeCloud();
+    f.writeApproval(request);
+    const [one, two] = await Promise.all([f.hub.routines.sweep(), f.hub.routines.sweep()]);
+    assert.equal(one, two);
+    assert.equal(f.routine.calls.length, 1);
+    assert.equal(f.fires(request.id).length, 1);
+  } finally { await f.close(); }
+});
+
+test('taken, stopped, declined, finished and expired requests are never fired', async () => {
+  const f = await fixture();
+  try {
+    const put = (request, file, body = {}) => f.fake.seed(`sections/inbox/requests/${request.id}/${file}`, JSON.stringify(body), 'application/json');
+    const taken = f.proposeCloud(); f.writeApproval(taken); put(taken, 'taken.json', { runner: 'cloud', at: new Date(START).toISOString() });
+    const stopped = f.proposeCloud(); f.writeApproval(stopped); put(stopped, 'stop.json');
+    const declined = f.proposeCloud(); f.writeApproval(declined); put(declined, 'declined.json');
+    const finished = f.proposeCloud(); f.writeApproval(finished); put(finished, 'result.json', { v: 1, outcome: 'pr', at: new Date(START).toISOString() });
+    const expired = f.proposeCloud(); f.writeApproval(expired, { at: START - 80 * 60 * MIN, expiresIn: 72 * 60 * MIN });
+    const onPc = f.proposeCloud({ target: 'pc' }); f.writeApproval(onPc, { target: 'pc' });
+    const done = await f.hub.routines.sweep();
+    assert.deepEqual(done, { fired: [], waiting: [], refused: [] });
+    assert.equal(f.routine.calls.length, 0);
+    assert.equal(f.hub.routines.alerts().length, 0, 'An expired approval is not a forged one.');
+  } finally { await f.close(); }
+});
+
+test('the queue stays idle without a routine key or a dry run', async () => {
+  const f = await fixture({ env: { CLAUDE_ROUTINE_PROBE_URL: '', CLAUDE_ROUTINE_PROBE_TOKEN: '' } });
+  try {
+    f.hub.routines.start();
+    assert.equal(f.logs.filter(line => line.includes('sweep')).length, 0);
+    const request = f.proposeCloud({ repo: 'example/none' });
+    f.writeApproval(request);
+    assert.equal((await f.detail(request.id)).cloud.status, 'queued', 'The status still reads from the files.');
+    assert.equal(f.routine.calls.length, 0);
+  } finally { await f.close(); }
+});
+
+// --- review fixes ---
+
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('an approve and a sweep at once fire the request once', async () => {
+  const f = await fixture({ routine: createFakeRoutine({ delayMs: 400 }) });
+  try {
+    const request = f.proposeCloud();
+    const approving = f.post(`/hub/requests/${request.id}/approve`, {});
+    await pause(150);
+    const [approved, swept] = await Promise.all([approving, f.hub.routines.sweep()]);
+    assert.equal(approved.status, 201);
+    assert.equal(approved.body.cloud.fired, true);
+    assert.deepEqual(swept.fired, []);
+    assert.equal(f.routine.calls.length, 1);
+    assert.equal(f.fires(request.id).length, 1);
+  } finally { await f.close(); }
+});
+
+test('a Retry and a sweep at once fire the request once', async () => {
+  const f = await fixture({ routine: createFakeRoutine({ delayMs: 400 }) });
+  try {
+    const request = f.proposeCloud();
+    f.writeApproval(request);
+    const retrying = f.post(`/hub/requests/${request.id}/fire`, {});
+    await pause(100);
+    const [retried, swept] = await Promise.all([retrying, f.hub.routines.sweep()]);
+    assert.equal(retried.status, 200);
+    assert.deepEqual(swept.fired, []);
+    assert.equal(f.routine.calls.length, 1);
+    assert.equal(f.fires(request.id).length, 1);
+  } finally { await f.close(); }
+});
+
+test('a sweep that began before a stop or a take does not fire the request', async () => {
+  const f = await fixture({ routine: createFakeRoutine({ delayMs: 300 }) });
+  try {
+    const first = f.proposeCloud();
+    const second = f.proposeCloud();
+    f.writeApproval(first, { at: START - 20 * MIN });
+    f.writeApproval(second, { at: START - 10 * MIN });
+    const sweeping = f.hub.routines.sweep();
+    await pause(100); // the first fire is in flight; the second waits for the lock
+    f.fake.seed(`sections/inbox/requests/${second.id}/stop.json`, '{}', 'application/json');
+    const done = await sweeping;
+    assert.deepEqual(done.fired, [first.id]);
+    assert.equal(f.routine.calls.length, 1);
+  } finally { await f.close(); }
+});
+
+test("a run's own result.json cannot pause the queue from the future or for longer than 60 minutes", async () => {
+  const f = await fixture();
+  try {
+    const liar = f.proposeCloud();
+    f.writeApproval(liar, { at: START - 90 * MIN });
+    f.fake.seed(`sections/inbox/requests/${liar.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', reason: 'usage-limit', at: '2099-01-01T00:00:00Z', by: 'run' }), 'application/json');
+    const waiting = f.proposeCloud();
+    f.writeApproval(waiting);
+    assert.deepEqual((await f.hub.routines.sweep()).fired, [waiting.id], 'A date in the future is ignored.');
+  } finally { await f.close(); }
+  const g = await fixture();
+  try {
+    const skewed = g.proposeCloud();
+    g.writeApproval(skewed, { at: START - 90 * MIN });
+    g.fake.seed(`sections/inbox/requests/${skewed.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', reason: 'usage-limit', at: new Date(START + 30_000).toISOString(), by: 'run' }), 'application/json');
+    const waiting = g.proposeCloud();
+    g.writeApproval(waiting);
+    assert.deepEqual((await g.hub.routines.sweep()).fired, [], 'A little skew still pauses.');
+    g.clock.time = START + 61 * MIN;
+    assert.deepEqual((await g.hub.routines.sweep()).fired, [waiting.id], 'The pause never outlasts 60 minutes from now.');
+  } finally { await g.close(); }
 });

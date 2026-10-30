@@ -20,6 +20,13 @@ export const DEFAULT_DAILY = 10;
 export const FIRE_TIMEOUT_MS = 30_000;
 /** A fire that answered ok is not retried by hand within this long: the run may be starting. */
 export const RETRY_AFTER_MS = 10 * 60_000;
+/** An ok fire with no taken.json and no result.json after this long is "fired, not started". */
+export const NOT_STARTED_MS = 20 * 60_000;
+/** A 429 from the Fire URL, or a run that ended on a usage limit, pauses every cloud fire for this long. */
+export const PAUSE_MS = 60 * 60_000;
+/** Automatic retries of a fire that failed: this many minutes after the previous attempt. Then it stops and shows Retry. */
+export const RETRY_BACKOFF_MIN = [5, 15, 45];
+export const SWEEP_MS = 5 * 60_000;
 
 const MIN = 60_000;
 const STAMP_RE = /^fire-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z-[a-z0-9]{4}\.json$/;
@@ -35,6 +42,24 @@ export function fireFileTime(name) {
   if (!m) return null;
   const time = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}.${m[7]}Z`);
   return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * What to do next about a request with no ok fire, from its fire records (newest first). Pure.
+ * A 429 is not a failure of the fire: it pauses the queue and costs no retry. Any other failure is retried
+ * 5, 15 and 45 minutes after the one before it, then the request stops and shows Retry; a 4xx other than 429
+ * is a configuration fault and stops at once.
+ * Returns `{ go: true }`, `{ wait: true, next }` or `{ stop: true, reason }`.
+ */
+export function retryPlan(fires, at) {
+  const failures = fires.filter(fire => fire && fire.ok === false && fire.status !== 429);
+  const newest = failures[0];
+  if (!newest) return { go: true };
+  if (newest.reason === 'routine-repo-unset') return { stop: true, reason: newest.reason };
+  if (newest.status >= 400 && newest.status < 500) return { stop: true, reason: newest.reason ?? `http-${newest.status}` };
+  if (failures.length > RETRY_BACKOFF_MIN.length) return { stop: true, reason: newest.reason ?? 'failed' };
+  const due = Date.parse(newest.at) + RETRY_BACKOFF_MIN[failures.length - 1] * 60_000;
+  return due <= at.getTime() ? { go: true } : { wait: true, next: new Date(due).toISOString() };
 }
 
 /** The time zone to count days in: a valid IANA name, else UTC. */
@@ -118,6 +143,12 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
   for (const name of incomplete) log(`[hub] ${name} is set without its pair; that routine is ignored`);
   if (dryRun && routines.size) log('[hub] Cloud routine dry run is on (HUB_ROUTINE_DRY_RUN): nothing is fired, whatever routine keys are set');
 
+  // The queue's memory. A restart forgets the pause; the next 429 sets it again and costs one fire attempt.
+  let pausedUntil = 0;
+  let refused = new Map(); // request id -> { ts, project, title }: approvals the server's check refused
+  let capacityMemo = null;
+  const paused = at => pausedUntil > at.getTime();
+
   const hasRoutine = repo => dryRun || (!!repo && !!routineFor(routines, repo));
   const keys = () => [...routines.keys()];
 
@@ -186,9 +217,12 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
   }
 
   /** `{ under, used, cap, next }`: whether another fire fits today, and when the count resets. */
-  async function capacity(at = now()) {
+  async function capacity(at = now(), { memo = false } = {}) {
+    if (memo && capacityMemo && capacityMemo.at === at.getTime() && Date.now() - capacityMemo.made < 5000) return capacityMemo.value;
     const used = await firesToday(at);
-    return { under: used < cap, used, cap, next: nextMidnight(at, zone).toISOString() };
+    const value = { under: used < cap, used, cap, next: nextMidnight(at, zone).toISOString() };
+    capacityMemo = { at: at.getTime(), made: Date.now(), value };
+    return value;
   }
 
   /**
@@ -219,6 +253,8 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     const result = await fire({ repo: approved.repo, requestId: id });
     log(`[hub] fire ${id} -> ${result.dryRun ? 'dry-run' : result.status || result.reason}`);
     const record = await recordFire(id, result, { repo: approved.repo, by, at });
+    capacityMemo = null;
+    if (result.status === 429) pausedUntil = Math.max(pausedUntil, at.getTime() + PAUSE_MS);
     return { result, record };
   }
 
@@ -232,18 +268,34 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     if (!checked.ok) return { fired: false, reason: 'check-failed', waiting: `The approval failed the server's check (${checked.reason}).` };
     const room = await capacity(at);
     if (!room.under) return { fired: false, reason: 'daily-cap', next: room.next, waiting: 'The daily limit for cloud runs is used.' };
+    // Another fire may have got in while this waited for the lock (a sweep, Retry): never fire twice.
+    if ((await readFires(id, await freshNames(id))).some(fire => fire.ok === true)) return { fired: true };
+    const limited = { fired: false, reason: 'usage-limit', waiting: 'Cloud runs are paused on a usage limit.' };
+    if (paused(at)) return { ...limited, next: new Date(pausedUntil).toISOString() };
     const { result } = await fireAndRecord(id, checked.approved, 'hub', at);
     if (result.ok) return { fired: true };
+    if (result.status === 429) return { ...limited, next: new Date(pausedUntil).toISOString() };
     return { fired: false, reason: result.reason, waiting: `The cloud routine did not start (${result.reason}). Retry.` };
   });
+
+  /** The file names in `requests/<id>/` right now (a fresh listing, never the sweep's earlier one). */
+  async function freshNames(id) {
+    const base = key(`requests/${id}/x`).slice(0, -1);
+    const { objects } = await bucket.list(base);
+    return new Set(objects.map(object => object.key.slice(base.length)).filter(name => name && !name.includes('/')));
+  }
+
+  /** The newest `limit` fire records of a request, newest first. */
+  async function readFires(id, names, limit = 20) {
+    const picked = [...names].filter(name => fireFileTime(name) !== null).sort().reverse().slice(0, limit);
+    return (await Promise.all(picked.map(name => cached(`requests/${id}/${name}`)))).filter(Boolean);
+  }
 
   /** `POST /hub/requests/:id/fire`: Retry. */
   const retry = (id, user, at = now()) => exclusive(async () => {
     const { state, names, parts } = await requests.loadOne(id, at);
     if (state !== 'approved' || parts.approved?.target !== 'cloud') throw fail(`That request is ${state}${parts.approved ? ` on ${parts.approved.target}` : ''}; only an approved cloud request can be fired.`, 409);
-    const fires = [];
-    for (const name of names) if (fireFileTime(name) !== null) fires.push(name);
-    const bodies = (await Promise.all(fires.sort().reverse().slice(0, 20).map(name => cached(`requests/${id}/${name}`)))).filter(Boolean);
+    const bodies = await readFires(id, names);
     const newestOk = bodies.find(body => body.ok === true);
     if (newestOk) {
       const age = at.getTime() - Date.parse(newestOk.at);
@@ -257,11 +309,118 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
     return { status: 200, body: { fired: result.ok === true, ...(result.ok ? {} : { reason: result.reason }), fire: record } };
   });
 
+  /**
+   * Where a cloud request stands, for the list row and the detail: `{ status, reason?, next?, fires? }`, or null when
+   * the request is not an approved cloud request. `queued` (nothing fired, nothing in the way), `fired`, `waiting`
+   * (`daily-cap`, `usage-limit` or `retry`, with `next`), `fire-failed` (stopped; Retry) and `not-started`
+   * (an ok fire 20 minutes old and no taken.json or result.json; never re-fired by itself).
+   */
+  async function cloudStatus(id, { names, state, approved }, at = now(), { withFires = false } = {}) {
+    if (state !== 'approved' || approved?.target !== 'cloud') return null;
+    const fires = await readFires(id, names);
+    const out = status => ({ ...status, ...(withFires ? { fires } : {}) });
+    const okFire = fires.find(fire => fire.ok === true);
+    if (okFire) {
+      const age = at.getTime() - Date.parse(okFire.at);
+      return out(age > NOT_STARTED_MS ? { status: 'not-started', since: new Date(Date.parse(okFire.at) + NOT_STARTED_MS).toISOString() } : { status: 'fired' });
+    }
+    const plan = retryPlan(fires, at);
+    if (plan.stop) return out({ status: 'fire-failed', reason: plan.reason });
+    if (plan.wait) return out({ status: 'waiting', reason: 'retry', next: plan.next });
+    if (paused(at)) return out({ status: 'waiting', reason: 'usage-limit', next: new Date(pausedUntil).toISOString() });
+    const room = await capacity(at, { memo: true });
+    if (!room.under) return out({ status: 'waiting', reason: 'daily-cap', next: room.next });
+    return out({ status: 'queued' });
+  }
+
+  /**
+   * One pass over every approved cloud request that has not started: verify, then fire the ones that may fire.
+   * Candidates are approved, not taken, not stopped or declined, with no result, and no ok fire; oldest approval first.
+   * A forged or changed approval writes nothing, is logged and raises a Today alert. Returns what it did.
+   */
+  async function sweepOnce(at) {
+    const done = { fired: [], waiting: [], refused: [] };
+    const folders = await listFolders('requests', at);
+    const refusedNow = new Map();
+    // A run that ended on a usage limit pauses the queue, as a 429 does.
+    for (const [id, names] of folders) {
+      if (!names.has('result.json') || !names.has('approved.json')) continue;
+      const result = await cached(`requests/${id}/result.json`);
+      // result.json is the run's own file: a date in the future is ignored, and the pause never outlasts 60 minutes from now.
+      const ended = Date.parse(result?.at);
+      if (result?.reason === 'usage-limit' && Number.isFinite(ended) && ended <= at.getTime() + 60_000 && ended + PAUSE_MS > at.getTime()) {
+        pausedUntil = Math.max(pausedUntil, Math.min(ended + PAUSE_MS, at.getTime() + PAUSE_MS));
+      }
+    }
+    const candidates = [];
+    for (const [id, names] of folders) {
+      if (!names.has('approved.json')) continue;
+      if (['taken.json', 'result.json', 'stop.json', 'declined.json'].some(file => names.has(file))) continue;
+      const approved = await cached(`requests/${id}/approved.json`);
+      if (!approved || approved.target !== 'cloud') continue;
+      candidates.push({ id, names, approved });
+    }
+    candidates.sort((a, b) => (String(a.approved.at) < String(b.approved.at) ? -1 : String(a.approved.at) > String(b.approved.at) ? 1 : a.id < b.id ? -1 : 1));
+    for (const { id, names, approved } of candidates) {
+      const fires = await readFires(id, names);
+      if (fires.some(fire => fire.ok === true)) continue;
+      const checked = await verifyApproval(id, at);
+      if (!checked.ok) {
+        if (checked.reason === 'expired') continue;
+        log(`[hub] skip ${id}: ${checked.reason}`);
+        const request = await cached(`requests/${id}/request.json`);
+        refusedNow.set(id, { ts: refused.get(id)?.ts ?? at.toISOString(), project: approved.project ?? request?.project, title: String(request?.title ?? request?.text ?? id).replace(/\s+/g, ' ').trim().slice(0, 80) });
+        done.refused.push(id);
+        continue;
+      }
+      const plan = retryPlan(fires, at);
+      if (!plan.go) { done.waiting.push({ id, reason: plan.stop ? 'fire-failed' : 'retry' }); continue; }
+      const outcome = await exclusive(async () => {
+        // Look again inside the lock: an approve or Retry that held it has since fired or ended this request.
+        const nowNames = await freshNames(id);
+        if (['taken.json', 'result.json', 'stop.json', 'declined.json'].some(file => nowNames.has(file))) return { skipped: true };
+        const nowFires = await readFires(id, nowNames);
+        if (nowFires.some(fire => fire.ok === true)) return { skipped: true };
+        if (!retryPlan(nowFires, at).go) return { waiting: 'retry' };
+        if (paused(at)) return { waiting: 'usage-limit' };
+        const room = await capacity(at);
+        if (!room.under) return { waiting: 'daily-cap' };
+        const { result } = await fireAndRecord(id, checked.approved, 'sweep', at);
+        return result.status === 429 ? { waiting: 'usage-limit' } : { fired: true };
+      });
+      if (outcome.skipped) continue;
+      if (outcome.fired) done.fired.push(id); else done.waiting.push({ id, reason: outcome.waiting });
+    }
+    refused = refusedNow;
+    return done;
+  }
+
+  // Sweeps never overlap: a second call while one runs gets the same answer.
+  let inflight = null;
+  function sweep(at = now()) {
+    if (!inflight) inflight = sweepOnce(at).finally(() => { inflight = null; });
+    return inflight;
+  }
+
+  let timer = null;
+  /** Sweep now and every 5 minutes, only when there is something to fire with. Safe to call twice. */
+  function start() {
+    if (timer || !signingKey || !(routines.size || dryRun)) return;
+    const run = () => sweep().catch(error => log(`[hub] cloud sweep failed: ${scrub(error.message, 120)}`));
+    run();
+    timer = setInterval(run, timing.sweepMs ?? SWEEP_MS);
+    timer.unref();
+  }
+  const close = async () => { if (timer) clearInterval(timer); timer = null; await inflight?.catch(() => {}); };
+
   requests.hooks.handOff.cloud = handOff;
   requests.hooks.retryFire = retry;
+  requests.hooks.cloudStatus = cloudStatus;
 
   return {
-    dryRun, cap, zone, hasRoutine, keys, fire, recordFire, firesToday, capacity, verifyApproval, handOff, retry, exclusive,
+    dryRun, cap, zone, hasRoutine, keys, fire, recordFire, firesToday, capacity, verifyApproval, handOff, retry, exclusive, cloudStatus, sweep, start, close,
+    /** Today alerts for approvals the server's check refused, as `kind: alert` rows. */
+    alerts: () => [...refused].map(([id, row]) => ({ ts: row.ts, kind: 'alert', source: 'request', request: id, project: row.project, title: `Approval for ${row.title} failed the server's check` })),
     /** The repo keys that have a routine (never URLs). */
     cloudRepos: () => keys(),
   };
