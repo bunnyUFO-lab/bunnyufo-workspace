@@ -37,4 +37,7 @@ export default [
   {"name":"discord bot token","input":["bot M","FAKEFAKEFAKEFAKEFAKEFAK",".abc123.","FAKEFAKEFAKEFAKEFAKEFAKEFAK"," ok"],"expected":"bot [masked] ok"},
   {"name":"basic authorization header","input":["Authorization: Basic ","ZmFrZXVzZXI6ZmFrZXBhc3M="],"expected":"Authorization: Basic [masked]"},
   {"name":"prose with basic","input":"a basic idea. Authorization: Basic authentication is weak.","expected":"a basic idea. Authorization: Basic authentication is weak."},
+  {"name":"basic authorization, digits only","input":["Authorization: Basic ","0123456789"],"expected":"Authorization: Basic [masked]"},
+  {"name":"basic authorization, letters and digits","input":["Authorization: Basic ","abc12345xyz"],"expected":"Authorization: Basic [masked]"},
+  {"name":"basic authorization, plain word survives","input":"Authorization: Basic understanding is key","expected":"Authorization: Basic understanding is key"},
 ]

@@ -8,7 +8,7 @@ import cases from './fixtures/mask-vectors.mjs';
 // The same vectors live in bunnyUFO-lab/workspace-skills at mods/hub-hooks/hooks/mask-vectors.mjs. When you change fixtures/mask-vectors.mjs,
 // change that one and the hash in mods/hub-hooks/hooks/mask.test.ts too. The hash is of JSON.stringify(vectors), so line endings do not matter.
 // Must be the same literal as MASK_VECTORS_SHA256 in mods/hub-hooks/hooks/mask.test.ts (workspace-skills): a change in one repo fails here until the other is mirrored.
-const MASK_VECTORS_SHA256 = 'dda34f6f2d375bc84eae386d3d2e1b97fe9d0b44f0f41fb14f7cb9582c760e5e';
+const MASK_VECTORS_SHA256 = '684bb14db54925ad53976afc24e6375bcc853bd5d3e092a3b883dc5975a921f2';
 const join = value => (Array.isArray(value) ? value.join('') : value);
 
 test('the shared mask vectors match the copy in the skills repository', () => {
