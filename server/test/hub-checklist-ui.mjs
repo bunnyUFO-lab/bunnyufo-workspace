@@ -65,7 +65,7 @@ try {
   await page.locator('.hub-chip[data-filter="answered"]').tap();
   const history = page.locator('.hub-row', { hasText: 'Update the router settings' });
   await history.waitFor();
-  assert.match(await history.locator('.hub-row-meta').innerText(), /^To do · probe · 2 of 3 · submitted · /);
+  assert.match(await history.locator('.hub-row-meta').innerText(), /^To do · probe · Submitted · 1 open · /);
   await page.locator('.hub-chip[data-filter="steps"]').tap();
   await row.waitFor();
   await noSideways(page, 'Steps');
@@ -184,7 +184,7 @@ try {
   await page.locator('.hub-chip[data-filter="answered"]').tap();
   const submittedRow = page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' });
   await submittedRow.waitFor();
-  assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^To do · probe · 2 of 4 · submitted · /);
+  assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^To do · probe · Submitted · 2 open · /);
 
   step('a submitted list is read-only, with the time and the note');
   await submittedRow.tap();
