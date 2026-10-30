@@ -785,9 +785,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
   async function cardHrefOf(card) {
     if (typeof card !== 'string') return undefined;
-    if (Date.now() - cardIndex.at > 60000) {
-      try { cardIndex = { at: Date.now(), byFolder: new Map((await allCards()).map(row => [`${row.section}/${row.folder}`, `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}`])) }; } catch { return undefined; }
-    }
+    const rebuild = async () => {
+      // A failed listing also counts as a try, so an S3 outage does not list every section for every lookup.
+      const at = now().getTime();
+      try { cardIndex = { at, byFolder: new Map((await allCards()).map(row => [`${row.section}/${row.folder}`, `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}`])) }; } catch { cardIndex = { ...cardIndex, at }; }
+    };
+    if (now().getTime() - cardIndex.at > 60000) await rebuild();
+    // A card a run has just written is not in an index built a moment ago: on a miss, look again once the index is 10 s old.
+    if (!cardIndex.byFolder.has(card) && now().getTime() - cardIndex.at > 10000) await rebuild();
     return cardIndex.byFolder.get(card);
   }
 

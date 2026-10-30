@@ -17,12 +17,12 @@ import { iso, minutesAgo, pcStatusJson, seeder } from './hub-fixtures.mjs';
 const NOW = new Date();
 const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
 
-async function fixture() {
+async function fixture({ now } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-runs-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev' });
+  const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev', ...(now ? { now } : {}) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -109,4 +109,23 @@ test('withRunEvents keeps the window sorted, drops old runs and never doubles an
   const merged = withRunEvents([{ ts: iso(minutesAgo(NOW, 60)), kind: 'alert', file: 'a.json' }], [old, fresh], { now: NOW });
   assert.deepEqual(merged.map(event => event.kind), ['run-started', 'alert']);
   assert.equal(withRunEvents(merged, [old, fresh], { now: NOW }).length, 2);
+});
+
+test('a card written after the card index was built resolves once the index is 10 s old; before that, it is simply not linked', async () => {
+  let clock = Date.now();
+  const { fake, get, run, close } = await fixture({ now: () => new Date(clock) });
+  try {
+    const card = (id, folder) => fake.seed('sections/assistant/workspace.json', JSON.stringify({ name: 'Assistant', entities: [{ id, title: id, folder }] }), 'application/json');
+    card('first-card', '2026-10-30_first');
+    const one = `${day}-research-one-aa11`;
+    const two = `${day}-research-two-bb22`;
+    run(one, { result: { outcome: 'card', card: 'assistant/2026-10-30_first' } });
+    assert.equal((await get(`/hub/requests/${one}`)).body.cardHref, '/assistant#/first-card', 'The index is built.');
+    card('second-card', '2026-10-30_second');
+    run(two, { result: { outcome: 'card', card: 'assistant/2026-10-30_second' } });
+    clock += 3000;
+    assert.equal((await get(`/hub/requests/${two}`)).body.cardHref, undefined, 'Three seconds on: no new listing yet, and no folder link either.');
+    clock += 9000;
+    assert.equal((await get(`/hub/requests/${two}`)).body.cardHref, '/assistant#/second-card', 'Twelve seconds on, the miss rebuilds the index.');
+  } finally { await close(); }
 });

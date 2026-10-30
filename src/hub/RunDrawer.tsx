@@ -3,7 +3,7 @@ import { host } from '../lib/host'
 import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
-import { entityHash, hubHash } from '../lib/route'
+import { hubHash } from '../lib/route'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
@@ -86,8 +86,8 @@ function cardLink(card: string, resolved?: string): string | undefined {
   if (site) return site
   // The site API finds the card's id in its section (a folder is not an id, and the card may be in another section).
   if (resolved && /^\/[\w%-]+#\/[\w%.~-]+$/.test(resolved)) return resolved
-  const match = /^([\w-]+)\/([\w.-]+)$/.exec(card)
-  return match ? `/${encodeURIComponent(match[1])}${entityHash(match[2])}` : undefined
+  // Never the folder as a card id: it does not resolve. The card shows as not found until the server lists it.
+  return undefined
 }
 
 /** The running time of one tool step, ticking each second; only this span re-renders. */
@@ -257,6 +257,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
             <div className="rd-links">
               {prHref && <a className="hub-btn" href={prHref} target="_blank" rel="noopener noreferrer" data-run-pr>Open the PR</a>}
               {cardHref && <a className="hub-btn" href={cardHref} data-run-card>Open the card</a>}
+              {!cardHref && result?.card && <span className="hub-muted" data-run-card-missing>Card not found yet: {result.card.split('/').pop()}</span>}
             </div>
             {usageLine(result.usage) && <p className="hub-muted" data-run-usage>{usageLine(result.usage)}</p>}
           </div>
