@@ -1,4 +1,5 @@
 import { host, signedOut } from './host'
+import { reloadWhenIdle } from './reloadGate'
 
 /**
  * The phone app: a worker that keeps the shell and the cards last read, so they open with no
@@ -8,13 +9,15 @@ import { host, signedOut } from './host'
 export function registerServiceWorker() {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator) || host.files || signedOut) return
   // A page already under a worker that sees a new one take over is out of date: reload once. The
-  // very first install also "takes control", and that page is up to date, so it is left alone.
+  // very first install also "takes control", and that page is up to date, so it is left alone. The
+  // reload waits for a Chat reply that is streaming and for Hub writes in flight (reloadGate): a
+  // reload would cut the stream (the server would still save the reply, but the page would show nothing).
   const updating = !!navigator.serviceWorker.controller
   let reloaded = false
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!updating || reloaded) return
     reloaded = true
-    window.location.reload()
+    reloadWhenIdle(() => window.location.reload())
   })
   navigator.serviceWorker.register('/sw.js').then(registration => registration.update()).catch(() => {})
 }

@@ -333,6 +333,16 @@ test('runs on: an approval mid-turn arrives as an event, is answered through the
   } finally { await close(); }
 });
 
+test('runs on: a completions turn also says `started`, with no run to stop', async () => {
+  const { call, close } = await fixture({ env: RUNS });
+  try {
+    const result = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    const started = result.events.find(item => item.event === 'started');
+    assert.equal(started.data.run, null);
+    assert.match(started.data.conversation, /^\d{8}-/);
+  } finally { await close(); }
+});
+
 test('runs on: a turn with a picture stays on completions, and a failed run ends the turn with an error', async () => {
   const { upstream, call, close } = await fixture({ env: RUNS });
   try {
@@ -587,5 +597,85 @@ test('runs on: a plain chat whose first turn had a picture sends its later text 
     assert.equal(second.events.at(-1).event, 'done');
     assert.equal(upstream.requests.length, 1, 'the text turn did not go to completions');
     assert.equal(upstream.runs.length, 1);
+  } finally { await close(); }
+});
+
+// --- A browser that goes away mid-turn (ws-otk) --------------------------------------------------------------------
+
+/** Starts a run turn, reads until the `started` event, and hands back what it said and the open stream. */
+async function startTurn(origin, owner, text, waitFor = /started/) {
+  const controller = new AbortController();
+  const answer = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), signal: controller.signal });
+  const reader = answer.body.getReader();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error('The stream ended before it started.');
+    buffer += new TextDecoder().decode(value);
+    const hit = /event: started\ndata: (.+)\n\n/.exec(buffer);
+    if (hit && waitFor.test(buffer)) return { ...JSON.parse(hit[1]), controller };
+  }
+}
+
+const savedLines = async (fake, conversation, count) => {
+  const started = Date.now();
+  while (Date.now() - started < 3000) {
+    try { const found = lines(fake, conversation); if (found.length >= count) return found; } catch { /* not saved yet */ }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error('The conversation was not saved.');
+};
+
+test('runs on: a browser that drops mid-turn does not stop the run, and the reply is saved when Hermes finishes', async () => {
+  const { fake, upstream, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'a long one', /Working/);
+    turn.controller.abort();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(upstream.stops, [], 'Hermes was not told to stop.');
+    upstream.release(turn.run, 'Working. Finished.');
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.equal(saved[0].text, 'a long one');
+    assert.equal(saved[1].role, 'assistant');
+    assert.match(saved[1].text, /^Working\./);
+    assert.ok(!saved[1].text.includes('[interrupted]'));
+    assert.equal(saved[1].run, turn.run);
+    assert.deepEqual(upstream.stops, []);
+  } finally { await close(); }
+});
+
+test('runs on: a new turn in a conversation whose reply is still being written is refused with 409, then accepted once it is saved', async () => {
+  const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'first', /Working/);
+    turn.controller.abort();
+    const early = await call('POST', '/hub/chat', { text: 'second', conversation: turn.conversation });
+    assert.equal(early.status, 409);
+    assert.match((await early.json()).error, /still answering/);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    upstream.release(turn.run, 'Working. Done.');
+    await savedLines(fake, turn.conversation, 2);
+    const controller = new AbortController();
+    const late = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'second', conversation: turn.conversation }), signal: controller.signal });
+    assert.equal(late.status, 200);
+    controller.abort();
+  } finally { await close(); }
+});
+
+test('runs on: Stop ends the run through its own route, which needs a signed-in user and a run this relay is carrying', async () => {
+  const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me', /Working/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { Origin: 'https://site.example' })).status, 401, 'No user, no stop.');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { 'Remote-User': 'owner', Origin: 'https://evil.example' })).status, 403, 'A foreign Origin is refused.');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: 'run_not_mine' })).status, 404);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run }, { 'Remote-User': 'someone-else', Origin: 'https://site.example' })).status, 404, 'Another user cannot stop it.');
+    assert.deepEqual(upstream.stops, []);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.deepEqual(upstream.stops, [turn.run]);
+    assert.match(saved[1].text, /\[interrupted\]$/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 404, 'A finished turn cannot be stopped again.');
   } finally { await close(); }
 });

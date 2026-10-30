@@ -7,7 +7,8 @@ import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseHelpId, reviewHash } from '../lib/route'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
-import { plainText, streamChat } from './chatStream'
+import { holdReload } from '../lib/reloadGate'
+import { StreamCut, plainText, streamChat } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
@@ -165,6 +166,8 @@ function ChatView({ id }: { id?: string }) {
   const [drawer, setDrawer] = useState(false)
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
   const abort = useRef<AbortController | null>(null)
+  const run = useRef<string | null>(null)
+  const stopWanted = useRef(false)
   const input = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -189,6 +192,15 @@ function ChatView({ id }: { id?: string }) {
     const made = urls.current
     return () => { abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
   }, [speaks])
+
+  // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
+  const stop = () => {
+    const id = run.current
+    if (id) { void hubPost('/chat/stop', { run: id }).catch(() => {}); abort.current?.abort(); return }
+    // Before `started` there is no run to name, and aborting now would leave it running on the server:
+    // hold the stop until onStarted, which sends it (or aborts, when the turn has no run).
+    stopWanted.current = true
+  }
 
   const release = (list: string[]) => list.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
 
@@ -265,12 +277,16 @@ function ChatView({ id }: { id?: string }) {
     setMessages([...before, optimistic])
     const controller = new AbortController()
     abort.current = controller
+    run.current = null
+    stopWanted.current = false
     let reply = ''
     let created: Item[] = []
     let finished: string | null = null
     let saved: ChatLine | undefined
     let savedContext: ChatLine | undefined
     let problem: string | null = null
+    let cut = false
+    const unhold = holdReload()   // an update reload waits until the reply has ended
     const used: string[] = []
     try {
       const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
@@ -282,13 +298,23 @@ function ChatView({ id }: { id?: string }) {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
         },
+        onStarted: (id, name) => {
+          run.current = id
+          if (name) conversation.current = name   // a resend joins this conversation, not a second one
+          if (stopWanted.current) { stopWanted.current = false; if (id) stop(); else abort.current?.abort() }
+        },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
         onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },
         onError: message => { problem = message },
       }, controller.signal)
     } catch (failure) {
-      if (!controller.signal.aborted) {
+      if (failure instanceof StreamCut) {
+        // The server took the message and the stream broke: the line is saved there, so it stays here.
+        cut = true
+        problem = failure.message
+      } else if (!controller.signal.aborted) {
+        unhold()
         // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
         setMessages(before)
         if (asked === undefined) { setDraft(text); setImages(sending); slots.current = MAX_IMAGES - sending.length }
@@ -298,10 +324,11 @@ function ChatView({ id }: { id?: string }) {
         return
       }
     }
+    unhold()
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : optimistic
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}) }]
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
@@ -310,6 +337,7 @@ function ChatView({ id }: { id?: string }) {
     setStreaming(false)
     if (swapped) release(previews)
     if (problem) setError(problem)
+    if (cut) list.reload()
     if (finished) {
       list.reload()
       if (finished !== id) { carry(finished, lines); window.location.assign(hubHash('chat', finished)) }
@@ -389,7 +417,7 @@ function ChatView({ id }: { id?: string }) {
             onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
           />
           {streaming
-            ? <button type="button" className="hub-btn" onClick={() => abort.current?.abort()}>Stop</button>
+            ? <button type="button" className="hub-btn" onClick={stop}>Stop</button>
             : <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>}
         </div>
         {speaks && (

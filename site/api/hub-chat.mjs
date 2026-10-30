@@ -164,6 +164,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     return { chat: chatId, ...helpExcerpt(lines) };
   }
 
+  // The runs this process started and is still relaying: Stop may end these and no others.
+  // Each maps to who started it and which conversation it writes to.
+  const active = new Map();
+
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const text = typeof data.text === 'string' ? data.text.trim() : '';
@@ -176,6 +180,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const context = asking ? null : (data.about !== undefined && data.about !== null ? await helpContext(data.about) : null);   // help:
     if (asking) {
       if (typeof id !== 'string' || !CHAT_ID.test(id)) throw fail('No such conversation.', 404);
+      // An earlier reply is still being written: a new turn now would miss it in the history and save out of order.
+      if ([...active.values()].some(carried => carried.conversation === id)) throw fail('Hermes is still answering in this conversation; wait for the reply.', 409);
       const got = await fresh(`chat/${id}.jsonl`);
       if (!got) throw fail('No such conversation.', 404);
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
@@ -216,7 +222,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const touch = () => { if (runTurn) return; clearTimeout(idle); idle = setTimeout(() => abort.abort(), IDLE_MS); };
     const total = runTurn ? null : setTimeout(() => abort.abort(), TOTAL_MS); // a run turn lives as long as Hermes keeps sending
     const finish = () => { clearTimeout(idle); clearTimeout(total); };
-    response.on('close', () => { if (!response.writableFinished) abort.abort(); });
+    // A run turn outlives its browser: Hermes finishes and the reply is saved, so a dropped page loses nothing. Only Stop ends it.
+    if (!runTurn) response.on('close', () => { if (!response.writableFinished) abort.abort(); });
     touch();
 
     let upstream;
@@ -260,6 +267,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       Connection: 'keep-alive',
     });
     const emit = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
+    if (runTurn) active.set(runId, { user: user ?? null, conversation: id });
+    emit('started', { conversation: id, run: runTurn ? runId : null });   // run is null on a turn that has none to stop
     const keepalive = setInterval(() => { if (!response.destroyed) response.write(': keepalive\n\n'); }, KEEPALIVE_MS);
 
     let reply = '';
@@ -267,8 +276,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const tools = [];
     let finishedByHermes = false;
     if (runTurn) {
-      // The client leaving ends the run: nobody is reading it.
-      response.on('close', () => { if (!response.writableFinished) hermesRuns.stop(runId).catch(() => {}); });
       try {
         let ended = false;
         for await (const event of hermesRuns.events(runId, { signal: abort.signal })) {
@@ -304,8 +311,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       } catch (error) {
         failure = abort.signal.aborted ? 'Hermes stopped answering.' : error?.code === 'idle' ? 'Hermes stopped answering.' : 'The connection to Hermes broke.';
       }
-      // Any exit that is not Hermes ending the run (idle, a dropped stream, an unsaved ask): nobody is reading it, so stop it.
+      // Any exit that is not Hermes ending the run (idle, a dropped Hermes stream, an unsaved ask): stop it.
       if (!finishedByHermes) hermesRuns.stop(runId).catch(() => {});
+      active.delete(runId);
     } else try {
       const reader = upstream.body.getReader();
       const decoder = new TextDecoder();
@@ -417,6 +425,14 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/images\/([^/]+)$/.exec(route))) return serveImage(response, match[1], match[2]);
       if (method === 'POST' && route === '/hub/chat') return relay(request, response, user);
+      if (method === 'POST' && route === '/hub/chat/stop') {
+        const data = await readJson(request, 4096);
+        const run = typeof data.run === 'string' ? data.run : '';
+        const carried = active.get(run);
+        if (!carried || carried.user !== (user ?? null)) throw fail('No such reply is running.', 404);
+        await hermesRuns.stop(run).catch(() => {});
+        return json(response, 200, { stopped: true });
+      }
       throw fail('Not found', 404);
     },
   };
