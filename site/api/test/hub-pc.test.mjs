@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { beadOfBranch, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
+import { beadOfBranch, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
@@ -111,6 +111,46 @@ test('workingNow: a 20-minute-old status falls back to events; a cloud session s
   assert.deepEqual(workingNow({ status: null, events: [], at: NOW }), []);
 });
 
+const HOURS = 60;
+const startedAgo = (minutes, session, host = 'cloud') => eventJson({ kind: 'session-started', ts: minutesAgo(NOW, minutes), session, host, title: session, project: 'probe' });
+
+test('workingNow: a fresh PC status is the truth for PC sessions, so old session-started events of its host add nothing', () => {
+  const events = withFile([startedAgo(3 * 24 * HOURS, 'old-pc', 'test-pc'), startedAgo(36 * HOURS, 'old-pc-2', 'test-pc'), startedAgo(20, 'cloud-live')]);
+  const items = workingNow({ status: validStatus(pcStatusJson({ now: NOW })), events, at: NOW, defaults: PROJECT_DEFAULTS });
+  assert.deepEqual(items.map(item => [item.id, item.state]).sort(), [['cloud-live', 'working'], ['pc-sess-a', 'working'], ['pc-sess-b', 'idle']]);
+  assert.equal(items.filter(isActive).length, 2);
+});
+
+test('workingNow: with no usable PC status, events show, but a session quiet for over 2 hours is stale and counts nowhere', () => {
+  const events = withFile([startedAgo(3 * 24 * HOURS, 'days-old', 'test-pc'), startedAgo(36 * HOURS, 'day-old', 'test-pc'), startedAgo(90, 'recent', 'test-pc'), eventJson({ kind: 'resumed', ts: minutesAgo(NOW, 5), session: 'days-old', host: 'test-pc', title: 'x' })]);
+  for (const status of [null, validStatus(pcStatusJson({ now: NOW, minutesOld: 40 })), validStatus(pcStatusJson({ now: NOW, extra: { sessions: null } }))]) {
+    const items = workingNow({ status, events, at: NOW, defaults: PROJECT_DEFAULTS });
+    const state = Object.fromEntries(items.map(item => [item.id, item.state]));
+    assert.equal(state.recent, 'working');
+    assert.equal(state['day-old'], 'stale');
+    assert.equal(state['days-old'], 'working', 'Any later event from the session is word.');
+    assert.equal(items.find(item => item.id === 'day-old').since, new Date(Math.floor(minutesAgo(NOW, 36 * HOURS).getTime() / 1000) * 1000).toISOString(), 'Stale shows when the last word was.');
+    assert.deepEqual(items.map(item => item.state), ['working', 'working', 'stale'], 'Stale rows sort last.');
+    assert.equal(items.filter(isActive).length, 2);
+  }
+});
+
+test('GET /hub/today: the Running count and Working now agree when old event sessions pile up', async () => {
+  const { fake, get, seed, close } = await fixture();
+  try {
+    seed.event(startedAgo(3 * 24 * HOURS, 'days-old', 'test-pc'));
+    seed.event(startedAgo(36 * HOURS, 'day-old', 'elsewhere'));
+    const none = (await get('/hub/today')).body;
+    assert.deepEqual(none.working.map(item => item.state), ['stale', 'stale']);
+    assert.equal(none.counts.running, 0, 'Quiet event sessions are not counted.');
+    seedPcStatus(fake, pcStatusJson({ now: NOW, minutesOld: 1 }));
+    const today = (await get('/hub/today')).body;
+    assert.equal(today.counts.running, 1);
+    assert.equal(today.counts.running, today.working.filter(isActive).length);
+    assert.deepEqual(today.pc.sessions, { busy: 1, idle: 1 });
+  } finally { await close(); }
+});
+
 test('GET /hub/pc and /hub/today read the newest status file', async () => {
   const { fake, get, seed, close } = await fixture();
   try {
@@ -152,14 +192,14 @@ test('a stale or a bad status gives no live PC; the dev inbox is its own folder'
     assert.deepEqual(stale.working, []);
 
     fake.seed(`${prefix}/pc/status-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}.json`, 'not json', 'application/json');
-    assert.equal((await get('/hub/today')).body.pc, null, 'The newest file is bad: no status.');
+    assert.equal((await get('/hub/today')).body.pc.state, 'asleep-or-off', 'The newest file is bad: the file before it is read, not no status.');
 
     const real = await fixture();
     try {
       seedPcStatus(real.fake, pcStatusJson({ now: NOW }));
       assert.equal((await real.get('/hub/pc')).body.pc.state, 'on');
     } finally { await real.close(); }
-    assert.equal((await get('/hub/pc')).body.pc, null, 'The dev hub never reads the real inbox.');
+    assert.equal((await get('/hub/pc')).body.pc.state, 'asleep-or-off', 'The dev hub reads its own folder (the 30-minute file), never the real inbox (on).');
     assert.equal(inboxKey('pc/status-20261028T091503Z.json'), 'sections/inbox/pc/status-20261028T091503Z.json');
     assert.throws(() => inboxKey('pc'), /not in the inbox/);
   } finally { await close(); }

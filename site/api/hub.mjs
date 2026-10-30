@@ -33,7 +33,7 @@ import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
-import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { createWake } from './pc-wake.mjs';
@@ -308,10 +308,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const before = new Date(at.getTime() - 60 * 60 * 1000);
     let found = await names([hour(before), hour(at)]);
     if (!found.length) found = await names([day(new Date(at.getTime() - DAY)), day(at)]);
-    const newest = found.at(-1);
-    if (!newest) return null;
-    const got = await fresh(`pc/${newest}`);
-    return got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+    // The newest file that reads: one the script wrote half-done or this version refuses must not hide the minute before it.
+    for (const name of found.slice(-3).reverse()) {
+      const got = await fresh(`pc/${name}`);
+      const status = got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+      if (status) return status;
+    }
+    return null;
   }
 
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
@@ -1085,7 +1088,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
             const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
-            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle' && item.state !== 'stale').length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
+            reply({ ...today, counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });

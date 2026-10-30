@@ -23,7 +23,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
   const link = sessionUrl(item.url) ?? safeApp(item.appUrl)
   const where = [item.project, item.branch].filter(Boolean).join(' · ')
   const stale = item.state === 'stale'
-  const since = stale ? '' : duration(item.since, now)
+  const since = stale || item.state === 'idle' ? '' : duration(item.since, now)
   const isRun = item.source === 'run'
   const runHref = item.request ? hubHash('request', item.request) : ''
   const sprite = item.agent === 'hermes' ? HERMES_SPRITE : SPRITE

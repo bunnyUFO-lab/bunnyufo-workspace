@@ -120,6 +120,12 @@ export function beadOfBranch(branch, prefix) {
   return new RegExp(`(?:^|/)(${prefix}-[a-z0-9]{3,8}(?:\\.\\d+)*)(?=-|$)`).exec(branch)?.[1] ?? null;
 }
 
+/** A session known only from events with no event for this long is not working: its end was never reported. */
+export const EVENT_QUIET_MS = 2 * 60 * 60 * 1000;
+
+/** The one count rule: a row counts as at work unless it is idle or has gone quiet. Today's Running tile, Working now and the agent states all use it. */
+export const isActive = item => item.state !== 'idle' && item.state !== 'stale';
+
 const RANK = { 'needs-you': 0, working: 1, stopping: 1, idle: 2, stale: 3 };
 
 /** A request state that is taken and not finished, as a Working now state. */
@@ -151,13 +157,24 @@ function runItems(requests, skip, at) {
  */
 export function workingNow({ status = null, events, requests = [], at, defaults = [] }) {
   const derived = deriveEventItems(events);
+  // The newest word of each session in the window (a future stamp is no word). Past EVENT_QUIET_MS the session is stale, not working.
+  const nowMs = at.getTime();
+  const lastWord = new Map();
+  for (const event of events) {
+    const ms = new Date(event.ts).getTime();
+    if (event.session && Number.isFinite(ms) && ms <= nowMs && ms > (lastWord.get(event.session) ?? 0)) lastWord.set(event.session, ms);
+  }
   const fromEvents = host => derived.running
     .filter(item => !host || item.host !== host)
-    .map(item => ({
-      id: item.id, source: 'events', host: item.host ?? '', agent: 'claude', title: item.title,
-      ...(item.project ? { project: item.project } : {}), ...(item.bead ? { bead: item.bead } : {}),
-      state: 'working', since: item.at, ...(item.url ? { url: item.url } : {}),
-    }));
+    .map(item => {
+      const word = Math.max(lastWord.get(item.id) ?? 0, new Date(item.at).getTime() <= nowMs ? new Date(item.at).getTime() || 0 : 0);
+      const quiet = word > 0 && nowMs - word > EVENT_QUIET_MS;
+      return {
+        id: item.id, source: 'events', host: item.host ?? '', agent: 'claude', title: item.title,
+        ...(item.project ? { project: item.project } : {}), ...(item.bead ? { bead: item.bead } : {}),
+        state: quiet ? 'stale' : 'working', since: quiet ? new Date(word).toISOString() : item.at, ...(item.url ? { url: item.url } : {}),
+      };
+    });
   const sort = list => list.sort((a, b) => RANK[a.state] - RANK[b.state] || (a.since < b.since ? 1 : a.since > b.since ? -1 : 0));
   const requestOf = new Map(requests.filter(item => item.run?.session).map(item => [item.run.session, item.id]));
   const fresh = status && status.sessions && pcSummary(status, at).state === 'on';
