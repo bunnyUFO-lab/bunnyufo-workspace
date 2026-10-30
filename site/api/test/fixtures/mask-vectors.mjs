@@ -32,4 +32,9 @@ export default [
   {"name":"short sha and 32-character id","input":"fix in 8000c7d, merged a247d59f; id 0123456789abcdef0123456789abcdef","expected":"fix in 8000c7d, merged a247d59f; id 0123456789abcdef0123456789abcdef"},
   {"name":"look-alike prefixes","input":"xoxo hugs, the sk_live_ prefix, a task-list, risk_test_ing","expected":"xoxo hugs, the sk_live_ prefix, a task-list, risk_test_ing"},
   {"name":"paths and times","input":"/usr/local/bin/node at 12:30:45 in C:/Users/x/y.txt","expected":"/usr/local/bin/node at 12:30:45 in C:/Users/x/y.txt"},
+  {"name":"url credentials with an empty user (redis)","input":["REDIS_URL=redis://:","fake-pass-2","@cache.example.test:6379"],"expected":"REDIS_URL=redis://:[masked]@cache.example.test:6379"},
+  {"name":"discord webhook keeps the id, drops the token","input":["post to https://disc","ord.com/api/webhooks/123456789012345678/","FAKEFAKEFAKEFAKEFAKE_fake-token-0123456789"," now"],"expected":["post to https://disc","ord.com/api/webhooks/123456789012345678/[masked] now"]},
+  {"name":"discord bot token","input":["bot M","FAKEFAKEFAKEFAKEFAKEFAK",".abc123.","FAKEFAKEFAKEFAKEFAKEFAKEFAK"," ok"],"expected":"bot [masked] ok"},
+  {"name":"basic authorization header","input":["Authorization: Basic ","ZmFrZXVzZXI6ZmFrZXBhc3M="],"expected":"Authorization: Basic [masked]"},
+  {"name":"prose with basic","input":"a basic idea. Authorization: Basic authentication is weak.","expected":"a basic idea. Authorization: Basic authentication is weak."},
 ]

@@ -7,7 +7,8 @@ import cases from './fixtures/mask-vectors.mjs';
 
 // The same vectors live in bunnyUFO-lab/workspace-skills at mods/hub-hooks/hooks/mask-vectors.mjs. When you change fixtures/mask-vectors.mjs,
 // change that one and the hash in mods/hub-hooks/hooks/mask.test.ts too. The hash is of JSON.stringify(vectors), so line endings do not matter.
-const MASK_VECTORS_SHA256 = '77c17ab7eb1b40d86d3725f54b4b40ca2ddd955e631f3478a2b835509ad44fb5';
+// Must be the same literal as MASK_VECTORS_SHA256 in mods/hub-hooks/hooks/mask.test.ts (workspace-skills): a change in one repo fails here until the other is mirrored.
+const MASK_VECTORS_SHA256 = 'dda34f6f2d375bc84eae386d3d2e1b97fe9d0b44f0f41fb14f7cb9582c760e5e';
 const join = value => (Array.isArray(value) ? value.join('') : value);
 
 test('the shared mask vectors match the copy in the skills repository', () => {
@@ -22,4 +23,12 @@ for (const vector of cases) {
 
 test('masking is idempotent', () => {
   for (const vector of cases) assert.equal(maskSecrets(join(vector.expected)), join(vector.expected));
+});
+
+test('a 200 KB run of dashed words is masked in under 200 ms', () => {
+  for (const unit of ['a-', 'a.', 'eyJ', 'a-a:']) {
+    const started = performance.now();
+    maskSecrets(unit.repeat(Math.ceil(200000 / unit.length)));
+    assert.ok(performance.now() - started < 200, `${unit} took ${Math.round(performance.now() - started)} ms`);
+  }
 });
