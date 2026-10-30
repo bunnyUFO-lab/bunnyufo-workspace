@@ -56,12 +56,19 @@ const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen ===
 function readRoute(): Route {
   const canonical = canonicalHubHash()
   if (canonical) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + canonical)
-  // A phone opens on the Hub's Today, not the cards' home. Only a first load with no hash: a deep link, a card and the home link
-  // (which are not first loads) all keep their address. Replaced in place, so Back does not return to an empty address.
+  return parseHash()
+}
+
+/**
+ * The route at the first render only. A phone opens on the Hub's Today, not the cards' home, when there is no hash. It is not
+ * `readRoute`, which also runs on Back and on hashchange: there an empty address is the cards' home and must stay it. Replaced in
+ * place, so Back does not return to an empty address.
+ */
+function initialRoute(): Route {
   if (host.hub && !window.location.hash && window.matchMedia('(max-width: 640px)').matches) {
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + hubHash('today'))
   }
-  return parseHash()
+  return readRoute()
 }
 
 export default function App() {
@@ -70,7 +77,7 @@ export default function App() {
   // service, or a published site running the write API. Everywhere else the cards stay
   // read-only, which is what a site without that API has always been.
   const canWrite = useCanWrite()
-  const [route, setRoute] = useState<Route>(readRoute)
+  const [route, setRoute] = useState<Route>(initialRoute)
   // The Hub's one `/today` poll: the sidebar badge, the phone's tab bar and the Today screen all read it.
   const today = useHubData<Today>(host.hub ? '/today' : null)
   const needsYou = today.data?.counts.needsYou ?? 0

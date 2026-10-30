@@ -36,6 +36,19 @@ try {
   await phone.locator('.hub[data-screen="needs"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/needs');
 
+  step('phone: from Today go to the cards home, open a card, press Back, and the cards home stays');
+  await phone.goto(`${fixture.url}#/~hub/today`);
+  await phone.locator('.hub[data-screen="today"]').waitFor();
+  await phone.locator('.hub-tabs [data-hub-tab="more"]').click();
+  await phone.locator('[data-hub-more="library"]').click();
+  await phone.getByText('The hub card', { exact: true }).last().click();
+  await phone.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
+  await phone.goBack();
+  await phone.getByText('The hub card', { exact: true }).last().waitFor();
+  await phone.waitForTimeout(500);
+  assert.equal(await hashOf(phone), '', 'Back from a card does not bounce to Today.');
+  assert.equal(await phone.locator('.hub[data-screen]').count(), 0, 'Back lands on the cards home, not a Hub screen.');
+
   step('desktop, no hash: the cards home, no redirect');
   const desk = await open({ width: 1280, height: 800 });
   await desk.goto(fixture.url);
