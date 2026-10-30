@@ -190,7 +190,7 @@ test('moving back into the old workspace works, and leaves the other copy in pla
   } finally { await w.close(); }
 });
 
-test('files left in the target by an earlier attempt are reused; foreign files there are a 409', async () => {
+test('files left in the target by an earlier attempt are reused or overwritten; files the source lacks make it a 409', async () => {
   const w = await bucketWorld();
   try {
     w.fake.seed('sections/two/2026-10-29_deck/index.md', '# Deck\n', 'text/markdown');
@@ -199,10 +199,44 @@ test('files left in the target by an earlier attempt are reused; foreign files t
   } finally { await w.close(); }
   const x = await bucketWorld();
   try {
-    x.fake.seed('sections/two/2026-10-29_deck/index.md', 'someone else', 'text/markdown');
+    x.fake.seed('sections/two/2026-10-29_deck/stranger.txt', 'someone else', 'text/plain');
     await assert.rejects(moveCard({ from: x.one, to: x.two, id: 'deck', now }), { status: 409, message: /already has files/ });
-    assert.equal(x.fake.text('sections/two/2026-10-29_deck/index.md'), 'someone else', 'Their file was not overwritten.');
+    assert.equal(x.fake.text('sections/two/2026-10-29_deck/stranger.txt'), 'someone else', 'Their file was not touched.');
+    assert.equal(x.list('one').entities.length, 2);
   } finally { await x.close(); }
+});
+
+test('a move stopped half way is finished even when the source changed since', async () => {
+  const w = await bucketWorld();
+  try {
+    // The first attempt copied two files, then the source changed: a page rewritten, viewer data added.
+    w.fake.seed('sections/two/2026-10-29_deck/index.md', '# Old deck\n', 'text/markdown');
+    w.fake.seed('sections/two/card-responses/deck/notes.json', '{"items":{"old":1}}', 'application/json');
+    const done = await moveCard({ from: w.one, to: w.two, id: 'deck', now });
+    assert.equal(w.fake.text('sections/two/2026-10-29_deck/index.md'), '# Deck\n');
+    assert.equal(w.fake.text('sections/two/card-responses/deck/notes.json'), '{"items":{}}');
+    assert.equal(done.files, 4);
+    assert.deepEqual(w.list('two').entities.map(item => item.id), ['deck']);
+  } finally { await w.close(); }
+});
+
+test('a move never erases a Trash record: not in the target, not in the source', async () => {
+  const w = await bucketWorld();
+  try {
+    await w.two.adoptCard({ entity: entity('deck', { folder: 'old', title: 'Trashed deck' }) });
+    await w.two.deleteCard({ id: 'deck' });
+    await assert.rejects(moveCard({ from: w.one, to: w.two, id: 'deck', now }), { status: 409, message: /Trash/ });
+    assert.equal(w.list('two').retired.deck.kind, 'deleted', 'The Trash record is still there.');
+    assert.equal(w.list('one').entities.length, 2, 'Nothing moved.');
+    assert.ok(![...w.fake.objects.keys()].some(key => key.startsWith('sections/two/2026-10-29_')), 'Nothing was copied.');
+    await assert.rejects(w.two.adoptCard({ entity: entity('deck', { folder: 'again' }) }), { status: 409 });
+    // And the source side: an old-data card with a Trash record under its id cannot be recorded as moved.
+    const stored = w.list('one');
+    stored.retired = { other: { kind: 'deleted', at: '2026-10-01', entity: entity('other') } };
+    w.fake.seed('sections/one/workspace.json', JSON.stringify(stored), 'application/json');
+    await assert.rejects(w.one.retireMoved({ id: 'other', to: 'two', folder: '2026-10-29_other' }), { status: 409 });
+    assert.equal(w.list('one').retired.other.kind, 'deleted');
+  } finally { await w.close(); }
 });
 
 test('a card of more than 300 files is refused with a 413', async () => {

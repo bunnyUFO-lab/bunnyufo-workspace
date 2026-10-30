@@ -40,6 +40,7 @@ export async function moveCard({ from, to, id, category, state, now = () => new 
   if (!entity.folder) throw fail('That card has no folder to move.', 409);
   const chosen = typeof category === 'string' && category.trim() ? slug(category) || 'notes' : entity.category;
 
+  if (target.list.retired?.[id]?.kind === 'deleted') throw fail(`${target.list.name || to.section} has a card with that id in its Trash; restore or empty it first.`, 409);
   const sameCard = already && already.folder === entity.folder;
   if (!sameCard) {
     const clash = target.list.entities.find(item => item?.id === id || item?.folder === entity.folder);
@@ -64,7 +65,9 @@ export async function moveCard({ from, to, id, category, state, now = () => new 
     const lived = target.list.retired?.[id]?.folder === entity.folder;
     if (there.length && !lived) {
       const bySource = new Map(snapshot.map(item => [item.file, item]));
-      if (!there.every(item => same(item, bySource.get(item.file)))) {
+      // Files an earlier attempt left may be older than the source's now; the copy below overwrites them.
+      // A file the source does not have is someone else's.
+      if (!there.every(item => bySource.has(item.file))) {
         throw fail(`${target.list.name || to.section} already has files in that card's folder.`, 409);
       }
     }

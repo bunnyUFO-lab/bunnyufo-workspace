@@ -468,6 +468,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         if (list.entities.some(item => item?.id === entity.id || (entity.folder && item?.folder === entity.folder))) {
           throw fail('A card with that id or folder is already here.', 409);
         }
+        if (list.retired?.[entity.id]?.kind === 'deleted') throw fail('A card with that id is in the Trash of this workspace; restore it first.', 409);
         list.entities.push(entity);
         if (list.retired) {
           delete list.retired[entity.id];
@@ -483,7 +484,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         const at = list.entities.findIndex(item => item?.id === id);
         if (at >= 0) list.entities.splice(at, 1);
         const retired = list.retired && typeof list.retired === 'object' && !Array.isArray(list.retired) ? list.retired : {};
-        delete retired[id];
+        if (retired[id]?.kind === 'deleted') throw fail('A card with that id is in the Trash of this workspace; it cannot be recorded as moved.', 409);
         retired[id] = { kind: 'moved', to, folder, at: today(now()) };
         list.retired = capRetired(retired);
         return retired[id];
