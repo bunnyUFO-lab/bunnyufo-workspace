@@ -17,7 +17,7 @@ const issues = [
   beadsIssue({ id: 'sd-m1', title: 'Sheet milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
   extra(beadsIssue({ id: 'sd-f-done', title: 'Finished feature', type: 'epic', parent: 'sd-m1', status: 'closed', closed: '2026-10-18T12:00:00Z', created: '2026-10-01T11:00:00Z', description: 'Everything the loader needs to stream chunks. It keeps memory flat.' }), { close_reason: 'done (backfilled)' }),
   extra(beadsIssue({ id: 'sd-t-done', title: 'Stream the chunks', parent: 'sd-f-done', status: 'closed', closed: '2026-10-17T12:00:00Z', created: '2026-10-01T12:00:00Z', description: `a62a2bb4\n\nPR: #138 merged\n${BACKFILL}` }), { external_ref: 'gh-138', close_reason: 'Merged in review' }),
-  beadsIssue({ id: 'sd-f-open', title: 'Open feature', type: 'epic', parent: 'sd-m1', created: '2026-10-02T11:00:00Z', description: 'Show the hero a wall slide when they touch a wall. It reuses the grounded check.' }),
+  beadsIssue({ id: 'sd-f-open', title: 'Open feature', type: 'epic', parent: 'sd-m1', created: '2026-10-02T11:00:00Z', description: 'Show the hero a wall slide when they touch a <b>wall</b>. It reuses the grounded check.' }),
   extra(beadsIssue({ id: 'sd-t-said', title: 'Copy the backups', parent: 'sd-f-open', created: '2026-10-02T12:00:00Z', description: `Copy the weekly backups off the host, so one dead disk loses nothing. A second sentence follows here. A third is cut.\n\n${BACKFILL}` }), { metadata: { cards: 'sheetlib/2026-10-27_plan,nowhere/missing' } }),
   beadsIssue({ id: 'sd-t-hash', title: 'Hash only', parent: 'sd-f-open', created: '2026-10-02T13:00:00Z', description: `a62a2bb4\n\n${BACKFILL}` }),
   beadsIssue({ id: 'sd-t-label', title: 'Register the domain', parent: 'sd-f-open', labels: ['needs-owner'], created: '2026-10-02T14:00:00Z' }),
@@ -69,6 +69,11 @@ try {
     assert.deepEqual(await cards.allInnerTexts(), ['Mission control'], 'The card that resolves is linked, the one that does not is dropped.');
     assert.equal(await cards.first().getAttribute('href'), '/sheetlib#/mission');
     assert.equal(await cards.first().getAttribute('target'), null, 'It opens in the same tab.');
+    const look = await cards.first().evaluate(link => { const style = getComputedStyle(link); return { color: style.color, line: style.textDecorationLine, text: getComputedStyle(link.closest('.hub-map-panel')).color }; });
+    assert.notEqual(look.color, look.text, 'A Library link is coloured, not the text colour.');
+    assert.match(look.line, /underline/, 'And underlined.');
+    await cards.first().focus();
+    assert.notEqual(await cards.first().evaluate(link => getComputedStyle(link).boxShadow), 'none', 'A focused link shows a ring.');
     assert.match(await panel.innerText(), /No pull requests yet\./);
     await noSideways(page, `${label} summary`);
 
@@ -86,6 +91,8 @@ try {
     assert.match(text, /#138 · merged/, 'The PR from Beads shows in the feature.');
     panel = await sheet(page, 'sd-f-open');
     assert.doesNotMatch(await panel.innerText(), /Finished/, 'An open feature does not say it finished.');
+    assert.equal(await panel.locator('[data-summary]').innerText(), 'Show the hero a wall slide when they touch a <b>wall</b>. It reuses the grounded check.', 'Angle brackets show as text.');
+    assert.equal(await panel.locator('[data-summary] b').count(), 0);
 
     step(`${label}: a done task shows its Beads PR with an Open PR link, its commit and when it closed`);
     panel = await sheet(page, 'sd-t-done');
@@ -95,6 +102,9 @@ try {
     const link = row.locator('a', { hasText: 'Open PR' });
     assert.equal(await link.getAttribute('href'), 'https://github.com/example/sheetdev/pull/138');
     assert.match(await panel.locator('[data-commits]').innerText(), /^Commits: a62a2bb4/);
+    const commit = await panel.locator('[data-commits] a').first().evaluate(link => ({ color: getComputedStyle(link).color, line: getComputedStyle(link).textDecorationLine, text: getComputedStyle(link.closest('.hub-map-panel')).color }));
+    assert.notEqual(commit.color, commit.text, 'A commit link is coloured.');
+    assert.match(commit.line, /underline/);
     assert.match(await panel.locator('[data-closed]').innerText(), /^Closed 17 Oct · Merged in review$/);
     assert.ok((await link.boundingBox()).height >= 43.5, 'The Open PR button is tall enough to tap.');
     await noSideways(page, `${label} done task`);
