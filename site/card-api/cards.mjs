@@ -295,7 +295,10 @@ async function call(method, route, { body, raw, contentType } = {}) {
     return Buffer.from(await response.arrayBuffer());
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(`${method} ${route}: ${response.status} ${data.error ?? ''}`), { status: response.status, data });
+  if (!response.ok) {
+    const moved = data.movedTo?.section && !String(data.error).includes(data.movedTo.section) ? ` Moved to ${data.movedTo.section}${data.movedTo.folder ? `/${data.movedTo.folder}` : ''}.` : '';
+    throw Object.assign(new Error(`${method} ${route}: ${response.status} ${data.error ?? ''}${moved}`), { status: response.status, data });
+  }
   return data;
 }
 
