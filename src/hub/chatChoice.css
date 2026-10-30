@@ -10,3 +10,12 @@
   .hub-model-note { display: none; }
   .hub-model { min-height: 44px; }
 }
+
+/* Who the chat talks to (ws-2oo.1): the header line, the picker beside the Model menu and the avatar on a persona's replies. */
+.hub-who { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.hub-who .px { image-rendering: pixelated; flex: 0 0 auto; }
+.hub-who-name { font-weight: 600; font-size: 0.85rem; color: var(--text); }
+.hub-chat-with { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 0.85rem; min-width: 0; }
+.hub-bubble > .hub-who { display: flex; margin-bottom: 4px; }
+.hub-persona { min-height: 36px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; min-width: 0; max-width: 100%; }
+@media (max-width: 480px) { .hub-persona { min-height: 44px; } }
