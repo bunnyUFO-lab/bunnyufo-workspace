@@ -343,7 +343,7 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/requests/:id/answer-run` | `{ text }` (1 to 2000 characters): answers a Hermes run that ended with a question (state `asking`). First claims the old request with the signed stop `answered by <new id>` (create-only, so of two answers at once one gets 409 and only one run starts), then makes a new request that `replaces` it with `followUp { from, question, answer, summary }` and `textOrigin` (who wrote the job text: an answer does not make the owner its author), and approves it for Hermes. In the brief only `answer` follows "The owner answered:"; the run's question and summary are quoted line by line and labelled as not the owner's words. Without a signing key the new request stays a proposal and the old one stays as it is. If starting fails after the claim, the new request stays a proposal with the answer kept in it. 409 in any other state, so a second answer is refused. "Close" is `…/stop`, which is allowed in `asking` |
 | `POST /api/hub/requests/:id/decline` | `{ reason? }`: writes `declined.json` create-only. Only a request nobody has acted on (`open`, `proposed`, `expired`); anything else is 409 |
 | `POST /api/hub/requests/:id/done` | `{ summary? }`: Mark done for a request the owner runs at the PC (`target: at-pc`). Writes `result.json` with outcome `manual`; 400 for any other request, 409 once it has a state past `proposed`. Not signed |
-| `GET /api/hub/beads/:project`, `/map/:project` | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
+| `GET /api/hub/beads/:project`, `/map/:project` (and `POST /map/:project/marks`, see the owner's marks) | The Beads copies of the project merged (see Beads copies), and the progress map built from them |
 | `GET /api/hub/file?path=`, `/drawings`, `/drawings/:id`; `POST /drawings[/:id]` | Ask and drawing files, and Sketch drafts |
 | `GET /api/hub/discord/asks`, `POST /api/hub/discord/answer` | The Asks bot only, with its own bearer token and no `Remote-User` (see Answers from Discord) |
 | `GET /api/hub/chat`, `/chat/:id` | The newest 30 conversations, and one conversation's lines. Chat needs `HERMES_URL` and `HERMES_API_KEY`, and a signed-in user where writes need `Remote-User` (503 when off, 401 without a user) |
@@ -522,6 +522,25 @@ beads/<project>.jsonl + .meta.json  the older single copy: still read, never wri
 `<copy>` is `<host>-<first 10 hex of sha256 of the worktree root>`: the root is lower-cased with forward slashes, so one worktree always writes the same copy. A hash stands in for the worktree name because the card API refuses a `.json` file whose name contains `token`, `secret`, `password` or `credential`. `--copy <id>` names the copy by hand. `root` is for the hub-hooks mod's own clean-up and is not shown in the UI.
 
 The site reads the newest 30 copies of a project (by `pushedAt`) and the older single copy, and keeps for each issue the version with the greatest `updated_at` (a missing or bad date is oldest; a tie goes to the later push). `meta` is the newest copy's `pushedAt`, `host` and `repo` plus `count` and `copies` (`copy`, `host`, `worktree`, `main`, `pushedAt`, `count` for each). A project with only the older file answers as before, with its own `meta`. A project is listed when it has any copy. An issue removed with `bd delete` stays in other copies until they are pruned.
+
+### The owner's marks on the Roadmap
+
+A task that waits on the owner (yellow on the Roadmap because of the `needs-owner` label) with no Ask and nothing in Needs you has **Mark done** and **No longer needed** on its sheet. The Hub cannot run `bd`, so the mark is a log of create-only files, one folder per issue, and the Roadmap and Work show the issue as closed until Beads says so itself:
+
+```
+bead-marks/<project>/<bead id>/<stamp>-<verdict>-<rand4>.json
+  done | not-needed | undo   the Hub only (POST /api/hub/map/:project/marks, signed in): { v: 1, project, bead, verdict, at, by, reason? }  (reason: not-needed only, 200 characters)
+  applied                    an agent, after bd close: { v: 1, project, bead, verdict: "applied", at, by: <host>, mark: <file it applied>, session? }
+```
+
+The current verdict is the newest of done, not-needed and undo. A mark is **active** when that verdict is done or not-needed, no `applied` file names it, and the merged Beads issue is not closed. An active mark only ever turns an open issue closed on the map and in Work (`/hub/beads/:project` stays the raw export); it stops by itself when Beads shows the issue closed or an `applied` file exists, so a push that still has the issue open changes nothing. The route refuses a task with an open or snoozed Ask (409), one with an item in Needs you (409), one that is not waiting on the owner (409) and a closed one (409); a repeat of the active verdict is a 200 that writes nothing; undo after an agent applied it is refused (reopen it with `bd reopen`). The card API keeps `…-done|not-needed|undo-….json` to the Hub (`OWNER_FILES`), lets an agent put only the `applied` note, create-only, and tags everything it writes there `x-amz-meta-writer: card-api`; the Hub ignores a verdict with a writer.
+
+**Applying marks (agent side).** In a session in that project's repository, for each mark listed by `cards mark list --project <p>`:
+
+1. `bd show <id>`. If it is open: `bd close <id> --reason "Done (owner, Roadmap <date>)"`, or for no longer needed `bd close <id> --reason "Not needed (owner, Roadmap <date>): <reason>"` and `bd update <id> --add-label not-needed`; then `bd export -o .beads/issues.jsonl` and commit it with the session's work, as that repository's rules say.
+2. `cards mark applied --project <p> --bead <id>` (prints `nothing to apply` and exits 0 when no mark is active). If the issue was already closed, only this step is needed.
+
+The `bd close` is what the hub-hooks push sends, so the Roadmap shows the real close within a minute. `BUW_INBOX_SECTION=inbox-dev` points both commands at the development inbox.
 
 ### Checklists
 

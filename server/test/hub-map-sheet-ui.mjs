@@ -1,6 +1,11 @@
 // Run after npm run build. The Roadmap item sheet through a real browser, over the hub fixture: what the work is
 // (summary), the Library cards it names, its pull requests from Beads, how a done feature says it finished, and
-// "Open in Needs you" only when Needs you has the item. Desktop (1280x800) and phone (390x844).
+// "Open in Needs you" only when Needs you has the item, and the owner's Mark done / No longer needed / Undo on a
+// yellow task with no Ask or Inbox item. Desktop (1280x800) and phone (390x844).
+import http from 'node:http';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
@@ -22,10 +27,14 @@ const issues = [
   beadsIssue({ id: 'sd-t-hash', title: 'Hash only', parent: 'sd-f-open', created: '2026-10-02T13:00:00Z', description: `a62a2bb4\n\n${BACKFILL}` }),
   beadsIssue({ id: 'sd-t-label', title: 'Register the domain', parent: 'sd-f-open', labels: ['needs-owner'], created: '2026-10-02T14:00:00Z' }),
   beadsIssue({ id: 'sd-t-ask', title: 'Pick the arc', parent: 'sd-f-open', labels: ['needs-owner'], created: '2026-10-02T15:00:00Z' }),
+  beadsIssue({ id: 'sd-f-race', title: 'Race feature', type: 'epic', parent: 'sd-m1', created: '2026-10-03T11:00:00Z' }),
+  beadsIssue({ id: 'sd-t-race-desktop', title: 'Race one', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T12:00:00Z' }),
+  beadsIssue({ id: 'sd-t-race-phone', title: 'Race two', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T13:00:00Z' }),
 ];
 fixture.seed.beads(PROJECT, issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sheetdev' });
 fixture.fake.seed('sections/sheetlib/workspace.json', JSON.stringify({ name: 'Sheet library', entities: [{ id: 'mission', title: 'Mission control', folder: '2026-10-27_plan' }] }), 'application/json');
 const ASK = askId('sheet-arc', 's1s1');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 fixture.seed.ask(askJson({ id: ASK, bead: 'sd-t-ask', now: minutesAgo(fixture.now, 10), options: threeOptions() }));
 
 const browser = await chromium.launch({ headless: true, channel });
@@ -126,7 +135,99 @@ try {
     assert.equal(await rows.filter({ hasText: 'Pick the arc' }).locator('a', { hasText: 'Open in Needs you' }).count(), 1);
     assert.equal(await rows.filter({ hasText: 'Register the domain' }).locator('a', { hasText: 'Open in Needs you' }).count(), 0);
     await noSideways(page, `${label} feature`);
+
+    step(`${label}: Mark done shows at once, survives a reload, and Undo brings the buttons back`);
+    panel = await sheet(page, 'sd-t-label');
+    const markDone = panel.locator('[data-mark-done]');
+    const notNeeded = panel.locator('[data-mark-not-needed]');
+    assert.equal(await markDone.innerText(), 'Mark done');
+    assert.equal(await notNeeded.innerText(), 'No longer needed');
+    assert.ok((await markDone.boundingBox()).height >= 43.5 && (await notNeeded.boundingBox()).height >= 43.5, 'The buttons are tall enough to tap.');
+    assert.match(await panel.innerText(), /Closes it in Beads the next time an agent works in Sheetdev\./);
+    assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
+    await markDone.click();
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. Beads closes it the next time an agent works in Sheetdev\.\s*Undo$/);
+    assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · done/);
+    assert.equal(await panel.locator('[data-mark-done]').count(), 0);
+    await page.reload();
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /done/, 'A reload keeps it.');
+    await noSideways(page, `${label} pending`);
+    await panel.locator('[data-mark-undo]').click();
+    await panel.locator('[data-mark-done]').waitFor();
+    assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /needs you/);
+
+    step(`${label}: No longer needed asks for a reason, then says it was marked not needed`);
+    await notNeeded.click();
+    const reason = panel.locator('.hub-map-panel-reason input');
+    assert.equal(await reason.getAttribute('placeholder'), 'Why (optional)');
+    assert.equal(await reason.getAttribute('maxlength'), '200');
+    await panel.locator('.hub-map-panel-reason button', { hasText: 'Cancel' }).click();
+    assert.equal(await reason.count(), 0);
+    await notNeeded.click();
+    await reason.fill('The domain is not needed any more');
+    await panel.locator('[data-mark-confirm]').click();
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this not needed on /);
+    await panel.locator('[data-mark-undo]').click();
+    await panel.locator('[data-mark-done]').waitFor();
+
+    step(`${label}: a refusal from the Hub shows in an alert, and the sheet then offers the Ask`);
+    const race = `sd-t-race-${label}`;
+    panel = await sheet(page, race);
+    await panel.locator('[data-mark-done]').waitFor();
+    fixture.seed.ask(askJson({ id: askId(`race-${label}`, label === 'phone' ? 'r2r2' : 'r1r1'), bead: race, now: new Date(), options: threeOptions() }));
+    await panel.locator('[data-mark-done]').click();
+    const alert = panel.locator('[role="alert"]');
+    await alert.waitFor();
+    assert.equal(await alert.innerText(), 'This has an Ask; answer it in Needs you.');
+    await panel.locator('a', { hasText: 'Open in Needs you' }).waitFor();
+    assert.equal(await alert.count(), 1, 'The message stays when the sheet learns about the Ask.');
+    assert.equal(await panel.locator('[data-mark-done]').count(), 0, 'The buttons give way to Open in Needs you.');
+
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
+  }
+
+  // A read-only copy of the site: no capability to write, so the sheet says so and sends nothing.
+  for (const [label, viewport, options] of [['desktop', { width: 1280, height: 800 }, {}], ['phone', { width: 390, height: 844 }, { hasTouch: true, isMobile: true }]]) {
+    step(`${label}: a read-only copy says "Sign in to mark this." and sends nothing`);
+    const model = {
+      project: 'rodev', ageMinutes: 1, sprints: [], wayfinder: null, meta: { pushedAt: new Date().toISOString(), host: 'h', count: 3, repo: 'example/rodev' },
+      milestones: [{ id: 'ro-m', title: 'Read-only milestone', state: 'you', features: [{ id: 'ro-f', title: 'Read-only feature', state: 'you', tasks: [{ id: 'ro-t', title: 'Waits on you', state: 'you', you: 'label', status: 'open', signs: [], sprints: [], deps: [] }] }] }],
+    };
+    const canned = {
+      '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, reason: 'Read-only here.' },
+      '/api/card-state': { cards: {} },
+      '/sites.json': [{ id: 'one', name: 'One', base: '/w/one' }],
+      '/w/one/workspace.json': { entities: [] },
+      '/api/hub/today': { counts: { needsYou: 0, running: 0, recent: 0, alerts: 0 }, needsYou: [], running: [], recent: [], alerts: [], at: new Date().toISOString() },
+      '/api/hub/projects': { projects: [{ id: 'rodev', name: 'Read-only dev', beads: true }] },
+      '/api/hub/map/rodev': model,
+      '/api/hub/inbox': { items: [], counts: {}, at: new Date().toISOString() },
+    };
+    const writes = [];
+    const stub = http.createServer(async (request, response) => {
+      const url = new URL(request.url, 'http://site');
+      const send = (status, type, body) => { response.writeHead(status, { 'Content-Type': type }); response.end(body); };
+      if (request.method !== 'GET') { writes.push(`${request.method} ${url.pathname}`); return send(403, 'application/json', '{"error":"read-only"}'); }
+      if (canned[url.pathname]) return send(200, 'application/json', JSON.stringify(canned[url.pathname]));
+      if (url.pathname.startsWith('/api/')) return send(404, 'application/json', '{"error":"none"}');
+      try {
+        const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+        return send(200, name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html', await readFile(path.join(root, 'dist', name)));
+      } catch { return send(200, 'text/html', await readFile(path.join(root, 'dist', 'index.html'))); }
+    });
+    await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+    try {
+      const guest = await open(viewport, options);
+      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-t`);
+      const panel = guest.locator('.hub-map-panel');
+      await panel.waitFor();
+      await panel.locator('[data-readonly-note]', { hasText: 'Sign in to mark this.' }).waitFor();
+      assert.equal(await panel.locator('[data-mark-done]').count(), 0);
+      assert.deepEqual(writes, [], 'Nothing was sent.');
+    } finally { stub.close(); }
   }
   console.log('hub-map-sheet-ui: passed');
 } finally {

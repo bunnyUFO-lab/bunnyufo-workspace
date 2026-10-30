@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react'
-import type { Item, MapCard, MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
+import { useEffect, useRef, useState } from 'react'
+import type { HubProject, Item, MapCard, MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
 import { safeUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import ItemRow from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { useHubData } from './useHub'
 import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, sprintLines, tasksOf, type Found } from './mapState'
+import MarkActions from './MarkActions'
 import { cardHref, closedLine, finishedLine, hasNeedsItem, noPrs, prLabel, sheetPrs, type SheetPr } from './mapSheet'
 
 /** The signs in the legend's order, with the short word the panel counts them under. */
@@ -88,6 +89,9 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
   const found = find(model, nodeId)
   // What waits on you for this node's tasks (open Asks, reviews, blocked sessions), once per panel.
   const { data: inbox } = useHubData<{ items: Item[] }>('/inbox?filter=needs-you')
+  // A refusal from the Hub, kept with the node it was for so it does not follow the owner to another one.
+  const [markFailure, setMarkFailure] = useState<{ id: string; message: string }>({ id: '', message: '' })
+  const { data: projects } = useHubData<{ projects: HubProject[] }>('/projects')
 
   useEffect(() => {
     const element = dialog.current
@@ -149,6 +153,10 @@ export default function MapPanel({ model, nodeId, onClose, onOpen }: { model: Ma
         )}
         {closed && <p className="hub-muted" data-closed>{closed}</p>}
         {task.state === 'you' && hasNeedsItem(task, inboxBeads) && <div className="hub-actions start"><a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs')}>Open in Needs you</a></div>}
+        <MarkActions
+          task={task} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+          eligible={task.state === 'you' && task.you === 'label' && !!inbox && !hasNeedsItem(task, inboxBeads)} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+        />
       </>
     )
   } else {
