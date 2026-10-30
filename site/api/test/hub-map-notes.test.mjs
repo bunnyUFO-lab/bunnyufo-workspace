@@ -17,8 +17,11 @@ test('summaryOf: three words are not a description', () => {
   assert.equal(summaryOf(`TODO in backups.md\n\n${BACKFILL}`), null);
 });
 
-test('summaryOf: a fragment of four words shows, boilerplate lines in its paragraph do not', () => {
-  assert.equal(summaryOf(`commits 2026-10-24, PR opened 25 Oct, awaiting review\n${BACKFILL}`), 'commits 2026-10-24, PR opened 25 Oct, awaiting review');
+test('summaryOf: a status fragment is not a description, and boilerplate lines in a real paragraph are dropped', () => {
+  assert.equal(summaryOf(`commits 2026-10-24, PR opened 25 Oct, awaiting review\n${BACKFILL}`), null);
+  assert.equal(summaryOf('PR opened 25 Oct, awaiting review by the owner'), null);
+  assert.equal(summaryOf('Awaiting review of the wall slide tuning pass with the team.'), 'Awaiting review of the wall slide tuning pass with the team.', 'Words about the work that start the same way are kept.');
+  assert.equal(summaryOf('a1b2c3d4 e5f6a7b8 shipped and then another thing happened here'), 'a1b2c3d4 e5f6a7b8 shipped and then another thing happened here', 'Only a line of nothing but hashes is dropped.');
   assert.equal(summaryOf(`Copy the weekly backups off the host.\nPR: #12 open\n\n${BACKFILL}`), 'Copy the weekly backups off the host.');
 });
 

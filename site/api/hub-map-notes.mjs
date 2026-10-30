@@ -13,7 +13,9 @@ export const SUMMARY_MAX = 240;
 const HASH = '[0-9a-f]{7,40}';
 const HASH_LINE = new RegExp(`^${HASH}([\\s,;]+(${HASH}|\\d{4}-\\d{2}-\\d{2}))*\\.?$`, 'i');
 // Lines that are evidence for the next reader, not words about the work.
-const BOILERPLATE = [/^Backfilled \d{4}-\d{2}-\d{2}\b/, /^PRs?:\s*#\d+/, /^#{1,6}\s/, HASH_LINE];
+// A status fragment ("commits 2026-10-24, PR opened 25 Oct, awaiting review") is evidence too, not a description.
+const STATUS_LINE = /^(commits?\s+(\d{4}-\d{2}|[0-9a-f]{7,40}\b)|(PRs?|pull requests?)\s+(#\d+|opened|merged|closed|open|awaiting)\b|(opened|merged)\s+PR\b)/i;
+const BOILERPLATE = [/^Backfilled \d{4}-\d{2}-\d{2}\b/, /^PRs?:\s*#\d+/, /^#{1,6}\s/, HASH_LINE, STATUS_LINE];
 const SENTENCE_BREAK = /(?<=[.!?])\s+(?=[A-Z0-9"(])/;
 
 /**
