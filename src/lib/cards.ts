@@ -117,3 +117,13 @@ export async function moveCard(workspace: string, id: string, to: string, catego
   changed()
   return answer
 }
+
+/**
+ * Empty a workspace's Trash of what was deleted more than 30 days ago (site only; the server decides).
+ * Answers what went. The one call that erases anything: see site/api/card-purge.mjs.
+ */
+export async function purgeTrash(workspace: string): Promise<{ cards: string[]; tabs: { id: string; path: string }[]; files: number }> {
+  const answer = await api<{ cards: string[]; tabs: { id: string; path: string }[]; files: number }>('/cards/trash/purge', { workspace })
+  if (answer.cards.length || answer.tabs.length) changed()
+  return answer
+}

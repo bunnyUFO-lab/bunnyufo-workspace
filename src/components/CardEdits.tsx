@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { addSection, openForEditing, restoreSection, updateCard } from '../lib/cards'
 import type { SectionKind } from '../lib/cards'
+import { purgeDue } from '../lib/trash'
 import './cards.css'
 
 const message = (problem: unknown) => problem instanceof Error ? problem.message : String(problem)
@@ -15,7 +16,7 @@ export function AddSection({ card, onStep, onNaming }: { card: WorkspaceCard; on
   const [kind, setKind] = useState<SectionKind>('markdown')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const removed = card.removedTabs ?? []
+  const removed = (card.removedTabs ?? []).filter(tab => !tab.pending)
   const close = () => { setNaming(false); setName(''); setKind('markdown'); setError('') }
   // The name offered for a drawing is replaced by the user's own, but a name they typed is kept.
   const pick = (next: SectionKind) => {
@@ -42,7 +43,7 @@ export function AddSection({ card, onStep, onNaming }: { card: WorkspaceCard; on
     <button type="submit" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add'}</button>
     <button type="button" onClick={close} disabled={busy} aria-label="Cancel">✕</button>
     {removed.length > 0 && (
-      <details className="removed-tabs">
+      <details className="removed-tabs" onToggle={event => { if (event.currentTarget.open) purgeDue([card.workspace], [card]) }}>
         <summary>Removed tabs ({removed.length})</summary>
         <ul>
           {removed.map(tab => (

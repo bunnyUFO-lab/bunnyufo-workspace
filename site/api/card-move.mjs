@@ -40,7 +40,7 @@ export async function moveCard({ from, to, id, category, state, now = () => new 
   if (!entity.folder) throw fail('That card has no folder to move.', 409);
   const chosen = typeof category === 'string' && category.trim() ? slug(category) || 'notes' : entity.category;
 
-  if (target.list.retired?.[id]?.kind === 'deleted') throw fail(`${target.list.name || to.section} has a card with that id in its Trash; restore or empty it first.`, 409);
+  if (['deleted', 'purged'].includes(target.list.retired?.[id]?.kind)) throw fail(`${target.list.name || to.section} has had a card with that id in its Trash; that id is not free.`, 409);
   const sameCard = already && already.folder === entity.folder;
   if (!sameCard) {
     const clash = target.list.entities.find(item => item?.id === id || item?.folder === entity.folder);
