@@ -4,6 +4,7 @@
 // The file is written by the PC's report script (`inbox/pc/status-<stamp>.json`, create-only, at
 // most 64 KB). It is an agent's file, so `validStatus` cleans every field and refuses what it
 // cannot trust.
+import { MAX_RUN_MINUTES } from './presets.mjs';
 import { blockedAppUrl, blockedSessionUrl, deriveEventItems, validProject } from './hub-model.mjs';
 
 export const STATUS_MAX_BYTES = 64 * 1024;
@@ -118,7 +119,7 @@ export function beadOfBranch(branch, prefix) {
   return new RegExp(`(?:^|/)(${prefix}-[a-z0-9]{3,8}(?:\\.\\d+)*)(?=-|$)`).exec(branch)?.[1] ?? null;
 }
 
-const RANK = { 'needs-you': 0, working: 1, stopping: 1, idle: 2 };
+const RANK = { 'needs-you': 0, working: 1, stopping: 1, idle: 2, stale: 3 };
 
 /** A request state that is taken and not finished, as a Working now state. */
 const RUN_STATE = { taken: 'working', running: 'working', stopping: 'stopping', asking: 'needs-you' };
@@ -127,15 +128,31 @@ const RUN_STATE = { taken: 'working', running: 'working', stopping: 'stopping', 
  * The requests that are at work: approved, taken and not finished, whatever took them (Hermes, the cloud or the
  * PC). `skip` holds the session ids the list already shows, so a PC run that is also a PC session shows once.
  */
-function runItems(requests, skip) {
+function runItems(requests, skip, at) {
   return requests
     .filter(item => item.run && RUN_STATE[item.state] && !(item.run.session && skip.has(item.run.session)))
     .map(item => ({
       id: item.id, source: 'run', request: item.id, host: '', agent: item.run.runner === 'hermes' ? 'hermes' : 'claude',
       ...(item.run.runner ? { runner: item.run.runner } : {}), ...(item.preset ? { preset: item.preset } : {}),
       title: item.title, ...(item.project ? { project: item.project } : {}),
-      state: RUN_STATE[item.state], since: item.run.at,
+      ...(staleSince(item, at) ? { state: 'stale', since: staleSince(item, at) } : { state: RUN_STATE[item.state], since: item.run.at }),
     }));
+}
+
+/** How long past its limit a quiet run gets before it stops counting as working. */
+export const STALE_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * When a run last gave word (taken, or its newest run file) if that is longer ago than its approved limit
+ * (`run.minutes`, at most the 120-minute maximum, else the maximum) plus a grace; else ''. A run that asked
+ * a question waits on the owner and is never stale.
+ */
+function staleSince(item, at) {
+  if (item.state === 'asking' || !at) return '';
+  const minutes = Number(item.run.minutes) > 0 ? Math.min(Number(item.run.minutes), MAX_RUN_MINUTES) : MAX_RUN_MINUTES;
+  const word = Math.max(new Date(item.run.at).getTime() || 0, new Date(item.run.lastAt ?? '').getTime() || 0);
+  if (!word || at.getTime() - word <= minutes * 60000 + STALE_GRACE_MS) return '';
+  return new Date(word).toISOString();
 }
 
 /**
@@ -161,7 +178,7 @@ export function workingNow({ status = null, events, requests = [], at, defaults 
   const fresh = status && status.sessions && pcSummary(status, at).state === 'on';
   if (!fresh) {
     const events = fromEvents(null).map(item => (requestOf.has(item.id) ? { ...item, request: requestOf.get(item.id) } : item));
-    return sort([...events, ...runItems(requests, new Set(events.map(item => item.id)))]);
+    return sort([...events, ...runItems(requests, new Set(events.map(item => item.id)), at)]);
   }
 
   const blocked = new Map(derived.blocked.filter(item => item.session).map(item => [item.session, item]));
@@ -183,5 +200,5 @@ export function workingNow({ status = null, events, requests = [], at, defaults 
     };
   });
   const other = fromEvents(status.host);
-  return sort([...items, ...other, ...runItems(requests, new Set([...items, ...other].map(item => item.id)))]);
+  return sort([...items, ...other, ...runItems(requests, new Set([...items, ...other].map(item => item.id)), at)]);
 }

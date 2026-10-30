@@ -38,3 +38,6 @@ a.wn-bead:hover { text-decoration: underline; }
 }
 
 .wn-runner { display: inline-block; padding: 1px 8px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11px; color: var(--t2); }
+.wn-stale { opacity: 0.72; }
+.wn-stale .wn-state { font-weight: 500; color: var(--t3); }
+.wn-stale .wn-text b { color: var(--t2); }

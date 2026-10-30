@@ -62,7 +62,8 @@ export interface WorkingItem {
   project?: string
   branch?: string
   bead?: string
-  state: 'working' | 'needs-you' | 'stopping' | 'idle'
+  /** `stale`: a run past its time limit with no word since; `since` is then when it last gave word. */
+  state: 'working' | 'needs-you' | 'stopping' | 'idle' | 'stale'
   since: string
   updatedAt?: string
   url?: string

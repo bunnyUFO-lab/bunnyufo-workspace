@@ -22,7 +22,8 @@ function needsHref(item: WorkingItem, blocked: Item[]) {
 function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: number }) {
   const link = sessionUrl(item.url) ?? safeApp(item.appUrl)
   const where = [item.project, item.branch].filter(Boolean).join(' · ')
-  const since = duration(item.since, now)
+  const stale = item.state === 'stale'
+  const since = stale ? '' : duration(item.since, now)
   const isRun = item.source === 'run'
   const runHref = item.request ? hubHash('request', item.request) : ''
   const sprite = item.agent === 'hermes' ? HERMES_SPRITE : SPRITE
@@ -33,7 +34,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
     : runHref && isRun ? <a href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>{item.title}</a> : item.title
   return (
     <div className={`wn-row wn-${item.state}`} data-working={item.state} data-source={item.source}>
-      <span className="wn-sprite"><AgentSprite sprite={sprite} size={32} name={name} state={stateOf({ status: item.state === 'idle' ? 'idle' : item.state === 'stopping' ? 'working' : item.state, now })} /></span>
+      <span className="wn-sprite"><AgentSprite sprite={sprite} size={32} name={name} state={stateOf({ status: item.state === 'idle' || item.state === 'stale' ? 'idle' : item.state === 'stopping' ? 'working' : item.state, now })} /></span>
       <span className="wn-text">
         <b>{title}</b>
         <small>
@@ -42,7 +43,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
         </small>
       </span>
       <span className="wn-meta">
-        <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{runStateLabel(item)}</span>
+        <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{runStateLabel(item, now)}</span>
         {item.runner && <span className="wn-runner" data-runner={item.runner}>{RUNNER_LABEL[item.runner]}</span>}
         {since && <small>{since}</small>}
         {!isRun && item.request && <a className="wn-open" href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>Open run</a>}
@@ -53,12 +54,14 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
 }
 
 export default function WorkingNow({ items, blocked, running, now }: { items: WorkingItem[]; blocked: Item[]; running: number; now: number }) {
-  const active = items.filter(item => item.state !== 'idle')
+  const active = items.filter(item => item.state !== 'idle' && item.state !== 'stale')
+  const stale = items.filter(item => item.state === 'stale')
   const idle = items.filter(item => item.state === 'idle')
   return (
     <section className="hub-panel rise" style={{ '--i': 4 } as CSSProperties} aria-label="Working now">
       <h3><span className="dot st-working live" aria-hidden="true" />Working now <span>{running}</span></h3>
       {active.map(item => <Row key={item.id} item={item} blocked={blocked} now={now} />)}
+      {stale.map(item => <Row key={item.id} item={item} blocked={blocked} now={now} />)}
       {idle.length > 0 && (
         <details className="wn-idle" data-working-idle>
           <summary>{idle.length} idle</summary>

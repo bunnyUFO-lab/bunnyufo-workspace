@@ -4,7 +4,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
-import { eventJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
+import { eventJson, minutesAgo, requestJson } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -92,6 +92,28 @@ try {
     assert.equal(await old.locator('[aria-label="Working now"] [data-source="pc"]').count(), 0);
     assert.equal(await old.locator('[aria-label="Working now"] [data-source="events"]').count(), 1);
     await noSideways(old, `the stale Today at ${viewport.width} px`);
+  }
+
+  step('a taken request with no word for a day and a half reads "No word since", calmly, and is not counted');
+  const quiet = await startHubFixture({ pc: 'fresh' });
+  fixtures.push(quiet);
+  const quietId = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-spike-s3-add-one-line-bf43`;
+  quiet.seed.request({ ...requestJson({ id: quietId, project: 'probe', text: 'Add one line to the end of docs/README.md', now: minutesAgo(quiet.now, 34 * 60 + 15) }) });
+  quiet.seed.put(`requests/${quietId}/taken.json`, { runner: 'cloud', session: 'session_x', at: minutesAgo(quiet.now, 34 * 60).toISOString() });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  for (const [label, viewport] of [['desktop', { width: 1920, height: 1080 }], ['phone', { width: 390, height: 844 }]]) {
+    const page = await open(viewport, quiet);
+    const panel = page.locator('[aria-label="Working now"]');
+    const row = panel.locator('[data-working="stale"]');
+    assert.equal(await row.count(), 1, `${label}: the quiet run shows once, as stale.`);
+    assert.match(await row.innerText(), /No word since/);
+    assert.doesNotMatch(await row.innerText(), /Working/);
+    assert.equal(await row.locator('.dot.live').count(), 0, `${label}: a stale row does not pulse.`);
+    assert.equal(await panel.locator('[data-working="working"]').count(), 2, `${label}: the live rows stay.`);
+    assert.equal((await page.locator('[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '2', `${label}: the Running count leaves it out.`);
+    assert.equal((await panel.locator('h3 span').last().innerText()).trim(), '2', `${label}: so does the Working now count.`);
+    await noSideways(page, `stale Today at ${label} width`);
+    if (process.env.BUW_SHOTS) await panel.screenshot({ path: `${process.env.BUW_SHOTS}-${label}.png` });
   }
 
   step('a fixture with no PC status shows no tile and "Nothing is running."');
