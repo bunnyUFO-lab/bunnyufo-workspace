@@ -1,6 +1,7 @@
 // The Hub's rules, with no I/O: Ask state, what Today and the Inbox show, ids and slugs, and the
 // checks on what a request carries. hub.mjs reads the bucket and calls these; the tests call them
 // directly. Everything is a function of its arguments (the clock included).
+import { nothingToDo } from './nothing-to-do.mjs';
 import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
@@ -78,12 +79,7 @@ export function runFileTime(name) {
   return Number.isNaN(time) ? null : time;
 }
 
-/**
- * A run that looked and found nothing to change ends `outcome: failed` with a `no-*` reason (`no-typo-found`).
- * The dashboard reads that as done without a change, not as a failure. A real failure keeps its reason.
- * (Cleaner later: a `nothing` outcome in `cards request finish`.)
- */
-export const nothingToDo = result => result?.outcome === 'failed' && typeof result.reason === 'string' && /^no-[a-z0-9-]{1,60}$/.test(result.reason);
+export { nothingToDo };
 
 /**
  * The state of a request.

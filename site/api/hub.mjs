@@ -34,6 +34,7 @@ import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
@@ -1095,7 +1096,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
             const detail = await requestFiles.detail(decodeURIComponent(match[1]), at);
             const cardHref = await cardHrefOf(detail.result?.card);
-            reply(cardHref ? { ...detail, cardHref } : detail);
+            reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}) });
           } else if (route.startsWith('/hub/presets')) {
             reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {

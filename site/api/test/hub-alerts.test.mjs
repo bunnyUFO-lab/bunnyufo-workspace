@@ -8,7 +8,8 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { dismissedAlerts, nothingToDo, requestState } from '../hub-model.mjs';
+import { dismissedAlerts, requestState } from '../hub-model.mjs';
+import { NOTHING_TO_DO_REASONS, nothingToDo } from '../nothing-to-do.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, iso, minutesAgo, seeder } from './hub-fixtures.mjs';
 
@@ -39,7 +40,9 @@ async function fixture() {
   return { fake, put, run, get: route => call('GET', route), post: (route, body) => call('POST', route, body), close: async () => { server.close(); await fake.close(); } };
 }
 
-test('a failed run whose reason starts with no- is done, anything else stays failed', () => {
+test('only a listed reason reads as nothing to change; no-access and no-push-access stay failed', () => {
+  for (const reason of NOTHING_TO_DO_REASONS) assert.equal(nothingToDo({ outcome: 'failed', reason }), true, reason);
+  for (const reason of ['no-access', 'no-push-access', 'no-repo', 'no-network', 'no-permission', 'no-tests']) assert.equal(nothingToDo({ outcome: 'failed', reason }), false, reason);
   assert.equal(nothingToDo({ outcome: 'failed', reason: 'no-typo-found' }), true);
   assert.equal(nothingToDo({ outcome: 'failed', reason: 'budget' }), false);
   assert.equal(nothingToDo({ outcome: 'failed' }), false);
@@ -92,6 +95,20 @@ test('Dismiss removes an alert from Today and the count, Undo brings it back, an
   } finally { await close(); }
 });
 
+test('a run that failed with no-access is still failed and still an alert', async () => {
+  const { put, run, get, close } = await fixture();
+  try {
+    const id = `${day}-probe-fix-access-zz99`;
+    run(id, { title: 'Fix a typo in docs', result: { outcome: 'failed', reason: 'no-access', summary: 'No access to the repo.' } });
+    put.event(eventJson({ kind: 'alert', ts: minutesAgo(NOW, 5), title: `Run failed: ${id}`, source: 'cards-finish', project: 'probe' }));
+    const today = (await get('/hub/today')).body;
+    assert.equal(today.counts.alerts, 2, 'The CLI alert and the failed request both stay.');
+    const detail = (await get(`/hub/requests/${id}`)).body;
+    assert.equal(detail.state, 'failed');
+    assert.equal(detail.nothing, undefined);
+  } finally { await close(); }
+});
+
 test('a run that found nothing to change is done: no alert, not failed, and its event says so', async () => {
   const { put, run, get, close } = await fixture();
   try {
@@ -103,6 +120,7 @@ test('a run that found nothing to change is done: no alert, not failed, and its 
     assert.equal(today.counts.alerts, 0);
     const detail = (await get(`/hub/requests/${id}`)).body;
     assert.equal(detail.state, 'done');
+    assert.equal(detail.nothing, true, 'The drawer is told, it does not guess.');
     const finished = today.recent.find(event => event.kind === 'run-finished' && event.request === id);
     assert.equal(finished.outcome, 'nothing');
     assert.match(finished.title, /^Done, nothing to change: Fix a typo/);
