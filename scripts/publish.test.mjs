@@ -575,7 +575,7 @@ test('a site change to the card list during a publish is merged in, not overwrit
   } finally { await fake.close(); }
 });
 
-test('a new local card that reuses a retired id is kept and the publish says so', async () => {
+test('a new local card that reuses a retired id stops the whole publish before anything is written', async () => {
   const fake = await startFakeS3();
   try {
     const { site, registryFile, bucketOptions } = await withCards(fake);
@@ -591,9 +591,59 @@ test('a new local card that reuses a retired id is kept and the publish says so'
     await mkdir(path.join(site, 'a2'), { recursive: true });
     await writeFile(path.join(site, 'a2', 'index.md'), '# a again\n');
     await putLocal(site, local);
+    await writeFile(path.join(site, 'hub', 'index.md'), '# Hub, changed\n');
+    const before = fake.text(LIST);
+    await assert.rejects(publish({ content: site, registryFile, bucketOptions, log: () => {} }),
+      /Nothing published: the card "a" made here reuses an id that was moved to game-ideas on the site\. Give it another id/);
+    assert.equal(fake.text(LIST), before, 'The card list was not touched.');
+    assert.equal(fake.text('sections/my-workspace/a2/index.md'), null, 'Nothing was uploaded.');
+    assert.equal(fake.text('sections/my-workspace/hub/index.md'), '# Hub\n');
+    assert.ok((await localList(site)).entities.some(item => item.id === 'a'), 'The local list is left as it is.');
+  } finally { await fake.close(); }
+});
+
+test('a card deleted in the local app and edited on the site stays deleted, and Restore gets the latest version', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await withCards(fake);
+    const local = await localList(site);
+    const a = local.entities.find(item => item.id === 'a');
+    local.entities = local.entities.filter(item => item.id !== 'a');
+    local.retired = { a: { kind: 'deleted', at: '2026-10-30', entity: a } };
+    await putLocal(site, local);
+    const remote = fake.json(LIST);
+    remote.entities.find(item => item.id === 'a').title = 'A, edited on the site';
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const published = fake.json(LIST);
+    assert.deepEqual(published.entities.map(item => item.id).sort(), ['b', 'hub']);
+    assert.equal(published.retired.a.entity.title, 'A, edited on the site');
+  } finally { await fake.close(); }
+});
+
+test('each side deleting a different tab of a two-tab card leaves one tab, and the publish says so', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await workspace(fake);
+    const list = await localList(site);
+    list.entities[0].steps = [step('Overview', 'index.md'), step('A', 'a.md')];
+    await putLocal(site, list);
+    await writeFile(path.join(site, 'hub', 'a.md'), '# A\n');
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    // Here: Overview deleted. On the site: A deleted.
+    const local = await localList(site);
+    local.entities[0].steps = [step('A', 'a.md')];
+    local.entities[0].removedTabs = [removed('index.md', 0)];
+    await putLocal(site, local);
+    const remote = fake.json(LIST);
+    remote.entities[0].steps = [step('Overview', 'index.md')];
+    remote.entities[0].removedTabs = [removed('a.md', 1)];
+    fake.seed(LIST, JSON.stringify(remote, null, 2), 'application/json');
     const lines = [];
     await publish({ content: site, registryFile, bucketOptions, log: line => lines.push(line) });
-    assert.ok((await localList(site)).entities.some(item => item.id === 'a'), 'The new card is not dropped.');
-    assert.match(lines.join('\n'), /"a" made here reuses an id that was moved to game-ideas/);
+    const card = fake.json(LIST).entities[0];
+    assert.deepEqual(card.steps.map(item => item.path), ['index.md']);
+    assert.deepEqual((card.removedTabs ?? []).map(item => item.path), ['a.md']);
+    assert.match(lines.join('\n'), /would have no tabs left/);
   } finally { await fake.close(); }
 });

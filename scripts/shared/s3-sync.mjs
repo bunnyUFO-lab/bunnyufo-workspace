@@ -101,7 +101,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const placeOf = (bucket, prefix) => `${bucket.bucket}/${prefix ? `${prefix.replace(/\/+$/, '')}/` : ''}`;
 
 /** One card changed on both sides: each field from the side that changed it, sections from both. */
-function mergeCard(base, local, remote) {
+function mergeCard(base, local, remote, notes = []) {
   const out = { ...local };
   for (const key of new Set([...Object.keys(local), ...Object.keys(remote)])) {
     if (key === 'steps') continue;
@@ -135,6 +135,15 @@ function mergeCard(base, local, remote) {
   }
   out.steps = steps;
   mergeRemovedTabs(out, local, remote);
+  // Each side deleted a different tab of a card with two: it must keep one. The tab deleted here stays.
+  if (!steps.length) {
+    const back = (base?.steps ?? []).find(item => !(local.steps ?? []).some(own => stepKey(own) === stepKey(item))) ?? (base?.steps ?? [])[0];
+    if (back) {
+      out.steps = [back];
+      mergeRemovedTabs(out, local, remote);
+      notes.push(`  the card "${local.id}" would have no tabs left (each side deleted one); the tab "${back.name ?? back.path}" is kept`);
+    }
+  }
   return out;
 }
 
@@ -158,7 +167,7 @@ function mergeRemovedTabs(out, local, remote) {
  * one side is added; a card gone from one side and untouched on the other is gone. With no record
  * of the last sync, every card on either side is kept and this folder's version of a card wins.
  */
-export function mergeCardLists(base, local, remote) {
+export function mergeCardLists(base, local, remote, notes = []) {
   const ids = list => new Map((Array.isArray(list?.entities) ? list.entities : []).filter(item => item?.id).map(item => [item.id, item]));
   const B = ids(base), L = ids(local), R = ids(remote);
   const merged = { ...local };
@@ -184,6 +193,8 @@ export function mergeCardLists(base, local, remote) {
   }
   if (Object.keys(mergedRetired).length) merged.retired = mergedRetired; else delete merged.retired;
   const retired = mergedRetired;
+  // A card deleted here (a record added or changed here) is deleted whatever the site did to it since.
+  const deletedHere = id => LR[id] && !same(LR[id], BR[id]);
   const entities = [];
   for (const card of Array.isArray(local?.entities) ? local.entities : []) {
     if (!card?.id) { entities.push(card); continue; }
@@ -196,10 +207,15 @@ export function mergeCardLists(base, local, remote) {
       entities.push(card);
     } else if (same(card, theirs) || (was && same(theirs, was))) entities.push(card);
     else if (was && same(card, was)) entities.push(theirs);
-    else entities.push(mergeCard(was ?? null, card, theirs));
+    else entities.push(mergeCard(was ?? null, card, theirs, notes));
   }
   for (const [id, card] of R) {
     if (L.has(id)) continue;
+    // Deleted here, edited there: the delete wins, and Restore gives back the site's newer version.
+    if (deletedHere(id) && retired[id]) {
+      if (retired[id].kind === 'deleted') retired[id] = { ...retired[id], entity: card };
+      continue;
+    }
     // New there (not in the last sync): bring it in. In the last sync and gone from here: removed
     // here, unless it changed there since.
     if (!B.has(id) || !same(card, B.get(id))) entities.push(card);
@@ -223,12 +239,17 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
   if (!remote || remote.etag === md5(Buffer.from(localText))) return { merged: false, added: [], etag: remote?.etag ?? null };
   const record = await loadBase(root, placeOf(bucket, prefix));
   const local = JSON.parse(localText);
-  const result = mergeCardLists(record.list, local, remote.value);
+  const notes = [];
+  const result = mergeCardLists(record.list, local, remote.value, notes);
   const live = new Set((remote.value?.entities ?? []).map(item => item?.id));
-  for (const item of result.entities ?? []) {
-    const record = item?.id && !live.has(item.id) ? result.retired?.[item.id] : null;
-    if (record) log(`  Warning: the card "${item.id}" made here reuses an id that was ${record.kind === 'moved' ? `moved to ${record.to ?? 'another workspace'}` : 'put in the Trash'} on the site. It is published, but pick another id or restore the old card there.`);
+  // An id that is retired on the site stays taken: a card made here with it would sit live next to
+  // its own Trash or move record. The whole publish stops, before anything is written.
+  const clash = (result.entities ?? []).filter(item => item?.id && !live.has(item.id) && result.retired?.[item.id]);
+  if (clash.length) {
+    const what = item => (result.retired[item.id].kind === 'moved' ? `moved to ${result.retired[item.id].to ?? 'another workspace'}` : 'is in the Trash');
+    throw new Error(`Nothing published: ${clash.map(item => `the card "${item.id}" made here reuses an id that was ${what(item).replace('is in', 'put in')} on the site`).join('; ')}. Give it another id (or restore the old card on the site), then publish again.`);
   }
+  for (const note of notes) log(note);
   if (same(result, local)) return { merged: false, added: [], etag: remote.etag };
   const known = new Set((local.entities ?? []).map(item => item?.id));
   const added = (result.entities ?? []).filter(item => item?.id && !known.has(item.id)).map(item => item.id);
