@@ -2,6 +2,7 @@
 // checks on what a request carries. hub.mjs reads the bucket and calls these; the tests call them
 // directly. Everything is a function of its arguments (the clock included).
 import { nothingToDo } from './nothing-to-do.mjs';
+import { MAX_RUN_MINUTES } from './presets.mjs';
 import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
@@ -88,7 +89,7 @@ export { nothingToDo };
  * `taken` when taken.json is there, else `open`. Called with
  * `{ names, request, approved, taken, result, newestRunAt, hermesLive, pcBusy, now }` it applies the table in
  * docs/workspaces.md ("Requests"), the first match winning. A request without a `preset` is a legacy one and
- * only ever reads `declined`, `taken` or `open`. `newestRunAt` is a Date or a time in ms, `hermesLive` says a
+ * reads `declined`, `taken` or `open`, and `done` or `failed` once it is taken and has a result. `newestRunAt` is a Date or a time in ms, `hermesLive` says a
  * follower is on the request's Hermes run, `pcBusy(session)` says the PC report shows that session busy.
  */
 export function requestState(input) {
@@ -98,7 +99,13 @@ export function requestState(input) {
   const nowMs = now.getTime();
   const isTaken = has('taken.json');
   if (has('declined.json')) return 'declined';
-  if (!request?.preset) return isTaken ? 'taken' : 'open';
+  if (!request?.preset) {
+    // A legacy request has no signed approval, so approved.json means nothing. A result counts only on a taken request,
+    // and only as done or failed: whoever can write taken.json can write result.json, and it never asks or runs.
+    if (isTaken && has('result.json') && (result?.outcome === 'pr' || result?.outcome === 'card')) return 'done';
+    if (isTaken && has('result.json') && result?.outcome === 'failed') return nothingToDo(result) ? 'done' : 'failed';
+    return isTaken ? 'taken' : 'open';
+  }
   const hasResult = has('result.json');
   const lastRun = newestRunAt == null ? NaN : newestRunAt instanceof Date ? newestRunAt.getTime() : Number(newestRunAt);
   const running = isTaken && !hasResult && ((Number.isFinite(lastRun) && nowMs - lastRun < RUN_STALE_MS) || hermesLive === true || pcBusy(taken?.session) === true);
@@ -313,7 +320,7 @@ export function requestItem(request, state, taken, extra = {}) {
   const { approved = null, result = null, cloud = null } = extra;
   const target = approved?.target ?? request.target;
   const since = cloud?.since ? cloud.since : state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
-  return {
+  const item = {
     kind: state === 'proposed' ? 'approval' : state === 'asking' ? 'run-question' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
     ...(taken?.bead ? { bead: taken.bead } : {}),
     ...(request.by ? { by: request.by } : {}),
@@ -328,6 +335,29 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(typeof since === 'string' ? { since } : {}),
     ...runParts(request, approved, taken, result, extra.lastRunAt),
   };
+  const stale = staleSince(item, extra.now);
+  return stale ? { ...item, stale } : item;
+}
+
+/** How long past its limit a quiet run gets before it stops counting as working. */
+export const STALE_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * When a taken run last gave word (taken, or its newest run file) if that is longer ago than its approved limit
+ * (`run.minutes`, at most the 120-minute maximum, else the maximum) plus a grace; else ''. Only a taken, running or
+ * stopping request can be stale: a finished one is finished, and one that asked a question waits on the owner. A stamp
+ * in the future is no word (the runner writes taken.json and the run files, so it may be wrong): it is ignored, and a
+ * run with no usable stamp counts from the request's own time (`item.at`, also ignored when in the future).
+ * Working now, the request lists and the request page all use this one rule.
+ */
+export function staleSince(item, at) {
+  if (!at || !item.run || !['taken', 'running', 'stopping'].includes(item.state)) return '';
+  const nowMs = at.getTime();
+  const past = value => { const ms = new Date(value ?? '').getTime(); return Number.isFinite(ms) && ms <= nowMs ? ms : 0; };
+  const minutes = Number(item.run.minutes) > 0 ? Math.min(Number(item.run.minutes), MAX_RUN_MINUTES) : MAX_RUN_MINUTES;
+  const word = Math.max(past(item.run.at), past(item.run.lastAt)) || past(item.at);
+  if (!word || nowMs - word <= minutes * 60000 + STALE_GRACE_MS) return '';
+  return new Date(word).toISOString();
 }
 
 const RUNNERS = ['hermes', 'cloud', 'pc'];

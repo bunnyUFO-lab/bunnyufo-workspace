@@ -13,6 +13,7 @@ import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
 import { useHubData } from './useHub'
 import { usePcWake } from './usePcWake'
+import { requestStateWord } from './working'
 import WakeButton from './WakeButton'
 import './runs.css'
 
@@ -207,7 +208,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
       <div className="rd-head">
         <span className="hub-id" data-run-id>{request.id}</span>
         {request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
-        <span className={`ni-chip rd-state ${state}`} data-run-state-chip>{STATE_WORD[state] ?? state}</span>
+        <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
       </div>
       <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>
       <p className="rd-body" data-run-request-text>{request.text}</p>

@@ -21,6 +21,8 @@ export interface Item {
   title: string
   at: string
   state?: string
+  /** A request row that was taken and has given no word past its limit: when it last did. */
+  stale?: string
   bead?: string
   url?: string
   /** The desktop app's link to the session (claude://…); only works on the PC that runs the app. */

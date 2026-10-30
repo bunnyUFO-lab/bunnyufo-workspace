@@ -3,6 +3,7 @@ import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
 import { hubHash, reviewHash } from '../lib/route'
 import { openRun } from './runStore'
+import { requestStateWord } from './working'
 import { useMarkDone } from './useMarkDone'
 
 const EVENT_DOT: Record<string, string> = {
@@ -91,7 +92,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     const open = Math.max(0, (item.total ?? 0) - (item.done ?? 0))
     const sent = item.state === 'submitted' ? 'Submitted' : item.state === 'picked-up' ? 'Picked up' : ''
     const progress = item.kind === 'checklist' ? (sent ? (open > 0 ? `${sent} · ${open} open` : sent) : `${item.done ?? 0} of ${item.total ?? 0}`) : ''
-    const state = item.kind === 'checklist' ? progress : item.kind === 'ask' ? (item.state ?? 'open').replace('-', ' ') : item.kind === 'request' ? (item.state === 'taken' ? `taken as ${item.bead ?? 'a task'}` : 'open') : ''
+    const state = item.kind === 'checklist' ? progress : item.kind === 'ask' ? (item.state ?? 'open').replace('-', ' ') : item.kind === 'request' ? (item.stale ? requestStateWord(item.state ?? '', item.stale, {}) : item.state === 'taken' ? `taken as ${item.bead ?? 'a task'}` : item.state === 'done' || item.state === 'failed' ? item.state : 'open') : ''
     const meta = [KIND_LABEL[item.kind], item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
     if (item.kind === 'review') return <ReviewRow item={item} meta={meta} />
     if (item.kind === 'blocked') return <BlockedRow item={item} meta={meta} />

@@ -9,6 +9,7 @@ import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { workingNow } from '../hub-pc.mjs';
+import { staleSince } from '../hub-model.mjs';
 import { validStatus } from '../hub-pc.mjs';
 import { withRunEvents } from '../hub-run-events.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -178,5 +179,55 @@ test('GET /hub/today: the approved limit, and the newest run file, reach the sta
     // 18 minutes is inside the 20 for 'taken' to be live in the state table, past 5 + 10 for the limit.
     const row = (await get('/hub/today')).body.working.find(item => item.request === id);
     assert.equal(row.state, 'stale');
+    assert.ok((await get(`/hub/requests/${id}`)).body.stale, 'The request page carries the stale time.');
+
+    // The same run with a run file two minutes old has given word lately: it stays working.
+    const spoke = `${day}-research-spoke-ef56`;
+    put.request({ id: spoke, project: 'probe', text: 'Slow job that talks', preset: 'research', target: 'cloud', createdAt: iso(minutesAgo(NOW, 90)) });
+    put.put(`requests/${spoke}/approved.json`, { target: 'cloud', limits: { minutes: 5 }, expires: iso(new Date(NOW.getTime() + 3600000)), at: iso(minutesAgo(NOW, 89)) });
+    put.put(`requests/${spoke}/taken.json`, { runner: 'cloud', at: iso(minutesAgo(NOW, 18)) });
+    put.put(`requests/${spoke}/run-${minutesAgo(NOW, 2).toISOString().replace(/[-:.]/g, '')}-ab12.json`, { state: 'working' });
+    assert.equal((await get('/hub/today')).body.working.find(item => item.request === spoke).state, 'working');
+    assert.equal((await get(`/hub/requests/${spoke}`)).body.stale, undefined);
   } finally { await close(); }
+});
+
+test('a legacy request taken with a result is done on the request page and out of Working now; a silent one is stale', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const finished = `${day}-spike-s3-done-bf43`;
+    put.request({ id: finished, project: 'probe', text: 'Add one line to docs/README.md', when: 'nightly', createdAt: iso(minutesAgo(NOW, 300)) });
+    put.put(`requests/${finished}/approved.json`, { target: 'cloud', at: iso(minutesAgo(NOW, 299)) });
+    put.put(`requests/${finished}/taken.json`, { runner: 'cloud', at: iso(minutesAgo(NOW, 290)) });
+    put.put(`requests/${finished}/result.json`, { outcome: 'pr', pr: 'https://github.com/example/repo/pull/1', summary: 'Created docs/README.md', at: iso(minutesAgo(NOW, 280)) });
+    const untaken = `${day}-spike-s3-untaken-aa11`;
+    put.request({ id: untaken, project: 'probe', text: 'Never taken', when: 'nightly', createdAt: iso(minutesAgo(NOW, 300)) });
+    put.put(`requests/${untaken}/result.json`, { outcome: 'pr', at: iso(minutesAgo(NOW, 280)) });
+    const silent = `${day}-spike-s3-silent-cc33`;
+    put.request({ id: silent, project: 'probe', text: 'Taken, never heard of again', when: 'nightly', createdAt: iso(minutesAgo(NOW, 300)) });
+    put.put(`requests/${silent}/taken.json`, { runner: 'cloud', at: iso(minutesAgo(NOW, 290)) });
+
+    const page = (await get(`/hub/requests/${finished}`)).body;
+    assert.equal(page.state, 'done');
+    assert.equal(page.stale, undefined);
+    assert.equal((await get(`/hub/requests/${untaken}`)).body.state, 'open');
+    const silentPage = (await get(`/hub/requests/${silent}`)).body;
+    assert.equal(silentPage.state, 'taken');
+    assert.equal(new Date(silentPage.stale).getTime(), new Date(iso(minutesAgo(NOW, 290))).getTime());
+
+    const rows = (await get('/hub/today')).body.working.filter(item => item.source === 'run');
+    assert.equal(rows.find(item => item.request === finished), undefined, 'A finished run is not at work.');
+    assert.equal(rows.find(item => item.request === silent).state, 'stale');
+  } finally { await close(); }
+});
+
+test('staleSince: a stamp in the future is no word, so it cannot keep a row working', () => {
+  const run = (taken, extra = {}) => ({ state: 'taken', at: iso(minutesAgo(NOW, 600)), run: { at: taken, ...extra } });
+  const future = iso(new Date(NOW.getTime() + 3600000));
+  assert.equal(staleSince(run(future), NOW), new Date(iso(minutesAgo(NOW, 600))).toISOString(), 'A future taken.at falls back to the request time.');
+  assert.equal(staleSince(run(iso(minutesAgo(NOW, 400)), { lastAt: future }), NOW), new Date(iso(minutesAgo(NOW, 400))).toISOString(), 'A future run file is ignored.');
+  assert.equal(staleSince(run(iso(minutesAgo(NOW, 400)), { lastAt: iso(minutesAgo(NOW, 3)) }), NOW), '', 'A recent run file is word.');
+  assert.equal(staleSince({ state: 'taken', at: future, run: { at: future } }, NOW), '', 'Nothing usable at all: not stale.');
+  assert.equal(staleSince({ ...run(iso(minutesAgo(NOW, 600))), state: 'asking' }, NOW), '');
+  assert.equal(staleSince({ ...run(iso(minutesAgo(NOW, 600))), state: 'done' }, NOW), '');
 });

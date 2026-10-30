@@ -4,8 +4,9 @@
 // The file is written by the PC's report script (`inbox/pc/status-<stamp>.json`, create-only, at
 // most 64 KB). It is an agent's file, so `validStatus` cleans every field and refuses what it
 // cannot trust.
-import { MAX_RUN_MINUTES } from './presets.mjs';
-import { blockedAppUrl, blockedSessionUrl, deriveEventItems, validProject } from './hub-model.mjs';
+import { STALE_GRACE_MS, blockedAppUrl, blockedSessionUrl, deriveEventItems, staleSince, validProject } from './hub-model.mjs';
+
+export { STALE_GRACE_MS };
 
 export const STATUS_MAX_BYTES = 64 * 1024;
 /** A status older than this means the PC is asleep or off (the script reports every minute). */
@@ -137,22 +138,6 @@ function runItems(requests, skip, at) {
       title: item.title, ...(item.project ? { project: item.project } : {}),
       ...(staleSince(item, at) ? { state: 'stale', since: staleSince(item, at) } : { state: RUN_STATE[item.state], since: item.run.at }),
     }));
-}
-
-/** How long past its limit a quiet run gets before it stops counting as working. */
-export const STALE_GRACE_MS = 10 * 60 * 1000;
-
-/**
- * When a run last gave word (taken, or its newest run file) if that is longer ago than its approved limit
- * (`run.minutes`, at most the 120-minute maximum, else the maximum) plus a grace; else ''. A run that asked
- * a question waits on the owner and is never stale.
- */
-function staleSince(item, at) {
-  if (item.state === 'asking' || !at) return '';
-  const minutes = Number(item.run.minutes) > 0 ? Math.min(Number(item.run.minutes), MAX_RUN_MINUTES) : MAX_RUN_MINUTES;
-  const word = Math.max(new Date(item.run.at).getTime() || 0, new Date(item.run.lastAt ?? '').getTime() || 0);
-  if (!word || at.getTime() - word <= minutes * 60000 + STALE_GRACE_MS) return '';
-  return new Date(word).toISOString();
 }
 
 /**
