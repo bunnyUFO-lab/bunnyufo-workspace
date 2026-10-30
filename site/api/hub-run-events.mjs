@@ -5,7 +5,7 @@
 import { WINDOW_DAYS, DAY } from './hub-model.mjs';
 
 const WHERE = { hermes: 'Hermes', cloud: 'the cloud', pc: 'the PC' };
-const OUTCOME_WORD = { pr: 'opened a pull request', card: 'wrote a card', failed: 'failed', question: 'asked a question', unknown: 'ended, outcome unknown' };
+const OUTCOME_WORD = { pr: 'opened a pull request', card: 'wrote a card', failed: 'failed', question: 'asked a question', unknown: 'ended, outcome unknown', nothing: 'looked and found nothing to change' };
 
 /**
  * @param requests   request list rows (`requestItem`), which carry `run` and `finish`
@@ -26,7 +26,7 @@ export function runEvents(requests, { now, cardHref = () => undefined } = {}) {
       const href = card ? cardHref(card) : undefined;
       out.push({
         ...base, ts: item.finish.at, kind: 'run-finished', file: `run-${item.id}-finished.json`, outcome,
-        title: `${outcome === 'failed' ? 'Failed' : 'Finished'}: ${item.title}`,
+        title: `${outcome === 'failed' ? 'Failed' : outcome === 'nothing' ? 'Done, nothing to change' : 'Finished'}: ${item.title}`,
         summary: `The run ${OUTCOME_WORD[outcome] ?? 'ended'}`,
         ...(pr ? { url: pr } : {}), ...(href ? { cardHref: href } : {}),
       });

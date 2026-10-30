@@ -1,6 +1,6 @@
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Item, MoveOffer, Today as TodayData } from '../lib/hub'
+import type { HubEvent, Item, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
 import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
@@ -54,6 +54,47 @@ function AlertRetry({ request }: { request: string }) {
       <button type="button" className="hub-btn alert-retry" disabled={busy} onClick={() => void retry()} data-alert-retry={request}>Retry</button>
       {problem && <small className="hub-error" role="alert" data-alert-retry-error>{problem}</small>}
     </>
+  )
+}
+
+/** The Alerts panel: Dismiss on each row, Clear all, and Undo for the last dismissal. Dismissals are kept on the server, so they hold on every device. */
+function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: number; index: number }) {
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [undo, setUndo] = useState<string[] | null>(null)
+  const timer = useRef(0)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const send = async (verb: 'dismiss' | 'restore', keys: string[]) => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      await hubPost(`/alerts/${verb}`, { keys })
+      window.clearTimeout(timer.current)
+      if (verb === 'dismiss') { setUndo(keys); timer.current = window.setTimeout(() => setUndo(null), 20000) } else setUndo(null)
+    } catch (failure) { setProblem(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false); window.dispatchEvent(new Event(HUB_WROTE)) }
+  }
+  const keys = alerts.map(event => event.key).filter((key): key is string => !!key)
+  return (
+    <section className="hub-panel rise" style={stagger(index)} aria-label="Alerts">
+      <h3>Alerts <span>{count ? `${count} failed` : ''}</span>
+        {host.write && keys.length > 1 && <button type="button" className="hub-btn alert-clear" disabled={busy} onClick={() => void send('dismiss', keys.slice(0, 50))} data-alerts-clear>Clear all</button>}
+      </h3>
+      {undo && (
+        <div className="alert-undo" role="status" data-alerts-undo>
+          <span>{undo.length === 1 ? 'Alert dismissed.' : `${undo.length} alerts dismissed.`}</span>
+          <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('restore', undo)} data-alerts-undo-button>Undo</button>
+        </div>
+      )}
+      {problem && <p className="hub-error" role="alert" data-alerts-error>{problem}</p>}
+      {alerts.length ? alerts.slice(0, 5).map(event => (
+        <div key={event.key ?? event.file} className="alert-row" data-alert>
+          <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
+          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+          {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
+          {host.write && event.key && <button type="button" className="hub-btn alert-dismiss" disabled={busy} onClick={() => void send('dismiss', [event.key as string])} aria-label={`Dismiss: ${event.title}`} data-alert-dismiss>Dismiss</button>}
+        </div>
+      )) : <p className="hub-empty">No alerts.</p>}
+    </section>
   )
 }
 
@@ -156,16 +197,7 @@ export default function Today() {
               {data.offers.slice(0, 3).map(offer => <MoveTile key={offer.request} offer={offer} />)}
             </section>
           ) : null}
-          <section className="hub-panel rise" style={stagger(3)} aria-label="Alerts">
-            <h3>Alerts <span>{counts.alerts ? `${counts.alerts} failed` : ''}</span></h3>
-            {data.alerts.length ? data.alerts.slice(0, 5).map(event => (
-              <div key={event.file} className="alert-row" data-alert>
-                <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
-                <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
-                {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
-              </div>
-            )) : <p className="hub-empty">No alerts.</p>}
-          </section>
+          <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} />
           <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
           {data.pc && <PcTile pc={data.pc} />}
         </div>

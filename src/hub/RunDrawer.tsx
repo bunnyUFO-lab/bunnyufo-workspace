@@ -252,6 +252,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
         <>
           <h4 className="rd-h">Result</h4>
           <div className="rd-result" data-run-result>
+            {result.outcome === 'failed' && /^no-[a-z0-9-]+$/.test(result.reason ?? '') && <p data-run-nothing><b>Done, nothing to change.</b></p>}
             {result.summary && <p>{result.summary}</p>}
             {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
             <div className="rd-links">

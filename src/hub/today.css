@@ -68,3 +68,11 @@
   .kpi-label { gap: 8px; letter-spacing: 0.1em; }
   .hub .today-head h2 { font-size: 28px; }
 }
+
+/* Dismiss, Clear all and Undo on the Alerts panel. */
+.today h3 .alert-clear { margin-left: auto; min-height: 32px; padding: 0 12px; font-size: 12px; }
+.alert-row .alert-dismiss { margin-left: auto; min-height: 32px; padding: 0 12px; font-size: 12px; }
+.alert-undo { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--s2); font-size: 13px; }
+@media (max-width: 767px) {
+  .today h3 .alert-clear, .alert-row .alert-dismiss, .alert-undo .hub-btn { min-height: 44px; }
+}

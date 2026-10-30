@@ -15,7 +15,7 @@ import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
   askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
-  checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
+  ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { createRequests } from './hub-requests.mjs';
@@ -747,6 +747,24 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { status: 201, body: { state: 'done' } };
   }
 
+  /**
+   * Dismiss or restore alerts: one event per key (`alert-dismissed` / `alert-restored`, create-only), so the choice
+   * is the owner's on every device. Keys the client got from Today's alerts; a repeat writes nothing.
+   */
+  async function markAlerts(kind, raw, user, at) {
+    const keys = Array.isArray(raw?.keys) ? [...new Set(raw.keys)] : [];
+    if (!keys.length || keys.length > 50 || keys.some(item => typeof item !== 'string' || !ALERT_KEY_RE.test(item))) throw fail('Send up to 50 alert keys.', 400);
+    const { events } = await loadEvents(at);
+    const current = dismissedAlerts(events);
+    let written = 0;
+    for (const alert of keys) {
+      if (current.has(alert) === (kind === 'alert-dismissed')) continue;
+      await putHubEvent({ ts: at.toISOString(), kind, alert, title: kind === 'alert-dismissed' ? 'Alert dismissed' : 'Alert restored', host: 'hub', source: 'hub', by: user || 'local' }, at);
+      written += 1;
+    }
+    return { status: written ? 201 : 200, body: { state: kind === 'alert-dismissed' ? 'dismissed' : 'restored', count: written } };
+  }
+
   /** One review's detail, from the ready-for-review event in the last seven days. */
   async function reviewDetailFor(id, at) {
     const missing = () => fail('This review is not in the last 7 days.', 404);
@@ -1041,7 +1059,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const status = await loadPcStatus(at);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
             const cloud = cloudOn ? await routines.capacity(at, { memo: true }).catch(() => null) : null;
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud });
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
             const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
@@ -1088,7 +1106,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const [window, requests] = await Promise.all([loadEvents(at), loadRequests(at)]);
             const events = await eventsWithRuns(window.events, requests, at);
             reply({
-              events: events.filter(event => new Date(event.ts).getTime() >= since && (!project || event.project === project)),
+              events: events.filter(event => !ALERT_MARKS.includes(event.kind) && new Date(event.ts).getTime() >= since && (!project || event.project === project)),
               truncated: window.truncated,
             });
           } else if (route === '/hub/projects') {
@@ -1149,6 +1167,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await putChecklistFile(decodeURIComponent(match[1]), raw, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/submit$/.exec(route))) {
           send(await submitChecklist(decodeURIComponent(match[1]), raw, user, at));
+        } else if (route === '/hub/alerts/dismiss' || route === '/hub/alerts/restore') {
+          send(await markAlerts(route.endsWith('dismiss') ? 'alert-dismissed' : 'alert-restored', raw, user, at));
         } else if ((match = /^\/hub\/reviews\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
