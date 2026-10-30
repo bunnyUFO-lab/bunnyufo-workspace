@@ -10,7 +10,7 @@
 // the Inbox are computed from a seven-day window of event files. Event files, ask.json and
 // request.json are create-only and so never change; they are cached by key.
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
@@ -895,7 +895,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     };
     response.writeHead(200, headers);
     if (!object.body) return response.end();
-    Readable.fromWeb(object.body).pipe(response);
+    // pipeline, not pipe: a body error or a client that leaves ends this one response and never throws on the process.
+    pipeline(Readable.fromWeb(object.body), response, () => {});
   }
 
   async function drawingList() {

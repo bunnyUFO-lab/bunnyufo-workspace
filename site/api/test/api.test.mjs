@@ -591,3 +591,37 @@ test('a move needs write access to both workspaces on the development copy and t
     assert.ok(gated.entity('one', 'alpha'));
   } finally { await gated.close(); }
 });
+
+test('an S3 body that fails mid-download ends that one response; the server keeps answering', { timeout: 30_000 }, async () => {
+  const fake = await startFakeS3();
+  fake.seed('sections/one/workspace.json', JSON.stringify({ entities: [card('alpha')] }), 'application/json');
+  fake.seed('sections/one/alpha/index.html', '<h1>alpha</h1>', 'text/html; charset=utf-8');
+  fake.seed('sections/one/alpha/big.bin', 'x'.repeat(1000), 'application/octet-stream');
+  fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
+  // The stand-in S3 for every call, except that the body of big.bin starts and then breaks.
+  const fetchImpl = async (url, init) => {
+    if (String(url).endsWith('/alpha/big.bin') && init.method === 'GET') {
+      const body = new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode('x'.repeat(100))); setTimeout(() => controller.error(new Error('upstream broke')), 20); },
+      });
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': '1000', ETag: '"e"' } });
+    }
+    return fetch(url, init);
+  };
+  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1', fetchImpl });
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-site-api-'));
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'state.json'), sectionsTtl: 0 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // The download is cut short: the client sees a failure, not a complete file.
+    await assert.rejects(async () => (await fetch(`${origin}/w/one/alpha/big.bin`)).arrayBuffer());
+    // A client that leaves mid-body is the same case from the other side.
+    const early = await fetch(`${origin}/w/one/alpha/big.bin`);
+    await early.body.cancel();
+    // The process is still up (an uncaught error would fail this test) and serves the next request.
+    const next = await fetch(`${origin}/w/one/alpha/index.html`);
+    assert.equal(next.status, 200);
+    assert.match(await next.text(), /alpha/);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fake.close(); }
+});

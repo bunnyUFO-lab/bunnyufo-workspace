@@ -103,6 +103,7 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
       objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata });
     },
-    close: () => new Promise(resolve => server.close(resolve)),
+    // Drop keep-alive and stuck sockets too, so a close never waits on a client that is not coming back.
+    close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }),
   };
 }

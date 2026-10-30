@@ -1,6 +1,6 @@
 // Emptying the Trash: the one place anything is deleted from the bucket. Every test says exactly
 // which keys were deleted, and that nothing else was.
-import test from 'node:test';
+import baseTest from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,9 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { bucketStore, cardWriter, folderStore } from '../card-writes.mjs';
 import { parseDay, purgeOn, safeFile, safeFolder } from '../card-purge.mjs';
 import { createSiteApi } from '../server.mjs';
+
+// Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
+const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
 
 const NOW = new Date('2026-11-30T09:00:00Z');
 const entity = (id, folder, extra = {}) => ({ id, folder, title: id, category: 'x', created: '2026-09-01', updated: '2026-09-01', steps: [{ name: 'Overview', path: 'index.md' }], ...extra });
@@ -195,6 +198,23 @@ test('a tab file that another live or fresh-Trash card in the same folder uses i
   } finally { await w.close(); }
 });
 
+test('two removed tabs on one path: the expired one does not take the newer file', async () => {
+  const w = await world({
+    entities: [entity('a', 'deck', { removedTabs: [
+      { name: 'Old', path: 'x.md', at: '2026-09-01', index: 1 },
+      { name: 'New', path: 'x.md', at: '2026-11-25', index: 2 },
+      { name: 'OldDraw', path: 'd.excalidraw', at: '2026-09-01', index: 3 },
+      { name: 'NewDraw', path: './d.excalidraw', at: '2026-11-25', index: 4 },
+    ] })],
+  });
+  try {
+    w.files('deck/x.md', 'deck/d.excalidraw', 'deck/d.png');
+    await w.writer.purgeTrash();
+    assert.deepEqual(w.deleted(), [], 'a not-yet-expired entry still references both files');
+    assert.deepEqual(w.list().entities[0].removedTabs.map(tab => tab.name), ['New', 'NewDraw']);
+  } finally { await w.close(); }
+});
+
 test('safeFile normalizes and refuses paths that leave the folder', () => {
   assert.equal(safeFile('./keep.md'), 'keep.md');
   assert.equal(safeFile('a/./b.md'), 'a/b.md');
@@ -306,5 +326,8 @@ test('the route is a gated write: Origin, Remote-User and the development copy',
     const ok = await post(gated.url, 'one', { 'Remote-User': 'owner', Origin: 'https://site.example' });
     assert.equal(ok.status, 200);
     assert.deepEqual(fake.log.filter(entry => entry.method === 'DELETE').map(entry => entry.key), ['sections/dev-sandbox/old/index.md', 'sections/one/old/index.md']);
-  } finally { gated.server.close(); dev.server.close(); await fake.close(); }
+  } finally {
+    for (const { server } of [gated, dev]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    await fake.close();
+  }
 });

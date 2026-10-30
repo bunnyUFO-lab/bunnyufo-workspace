@@ -22,7 +22,7 @@
 // Nginx Proxy Manager sets after the passkey check; Caddy only lets that header through from NPM.
 import { createServer } from 'node:http';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { Readable } from 'node:stream';
+import { Readable, pipeline } from 'node:stream';
 import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
@@ -277,7 +277,8 @@ export function createSiteApi({
     if (object.size) headers['Content-Length'] = object.size;
     response.writeHead(200, headers);
     if (request.method === 'HEAD' || !object.body) { object.body?.cancel?.(); return response.end(); }
-    Readable.fromWeb(object.body).pipe(response);
+    // pipeline, not pipe: a body error or a client that leaves ends this one response and never throws on the process.
+    pipeline(Readable.fromWeb(object.body), response, () => {});
   }
 
   const contentHost = contentOrigin ? new URL(contentOrigin).host : '';
