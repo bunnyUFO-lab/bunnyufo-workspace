@@ -3,7 +3,7 @@
 // The owner chose "Trash, and empty it for good after 30 days". So a card deleted from the Library
 // stays restorable for 30 days; a day after that its files go. The same holds for a tab removed from
 // a card. Nothing else is ever deleted: not a card that was moved (its source files stay so old
-// links keep working), not viewer data under card-responses/ (pending the owner's word), not
+// links keep working), not another card's viewer data, not
 // anything outside the one folder of the one card, nor a file a live tab still uses.
 //
 // Three steps, in this order, each a conditional write or a plain delete, so a crash anywhere is
@@ -11,7 +11,8 @@
 //   1. claim: one conditional write of workspace.json turns each expired Trash record into a
 //      tombstone `{ kind: 'purged', at, folder, pending: true }` and marks each expired removed tab
 //      `pending: true`. Restore refuses both from then on, and the card's id stays taken for good.
-//   2. delete: only the files under the tombstone's folder, and the pending tabs' own files, that
+//   2. delete: only the files under the tombstone's folder, then the card's own `card-responses/<id>/`
+//      (viewer responses and pins, the owner's answer 0e06), and the pending tabs' own files, that
 //      no live tab uses.
 //   3. finish: a second conditional write clears `pending`.
 // Every run also finishes whatever is still `pending`. A run with nothing to do writes nothing.
@@ -118,7 +119,10 @@ export function claimExpired(list, today) {
     if (!folder || !freeToDelete(folder)) { out.skipped.push({ id, why: 'folder not safe to delete' }); const { pending: _gone, ...rest } = record; retired[id] = rest; out.claimed = true; continue; }
     if (seenFolders.has(folder)) continue;
     seenFolders.add(folder);
-    out.cards.push({ id, folder });
+    // card-responses/<id>/ is keyed by id: a live card that reuses this id (a hand-edited or merged list) owns that data now.
+    const idInUse = entities.some(entity => entity?.id === id);
+    if (idInUse) out.skipped.push({ id, why: 'a live card has this id; its viewer data stays' });
+    out.cards.push({ id, folder, ...(idInUse ? { keepResponses: true } : {}) });
   }
   if (Object.keys(retired).length) list.retired = retired;
 
