@@ -1,6 +1,6 @@
 // A stand-in S3 for the tests: one bucket in memory, path-style (/<bucket>/<key>), speaking
 // just enough of the REST API for s3.mjs — GET, HEAD, PUT (with If-Match / If-None-Match),
-// DELETE and ListObjectsV2 with prefix, delimiter and continuation. Signatures are not checked.
+// DELETE, CopyObject and ListObjectsV2 with prefix, delimiter and continuation. Signatures are not checked.
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 
@@ -53,6 +53,16 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       if (request.headers['if-none-match'] === `"${object.etag}"`) { response.writeHead(304, headers); return response.end(); }
       response.writeHead(200, headers);
       return response.end(request.method === 'HEAD' ? undefined : object.body);
+    }
+
+    if (request.method === 'PUT' && request.headers['x-amz-copy-source']) {
+      const source = decodeURIComponent(request.headers['x-amz-copy-source']).replace(/^\//, '');
+      const origin = objects.get(source.slice(bucket.length + 1));
+      if (!source.startsWith(`${bucket}/`) || !origin) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
+      objects.set(key, { ...origin, lastModified: new Date().toUTCString() });
+      const xml = `<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult><LastModified>${new Date().toISOString()}</LastModified><ETag>&quot;${origin.etag}&quot;</ETag></CopyObjectResult>`;
+      response.writeHead(200, { 'Content-Type': 'application/xml', 'Content-Length': Buffer.byteLength(xml) });
+      return response.end(xml);
     }
 
     if (request.method === 'PUT') {

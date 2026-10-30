@@ -546,3 +546,48 @@ test('the new write routes keep the Origin and dev-copy gates', async () => {
     assert.ok(dev.entity('one', 'alpha'));
   } finally { await dev.close(); }
 });
+
+test('a card moves between workspaces on the site; hidden, inbox and missing targets are refused; nothing is deleted', async () => {
+  const { request, fake, entity, stateOf, close } = await fixture();
+  try {
+    fake.seed('sections/inbox/workspace.json', '{"hidden":true,"entities":[]}\n', 'application/json');
+    fake.seed('sections/ideas/workspace.json', '{"name":"Game Ideas","hidden":true,"entities":[]}\n', 'application/json');
+    assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true })).status, 200);
+    for (const to of ['inbox', 'ideas', 'nowhere']) {
+      const refused = await request('/cards/move', { workspace: 'one', id: 'alpha', to });
+      assert.ok([409, 404].includes(refused.status), `${to}: ${refused.status}`);
+    }
+    assert.equal((await request('/cards/move', { workspace: 'one', id: 'alpha', to: 'one' })).status, 400);
+    assert.ok(entity('one', 'alpha'), 'Nothing moved.');
+
+    const done = await request('/cards/move', { workspace: 'one', id: 'alpha', to: 'two', category: 'Brief' });
+    assert.equal(done.status, 200, JSON.stringify(await done.clone().json()));
+    const body = await done.json();
+    assert.deepEqual([body.from, body.to, body.card.category], ['one', 'two', 'brief']);
+    assert.equal(entity('one', 'alpha'), undefined);
+    assert.equal(entity('two', 'alpha').folder, 'alpha');
+    assert.equal(fake.json('sections/one/workspace.json').retired.alpha.to, 'two');
+    assert.equal(fake.text('sections/two/alpha/index.html'), '<h1>alpha</h1>');
+    assert.equal(fake.text('sections/one/alpha/index.html'), '<h1>alpha</h1>', 'The source file stays.');
+    assert.equal(stateOf('two', 'alpha')?.pinned, true);
+    assert.equal(stateOf('one', 'alpha'), null);
+    assert.ok(!fake.log.some(entry => entry.method === 'DELETE'));
+  } finally { await close(); }
+});
+
+test('a move needs write access to both workspaces on the development copy and the Origin gate on the site', async () => {
+  const dev = await fixture({ dev: devOnly, stateKey: 'dev-state.json' });
+  try {
+    for (const id of ['dev-a', 'dev-b']) dev.fake.seed(`sections/${id}/workspace.json`, `${JSON.stringify({ entities: id === 'dev-a' ? [card('probe')] : [] })}\n`, 'application/json');
+    dev.fake.seed('sections/dev-a/probe/index.html', '<h1>probe</h1>', 'text/html');
+    assert.equal((await dev.request('/cards/move', { workspace: 'dev-a', id: 'probe', to: 'one' })).status, 403, 'Into a real workspace.');
+    assert.equal((await dev.request('/cards/move', { workspace: 'one', id: 'alpha', to: 'dev-b' })).status, 403, 'Out of a real workspace.');
+    assert.equal((await dev.request('/cards/move', { workspace: 'dev-a', id: 'probe', to: 'dev-b' })).status, 200);
+  } finally { await dev.close(); }
+  const gated = await fixture({ requireRemoteUser: true });
+  try {
+    const noOrigin = await fetch(`${gated.origin}/api/cards/move`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify({ workspace: 'one', id: 'alpha', to: 'two' }) });
+    assert.equal(noOrigin.status, 403);
+    assert.ok(gated.entity('one', 'alpha'));
+  } finally { await gated.close(); }
+});

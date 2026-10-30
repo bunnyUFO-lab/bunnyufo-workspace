@@ -374,7 +374,13 @@ export function createSiteApi({
         return json(response, 200, { cards: await cards.all() });
       }
 
-      const writerFor = async id => { const found = (await findSection(id)).id; return cardWriter(bucketStore(bucket, keyOf(found, '').replace(/\/$/, '')), { section: found }); };
+      const writerFor = async (id, { target = false } = {}) => {
+        const section = await findSection(id);
+        // A card moves only into a workspace that lists cards: not the Inbox or another hidden one.
+        if (target && (section.hidden || /^inbox/.test(section.id))) throw Object.assign(new Error(`"${section.name}" does not take cards.`), { status: 409 });
+        const found = section.id;
+        return cardWriter(bucketStore(bucket, keyOf(found, '').replace(/\/$/, '')), { section: found });
+      };
       if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing' || route === '/cards/responses')) {
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
         const answer = await cardRoute({ method: 'GET', route, query: url.searchParams, data: {}, writerFor });
@@ -390,8 +396,9 @@ export function createSiteApi({
         if (route === '/workspace/pins') {
           if (Array.isArray(data.list)) for (const item of data.list) mayWrite(item?.workspace ?? data.workspace);
         } else mayWrite(data.workspace);
+        if (route === '/cards/move') mayWrite(data.to);
       }
-      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor });
+      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor, state: cards });
       if (card) return json(response, card.status, card.body);
 
       // Archiving, pinning and tagging write the state object and answer at once. The card's files
