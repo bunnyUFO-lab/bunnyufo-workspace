@@ -637,6 +637,8 @@ export function checkAnswer(ask, data) {
     if (!ask.allowDrawing) throw fail('This Ask takes no drawing.');
   }
   const has = value => value !== undefined && value !== null && value !== '';
+  // An Ask with options is answered with one of them, even when it also has decisions: the lead should not have to guess.
+  if (Array.isArray(ask.options) && ask.options.length && !has(choice)) throw fail('Pick one of the options.');
   if (!has(choice) && !has(note) && !has(drawing) && !asked) throw fail('Choose an option, write a note or draw something.');
 }
 

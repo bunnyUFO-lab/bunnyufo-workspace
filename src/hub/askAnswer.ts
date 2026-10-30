@@ -58,6 +58,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const askId = ask.id
   const decisions = decisionList(ask)
   const kind = designKind(ask)
+  const needsOption = optionList(ask).length > 0
   const io = useMemo<DrawingIo | null>(() => (editing ? {
     load: async () => ({ text: editing.scene ?? (editing.image ? annotationScene(editing.image, editing.w, editing.h) : blankScene()), etag: null }),
     save: async (scene, png) => {
@@ -105,7 +106,9 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     setVerdictNote: (decision: string, text: string) => setVerdicts(previous => (previous[decision] ? { ...previous, [decision]: { ...previous[decision], note: text } } : previous)),
     choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
     // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
-    ready: decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing,
+    // An Ask with options needs one of them picked, whatever else it asks for.
+    needsOption,
+    ready: (!needsOption || !!choice) && (decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing),
     send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}) }), kind ? 'reviewed' : 'answered'),
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
