@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { moveCard } from './card-move.mjs';
+import { claimExpired } from './card-purge.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
 
@@ -213,6 +214,10 @@ export function bucketStore(bucket, prefix) {
         if (error.status === 404) return false;
         throw error;
       }
+    },
+    /** Delete one object. Used by the Trash purge (card-purge.mjs) and by nothing else. */
+    async remove(file) {
+      await bucket.del(key(file));
     },
     async write(file, body, { ifMatch } = {}) {
       const written = await bucket.put(key(file), body, ifMatch === null ? { ifNoneMatch: '*' } : ifMatch ? { ifMatch } : {});
@@ -450,6 +455,29 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         list.entities.push(entity);
         return { card: entity };
       });
+    },
+
+    /**
+     * Empty this workspace's Trash of what is more than 30 days old (card-purge.mjs says exactly what
+     * goes). The expired records are dropped from workspace.json first; only then are the files under
+     * those cards' own folders, and the removed tabs' own files, deleted. Only on the site's bucket.
+     */
+    async purgeTrash() {
+      if (typeof store.remove !== 'function') throw fail('The Trash is only emptied on the published site.', 501);
+      const claimed = await editList(async list => claimExpired(list, today(now())));
+      const keys = [];
+      for (const card of claimed.cards) {
+        for (const item of await store.list(`${card.folder}/`)) {
+          // Belt and braces: whatever the listing says, nothing outside the card's own folder.
+          if (item.file.startsWith(`${card.folder}/`)) keys.push(item.file);
+        }
+      }
+      for (const tab of claimed.tabs) keys.push(...tab.files);
+      let removed = 0;
+      for (const file of keys) {
+        if (await store.exists(file)) { await store.remove(file); removed += 1; }
+      }
+      return { cards: claimed.cards.map(card => card.id), tabs: claimed.tabs.map(tab => ({ id: tab.id, path: tab.path })), files: removed, skipped: claimed.skipped };
     },
 
     /** The card list as it is now: `{ list, etag }`. Read-only; a change goes through one of the calls below. */
@@ -747,6 +775,7 @@ export async function cardRoute({ method, route, query, data, writerFor, state }
     const target = await writerFor(data.to, { target: true });
     return { status: 200, body: await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, now: writer.now }) };
   }
+  if (route === '/cards/trash/purge') return { status: 200, body: await writer.purgeTrash() };
   if (route === '/cards/category') return { status: 200, body: await writer.renameCategory(data) };
   if (route === '/cards/section/move') return { status: 200, body: { card: await writer.moveSection(data) } };
   if (route === '/cards/section/delete') return { status: 200, body: await writer.deleteSection(data) };

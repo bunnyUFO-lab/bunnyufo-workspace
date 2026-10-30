@@ -3,6 +3,9 @@ import { restoreCard } from './cards'
 import { reportError } from '../local/client'
 import { showUndo } from './undo'
 
+/** The first day a card deleted on `at` is more than 30 days old, when the Trash lets it go for good. Same rule as site/api/card-purge.mjs. */
+export const purgeOn = (at: string) => new Date(Date.parse(`${at}T00:00:00Z`) + 31 * 86_400_000).toISOString().slice(0, 10)
+
 export interface TrashEntry { workspace: CardWorkspace; id: string; at: string; entity: WorkspaceEntity }
 
 /** The deleted cards of these workspaces, newest first. */

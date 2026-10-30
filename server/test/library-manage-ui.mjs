@@ -160,6 +160,7 @@ try {
   await page.locator('[data-trash-link]').click();
   const row = page.locator('[data-trash="plan"]');
   await row.waitFor();
+  assert.ok(!/forever/i.test(await row.innerText()), 'the local app deletes nothing, so it promises nothing');
   await row.getByRole('button', { name: 'Restore' }).click();
   await card('plan').waitFor();
   assert.equal((await listOf(alpha)).retired, undefined, 'restore emptied the Trash record');
