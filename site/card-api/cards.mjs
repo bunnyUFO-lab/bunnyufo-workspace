@@ -46,7 +46,7 @@
 //        or ~/.buw/secrets/discord-owner-user-id); a dev inbox never mentions anyone.
 //        A simple multiple-choice Ask (2 to 5 options, no pictures, no drawing) also gets Discord buttons once the
 //        Asks bot runs. --require-passkey (or "requirePasskey": true in ask.json) keeps an Ask in the Hub, where only you,
-//        signed in, can answer it: set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
+//        signed in with your passkey, can answer it (the passkey is a sign-in check; the answer itself is not signed): set it on any Ask that approves a merge, a deploy, spending, a deletion or secrets.
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
 //        "avatar" in the file marks an Ask of the sprite flow: { agent, request, subject? } (pick one of four variants) or { agent, sheet }
 //        (use this sheet?); the Hub acts on the answer. Use it with --require-passkey.
@@ -58,6 +58,9 @@
 //   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json; for a design
 //        review also one line per decision ("d1 approve", "d2 change: Bottom-left")
 //   cards ask pickup <id> | cards ask cancel <id>                     exit 3 when someone else already did
+//   cards ask wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>] [--json]
+//        exit 0 once answered (prints what get prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or when the
+//        Ask expired; a snoozed Ask keeps waiting
 //   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]
 //        [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
 //        put a checklist for the owner to tick off in the Hub (a list of steps, each with an optional guide) and post a
@@ -952,6 +955,49 @@ async function askGet(id) {
   if (others.length) console.log(`== other files\n${others.join('\n')}`);
 }
 
+/** Wait for the owner's answer. Exit 0 once answered (prints what `get` prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or an expired Ask. */
+async function askWait(id, flags) {
+  id = idSafe(id);
+  const minutes = flags.timeout === undefined ? 30 : Number(flags.timeout);
+  const seconds = flags.every === undefined ? 20 : Number(flags.every);
+  if (!(minutes > 0) || minutes > 240) throw new Error('--timeout is a number of minutes above 0 and at most 240.');
+  if (!(seconds >= 5)) throw new Error('--every is a number of seconds, at least 5.');
+  const deadline = Date.now() + minutes * 60_000;
+  const read = async () => {
+    const names = new Set((await listInbox(`asks/${id}/`)).map(file => file.split('/').slice(2).join('/')));
+    if (!names.size) throw new Error(`No ask ${id}.`);
+    const ask = names.has('ask.json') ? await readJson(inboxPath('asks', id, 'ask.json')) : null;
+    const snooze = names.has('snooze.json') && !['cancel.json', 'pickup.json', 'answer.json'].some(name => names.has(name)) ? await readJson(inboxPath('asks', id, 'snooze.json')) : null;
+    return { names, ask, state: askState(names, ask, snooze) };
+  };
+  for (let first = true; ; first = false) {
+    let view;
+    try {
+      view = await read();
+    } catch (error) {
+      if (first || /^No ask/.test(error.message)) throw error;
+      console.error(`(poll failed, trying again: ${error.message})`);
+    }
+    if (view) {
+      if (view.state === 'cancelled') { console.log(`${id}	cancelled`); throw new Exit(3); }
+      if (view.state === 'answered' || view.state === 'picked up') {
+        if (flags.json) {
+          const answer = view.names.has('answer.json') ? await readJson(inboxPath('asks', id, 'answer.json')) : null;
+          console.log(JSON.stringify({ ask: view.ask, answer }));
+        } else await askGet(id);
+        return;
+      }
+      if (view.state === 'expired' || Date.now() >= deadline) {
+        console.log(`${id}	${view.state}	${view.ask?.project ?? ''}	(${view.state === 'expired' ? 'expired' : `timed out after ${minutes} min`})`);
+        throw new Exit(4);
+      }
+    } else if (Date.now() >= deadline) {
+      throw new Exit(4);
+    }
+    await delay(Math.max(0, Math.min(seconds * 1000, deadline - Date.now())));
+  }
+}
+
 /** pickup.json and cancel.json, and taken.json for a request: create-only, and the second one in learns who was first. */
 async function claim(folder, id, file, body) {
   const target = inboxPath(folder, id, file);
@@ -1601,6 +1647,7 @@ async function inbox(command, args) {
   if (command === 'ask' && sub === 'create') return askCreate(flags);
   if (command === 'ask' && sub === 'list') return askList(flags);
   if (command === 'ask' && sub === 'get' && id) return askGet(id);
+  if (command === 'ask' && sub === 'wait' && id) return askWait(id, flags);
   if (command === 'ask' && sub === 'pickup' && id) return claim('asks', idSafe(id), 'pickup.json', pickupBody(flags));
   if (command === 'ask' && sub === 'cancel' && id) return claim('asks', idSafe(id), 'cancel.json', { at: isoNow(), by: hostName() });
   if (command === 'checklist' && sub === 'create') return checklistCreate(flags);

@@ -174,6 +174,47 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`ask wait (${via}): answered, cancelled, timeout, snoozed, json`, async () => {
+    const { fake, cli, close } = await setup();
+    try {
+      const make = async question => {
+        const created = await cli(via, 'ask', 'create', '--project', 'probe', '--question', question);
+        assert.equal(created.code, 0, created.stderr);
+        return created.stdout.trim().split('\n').at(-1);
+      };
+      const answerOf = choice => JSON.stringify({ at: new Date().toISOString(), by: 'owner', choice });
+      const [plain, snoozed, asJson, cancelled, quiet] = await Promise.all(['May I?', 'May I later?', 'May I as JSON?', 'May I not?', 'May I wait?'].map(make));
+
+      assert.equal((await cli(via, 'ask', 'wait', quiet, '--every', '1')).code, 1, '--every is at least 5.');
+      assert.equal((await cli(via, 'ask', 'wait', quiet, '--timeout', '241')).code, 1, '--timeout is at most 240.');
+      assert.equal((await cli(via, 'ask', 'wait', '20990101-probe-nothing-a1b2')).code, 1, 'No such ask.');
+      const timedOut = await cli(via, 'ask', 'wait', quiet, '--timeout', '0.05', '--every', '5');
+      assert.equal(timedOut.code, 4);
+      assert.match(timedOut.stdout, /timed out/);
+
+      assert.equal((await cli(via, 'ask', 'cancel', cancelled)).code, 0);
+      assert.equal((await cli(via, 'ask', 'wait', cancelled, '--timeout', '1', '--every', '5')).code, 3);
+
+      fake.seed(`sections/inbox/asks/${snoozed}/snooze.json`, JSON.stringify({ at: new Date().toISOString(), until: new Date(Date.now() + 3600_000).toISOString() }), 'application/json');
+      const waits = [
+        cli(via, 'ask', 'wait', plain, '--timeout', '1', '--every', '5'),
+        cli(via, 'ask', 'wait', snoozed, '--timeout', '1', '--every', '5'),
+        cli(via, 'ask', 'wait', asJson, '--timeout', '1', '--every', '5', '--json'),
+      ];
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      for (const id of [plain, snoozed, asJson]) fake.seed(`sections/inbox/asks/${id}/answer.json`, answerOf('later'), 'application/json');
+      const [answered, afterSnooze, json] = await Promise.all(waits);
+      assert.equal(answered.code, 0, answered.stderr);
+      assert.match(answered.stdout, /== ask\.json[\s\S]*== answer\.json[\s\S]*"choice":"later"/);
+      assert.equal(afterSnooze.code, 0, afterSnooze.stderr);
+      assert.match(afterSnooze.stdout, /"choice":"later"/);
+      assert.equal(json.code, 0, json.stderr);
+      const parsed = JSON.parse(json.stdout);
+      assert.equal(parsed.ask.question, 'May I as JSON?');
+      assert.equal(parsed.answer.choice, 'later');
+    } finally { await close(); }
+  });
+
   test(`checklist (${via}): create from a file and from flags, list, get, wait, pickup, cancel`, async () => {
     const { fake, cli, keys, dir, close } = await setup();
     const file = path.join(dir, 'checklist.json');
