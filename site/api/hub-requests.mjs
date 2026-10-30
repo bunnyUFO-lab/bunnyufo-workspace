@@ -7,7 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
-import { RULES, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
+import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createPublicKey } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
@@ -121,8 +121,8 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
   }
   if (data.subject !== undefined && data.subject !== null) {
     if (!fromOwner) throw fail('Only the site can record a subject.');
-    const subject = text(data.subject, REQUEST_LIMITS.subject, 'The subject');
-    if (subject) out.subject = subject.replace(/[\s\u0085]+/g, ' ');
+    if (typeof data.subject !== 'string' || !SUBJECT_RE.test(data.subject)) throw fail('The subject is a path of up to 200 letters, digits, spaces and . _ / : -.');
+    out.subject = data.subject;
   }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
@@ -434,6 +434,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
+    // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
+    if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
     const chosen = target ?? request.target;
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
@@ -639,6 +641,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }), null, id);
   }
 
+  /** True when the site API wrote this request.json (its metadata says so; a body cannot). */
+  async function siteWrote(id) {
+    return (await bucket.head(key(`requests/${id}/request.json`)).catch(() => null))?.metadata?.writer === 'site';
+  }
+
   /**
    * The request and its approval, when the approval is the server's own: `approved.json` verifies with the public half of the
    * signing key, names this request, covers the bytes of `request.json` as they are now, and carries the expected preset.
@@ -646,8 +653,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    */
   async function verifiedRun(id, { preset: expected, at }) {
     needKey();
-    const { names, request } = await loadOne(id, at);
+    const { names, request, state } = await loadOne(id, at);
     if (!names.has('approved.json')) throw fail('That request was never approved.', 409);
+    if (names.has('stop.json') || names.has('declined.json') || ['stopped', 'stopping', 'declined', 'lost'].includes(state)) throw fail('That request was stopped or declined, so it cannot start a sheet run.', 409);
     const [stored, signed] = await Promise.all([bucket.getBytes(key(`requests/${id}/request.json`)), bucket.getJson(key(`requests/${id}/approved.json`))]);
     const approved = signed?.value;
     if (!stored || !approved) throw fail('That request cannot be read.', 409);
@@ -657,5 +665,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved };
   }
 
-  return { createFixed, verifiedRun, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  return { createFixed, verifiedRun, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }
