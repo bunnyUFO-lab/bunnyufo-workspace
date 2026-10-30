@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, canonicalHubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, canonicalHubHash, hubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -59,13 +59,25 @@ function readRoute(): Route {
   return parseHash()
 }
 
+/**
+ * The route at the first render only. A phone opens on the Hub's Today, not the cards' home, when there is no hash. It is not
+ * `readRoute`, which also runs on Back and on hashchange: there an empty address is the cards' home and must stay it. Replaced in
+ * place, so Back does not return to an empty address.
+ */
+function initialRoute(): Route {
+  if (host.hub && !window.location.hash && window.matchMedia('(max-width: 640px)').matches) {
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + hubHash('today'))
+  }
+  return readRoute()
+}
+
 export default function App() {
   const { data, offline, lastSync } = useWorkspace()
   // Pin, reorder and archive are offered wherever something can write them: the local
   // service, or a published site running the write API. Everywhere else the cards stay
   // read-only, which is what a site without that API has always been.
   const canWrite = useCanWrite()
-  const [route, setRoute] = useState<Route>(readRoute)
+  const [route, setRoute] = useState<Route>(initialRoute)
   // The Hub's one `/today` poll: the sidebar badge, the phone's tab bar and the Today screen all read it.
   const today = useHubData<Today>(host.hub ? '/today' : null)
   const needsYou = today.data?.counts.needsYou ?? 0
