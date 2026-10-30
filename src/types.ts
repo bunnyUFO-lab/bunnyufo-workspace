@@ -54,12 +54,16 @@ export interface RemovedTab extends WorkspaceStep {
   at: string
   index: number
   wasDefault?: boolean
+  /** Being deleted for good: it can no longer be restored. */
+  pending?: boolean
 }
 
 /** A workspace.json `retired` record: a card moved to another workspace, or in this one's Trash. */
 export type RetiredCard =
   | { kind: 'moved'; to: string; folder: string; at: string }
   | { kind: 'deleted'; at: string; entity: WorkspaceEntity }
+  /** Emptied for good after 30 days in the Trash: only the id stays taken. */
+  | { kind: 'purged'; at: string; folder?: string; pending?: boolean }
 
 export interface WorkspaceState {
   entities: WorkspaceEntity[]

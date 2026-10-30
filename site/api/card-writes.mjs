@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { moveCard } from './card-move.mjs';
-import { claimExpired } from './card-purge.mjs';
+import { claimExpired, finishPurge } from './card-purge.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
 
@@ -233,14 +233,17 @@ export function bucketStore(bucket, prefix) {
  */
 export function cardWriter(store, { now = () => new Date(), retries = 4, section = '' } = {}) {
   /** Read the card list, let `change` edit it, and write it back only if nobody else did meanwhile. */
-  async function editList(change) {
+  async function editList(change, { quiet = false } = {}) {
     for (let attempt = 1; ; attempt += 1) {
       const got = await store.read('workspace.json');
       if (!got) throw fail('This workspace has no card list (workspace.json).', 404);
       let list;
       try { list = JSON.parse(got.text); } catch { throw fail('This workspace\'s workspace.json is not valid JSON.', 409); }
       if (!Array.isArray(list.entities)) list.entities = [];
+      const before = quiet ? JSON.stringify(list) : null;
       const result = await change(list);
+      // A change that found nothing to do leaves the file, and its ETag, alone.
+      if (quiet && JSON.stringify(list) === before) return result;
       try {
         await store.write('workspace.json', `${JSON.stringify(list, null, 2)}\n`, { ifMatch: got.etag });
         return result;
@@ -410,6 +413,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         const removed = Array.isArray(card.removedTabs) ? card.removedTabs : [];
         const at = removed.map(item => item?.path).lastIndexOf(file);
         if (at < 0) throw fail('That card has no removed section with that file.', 404);
+        if (removed[at].pending === true) throw fail('That section is being removed for good; it cannot be restored.', 409);
         if (card.steps.some(item => item?.path === file)) throw fail('A section with that file is already on the card.', 409);
         const { at: _when, index, wasDefault, ...step } = removed[at];
         const place = Math.min(Math.max(Number.isInteger(index) ? index : card.steps.length, 0), card.steps.length);
@@ -464,20 +468,24 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
      */
     async purgeTrash() {
       if (typeof store.remove !== 'function') throw fail('The Trash is only emptied on the published site.', 501);
-      const claimed = await editList(async list => claimExpired(list, today(now())));
-      const keys = [];
-      for (const card of claimed.cards) {
+      // 1. Claim: the expired records become tombstones, in one conditional write (none when nothing is due).
+      const plan = await editList(async list => claimExpired(list, today(now())), { quiet: true });
+      // 2. Delete: only under the tombstones' folders and the pending tabs' own files, and never a file a live tab uses.
+      const keys = new Set();
+      for (const card of plan.cards) {
         for (const item of await store.list(`${card.folder}/`)) {
           // Belt and braces: whatever the listing says, nothing outside the card's own folder.
-          if (item.file.startsWith(`${card.folder}/`)) keys.push(item.file);
+          if (item.file.startsWith(`${card.folder}/`)) keys.add(item.file);
         }
       }
-      for (const tab of claimed.tabs) keys.push(...tab.files);
+      for (const tab of plan.tabs) for (const file of tab.files) keys.add(file);
       let removed = 0;
       for (const file of keys) {
         if (await store.exists(file)) { await store.remove(file); removed += 1; }
       }
-      return { cards: claimed.cards.map(card => card.id), tabs: claimed.tabs.map(tab => ({ id: tab.id, path: tab.path })), files: removed, skipped: claimed.skipped };
+      // 3. Finish: clear `pending` (nothing is written when there was nothing pending).
+      if (plan.cards.length || plan.tabs.length) await editList(async list => finishPurge(list, plan), { quiet: true });
+      return { cards: plan.cards.map(card => card.id), tabs: plan.tabs.map(tab => ({ id: tab.id, path: tab.path })), files: removed, skipped: plan.skipped };
     },
 
     /** The card list as it is now: `{ list, etag }`. Read-only; a change goes through one of the calls below. */
@@ -496,7 +504,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         if (list.entities.some(item => item?.id === entity.id || (entity.folder && item?.folder === entity.folder))) {
           throw fail('A card with that id or folder is already here.', 409);
         }
-        if (list.retired?.[entity.id]?.kind === 'deleted') throw fail('A card with that id is in the Trash of this workspace; restore it first.', 409);
+        if (['deleted', 'purged'].includes(list.retired?.[entity.id]?.kind)) throw fail('A card with that id is in the Trash of this workspace; restore it first.', 409);
         list.entities.push(entity);
         if (list.retired) {
           delete list.retired[entity.id];

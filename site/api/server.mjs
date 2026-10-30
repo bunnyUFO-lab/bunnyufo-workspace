@@ -352,6 +352,8 @@ export function createSiteApi({
           create: !!bucket && template,
           // Making cards and editing their Markdown sections: puts into a section that exists.
           cards: !!bucket && known.size > 0,
+          // The Trash empties itself after 30 days (card-purge.mjs).
+          purge: !!bucket && known.size > 0,
           sections: [...known.keys()],
           store: cards.kind,
           cardApi: cardApi || null,

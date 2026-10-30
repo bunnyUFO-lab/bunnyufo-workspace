@@ -39,6 +39,8 @@ export interface HostCapabilities {
   approveReason: string | null
   /** The kinds of request the server signs without a tap (empty while policy is off). */
   policy: string[]
+  /** The Trash empties itself after 30 days here (the published site's bucket; never the local app). */
+  purge: boolean
   /** Why this host is read-only, in its own words (it names where to sign in), or null. */
   reason: string | null
   /** The card API's address (http or https) when the host knows it, else null. */
@@ -50,7 +52,7 @@ export interface HostCapabilities {
 }
 
 const NONE: HostCapabilities = {
-  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, approve: false, approveReason: null, policy: [], reason: null, cardApi: null, contentOrigin: null,
+  write: false, create: false, cards: false, files: false, mcp: false, saves: false, settings: false, workspaces: false, live: false, routes: 'path', hub: false, chat: false, approve: false, approveReason: null, policy: [], purge: false, reason: null, cardApi: null, contentOrigin: null,
 }
 
 export let host: HostCapabilities = NONE
@@ -92,6 +94,7 @@ export async function probeHost(): Promise<void> {
       hub: !!answer.hub, chat: !!answer.chat,
       approve: answer.approve === true, approveReason: typeof answer.approveReason === 'string' ? answer.approveReason : null,
       policy: Array.isArray(answer.policy) ? answer.policy.filter((kind): kind is string => typeof kind === 'string') : [],
+      purge: answer.purge === true,
       reason: typeof answer.reason === 'string' ? answer.reason : null,
       cardApi: typeof answer.cardApi === 'string' && /^https?:\/\//.test(answer.cardApi) ? answer.cardApi : null,
       contentOrigin: typeof answer.contentOrigin === 'string' && /^https?:\/\//.test(answer.contentOrigin) ? new URL(answer.contentOrigin).origin : null,
