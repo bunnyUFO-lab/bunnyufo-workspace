@@ -333,7 +333,8 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
 | `GET /api/hub/presets`, `/presets/route?preset=&project=&repo=`, `/presets/brief?request=` | The eight presets for the Spawn sheet (no templates) with the five routing rules; where a job would run (`{ target, rule, why }`); the rendered brief of a request the owner starts at the PC (400 for any other) |
 | `GET /api/hub/requests/:id` | One request: `{ request, state, approved?, taken?, runs, result?, hermesRun?, retry?, fires, stop?, declined?, files, report }`. `runs` and `fires` are the newest 20 `run-*` and `fire-*` files, newest first; `approved` comes without `run.brief`; 404 for an id that is not a request |
-| `POST /api/hub/requests/:id/approve` | `{ target? }`: sign `approved.json` (Ed25519, key `HUB_SIGNING_KEY`) and hand the request to its target. 201 `{ state, approved (without run.brief), waiting? }`. 503 without a key, 400 for a target the preset does not allow, an `at-pc` request or a cloud run without a repo, 409 unless the state is `proposed`. No cap is checked: a full target makes the request wait in `approved` and `waiting` says why |
+| `POST /api/hub/requests/:id/approve` | `{ target? }`: sign `approved.json` (Ed25519, key `HUB_SIGNING_KEY`) and hand the request to its target. 201 `{ state, approved (without run.brief), waiting?, cloud? }`. 503 without a key, 400 for a target the preset does not allow, an `at-pc` request, a cloud run without a repo or a repo with no cloud routine (nothing is signed), 409 unless the state is `proposed`. No cap is checked: a full target makes the request wait in `approved` and `waiting` says why. For `cloud`, `cloud` is `{ fired, reason?, next? }` (`reason` `daily-cap` with `next` the owner's next midnight, or the failure of the fire); a failed fire is still a 201 and the approval stands |
+| `POST /api/hub/requests/:id/fire` | Retry: fire the repo's cloud routine again. Needs a signed-in user (401). 200 `{ fired, reason?, fire }`. 409 unless the request is `approved` for `cloud`, when the newest ok fire is under 10 minutes old (it names the minutes), when today's cap is used (it names the reset time) or when the approval fails the server's own check (signature with the server's public key, `requestSha256` against the stored `request.json`, `expires`) |
 | `POST /api/hub/requests/:id/stop` | `{ reason? }`: a signed `stop.json`, in `approved`, `expired`, `taken`, `running` or `lost`; a Hermes run is stopped too |
 | `POST /api/hub/requests/:id/again` | `{ target?, text?, title? }`: for an `expired`, `failed`, `lost` or `proposed` request. Makes a new request that `replaces` it, approves that one, and retires the old: a proposal gets `declined.json`, the others a signed stop naming the new id. Answers `{ id, state, approved, waiting? }` |
 | `GET /api/hub/requests/:id/events` | Server-sent events of a Hermes request run: `message.delta`, `tool.started`, `tool.completed`, `approval.request`, `approval.settled`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted`, then `state { state }` and the end. The site's follower feeds it (recent events are replayed); closing the page never stops the run. 409 when the request has no Hermes run; a finished request answers `state` at once |
@@ -375,7 +376,7 @@ without a `preset` is a legacy one (`when` set, no approval) and is only ever `o
 | `approved.json`, `stop.json` | the site API | the signed approval and the signed stop |
 | `taken.json` | the runner | who took it and when |
 | `run-<stamp>.json` | the run | a progress line; the newest decides whether it still runs |
-| `fire-<stamp>.json` | the site API | one cloud-routine fire attempt |
+| `fire-<stamp>-<rand4>.json` | the site API | one cloud-routine fire attempt: `{ v: 1, at, routine, ok, status, session?, sessionId?, reason?, dryRun?, by: hub \| sweep }`. Create-only, one per attempt, so a fire that answered 200 and started nothing can be tried again. `reason` is `network`, `timeout` or `http-<code>`. The routine's URL and token are never written anywhere |
 | `hermes-run.json`, `hermes-retry.json` | the site API | the Hermes run, and the one retry on quota |
 | `result.json`, `report.md` | the run (`hub` for Hermes and `at-pc`) | `outcome` (`pr`, `card`, `failed`, `manual`, `question`, `unknown`), `summary`, `question` (600) when it asks; the report is Markdown up to 256 KB, served at `/api/hub/file?path=requests/<id>/report.md` |
 | `declined.json` | the site API | `{ at, by, reason? }` |
@@ -456,6 +457,17 @@ signatures per Pacific day (`America/Los_Angeles`), counted from the day's `appr
 tap does not count); over it a proposal stays with the note "Policy limit reached today" and a tap still signs it.
 `/api/capabilities` `policy` lists the active kinds. Until the card API leaves `writer: agent` on an agent session's
 `request.json`, only the site's own requests are signed.
+
+Cloud runs (`routines.mjs`): a repo has a cloud target when the site API's environment holds the pair
+`CLAUDE_ROUTINE_<REPO_KEY>_URL` and `_TOKEN` (`REPO_KEY` is the repo's name part in capitals with every other character
+as `_`: `owner/my-repo` is `MY_REPO`). A half pair is logged once by key name and ignored. `CLAUDE_ROUTINE_<REPO_KEY>_REPO=owner/name` is required: the routine serves only that exact repo. Without it the routine is refused (fail closed): nothing is sent, the fire record has `reason: routine-repo-unset` and the log says which key is missing. Approving a cloud request signs
+it, then fires the routine with one POST whose body is exactly `{"text":"<request id>"}` (the routine fetches the signed
+approval itself), unless today's count of ok fires has reached `HUB_CLOUD_DAILY` (default 10): then the request waits in
+`approved`. A day is the owner's day in `HUB_TIME_ZONE` (an IANA name, default `UTC`). Every attempt is one
+`fire-<stamp>-<rand4>.json`. Retry (`POST …/fire`) checks the approval again with the server's own public key before it
+fires. `HUB_ROUTINE_BETA` overrides the beta header. `HUB_ROUTINE_DRY_RUN=1` makes every repo count as having a routine
+and sends nothing; the record carries `dryRun: true`, and it wins over real keys. The URL and the token are never logged
+or stored. `/api/capabilities` `cloudRepos` lists the repo keys that have a routine.
 
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
