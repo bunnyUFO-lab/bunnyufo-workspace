@@ -194,7 +194,10 @@ try {
     step(`${label}: a read-only copy says "Sign in to mark this." and sends nothing`);
     const model = {
       project: 'rodev', ageMinutes: 1, sprints: [], wayfinder: null, meta: { pushedAt: new Date().toISOString(), host: 'h', count: 3, repo: 'example/rodev' },
-      milestones: [{ id: 'ro-m', title: 'Read-only milestone', state: 'you', features: [{ id: 'ro-f', title: 'Read-only feature', state: 'you', tasks: [{ id: 'ro-t', title: 'Waits on you', state: 'you', you: 'label', status: 'open', signs: [], sprints: [], deps: [] }] }] }],
+      milestones: [{ id: 'ro-m', title: 'Read-only milestone', state: 'you', features: [{ id: 'ro-f', title: 'Read-only feature', state: 'you', tasks: [
+        { id: 'ro-t', title: 'Waits on you', state: 'you', you: 'label', status: 'open', signs: [], sprints: [], deps: [] },
+        { id: 'ro-marked', title: 'Already marked', state: 'done', status: 'closed', signs: [], sprints: [], deps: [], mark: { verdict: 'done', at: new Date().toISOString(), pending: true } },
+      ] }] }],
     };
     const canned = {
       '/api/capabilities': { write: false, create: false, cards: false, hub: true, chat: false, reason: 'Read-only here.' },
@@ -226,6 +229,10 @@ try {
       await panel.waitFor();
       await panel.locator('[data-readonly-note]', { hasText: 'Sign in to mark this.' }).waitFor();
       assert.equal(await panel.locator('[data-mark-done]').count(), 0);
+      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-marked`);
+      await panel.locator('[data-mark-pending]').waitFor();
+      assert.equal(await panel.locator('button').filter({ hasText: /Undo|Mark done|No longer needed/ }).count(), 0, 'A marked task has no buttons on a read-only copy.');
+      await panel.locator('[data-readonly-note]', { hasText: 'Sign in to undo this.' }).waitFor();
       assert.deepEqual(writes, [], 'Nothing was sent.');
     } finally { stub.close(); }
   }

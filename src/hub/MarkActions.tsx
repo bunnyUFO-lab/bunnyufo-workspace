@@ -41,7 +41,9 @@ export default function MarkActions({ task, project, projectName, eligible, erro
       <div className="hub-map-panel-mark" data-mark-pending>
         <p className="hub-muted">You marked this {task.mark.verdict === 'not-needed' ? 'not needed' : 'done'}{date ? ` on ${date}` : ''}. Beads closes it the next time an agent works in {projectName}.</p>
         {failed}
-        <div className="hub-actions start"><button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button></div>
+        {host.write
+          ? <div className="hub-actions start"><button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button></div>
+          : <p className="hub-muted" data-readonly-note>Sign in to undo this.</p>}
       </div>
     )
   }
