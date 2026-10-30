@@ -2,7 +2,7 @@
 // helpers. Every request carries the local service's bearer token when there is one, so the same
 // code runs against the published site and the local app.
 import { authHeaders } from '../local/client'
-import type { PcSummary, WorkingItem } from './hubPc'
+import type { PcSummary, PcWake, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
 import { holdReload } from './reloadGate'
 
@@ -140,6 +140,8 @@ export interface Today {
   /** From the PC's status, else from events. Absent from an older site API. */
   working?: WorkingItem[]
   pc?: PcSummary | null
+  /** Whether the PC is awake, waking or off, and whether a wake is set up. Absent from an older site API. */
+  wake?: PcWake
   /** Cloud runs fired today against the daily cap; absent when no cloud routine is set up. */
   cloud?: { used: number; cap: number; next: string }
   /** Things the owner could do now: a PC request that has waited 6 hours can move to the cloud. */

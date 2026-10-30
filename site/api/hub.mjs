@@ -36,6 +36,7 @@ import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
+import { createWake } from './pc-wake.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
@@ -312,6 +313,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const got = await fresh(`pc/${newest}`);
     return got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
   }
+
+  // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
+  const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
+  requestFiles.hooks.wakeOnApprove = async ({ by, at }) => wake.onApproval({ status: await loadPcStatus(at).catch(() => null), by, at });
 
   /** Hermes `/health` (no key, 1.5 s), cached for 60 s. `null` when HERMES_URL is not set. */
   let hermesHealth = { at: 0, value: null };
@@ -1064,10 +1069,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
             const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
-            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null });
+            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
-            reply({ pc: status ? pcSummary(status, at) : null, status });
+            reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });
           } else if (route === '/hub/inbox') {
             const filter = inboxFilter(query.get('filter'));
             const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
@@ -1175,6 +1180,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
+        } else if (route === '/hub/pc/wake') {
+          if (!user) throw fail('Sign in to wake the PC.', 401);
+          send(await wake.send({ by: user, at }));
         } else if (route === '/hub/requests') {
           send(await requestFiles.create(raw, user, at));
         } else if ((match = /^\/hub\/hermes-approvals\/([^/]+)\/answer$/.exec(route))) {

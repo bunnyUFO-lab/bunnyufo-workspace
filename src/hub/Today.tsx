@@ -199,7 +199,7 @@ export default function Today() {
           ) : null}
           <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} />
           <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
-          {data.pc && <PcTile pc={data.pc} />}
+          {(data.pc || data.wake?.wakeAvailable) && <PcTile pc={data.pc ?? null} wake={data.wake} />}
         </div>
       </div>
     </div>
