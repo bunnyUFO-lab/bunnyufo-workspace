@@ -20,7 +20,7 @@ export const MOVE_AFTER_MS = 6 * 3600 * 1000;
 /** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
-export const REQUEST_LIMITS = { text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
+export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
 /** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
@@ -107,6 +107,22 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     if (typeof doneBy !== 'object' || Array.isArray(doneBy) || !ORIGIN_KINDS.includes(doneBy.kind)) throw fail('The "done when" origin is { kind: owner, agent or run, name }.');
     const doneByName = text(doneBy.name, REQUEST_LIMITS.name, 'The "done when" origin name');
     out.doneWhenOrigin = { kind: doneBy.kind, ...(doneByName ? { name: doneByName } : {}) };
+  }
+  // The avatar sheet request (the site API makes it after the owner picks a variant): the Ask, the pick and the subject it names.
+  if (data.fromAsk !== undefined && data.fromAsk !== null) {
+    if (!fromOwner) throw fail('Only the site can say which Ask a request came from.');
+    if (!validId(data.fromAsk)) throw fail('The Ask is an Ask id.');
+    out.fromAsk = data.fromAsk;
+  }
+  if (data.choice !== undefined && data.choice !== null) {
+    if (!fromOwner) throw fail('Only the site can record a pick.');
+    if (typeof data.choice !== 'string' || !/^[a-d]$/.test(data.choice)) throw fail('The pick is a to d.');
+    out.choice = data.choice;
+  }
+  if (data.subject !== undefined && data.subject !== null) {
+    if (!fromOwner) throw fail('Only the site can record a subject.');
+    const subject = text(data.subject, REQUEST_LIMITS.subject, 'The subject');
+    if (subject) out.subject = subject.replace(/[\s\u0085]+/g, ' ');
   }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
@@ -606,5 +622,40 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return actions[action](id, raw, user, at);
   }
 
-  return { loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  /**
+   * A request the site makes itself, under an id it chooses (create-only: a second call is a 409). Used for the avatar sheet
+   * run, which a request body cannot ask for. `data` is checked like an owner's request; `origin` is the owner's.
+   */
+  async function createFixed(data, { id, user, at }) {
+    if (!validId(id)) throw fail('That is not a request id.', 400);
+    const clean = checkRequest(data, { fromOwner: true });
+    const preset = presetOf(clean.preset);
+    if (!preset) throw fail('There is no such preset.', 400);
+    const needs = preset.needs.length ? preset.needs : undefined;
+    const routed = route({ preset, project: clean.project, needs: needs ?? [], cloudRepos: cloudRepos() });
+    return writeNew(clean.project, clean.text, at, newId => ({
+      id: newId, ...clean, ...(needs ? { needs } : {}), target: clean.target ?? routed.target,
+      createdAt: at.toISOString(), by: user || 'local', origin: { kind: 'owner', name: user || 'local' },
+    }), null, id);
+  }
+
+  /**
+   * The request and its approval, when the approval is the server's own: `approved.json` verifies with the public half of the
+   * signing key, names this request, covers the bytes of `request.json` as they are now, and carries the expected preset.
+   * Throws a 409 with the reason otherwise. Never reads an approval it did not sign.
+   */
+  async function verifiedRun(id, { preset: expected, at }) {
+    needKey();
+    const { names, request } = await loadOne(id, at);
+    if (!names.has('approved.json')) throw fail('That request was never approved.', 409);
+    const [stored, signed] = await Promise.all([bucket.getBytes(key(`requests/${id}/request.json`)), bucket.getJson(key(`requests/${id}/approved.json`))]);
+    const approved = signed?.value;
+    if (!stored || !approved) throw fail('That request cannot be read.', 409);
+    if (!verify(approved, createPublicKey(signingKey))) throw fail('The approval of that request does not verify.', 409);
+    if (approved.request !== id || approved.requestSha256 !== sha256Hex(stored.buffer)) throw fail('The approval does not match that request.', 409);
+    if (approved.run?.preset !== expected || request.preset !== expected) throw fail(`That request is not a ${expected} request.`, 409);
+    return { request: checkedRequest(id, stored.buffer), approved };
+  }
+
+  return { createFixed, verifiedRun, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }
