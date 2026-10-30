@@ -267,7 +267,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       Connection: 'keep-alive',
     });
     const emit = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
-    if (runTurn) { active.set(runId, { user: user ?? null, conversation: id }); emit('started', { conversation: id, run: runId }); }
+    if (runTurn) active.set(runId, { user: user ?? null, conversation: id });
+    emit('started', { conversation: id, run: runTurn ? runId : null });   // run is null on a turn that has none to stop
     const keepalive = setInterval(() => { if (!response.destroyed) response.write(': keepalive\n\n'); }, KEEPALIVE_MS);
 
     let reply = '';

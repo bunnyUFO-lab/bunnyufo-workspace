@@ -63,6 +63,29 @@ try {
   await page.locator('.hub-error', { hasText: 'The reply was interrupted' }).waitFor();
   await page.locator('.hub-bubble.user', { hasText: 'This one breaks' }).waitFor();
   await page.locator('.hub-bubble.assistant', { hasText: 'Half a rep [interrupted]' }).waitFor();
+
+  // Stop pressed before `started`, which arrives after more than 2 s: the run is still stopped, not left to finish.
+  const slow = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const other = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+    other.setDefaultTimeout(15000);
+    await other.route('**/api/hub/chat', async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await new Promise(resolve => setTimeout(resolve, 2600));
+      return route.continue();
+    });
+    await other.goto(slow.url + '#/~hub/chat');
+    step('Stop before a late started still stops the run');
+    await other.locator('textarea[aria-label="Message"]').fill('Hold on');
+    await other.keyboard.press('Enter');
+    await other.getByRole('button', { name: 'Stop' }).click();
+    await other.waitForTimeout(3500);
+    const stopped = () => slow.hermes.stops?.length ?? 0;
+    const started = Date.now();
+    while (!stopped() && Date.now() - started < 8000) await other.waitForTimeout(100);
+    assert.equal(stopped(), 1, 'Hermes was told to stop.');
+    console.log('late-start stop: ok');
+  } finally { await slow.close?.(); }
   console.log('chat stream ui: ok');
 } finally {
   await browser.close();

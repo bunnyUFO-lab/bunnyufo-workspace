@@ -197,11 +197,9 @@ function ChatView({ id }: { id?: string }) {
   const stop = () => {
     const id = run.current
     if (id) { void hubPost('/chat/stop', { run: id }).catch(() => {}); abort.current?.abort(); return }
-    // Before `started` there is no run to name: hold the stop and send it from onStarted. A turn that
-    // never starts a run (a picture turn) is just aborted after a moment.
+    // Before `started` there is no run to name, and aborting now would leave it running on the server:
+    // hold the stop until onStarted, which sends it (or aborts, when the turn has no run).
     stopWanted.current = true
-    const controller = abort.current
-    window.setTimeout(() => { if (stopWanted.current) controller?.abort() }, 2000)
   }
 
   const release = (list: string[]) => list.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
@@ -303,7 +301,7 @@ function ChatView({ id }: { id?: string }) {
         onStarted: (id, name) => {
           run.current = id
           if (name) conversation.current = name   // a resend joins this conversation, not a second one
-          if (stopWanted.current) stop()
+          if (stopWanted.current) { stopWanted.current = false; if (id) stop(); else abort.current?.abort() }
         },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),

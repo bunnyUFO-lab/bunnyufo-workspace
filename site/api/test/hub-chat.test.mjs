@@ -333,6 +333,16 @@ test('runs on: an approval mid-turn arrives as an event, is answered through the
   } finally { await close(); }
 });
 
+test('runs on: a completions turn also says `started`, with no run to stop', async () => {
+  const { call, close } = await fixture({ env: RUNS });
+  try {
+    const result = await chat(call, { text: 'look', images: [picture(solidPng(8, 8), 'image/png')] });
+    const started = result.events.find(item => item.event === 'started');
+    assert.equal(started.data.run, null);
+    assert.match(started.data.conversation, /^\d{8}-/);
+  } finally { await close(); }
+});
+
 test('runs on: a turn with a picture stays on completions, and a failed run ends the turn with an error', async () => {
   const { upstream, call, close } = await fixture({ env: RUNS });
   try {

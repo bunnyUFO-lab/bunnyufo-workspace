@@ -8,8 +8,8 @@ export interface ChatHandlers {
   onTool?: (tool: ChatTool) => void
   onApproval?: (approval: ChatApproval) => void
   onApprovalSettled?: () => void
-  /** The reply is a run on the server: its id, so Stop can end it. */
-  onStarted?: (run: string, conversation: string) => void
+  /** The server took the message. `run` is the Hermes run Stop can end, or null on a turn that has none. */
+  onStarted?: (run: string | null, conversation: string) => void
 }
 
 /** The reply stream broke after the server had accepted the message, before `done` or `error`. */
@@ -37,7 +37,7 @@ export async function readChatStream(stream: ReadableStream<Uint8Array>, handler
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
     else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined, value.context && typeof value.context === 'object' ? value.context as ChatLine : undefined)
-    else if (event === 'started' && typeof value.run === 'string') handlers.onStarted?.(value.run, typeof value.conversation === 'string' ? value.conversation : '')
+    else if (event === 'started') handlers.onStarted?.(typeof value.run === 'string' ? value.run : null, typeof value.conversation === 'string' ? value.conversation : '')
     else if (event === 'tool' && typeof value.name === 'string') handlers.onTool?.(value as unknown as ChatTool)
     else if (event === 'approval' && typeof value.id === 'string') handlers.onApproval?.(value as unknown as ChatApproval)
     else if (event === 'approval-settled') handlers.onApprovalSettled?.()
