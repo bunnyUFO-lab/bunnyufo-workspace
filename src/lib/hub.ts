@@ -326,8 +326,10 @@ export const appUrl = (value: string | undefined): string | undefined => (value 
 export interface ChatImage { file: string; type: string; width: number; height: number }
 /** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
 export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[] }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; model?: string }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string }
+/** A model the chat may ask Hermes for: the id is all the page ever sends. */
+export interface ChatModel { id: string; label: string; note: string }
 /** What Hermes will be given for an item, as the preview route shows it. */
 export interface HelpPreview { about: ChatAbout; title: string; text: string; pictures: { path: string; label?: string }[] }
 /** The excerpt an answer or a submission carries when the owner attached a help chat. */
