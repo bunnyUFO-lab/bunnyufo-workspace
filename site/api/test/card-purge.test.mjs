@@ -54,7 +54,7 @@ test('only the folder of a card deleted over 30 days ago goes; everything else s
   try {
     w.files('2026-09-01_old/index.md', '2026-09-01_old/img/b.png', '2026-09-01_old/notes/deep/c.txt', '2026-09-02_edge/index.md',
       '2026-09-01_old-2/index.md', '2026-09-01_live/index.md', '2026-09-01_gone/index.md', '2026-10-01_fresh/index.md',
-      'card-responses/old/notes.json', '_shared/report.css', 'state.json');
+      '_shared/report.css', 'state.json');
     const before = new Set(w.fake.objects.keys());
     const answer = await w.writer.purgeTrash();
     assert.deepEqual(answer.cards.sort(), ['edge', 'old']);
@@ -64,7 +64,7 @@ test('only the folder of a card deleted over 30 days ago goes; everything else s
       'sections/one/2026-09-02_edge/index.md',
     ], 'exactly the files of the two expired cards');
     assert.deepEqual([...before].filter(key => !w.fake.objects.has(key)).sort(), w.deleted());
-    for (const kept of ['2026-09-01_old-2/index.md', 'card-responses/old/notes.json', '2026-09-01_gone/index.md', '2026-10-01_fresh/index.md', '2026-09-01_live/index.md']) {
+    for (const kept of ['2026-09-01_old-2/index.md', '2026-09-01_gone/index.md', '2026-10-01_fresh/index.md', '2026-09-01_live/index.md']) {
       assert.ok(w.fake.objects.has(`sections/one/${kept}`), kept);
     }
     const list = w.list();
@@ -87,7 +87,7 @@ test('the id of a purged card stays taken, and the tombstone cannot be restored'
     assert.equal(fresh.id, 'old-deck-2', 'A new card does not inherit the purged card\'s viewer data, pins or links.');
     await assert.rejects(w.writer.restoreCard({ id: 'old-deck' }), { status: 404 });
     await assert.rejects(w.writer.adoptCard({ entity: entity('old-deck', 'x') }), { status: 409 });
-    assert.ok(w.fake.objects.has('sections/one/card-responses/old-deck/notes.json'), 'Viewer data is left alone until the owner says.');
+    assert.ok(!w.fake.objects.has('sections/one/card-responses/old-deck/notes.json'), 'The purge took the viewer data with the card (owner answer 0e06).');
   } finally { await w.close(); }
 });
 
@@ -219,6 +219,49 @@ test('safeFile normalizes and refuses paths that leave the folder', () => {
   assert.equal(safeFile('./keep.md'), 'keep.md');
   assert.equal(safeFile('a/./b.md'), 'a/b.md');
   for (const bad of ['../x', 'a/../../x', '/abs', 'a\\b', '', '.', '..', undefined]) assert.equal(safeFile(bad), null, String(bad));
+});
+
+test('the purge also removes the viewer data of the card, after its own files, and only that card', async () => {
+  const w = await world({ name: 'One', entities: [entity('live', 'live')], retired: { old: gone('old', 'old'), fresh: gone('fresh', 'fresh', '2026-11-25') } });
+  try {
+    w.files('old/index.md', 'live/index.md', 'fresh/index.md',
+      'card-responses/old/notes.json', 'card-responses/old/pins.json', 'card-responses/old/deep/x.json',
+      'card-responses/old-2/notes.json', 'card-responses/live/notes.json', 'card-responses/fresh/notes.json', 'card-responses/oldx.json');
+    const answer = await w.writer.purgeTrash();
+    assert.deepEqual(answer.cards, ['old']);
+    assert.equal(answer.files, 4);
+    assert.deepEqual(w.deleted(), [
+      'sections/one/card-responses/old/deep/x.json', 'sections/one/card-responses/old/notes.json', 'sections/one/card-responses/old/pins.json', 'sections/one/old/index.md',
+    ], 'the files of the card and everything under card-responses/old/, nothing else');
+    const order = w.fake.log.filter(entry => entry.method === 'DELETE').map(entry => entry.key);
+    assert.equal(order[0], 'sections/one/old/index.md', 'Its own files go first.');
+    for (const kept of ['card-responses/old-2/notes.json', 'card-responses/live/notes.json', 'card-responses/fresh/notes.json', 'card-responses/oldx.json', 'live/index.md', 'fresh/index.md']) {
+      assert.ok(w.fake.objects.has(`sections/one/${kept}`), `${kept} stays`);
+    }
+    assert.equal((await w.writer.purgeTrash()).files, 0, 'A second run has nothing left to delete.');
+  } finally { await w.close(); }
+});
+
+test('a purge that stops while deleting viewer data is finished by the next run', async () => {
+  const w = await world({ entities: [], retired: { old: gone('old', 'old') } });
+  try {
+    w.files('old/index.md', 'card-responses/old/a.json', 'card-responses/old/b.json', 'card-responses/other/a.json');
+    const remove = w.store.remove.bind(w.store);
+    let calls = 0;
+    w.store.remove = async file => {
+      calls += 1;
+      if (calls === 3) throw new Error('S3 said no');
+      return remove(file);
+    };
+    await assert.rejects(w.writer.purgeTrash(), /S3 said no/);
+    assert.equal(w.list().retired.old.pending, true, 'Still pending: the next run knows.');
+    assert.ok(w.fake.objects.has('sections/one/card-responses/old/b.json'), 'The data not yet deleted is still there.');
+    const second = await w.writer.purgeTrash();
+    assert.deepEqual(second.cards, ['old']);
+    assert.equal(w.list().retired.old.pending, undefined);
+    assert.deepEqual([...w.fake.objects.keys()].filter(key => key.includes('card-responses/old/') || key.includes('/old/')), []);
+    assert.ok(w.fake.objects.has('sections/one/card-responses/other/a.json'), 'The data of another card is never touched.');
+  } finally { await w.close(); }
 });
 
 test('the claim is written before the first delete, restore after it is refused, and a restore before it wins', async () => {
