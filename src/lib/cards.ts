@@ -15,7 +15,7 @@ export async function createCard(workspace: string, title: string, description: 
   return card
 }
 
-export async function updateCard(workspace: string, id: string, fields: { title?: string; description?: string }): Promise<WorkspaceEntity> {
+export async function updateCard(workspace: string, id: string, fields: { title?: string; description?: string; category?: string }): Promise<WorkspaceEntity> {
   const { card } = await api<{ card: WorkspaceEntity }>('/cards/update', { workspace, id, ...fields })
   changed()
   return card
@@ -66,4 +66,54 @@ export const takeEditing = (workspace: string, id: string, path: string) => {
   if (editNext !== `${workspace}/${id}/${path}`) return false
   editNext = ''
   return true
+}
+
+/** Every card of category `from` becomes `to`. `merged` is true when `to` already existed. */
+export async function renameCategory(workspace: string, from: string, to: string): Promise<{ from: string; to: string; count: number; merged: boolean }> {
+  const answer = await api<{ from: string; to: string; count: number; merged: boolean }>('/cards/category', { workspace, from, to })
+  changed()
+  return answer
+}
+
+export async function renameSection(workspace: string, id: string, index: number, name: string): Promise<WorkspaceEntity> {
+  const { card } = await api<{ card: WorkspaceEntity }>('/cards/section/rename', { workspace, id, index, name })
+  changed()
+  return card
+}
+
+/** Move a tab from place `from` to place `to`; `path` is the tab being moved, so a card that changed meanwhile is refused. */
+export async function moveSection(workspace: string, id: string, from: number, to: number, path: string): Promise<WorkspaceEntity> {
+  const { card } = await api<{ card: WorkspaceEntity }>('/cards/section/move', { workspace, id, from, to, path })
+  changed()
+  return card
+}
+
+export async function deleteSection(workspace: string, id: string, index: number, path: string): Promise<void> {
+  await api('/cards/section/delete', { workspace, id, index, path })
+  changed()
+}
+
+export async function restoreSection(workspace: string, id: string, path: string): Promise<{ step: number }> {
+  const answer = await api<{ step: number }>('/cards/section/restore', { workspace, id, path })
+  changed()
+  return answer
+}
+
+/** Delete puts the card in its workspace's Trash; nothing is erased. */
+export async function deleteCard(workspace: string, id: string): Promise<void> {
+  await api('/cards/delete', { workspace, id })
+  changed()
+}
+
+export async function restoreCard(workspace: string, id: string): Promise<WorkspaceEntity> {
+  const { card } = await api<{ card: WorkspaceEntity }>('/cards/restore', { workspace, id })
+  changed()
+  return card
+}
+
+/** Move a card to another workspace. Ids and folders stay, so links keep working. */
+export async function moveCard(workspace: string, id: string, to: string, category?: string): Promise<{ card: WorkspaceEntity; from: string; to: string; files: number; warning?: string }> {
+  const answer = await api<{ card: WorkspaceEntity; from: string; to: string; files: number; warning?: string }>('/cards/move', { workspace, id, to, ...(category ? { category } : {}) })
+  changed()
+  return answer
 }

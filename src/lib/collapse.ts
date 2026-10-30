@@ -43,3 +43,9 @@ export function useCollapsedSections() {
   }, [])
   return { isClosed: (key: string) => list.includes(key), toggle }
 }
+
+/** A category was renamed: it stays folded (or open) under its new name. */
+export function renameCollapsed(from: string, to: string) {
+  if (!closed.includes(from)) return
+  set([...new Set(closed.map(key => key === from ? to : key))])
+}
