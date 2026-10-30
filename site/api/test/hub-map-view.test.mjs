@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { clampView, fitScale, fitView, keepPoint, limitsFor, viewAt, zoomAround } from '../../../src/hub/panZoom.ts';
-import { layoutMap } from '../../../src/hub/mapLayout.ts';
+import { LABEL_MAX, layoutMap } from '../../../src/hub/mapLayout.ts';
 import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 
@@ -203,9 +203,9 @@ test('the ancestors of the open panel are never folded', () => {
   assert.deepEqual([...step.open], ['m2'], 'only the unkept feature folds');
 });
 
-// --- The horizontal layout does not move ---------------------------------------------------------
+// --- The horizontal layout is pinned ---------------------------------------------------------------
 
-/** What `layoutMap` returned for the snapshot model before the vertical layout was added (recorded from main). Infinity is spelled out. */
+/** What `layoutMap` returns for the snapshot model, recorded when branches stopped crossing labels (ws-8x1: higher levels leave the spine further left, one-line labels, the chevron at the elbow). Infinity is spelled out. */
 const recorded = JSON.parse(readFileSync(new URL('./snapshots/hub-map-layout-x.json', import.meta.url), 'utf8'));
 const spelled = value => JSON.parse(JSON.stringify(value, (key, item) => (item === Infinity ? 'Infinity' : item === -Infinity ? '-Infinity' : item)));
 /** Keeps, at every level, only the keys the recorded value has: the layout may only add fields. */
@@ -222,7 +222,7 @@ const kept = (value, path = '') => {
   return value;
 };
 
-test('the horizontal layout keeps every field it had; the new ones are only added', () => {
+test('the horizontal layout keeps every field the recording has; new ones are only added', () => {
   const m = snapshotModel();
   const layouts = {
     open: layoutMap(m, everythingOpen(m), true),
@@ -260,7 +260,7 @@ test('vertical: the busiest model, everything open and Sprints on, fits a phone'
   const m = snapshotModel();
   const layout = vertical(m, everythingOpen(m), true);
   assert.equal(layout.axis, 'y');
-  assert.ok(layout.width < 500, `${layout.width}`);
+  assert.ok(layout.width < 540, `${layout.width}`);
   assert.deepEqual(layout.spine, { from: [0, 16], to: [0, layout.height - 14] });
   assert.equal(layout.bands.length, 2);
   assert.ok(layout.bands[1].rect.x === layout.bands[0].rect.x - 18, 'sprint bars are 18 units apart, further left');
@@ -278,7 +278,7 @@ test('vertical: every node has a label; left-side features and their tasks end a
       assert.equal(item.label.anchor, item.side < 0 ? 'end' : 'start', item.id);
       assert.ok(item.side < 0 ? item.label.x < item.center.x : item.label.x > item.center.x, `${item.id}: text lies outside its run`);
     }
-    if (item.kind !== 't') assert.ok(item.label.lines.length <= 2 && item.label.lines.every(line => line.length <= 24), item.id);
+    assert.ok(item.label.lines.length === 1 && item.label.lines[0].length <= (item.kind === 'm' ? 40 : LABEL_MAX), `${item.id}: a label is one line`);
   }
   const sides = layout.nodes.filter(item => item.kind === 'f' && item.milestone === 'm2').map(item => item.side);
   assert.deepEqual(sides, [-1, 1, -1, 1, -1], 'features alternate sides');
@@ -376,4 +376,74 @@ test('vertical: zooming out folds what zoom opened and holds a surviving feature
   assert.ok(step.anchor === 'fa' || step.anchor === 'fb');
   const gone = zoomStep({ layout, open, auto: new Set(['m2', 'fb']), k: 1.1, dir: -1, at, keep: none });
   assert.equal(gone.anchor, 'm2');
+});
+
+// --- Connectors stay off labels; a toggle's anchor does not move (ws-8x1) -------------------------
+
+/** A milestone shaped like "Sprint 2" on the Magic Loops roadmap: four features, long titles, and a sixth feature on another milestone for a third level. */
+const sprintTwo = () => {
+  const names = [['Combat feel and runes', ['Hit stop and screen shake', 'Rune slot inventory', 'Rune effects pass one', 'Combat tuning playtest']], ['Hex map generator (pure C#)', ['Hex grid coordinates', 'Noise terrain pass', 'Region and biome assignment', 'Map seed save format']], ['Enemy telegraphs', ['Wind-up animation set', 'Audio cue pass']], ['First contact encounter', ['Block out the arena', 'A task with a title far too long to fit on a single line of the map']], ['Telemetry', ['Log hits']], ['Saves', ['Slot format', 'Migration']]];
+  return model([
+    { id: 'p1', title: 'Sprint 1: moving', state: 'done', features: [{ id: 'p1-f', title: 'Movement', state: 'done', tasks: [{ ...task('p1-t', 'done') }] }] },
+    { id: 'p2', title: 'Sprint 2: feel, first contact', state: 'doing', features: names.map(([title, tasks], k) => ({ id: `p2-f${k}`, title, state: 'doing', tasks: tasks.map((name, j) => ({ ...task(`p2-f${k}-t${j}`, j ? 'next' : 'done'), title: name })) })) },
+    { id: 'p3', title: 'Sprint 3: depth', state: 'later', features: [{ id: 'p3-f', title: 'Depth', state: 'later', tasks: [{ ...task('p3-t', 'later') }] }] },
+  ]);
+};
+/** Where a node's text is drawn, as the box a reader sees: the label's width is the characters times the drawn size (bold 12 px titles, 10.5 px task labels), a line is 12 px tall. */
+const labelBoxes = layout => layout.nodes.flatMap(item => (item.label.lines ?? [item.title]).map((line, k) => {
+  const width = line.length * (item.kind === 't' ? 5.6 : 6.8);
+  const left = item.label.anchor === 'middle' ? item.label.x - width / 2 : item.label.anchor === 'end' ? item.label.x - width : item.label.x;
+  const baseline = item.label.y + k * (item.label.step ?? 14);
+  return { id: item.id, line, x0: left, x1: left + width, y0: baseline - 10, y1: baseline + 2 };
+}));
+/** Whether the segment a-b passes through the box (Liang-Barsky). */
+const crosses = (a, b, box) => {
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, q] of [[-(b[0] - a[0]), a[0] - box.x0], [b[0] - a[0], box.x1 - a[0]], [-(b[1] - a[1]), a[1] - box.y0], [b[1] - a[1], box.y1 - a[1]]]) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; t0 = Math.max(t0, r); } else { if (r < t0) return false; t1 = Math.min(t1, r); }
+  }
+  return t0 <= t1;
+};
+const segmentsOf = layout => [
+  ...layout.branches.flatMap(branch => branch.points.slice(1).map((point, k) => ({ id: branch.id, a: branch.points[k], b: point }))),
+  { id: 'spine', a: layout.spine.from, b: layout.spine.to },
+];
+
+for (const axis of ['x', 'y']) {
+  test(`${axis === 'x' ? 'horizontal' : 'vertical'}: a Sprint 2 shaped milestone has no connector through a label, and no label on two lines`, () => {
+    const m = sprintTwo();
+    for (const [name, open] of [['everything open', everythingOpen(m)], ['milestone only', new Set(['p2'])], ['two features', new Set(['p2', 'p2-f0', 'p2-f1'])], ['the second level', new Set(['p2', 'p2-f2', 'p2-f3'])]]) {
+      const layout = layoutMap(m, open, false, axis);
+      for (const item of layout.nodes) assert.ok((item.label.lines?.length ?? 1) === 1, `${name}: ${item.id} is one line`);
+      const crossings = [];
+      for (const box of labelBoxes(layout)) for (const segment of segmentsOf(layout)) if (crosses(segment.a, segment.b, box)) crossings.push(`${segment.id} through "${box.line}"`);
+      assert.deepEqual(crossings, [], `${name}: connectors cross labels`);
+    }
+  });
+}
+
+test('a title longer than a label ends in an ellipsis; the full title stays on the node', () => {
+  const layout = layoutMap(sprintTwo(), new Set(['p2', 'p2-f3']), false, 'x');
+  const long = layout.nodes.find(item => item.id === 'p2-f3-t1');
+  assert.equal(long.lines[0].length, LABEL_MAX);
+  assert.ok(long.lines[0].endsWith('…'));
+  assert.ok(long.title.length > LABEL_MAX, 'the node keeps the whole title for its tooltip');
+  assert.equal(layout.nodes.find(item => item.id === 'p2-f1').label.lines[0], 'Hex map generator (pure C#)', 'a title that fits is whole');
+});
+
+test("a branch's toggle sits at its elbow, and the elbow is where it was whether the branch is open or closed", () => {
+  const m = sprintTwo();
+  for (const axis of ['x', 'y']) {
+    const closed = layoutMap(m, new Set(['p2']), false, axis);
+    const opened = layoutMap(m, new Set(['p2', ...m.milestones[1].features.map(feature => feature.id)]), false, axis);
+    for (const item of closed.nodes.filter(node => node.kind === 'f' && node.milestone === 'p2')) {
+      assert.deepEqual(item.chevronAt, item.elbow, `${axis}: ${item.id} toggles at its elbow`);
+      if (axis === 'x') assert.deepEqual(opened.nodes.find(node => node.id === item.id).elbow, item.elbow, `${item.id}: the elbow does not move when features open`);
+    }
+    const milestoneAt = layout => layout.nodes.find(node => node.id === 'p2');
+    assert.deepEqual(milestoneAt(closed).chevronAt, milestoneAt(layoutMap(m, new Set(), false, axis)).chevronAt, `${axis}: a milestone's toggle does not move when it opens`);
+  }
 });
