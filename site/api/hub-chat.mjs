@@ -26,8 +26,10 @@ export const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
 const MAX_FILE = 1024 * 1024;
 const HISTORY_IMAGE_BUDGET = 6 * MB;
 const NO_PICTURE = '[An earlier picture is not included.]';
-const TOTAL_MS = 120_000;
-const IDLE_MS_DEFAULT = 60_000;
+// A completions stream (a picture turn) sends nothing while Hermes runs a tool, and tool calls of 60-120 s are normal, so allow 5 min of
+// silence and 10 min in all. The site's own 15 s keepalive keeps the browser and the proxy side open meanwhile.
+export const TOTAL_MS_DEFAULT = 600_000;
+export const IDLE_MS_DEFAULT = 300_000;
 const MAX_TOOLS = 20;
 const KEEPALIVE_MS = 15_000;
 
@@ -37,6 +39,7 @@ export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/
 
 export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
+  const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
   const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
