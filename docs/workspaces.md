@@ -483,6 +483,18 @@ stops and shows Retry; a 4xx other than 429 stops it at once. A 429 costs no ret
 Request detail and list rows carry `cloud: { status, reason?, next? }` for an `approved` cloud request (detail adds
 `fires`): `status` is `queued`, `fired`, `waiting` (`daily-cap`, `usage-limit` or `retry`), `fire-failed` or `not-started`.
 
+Move to the cloud: a request approved for the PC, not taken, that has waited 6 hours is offered on Today (`offers` in
+`GET /hub/today`; list rows carry `offer: "move-to-cloud"`). It must use a preset that allows the cloud, need nothing only the
+PC has, have a repo with a routine, and not be in the `bunnylink` project or in `HUB_CLOUD_NEVER` (comma-separated project
+names, empty by default). The old approval is checked first (this host's signature, this request, target `pc`, not expired,
+and on the route the hash of `request.json`): an approval signed by another key is never offered or re-signed.
+`POST /hub/requests/:id/move-to-cloud` (signed-in user) is Approve again with the cloud as the target, in this order: the old
+request's signed stop `moved to the cloud: <new id>` is written first (create-only, so it is the lock: a PC take before it, or a
+second move from any process, gets a 409 and nothing is made), then the new request that `replaces` it is made under that id,
+signed and handed to the fire queue (the daily cap and a pause apply, and a move at the cap waits). If that second part fails the
+old request stays stopped and the owner approves the work again by hand. `request take --runner` refuses (exit 5) a request with
+a stop, a decline or a result, before the claim and again after it.
+
 A `proposed` request is a Needs you row of kind `approval`. `failed`, `lost` and `expired` requests
 appear in Today's alerts for a day. `src/lib/needsKinds.ts` and `hub-model.mjs` hold the kind rules.
 

@@ -249,6 +249,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const dryRun = String(env.HUB_ROUTINE_DRY_RUN ?? '').trim() === '1';
   const hasCloud = repo => dryRun || (!!repo && !!routineFor(routineSet.routines, repo));
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
+    cloudNever: String(env.HUB_CLOUD_NEVER ?? '').split(',').map(name => name.trim()).filter(Boolean),
     repoProjects: PROJECT_DEFAULTS.map(row => row.id),
     // Repos beyond the projects' own, for Spawn's picker: `HUB_KNOWN_REPOS=owner/name,owner/other`. Bad entries are dropped.
     extraRepos: String(env.HUB_KNOWN_REPOS ?? '').split(',').map(item => item.trim()).filter(Boolean),
