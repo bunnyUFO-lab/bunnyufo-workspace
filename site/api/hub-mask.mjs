@@ -4,9 +4,17 @@
 // which live on the owner's PC.
 export const MASKED = '[masked]';
 
+// The rule list is shared with mods/hub-hooks/hooks/mask.ts in bunnyUFO-lab/workspace-skills, and so are the test vectors
+// (here site/api/test/fixtures/mask-vectors.json; there mods/hub-hooks/hooks/mask-vectors.json). Change both together.
 const RULES = [
-  // password: hunter2, MY_API_KEY=abc, client-secret = abc
-  text => text.replace(/\b(\w*(?:password|passwd|passphrase|secret|token|api[_-]?key)\w*)(\s*[:=]\s*)(\S+)/gi, (_all, name, sep) => `${name}${sep}${MASKED}`),
+  // Authorization: Bearer <token>. The scheme stays. A short all-letter word after "bearer" is prose and survives.
+  text => text.replace(/\b(bearer)(\s+)([A-Za-z0-9._~+/=-]{8,})/gi, (all, word, space, token) => (token.length >= 20 || /\d/.test(token) ? `${word}${space}${MASKED}` : all)),
+  // https://user:pass@host: the user and the host stay.
+  text => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s:/@]+):([^\s@/]+)@/gi, (_all, scheme, user) => `${scheme}${user}:${MASKED}@`),
+  // password: hunter2, MY_API_KEY=abc, client-secret = abc, api key: abc, DB_PASSWORD="two words", {"password": "two words"}
+  text => text.replace(/\b(\w*(?:password|passwd|passphrase|secret|token|api[_ -]?key)\w*)(["']?\s*[:=]\s*)(\[masked\]|"[^"\n]*"|'[^'\n]*'|\S+)/gi, (_all, name, sep) => `${name}${sep}${MASKED}`),
+  text => text.replace(/(?<![A-Za-z0-9])(?:xox[abposr]|xapp)-[A-Za-z0-9-]{10,}/g, MASKED),
+  text => text.replace(/(?<![A-Za-z0-9])[sr]k_(?:live|test)_[A-Za-z0-9]{8,}/g, MASKED),
   text => text.replace(/\bsk-[A-Za-z0-9_-]{20,}/g, MASKED),
   text => text.replace(/\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b/g, MASKED),
   text => text.replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, MASKED),
