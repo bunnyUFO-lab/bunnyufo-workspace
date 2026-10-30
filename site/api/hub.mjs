@@ -1069,7 +1069,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
             const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
-            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle').length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
+            reply({ ...today, counts: { ...today.counts, running: working.filter(item => item.state !== 'idle' && item.state !== 'stale').length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });

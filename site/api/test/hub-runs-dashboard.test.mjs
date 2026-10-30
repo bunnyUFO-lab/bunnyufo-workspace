@@ -129,3 +129,54 @@ test('a card written after the card index was built resolves once the index is 1
     assert.equal((await get(`/hub/requests/${two}`)).body.cardHref, '/assistant#/second-card', 'Twelve seconds on, the miss rebuilds the index.');
   } finally { await close(); }
 });
+
+test('workingNow: a run with no word past its limit plus grace is stale, not working, and sorts last', () => {
+  const at = (minutes, extra = {}) => ({ runner: 'cloud', at: iso(minutesAgo(NOW, minutes)), ...extra });
+  const requests = [
+    row({ id: `${day}-a-0001`, title: 'Quiet but inside the limit', run: at(35, { minutes: 30 }) }),
+    row({ id: `${day}-a-0002`, title: 'Past its limit', run: at(60, { minutes: 30 }) }),
+    row({ id: `${day}-a-0003`, title: 'Past, but spoke lately', run: at(300, { minutes: 30, lastAt: iso(minutesAgo(NOW, 5)) }) }),
+    row({ id: `${day}-a-0004`, title: 'No limit on record', run: at(34 * 60) }),
+    row({ id: `${day}-a-0005`, title: 'Asked long ago', state: 'asking', run: at(34 * 60) }),
+    row({ id: `${day}-a-0006`, title: 'No limit, inside the maximum', run: at(100) }),
+  ];
+  const list = workingNow({ status: null, events: [], requests, at: NOW }).filter(item => item.source === 'run');
+  const stateOf = title => list.find(item => item.title === title).state;
+  assert.equal(stateOf('Quiet but inside the limit'), 'working');
+  assert.equal(stateOf('Past its limit'), 'stale');
+  assert.equal(stateOf('Past, but spoke lately'), 'working');
+  assert.equal(stateOf('No limit on record'), 'stale', 'The maximum of 120 minutes applies.');
+  assert.equal(stateOf('Asked long ago'), 'needs-you', 'A question waits on the owner; it is never stale.');
+  assert.equal(stateOf('No limit, inside the maximum'), 'working');
+  const old = list.find(item => item.title === 'No limit on record');
+  assert.equal(new Date(old.since).getTime(), new Date(requests[3].run.at).getTime(), 'A stale row carries when it last gave word.');
+  assert.deepEqual(list.slice(-2).map(item => item.state), ['stale', 'stale'], 'Stale rows come last.');
+});
+
+test('GET /hub/today: a legacy request taken a day and a half ago with no word is stale and out of the Running count', async () => {
+  const { get, put, run, close } = await fixture();
+  try {
+    const id = `${day}-spike-s3-old-bf43`;
+    put.request({ id, project: 'probe', text: 'Add one line to the end of docs/README.md', createdAt: iso(minutesAgo(NOW, 34 * 60 + 20)) });
+    put.put(`requests/${id}/taken.json`, { runner: 'cloud', session: 'session_x', at: iso(minutesAgo(NOW, 34 * 60)) });
+    run(`${day}-research-live-ab12`, { title: 'Live run', minutes: 4 });
+    const today = (await get('/hub/today')).body;
+    const rows = today.working.filter(item => item.source === 'run');
+    assert.equal(rows.find(item => item.request === id).state, 'stale');
+    assert.equal(rows.find(item => item.title === 'Live run').state, 'working');
+    assert.equal(today.counts.running, 1, 'Only the live run counts.');
+  } finally { await close(); }
+});
+
+test('GET /hub/today: the approved limit, and the newest run file, reach the stale rule', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const id = `${day}-research-limit-cd34`;
+    put.request({ id, project: 'probe', text: 'Slow job', preset: 'research', target: 'cloud', createdAt: iso(minutesAgo(NOW, 90)) });
+    put.put(`requests/${id}/approved.json`, { target: 'cloud', limits: { minutes: 5 }, expires: iso(new Date(NOW.getTime() + 3600000)), at: iso(minutesAgo(NOW, 89)) });
+    put.put(`requests/${id}/taken.json`, { runner: 'cloud', at: iso(minutesAgo(NOW, 18)) });
+    // 18 minutes is inside the 20 for 'taken' to be live in the state table, past 5 + 10 for the limit.
+    const row = (await get('/hub/today')).body.working.find(item => item.request === id);
+    assert.equal(row.state, 'stale');
+  } finally { await close(); }
+});

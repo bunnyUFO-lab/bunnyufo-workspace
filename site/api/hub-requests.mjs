@@ -233,7 +233,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
       const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
       // (The list pass skips the request hash; the route checks it.)
-      return requestItem(full, state, parts.taken, { ...parts, cloud, offer });
+      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names) });
     });
     return rows.filter(Boolean);
   }

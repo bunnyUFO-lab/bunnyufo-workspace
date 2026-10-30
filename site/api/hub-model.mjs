@@ -326,7 +326,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(state === 'done' && nothingToDo(result) ? { nothing: true } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
-    ...runParts(request, approved, taken, result),
+    ...runParts(request, approved, taken, result, extra.lastRunAt),
   };
 }
 
@@ -338,12 +338,14 @@ const httpsOnly = value => (typeof value === 'string' && /^https:\/\//i.test(val
  * known) and `finish` when it has a result (outcome, when, the pull request or the card). Nothing else of the
  * two files leaves the server; the PR must be an https link.
  */
-function runParts(request, approved, taken, result) {
+function runParts(request, approved, taken, result, lastRunAt = null) {
   const out = {};
   const takenAt = typeof taken?.at === 'string' && !Number.isNaN(new Date(taken.at).getTime()) ? taken.at : '';
   if (takenAt) {
     const runner = RUNNERS.includes(taken.runner) ? taken.runner : RUNNERS.includes(approved?.target ?? request.target) ? (approved?.target ?? request.target) : '';
-    out.run = { ...(runner ? { runner } : {}), at: takenAt, ...(typeof taken.session === 'string' && taken.session ? { session: taken.session.slice(0, 120) } : {}) };
+    const minutes = Number(approved?.limits?.minutes);
+    const lastAt = Number.isFinite(lastRunAt) && lastRunAt !== null ? new Date(lastRunAt).toISOString() : '';
+    out.run = { ...(runner ? { runner } : {}), at: takenAt, ...(lastAt ? { lastAt } : {}), ...(Number.isFinite(minutes) && minutes > 0 ? { minutes: Math.min(Math.floor(minutes), 120) } : {}), ...(typeof taken.session === 'string' && taken.session ? { session: taken.session.slice(0, 120) } : {}) };
   }
   const resultAt = typeof result?.at === 'string' && !Number.isNaN(new Date(result.at).getTime()) ? result.at : '';
   if (resultAt && typeof result.outcome === 'string') {
