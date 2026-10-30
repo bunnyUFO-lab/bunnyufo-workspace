@@ -101,6 +101,8 @@
 //        /#/~hub/request/<id>. --target is only a proposal. origin is { kind: run } when --origin-run or BUW_REQUEST_ID
 //        is set, else { kind: agent }; never owner.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
+//   cards mark list --project <p> [--json]                            the owner's marks on the Roadmap that no agent has applied yet (bead, verdict, time, reason), oldest first
+//   cards mark applied --project <p> --bead <id>                      after `bd close`: writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
 import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
 import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -118,7 +120,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | beads push --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | beads push --project <p> | mark list|applied --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -1620,6 +1622,59 @@ async function beadsPush(flags) {
   console.log(`beads/${project}/${copy}.jsonl (${meta.count} issue(s))`);
 }
 
+// --- The owner's marks on the Roadmap: bead-marks/<project>/<bead>/<stamp>-<verdict>-<rand4>.json ---
+// The Hub writes done, not-needed and undo; an agent that closed the issue in Beads writes applied. A mark is
+// active when the newest owner verdict is done or not-needed and no applied note names its file. (The Hub's
+// own copy of this rule is site/api/hub-marks.mjs; it also looks at who wrote each verdict file.)
+
+const MARK_NAME = /^(\d{8}T\d{9}Z)-(done|not-needed|undo|applied)-([a-z0-9]{4})\.json$/;
+const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
+const markProject = flags => {
+  if (!flags.project || !/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('Usage: mark list|applied --project <p> [--bead <id>]');
+  return flags.project;
+};
+
+/** The active marks of a project, oldest first: `{ bead, verdict, at, reason?, file }`. */
+async function activeMarks(project, only) {
+  const files = (await listInbox(`bead-marks/${project}/${only ? `${only}/` : ''}`)).map(file => file.split('/')).filter(parts => parts.length === 4 && MARK_NAME.test(parts[3]) && BEAD_ID.test(parts[2]));
+  const byBead = new Map();
+  for (const [, , bead, name] of files) {
+    if (!byBead.has(bead)) byBead.set(bead, []);
+    byBead.get(bead).push(name);
+  }
+  const rows = await mapLimit([...byBead], 8, async ([bead, names]) => {
+    names.sort();
+    const owner = names.filter(name => !name.includes('-applied-')).at(-1);
+    if (!owner || MARK_NAME.exec(owner)[2] === 'undo') return null;
+    const body = await readJson(inboxPath('bead-marks', project, bead, owner));
+    if (!body || body.verdict !== MARK_NAME.exec(owner)[2] || typeof body.at !== 'string') return null;
+    for (const name of names.filter(item => item.includes('-applied-'))) {
+      if ((await readJson(inboxPath('bead-marks', project, bead, name)))?.mark === owner) return null;
+    }
+    return { bead, verdict: body.verdict, at: body.at, ...(typeof body.reason === 'string' && body.reason ? { reason: clip(body.reason, 200) } : {}), file: owner };
+  });
+  return rows.filter(Boolean).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.bead < b.bead ? -1 : 1));
+}
+
+async function markList(flags) {
+  const marks = await activeMarks(markProject(flags));
+  if (flags.json) return console.log(JSON.stringify(marks.map(({ file, ...mark }) => mark), null, 2));
+  for (const mark of marks) console.log(`${mark.bead}\t${mark.verdict}\t${mark.at}${mark.reason ? `\t${mark.reason}` : ''}`);
+}
+
+async function markApplied(flags) {
+  const project = markProject(flags);
+  if (!BEAD_ID.test(flags.bead ?? '')) throw new Error('Usage: mark applied --project <p> --bead <bead id>');
+  const [mark] = await activeMarks(project, flags.bead);
+  if (!mark) return console.log('nothing to apply');
+  const body = { v: 1, project, bead: flags.bead, verdict: 'applied', at: isoNow(), by: hostName(), mark: mark.file, ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) };
+  for (let attempt = 0; ; attempt += 1) {
+    const file = inboxPath('bead-marks', project, flags.bead, `${new Date().toISOString().replace(/[-:.]/g, '')}-applied-${rand(2)}.json`);
+    if (await mustPut(file, `${JSON.stringify(body, null, 2)}\n`, { createOnly: true }) === 'ok') return console.log(file);
+    if (attempt >= 2) throw new Error('Could not find a free name for the applied note; run it again.');
+  }
+}
+
 // --- argument parsing for the inbox commands ---
 
 const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved']);
@@ -1677,6 +1732,8 @@ async function inbox(command, args) {
     return claim('requests', idSafe(id), 'taken.json', pickupBody(flags));
   }
   if (command === 'beads' && sub === 'push') return beadsPush(flags);
+  if (command === 'mark' && sub === 'list') return markList(flags);
+  if (command === 'mark' && sub === 'applied') return markApplied(flags);
   console.error(USAGE);
   throw new Exit(1);
 }
@@ -1684,7 +1741,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'ask', 'checklist', 'request', 'beads'].includes(first)) {
+  if (['event', 'ask', 'checklist', 'request', 'beads', 'mark'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;
