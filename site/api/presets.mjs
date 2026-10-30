@@ -28,9 +28,13 @@ The job:
 Done when: {{doneWhen}}
 {{followUp}}`;
 
-const RESEARCH = `Research the question below with web search. The project named above is context only; do not pull its cards unless the question is about that project. Write exactly one card to the \`assistant\` section with the cards tool. Cite every source with a link.
+/** The research rules of the three Hermes research presets; chat personas (chat-personas.mjs) quote them. */
+export const RESEARCH = `Research the question below with web search. The project named above is context only; do not pull its cards unless the question is about that project. Write exactly one card to the \`assistant\` section with the cards tool. Cite every source with a link.
 If you cannot finish without the owner, end your final message with one question on its own line, ending in \`?\`, and no \`CARD:\` line. Never create requests or Asks.
 End the final message with one line: \`CARD: assistant/<folder>\`.`;
+
+export const MARKET_EXTRA = 'Cover: who makes these games, their prices, review scores, what players praise and what they hate. Close with three takeaways.';
+export const TEARDOWN_EXTRA = 'Use public sources only: store pages, videos, reviews, talks and articles. Never download, decompile, disassemble or memory-inspect another studio\'s game. Our own builds may be inspected.';
 
 const wrap = (body, extra = '') => `${CONTEXT}\n${body}\n${extra ? `${extra}\n` : ''}\n${SHARED}\n`;
 
@@ -82,14 +86,14 @@ When the pull request is open, finish with \`cards request finish\`.`),
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
     example: 'Market research on tug-of-war card games', produces: 'an assistant card with sources',
     estimate: { cost: 'Codex plan · about 40k tokens', time: 'about 15 min' },
-    template: wrap(RESEARCH, 'Cover: who makes these games, their prices, review scores, what players praise and what they hate. Close with three takeaways.'),
+    template: wrap(RESEARCH, MARKET_EXTRA),
   },
   {
     id: 'game-teardown', label: 'Game teardown (public sources)', icon: 'search', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card',
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
     example: 'Teardown of how Balatro teaches its rules', produces: 'an assistant card',
     estimate: { cost: 'Codex plan · about 40k tokens', time: 'about 15 min' },
-    template: wrap(RESEARCH, 'Use public sources only: store pages, videos, reviews, talks and articles. Never download, decompile, disassemble or memory-inspect another studio\'s game. Our own builds may be inspected.'),
+    template: wrap(RESEARCH, TEARDOWN_EXTRA),
   },
   {
     id: 'playtest-build', label: 'Playtest build', icon: 'play', agent: 'Builder', kind: 'build', needs: ['unity'], targets: ['pc'], sideEffect: 'build',

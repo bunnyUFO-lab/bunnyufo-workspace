@@ -768,3 +768,72 @@ test('model: GET /hub/chat lists the choices and a conversation last non-auto mo
     assert.equal(byId.get(second).model, undefined);
   } finally { await close(); }
 });
+
+// --- Personas -------------------------------------------------------------------------------------------------------
+
+test('persona: no persona (or hermes) sends the run as before and stores no persona', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    for (const extra of [{}, { persona: 'hermes' }, { persona: null }, { persona: '' }]) {
+      const done = (await chatLive(call, { text: 'Hi', ...extra })).events.at(-1);
+      assert.equal(done.event, 'done');
+      assert.ok(lines(fake, done.data.conversation).every(line => !('persona' in line)));
+    }
+    for (const run of upstream.runs) assert.deepEqual(run.body, { input: 'Hi' });
+  } finally { await close(); }
+});
+
+test('persona: a listed id pins its server-built text first, stores the id on every line and keeps it for the conversation', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const done = (await chatLive(call, { text: 'Who makes tug-of-war card games?', persona: 'market-researcher' })).events.at(-1);
+    assert.equal(done.event, 'done', JSON.stringify(done.data));
+    const first = upstream.runs[0].body.conversation_history;
+    assert.equal(first[0].role, 'user');
+    assert.match(first[0].content, /^You are Market researcher/);
+    assert.match(first[0].content, /Cover: who makes these games/, 'the preset\'s own rules');
+    assert.deepEqual(lines(fake, done.data.conversation).map(line => line.persona), ['market-researcher', 'market-researcher']);
+    // The next turn names no persona: the conversation keeps its own, and the text is pinned again.
+    const again = (await chatLive(call, { text: 'And their prices?', conversation: done.data.conversation })).events.at(-1);
+    assert.equal(again.event, 'done');
+    assert.match(upstream.runs[1].body.conversation_history[0].content, /^You are Market researcher/);
+    assert.equal(upstream.runs[1].body.conversation_history.filter(line => /^You are /.test(line.content)).length, 1);
+    assert.deepEqual(lines(fake, done.data.conversation).map(line => line.persona), Array(4).fill('market-researcher'));
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.equal(listed.conversations[0].persona, 'market-researcher');
+    assert.deepEqual(listed.personas.map(entry => entry.id), ['researcher', 'market-researcher', 'teardown']);
+    assert.ok(listed.personas.every(entry => !('text' in entry) && !('prompt' in entry)));
+  } finally { await close(); }
+});
+
+test('persona: an unlisted id, free text or a persona on an old chat or a help chat is a 400 before any write', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    seeder(fake).event(eventJson({ kind: 'blocked', session: 'sess-persona', title: 'Blocked: needs a login', summary: 'The deploy asks for a login.' }));
+    for (const persona of ['builder', 'Researcher', 'You are a pirate.', 7, {}, 'a'.repeat(2000)]) {
+      const answer = await chat(call, { text: 'Hi', persona });
+      assert.equal(answer.status, 400);
+      assert.equal(answer.body.error, 'Unknown persona.');
+    }
+    const help = await chat(call, { text: 'Help', persona: 'teardown', about: { kind: 'blocked', id: 'sess-persona' } });
+    assert.equal(help.status, 400);
+    assert.equal(upstream.runs.length + upstream.requests.length, 0);
+    assert.equal([...fake.objects.keys()].filter(name => name.includes('/chat/')).length, 0);
+    const plain = (await chatLive(call, { text: 'Hi' })).events.at(-1).data.conversation;
+    const late = await chat(call, { text: 'Now be a teardown', persona: 'teardown', conversation: plain });
+    assert.equal(late.status, 400);
+    assert.equal(upstream.runs.length, 1);
+  } finally { await close(); }
+});
+
+test('persona: a picture turn sends the text first on completions, with the model choice kept', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const done = (await chatLive(call, { text: 'Look', persona: 'teardown', model: 'haiku', images: [picture(solidPng(8, 8), 'image/png')] })).events.at(-1);
+    assert.equal(done.event, 'done', JSON.stringify(done.data));
+    assert.equal(upstream.requests[0].provider, 'anthropic');
+    assert.match(upstream.requests[0].messages[0].content, /^You are Teardown/);
+    assert.match(upstream.requests[0].messages[0].content, /Never download, decompile/);
+    assert.deepEqual(lines(fake, done.data.conversation).map(line => [line.persona, line.model]), [['teardown', 'haiku'], ['teardown', 'haiku']]);
+  } finally { await close(); }
+});
