@@ -1,6 +1,7 @@
 // The Hub's rules, with no I/O: Ask state, what Today and the Inbox show, ids and slugs, and the
 // checks on what a request carries. hub.mjs reads the bucket and calls these; the tests call them
 // directly. Everything is a function of its arguments (the clock included).
+import { nothingToDo } from './nothing-to-do.mjs';
 import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
@@ -78,6 +79,8 @@ export function runFileTime(name) {
   return Number.isNaN(time) ? null : time;
 }
 
+export { nothingToDo };
+
 /**
  * The state of a request.
  *
@@ -104,7 +107,7 @@ export function requestState(input) {
   if (has('stop.json')) return hasResult || !isTaken || lost ? 'stopped' : 'stopping';
   if (hasResult) {
     if (result?.outcome === 'question') return 'asking';
-    return result?.outcome === 'failed' ? 'failed' : 'done';
+    return result?.outcome === 'failed' && !nothingToDo(result) ? 'failed' : 'done';
   }
   if (running) return 'running';
   if (lost) return 'lost';
@@ -320,6 +323,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
     ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}), ...(request.repo ? { repo: request.repo } : {}) } : {}),
+    ...(state === 'done' && nothingToDo(result) ? { nothing: true } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
     ...(typeof since === 'string' ? { since } : {}),
     ...runParts(request, approved, taken, result),
@@ -345,7 +349,7 @@ function runParts(request, approved, taken, result) {
   if (resultAt && typeof result.outcome === 'string') {
     const pr = httpsOnly(result.pr);
     const card = typeof result.card === 'string' && /^[a-z0-9-]+\/[A-Za-z0-9._-]+$/.test(result.card) ? result.card : undefined;
-    out.finish = { outcome: result.outcome.slice(0, 20), at: resultAt, ...(pr ? { pr } : {}), ...(card ? { card } : {}) };
+    out.finish = { outcome: nothingToDo(result) ? 'nothing' : result.outcome.slice(0, 20), at: resultAt, ...(pr ? { pr } : {}), ...(card ? { card } : {}) };
   }
   return out;
 }
@@ -423,8 +427,23 @@ export function deriveEventItems(events) {
 
 const newest = (a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
 
+/** Events the Hub writes to remember that the owner dismissed an alert, or took it back. */
+export const ALERT_MARKS = ['alert-dismissed', 'alert-restored'];
+export const ALERT_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,199}$/;
+
+/** The alert keys the owner has dismissed: the newest mark for a key wins. */
+export function dismissedAlerts(events) {
+  const out = new Set();
+  for (const event of chronological(events)) {
+    if (typeof event.alert !== 'string') continue;
+    if (event.kind === 'alert-dismissed') out.add(event.alert);
+    else if (event.kind === 'alert-restored') out.delete(event.alert);
+  }
+  return out;
+}
+
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null }) {
+export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null, dismissed = new Set() }) {
   const { reviews, blocked, running } = deriveEventItems(events);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
@@ -434,22 +453,28 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   const hermes = [...hermesApprovals].sort(newest);
   const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
   const since = now.getTime() - DAY;
-  const recent = events.filter(event => new Date(event.ts).getTime() >= since);
+  // The dismiss and restore marks are bookkeeping, not news.
+  const recent = events.filter(event => new Date(event.ts).getTime() >= since && !ALERT_MARKS.includes(event.kind));
+  const nothingIds = new Set(requests.filter(item => item.nothing).map(item => item.id));
   const requestAlerts = requests
     .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)
-    .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, title: item.reason === 'approval-refused' ? `Cloud run refused the approval: ${item.title}` : `Request ${item.state}: ${item.title}` }));
+    .map(item => ({ ts: item.since ?? item.at, kind: 'alert', source: 'request', key: `request:${item.id}:${item.state}`, request: item.id, project: item.project, title: item.reason === 'approval-refused' ? `Cloud run refused the approval: ${item.title}` : `Request ${item.state}: ${item.title}` }));
   // A cloud request that fired and never started, or whose fire stopped failing, stays an alert until it is dealt with; Retry is on its row.
   const cloudAlerts = requests
     .filter(item => item.cloud?.status === 'not-started' || item.cloud?.status === 'fire-failed')
     .map(item => ({
-      ts: item.since ?? item.at, kind: 'alert', source: 'request', request: item.id, project: item.project, retry: true,
+      ts: item.since ?? item.at, kind: 'alert', source: 'request', key: `cloud:${item.id}:${item.cloud.status}`, request: item.id, project: item.project, retry: true,
       title: item.cloud.status === 'not-started' ? `Cloud run did not start: ${item.title}` : `Cloud run could not be fired: ${item.title}`,
     }));
   // Offers: what the owner could do now. A PC request that has waited 6 hours may move to the cloud.
   const offers = requests.filter(item => item.offer === 'move-to-cloud')
     .map(item => ({ kind: 'move-to-cloud', request: item.id, project: item.project, repo: item.repo, title: item.title, since: item.approvedAt }))
     .sort((a, b) => (a.since < b.since ? -1 : 1));
-  const alerts = [...recent.filter(event => event.kind === 'alert'), ...requestAlerts, ...cloudAlerts, ...extraAlerts];
+  // `cards request finish` posts "Run failed: <id>" as an alert even for a run that found nothing to change: that one is not an alert.
+  const eventAlerts = recent.filter(event => event.kind === 'alert' && !(event.source === 'cards-finish' && nothingIds.has(String(event.title ?? '').replace(/^Run failed: /, ''))))
+    .map(event => ({ ...event, key: `event:${event.file}` }));
+  const keyed = extraAlerts.map(alert => ({ ...alert, key: alert.key ?? `refused:${alert.request ?? alert.title}` }));
+  const alerts = [...eventAlerts, ...requestAlerts, ...cloudAlerts, ...keyed].filter(alert => !dismissed.has(alert.key));
   return {
     counts: { needsYou: needsYou.length, running: running.length, recent: recent.length, alerts: alerts.length },
     needsYou, running, recent, alerts, at: now.toISOString(),

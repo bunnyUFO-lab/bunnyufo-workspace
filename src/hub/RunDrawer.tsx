@@ -22,6 +22,8 @@ interface RunDetail extends RequestDetail {
   hermesRun?: { runId: string; at: string }
   /** The result's card as a site path, when the site API found it. */
   cardHref?: string
+  /** The run found nothing to change: the site API's reading of a failed result with a listed reason. */
+  nothing?: boolean
   retry?: { runId: string; at: string; provider: string; model: string; reason: string }
   stop?: { reason?: string; at?: string; by?: string }
   report?: boolean
@@ -252,6 +254,7 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
         <>
           <h4 className="rd-h">Result</h4>
           <div className="rd-result" data-run-result>
+            {detail?.nothing && <p data-run-nothing><b>Done, nothing to change.</b></p>}
             {result.summary && <p>{result.summary}</p>}
             {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
             <div className="rd-links">

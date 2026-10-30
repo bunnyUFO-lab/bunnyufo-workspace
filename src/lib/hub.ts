@@ -81,6 +81,8 @@ export interface HubEvent {
   request?: string
   /** A cloud alert whose request can fire again (`POST /hub/requests/:id/fire`). */
   retry?: boolean
+  /** An alert in Today's panel: the key Dismiss sends (`POST /hub/alerts/dismiss`). */
+  key?: string
   /** A run event (`run-started`, `run-finished`): how it ended, and the site path of the card it wrote. */
   outcome?: string
   cardHref?: string
