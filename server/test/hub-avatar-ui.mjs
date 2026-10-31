@@ -49,7 +49,7 @@ try {
     await page.goto(`${fixture.url}#/~hub/ask/${pickId}`);
     const note = page.locator('[data-avatar-note="pick"]');
     await note.waitFor();
-    assert.equal(await note.innerText(), 'Picking one starts the sprite sheet on the Gaming PC at its next run check, within about an hour.');
+    assert.equal(await note.innerText(), 'Picking one starts the sprite sheet on the Gaming PC within a few minutes.');
     await page.locator('[data-option="a"]').waitFor();
     const noteBox = await note.boundingBox();
     const optionBox = await page.locator('[data-option="a"]').boundingBox();

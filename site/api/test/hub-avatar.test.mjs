@@ -83,7 +83,7 @@ test('an answered variant pick makes one signed sheet request, and nothing else 
     assert.equal(done.status, 201, JSON.stringify(done.body));
     assert.equal(done.body.state, 'answered');
     assert.equal(done.body.avatar.started, true);
-    assert.equal(done.body.avatar.message, 'The sprite sheet starts on the Gaming PC within about an hour.');
+    assert.equal(done.body.avatar.message, 'The sprite sheet starts on the Gaming PC within a few minutes.');
     const [sheet] = f.sheetRequests();
     assert.equal(f.sheetRequests().length, 1);
     assert.equal(sheet.id, done.body.avatar.request);

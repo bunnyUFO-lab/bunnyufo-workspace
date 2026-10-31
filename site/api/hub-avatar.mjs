@@ -14,7 +14,7 @@ import { validId } from './hub-model.mjs';
 import { SUBJECT_RE } from './presets.mjs';
 
 const SLUG_RE = /^[a-z][a-z0-9-]{0,39}$/;
-export const START_NOTE = 'The sprite sheet starts on the Gaming PC within about an hour.';
+export const START_NOTE = 'The sprite sheet starts on the Gaming PC within a few minutes.';
 
 
 /**
