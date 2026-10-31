@@ -522,7 +522,7 @@ test('replay: an entry already there (412) is dropped, one over 24 hours old is 
   } finally { await close(); }
 });
 
-test('replay: only event files and run progress files are replayed; a spooled ask.json, request.json or approval line is dropped and never sent', async () => {
+test('replay: only event files (and a run\'s own progress files) are replayed; a spooled ask.json, request.json or approval line is dropped and never sent', async () => {
   const { fake, cli, spool, close } = await setup();
   try {
     const at = () => new Date().toISOString();
@@ -540,13 +540,15 @@ test('replay: only event files and run progress files are replayed; a spooled as
       line('events/2026-10-30/ok.json'), line(runFile),
     ].join('\n') + '\n');
     fake.seed('sections/inbox/events/2026-10-30/replace.json', '{"first":true}', 'application/json');
+    // The watcher's context: no BUW_RUN_FOLDER, so the run progress file is dropped too.
     const done = await cli('api', 'ask', 'list');
     assert.equal(done.code, 0, done.stderr);
+    assert.equal(fake.text(`sections/inbox/${runFile}`), null, 'a run file is not replayed outside a run');
+    assert.match(done.stderr, /dropped a line for requests\/20261030-sprite-studio-job-a1b2\/run-/);
     for (const file of refused.filter(name => name !== 'workspace.json')) assert.equal(fake.text(`sections/inbox/${file}`), null, `${file} is never sent`);
     assert.equal(fake.text('sections/inbox/workspace.json'), '{"name":"Inbox","hidden":true,"entities":[]}', 'workspace.json is not replaced');
     assert.match(done.stderr, /dropped a line for asks\/20261030-sprite-studio-planted-a1b2\/ask\.json/);
     assert.equal(fake.text('sections/inbox/events/2026-10-30/ok.json'), '{"x":1}', 'an event replays');
-    assert.equal(fake.text(`sections/inbox/${runFile}`), '{"x":1}', 'a run progress file replays');
     assert.equal(fake.text('sections/inbox/events/2026-10-30/replace.json'), '{"first":true}', 'a line saying createOnly false still cannot replace');
     assert.equal(fake.objects.get('sections/inbox/events/2026-10-30/ok.json').contentType, 'application/json');
     assert.equal((await readFile(spool, 'utf8')).trim(), '', 'refused lines are dropped, not kept');
@@ -554,6 +556,43 @@ test('replay: only event files and run progress files are replayed; a spooled as
   } finally { await close(); }
 });
 
+test('replay: a run replays the run files of its own request and drops another request\'s; the watcher replays neither', async () => {
+  const { fake, cli, spool, dir, close } = await setup();
+  try {
+    const own = '20261030-sprite-studio-job-a1b2';
+    const other = '20261030-sprite-studio-other-c3d4';
+    const line = (request, stamp) => JSON.stringify({ v: 1, at: new Date().toISOString(), kind: 'put', section: 'inbox', path: `requests/${request}/run-${stamp}.json`, body: '{"state":"working"}', contentType: 'application/json', createOnly: true });
+    const mine = `requests/${own}/run-20261030T101500123Z-ab12.json`;
+    const theirs = `requests/${other}/run-20261030T101500123Z-cd34.json`;
+    const future = `requests/${own}/run-29991231T235959999Z-ff00.json`;
+    const entries = [line(own, '20261030T101500123Z-ab12'), line(other, '20261030T101500123Z-cd34')].join('\n') + '\n';
+    // A run checkout: .claude/run-current.json names its request.
+    await mkdir(path.join(dir, '.claude'), { recursive: true });
+    await writeFile(path.join(dir, '.claude', 'run-current.json'), JSON.stringify({ requestId: own }));
+    // The watcher (no BUW_RUN_FOLDER), even standing in the run checkout: nothing.
+    await writeFile(spool, entries);
+    cli.cwd = dir;
+    assert.equal((await cli('api', 'ask', 'list')).code, 0);
+    assert.equal(fake.text(`sections/inbox/${mine}`), null);
+    assert.equal(fake.text(`sections/inbox/${theirs}`), null);
+    assert.equal((await readFile(spool, 'utf8')).trim(), '', 'both dropped');
+    // A run: its own request's file goes, another request's is dropped and logged, and a future stamp for another request is not sent.
+    await writeFile(spool, entries + JSON.stringify({ v: 1, at: new Date().toISOString(), kind: 'put', section: 'inbox', path: future.replace(own, other), body: '{}', contentType: 'application/json', createOnly: true }) + '\n');
+    cli.env = { BUW_RUN_FOLDER: '1' };
+    const run = await cli('api', 'ask', 'list');
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(fake.text(`sections/inbox/${mine}`), '{"state":"working"}', 'its own request\'s run file replays');
+    assert.equal(fake.text(`sections/inbox/${theirs}`), null, 'another request\'s is dropped');
+    assert.equal(fake.text(`sections/inbox/${future.replace(own, other)}`), null);
+    assert.match(run.stderr, new RegExp(`dropped a line for requests/${other}/run-`));
+    assert.equal((await readFile(spool, 'utf8')).trim(), '');
+    // A run whose checkout names no request replays no run file.
+    await rm(path.join(dir, '.claude', 'run-current.json'));
+    await writeFile(spool, line(own, '20261030T101600123Z-ab13') + '\n');
+    assert.equal((await cli('api', 'ask', 'list')).code, 0);
+    assert.equal(fake.text(`sections/inbox/requests/${own}/run-20261030T101600123Z-ab13.json`), null);
+  } finally { cli.cwd = null; cli.env = {}; await close(); }
+});
 test('replay: a refusal (403 for a read-only token) keeps the line; an unreadable time expires it', async () => {
   const { fake, cli, spool, close } = await setup();
   try {
