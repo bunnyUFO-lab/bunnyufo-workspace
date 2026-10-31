@@ -1364,7 +1364,7 @@ for (const via of ['api', 's3']) {
       const png = path.join(dir, 'sheet.png');
       const json = path.join(dir, 'sheet.json');
       await writeFile(png, Buffer.concat([PNG_BYTES, Buffer.from('pixels')]));
-      await writeFile(json, JSON.stringify({ source: { request: id, choice: 'a' } }));
+      await writeFile(json, JSON.stringify({ v: 1, agent: 'claude', source: { request: id, choice: 'a' } }));
       const args = (over = {}) => ['sheet', 'put', '--request', over.request ?? id, '--stamp', over.stamp ?? stamp, '--png', over.png ?? png, '--meta', over.json ?? json];
 
       // refused before anything is written
@@ -1376,6 +1376,16 @@ for (const via of ['api', 's3']) {
       assert.equal((await cli(via, ...args({ png: path.join(dir, 'bad.png') }))).code, 1, 'not a PNG');
       await writeFile(path.join(dir, 'other.json'), JSON.stringify({ source: { request: other } }));
       assert.equal((await cli(via, ...args({ json: path.join(dir, 'other.json') }))).code, 1, 'JSON of another request');
+      await writeFile(path.join(dir, 'big.json'), JSON.stringify({ v: 1, agent: 'claude', source: { request: id }, pad: 'x'.repeat(17 * 1024) }));
+      const big = await cli(via, ...args({ json: path.join(dir, 'big.json') }));
+      assert.equal(big.code, 1);
+      assert.match(big.stderr, /over 16 KB/);
+      await writeFile(path.join(dir, 'agent.json'), JSON.stringify({ v: 1, agent: 'codex', source: { request: id } }));
+      const wrongAgent = await cli(via, ...args({ json: path.join(dir, 'agent.json') }));
+      assert.equal(wrongAgent.code, 1);
+      assert.match(wrongAgent.stderr, /names agent "codex"/);
+      await writeFile(path.join(dir, 'noagent.json'), JSON.stringify({ source: { request: id } }));
+      assert.equal((await cli(via, ...args({ json: path.join(dir, 'noagent.json') }))).code, 1, 'no agent field');
       assert.equal([...fake.objects.keys()].filter(key => key.includes('/team/')).length, 0);
 
       const done = await cli(via, ...args());

@@ -1598,10 +1598,11 @@ async function sheetPut(flags) {
   if (png.length > MAX_INLINE) throw new Error('The sheet PNG is over 4 MB.');
   if (png.length < PNG_SIGNATURE.length || !png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) throw new Error('The sheet PNG is not a PNG.');
   const jsonBytes = await readFile(flags.meta);
-  if (jsonBytes.length > 64 * 1024) throw new Error('The sheet JSON is over 64 KB.');
+  if (jsonBytes.length > 16 * 1024) throw new Error('The sheet JSON is over 16 KB (the Hub would not list it).');
   let json;
   try { json = JSON.parse(jsonBytes.toString('utf8')); } catch { throw new Error('The sheet JSON is not JSON.'); }
   if (json?.source?.request !== id) throw new Error(`The sheet JSON needs source.request equal to ${id}.`);
+  if (json.agent !== request.agent) throw new Error(`The sheet JSON names agent ${JSON.stringify(json.agent ?? null)}, but ${id} is for ${request.agent}; the Hub would not list it.`);
   const name = `sheet-${flags.stamp}`;
   const pngFile = inboxPath('team', request.agent, `${name}.png`);
   const jsonFile = inboxPath('team', request.agent, `${name}.json`);
