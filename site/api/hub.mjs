@@ -14,7 +14,7 @@ import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -455,9 +455,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const state = askState(names, ask, at, snooze);
     const read = async name => (names.has(name) ? cached(`asks/${id}/${name}`) : undefined);
     const [answer, pickup, cancel] = await Promise.all([read('answer.json'), read('pickup.json'), read('cancel.json')]);
+    // Agent-written files: where the answer went (delivered.json) and which sessions watch the Ask (watch-*.json, at most 3).
+    const watchNames = [...names].filter(name => /^watch-[A-Za-z0-9_-]{1,40}\.json$/.test(name)).sort().slice(0, DELIVERY_WATCHERS);
+    const [delivered, ...watchers] = answer ? await Promise.all([read('delivered.json'), ...watchNames.map(read)]) : [];
+    const delivery = deliveryOf({ answer, delivered, watchers, at });
     return {
       ...ask, ...state,
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
+      ...(delivery ? { delivery } : {}),
       files: [...names].sort(),
     };
   }
