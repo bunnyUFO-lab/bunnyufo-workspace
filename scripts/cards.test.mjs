@@ -15,6 +15,7 @@ import * as presets from '../site/api/presets.mjs';
 import { createBucket } from '../site/api/s3.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
+import { listenOnGoodPort } from '../server/listen.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sha = text => createHash('sha256').update(text).digest('hex');
@@ -52,7 +53,7 @@ async function serve(api, flaky) {
     response.writeHead(result.statusCode, result.headers);
     response.end(result.isBase64Encoded ? Buffer.from(result.body, 'base64') : result.body);
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   server.url = `http://127.0.0.1:${server.address().port}`;
   return server;
 }
@@ -568,7 +569,7 @@ async function webhook({ status = 204 } = {}) {
     response.writeHead(status);
     response.end();
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   return { posts, url: `http://127.0.0.1:${server.address().port}/hook`, close: () => new Promise(resolve => server.close(resolve)) };
 }
 

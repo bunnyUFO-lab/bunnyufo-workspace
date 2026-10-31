@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const card = id => ({ id, folder: id, title: id, created: '2026-01-01', updated: '2026-01-01', status: 'active', steps: [{ name: 'Page', path: 'index.html' }] });
 const APP = 'https://site.example';
@@ -18,7 +19,7 @@ async function fixture({ secured = false, dev } = {}) {
   for (const id of ['one', 'dev-one']) fake.seed(`sections/${id}/workspace.json`, JSON.stringify({ entities: [card('alpha')] }), 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const server = createSiteApi({ bucket, stateFile: path.join(root, 'state.json'), sectionsTtl: 0, dev, ...(secured ? { requireRemoteUser: true, allowedOrigins: [APP] } : {}) });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = (workspace, id, doc) => fetch(`${origin}/api/cards/responses?workspace=${workspace}&id=${id}&doc=${doc}`);
   const post = (data, headers = {}) => fetch(`${origin}/api/cards/responses`, {

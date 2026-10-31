@@ -12,6 +12,7 @@ import { dismissedAlerts, requestState } from '../hub-model.mjs';
 import { NOTHING_TO_DO_REASONS, nothingToDo } from '../nothing-to-do.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, iso, minutesAgo, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example.test';
 const NOW = new Date();
@@ -24,7 +25,7 @@ async function fixture() {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev' });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, body) => {
     const answer = await fetch(`${origin}/api${route}`, { method, ...(body ? { headers: { Origin: SITE, 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify(body) } : {}) });

@@ -10,6 +10,7 @@ import { createHub } from '../hub.mjs';
 import { checkSheet, pngSize, sheetSprite } from '../hub-sheets.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { seeder, teamSheet } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 
@@ -20,7 +21,7 @@ async function fixture() {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, env: {} });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const raw = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, bytes: Buffer.from(await answer.arrayBuffer()), headers: answer.headers }; };

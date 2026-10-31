@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
 import { createCardApi, handler, parseRef, parseScope, parseTokens } from '../handler.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -83,7 +84,7 @@ async function serve(api) {
     response.writeHead(result.statusCode, result.headers);
     response.end(result.isBase64Encoded ? Buffer.from(result.body, 'base64') : result.body);
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   server.url = `http://127.0.0.1:${server.address().port}`;
   return server;
 }

@@ -12,6 +12,7 @@ import { AGENTS, agentStatuses, BUILTIN_KEYS, checkAvatar } from '../hub-team.mj
 import { BUILTIN_KEYS as CLIENT_KEYS } from '../../../src/hub/team/sprites.ts';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder, teamAvatarJson } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const NOW = new Date();
@@ -23,7 +24,7 @@ async function fixture({ env = {} } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, env });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const post = async (route, data, user = 'owner') => {
@@ -40,7 +41,7 @@ async function fixture({ env = {} } = {}) {
 async function healthServer(status = 200) {
   let hits = 0;
   const server = createServer((request, response) => { hits += 1; response.writeHead(request.url === '/health' ? status : 404); response.end('{}'); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   return { url: `http://127.0.0.1:${server.address().port}`, hits: () => hits, close: () => new Promise(resolve => server.close(resolve)) };
 }
 

@@ -12,6 +12,7 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { startFakeHermes } from './fake-hermes.mjs';
 import { checklistJson, designAskJson, eventJson, requestJson, seeder } from './hub-fixtures.mjs';
 import { jpeg, solidPng, textPng } from './png.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-chat-'));
@@ -23,7 +24,7 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true } = {})
   // The completions tests below run with the run path off (the kill switch); the run tests turn it on.
   const hubEnv = { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', HUB_CHAT_RUNS: '0', ...env };
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, allowedOrigins: ['https://site.example'], hub: createHub({ bucket, enabled: true, env: hubEnv }) });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const owner = { 'Remote-User': 'owner', Origin: 'https://site.example' };
   const call = (method, route, data, headers = owner) => fetch(`${origin}/api${route}`, { method, headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers }, body: data === undefined ? undefined : JSON.stringify(data) });
