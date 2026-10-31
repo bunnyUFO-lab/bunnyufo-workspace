@@ -49,7 +49,7 @@ try {
       const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
       assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
     };
-    const shoot = async state => { if (shots) await page.screenshot({ path: path.join(shots, `checklist-${state}-${name}.png`), fullPage: true }); };
+    const shoot = async state => { if (shots) { await page.locator('[data-delivery]').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(shots, `checklist-${state}-${name}.png`) }); } };
 
     step(`${name}: delivered says which session, where and how`);
     await open(asks.delivered);
