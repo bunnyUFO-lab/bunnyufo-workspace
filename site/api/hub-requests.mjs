@@ -208,10 +208,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
   const moving = new Set();
 
-  const newestRun = names => {
+  /** The newest run file's time, ignoring any later than `at` plus the skew (see `runFileTime`). */
+  const newestRun = (names, at) => {
     let newest = null;
     for (const name of names) {
-      const time = runFileTime(name);
+      const time = runFileTime(name, at);
       if (time !== null && (newest === null || time > newest)) newest = time;
     }
     return newest;
@@ -226,7 +227,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   const stateOf = (id, names, request, parts, at) => requestState({
-    names, request, ...parts, newestRunAt: newestRun(names), hermesLive: live.hermesLive(id) === true, pcBusy: live.pcBusy, now: at,
+    names, request, ...parts, newestRunAt: newestRun(names, at), hermesLive: live.hermesLive(id) === true, pcBusy: live.pcBusy, now: at,
   });
 
   /** Every request of this month and the one before, as list rows. */
@@ -243,7 +244,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
       const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
       // (The list pass skips the request hash; the route checks it.)
-      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names), now: at });
+      return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names, at), now: at });
     });
     return rows.filter(Boolean);
   }
@@ -269,8 +270,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /** The newest `limit` files of a family (`run-*`, `fire-*`), parsed, newest first; the stamp in the name sorts by time. */
-  async function newestFiles(id, names, prefix, limit = LIST_CAP) {
-    const picked = [...names].filter(name => name.startsWith(prefix) && name.endsWith('.json')).sort().reverse().slice(0, limit);
+  async function newestFiles(id, names, prefix, limit = LIST_CAP, at = null) {
+    // A run file stamped in the future (past the skew) is not shown in the timeline either.
+    const picked = [...names].filter(name => name.startsWith(prefix) && name.endsWith('.json') && (prefix !== 'run-' || at === null || runFileTime(name, at) !== null)).sort().reverse().slice(0, limit);
     const bodies = await pool(8, picked, name => cached(`requests/${id}/${name}`));
     return bodies.filter(Boolean);
   }
@@ -284,13 +286,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const read = file => (names.has(file) ? cached(`requests/${id}/${file}`) : null);
     const [stop, declined, hermesRun, retry, runs, fires] = await Promise.all([
       read('stop.json'), read('declined.json'), read('hermes-run.json'), read('hermes-retry.json'),
-      newestFiles(id, names, 'run-'), newestFiles(id, names, 'fire-'),
+      newestFiles(id, names, 'run-', LIST_CAP, at), newestFiles(id, names, 'fire-'),
     ]);
     const { approved } = parts;
     const cloudFull = approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved }, at, { withFires: true }).catch(() => null) : null;
     const cloud = cloudFull?.fires ? { ...cloudFull, fires: cloudFull.fires.map(publicFire) } : cloudFull;
     const shown = approved && approved.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved;
-    const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names) }), at);
+    const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names, at) }), at);
     return {
       request,
       state,

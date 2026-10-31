@@ -206,6 +206,7 @@ What it refuses:
   `requests/<id>/request.json` exists with that `project` (one read, only for these writes). Any other limited token,
   `hermes-main` and the old `cloud` token included, is refused; the passphrase is not limited. This means a session that
   holds only a limited token can no longer `cards request take` a request: legacy takes need the passphrase or a runner token
+- the `pc-runner` token writes `requests/<id>/run-*.json` and `result.json` only when that request already has a `taken.json` naming the PC runner (`"runner": "pc"`; the claim writes it before the run starts, and `taken.json` and `report.md` themselves are not gated). Otherwise 403 "taken.json is not there"
 - `requests/*/request.json` is create-only for a limited writer like `ask.json`, and a limited writer's request whose
   `origin.kind` is `owner` is refused: only the Hub marks a request as the owner's
 - `writer` metadata: a `request.json` put by a limited token named `agent` or `agent-<name>` is stored with the object
