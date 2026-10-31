@@ -64,7 +64,7 @@ async function setup() {
     const data = response.isBase64Encoded ? Buffer.from(response.body, 'base64') : JSON.parse(response.body);
     return { status: response.statusCode, data, headers: response.headers };
   };
-  return { fake, api, call };
+  return { fake, api, call, bucket };
 }
 
 /** The handler behind a local HTTP server, as API Gateway puts it on the internet. */
@@ -918,7 +918,7 @@ test('moved and deleted cards: a write is refused, a read says where it went, re
 });
 
 test('inbox: pc-runner writes run-* and result files only for a request taken by the PC runner; taken.json, report.md and other tokens are not gated by it', async () => {
-  const { fake, call } = await setup();
+  const { fake, call, bucket } = await setup();
   try {
     fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
     for (const inbox of ['inbox', 'inbox-dev']) {
@@ -940,6 +940,18 @@ test('inbox: pc-runner writes run-* and result files only for a request taken by
       fake.seed(`sections/${inbox}/requests/n-1/taken.json`, JSON.stringify({ runner: 'pc', host: 'pc' }), 'application/json');
       for (const file of files) assert.equal((await put('tok-pc-runner', 'n-1', file)).status, 200, `${inbox} ${file} after the take`);
       assert.equal((await put('tok-pc-runner', 'n-1', 'report.md')).status, 200, 'the report is not gated');
+      // A taken.json that does not parse is no take (403); a storage error is not an answer (503, so the client retries), and nothing is stored.
+      fake.seed(`sections/${inbox}/requests/n-3/taken.json`, 'not json', 'text/plain');
+      const garbled = await put('tok-pc-runner', 'n-3', 'result.json');
+      assert.equal(garbled.status, 403, `${inbox} unparseable taken.json`);
+      const real = bucket.getJson;
+      bucket.getJson = async name => { if (name.endsWith('/taken.json')) throw Object.assign(new Error('storage is down'), { status: 500 }); return real.call(bucket, name); };
+      try {
+        const down = await put('tok-pc-runner', 'n-1', 'result.json', { 'If-None-Match': '*' });
+        assert.equal(down.status, 503, `${inbox} a storage error is not a refusal`);
+        assert.match(down.data.error, /try again/);
+      } finally { bucket.getJson = real; }
+      assert.equal(fake.text(`sections/${inbox}/requests/n-3/result.json`), null);
       // The passphrase is not limited, and a cloud token keeps its own project rule.
       assert.equal((await put('tok-all', 'n-2', 'result.json')).status, 200, 'the passphrase needs no take');
     }

@@ -194,7 +194,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       // A run's progress and result files only follow its take: `taken.json` (written by the runner when it claims the request) must be there first.
       // taken.json and report.md themselves are not gated (taken is the claim; the report is read with the result, after the take).
       if (/^(run-[^/]+|result)\.json$/i.test(match[2] ?? '')) {
-        const taken = await bucket.getJson(keyOf(sectionId, `requests/${match[1]}/taken.json`)).catch(() => null);
+        let taken = null;
+        try {
+          taken = await bucket.getJson(keyOf(sectionId, `requests/${match[1]}/taken.json`));   // null when there is no such file
+        } catch (error) {
+          // A file that does not parse is no take. A storage error is not an answer: 503, so the client retries or spools instead of dropping the write.
+          if (!(error instanceof SyntaxError)) throw new HttpError(503, 'Could not check taken.json just now; try again.');
+        }
         if (taken?.value?.runner !== 'pc') throw new HttpError(403, 'A run file follows the PC runner taking the request: taken.json is not there.');
       }
       return;
