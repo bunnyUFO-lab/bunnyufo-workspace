@@ -235,15 +235,24 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
   }
 });
 
-test('inbox: a limited writer may create an Ask delivered.json and watch-<session>.json (they are not the Hub files)', async () => {
+test('inbox: delivered.json and watch-<session>.json are create-only for a limited token: the first create passes, a replace, an upload URL and a delete are refused', async () => {
   const { fake, call } = await setup();
   try {
-    const create = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{"v":1}'), base64: true, headers: { 'If-None-Match': '*' } });
+    const put = (token, file, headers) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{"v":1}'), base64: true, headers });
     for (const file of ['asks/x-1/delivered.json', 'asks/x-1/watch-abcd1234.json']) {
-      assert.equal((await create('tok-cloud', file)).status, 200, file);
-      assert.equal((await create('tok-cloud', file)).status, 412, `${file} a second time`);
+      assert.equal((await put('tok-cloud', file, { 'If-None-Match': '*' })).status, 200, `${file} the first create`);
+      assert.equal((await put('tok-cloud', file, { 'If-None-Match': '*' })).status, 412, `${file} a second create finds it`);
+      const replace = await put('tok-cloud', file);
+      assert.equal(replace.status, 403, `${file} replace`);
+      assert.match(replace.data.error, /create-only/);
+      assert.equal((await put('tok-cloud', file, { 'If-Match': '"x"' })).status, 403, `${file} conditional replace`);
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: file }] } })).status, 403, `${file} by upload URL`);
+      assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-cloud' })).status, 403, `${file} delete`);
+      assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-deleter' })).status, 403, `${file} delete by a limited deleter`);
     }
     assert.equal(fake.text('sections/inbox/asks/x-1/delivered.json'), '{"v":1}');
+    assert.equal((await put('tok-all', 'asks/x-1/delivered.json')).status, 200, 'The passphrase may replace.');
+    assert.equal((await call('DELETE', '/sections/inbox/files/asks/x-1/watch-abcd1234.json', { token: 'tok-all' })).status, 200, 'The passphrase may delete.');
   } finally {
     await fake.close();
   }
