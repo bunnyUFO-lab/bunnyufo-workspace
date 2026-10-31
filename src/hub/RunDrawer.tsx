@@ -309,12 +309,12 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 /** Mounted once in the Hub screen: opens the drawer when `openRun` is called, and gives the focus back to what opened it. */
-/** An approved PC request waits for the PC's next hourly check; when the PC reads as asleep or off, it can be woken from here. */
+/** An approved PC request starts at the watcher's next tick, within a few minutes; when the PC reads as asleep or off, it can be woken from here. */
 function PcStart() {
   const wake = usePcWake()
   return (
     <div className="rd-pc" data-run-pc-start>
-      <p>Starts on the PC within the hour (its next hourly check).</p>
+      <p>Starts on the PC within a few minutes.</p>
       <WakeButton wake={wake} />
     </div>
   )
