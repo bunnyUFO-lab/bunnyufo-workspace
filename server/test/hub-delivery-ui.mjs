@@ -32,6 +32,8 @@ try {
     none: seed('a1b4', { 'answer.json': answer(3) }),
     picked: seed('a1b5', { 'answer.json': answer(30), 'pickup.json': { at: ago(20), host: 'pc-one' } }),
     open: seed('a1b6', {}),
+    // Handed over in a later session's start note: no watch file, so no folder.
+    started: seed('a1b7', { 'answer.json': answer(12), 'delivered.json': { v: 1, at: ago(8), session: 'ef567890-1234', host: 'pc-one', how: 'start' } }),
   };
   await new Promise(resolve => setTimeout(resolve, 150));
 
@@ -56,6 +58,12 @@ try {
     assert.equal(await page.locator('[data-delivery-open]').count(), 0);
     await noSideways('delivered');
     await shoot('delivered');
+
+    step(`${name}: delivered at a later session's start, with no folder known`);
+    await open(asks.started);
+    await line().waitFor();
+    assert.match(await line().innerText(), /^Reached an agent session on pc-one .*: at the next session's start\./);
+    assert.doesNotMatch(await line().innerText(), /session an agent session/);
 
     step(`${name}: watching under five minutes, with a link to the session`);
     await open(asks.watching);
