@@ -522,6 +522,38 @@ test('replay: an entry already there (412) is dropped, one over 24 hours old is 
   } finally { await close(); }
 });
 
+test('replay: only event files and run progress files are replayed; a spooled ask.json, request.json or approval line is dropped and never sent', async () => {
+  const { fake, cli, spool, close } = await setup();
+  try {
+    const at = () => new Date().toISOString();
+    const line = (file, extra = {}) => JSON.stringify({ v: 1, at: at(), kind: 'put', section: 'inbox', path: file, body: '{"x":1}', contentType: 'application/json', createOnly: true, ...extra });
+    const runFile = 'requests/20261030-sprite-studio-job-a1b2/run-20261030T101500123Z-ab12.json';
+    const refused = [
+      'asks/20261030-sprite-studio-planted-a1b2/ask.json', 'requests/20261030-sprite-studio-job-a1b2/request.json', 'requests/20261030-sprite-studio-job-a1b2/approved.json',
+      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
+      'asks/20261030-sprite-studio-planted-a1b2/delivered.json', 'events/2026-10-30/../../asks/x/ask.json', 'events/not-a-date/x.json', 'events/2026-10-30/sub/x.json', 'events/2026-10-30/x.png',
+      'requests/x/run-bad.json', 'requests/x/y/run-20261030T101500123Z-ab12.json', 'workspace.json', '../events/2026-10-30/x.json',
+    ];
+    // The same line, and a line that asks to replace what is there, are only ever replayed as a create-only JSON file.
+    await writeFile(spool, [
+      ...refused.map(file => line(file)), line('events/2026-10-30/replace.json', { createOnly: false, contentType: 'text/html' }),
+      line('events/2026-10-30/ok.json'), line(runFile),
+    ].join('\n') + '\n');
+    fake.seed('sections/inbox/events/2026-10-30/replace.json', '{"first":true}', 'application/json');
+    const done = await cli('api', 'ask', 'list');
+    assert.equal(done.code, 0, done.stderr);
+    for (const file of refused.filter(name => name !== 'workspace.json')) assert.equal(fake.text(`sections/inbox/${file}`), null, `${file} is never sent`);
+    assert.equal(fake.text('sections/inbox/workspace.json'), '{"name":"Inbox","hidden":true,"entities":[]}', 'workspace.json is not replaced');
+    assert.match(done.stderr, /dropped a line for asks\/20261030-sprite-studio-planted-a1b2\/ask\.json/);
+    assert.equal(fake.text('sections/inbox/events/2026-10-30/ok.json'), '{"x":1}', 'an event replays');
+    assert.equal(fake.text(`sections/inbox/${runFile}`), '{"x":1}', 'a run progress file replays');
+    assert.equal(fake.text('sections/inbox/events/2026-10-30/replace.json'), '{"first":true}', 'a line saying createOnly false still cannot replace');
+    assert.equal(fake.objects.get('sections/inbox/events/2026-10-30/ok.json').contentType, 'application/json');
+    assert.equal((await readFile(spool, 'utf8')).trim(), '', 'refused lines are dropped, not kept');
+    assert.deepEqual([...fake.objects.keys()].filter(key => /\/asks\//.test(key)), [], 'no Ask was written, so none carries the watcher\'s mark');
+  } finally { await close(); }
+});
+
 test('replay: a refusal (403 for a read-only token) keeps the line; an unreadable time expires it', async () => {
   const { fake, cli, spool, close } = await setup();
   try {

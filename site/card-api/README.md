@@ -216,7 +216,9 @@ What it refuses:
 - `writer` metadata on `asks/*/ask.json`: a limited token's ask.json is stored with `x-amz-meta-writer: pc-runner` (the token named
   `pc-runner`, the PC watcher's), `agent` (`agent`/`agent-<name>`) or `other` (any other limited token); the passphrase's carries
   nothing. Only the handler sets it (a caller's `x-amz-meta-*` headers are ignored, and ask.json cannot go through an upload URL).
-  The Hub starts a run from an Ask's `rerun` pointer only when this is `pc-runner`
+  The Hub starts a run from an Ask's `rerun` pointer only when this is `pc-runner`. A PC run holds that token in its environment too, so the
+  mark excludes other tokens (a cloud run, a bot, an agent session), not a run's own code; against a run the gate is on the PC (the rules
+  must equal what the watcher computed, and the rerun gate)
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB
