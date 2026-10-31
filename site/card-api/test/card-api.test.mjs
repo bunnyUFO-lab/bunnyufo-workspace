@@ -235,6 +235,20 @@ test('inbox: answers, snoozes and declines are the Hub\'s, so a limited writer i
   }
 });
 
+test('inbox: a limited writer may create an Ask delivered.json and watch-<session>.json (they are not the Hub files)', async () => {
+  const { fake, call } = await setup();
+  try {
+    const create = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{"v":1}'), base64: true, headers: { 'If-None-Match': '*' } });
+    for (const file of ['asks/x-1/delivered.json', 'asks/x-1/watch-abcd1234.json']) {
+      assert.equal((await create('tok-cloud', file)).status, 200, file);
+      assert.equal((await create('tok-cloud', file)).status, 412, `${file} a second time`);
+    }
+    assert.equal(fake.text('sections/inbox/asks/x-1/delivered.json'), '{"v":1}');
+  } finally {
+    await fake.close();
+  }
+});
+
 test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an applied note, once', async () => {
   const { fake, call } = await setup();
   try {
