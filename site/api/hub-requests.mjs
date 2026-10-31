@@ -173,13 +173,14 @@ export function rerunRequestId(requestId) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, bunnylinkRepo = async () => null, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], neverRepos = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
+  const NEVER_REPO = 'That repo is never run for you by the PC or the cloud; start work on it yourself at the PC.';
   const MODEL_ON_HERMES = 'A model can be chosen for a job that runs on Hermes.';
 
   /**
@@ -188,7 +189,40 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * only the PC has; it needs a repo that has a routine; and its project may not be Bunnylink or in `HUB_CLOUD_NEVER`.
    */
   const publicKey = signingKey ? createPublicKey(signingKey) : null;
-  function moveEligibility(request, state, approved, at, stored = null) {
+  /** One spelling of a repo for comparing: lower case, no trailing `.git` (REPO_RE allows `owner/name.git`). */
+  const normRepo = repo => String(repo).trim().toLowerCase().replace(/\.git$/, '');
+  // HUB_NEVER_REPOS: entries that are not `owner/name` are logged and dropped.
+  const configuredNever = neverRepos.filter(repo => {
+    if (validRepo(repo)) return true;
+    log(`[hub] HUB_NEVER_REPOS: dropped an entry that is not owner/name (${String(repo).replace(/[^\x20-\x7e]/g, '?').slice(0, 60)})`);
+    return false;
+  }).map(normRepo);
+  /**
+   * The repos no request may be signed for, whatever its project: the Bunnylink project's own repo (the homelab) and `HUB_NEVER_REPOS`. The project
+   * guard alone is not enough: another project that names that repo would otherwise be signed for the PC or the cloud. It fails closed: when the
+   * Bunnylink repo cannot be read (a storage error) or the Bunnylink section has no tracked repo, `unknown` says so and every request that names a
+   * repo is refused for the PC and the cloud, because it could be that repo. No Bunnylink section at all means nothing to protect.
+   * → `{ set: Set of normalised repos, unknown: { status, message } | null }`.
+   */
+  async function neverRepoSet() {
+    const set = new Set(configuredNever);
+    let home;
+    try {
+      home = await bunnylinkRepo();
+    } catch (error) {
+      log(`[hub] could not read the Bunnylink project's repo, so PC and cloud approvals for a repo are refused: ${error.message}`);
+      return { set, unknown: { status: 503, message: 'Could not check which repos are off limits just now; try again.' } };
+    }
+    if (home === '') {
+      log('[hub] the bunnylink section has no tracked repo, so PC and cloud approvals for a repo are refused until it has one');
+      return { set, unknown: { status: 400, message: 'The Bunnylink project has no tracked repo, so the Hub cannot tell which repos are off limits; set it in the Bunnylink workspace.json.' } };
+    }
+    if (home) set.add(normRepo(home));
+    return { set, unknown: null };
+  }
+  /** Why a request naming `repo` may not be signed for the PC or the cloud: `{ status, message }`, or null. */
+  const neverProblem = (never, repo) => (!repo ? null : never.set.has(normRepo(repo)) ? { status: 400, message: NEVER_REPO } : never.unknown);
+  function moveEligibility(request, state, approved, at, stored = null, never = { set: new Set(), unknown: null }) {
     const preset = presetOf(request.preset);
     if (!preset) return 'Only a request made from a preset can move.';
     if (state !== 'approved') return `That request is ${state}; it cannot move to the cloud.`;
@@ -204,6 +238,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!request.repo) return 'A cloud run needs a repo.';
     if (!hasCloud(request.repo)) return 'There is no cloud routine for that repo.';
     if (request.project === 'bunnylink' || cloudNever.includes(request.project)) return 'That project does not run in the cloud.';
+    const never_ = neverProblem(never, request.repo);
+    if (never_) return never_.message === NEVER_REPO ? 'That repo does not run in the cloud.' : never_.message;
     return null;
   }
   const moving = new Set();
@@ -232,6 +268,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   /** Every request of this month and the one before, as list rows. */
   async function loadRequests(at) {
     const folders = await listFolders('requests', at);
+    const never = await neverRepoSet();
     const rows = await pool(16, [...folders], async ([id, names]) => {
       if (!names.has('request.json') || !validId(id)) return null;
       const request = await cached(`requests/${id}/request.json`);
@@ -241,7 +278,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const state = stateOf(id, names, full, parts, at);
       // Where a cloud request stands (queued, fired, waiting, fire-failed, not-started); null for everything else.
       const cloud = parts.approved?.target === 'cloud' ? await live.cloudStatus(id, { names, state, approved: parts.approved }, at).catch(() => null) : null;
-      const offer = moveEligibility(full, state, parts.approved, at) === null ? 'move-to-cloud' : null;
+      const offer = moveEligibility(full, state, parts.approved, at, null, never) === null ? 'move-to-cloud' : null;
       // (The list pass skips the request hash; the route checks it.)
       return requestItem(full, state, parts.taken, { ...parts, cloud, offer, lastRunAt: newestRun(names), now: at });
     });
@@ -327,11 +364,14 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const repo = clean.repo ?? (preset.fields.includes('repo') ? await projectRepo(clean.project) : undefined);
       const needs = clean.needs ?? (preset.needs.length ? preset.needs : undefined);
       if (clean.project === 'bunnylink' && clean.target && clean.target !== 'at-pc') throw fail(BUNNYLINK_AT_PC, 400);
+      const neverWhy = neverProblem(await neverRepoSet(), repo);
+      const neverRepo = !!neverWhy;
+      if (neverWhy && clean.target && clean.target !== 'at-pc' && clean.target !== 'hermes') throw fail(neverWhy.message, neverWhy.status);
       if (clean.target && clean.target !== 'at-pc' && !preset.targets.includes(clean.target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
       const routed = route({ preset, project: clean.project, needs: needs ?? [], repo, cloudRepos: hasCloud });
       proposal = {
         ...(clean.title ? { title: clean.title } : {}), preset: preset.id, ...(repo ? { repo } : {}), ...(needs ? { needs } : {}),
-        target: clean.project === 'bunnylink' ? 'at-pc' : clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}), ...(clean.agent ? { agent: clean.agent } : {}),
+        target: clean.project === 'bunnylink' || (neverRepo && (clean.target ?? routed.target) !== 'hermes') ? 'at-pc' : clean.target ?? routed.target, ...(clean.doneWhen ? { doneWhen: clean.doneWhen } : {}), ...(clean.agent ? { agent: clean.agent } : {}),
         origin: { kind: 'owner', name: user }, ...(clean.replaces ? { replaces: clean.replaces } : {}),
       };
       proposal.why = clean.target ? 'you chose it' : routed.why;
@@ -451,8 +491,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * Approve again and a follow-up), a request you start at the PC is never signed, the target must suit the preset, a model is for Hermes, a cloud run
    * needs a repo with a routine. `approveRequest` runs it, and so does `copyFor` BEFORE it writes the copy, so a refused Approve again leaves nothing behind.
    */
-  function refuseUnapprovable(request, preset, chosen) {
+  async function refuseUnapprovable(request, preset, chosen) {
     if (request.project === 'bunnylink') throw fail(BUNNYLINK_AT_PC, 400);
+    // The repo guard: another project that names the Bunnylink repo (or a repo in HUB_NEVER_REPOS) is never signed for the PC or the cloud either.
+    if (chosen === 'pc' || chosen === 'cloud') {
+      const why = neverProblem(await neverRepoSet(), request.repo);
+      if (why) throw fail(why.message, why.status);
+    }
     if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
     if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
     if (request.model && chosen !== 'hermes') throw fail(MODEL_ON_HERMES, 400);
@@ -479,7 +524,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
     if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
     const chosen = target ?? request.target;
-    refuseUnapprovable(request, preset, chosen);
+    await refuseUnapprovable(request, preset, chosen);
     const body = {
       v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
@@ -564,7 +609,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const clean = checkRequest({ ...copy, ...(fromAsk ? { fromAsk } : {}), ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     // Refuse what the approval would refuse before anything is written: a copy that cannot be approved is never made.
     if (preset.hidden && !clean.fromAsk) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
-    refuseUnapprovable(clean, preset, target);
+    await refuseUnapprovable(clean, preset, target);
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
     }), null, fixedId);
@@ -666,7 +711,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const { request, parts, state } = await loadOne(id, at);
       const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
       if (!stored) throw fail('No such request.', 404);
-      const why = moveEligibility(request, state, parts.approved, at, stored);
+      const why = moveEligibility(request, state, parts.approved, at, stored, await neverRepoSet());
       if (why) throw clash(why);
       const newId = newRequestId(request.project, request.text, at);
       await writeStop(id, `moved to the cloud: ${newId}`, user, at, ['approved']);

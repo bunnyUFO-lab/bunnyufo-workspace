@@ -488,7 +488,7 @@ Request detail and list rows carry `cloud: { status, reason?, next? }` for an `a
 Move to the cloud: a request approved for the PC, not taken, that has waited 6 hours is offered on Today (`offers` in
 `GET /hub/today`; list rows carry `offer: "move-to-cloud"`). It must use a preset that allows the cloud, need nothing only the
 PC has, have a repo with a routine, and not be in the `bunnylink` project or in `HUB_CLOUD_NEVER` (comma-separated project
-names, empty by default). The old approval is checked first (this host's signature, this request, target `pc`, not expired,
+names, empty by default), and its repo may not be Bunnylink's own or in `HUB_NEVER_REPOS` (`owner/name`, empty by default). Repos are compared in lower case without a trailing `.git`; an invalid `HUB_NEVER_REPOS` entry is logged and dropped. The guard fails closed: if the Bunnylink project's repo cannot be read (a storage error, 503) or its section tracks no repo (400), a request that names any repo is refused for the PC and the cloud, and the move offer is hidden, until it can be read; with no Bunnylink section there is nothing to protect. The old approval is checked first (this host's signature, this request, target `pc`, not expired,
 and on the route the hash of `request.json`): an approval signed by another key is never offered or re-signed.
 `POST /hub/requests/:id/move-to-cloud` (signed-in user) is Approve again with the cloud as the target, in this order: the old
 request's signed stop `moved to the cloud: <new id>` is written first (create-only, so it is the lock: a PC take before it, or a
