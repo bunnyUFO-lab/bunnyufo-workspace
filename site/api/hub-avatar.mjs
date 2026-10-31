@@ -37,6 +37,16 @@ export function checkAvatarField(raw) {
   return { agent: raw.agent, request: raw.request, ...(raw.subject ? { subject: raw.subject } : {}) };
 }
 
+/** What is wrong with an `avatar` field that `checkAvatarField` refused, in words for the owner. */
+export function avatarFieldProblem(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return "The Ask's avatar field is not readable.";
+  if (typeof raw.agent !== 'string' || !SLUG_RE.test(raw.agent)) return 'The Ask names no known agent.';
+  if (raw.sheet !== undefined) return "The Ask names a sheet that is not a sheet id.";
+  if (!validId(raw.request)) return 'The Ask names no valid avatar request.';
+  if (raw.subject !== undefined && (typeof raw.subject !== 'string' || !SUBJECT_RE.test(raw.subject))) return "The Ask's subject is not a valid path (letters, digits, spaces and . _ / : -), so nothing started.";
+  return 'The Ask names no known agent.';
+}
+
 /**
  * @param requests      `createRequests(...)`: `verifiedRun`, `createFixed`, `approveRequest`
  * @param chooseAvatar  `(agentId, { kind: 'custom', sheet }, user, at)`: the Team screen's avatar write
@@ -54,6 +64,11 @@ export function createAvatar({ requests, chooseAvatar, agents, log = () => {} })
     return own ? loaded : null;
   }
 
+  /** The sheet request is already approved: said to the Ask that made it as started, to any other Ask as already running, with the letter that runs. */
+  const alreadyRunning = (mine, ask, id) => (mine.request.fromAsk === ask.id
+    ? { started: true, request: id, message: START_NOTE }
+    : no(`A sprite sheet run was already started for this avatar request, from variant ${mine.request.choice} of another Ask; this pick changes nothing.`));
+
   async function startSheet({ ask, avatar, answer, user, at }) {
     if (ask.requirePasskey !== true) return no('This Ask does not require a passkey, so it cannot start a run.');
     if (!/^[a-d]$/.test(answer.choice ?? '')) return no('That is not one of the four variants.');
@@ -67,6 +82,7 @@ export function createAvatar({ requests, chooseAvatar, agents, log = () => {} })
     if (verified.request.agent !== avatar.agent) return no('That request was made for another agent.');
     const id = sheetRequestId(avatar.request);
     let found = false;
+    let firstPick = null;
     try {
       await requests.createFixed({
         project: verified.request.project, preset: 'agent-avatar-sheet', agent: avatar.agent, fromAsk: ask.id, choice: answer.choice, subject: avatar.subject,
@@ -81,14 +97,20 @@ export function createAvatar({ requests, chooseAvatar, agents, log = () => {} })
       const mine = await ownSheetRequest(id, avatar.agent, at);
       if (!mine) return no('That request id is taken; nothing started.');
       // Still only proposed: an earlier approve failed, so this pick finishes it. Approved already: the same Ask is told so, another Ask is refused.
-      if (mine.state !== 'proposed') return mine.request.fromAsk === ask.id ? { started: true, request: id, message: START_NOTE } : no('A sprite sheet run was already started for this avatar request.');
+      if (mine.state !== 'proposed') return alreadyRunning(mine, ask, id);
+      // The request was saved from an earlier pick and cannot be changed: this pick can only start it as it is.
+      if (mine.request.choice !== answer.choice) firstPick = { choice: mine.request.choice, ask: mine.request.fromAsk };
     }
     try {
       await requests.approveRequest(id, { target: 'pc', by: user, at });
     } catch (error) {
+      // Another answer may have approved it between our read and our write: the sheet is running, which is not a failure.
+      const now = await ownSheetRequest(id, avatar.agent, at);
+      if (now && now.state !== 'proposed') return alreadyRunning(now, ask, id);
       log(`[hub] the sheet request ${id} was made but not approved: ${error.message}`);
-      return no(`The sheet request was saved but not approved: ${error.message}. Picking again on an Ask for the same avatar request finishes it.`);
+      return no(`The sheet request was saved but not approved: ${String(error.message).replace(/\.+$/, '')}. Picking again on an Ask for the same avatar request finishes it.`);
     }
+    if (firstPick) return { started: true, request: id, message: `The sprite sheet starts from the first pick, variant ${firstPick.choice}, which was saved but not started earlier. Your later pick, variant ${answer.choice}, did not change it.` };
     return { started: true, request: id, message: START_NOTE };
   }
 
@@ -108,7 +130,8 @@ export function createAvatar({ requests, chooseAvatar, agents, log = () => {} })
   async function afterAnswer({ ask, answer, user, at }) {
     if (!ask || ask.avatar === undefined || !answer?.choice) return null;
     const avatar = checkAvatarField(ask.avatar);
-    if (!avatar || !agents.includes(avatar.agent)) return no('The Ask names no known agent.');
+    if (!avatar) return no(avatarFieldProblem(ask.avatar));
+    if (!agents.includes(avatar.agent)) return no('The Ask names no known agent.');
     try {
       if (avatar.sheet) return answer.choice === 'use' ? await useSheet({ avatar, user, at }) : null;
       return await startSheet({ ask, avatar, answer, user, at });

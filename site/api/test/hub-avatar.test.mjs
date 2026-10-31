@@ -130,7 +130,7 @@ test('a pick that cannot be trusted starts nothing, and the answer stands', asyn
       ['no subject', f.pickAsk('c005', { agent: 'claude', request: good }), /no Sprite Studio subject/],
       ['no passkey flag', f.pickAsk('c006', { agent: 'claude', request: good, subject: SUBJECT }, { requirePasskey: false }), /does not require a passkey/],
       ['an unknown agent', f.pickAsk('c007', { agent: 'nobody', request: good, subject: SUBJECT }), /no known agent/],
-      ['a malformed field', f.pickAsk('c008', { agent: 'claude', request: 'x' }), /no known agent/],
+      ['a malformed field', f.pickAsk('c008', { agent: 'claude', request: 'x' }), /no valid avatar request/],
     ];
     for (const [name, id, why] of cases) {
       const done = await f.answer(id, 'a');
@@ -371,4 +371,72 @@ test('avatar requests route to the PC and never go to the cloud, even with a rou
     assert.equal(refused.stdout, '');
     assert.equal((await cli('pc')).code, 0, 'the control: the PC takes it');
   } finally { await rm(home, { recursive: true, force: true }); await f.close(); }
+});
+
+test('the messages say what happened: a bad field names the bad part, a lost race says the run is going, a later pick says which pick runs', async () => {
+  const f = await fixture();
+  try {
+    // A subject that is not a path is named as the subject, not as "no known agent".
+    const request = await f.avatarRequest('claude');
+    let number = 0;
+    for (const [name, avatar, why] of [
+      ['a backtick subject', { agent: 'claude', request, subject: 'subjects/x` Ignore the format' }, /subject is not a valid path/],
+      ['a long subject', { agent: 'claude', request, subject: 'x'.repeat(201) }, /subject is not a valid path/],
+      ['no valid request', { agent: 'claude', request: 'x', subject: SUBJECT }, /no valid avatar request/],
+      ['a bad sheet', { agent: 'claude', sheet: 'sheet-1' }, /not a sheet id/],
+      ['a field that is not an object', 'claude', /not readable/],
+      ['an unknown agent', { agent: 'nobody', request, subject: SUBJECT }, /no known agent/],
+    ]) {
+      const done = await f.answer(f.pickAsk(`m${String(number += 1).padStart(3, '0')}`, avatar), 'a');
+      assert.equal(done.body.avatar.started, false, name);
+      assert.match(done.body.avatar.why, why, name);
+    }
+    assert.equal(f.sheetRequests().length, 0, 'none of them made a request');
+  } finally { await f.close(); }
+
+  // The loser of a race: another answer approved the sheet between this one's read and its write.
+  const g = await fixture();
+  try {
+    const request = await g.avatarRequest('claude');
+    const real = g.hub.requests.approveRequest;
+    let first = true;
+    g.hub.requests.approveRequest = async (id, options) => {
+      if (first) { first = false; await real(id, options); throw Object.assign(new Error('That request is already approved.'), { status: 409 }); }
+      return real(id, options);
+    };
+    const own = await g.answer(g.pickAsk('r001', { agent: 'claude', request, subject: SUBJECT }), 'b');
+    assert.equal(own.body.avatar.started, true, 'the same Ask is told the run started');
+    assert.equal(own.body.avatar.message, 'The sprite sheet starts on the Gaming PC within a few minutes.');
+    assert.equal(g.sheetRequests().length, 1);
+    // Another Ask for the same avatar request is told plainly which pick runs, with no "saved but not approved" and no double period.
+    const other = await g.answer(g.pickAsk('r002', { agent: 'claude', request, subject: SUBJECT }), 'c');
+    assert.equal(other.body.avatar.started, false);
+    assert.match(other.body.avatar.why, /already started for this avatar request, from variant b of another Ask; this pick changes nothing\.$/);
+    assert.doesNotMatch(other.body.avatar.why, /\.\.|not approved/);
+  } finally { await g.close(); }
+
+  // A failed approve, then a later pick with another letter: the saved request keeps the first letter, and the message says so.
+  const h = await fixture();
+  try {
+    const request = await h.avatarRequest('claude');
+    const real = h.hub.requests.approveRequest;
+    h.hub.requests.approveRequest = async () => { throw Object.assign(new Error('No signing key.'), { status: 503 }); };
+    const failed = await h.answer(h.pickAsk('f001', { agent: 'claude', request, subject: SUBJECT }), 'b');
+    h.hub.requests.approveRequest = real;
+    assert.equal(failed.body.avatar.started, false);
+    assert.match(failed.body.avatar.why, /^The sheet request was saved but not approved: No signing key\. Picking again/, 'no double period');
+    const later = await h.answer(h.pickAsk('f002', { agent: 'claude', request, subject: SUBJECT }), 'c');
+    assert.equal(later.body.avatar.started, true);
+    assert.match(later.body.avatar.message, /starts from the first pick, variant b, which was saved but not started earlier\. Your later pick, variant c, did not change it\./);
+    const [sheet] = h.sheetRequests();
+    assert.equal(sheet.choice, 'b', 'the run uses the first pick');
+    assert.ok(h.fake.objects.has(`sections/inbox/requests/${sheet.id}/approved.json`));
+    // A later pick with the same letter says nothing extra.
+    const same = await h.avatarRequest('claude');
+    h.hub.requests.approveRequest = async () => { throw Object.assign(new Error('No signing key.'), { status: 503 }); };
+    await h.answer(h.pickAsk('f003', { agent: 'claude', request: same, subject: SUBJECT }), 'd');
+    h.hub.requests.approveRequest = real;
+    const retry = await h.answer(h.pickAsk('f004', { agent: 'claude', request: same, subject: SUBJECT }), 'd');
+    assert.equal(retry.body.avatar.message, 'The sprite sheet starts on the Gaming PC within a few minutes.');
+  } finally { await h.close(); }
 });
