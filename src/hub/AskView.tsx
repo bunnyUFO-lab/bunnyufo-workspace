@@ -44,17 +44,19 @@ const HOW: Record<string, string> = {
 
 /** Where the answer went, as the session's own mod reported it ("reported by <host>": these files are not the owner's). */
 function Delivery({ ask, delivery }: { ask: Ask; delivery: AskDelivery }) {
-  const folder = text(delivery.folder) || 'an agent session'
+  // A start or next-session hand-over has no watch file, so the folder can be unknown.
+  const folder = text(delivery.folder)
+  const who = folder ? `session ${folder}` : 'an agent session'
   const host = text(delivery.host)
   const on = host ? ` on ${host}` : ''
   const link = text(delivery.appUrl) || text(delivery.url)
   let body
   if (delivery.state === 'delivered') {
-    body = <>Reached session {folder}{on} {typeof delivery.at === 'string' ? ago(delivery.at) : ''}: {HOW[delivery.how ?? ''] ?? 'delivered'}.</>
+    body = <>Reached {who}{on} {typeof delivery.at === 'string' ? ago(delivery.at) : ''}: {HOW[delivery.how ?? ''] ?? 'delivered'}.</>
   } else if (delivery.state === 'watching') {
-    body = <>Session {folder}{on} is watching; it checks every minute.{link && <> <a className="hub-btn" href={link} data-delivery-open>Open the session</a></>}</>
+    body = <>{folder ? 'Session' : 'An agent session'}{folder && ` ${folder}`}{on} is watching; it checks every minute.{link && <> <a className="hub-btn" href={link} data-delivery-open>Open the session</a></>}</>
   } else if (delivery.state === 'stale') {
-    body = <>Not delivered after {delivery.minutes ?? 0} minutes. The session may be closed. Open it, or start a session in {folder}: it gets the answer at its start.{link && <> <a className="hub-btn" href={link} data-delivery-open>Open the session</a></>}</>
+    body = <>Not delivered after {delivery.minutes ?? 0} minutes. The session may be closed. Open it, or start a session in {folder || 'its repository'}: it gets the answer at its start.{link && <> <a className="hub-btn" href={link} data-delivery-open>Open the session</a></>}</>
   } else {
     body = <>No session is watching this Ask. The next session in project {text(ask.project)} gets it when it starts.</>
   }
