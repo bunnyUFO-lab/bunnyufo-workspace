@@ -99,7 +99,7 @@ export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (s
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>
     typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < count
-  return valid(requested) ? requested : valid(preferred) ? preferred : count - 1
+  return valid(requested) ? requested : valid(preferred) ? preferred : 0
 }
 
 /** The cards' home: this section's page with no hash. */

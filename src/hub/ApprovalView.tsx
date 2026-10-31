@@ -190,7 +190,7 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
   return (
     <>
       <div className="ni-b ap-body" data-approval-body>
-        {writtenByOther(detail) && <p className="ap-warn" role="note" data-approval-warning>Written by {whoWrote(detail)}, not by you. Read it before approving.</p>}
+        {actionable && writtenByOther(detail) && <p className="ap-warn" role="note" data-approval-warning>Written by {whoWrote(detail)}, not by you. Read it before approving.</p>}
         <div className="ni-chips">
           {preset && <span className="ni-chip" data-approval-preset>{preset.label}</span>}
           <span className="ni-chip">{request.project}</span>

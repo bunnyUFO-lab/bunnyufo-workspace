@@ -446,7 +446,7 @@ test('the Inbox filters: question, answered, requests', async () => {
     seed.request(requestJson({ id: id('req', 'r111'), now: NOW }));
     const ids = async filter => (await get(`/hub/inbox?filter=${filter}`)).body.items.map(item => item.id).sort();
     assert.deepEqual(await ids('question'), [open.id], 'Only open Asks wait on you.');
-    assert.deepEqual(await ids('answered'), [answered.id, taken.id].sort());
+    assert.deepEqual(await ids('answered'), [answered.id], 'Answered holds what is waiting to be picked up; picked-up work is with the agent now.');
     assert.deepEqual(await ids('all'), [open.id]);
     assert.deepEqual(await ids('requests'), [id('req', 'r111')]);
   } finally { await close(); }
@@ -1060,7 +1060,7 @@ test('Needs you counts an open checklist, a fully ticked one too, and drops subm
     const todo = (await get('/hub/inbox?filter=steps')).body.items;
     assert.deepEqual(todo.map(item => [item.id, item.state]), [[open.id, 'open'], [full.id, 'open']], 'Open lists only, newest first.');
     const history = (await get('/hub/inbox?filter=answered')).body.items;
-    assert.deepEqual(history.map(item => [item.id, item.state]), [[submitted.id, 'submitted'], [picked.id, 'picked-up']], 'Submitted and picked-up lists are history; cancelled is gone.');
+    assert.deepEqual(history.map(item => [item.id, item.state]), [[submitted.id, 'submitted']], 'Submitted lists are history; picked-up and cancelled ones are not.');
     assert.equal((await get('/hub/inbox?filter=bogus')).body.items.length, 2, 'An unknown filter is Needs you.');
   } finally { await close(); }
 });

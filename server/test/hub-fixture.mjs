@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, cardTabs = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -39,9 +39,11 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   const dir = path.join(base, 'one');
   await mkdir(path.join(dir, 'hub'), { recursive: true });
   await writeFile(path.join(dir, 'hub', 'index.md'), '# The hub card\n\nA card that happens to be called hub.\n');
+  // Off by default: a second tab, sorted last the way an old draft is, for tests of which tab a card opens on.
+  if (cardTabs) await writeFile(path.join(dir, 'hub', 'old.md'), '# Old draft\n\nAn older draft, kept as the last tab.\n');
   await writeFile(path.join(dir, 'workspace.json'), JSON.stringify({ entities: [{
     id: 'hub', folder: 'hub', title: 'The hub card', description: 'A card.', category: 'test', created: today, updated: today, status: 'active',
-    steps: [{ name: 'Notes', path: 'index.md' }],
+    steps: [{ name: 'Notes', path: 'index.md' }, ...(cardTabs ? [{ name: 'Old: Draft 1', path: 'old.md' }] : [])],
   }] }, null, 2));
   const repo = await mkdtemp(path.join(root, '.cache', 'hub-fixture-app-'));
   for (const folder of ['workspace', 'inbox', 'projects']) await mkdir(path.join(repo, folder), { recursive: true });

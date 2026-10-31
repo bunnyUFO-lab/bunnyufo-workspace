@@ -121,9 +121,9 @@ try {
     return page;
   };
 
-  // 1. Desktop, no step: the last tab is active.
+  // 1. Desktop, the last tab named: it is active and in view. (With no step a card opens on its first tab.)
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  let page = await open(desktop, '#/many-tabs');
+  let page = await open(desktop, `#/many-tabs/${names.length - 1}`);
   await oneRow(page, '1280 many');
   const height = await page.$eval('.step-tabs', el => el.getBoundingClientRect().height);
   assert.ok(height < 40, `the tab row is under 40 px tall (${height})`);
@@ -172,9 +172,9 @@ try {
   assert.deepEqual(c.arrows, [], 'no arrows on a short card');
   await desktop.close();
 
-  // 6. A phone, no step.
+  // 6. A phone, the last tab named.
   const phone = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
-  page = await open(phone, '#/many-tabs');
+  page = await open(phone, `#/many-tabs/${names.length - 1}`);
   await oneRow(page, '375 many');
   await activeInView(page, '375 last tab');
   await noSideways(page, '375 many');

@@ -18,3 +18,9 @@ export function itemPage(item: Item): string | undefined {
   if (item.kind === 'approval' || item.kind === 'request') return hubHash('request', item.id)
   return undefined
 }
+
+// The chip the owner last had open on Needs you, so the way back from an item lands on it and not on All.
+let lastFilter = 'all'
+export const rememberFilter = (filter: string) => { lastFilter = filter }
+/** Where "Back to Needs you" goes: the list as it was left. */
+export const needsHash = () => (lastFilter === 'all' ? hubHash('needs') : hubHash('needs', lastFilter))
