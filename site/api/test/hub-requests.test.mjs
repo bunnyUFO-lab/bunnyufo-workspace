@@ -24,13 +24,13 @@ const rid = (slug, n = 'a1b2') => `${day}-probe-${slug}-${n}`;
 const runName = (date, rand = 'r001') => `run-${markStamp(date)}-${rand}.json`;
 const fireName = (date, rand = 'f001') => `fire-${markStamp(date)}-${rand}.json`;
 
-async function fixture({ env = {}, hooks } = {}) {
+async function fixture({ env = {}, hooks, log } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-reqs-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true, now: () => NOW, env });
+  const hub = createHub({ bucket, enabled: true, now: () => NOW, env, ...(log ? { log } : {}) });
   if (hooks) Object.assign(hub.requestHooks, hooks);
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
   await listenOnGoodPort(server, '127.0.0.1');
@@ -566,6 +566,79 @@ test('the repo guard: another project that names the Bunnylink repo, or a repo i
       assert.equal((await f.post(`/hub/requests/${fine.id}/approve`, { target })).status, 201, target);
       assert.ok(signed(fine.id), `${target} signed`);
     }
+  } finally { await f.close(); }
+});
+
+test('the repo guard fails closed: a failed read of the Bunnylink repo, or no tracked repo, refuses pc and cloud for a repo, and says why', async () => {
+  // A storage error: the Bunnylink section cannot be read, so any request naming a repo might be the Bunnylink repo.
+  const f = await fixture({ env: { ...KEY_ENV, HUB_ROUTINE_DRY_RUN: '1' } });
+  try {
+    f.fake.seed('sections/bunnylink/workspace.json', JSON.stringify({ name: 'Bunnylink', tracked: { repo: 'example/homelab' }, entities: [] }), 'application/json');
+    const request = preset(rid('readerr', 'h111'), { project: 'probe', preset: 'code-task', repo: 'example/homelab', target: 'pc' });
+    f.put(request);
+    f.fake.fail = key => key.endsWith('bunnylink/workspace.json');
+    const refused = await f.post(`/hub/requests/${request.id}/approve`, { target: 'pc' });
+    assert.equal(refused.status, 503, JSON.stringify(refused.body));
+    assert.match(refused.body.error, /off limits just now; try again/);
+    assert.equal(f.fake.text(`sections/inbox/requests/${request.id}/approved.json`), null);
+    assert.equal((await f.post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Fix it', repo: 'example/homelab', target: 'cloud' })).status, 503);
+    // A request that names no repo, and a Hermes job, do not depend on the read.
+    const bare = preset(rid('norepo', 'h222'), { project: 'probe', preset: 'code-task', target: 'pc' });
+    f.put(bare);
+    assert.equal((await f.post(`/hub/requests/${bare.id}/approve`, { target: 'pc' })).status, 201, 'no repo, nothing to match');
+    // The read works again: a normal repo approves, the Bunnylink repo is still refused.
+    f.fake.fail = null;
+    const fine = preset(rid('fine', 'h333'), { project: 'probe', preset: 'code-task', repo: 'example/probe', target: 'pc' });
+    f.put(fine);
+    assert.equal((await f.post(`/hub/requests/${fine.id}/approve`, { target: 'pc' })).status, 201);
+    assert.equal((await f.post(`/hub/requests/${request.id}/approve`, { target: 'pc' })).status, 400);
+  } finally { await f.close(); }
+
+  // The Bunnylink section exists but tracks no repo: refused, and logged once per check.
+  const logs = [];
+  const g = await fixture({ env: { ...KEY_ENV, HUB_ROUTINE_DRY_RUN: '1' }, log: line => logs.push(line) });
+  try {
+    g.fake.seed('sections/bunnylink/workspace.json', JSON.stringify({ name: 'Bunnylink', entities: [] }), 'application/json');
+    const request = preset(rid('notracked', 'h444'), { project: 'probe', preset: 'code-task', repo: 'example/probe', target: 'pc' });
+    g.put(request);
+    const refused = await g.post(`/hub/requests/${request.id}/approve`, { target: 'pc' });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /no tracked repo/);
+    assert.ok(logs.some(line => /no tracked repo/.test(line)), 'logged');
+    assert.equal(g.fake.text(`sections/inbox/requests/${request.id}/approved.json`), null);
+    // Approve again writes no copy while it is unknown.
+    const before = [...g.fake.objects.keys()].filter(name => name.includes('/requests/')).length;
+    assert.equal((await g.post(`/hub/requests/${request.id}/again`, {})).status, 400);
+    assert.equal([...g.fake.objects.keys()].filter(name => name.includes('/requests/')).length, before, 'no copy');
+  } finally { await g.close(); }
+
+  // No Bunnylink section at all: nothing to protect, so a normal request approves (and nothing is logged as a problem).
+  const h = await fixture({ env: { ...KEY_ENV } });
+  try {
+    const request = preset(rid('nosection', 'h555'), { project: 'probe', preset: 'code-task', repo: 'example/probe', target: 'pc' });
+    h.put(request);
+    assert.equal((await h.post(`/hub/requests/${request.id}/approve`, { target: 'pc' })).status, 201);
+  } finally { await h.close(); }
+});
+
+test('the repo guard compares repos in one spelling (case, trailing .git) and drops invalid HUB_NEVER_REPOS entries with a log', async () => {
+  const logs = [];
+  const f = await fixture({ env: { ...KEY_ENV, HUB_ROUTINE_DRY_RUN: '1', HUB_NEVER_REPOS: 'example/Secret-Box.git, not a repo, ../x, example/secret-two' }, log: line => logs.push(line) });
+  try {
+    f.fake.seed('sections/bunnylink/workspace.json', JSON.stringify({ name: 'Bunnylink', tracked: { repo: 'Example/Homelab.git' }, entities: [] }), 'application/json');
+    for (const [slug, repo] of [['dotgit', 'example/homelab'], ['plain-git', 'example/homelab.git'], ['caps-git', 'EXAMPLE/HOMELAB.GIT'], ['env-git', 'example/secret-box'], ['env-plain', 'example/secret-box.git'], ['env-two', 'Example/Secret-Two']]) {
+      const request = preset(rid(slug, 'i111'), { project: 'probe', preset: 'code-task', repo, target: 'pc' });
+      f.put(request);
+      const refused = await f.post(`/hub/requests/${request.id}/approve`, { target: 'pc' });
+      assert.equal(refused.status, 400, `${slug}: ${JSON.stringify(refused.body)}`);
+      assert.equal(f.fake.text(`sections/inbox/requests/${request.id}/approved.json`), null, slug);
+    }
+    const dropped = logs.filter(line => /HUB_NEVER_REPOS: dropped/.test(line));
+    assert.equal(dropped.length, 2, 'two invalid entries were dropped and logged');
+    assert.ok(dropped.some(line => /not a repo/.test(line)) && dropped.some(line => /\.\.\/x/.test(line)));
+    const fine = preset(rid('fine', 'i222'), { project: 'probe', preset: 'code-task', repo: 'example/probe', target: 'pc' });
+    f.put(fine);
+    assert.equal((await f.post(`/hub/requests/${fine.id}/approve`, { target: 'pc' })).status, 201);
   } finally { await f.close(); }
 });
 
