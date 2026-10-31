@@ -8,7 +8,7 @@ const POWERSHELL = new Set(['powershell', 'pwsh', 'ps1', 'ps'])
 /** A line that only makes sense next to its neighbours: a comment after code or a "#" in a string, a continuation, a here-string, a block. */
 const TIED = /#|[`|{([,=+&]$|^[})\]|]|@["']|["']@/
 /** A line that opens a session, so the lines after it were meant for that session, not for this shell. */
-const SESSION = /^(ssh|Enter-PSSession)\b|^pct\s+enter\b|\s-(it|ti)\b|^(powershell|pwsh|cmd|bash|sh|python3?|node|wsl)(\.exe)?$/i
+const SESSION = /^(ssh|Enter-PSSession)\b|\s-(it|ti)\b|^(powershell|pwsh|cmd|bash|sh|python3?|node|wsl)(\.exe)?$/i
 
 export function copyText(code: string, lang = ''): { text: string; oneLine: boolean } {
   const shown = { text: code, oneLine: false }
