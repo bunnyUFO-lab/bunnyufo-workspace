@@ -19,6 +19,8 @@ export const SPRINT_COLORS = ['var(--purple)', 'var(--blue)', 'var(--amber)', 'v
 export interface Marks { working: boolean; idle: boolean; prs: number; review: number; failing: number; fresh: boolean; deployed: boolean }
 
 export interface At { x: number; y: number }
+/** Left, top, right, bottom. */
+type Box = [number, number, number, number]
 /** Where a node's text goes. `y` is the first line's baseline; `lines` (when set) are the wrapped lines, and `step` the distance between them. */
 export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number }
 interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; label: Label; center: At }
@@ -192,6 +194,31 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   })
   const end = x + 40
   const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')))
+  /** The marker is a dot with a ring, and a pill below it (horizontal) or beside it (vertical). Its box, with a margin, when the dot sits `at` along the spine. */
+  const markerBox = (at: number): Box => (vertical ? [-15, at - 15, 56, at + 15] : [at - 22, SPINE_Y - 15, at + 22, SPINE_Y + 35])
+  /** What "now" must stay clear of: every node's circle, chevron, marks and label. */
+  const obstacles: Box[] = []
+  for (const node of nodes) {
+    const radius = node.kind === 'm' ? (node.open ? 15 : 26) : node.kind === 'f' ? FR : 8
+    const around = (at: At, reach: number): Box => [at.x - reach, at.y - reach, at.x + reach, at.y + reach]
+    obstacles.push(around(node.center, radius + 3))
+    if (node.kind !== 't') obstacles.push(around(node.chevronAt, 15))
+    if (node.kind !== 't') obstacles.push(around({ x: node.center.x + radius, y: node.center.y - radius }, 10))
+    const size = node.kind === 'm' ? 7.6 : node.kind === 'f' ? 6.8 : 5.6
+    const lines = node.label.lines ?? [node.title]
+    const reach = textWidth(lines, size)
+    const left = node.label.anchor === 'end' ? node.label.x - reach : node.label.anchor === 'middle' ? node.label.x - reach / 2 : node.label.x
+    obstacles.push([left - 3, node.label.y - 13, left + reach + 3, node.label.y + 5 + (lines.length - 1) * (node.label.step ?? 14)])
+  }
+  const meets = (a: Box, b: Box) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+  /** The first place from `from` on, no further than `limit`, where the marker touches nothing; `from` itself when there is none. */
+  const clearOfNodes = (from: number, floor: number, limit: number) => {
+    for (let at = Math.max(from, floor); at <= limit; at += 4) {
+      const box = markerBox(at)
+      if (!obstacles.some(obstacle => meets(box, obstacle))) return at
+    }
+    return from
+  }
   let nowAlong = end - 40
   if (firstOpen >= 0) {
     const milestone = model.milestones[firstOpen]
@@ -205,6 +232,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     if (vertical) {
       if (Math.abs(nowAlong - here) <= radius + 16) nowAlong = here + radius + 20
     } else if (Math.abs(nowAlong - here) <= radius + 8) nowAlong = here + radius + 12
+    nowAlong = clearOfNodes(nowAlong, here, Math.max(here, next - 60))
   }
   const bands: Band[] = []
   if (showSprints) {
