@@ -530,6 +530,45 @@ test('Bunnylink is never signed for the PC or the cloud: creating with another t
   } finally { await f.close(); }
 });
 
+test('the repo guard: another project that names the Bunnylink repo, or a repo in HUB_NEVER_REPOS, is never signed for the PC or the cloud', async () => {
+  const f = await fixture({ env: { ...KEY_ENV, HUB_ROUTINE_DRY_RUN: '1', HUB_NEVER_REPOS: 'example/secret-box' } });
+  try {
+    f.fake.seed('sections/bunnylink/workspace.json', JSON.stringify({ name: 'Bunnylink', tracked: { repo: 'example/homelab' }, entities: [] }), 'application/json');
+    const signed = id => f.fake.text(`sections/inbox/requests/${id}/approved.json`);
+    const folders = () => [...new Set([...f.fake.objects.keys()].map(name => /requests\/([^/]+)\//.exec(name)?.[1]).filter(Boolean))].sort();
+    // Approving: another project naming the repo (any letter case), by the PC and by the cloud, and a repo from the env list.
+    for (const [slug, repo, target] of [['home-pc', 'example/homelab', 'pc'], ['home-case', 'Example/HomeLab', 'pc'], ['home-cloud', 'example/homelab', 'cloud'], ['env-pc', 'example/secret-box', 'pc']]) {
+      const request = preset(rid(slug, 'g111'), { project: 'probe', preset: 'code-task', repo, target });
+      f.put(request);
+      const refused = await f.post(`/hub/requests/${request.id}/approve`, { target });
+      assert.equal(refused.status, 400, `${slug}: ${JSON.stringify(refused.body)}`);
+      assert.match(refused.body.error, /never run for you by the PC or the cloud/, slug);
+      assert.equal(signed(request.id), null, `${slug}: nothing signed`);
+    }
+    // Approve again is refused before any copy is written.
+    const again = preset(rid('again', 'g222'), { project: 'probe', preset: 'code-task', repo: 'example/homelab', target: 'pc' });
+    f.put(again);
+    const before = folders();
+    assert.equal((await f.post(`/hub/requests/${again.id}/again`, {})).status, 400);
+    assert.deepEqual(folders(), before, 'no copy');
+    // Creating: a PC or cloud target for that repo is a 400; with no target it is proposed for the PC only to you (at-pc).
+    for (const target of ['pc', 'cloud']) {
+      assert.equal((await f.post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Fix the proxy rule', repo: 'example/homelab', target })).status, 400, target);
+    }
+    const proposed = await f.post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Fix the proxy rule', repo: 'example/homelab' });
+    assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
+    assert.equal(proposed.body.target, 'at-pc');
+    assert.equal((await f.post(`/hub/requests/${proposed.body.id}/approve`, {})).status, 400, 'and it cannot be approved');
+    // A normal repo is unaffected, for the PC and the cloud.
+    for (const target of ['pc', 'cloud']) {
+      const fine = preset(rid(`fine-${target}`, 'g333'), { project: 'probe', preset: 'code-task', repo: 'example/probe', target });
+      f.put(fine);
+      assert.equal((await f.post(`/hub/requests/${fine.id}/approve`, { target })).status, 201, target);
+      assert.ok(signed(fine.id), `${target} signed`);
+    }
+  } finally { await f.close(); }
+});
+
 test('approve hands a request to its target after approved.json is written; a full target makes it wait, never refuse', async () => {
   const calls = [];
   const holder = {};
