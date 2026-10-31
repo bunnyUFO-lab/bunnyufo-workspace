@@ -10,7 +10,7 @@ import { createHub } from '../hub.mjs';
 import { deliveryOf } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, checklistJson, seeder } from './hub-fixtures.mjs';
-
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date('2026-10-31T12:00:00Z');
 const ago = minutes => new Date(NOW.getTime() - minutes * 60000).toISOString();
