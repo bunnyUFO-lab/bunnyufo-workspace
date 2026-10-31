@@ -14,6 +14,7 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { createFakeRoutine } from './fake-routine.mjs';
 import { requestJson } from './hub-fixtures.mjs';
 import { sha256Hex, sign } from '../signing.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const MIN = 60000;
@@ -38,7 +39,7 @@ async function fixture({ env = {} } = {}) {
   const routine = createFakeRoutine();
   const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env: { ...ENV, ...env }, fetchImpl: routine.fetchImpl, log: () => {} });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   await hub.routines.sweep();
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, url, data, headers = {}) => {
@@ -70,7 +71,7 @@ async function fixture({ env = {} } = {}) {
     const routine2 = createFakeRoutine();
     const hub2 = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env: { ...ENV, ...env }, fetchImpl: routine2.fetchImpl, log: () => {} });
     const server2 = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state2.json'), sectionsTtl: 0, requireRemoteUser: false, hub: hub2, allowedOrigins: [SITE] });
-    await new Promise(resolve => server2.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(server2, '127.0.0.1');
     extra.push(async () => { await hub2.close(); server2.close(); });
     const origin2 = `http://127.0.0.1:${server2.address().port}`;
     const post2 = async url => {

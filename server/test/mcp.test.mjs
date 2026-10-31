@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
 import { McpInventory } from '../mcp.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 async function fixture(options = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'buw-mcp-test-'));
@@ -67,7 +68,7 @@ test('HTTP check initializes and lists tools without invoking a tool; auth failu
     const result = message.method === 'initialize' ? { protocolVersion:'2025-03-26',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1.0'} } : { tools:[{name:'read_fixture',description:'Fixture',inputSchema:{type:'object'}}] };
     res.writeHead(200, { 'Content-Type':'application/json' }); res.end(JSON.stringify({jsonrpc:'2.0',id:message.id,result}));
   });
-  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   try {
     await json(path.join(repo,'.mcp.json'), {mcpServers:{fixture:{url:`http://127.0.0.1:${server.address().port}/mcp`,headers:{Authorization:'echo-private-header'}}}});
     assert.deepEqual(await inventory.check('claude:fixture').then(({status,toolCount}) => ({status,toolCount})), {status:'available',toolCount:1});

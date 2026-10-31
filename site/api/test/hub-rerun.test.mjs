@@ -18,6 +18,7 @@ import { newNonce, parsePublicKey, publicKeyPem, sha256Hex, sign, verify } from 
 import { validId } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const OWNER = '100000000000000001';
@@ -44,7 +45,7 @@ async function fixture({ discord = false } = {}) {
   const logs = [];
   const hub = createHub({ bucket, enabled: true, now: () => NOW, env, log: line => logs.push(line) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, data, headers = {}) => {
     const answered = await fetch(`${origin}/api${route}`, {

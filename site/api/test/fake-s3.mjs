@@ -3,6 +3,7 @@
 // DELETE, CopyObject and ListObjectsV2 with prefix, delimiter and continuation. Signatures are not checked.
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const escapeXml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -90,7 +91,7 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
   });
   // Longer than the client's pool keeps an idle connection, so a test that pauses never reuses one this end just closed.
   server.keepAliveTimeout = 30_000;
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const endpoint = `http://127.0.0.1:${server.address().port}`;
   return {
     bucket, endpoint, objects, log,
