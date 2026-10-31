@@ -447,6 +447,20 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
+   * Every rule that makes a request unapprovable whatever its state: a Bunnylink request is never signed (second wall behind createRequest, also for
+   * Approve again and a follow-up), a request you start at the PC is never signed, the target must suit the preset, a model is for Hermes, a cloud run
+   * needs a repo with a routine. `approveRequest` runs it, and so does `copyFor` BEFORE it writes the copy, so a refused Approve again leaves nothing behind.
+   */
+  function refuseUnapprovable(request, preset, chosen) {
+    if (request.project === 'bunnylink') throw fail(BUNNYLINK_AT_PC, 400);
+    if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
+    if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
+    if (request.model && chosen !== 'hermes') throw fail(MODEL_ON_HERMES, 400);
+    if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
+    if (chosen === 'cloud' && !hasCloud(request.repo)) throw fail(`No cloud routine for ${request.repo}.`, 400);
+  }
+
+  /**
    * Sign and store `approved.json` for a proposed request, then hand it to its target. The one path that signs
    * an approval: the Approve route, Approve again, a follow-up and policy approval (`by: 'policy'`) all use it.
    * There is no cap check: a full target makes the request wait in `approved`, and `waiting` says why.
@@ -464,14 +478,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
     // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
     if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
-    // Second wall behind createRequest: whatever the target (also Approve again and a follow-up), a Bunnylink request is never signed.
-    if (request.project === 'bunnylink') throw fail(BUNNYLINK_AT_PC, 400);
     const chosen = target ?? request.target;
-    if (chosen === 'at-pc') throw fail('A request you start at the PC is never signed. Mark it done when you have done it.', 400);
-    if (!preset.targets.includes(chosen)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    if (request.model && chosen !== 'hermes') throw fail(MODEL_ON_HERMES, 400);
-    if (chosen === 'cloud' && !request.repo) throw fail('A cloud run needs a repo.', 400);
-    if (chosen === 'cloud' && !hasCloud(request.repo)) throw fail(`No cloud routine for ${request.repo}.`, 400);
+    refuseUnapprovable(request, preset, chosen);
     const body = {
       v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
@@ -554,6 +562,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const ownerChangedDone = raw?.doneWhen !== undefined && raw.doneWhen.trim() !== String(request.doneWhen ?? '').trim();
     const doneBy = ownerChangedDone ? null : doneWhenAuthor(request, oldOrigin);
     const clean = checkRequest({ ...copy, ...(fromAsk ? { fromAsk } : {}), ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
+    // Refuse what the approval would refuse before anything is written: a copy that cannot be approved is never made.
+    if (preset.hidden && !clean.fromAsk) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
+    refuseUnapprovable(clean, preset, target);
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
     }), null, fixedId);
