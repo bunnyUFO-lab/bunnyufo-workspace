@@ -123,7 +123,24 @@ function MoveTile({ offer }: { offer: MoveOffer }) {
   )
 }
 
+/** One column on a phone, as `today.css` lays it out at the same width. */
+const NARROW = '(max-width: 760px)'
+const narrowNow = () => typeof window.matchMedia === 'function' && window.matchMedia(NARROW).matches
+
+function useNarrow() {
+  const [narrow, setNarrow] = useState(narrowNow)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(NARROW)
+    const update = () => setNarrow(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  return narrow
+}
+
 export default function Today() {
+  const narrow = useNarrow()
   const shared = useContext(TodayContext)
   const own = useHubData<TodayData>(shared ? null : '/today')
   const { data, error, reload, at, loading } = shared ?? own
@@ -141,6 +158,39 @@ export default function Today() {
     ['recent', counts.recent, 'Since yesterday', 'events in 24 h', hubHash('activity'), 'idle'],
     ['alerts', counts.alerts, 'Alerts', counts.alerts ? 'need a look' : 'all quiet', hubHash('activity', 'alerts'), 'failed'],
   ]
+  const needsPanel = (
+    <section className="hub-panel rise" style={stagger(2)} aria-label="Needs you">
+      <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={hubHash('needs')}>All {counts.needsYou} →</a></h3>
+      {data.needsYou.length ? data.needsYou.slice(0, 3).map(item => {
+        const kind = needsKind(item)
+        return (
+          <a key={itemKey(item)} className="nrow" href={hubHash('needs')} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
+            <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
+            <span className="nrow-text">
+              <b>{item.title}</b>
+              <small>{[KIND_LABEL[kind], who(item), ago(item.at)].filter(Boolean).join(' · ')}</small>
+            </span>
+            <span className="nrow-go"><Icon paths={ICON_ARROW} /></span>
+          </a>
+        )
+      }) : <p className="hub-empty">Nothing waits on you.</p>}
+    </section>
+  )
+  const recentPanel = (
+    <section className="hub-panel rise" style={stagger(3)} aria-label="Since yesterday">
+      <h3>Since yesterday <span>{counts.recent}</span></h3>
+      {data.recent.length ? data.recent.slice(0, 10).map(event => <ItemRow key={event.file} event={event} />) : <p className="hub-empty">Nothing has happened in the last 24 hours.</p>}
+    </section>
+  )
+  const offersPanel = data.offers?.length && host.write ? (
+    <section className="hub-panel rise" style={stagger(3)} aria-label="Waiting for the PC">
+      <h3>Waiting for the PC <span>{data.offers.length}</span></h3>
+      {data.offers.slice(0, 3).map(offer => <MoveTile key={offer.request} offer={offer} />)}
+    </section>
+  ) : null
+  const alertsPanel = <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} />
+  const workingPanel = <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
+  const pcPanel = (data.pc || data.wake?.wakeAvailable) && <PcTile pc={data.pc ?? null} wake={data.wake} />
   return (
     <div className="today">
       <header className="today-head rise" style={stagger(0)}>
@@ -167,41 +217,17 @@ export default function Today() {
           </a>
         ))}
       </div>
-      <div className="today-cols">
-        <div className="today-stack">
-          <section className="hub-panel rise" style={stagger(2)} aria-label="Needs you">
-            <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={hubHash('needs')}>All {counts.needsYou} →</a></h3>
-            {data.needsYou.length ? data.needsYou.slice(0, 3).map(item => {
-              const kind = needsKind(item)
-              return (
-                <a key={itemKey(item)} className="nrow" href={hubHash('needs')} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
-                  <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
-                  <span className="nrow-text">
-                    <b>{item.title}</b>
-                    <small>{[KIND_LABEL[kind], who(item), ago(item.at)].filter(Boolean).join(' · ')}</small>
-                  </span>
-                  <span className="nrow-go"><Icon paths={ICON_ARROW} /></span>
-                </a>
-              )
-            }) : <p className="hub-empty">Nothing waits on you.</p>}
-          </section>
-          <section className="hub-panel rise" style={stagger(3)} aria-label="Since yesterday">
-            <h3>Since yesterday <span>{counts.recent}</span></h3>
-            {data.recent.length ? data.recent.slice(0, 10).map(event => <ItemRow key={event.file} event={event} />) : <p className="hub-empty">Nothing has happened in the last 24 hours.</p>}
-          </section>
+      {narrow ? (
+        // On a phone, what runs now comes right after what waits on the owner, before the day's history.
+        <div className="today-cols" data-today-layout="phone">
+          <div className="today-stack">{needsPanel}{workingPanel}{recentPanel}{offersPanel}{alertsPanel}{pcPanel}</div>
         </div>
-        <div className="today-stack">
-          {data.offers?.length && host.write ? (
-            <section className="hub-panel rise" style={stagger(3)} aria-label="Waiting for the PC">
-              <h3>Waiting for the PC <span>{data.offers.length}</span></h3>
-              {data.offers.slice(0, 3).map(offer => <MoveTile key={offer.request} offer={offer} />)}
-            </section>
-          ) : null}
-          <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} />
-          <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
-          {(data.pc || data.wake?.wakeAvailable) && <PcTile pc={data.pc ?? null} wake={data.wake} />}
+      ) : (
+        <div className="today-cols" data-today-layout="wide">
+          <div className="today-stack">{needsPanel}{recentPanel}</div>
+          <div className="today-stack">{offersPanel}{alertsPanel}{workingPanel}{pcPanel}</div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

@@ -36,6 +36,17 @@ try {
   await phone.locator('.hub[data-screen="needs"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/needs');
 
+  step('phone Today: Needs you, then Working now, then Since yesterday, in reading order too');
+  const panels = layout => phone.locator(`[data-today-layout="${layout}"] .today-stack > [aria-label]`).evaluateAll(list => list.map(e => e.getAttribute('aria-label')));
+  await phone.goto(`${fixture.url}#/~hub/today`);
+  await phone.locator('[data-today-layout="phone"]').waitFor();
+  assert.deepEqual((await panels('phone')).slice(0, 3), ['Needs you', 'Working now', 'Since yesterday']);
+  await phone.setViewportSize({ width: 1100, height: 812 });
+  await phone.locator('[data-today-layout="wide"]').waitFor();
+  assert.deepEqual((await panels('wide')).slice(0, 2), ['Needs you', 'Since yesterday'], 'Wide keeps two columns.');
+  await phone.setViewportSize({ width: 375, height: 812 });
+  await phone.locator('[data-today-layout="phone"]').waitFor();
+
   step('phone: from Today go to the cards home, open a card, press Back, and the cards home stays');
   await phone.goto(`${fixture.url}#/~hub/today`);
   await phone.locator('.hub[data-screen="today"]').waitFor();
