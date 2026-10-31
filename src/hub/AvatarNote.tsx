@@ -51,5 +51,5 @@ export default function AvatarNote({ ask }: { ask: Ask }) {
   if (!avatar) return null
   if ('sheet' in avatar) return <section className="avatar-note" data-avatar-note="sheet" aria-label="The sheet to check"><SheetPreview agent={avatar.agent} sheet={avatar.sheet} /></section>
   if (ask.state !== 'open' && ask.state !== 'snoozed') return null
-  return <p className="avatar-note" data-avatar-note="pick">Picking one starts the sprite sheet on the Gaming PC at its next run check, within about an hour.</p>
+  return <p className="avatar-note" data-avatar-note="pick">Picking one starts the sprite sheet on the Gaming PC within a few minutes.</p>
 }

@@ -27,7 +27,7 @@ export interface ApproveAnswer { state: string; waiting?: string; wake?: string 
 
 export const MACHINE: Record<SpawnTarget, { name: string; icon: string; starts: string }> = {
   hermes: { name: 'Hermes', icon: 'spark', starts: 'Starts on Hermes right away' },
-  pc: { name: 'The PC', icon: 'pc', starts: 'Starts on the PC within the hour (its next hourly check)' },
+  pc: { name: 'The PC', icon: 'pc', starts: 'Starts on the PC within a few minutes' },
   cloud: { name: 'The cloud', icon: 'cloud', starts: 'Starts in the cloud' },
   'at-pc': { name: 'You, at the PC', icon: 'hand', starts: 'You start it at the PC' },
 }
@@ -55,8 +55,8 @@ export function approvedNote(target: SpawnTarget, waiting?: string, wake?: strin
   if (waiting) return `Approved. It waits: ${waiting.replace(/[.\s]+$/, '')}.`
   if (target === 'hermes') return 'Approved. Hermes starts it now.'
   if (target === 'cloud') return 'Approved. It starts in the cloud.'
-  if (wake === 'sent') return "Approved. Waking the PC; it starts at its next hourly check."
-  return "Approved. It starts at the PC's next hourly check."
+  if (wake === 'sent') return 'Approved. Waking the PC; it starts once the PC is up.'
+  return 'Approved. It starts on the PC within a few minutes.'
 }
 
 /** The cost line of a preset for a machine: the PC always runs Opus, whatever the preset's cloud estimate names. */

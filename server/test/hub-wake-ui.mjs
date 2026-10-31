@@ -1,6 +1,6 @@
 // Run after npm run build. Wake the PC through a real browser, over the fixture service: the Gaming PC tile offers "Wake the PC"
 // when the PC's status is stale and a wake is set up (a stand-in controller on 127.0.0.1 counts the POST), an approved PC request
-// says it starts within the hour and offers the same button, and with no wake set up neither shows it. Tests use fake S3 only.
+// says it starts within a few minutes and offers the same button, and with no wake set up neither shows it. Tests use fake S3 only.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -56,14 +56,14 @@ try {
   assert.equal(await tile.locator('[data-wake-button]').count(), 0, 'No second tap while it wakes.');
   assert.deepEqual(hook.calls, ['POST']);
 
-  step('An approved PC request says it starts within the hour and, with the PC asleep, offers Wake the PC in its drawer');
+  step('An approved PC request says it starts within a few minutes and, with the PC asleep, offers Wake the PC in its drawer');
   const second = await controller();
   const drawerFixture = await staleFixture({ HUB_WAKE_URL: second.url });
   const view = await open({ width: 1280, height: 900 });
   await view.goto(`${drawerFixture.url}#/~hub/needs`);
   const card = view.locator(`[data-need="approval-${PC_REQUEST}"]`);
   await card.waitFor();
-  assert.match(await card.locator('[data-approval-starts]').innerText(), /within the hour \(its next hourly check\)/);
+  assert.match(await card.locator('[data-approval-starts]').innerText(), /within a few minutes/);
   assert.doesNotMatch(await card.innerText(), /dispatcher|5 minutes/);
   await card.locator('[data-approval-approve]').click();
   await view.locator('[data-next-note]').waitFor();
@@ -71,7 +71,7 @@ try {
   await view.locator(`[data-request-open="${PC_REQUEST}"]`).click();
   const drawer = view.locator('[data-run-drawer]');
   await drawer.waitFor();
-  assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /Starts on the PC within the hour \(its next hourly check\)/);
+  assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /Starts on the PC within a few minutes/);
   await drawer.locator('[data-wake-button]').waitFor();
   assert.equal(await drawer.locator('[data-wake-button]').innerText(), 'Wake the PC');
   await drawer.locator('[data-wake-button]').click();

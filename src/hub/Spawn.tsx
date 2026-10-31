@@ -44,7 +44,7 @@ const policyLine = (kinds: string[]) => {
 
 const AUTO = 'auto'
 
-const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within the hour (its next hourly check).' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
+const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within a few minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
 /** The Spawn sheet: pick a job, see where it runs and why, then send it. A dialog on a desktop, a bottom sheet on a phone. */
 /** What the toast says after Spawn, and where the new run or item is: `run` is a started request, `needs` a request that waits in Needs you. */
