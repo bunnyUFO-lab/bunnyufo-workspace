@@ -24,7 +24,7 @@ export const checklistItems = () => [
   { text: 'Create the application', group: 'Discord developer portal', link: 'https://example.test/discord/applications' },
   {
     text: 'Copy the bot token into the vault', group: 'Discord developer portal',
-    guide: 'Open **Bot** in the left menu, press *Reset Token* and copy it.\n\nThen store it on the server:\n\n```bash\nssh root@host.example.test\nbunnylink-secret set discord-bot-token\n```\n\nDo not paste the token anywhere else. More in [the portal guide](https://example.test/discord/guide).',
+    guide: 'Open **Bot** in the left menu, press *Reset Token* and copy it.\n\nThen store it on the server:\n\n```bash\nssh root@host.example.test\nbunnylink-secret set discord-bot-token\n```\n\nThen check the bot from your PC:\n\n```powershell\ncd C:\\Users\\owner\\discord-bot\nnpm run check\n```\n\nDo not paste the token anywhere else. More in [the portal guide](https://example.test/discord/guide).',
     link: 'https://example.test/discord/bot',
   },
   { text: 'Invite the bot to your server', group: 'Your server' },
