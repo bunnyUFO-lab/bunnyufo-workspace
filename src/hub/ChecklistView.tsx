@@ -11,6 +11,7 @@ import HubImage from './HubImage'
 import { VERDICT_LABEL } from './playtest'
 import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
+import Delivery from './Delivery'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 
@@ -68,6 +69,7 @@ export default function ChecklistView({ id }: { id: string }) {
           {detail.state === 'picked-up' && detail.pickup && <p className="hub-muted">Picked up {ago(detail.pickup.at)}{text(detail.pickup.host) ? ` on ${text(detail.pickup.host)}` : ''}.</p>}
         </section>
       )}
+      {submitted && detail.submit && detail.delivery && !detail.pickup && <Delivery noun="checklist" project={detail.project} delivery={detail.delivery} />}
       <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
     </div>
   )
