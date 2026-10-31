@@ -426,6 +426,8 @@ class Exit extends Error {
 }
 
 const hostName = () => (os.hostname() || 'host').toLowerCase().replace(/[^a-z0-9-]/g, '-');
+/** The Claude Code session this command runs in. Claude Code sets CLAUDE_CODE_SESSION_ID; CLAUDE_SESSION_ID is the older name. Shown, never trusted for routing. */
+const sessionEnv = () => process.env.CLAUDE_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || '';
 const rand = bytes => randomBytes(bytes).toString('hex');
 const isoNow = () => new Date().toISOString();
 const clip = (text, length) => (String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, length));
@@ -623,7 +625,7 @@ function buildEvent(flags) {
     ...(flags.ask ? { ask: flags.ask } : {}),
     ...(flags.checklist ? { checklist: String(flags.checklist) } : {}),
     ...(flags.review ? { review: String(flags.review) } : {}),
-    ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}),
+    ...(sessionEnv() ? { session: sessionEnv() } : {}),
     host, source: flags.source || 'cli', title: String(flags.title),
     ...(flags.url ? { url: flags.url } : {}),
     ...(flags.summary ? { summary: String(flags.summary) } : {}),
@@ -697,7 +699,7 @@ async function mapLimit(items, limit, work) {
 
 function askFromFile(raw, flags, id) {
   const now = new Date();
-  const from = { host: hostName(), tool: flags.tool || 'claude-code', ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}), ...(raw.from ?? {}) };
+  const from = { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}), ...(raw.from ?? {}) };
   const ask = {
     id, project: flags.project,
     ...(flags.bead || raw.bead ? { bead: flags.bead || raw.bead } : {}),
@@ -918,6 +920,25 @@ function pictureProblem(name, body) {
   return ok ? null : `${name} is not a ${type} picture.`;
 }
 
+/** The Beads project the folder's CLAUDE.md names (`Beads project: \`x\``), looked up from the git root, else the working folder. Undefined when there is none. */
+function folderProject() {
+  const roots = [gitOut('rev-parse', '--show-toplevel'), process.cwd()].filter(Boolean);
+  for (const root of roots) {
+    try {
+      const found = /Beads project:\s*`([^`\s]+)`/i.exec(readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'));
+      return found ? found[1] : undefined;
+    } catch { /* no CLAUDE.md here */ }
+  }
+  return undefined;
+}
+
+/** On stderr (stdout stays the id): the project asked for is not the folder's. Never an error. */
+function projectNote(project) {
+  const own = folderProject();
+  if (!own || !project || own === project) return;
+  console.error(`Note: this repository's Beads project is ${own}, not ${project}. The answer still comes back to this session, and to the next session in this repository. Use --project ${own} if the question is about this repository.`);
+}
+
 async function askCreate(flags) {
   const raw = await askInput(flags);
   const id = newId(flags.project, raw.question);
@@ -940,6 +961,7 @@ async function askCreate(flags) {
   if (await mustPut(askFile, `${JSON.stringify(ask, null, 2)}\n`, { createOnly: true }) === 'exists') throw new Error(`${askFile} already exists; run it again.`);
   await postEvent({ kind: 'ask-created', title: clip(ask.question, 80), project: ask.project, bead: ask.bead, ask: id, source: 'cards', summary: 'A question is waiting for an answer.' }).catch(error => console.error(`(ask-created event skipped: ${error.message})`));
   await pingNeedsYou({ project: ask.project, text: ask.question, path: `/#/~hub/ask/${id}` }).catch(() => {});
+  projectNote(ask.project);
   console.log(id);
 }
 
@@ -1035,7 +1057,7 @@ async function claim(folder, id, file, body) {
   console.log(`${folder}/${id}/${file}`);
 }
 
-const pickupBody = flags => ({ at: isoNow(), ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}), host: hostName(), ...(flags.bead ? { bead: flags.bead } : {}) });
+const pickupBody = flags => ({ at: isoNow(), ...(sessionEnv() ? { session: sessionEnv() } : {}), host: hostName(), ...(flags.bead ? { bead: flags.bead } : {}) });
 
 // --- Checklists: a list of steps for the owner, ticked one at a time in the Hub ---
 // checklists/<id>/: checklist.json (this command), tick-/untick-<item>-<stamp>-<rand4>.json and submit.json (the Hub only),
@@ -1105,7 +1127,7 @@ function checklistFromInput(raw, flags, id) {
   const bead = flags.bead || raw.bead;
   return {
     id, project: flags.project, createdAt: isoNow(),
-    from: { host: hostName(), tool: flags.tool || 'claude-code', ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) },
+    from: { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}) },
     ...(bead ? { bead } : {}),
     title: raw.title.trim(),
     ...(raw.context ? { context: raw.context } : {}),
@@ -1213,6 +1235,7 @@ async function checklistCreate(flags) {
   const steps = checklist.items.length;
   await postEvent({ kind: 'checklist-created', title: clip(checklist.title, 80), project: checklist.project, bead: checklist.bead, checklist: id, source: 'cards', summary: checklist.kind === 'playtest' ? `A build to try: ${steps} things to look at.` : `${steps} steps for you.` }, { out: console.error }).catch(error => console.error(`(checklist-created event skipped: ${error.message})`));
   await pingNeedsYou({ project: checklist.project, text: checklist.kind === 'playtest' ? `Playtest: ${checklist.title}` : `${checklist.title} (${steps} steps)`, path: `/#/~hub/checklist/${id}` }).catch(() => {});
+  projectNote(checklist.project);
   console.log(id);
 }
 
@@ -1293,7 +1316,7 @@ async function checklistPickup(id) {
   const state = checklistState(names);
   if (state === 'picked-up') { console.error(`checklists/${id} was picked up already.`); throw new Exit(3); }
   if (state !== 'submitted') { console.error(`checklists/${id} is ${state}, not submitted: nothing to pick up.`); throw new Exit(2); }
-  return claim('checklists', id, 'pickup.json', { at: isoNow(), host: hostName(), ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) });
+  return claim('checklists', id, 'pickup.json', { at: isoNow(), host: hostName(), ...(sessionEnv() ? { session: sessionEnv() } : {}) });
 }
 
 /** Withdraw a list that is still open: exit 3 when it was cancelled or submitted already. */
@@ -1510,7 +1533,7 @@ async function requestTakeRunner(rawId, flags) {
   if (await readInbox(inboxPath('requests', id, 'stop.json')) !== null) refuse('stopped: the owner stopped this request.');
   if (await readInbox(inboxPath('requests', id, 'declined.json')) !== null) refuse('declined: the owner declined this request.');
   if (await readInbox(inboxPath('requests', id, 'result.json')) !== null) refuse('finished: this request already has a result.');
-  const session = flags.session || process.env.CLAUDE_SESSION_ID;
+  const session = flags.session || sessionEnv();
   await claim('requests', id, 'taken.json', { runner: flags.runner, host: hostName(), nonce: approved.nonce, ...(session ? { session } : {}), at: isoNow() });
   // A stop written between the check and the claim: the request now shows "stopping", and the runner must not start. It runs
   // `request finish --outcome failed --reason stopped` to end it.
@@ -1522,7 +1545,7 @@ async function requestRun(flags) {
   if (!id) throw new Error('Usage: request run <id> --state started|working|turn-ended|usage-limit [--last <text>] [--link <url>]');
   if (!RUN_STATES.includes(flags.state)) throw new Error(`--state is one of: ${RUN_STATES.join(', ')}.`);
   if (flags.link && !/^https:\/\/\S+$/.test(flags.link)) throw new Error('--link is an https address.');
-  const session = process.env.CLAUDE_SESSION_ID;
+  const session = sessionEnv();
   const doc = {
     v: 1, request: id, state: flags.state,
     ...(flags.last ? { lastAction: clip(maskSecrets(flags.last), 200) } : {}),
@@ -1724,7 +1747,7 @@ async function markApplied(flags) {
   if (!BEAD_ID.test(flags.bead ?? '')) throw new Error('Usage: mark applied --project <p> --bead <bead id>');
   const [mark] = await activeMarks(project, flags.bead);
   if (!mark) return console.log('nothing to apply');
-  const body = { v: 1, project, bead: flags.bead, verdict: 'applied', at: isoNow(), by: hostName(), mark: mark.file, ...(process.env.CLAUDE_SESSION_ID ? { session: process.env.CLAUDE_SESSION_ID } : {}) };
+  const body = { v: 1, project, bead: flags.bead, verdict: 'applied', at: isoNow(), by: hostName(), mark: mark.file, ...(sessionEnv() ? { session: sessionEnv() } : {}) };
   for (let attempt = 0; ; attempt += 1) {
     const file = inboxPath('bead-marks', project, flags.bead, `${new Date().toISOString().replace(/[-:.]/g, '')}-applied-${rand(2)}.json`);
     if (await mustPut(file, `${JSON.stringify(body, null, 2)}\n`, { createOnly: true }) === 'ok') return console.log(file);

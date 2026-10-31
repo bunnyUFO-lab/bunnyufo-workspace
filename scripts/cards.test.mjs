@@ -68,7 +68,7 @@ async function setup() {
   const spool = path.join(dir, 'spool.jsonl');
   const base = {
     ...process.env, HOME: dir, USERPROFILE: dir, BUW_REGISTRY: path.join(dir, 'none.json'), BUW_SPOOL: spool,
-    BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: '', BUW_CARDS_RETRY_MS: '5', CLAUDE_SESSION_ID: '', BUW_DISCORD_OWNER_ID: '',
+    BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: '', BUW_CARDS_RETRY_MS: '5', CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: '', BUW_DISCORD_OWNER_ID: '',
   };
   delete base.AWS_ACCESS_KEY_ID;
   delete base.AWS_PROFILE;
@@ -1437,3 +1437,59 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 }
+
+test('ask create stamps from.session from CLAUDE_CODE_SESSION_ID (or the old CLAUDE_SESSION_ID); with neither there is no key', async () => {
+  const { fake, cli, keys, close } = await setup();
+  try {
+    const ask = async (env, question) => {
+      cli.env = env;
+      const made = await cli('api', 'ask', 'create', '--project', 'probe', '--question', question);
+      assert.equal(made.code, 0, made.stderr);
+      return fake.json(`sections/inbox/asks/${made.stdout.trim().split('\n').at(-1)}/ask.json`);
+    };
+    assert.equal((await ask({ CLAUDE_CODE_SESSION_ID: 'sess-new' }, 'Which colour, one?')).from.session, 'sess-new');
+    assert.equal((await ask({ CLAUDE_SESSION_ID: 'sess-old', CLAUDE_CODE_SESSION_ID: 'sess-new' }, 'Which colour, two?')).from.session, 'sess-old');
+    assert.equal('session' in (await ask({}, 'Which colour, three?')).from, false);
+    assert.equal(keys('asks/').length, 3);
+  } finally { await close(); }
+});
+
+test('ask create and checklist create: a project that differs from the folder\'s CLAUDE.md prints one stderr note; the id stays the last stdout line', async () => {
+  const { cli, dir, close } = await setup();
+  try {
+    const folder = path.join(dir, 'repo-a');
+    await mkdir(folder);
+    await writeFile(path.join(folder, 'CLAUDE.md'), '# Demo\n\n## Tracked project\nWorkspace section: `demo` · Beads project: `demo` · Issue prefix: `dm`\n');
+    cli.cwd = folder;
+    const ask = await cli('api', 'ask', 'create', '--project', 'agent-plans', '--question', 'Which way, left or right?');
+    assert.equal(ask.code, 0, ask.stderr);
+    assert.match(ask.stdout.trim().split('\n').at(-1), /^\d{8}-agent-plans-[a-z0-9-]+$/, 'the id is the last stdout line');
+    assert.doesNotMatch(ask.stdout, /Note:/, 'the note is on stderr only');
+    assert.equal(ask.stderr.split('\n').filter(line => line.startsWith('Note:')).length, 1);
+    assert.match(ask.stderr, /Note: this repository's Beads project is demo, not agent-plans\. .*Use --project demo/);
+    const list = await cli('api', 'checklist', 'create', '--project', 'agent-plans', '--title', 'Try it', '--item', 'one');
+    assert.equal(list.code, 0, list.stderr);
+    assert.match(list.stderr, /Beads project is demo, not agent-plans/);
+    assert.doesNotMatch(list.stdout, /Note:/);
+    const same = await cli('api', 'ask', 'create', '--project', 'demo', '--question', 'Which way, up or down?');
+    assert.equal(same.code, 0, same.stderr);
+    assert.doesNotMatch(same.stderr, /Note:/, 'the same project is silent');
+  } finally { cli.cwd = null; await close(); }
+});
+
+test('ask create: a folder without a CLAUDE.md, or without a Beads project line, is silent', async () => {
+  const { cli, dir, close } = await setup();
+  try {
+    const bare = path.join(dir, 'bare');
+    const plain = path.join(dir, 'plain');
+    await mkdir(bare);
+    await mkdir(plain);
+    await writeFile(path.join(plain, 'CLAUDE.md'), '# Plain\n\nNo tracker here.\n');
+    for (const folder of [bare, plain]) {
+      cli.cwd = folder;
+      const made = await cli('api', 'ask', 'create', '--project', 'agent-plans', '--question', 'Which way, left or right?');
+      assert.equal(made.code, 0, made.stderr);
+      assert.doesNotMatch(made.stderr, /Note:/);
+    }
+  } finally { cli.cwd = null; await close(); }
+});

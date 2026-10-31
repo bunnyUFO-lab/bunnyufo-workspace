@@ -167,7 +167,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
   /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|undo-<rand>.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
   const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|undo)-[^/]+\.json)$/i;
-  const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
+  const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|asks\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
   /** An agent's only file under bead-marks/: the note that it closed the issue the owner marked (create-only). */
@@ -226,7 +226,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    */
   const askCreateOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && ASK_FILE.test(file) && (upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'ask.json, checklist.json and request.json are create-only.');
+      throw new HttpError(403, 'ask.json, checklist.json, request.json, delivered.json and watch-*.json are create-only.');
     }
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
