@@ -52,7 +52,7 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
       const tapped = (ask.options ?? []).find(candidate => candidate?.id === answer.choice);
       if (!said || typeof tapped?.label !== 'string' || tapped.label.trim() !== said) return { why: "The button you tapped does not match the run's own option, so nothing was started." };
     }
-    else if (answer.choice === 'again') said = note ? '' : NO_NOTE;
+    else if (answer.choice === 'again' && !(original.options ?? []).length) said = note ? '' : NO_NOTE;
     else return { why: "That is not one of the run's options." };
     const joined = said ? `${said}${note ? ` (${note})` : ''}` : note;
     const question = String(original.question ?? '').trim().slice(0, LIMITS.question);
@@ -97,6 +97,7 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
       if (mine?.missing) return no('That request cannot run again now.');
       if (!mine) return no('That request id is taken; nothing started.');
       ({ state } = mine);
+      if (state === 'declined') return no(`The copy ${copyId} was declined, so nothing started. Approve the original again in the Hub.`);
     }
     let already = state !== 'proposed';
     if (!already) {

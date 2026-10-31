@@ -573,7 +573,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!moved) {
       const copyId = rerunRequestId(id);
       const loaded = await loadOne(copyId, at).catch(() => null);
-      if (loaded && loaded.request.replaces === id && loaded.request.origin?.kind === 'owner' && await siteWrote(copyId)) throw fail(`That request was already run again as ${copyId}; approve or stop that one.`, 409);
+      if (loaded && loaded.request.replaces === id && loaded.request.origin?.kind === 'owner' && ['proposed', 'approved', 'taken', 'running', 'asking', 'stopping'].includes(loaded.state) && await siteWrote(copyId)) throw fail(`That request was already run again as ${copyId}; approve or stop that one.`, 409);
     }
     const { made, target, state } = await copyFor(id, { states: moved ? ['stopped'] : ['expired', 'failed', 'lost', 'proposed'], raw, user, at, fixedId: moved });
     let approval;

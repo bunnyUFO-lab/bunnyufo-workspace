@@ -445,3 +445,36 @@ async function fixtureNoKey(f) {
   const hub = createHub({ bucket, enabled: true, now: () => NOW, env: {} });
   return hub.rerun;
 }
+
+test('a declined copy is not live: Approve again works, and an answer says nothing started and stops nothing', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const real = f.hub.requests.approveRequest;
+    f.hub.requests.approveRequest = async () => { throw Object.assign(new Error('No signing key.'), { status: 503 }); };
+    await f.answer(f.rerunAsk('a1b2', { request: original, kind: 'denied' }), 'allowed');
+    f.hub.requests.approveRequest = real;
+    const copy = copyOf(f, original);
+    assert.equal((await f.post(`/hub/requests/${original}/again`, {})).status, 409, 'blocked while the copy is proposed');
+    assert.equal((await f.post(`/hub/requests/${copy.id}/decline`, {})).status, 201);
+    const answered = await f.answer(f.rerunAsk('c3d4', { request: original, kind: 'denied' }), 'allowed');
+    assert.equal(answered.body.rerun.started, false);
+    assert.match(answered.body.rerun.why, /was declined/);
+    assert.equal(f.fake.objects.has(f.file(original, 'stop.json')), false, 'the original is not stopped');
+    const again = await f.post(`/hub/requests/${original}/again`, {});
+    assert.equal(again.status, 201, JSON.stringify(again.body));
+  } finally { await f.close(); }
+});
+
+test('"again" is accepted only when the run\'s own Ask has no options', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const left = f.runAsk('b0b0', original); // it has options: alpha and beta
+    const forged = f.rerunAsk('a1b2', { request: original, kind: 'continue', ask: left }, { options: [{ id: 'again', label: 'Run it again' }, { id: 'drop', label: "Don't run it again" }] });
+    const done = await f.answer(forged, 'again');
+    assert.equal(done.body.rerun.started, false);
+    assert.match(done.body.rerun.why, /not one of the run's options/);
+    assert.equal(f.copies(original).length, 0);
+  } finally { await f.close(); }
+});
