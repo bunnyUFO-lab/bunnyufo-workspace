@@ -70,6 +70,62 @@ export function askState(names, ask, now, snooze = null) {
 
 export const canAnswer = state => state === 'open' || state === 'snoozed';
 
+/** How an answer reached a session, as `delivered.json` says it (the closed set of `how`). */
+export const DELIVERY_HOW = ['turn', 'woke', 'prompt', 'next-session', 'start'];
+export const DELIVERY_WATCHERS = 3;
+/** Minutes an answered Ask may wait for a watching session before the Hub says it was not delivered. */
+export const DELIVERY_PATIENCE_MIN = 5;
+
+const textOf = (value, max = 120) => (typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value) ? value : undefined);
+const idOf = value => (typeof value === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(value) ? value : undefined);
+/** A link to a session: only claude.ai itself, over https or the desktop app's claude:// scheme. No userinfo, no port, no look-alike host. */
+const linkOf = value => {
+  if (typeof value !== 'string' || value.length > 500 || /[\s<>"'\\]/.test(value)) return undefined;
+  const match = /^(https|claude):\/\/claude\.ai(\/[^?#]*)?(\?[^#]*)?(#.*)?$/.exec(value);
+  return match ? value : undefined;
+};
+const timeOf = value => {
+  const time = typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isNaN(time) ? undefined : time;
+};
+
+/**
+ * Where an answered Ask's answer went, from files an agent wrote (so every field is checked, and the UI says they were
+ * "reported by" a host): `delivered` is delivered.json, `watchers` the bodies of watch-*.json.
+ * → undefined for an Ask nobody answered, else
+ *   { state: 'delivered', how, at, host?, folder?, session? }
+ *   | { state: 'watching' | 'stale', minutes, host?, folder?, session?, url?, appUrl?, watchers }
+ *   | { state: 'none' }
+ */
+export function deliveryOf({ answer, delivered, watchers, at }) {
+  if (!answer || typeof answer !== 'object') return undefined;
+  const now = at instanceof Date ? at.getTime() : Date.now();
+  const list = (Array.isArray(watchers) ? watchers : []).slice(0, DELIVERY_WATCHERS).map(item => {
+    const session = idOf(item?.session);
+    if (!session || !item || typeof item !== 'object') return null;
+    const clean = { session, at: timeOf(item.at) };
+    for (const [name, value] of [['host', textOf(item.host)], ['folder', textOf(item.folder)], ['url', linkOf(item.url)], ['appUrl', linkOf(item.appUrl)]]) if (value) clean[name] = value;
+    return clean;
+  }).filter(Boolean);
+  const how = delivered && typeof delivered === 'object' && DELIVERY_HOW.includes(delivered.how) ? delivered.how : undefined;
+  const deliveredAt = how ? timeOf(delivered.at) : undefined;
+  if (how && deliveredAt !== undefined) {
+    const session = idOf(delivered.session);
+    const watcher = session ? list.find(item => item.session.slice(0, 8) === session.slice(0, 8)) : undefined;
+    const host = textOf(delivered.host) ?? watcher?.host;
+    return {
+      state: 'delivered', how, at: new Date(deliveredAt).toISOString(),
+      ...(host ? { host } : {}), ...(watcher?.folder ? { folder: watcher.folder } : {}), ...(session ? { session } : {}),
+    };
+  }
+  if (!list.length) return { state: 'none' };
+  const first = [...list].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
+  const since = timeOf(answer.at);
+  const minutes = since === undefined ? 0 : Math.max(0, Math.floor((now - since) / 60000));
+  const { at: _at, ...shown } = first;
+  return { state: minutes >= DELIVERY_PATIENCE_MIN ? 'stale' : 'watching', minutes, ...shown, watchers: list.length };
+}
+
 /** A run that has said nothing for this long is not running; a request taken this long ago with no run is lost. */
 export const RUN_STALE_MS = 20 * 60 * 1000;
 

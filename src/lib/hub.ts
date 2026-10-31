@@ -182,7 +182,25 @@ export interface Ask {
   answer?: AskAnswer
   pickup?: { at: string; host: string; session?: string; bead?: string }
   cancel?: { at: string; by: string }
+  /** Where the answer went, from files an agent wrote (the server checked every field). Only an answered Ask has it. */
+  delivery?: AskDelivery
   files: string[]
+}
+
+export type AskDeliveryHow = 'turn' | 'woke' | 'prompt' | 'next-session' | 'start'
+
+export interface AskDelivery {
+  state: 'delivered' | 'watching' | 'stale' | 'none'
+  how?: AskDeliveryHow
+  at?: string
+  host?: string
+  folder?: string
+  session?: string
+  /** Minutes between the answer and now, for a watched Ask. */
+  minutes?: number
+  url?: string
+  appUrl?: string
+  watchers?: number
 }
 
 export interface ChecklistItem {
