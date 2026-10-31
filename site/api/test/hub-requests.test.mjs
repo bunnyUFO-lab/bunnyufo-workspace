@@ -505,8 +505,24 @@ test('Bunnylink is never signed for the PC or the cloud: creating with another t
     assert.equal((await f.post(`/hub/requests/${stored.id}/approve`, { target: 'pc' })).status, 400);
     assert.equal(f.fake.text(`sections/inbox/requests/${stored.id}/approved.json`), null);
     // Approve again goes through approveRequest, so it is refused too.
+    const folders = () => [...new Set([...f.fake.objects.keys()].map(name => /requests\/([^/]+)\//.exec(name)?.[1]).filter(Boolean))].sort();
+    const declines = () => [...f.fake.objects.keys()].filter(name => name.endsWith('/declined.json'));
+    const before = { folders: folders(), declines: declines() };
     assert.equal((await f.post(`/hub/requests/${stored.id}/again`, {})).status, 400);
     assert.equal(f.fake.text(`sections/inbox/requests/${stored.id}/approved.json`), null);
+    // It is refused before anything is copied: no new request folder, and no declined.json on a copy.
+    assert.deepEqual(folders(), before.folders, 'a refused Approve again writes no copy');
+    assert.deepEqual(declines(), before.declines);
+    // The same for the other refusals the approval makes: a cloud run with no repo, a target the preset does not run on, and at-pc.
+    const plain = preset(rid('plain', 'b444'), { project: 'probe', preset: 'code-task', target: 'pc' });
+    f.put(plain);
+    const base = folders();
+    for (const target of ['cloud', 'hermes', 'at-pc']) {
+      const refused = await f.post(`/hub/requests/${plain.id}/again`, { target });
+      assert.equal(refused.status, 400, target);
+    }
+    assert.deepEqual(folders(), base, 'no copy for any refused target');
+    assert.deepEqual(declines(), before.declines);
     // Another project is unaffected.
     const other = preset(rid('other', 'b333'), { project: 'probe', preset: 'code-task', target: 'pc' });
     f.put(other);
@@ -721,19 +737,17 @@ test('a hand-off that throws leaves the approval standing and makes the request 
   } finally { await close(); }
 });
 
-test('again declines the copy only when nothing was signed', async () => {
+test('again refuses a request the approval would refuse before it writes any copy', async () => {
   const { fake, post, put, close } = await fixture({ env: KEY_ENV });
   try {
-    // A cloud request with no repo cannot be approved: the copy must not be left behind as a proposal.
+    // A cloud request with no repo cannot be approved: no copy is made, so none is left behind to decline.
     const request = preset(rid('cloudless', 'h555'), { preset: 'docs', target: 'cloud', repo: undefined });
     put(request);
-    const before = [...fake.objects.keys()].filter(name => name.includes('/requests/')).length;
+    const before = [...fake.objects.keys()].filter(name => name.includes('/requests/'));
     const answer = await post(`/hub/requests/${request.id}/again`, {});
     assert.equal(answer.status, 400);
-    const copies = [...fake.objects.keys()].filter(name => name.endsWith('/declined.json') && !name.includes(request.id));
-    assert.equal(copies.length, 1, 'The failed copy is declined.');
-    assert.equal(fake.text(copies[0].replace('declined.json', 'approved.json')), null);
-    assert.ok([...fake.objects.keys()].filter(name => name.includes('/requests/')).length > before);
+    assert.match(answer.body.error, /needs a repo/);
+    assert.deepEqual([...fake.objects.keys()].filter(name => name.includes('/requests/')), before, 'nothing was written: no copy, no declined.json');
   } finally { await close(); }
 });
 
