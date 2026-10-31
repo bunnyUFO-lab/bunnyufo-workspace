@@ -71,6 +71,30 @@ try {
   await page.keyboard.press('Escape');
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.old)}`);
   await page.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
+  step('ws-edv: the old request says where it went, the copy says where it came from, and neither page repeats the title, text or id');
+  for (const [name, size] of [['', { width: 1280, height: 900 }], ['-phone', { width: 390, height: 844 }]]) {
+    await page.setViewportSize(size);
+    await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.old)}`);
+    await page.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
+    await page.waitForTimeout(300);
+    await shot(page, `move-old-page${name}`);
+    await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(shownId.trim())}`);
+    await page.locator('[data-run-state-chip]').waitFor();
+    await page.waitForTimeout(300);
+    await shot(page, `move-copy-page${name}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.old)}`);
+  const movedLine = page.locator('[data-run-moved]');
+  await movedLine.waitFor();
+  assert.equal((await movedLine.innerText()).trim(), `Moved to the cloud → ${shownId.trim()}`);
+  assert.match(await movedLine.locator('a').getAttribute('href'), new RegExp(`/request/${shownId.trim()}$`));
+  assert.equal(await page.locator('[data-run-request-text], .rd-title, [data-run-id]').count(), 0, 'The request page shows the text, title and id once, not again in the run view.');
+  await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(shownId.trim())}`);
+  await page.locator('[data-run-moved-from]').waitFor();
+  assert.match(await page.locator('[data-run-moved-from]').innerText(), /^Moved from the PC/);
+  assert.equal(await page.locator('[data-run-moved]').count(), 0);
+  assert.match(await page.locator('[data-run-target]').innerText(), /^Runs on the cloud/);
   await page.goto(`${fixture.url}#/~hub/today`);
   await page.locator('[data-today-cloud]', { hasText: 'Cloud: 1 of 10 today' }).waitFor();
   assert.equal(await page.locator('[data-move-offer]').count(), 0, 'The tile is gone.');

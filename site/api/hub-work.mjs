@@ -99,6 +99,9 @@ const REQUEST_WHY = {
   stopping: 'stopping',
 };
 
+/** Why an approved cloud request is not running yet. The usage pause is its own reason: it is not the daily count. */
+const CLOUD_WHY = { 'usage-limit': 'waiting on the cloud usage pause', 'daily-cap': 'waiting: the daily cloud limit is used' };
+
 function requestCards({ requests, events }) {
   const ctx = { eventsByBead: eventsByBeadOf(events) };
   const cards = [];
@@ -107,10 +110,11 @@ function requestCards({ requests, events }) {
     let lane = REQUEST_LANE[request.state] ?? 'backlog';
     // Done with a pull request still open is waiting for review.
     if (lane === 'done' && request.bead && issueSigns({ id: request.bead, status: 'open' }, 'open', ctx).signs.includes('pr')) lane = 'review';
+    const why = (request.state === 'approved' && request.cloud?.status === 'waiting' ? CLOUD_WHY[request.cloud.reason] : null) ?? REQUEST_WHY[request.state];
     cards.push({
       key: `request:${request.id}`, source: 'request', id: request.id, project: request.project ?? '', title: request.title,
       lane, state: request.state === 'open' ? 'proposed' : request.state,
-      ...(REQUEST_WHY[request.state] ? { why: REQUEST_WHY[request.state] } : {}), signs: [],
+      ...(why ? { why } : {}), signs: [],
       updatedAt: request.at ?? '', href: `#/~hub/request/${encodeURIComponent(request.id)}`,
     });
   }

@@ -70,13 +70,22 @@ function cloudLine(cloud: CloudState, fires: CloudFire[]): { text: string; retry
     case 'queued': return { text: 'Starting in the cloud…', retry: false }
     case 'waiting':
       if (cloud.reason === 'daily-cap') return { text: `Waiting: ${cloud.cap ?? 10} cloud ${(cloud.cap ?? 10) === 1 ? "run" : "runs"} today. Starts at ${whenLabel(cloud.next)}.`, retry: false }
-      if (cloud.reason === 'usage-limit') return { text: `Waiting: cloud usage limit. Tries again at ${whenLabel(cloud.next)}.`, retry: false }
+      if (cloud.reason === 'usage-limit') return { text: `Waiting on the usage pause: cloud runs are paused after a usage limit, which is separate from today's count. Tries again at ${whenLabel(cloud.next)}.`, retry: false }
       return { text: `Could not start in the cloud yet (${fireReason(fires[0]?.reason)}). Tries again at ${whenLabel(cloud.next)}.`, retry: false }
     case 'fired': return { text: `Started in the cloud at ${okFire ? clock(okFire.at) : 'an unknown time'}`, retry: false, session }
     case 'fire-failed': return { text: `Could not start in the cloud: ${fireReason(cloud.reason ?? fires[0]?.reason)}`, retry: true }
     default: return { text: `Fired at ${okFire ? clock(okFire.at) : 'an unknown time'} but the run has not started.`, retry: true, session }
   }
 }
+
+/** The new request's id in a stop reason the cloud move wrote ("moved to the cloud: <id>"). */
+const movedTo = (reason: string | undefined) => /^moved to the cloud: (\S+)$/.exec(reason ?? '')?.[1] ?? null
+
+/** "Runs on the cloud": a machine's name in the middle of a sentence. */
+const runsOn = (target: string) => (target === 'at-pc' ? 'You start it at the PC' : `Runs on ${(MACHINE[target as SpawnTarget]?.name ?? target).replace(/^The /, 'the ')}`)
+
+/** A run's reason in words, for the timeline. */
+const reasonWord = (reason: string) => (reason === 'approval-refused' ? 'the approval was not accepted' : reason)
 
 const STOPPABLE = new Set(['approved', 'taken', 'running', 'lost', 'asking'])
 const AGAIN = new Set(['expired', 'failed', 'lost'])
@@ -130,13 +139,16 @@ function Live({ lines, ended }: { lines: LiveLine[]; ended: boolean }) {
  * state, a timeline, the live lines of a Hermes run while it goes, and the result. `onGone` runs when Approve again makes a
  * new request, with its id.
  */
-export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => void }) {
+export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id: string) => void; /** On the request's own page, which already shows the title, text, id and project. */ page?: boolean }) {
   const { data: detail, error, reload } = useHubData<RunDetail>(`/requests/${encodeURIComponent(id)}`)
   const [lines, setLines] = useState<LiveLine[]>([])
   const [ended, setEnded] = useState(false)
   const [report, setReport] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  // A copy made by the cloud move names the request it replaces; that one's stop says it was moved.
+  const replaces = detail?.request.replaces
+  const { data: older } = useHubData<RunDetail>(replaces ? `/requests/${encodeURIComponent(replaces)}` : null)
   const state = detail?.state ?? ''
   const hasRun = !!detail?.hermesRun
   const hasResult = !!detail?.result
@@ -189,11 +201,12 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   const act = useCallback(async (work: () => Promise<void>) => {
     setBusy(true)
     setProblem(null)
-    try { await work() } catch (failure) { setProblem(failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false); reload() }
+    try { await work(); window.dispatchEvent(new Event(HUB_WROTE)) } catch (failure) { setProblem(failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false); reload() }
   }, [reload])
 
   if (!detail) return <p className="hub-muted">{error ?? 'Loading…'}</p>
   const { request, approved, taken, runs = [], result, retry, stop, cloud, fires = [] } = detail
+  const movedId = movedTo(stop?.reason)
   const cloudShown = cloud && state === 'approved' ? cloudLine(cloud, fires) : null
   const dry = !!cloud?.dryRun || fires.some(fire => fire.dryRun)
   const target = (approved?.target ?? request.target) as SpawnTarget | undefined
@@ -206,13 +219,15 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
   return (
     <div className="rd" data-run-view={id} data-run-state={state}>
       <div className="rd-head">
-        <span className="hub-id" data-run-id>{request.id}</span>
-        {request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
+        {!page && <span className="hub-id" data-run-id>{request.id}</span>}
+        {!page && request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
         <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
       </div>
-      <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>
-      <p className="rd-body" data-run-request-text>{request.text}</p>
-      {target && <p className="hub-muted" data-run-target>Runs on {MACHINE[target]?.name ?? target}{request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
+      {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
+      {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
+      {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
+      {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
+      {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
       {state === 'approved' && target === 'pc' && <PcStart />}
       {cloudShown && (
         <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
@@ -234,8 +249,8 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
 
       <h4 className="rd-h">Timeline</h4>
       <ol className="rd-timeline" data-run-timeline>
-        {stop && <li data-step="stop"><b>Stop</b> {stop.reason ?? 'stopped'}{stop.at ? ` · ${clock(stop.at)}` : ''}</li>}
-        {result && <li data-step="result"><b>{result.outcome === 'failed' ? 'Failed' : 'Finished'}</b> {result.outcome}{result.reason ? ` (${result.reason})` : ''}{result.at ? ` · ${clock(result.at)}` : ''}</li>}
+        {stop && <li data-step="stop"><b>{movedId ? 'Moved' : 'Stop'}</b> {movedId ? 'to the cloud' : stop.reason ?? 'stopped'}{stop.at ? ` · ${clock(stop.at)}` : ''}</li>}
+        {result && <li data-step="result"><b>{result.outcome === 'failed' ? 'Failed' : 'Finished'}</b> {result.outcome}{result.reason ? ` (${reasonWord(result.reason)})` : ''}{result.at ? ` · ${clock(result.at)}` : ''}</li>}
         {runs.map(run => (
           <li key={run.at} data-step="run"><b>{RUN_WORD[run.state] ?? run.state}</b> {run.lastAction ?? ''} · {clock(run.at)}{sessionUrl(run.sessionLink) && <> · <a href={sessionUrl(run.sessionLink)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
         ))}
@@ -259,7 +274,9 @@ export function RunView({ id, onGone }: { id: string; onGone?: (id: string) => v
           <h4 className="rd-h">Result</h4>
           <div className="rd-result" data-run-result>
             {detail?.nothing && <p data-run-nothing><b>Done, nothing to change.</b></p>}
-            {result.summary && <p>{result.summary}</p>}
+            {result.reason === 'approval-refused'
+              ? <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>
+              : result.summary && <p>{result.summary}</p>}
             {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
             <div className="rd-links">
               {prHref && <a className="hub-btn" href={prHref} target="_blank" rel="noopener noreferrer" data-run-pr>Open the PR</a>}
@@ -297,7 +314,14 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     node?.querySelector<HTMLElement>('.rd-close')?.focus()
   }, [])
   return (
-    <dialog ref={dialog} className="run-drawer" aria-labelledby="run-drawer-title" data-run-drawer onClose={onClose} onClick={event => { if (event.target === dialog.current) dialog.current?.close() }}>
+    <dialog ref={dialog} className="run-drawer" aria-labelledby="run-drawer-title" data-run-drawer onClose={onClose} onClick={event => {
+      if (event.target !== dialog.current) return
+      // A click on the backdrop closes the drawer and then goes on to what is under it, so the first click on the board is not lost.
+      const { clientX, clientY } = event
+      dialog.current?.close()
+      const under = document.elementFromPoint(clientX, clientY)
+      if (under instanceof HTMLElement && under !== document.body && under !== document.documentElement) under.click()
+    }}>
       <div className="sp-head">
         <h2 id="run-drawer-title">Run</h2>
         <a className="hub-btn rd-page" href={hubHash('request', shown)} onClick={() => dialog.current?.close()}>Open as a page</a>
@@ -340,5 +364,6 @@ export default function RunDrawerHost() {
     opener.current = null
     if (back && document.contains(back)) back.focus({ preventScroll: true })
   }, [showing])
-  return id ? <RunDrawer key={id} id={id} onClose={() => setId(null)} /> : null
+  // The close event comes a moment after close(): by then a click that went on to another run may have set the next id, which stays.
+  return id ? <RunDrawer key={id} id={id} onClose={() => setId(current => (current === id ? null : current))} /> : null
 }
