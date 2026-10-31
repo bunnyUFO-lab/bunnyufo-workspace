@@ -569,6 +569,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    */
   async function againRoute(id, raw, user, at, { moved = null } = {}) {
     needKey();
+    // A rerun made from the watcher's Ask is the one run of this request: a second copy from here could make two runs.
+    if (!moved) {
+      const copyId = rerunRequestId(id);
+      const loaded = await loadOne(copyId, at).catch(() => null);
+      if (loaded && loaded.request.replaces === id && loaded.request.origin?.kind === 'owner' && await siteWrote(copyId)) throw fail(`That request was already run again as ${copyId}; approve or stop that one.`, 409);
+    }
     const { made, target, state } = await copyFor(id, { states: moved ? ['stopped'] : ['expired', 'failed', 'lost', 'proposed'], raw, user, at, fixedId: moved });
     let approval;
     try {

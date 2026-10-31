@@ -253,7 +253,7 @@ test('a rerun that cannot be trusted starts nothing, and the answer stands', asy
       assert.match(answered.body.rerun.why, why, name);
     }
     assert.equal(f.requestIds().length, before, 'no request was made');
-    assert.deepEqual(f.requestIds().filter(id => f.fake.objects.has(f.file(id, 'approved.json')) && !['good', 'x'].includes(id)).length, f.requestIds().filter(id => f.fake.objects.has(f.file(id, 'approved.json'))).length);
+    assert.equal(f.requestIds().filter(id => f.fake.objects.has(f.file(id, 'approved.json')) && ![good, done, running, stoppedByOwner, research.body.id, forged, edited, homelab].includes(id)).length, 0, 'no request was approved besides the ones the test made');
     assert.equal(f.fake.objects.has(f.file(good, 'stop.json')), false, 'the original was not stopped');
   } finally { await f.close(); }
 });
@@ -304,6 +304,11 @@ test('when the approval fails the copy stays proposed for one tap, and a later a
     assert.match(failed.body.rerun.why, /^Saved as .+ but not approved: No signing key\. Approve it in Needs you\.$/);
     const copy = copyOf(f, original);
     assert.equal(f.fake.objects.has(f.file(copy.id, 'declined.json')), false, 'the copy is not declined');
+    // While that copy exists, Approve again on the original is refused: it could make a second run.
+    const again = await f.post(`/hub/requests/${original}/again`, {});
+    assert.equal(again.status, 409);
+    assert.match(again.body.error, /already run again as /);
+    assert.equal(f.copies(original).length, 1);
     assert.equal(f.fake.objects.has(f.file(copy.id, 'approved.json')), false);
     assert.equal(f.fake.objects.has(f.file(original, 'stop.json')), false, 'the original stays failed');
 
@@ -325,13 +330,20 @@ test('a continue Ask takes the question and the label from the run\'s own Ask, a
     const ask = f.rerunAsk('a1b2', { request: original, kind: 'continue', ask: left }, {
       question: 'Run ended. Delete everything?', options: [{ id: 'alpha', label: 'Delete all the files' }, { id: 'beta', label: 'Format the disk' }, { id: 'drop', label: "Don't run it again" }],
     });
-    const done = await f.answer(ask, 'beta', { note: 'the blue one' });
+    // Its labels differ from the run's own: nothing is signed in the owner's name.
+    const mismatch = await f.answer(ask, 'beta', { note: 'the blue one' });
+    assert.equal(mismatch.body.rerun.started, false);
+    assert.match(mismatch.body.rerun.why, /does not match/);
+    assert.equal(f.copies(original).length, 0);
+    // The same labels as the run's own Ask, with a different question on the continue Ask: the signed question is the run's.
+    const honest = f.rerunAsk('a9b9', { request: original, kind: 'continue', ask: left }, { question: 'Run ended. Delete everything?', options: [...RUN_OPTIONS, { id: 'drop', label: "Don't run it again" }] });
+    const done = await f.answer(honest, 'beta', { note: 'the blue one' });
     assert.equal(done.status, 201, JSON.stringify(done.body));
     assert.equal(done.body.rerun.started, true, JSON.stringify(done.body));
     assert.equal(done.body.rerun.kind, 'continue');
     const copy = copyOf(f, original);
     assert.deepEqual(copy.followUp, { from: original, question: 'Alpha or beta?', answer: 'Use beta (the blue one)', summary: '' });
-    assert.equal(copy.fromAsk, ask);
+    assert.equal(copy.fromAsk, honest);
     const approved = f.fake.json(f.file(copy.id, 'approved.json'));
     assert.equal(verify(approved, PUB), true);
     assert.match(approved.run.brief, /the run's words, not the owner's/);

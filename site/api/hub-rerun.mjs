@@ -46,7 +46,12 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     const note = typeof answer.note === 'string' ? answer.note.trim() : '';
     const option = (original.options ?? []).find(candidate => candidate?.id === answer.choice);
     let said;
-    if (option) said = typeof option.label === 'string' ? option.label.trim() : '';
+    if (option) {
+      said = typeof option.label === 'string' ? option.label.trim() : '';
+      // The owner tapped a button on the continue Ask. What is signed in their name is the run's own label, so the two must be the same text.
+      const tapped = (ask.options ?? []).find(candidate => candidate?.id === answer.choice);
+      if (!said || typeof tapped?.label !== 'string' || tapped.label.trim() !== said) return { why: "The button you tapped does not match the run's own option, so nothing was started." };
+    }
     else if (answer.choice === 'again') said = note ? '' : NO_NOTE;
     else return { why: "That is not one of the run's options." };
     const joined = said ? `${said}${note ? ` (${note})` : ''}` : note;
