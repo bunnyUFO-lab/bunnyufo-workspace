@@ -12,9 +12,13 @@ export type AskVerb = 'answered' | 'snoozed' | 'cancelled' | 'reviewed'
 
 /** What the server says an answer set going: the avatar flow's line or the rerun's, or null for any other answer. */
 export function avatarNotice(result: unknown): string | null {
-  const rerun = (result as { rerun?: { started?: boolean; request?: string; kind?: string; already?: boolean; message?: string; why?: string } } | null)?.rerun
+  const rerun = (result as { rerun?: { started?: boolean; request?: string; kind?: string; project?: string; allowed?: string[]; already?: boolean; message?: string; why?: string } } | null)?.rerun
   if (rerun && typeof rerun === 'object') {
     if (rerun.started !== true) return `Not run again: ${text(rerun.why)}`
+    if (Array.isArray(rerun.allowed) && rerun.allowed.length > 0) {
+      const count = rerun.allowed.length
+      return `Allowed ${count} rule${count === 1 ? '' : 's'} for ${text(rerun.project)} and approved again as ${text(rerun.request)}. The Gaming PC adds the rule${count === 1 ? '' : 's'} and starts it within a few minutes; it sends an alert when it does.`
+    }
     if (rerun.already === true) return text(rerun.message)
     return rerun.kind === 'continue'
       ? 'A new run starts on the Gaming PC within a few minutes, with your answer.'

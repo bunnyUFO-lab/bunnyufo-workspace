@@ -478,3 +478,157 @@ test('"again" is accepted only when the run\'s own Ask has no options', async ()
     assert.equal(f.copies(original).length, 0);
   } finally { await f.close(); }
 });
+
+// --- The "allow" choice: a signed grant for the PC (ws-a5g.4.16) ---
+
+const ALLOW_OPTIONS = [{ id: 'allow', label: 'Allow it and run it again' }, ...DENIED_OPTIONS];
+const RULES = ['Bash(ping -n 1 example.com)'];
+const allowAsk = (f, tail, original, rules = RULES, extra = {}) => f.rerunAsk(tail, { request: original, kind: 'denied', allow: rules }, { options: ALLOW_OPTIONS, ...extra });
+const grantKey = (f, id) => f.file(id, 'allow-grant.json');
+
+test('the field check keeps a clean allow list and marks a malformed one', () => {
+  const r = `${day}-sprite-studio-walk-a1b2`;
+  assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: RULES }), { request: r, kind: 'denied', allow: RULES });
+  assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: ['Bash(ping:*)', 'mcp__bunnylink__status'] }).allow, ['Bash(ping:*)', 'mcp__bunnylink__status']);
+  const six = Array.from({ length: 6 }, (_, index) => `Bash(echo ${index})`);
+  for (const bad of [[], 'Bash(x)', six, ['Bash(x)', 'Bash(x)'], ['Read(//c/**)'], [`Bash(x${String.fromCharCode(10)}y)`], [`Bash(${'x'.repeat(300)})`], [5], ['Bash()']]) {
+    assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: bad }), { request: r, kind: 'denied', allowBad: true }, JSON.stringify(bad).slice(0, 60));
+  }
+  assert.equal(checkRerunField({ request: r, kind: 'continue', ask: `${day}-sprite-studio-ask-c3d4`, allow: RULES }).allow, undefined, 'a continue Ask has no allow');
+});
+
+test('"allow" signs a grant for the copy before it is approved, and approves the copy as before', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const ask = allowAsk(f, 'a1b2', original);
+    f.fake.log.length = 0;
+    const done = await f.answer(ask, 'allow');
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal(done.body.rerun.started, true, JSON.stringify(done.body));
+    assert.deepEqual(done.body.rerun.allowed, RULES);
+    assert.equal(done.body.rerun.project, 'sprite-studio');
+    const copy = copyOf(f, original);
+    const grant = f.fake.json(grantKey(f, copy.id));
+    assert.equal(verify(grant, PUB), true, 'signed with the approval key');
+    assert.deepEqual([grant.v, grant.kind, grant.grantFor, grant.original, grant.ask, grant.project, grant.by], [1, 'pc-allow', copy.id, original, ask, 'sprite-studio', 'owner']);
+    assert.deepEqual(grant.rules, RULES);
+    assert.ok(grant.nonce && grant.nonce.length >= 16, 'a nonce');
+    assert.equal(new Date(grant.expires).getTime() - new Date(grant.at).getTime(), 72 * 3600 * 1000);
+    assert.equal('request' in grant, false, 'a grant names no request, so it is not an approval or a stop');
+    // The grant is written before the copy's approval.
+    const puts = f.fake.log.filter(entry => entry.method === 'PUT').map(entry => entry.key);
+    const grantAt = puts.findIndex(name => name.endsWith(`${copy.id}/allow-grant.json`));
+    const approvedAt = puts.findIndex(name => name.endsWith(`${copy.id}/approved.json`));
+    assert.ok(grantAt >= 0 && approvedAt > grantAt, `grant ${grantAt} before approval ${approvedAt}`);
+    assert.equal(verify(f.fake.json(f.file(copy.id, 'approved.json')), PUB), true);
+    assert.equal(f.fake.json(f.file(original, 'stop.json')).reason, `run again as ${copy.id}`);
+  } finally { await f.close(); }
+});
+
+test('"allowed" and "denied" on an Ask with rules write no grant', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const kept = await f.answer(allowAsk(f, 'a1b2', original), 'denied');
+    assert.equal(kept.body.rerun, undefined);
+    const ran = await f.answer(allowAsk(f, 'c3d4', original), 'allowed');
+    assert.equal(ran.body.rerun.started, true);
+    assert.equal(ran.body.rerun.allowed, undefined);
+    assert.equal(f.fake.objects.has(grantKey(f, copyOf(f, original).id)), false);
+  } finally { await f.close(); }
+});
+
+test('a second answer reaches the 409 path and accepts the same grant; a copy from another Ask gets no grant', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const first = allowAsk(f, 'a1b2', original);
+    const done = await f.answer(first, 'allow');
+    assert.equal(done.body.rerun.started, true);
+    const copy = copyOf(f, original);
+    const before = f.fake.text(grantKey(f, copy.id));
+    const ask = (await f.call('GET', `/hub/asks/${first}`)).body;
+    const retry = await f.hub.rerun.afterAnswer({ ask, answer: { choice: 'allow' }, user: 'owner', at: NOW });
+    assert.equal(retry.started, true);
+    assert.deepEqual(retry.allowed, RULES);
+    assert.equal(f.fake.text(grantKey(f, copy.id)), before, 'the same grant, not a new one');
+
+    // Another Ask for the same run: the copy came from the first, so nothing is signed for the second.
+    const second = allowAsk(f, 'c3d4', original);
+    const other = await f.answer(second, 'allow');
+    assert.equal(other.body.rerun.started, false);
+    assert.match(other.body.rerun.why, /already run again from another Ask/);
+    assert.equal(f.fake.text(grantKey(f, copy.id)), before);
+
+    // A grant someone else left at the copy's id (other rules) is not accepted, and nothing is approved.
+    const run2 = await f.run({ text: 'Another job' });
+    const copy2 = rerunRequestId(run2);
+    f.seed.put(`requests/${copy2}/allow-grant.json`, sign({ v: 1, kind: 'pc-allow', grantFor: copy2, original: run2, ask: askId('e5f6'), project: 'sprite-studio', rules: ['Bash(echo other)'], at: NOW.toISOString(), expires: new Date(NOW.getTime() + 3600000).toISOString(), nonce: newNonce(), by: 'owner' }, keyPair.privateKey));
+    const clash = await f.answer(allowAsk(f, 'e5f6', run2), 'allow');
+    assert.equal(clash.body.rerun.started, false);
+    assert.match(clash.body.rerun.why, /id is taken/);
+    assert.equal(f.fake.objects.has(f.file(copy2, 'approved.json')), false, 'nothing was approved');
+  } finally { await f.close(); }
+});
+
+test('a malformed allow list gives the why, writes nothing, and the other choices still work', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const bad = f.rerunAsk('a1b2', { request: original, kind: 'denied', allow: ['Read(//c/**)'] }, { options: ALLOW_OPTIONS });
+    const before = f.requestIds().length;
+    const done = await f.answer(bad, 'allow');
+    assert.equal(done.body.rerun.started, false);
+    assert.match(done.body.rerun.why, /rules could not be read/);
+    assert.equal(f.requestIds().length, before);
+    assert.equal(f.fake.objects.has(f.file(original, 'stop.json')), false);
+    const ok = await f.answer(f.rerunAsk('c3d4', { request: original, kind: 'denied', allow: ['Read(//c/**)'] }, { options: ALLOW_OPTIONS }), 'allowed');
+    assert.equal(ok.body.rerun.started, true, 'the PC lines still work');
+  } finally { await f.close(); }
+});
+
+test('"allow" needs the passkey flag and the Ask\'s own project; nothing is signed otherwise', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const loose = await f.answer(allowAsk(f, 'a1b2', original, RULES, { requirePasskey: false }), 'allow');
+    assert.equal(loose.body.rerun.started, false);
+    assert.match(loose.body.rerun.why, /passkey/);
+    const other = await f.answer(allowAsk(f, 'c3d4', original, RULES, { project: 'magic-loops' }), 'allow');
+    assert.equal(other.body.rerun.started, false);
+    assert.equal(f.copies(original).length, 0);
+    assert.deepEqual([...f.fake.objects.keys()].filter(name => name.endsWith('/allow-grant.json')), [], 'no grant anywhere');
+  } finally { await f.close(); }
+});
+
+test('a grant never passes as an approval or a stop', async () => {
+  const f = await fixture();
+  const home = await mkdtemp(path.join(tmpdir(), 'buw-rerun-home-'));
+  try {
+    const original = await f.run();
+    await f.answer(allowAsk(f, 'a1b2', original), 'allow');
+    const copy = copyOf(f, original);
+    const grantBody = f.fake.objects.get(grantKey(f, copy.id)).body;
+    const env = { ...process.env, HOME: home, USERPROFILE: home, BUW_REGISTRY: path.join(home, 'none.json'), BUW_SPOOL: path.join(home, 'spool.jsonl'), AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test', BUW_S3_BUCKET: f.fake.bucket, BUW_S3_ENDPOINT: f.fake.endpoint, BUW_S3_REGION: 'us-east-1', BUW_CARDS_PASSWORD: '', HUB_SIGNING_PUBKEY: publicKeyPem(keyPair.privateKey) };
+    const cli = id => new Promise(resolve => execFile(process.execPath, [CARDS, 'request', 'verify', id, '--target', 'pc', '--via', 's3'], { env }, (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr })));
+    assert.equal((await cli(copy.id)).code, 0, 'the control: the real approval verifies');
+    // The grant in the place of the copy's approval: the PC client refuses it.
+    const approvedKey = f.file(copy.id, 'approved.json');
+    const real = f.fake.objects.get(approvedKey).body;
+    f.fake.seed(approvedKey, grantBody, 'application/json');
+    assert.notEqual((await cli(copy.id)).code, 0, 'a grant is not an approval');
+    f.fake.seed(approvedKey, real, 'application/json');
+    // The grant in the place of the original's approval: the Hub refuses to run it again from that.
+    const originalApproved = f.fake.objects.get(f.file(original, 'approved.json')).body;
+    f.fake.seed(f.file(original, 'approved.json'), grantBody, 'application/json');
+    const grantApproval = await f.hub.requests.verifiedPcRun(original, NOW).then(() => 'accepted', error => error.message);
+    assert.match(grantApproval, /does not (verify|match)/);
+    f.fake.seed(f.file(original, 'approved.json'), originalApproved, 'application/json');
+    // The grant in the place of a stop: the Hub does not count it as its own "run again" stop.
+    const run2 = await f.run({ text: 'Another job' });
+    f.seed.put(`requests/${run2}/stop.json`, JSON.parse(grantBody.toString()));
+    const asStop = await f.hub.requests.verifiedPcRun(run2, NOW).then(() => 'accepted', error => error.message);
+    assert.match(asStop, /was stopped/);
+  } finally { await rm(home, { recursive: true, force: true }); await f.close(); }
+});

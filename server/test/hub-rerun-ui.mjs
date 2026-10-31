@@ -33,6 +33,14 @@ try {
     fixture.seed.ask({ ...askJson({ id, project: 'sprite-studio', question, options: OPTIONS, context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: field });
     return id;
   };
+  // A second run, for the Ask that can allow rules from the phone.
+  const made2 = await api('/hub/requests', { project: 'sprite-studio', preset: 'sprite-set', text: 'Make the idle cycle', title: 'Idle cycle' });
+  assert.equal((await api('/hub/requests/' + made2.body.id + '/approve', { target: 'pc' })).status, 201);
+  fixture.seed.put('requests/' + made2.body.id + '/taken.json', { runner: 'pc', host: 'test-pc', nonce: 'n'.repeat(22), at: new Date(Date.now() - 30 * 60000).toISOString() });
+  fixture.seed.put('requests/' + made2.body.id + '/result.json', { v: 1, outcome: 'failed', summary: 'Denied a tool call.', reason: 'denied', by: 'run', at: new Date(Date.now() - 5 * 60000).toISOString() });
+  const RULE = 'Bash(ping -n 1 host.example.test)';
+  const allowId = askId('rerun-allow', 'g7h8');
+  fixture.seed.ask({ ...askJson({ id: allowId, project: 'sprite-studio', question, options: [{ id: 'allow', label: 'Allow it and run it again' }, ...OPTIONS], context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: { request: made2.body.id, kind: 'denied', allow: [RULE] } });
   const asks = { '1280': { one: seedAsk('a1b2', rerun), two: seedAsk('b2c3', rerun), keep: seedAsk('c3d4', gone), lost: seedAsk('d4e5', gone) }, '375': { keep: seedAsk('f6a7', gone), lost: seedAsk('a7b8', gone) } };
   await new Promise(resolve => setTimeout(resolve, 150));
 
@@ -76,6 +84,17 @@ try {
       await answerWith('allowed');
       await page.locator('[data-avatar-notice]').waitFor();
       assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Already approved again as /);
+    }
+    if (name === '1280') {
+      step('1280: the Allow Ask shows the exact rule, the Allows on PC tag and the notice after Allow');
+      await page.goto(fixture.url + '#/~hub/ask/' + allowId);
+      await page.locator('[data-rerun-allow]').waitFor();
+      assert.equal((await page.locator('[data-rerun-allow] code').innerText()).trim(), RULE);
+      assert.deepEqual(await page.locator('.hub-steps .tag').allInnerTexts(), ['Passkey only', 'Runs again', 'Allows on PC']);
+      assert.equal(await page.locator('[data-option]').count(), 3);
+      await answerWith('allow');
+      await page.locator('[data-avatar-notice]').waitFor();
+      assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Allowed 1 rule for sprite-studio and approved again as .+. The Gaming PC adds the rule and starts it within a few minutes; it sends an alert when it does.$/);
     }
     await context.close();
   }

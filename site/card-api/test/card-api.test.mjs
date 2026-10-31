@@ -682,7 +682,7 @@ test('the Lambda entry point: the passphrase set at deploy opens every section',
 });
 
 const HUB_ONLY = [
-  'requests/r-1/approved.json', 'requests/r-1/stop.json', 'requests/r-1/hermes-run.json', 'requests/r-1/hermes-retry.json',
+  'requests/r-1/approved.json', 'requests/r-1/stop.json', 'requests/r-1/hermes-run.json', 'requests/r-1/hermes-retry.json', 'requests/r-1/allow-grant.json',
   'requests/r-1/fire-20261029T100000000Z-ab12.json', 'requests/r-1/answer-20261029T100000000Z-ab12.json',
   'hermes-approvals/h-1/approval.json', 'hermes-approvals/h-1/answer.json',
 ];

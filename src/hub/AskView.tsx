@@ -89,6 +89,7 @@ export default function AskView({ id }: { id: string }) {
         ))}
         {ask.requirePasskey === true && <li className="tag" title="This Ask is answered in the Hub with a passkey, never from Discord">Passkey only</li>}
         {ask.rerun && typeof ask.rerun === 'object' && <li className="tag" title="Answering this Ask runs the work again on the Gaming PC">Runs again</li>}
+        {Array.isArray(ask.rerun?.allow) && ask.rerun.allow.length > 0 && <li className="tag" title="The Allow option adds these rules to the project's PC allow list">Allows on PC</li>}
         {SIDE[ask.state] && <li className="side on">{SIDE[ask.state]}{ask.state === 'snoozed' && ask.snoozedUntil ? ` until ${when(ask.snoozedUntil)}` : ''}</li>}
       </ol>
       <section className="hub-panel">

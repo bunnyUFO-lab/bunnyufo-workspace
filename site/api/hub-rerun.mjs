@@ -1,7 +1,10 @@
 // What an answer to a rerun Ask does (the watcher's "run it again", m3b). An Ask that carries a `rerun` field points at a
 // finished PC run:
 //
-//   { request, kind: 'denied' }            the run was denied a tool call. "I ran the allow lines; run it again" runs it again.
+//   { request, kind: 'denied', allow? }    the run was denied a tool call. "I ran the allow lines; run it again" runs it again. With
+//                                          `allow` (the rules the watcher suggests) the choice `allow` also signs a grant for them
+//                                          (`requests/<copy>/allow-grant.json`, before the copy is approved); the PC applies it only
+//                                          when the rules and this Ask are its own, and enforces the policy. The Hub checks only the shape.
 //   { request, kind: 'continue', ask }     the run ended before its own Ask (`ask`) was answered. Any option but "drop" starts a
 //                                          new run with that answer signed into its brief as the follow-up.
 //
@@ -16,6 +19,11 @@ import { rerunRequestId } from './hub-requests.mjs';
 import { validId } from './hub-model.mjs';
 
 const KINDS = ['denied', 'continue'];
+/** One phone-allowed rule: an exact Bash command rule or an exact MCP tool. Keep equal to RERUN_RULE_RE in site/card-api/cards.mjs. */
+const RERUN_RULE_RE = /^(Bash\(.+\)|mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+)$/s;
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+const validAllow = rules => Array.isArray(rules) && rules.length >= 1 && rules.length <= 5 && new Set(rules).size === rules.length
+  && rules.every(rule => typeof rule === 'string' && rule.length <= 300 && RERUN_RULE_RE.test(rule) && !CONTROL_RE.test(rule));
 const NO_NOTE = 'The owner asked to run it again without an answer.';
 const LIMITS = { question: 600, answer: 2000 };
 
@@ -24,11 +32,14 @@ export function checkRerunField(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   if (!validId(raw.request) || !KINDS.includes(raw.kind)) return null;
   if (raw.kind === 'continue') return validId(raw.ask) ? { request: raw.request, kind: 'continue', ask: raw.ask } : null;
-  return raw.ask === undefined ? { request: raw.request, kind: 'denied' } : null;
+  if (raw.ask !== undefined) return null;
+  // A malformed `allow` is dropped, not trusted: "allowed" and "denied" still work, and the "allow" choice says it could not be read.
+  if (raw.allow === undefined) return { request: raw.request, kind: 'denied' };
+  return validAllow(raw.allow) ? { request: raw.request, kind: 'denied', allow: [...raw.allow] } : { request: raw.request, kind: 'denied', allowBad: true };
 }
 
 /** Whether this answer is the one that starts the run: "allowed" on a denial Ask, any option but "drop" on a continue Ask. */
-const startsRun = (field, choice) => (field.kind === 'denied' ? choice === 'allowed' : typeof choice === 'string' && choice !== 'drop');
+const startsRun = (field, choice) => (field.kind === 'denied' ? choice === 'allowed' || choice === 'allow' : typeof choice === 'string' && choice !== 'drop');
 
 /**
  * @param requests  `createRequests(...)`: `verifiedPcRun`, `copyFor`, `writeStop`, `loadOne`, `siteWrote`, `approveRequest`
@@ -75,6 +86,7 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     try { verified = await requests.verifiedPcRun(field.request, at); } catch (error) { return no(error.message); }
     const project = verified.request.project;
     if (ask.project !== project) return no('That request belongs to another project.');
+    if (answer.choice === 'allow' && (field.allowBad || !field.allow)) return no("This Ask's rules could not be read; nothing was allowed or started.");
     let followUp;
     if (field.kind === 'continue') {
       const made = await followUpFor({ field, ask, answer, project });
@@ -83,10 +95,12 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     }
     const copyId = rerunRequestId(field.request);
     let state;
+    let fresh = false;
     if (!verified.ranAgain) {
       try {
         await requests.copyFor(field.request, { states: ['failed', 'lost', 'expired'], target: 'pc', user, at, followUp, fromAsk: ask.id, fixedId: copyId });
         state = 'proposed';
+        fresh = true;
       } catch (error) {
         if (error.status !== 409) return no(error.message);
       }
@@ -98,6 +112,18 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
       if (!mine) return no('That request id is taken; nothing started.');
       ({ state } = mine);
       if (state === 'declined') return no(`The copy ${copyId} was declined, so nothing started. Approve the original again in the Hub.`);
+    }
+    // The owner tapped Allow: sign the rules for this copy first, so a tick never sees an approved, gated copy without its grant.
+    let allowed;
+    if (answer.choice === 'allow') {
+      const own = fresh ? { request: { fromAsk: ask.id } } : await requests.loadOne(copyId, at).catch(() => null);
+      if (own?.request?.fromAsk !== ask.id) return no('This request was already run again from another Ask; allow the rule at the PC.');
+      try {
+        await requests.writeAllowGrant(copyId, { original: field.request, ask: ask.id, project, rules: field.allow, user, at });
+      } catch (error) {
+        return no(error.status === 409 ? error.message : `The allow grant was not written: ${error.message}`);
+      }
+      allowed = field.allow;
     }
     let already = state !== 'proposed';
     if (!already) {
@@ -118,7 +144,7 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     } catch (error) {
       if (error.status !== 409) log(`[hub] the original ${field.request} was not stopped after its rerun ${copyId}: ${error.message}`);
     }
-    return { started: true, request: copyId, kind: field.kind, ...(already ? { already: true, message: `Already approved again as ${copyId}.` } : {}) };
+    return { started: true, request: copyId, kind: field.kind, project, ...(allowed ? { allowed } : {}), ...(already ? { already: true, message: `Already approved again as ${copyId}.` } : {}) };
   }
 
   /**

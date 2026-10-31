@@ -506,6 +506,28 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return state;
   }
 
+  /**
+   * The signed allow grant of a rerun copy (`requests/<copy>/allow-grant.json`): the owner tapped Allow on these rules, for this Ask.
+   * It is written before the copy's approval and is not an approval or a stop: `kind: 'pc-allow'`, `grantFor` instead of `request`.
+   * The PC applies it only when the rules and the Ask are its own. Create-only: a second call accepts an identical grant of ours.
+   */
+  async function writeAllowGrant(copyId, { original, ask, project, rules, user, at }) {
+    needKey();
+    const body = sign({
+      v: 1, kind: 'pc-allow', grantFor: copyId, original, ask, project, rules, at: at.toISOString(),
+      expires: new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), by: user,
+    }, signingKey);
+    try {
+      await writeSigned(copyId, 'allow-grant.json', body, 'That request already has an allow grant.');
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      const existing = (await bucket.getJson(key(`requests/${copyId}/allow-grant.json`)).catch(() => null))?.value;
+      const same = existing && verify(existing, publicKey) && existing.kind === 'pc-allow' && existing.grantFor === copyId && existing.ask === ask
+        && Array.isArray(existing.rules) && JSON.stringify(existing.rules) === JSON.stringify(rules);
+      if (!same) throw fail('That request id is taken; nothing started.', 409);
+    }
+  }
+
   const STOPPABLE = ['approved', 'expired', 'taken', 'running', 'lost', 'asking'];
 
   /** `POST /hub/requests/:id/approve { target? }` */
@@ -747,5 +769,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
   }
 
-  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }

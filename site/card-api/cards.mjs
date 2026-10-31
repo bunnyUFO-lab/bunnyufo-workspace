@@ -53,6 +53,8 @@
 //        "rerun" in the file marks an Ask whose answer runs a finished PC run again: { request, kind: 'denied' } (a denied run: "I ran the
 //        allow lines; run it again") or { request, kind: 'continue', ask } (the run ended before its Ask `ask` was answered). The Hub checks
 //        every claim in it, makes one approved copy of the run and signs it; only an Ask with --require-passkey can do that.
+//        A `denied` rerun may also carry `allow`: 1 to 5 rules (`Bash(<command>)` or `mcp__<server>__<tool>`) that the "allow" option adds to the
+//        project's PC allow list; the Hub signs them in a grant and the PC applies them only when they are the ones it suggested itself.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
@@ -730,6 +732,8 @@ const AVATAR_SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
 const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 /** The `rerun` field of an Ask: a run to run again (`denied`), or a run that ended before its own Ask was answered (`continue`). */
 const RERUN_KINDS = ['denied', 'continue'];
+/** One phone-allowed rule: an exact Bash command rule or an exact MCP tool (the PC checks the policy). Keep equal to RERUN_RULE_RE in site/api/hub-rerun.mjs. */
+const RERUN_RULE_RE = /^(Bash\(.+\)|mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+)$/s;
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -842,13 +846,21 @@ function validateAsk(ask, imageNames) {
     const rerun = ask.rerun;
     if (!rerun || typeof rerun !== 'object' || Array.isArray(rerun)) problems.push('rerun is an object');
     else {
-      const known = Object.keys(rerun).filter(name => !['request', 'kind', 'ask'].includes(name));
+      const known = Object.keys(rerun).filter(name => !['request', 'kind', 'ask', 'allow'].includes(name));
       if (known.length) problems.push(`rerun has no field ${known.join(', ')}`);
       if (typeof rerun.request !== 'string' || !AVATAR_REQUEST_RE.test(rerun.request)) problems.push('rerun.request is a request id');
       if (!RERUN_KINDS.includes(rerun.kind)) problems.push(`rerun.kind is ${RERUN_KINDS.join(' or ')}`);
       if (rerun.kind === 'continue') {
         if (typeof rerun.ask !== 'string' || !AVATAR_REQUEST_RE.test(rerun.ask)) problems.push('rerun.ask is the id of the Ask the run left open');
       } else if (rerun.ask !== undefined) problems.push('rerun.ask is only for kind continue');
+      if (rerun.allow !== undefined) {
+        const rules = rerun.allow;
+        if (rerun.kind !== 'denied') problems.push('rerun.allow is only for kind denied');
+        else if (!Array.isArray(rules) || rules.length < 1 || rules.length > 5 || new Set(rules).size !== rules.length
+          || rules.some(rule => typeof rule !== 'string' || rule.length > 300 || !RERUN_RULE_RE.test(rule) || /[\u0000-\u001f\u007f-\u009f]/.test(rule))) {
+          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, with no control characters');
+        }
+      }
     }
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
