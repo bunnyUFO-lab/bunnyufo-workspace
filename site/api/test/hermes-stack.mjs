@@ -10,6 +10,7 @@ import { createHub } from '../hub.mjs';
 import { startFakeHermes } from './fake-hermes.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { requestJson, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 export const KEY = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
@@ -44,7 +45,7 @@ export async function stack({ hermesOptions = {}, env = {}, timing = TIMING, noH
       env: { HUB_SIGNING_KEY: KEY, ...(hermes ? { HERMES_URL: hermes.url, HERMES_API_KEY: 'k' } : {}), ...env },
     });
     const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, `state-${opened.length}.json`), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(server, '127.0.0.1');
     const origin = `http://127.0.0.1:${server.address().port}`;
     const call = async (method, route, data, headers = { 'Remote-User': 'owner' }) => {
       const answer = await fetch(`${origin}/api${route}`, {

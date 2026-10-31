@@ -15,6 +15,7 @@ import { parsePublicKey, publicKeyPem, sign, verify } from '../signing.mjs';
 import { validId } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, seeder, teamSheet } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const HOUR = 3600000;
@@ -38,7 +39,7 @@ async function fixture({ env = KEY_ENV } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, data, headers = {}) => {
     const answered = await fetch(`${origin}/api${route}`, {

@@ -14,6 +14,7 @@ import { validStatus } from '../hub-pc.mjs';
 import { withRunEvents } from '../hub-run-events.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { iso, minutesAgo, pcStatusJson, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
 const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
@@ -25,7 +26,7 @@ async function fixture({ now } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev', ...(now ? { now } : {}) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const put = seeder(fake, 'sections/inbox-dev');

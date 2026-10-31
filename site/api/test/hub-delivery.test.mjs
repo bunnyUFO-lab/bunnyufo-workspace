@@ -10,6 +10,7 @@ import { createHub } from '../hub.mjs';
 import { deliveryOf } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date('2026-10-31T12:00:00Z');
 const ago = minutes => new Date(NOW.getTime() - minutes * 60000).toISOString();
@@ -83,7 +84,7 @@ async function fixture() {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, now: () => NOW });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: ['https://site.example'] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const reply = await fetch(`${origin}/api${route}`); return reply.json(); };
   return { fake, seed: seeder(fake), get, close: async () => { server.close(); await fake.close(); } };

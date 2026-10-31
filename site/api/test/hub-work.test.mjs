@@ -11,6 +11,7 @@ import { buildWork } from '../hub-work.mjs';
 import { validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { beadsIssue, eventJson, iso, jsonl, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, workFixture } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
 const laneOf = (work, key) => Object.entries(work.lanes).find(([, cards]) => cards.some(card => card.key === key))?.[0];
@@ -128,7 +129,7 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   try {
     const seed = seeder(fake);

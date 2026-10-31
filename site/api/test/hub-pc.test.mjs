@@ -11,6 +11,7 @@ import { beadOfBranch, isActive, pcSummary, validStatus, workingNow } from '../h
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
 const withFile = (events, extra = {}) => events.map((event, index) => ({ ...event, file: `${String(index).padStart(3, '0')}.json`, ...extra }));
@@ -22,7 +23,7 @@ async function fixture({ inbox = 'inbox' } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, inbox });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   return { fake, get, seed: seeder(fake, `sections/${inbox}`), prefix: `sections/${inbox}`, close: async () => { server.close(); await fake.close(); } };
