@@ -19,7 +19,7 @@ import './runs.css'
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; agent?: string; model?: string; by?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; model?: string; by?: string; replaces?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   /** When a taken run last gave word, if that is past its limit: the request is then silent, not running. */
@@ -164,7 +164,7 @@ function RequestState({ detail }: { detail: RequestDetail }) {
     <div className="ap-state" data-request-state={detail.state}>
       <p>{by}{approved ? ` · ${MACHINE[approved.target]?.name ?? approved.target}` : ''}{approved?.at ? ` · ${ago(approved.at)}` : ''}</p>
       {declined && <p>Declined by {declined.by}{declined.reason ? `: ${declined.reason}` : ''}.</p>}
-      {stop?.reason && <p>Stopped: {stop.reason}</p>}
+      {stop?.reason && <p>{/^moved to the cloud: /.test(stop.reason) ? 'Moved to the cloud.' : `Stopped: ${stop.reason}`}</p>}
       {result && <p>{result.summary ?? `Outcome: ${result.outcome}`}{result.reason ? ` (${result.reason})` : ''}</p>}
     </div>
   )
@@ -200,7 +200,7 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
         <p className="ap-text" data-approval-text>{request.text}</p>
         {request.doneWhen && <p className="hub-muted">Done when: {request.doneWhen}</p>}
         {request.model && <p className="hub-muted" data-approval-model>Model: {modelLabel(request.model)}</p>}
-        {!actionable && page && <RunView id={id} onGone={next => { window.location.hash = hubHash('request', next) }} />}
+        {!actionable && page && <RunView id={id} page onGone={next => { window.location.hash = hubHash('request', next) }} />}
         {!actionable && !page && <RequestState detail={detail} />}
         {loadError && <p className="hub-error" role="alert">{loadError}</p>}
       </div>

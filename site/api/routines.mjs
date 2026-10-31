@@ -230,6 +230,14 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
    * stored request.json bytes, it names this request and the cloud, and it has not expired.
    * Returns `{ ok: true, approved }` or `{ ok: false, reason }`.
    */
+  /** What the check found, in words for the owner. */
+  const CHECK_WORDS = {
+    'no signing key': 'the server has no key to check approvals with', 'no approval': 'there is no approval for it',
+    'bad signature': 'the approval could not be verified as yours', 'names another request': 'the approval is for another request',
+    'not a cloud approval': 'the approval is not for the cloud', expired: 'the approval ran out',
+    'no request': 'the request is missing', 'request changed': 'the request was edited after it was approved',
+  };
+
   async function verifyApproval(id, at = now()) {
     if (!publicKey) return { ok: false, reason: 'no signing key' };
     const approved = await cached(`requests/${id}/approved.json`);
@@ -265,7 +273,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
    */
   const handOff = (id, { at = now() } = {}) => exclusive(async () => {
     const checked = await verifyApproval(id, at);
-    if (!checked.ok) return { fired: false, reason: 'check-failed', waiting: `The approval failed the server's check (${checked.reason}).` };
+    if (!checked.ok) return { fired: false, reason: 'check-failed', waiting: `The approval failed the server's check (${CHECK_WORDS[checked.reason] ?? 'it could not be verified'}).` };
     const room = await capacity(at);
     if (!room.under) return { fired: false, reason: 'daily-cap', next: room.next, waiting: 'The daily limit for cloud runs is used.' };
     // Another fire may have got in while this waited for the lock (a sweep, Retry): never fire twice.

@@ -264,7 +264,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                     <span className="sp-mach"><Icon name={machine.icon} /></span>
                     <div className="sp-route-t">
                       <b data-spawn-machine>{machine.name}</b>
-                      <p data-spawn-why>{changed ? `You changed it from ${MACHINE[route.target].name}` : route.why}<span className="sp-faint"> · {changed ? 'your choice' : `rule ${route.rule}`}</span></p>
+                      <p data-spawn-why>{changed ? `You changed it from ${MACHINE[route.target].name}` : route.why}{changed && <span className="sp-faint"> · your choice</span>}</p>
                       {data.rules.length > 0 && (
                         <ol className="sp-rules" aria-label="Routing rules">
                           {data.rules.map(rule => (

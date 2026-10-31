@@ -68,6 +68,18 @@ test('requests map by state; unknown states go to Backlog; declined and stopped 
   assert.equal(card(work, 'request:r-halt').why, 'stopping');
 });
 
+test('an approved cloud request that waits says what it waits on: the usage pause, or the daily limit', () => {
+  const item = (id, cloud) => ({ kind: 'request', id, project: 'ws', title: `Request ${id}`, at: iso(NOW), state: 'approved', ...(cloud ? { cloud } : {}) });
+  const work = buildWork({
+    requests: [item('c-pause', { status: 'waiting', reason: 'usage-limit' }), item('c-cap', { status: 'waiting', reason: 'daily-cap' }), item('c-fired', { status: 'fired' }), item('c-plain')],
+    now: NOW,
+  });
+  assert.equal(card(work, 'request:c-pause').why, 'waiting on the cloud usage pause');
+  assert.equal(card(work, 'request:c-cap').why, 'waiting: the daily cloud limit is used');
+  assert.equal(card(work, 'request:c-fired').why, undefined);
+  assert.equal(card(work, 'request:c-plain').why, undefined);
+});
+
 test('a task that inherited the milestone label is a task; the milestone itself stays out', () => {
   const work = buildWork({
     issues: [

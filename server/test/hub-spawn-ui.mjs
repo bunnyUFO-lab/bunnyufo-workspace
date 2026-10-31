@@ -53,7 +53,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').getAttribute('data-rule'), '3');
   assert.equal(await page.locator('[data-spawn-route] .sp-rules li').count(), 5);
-  assert.match(await page.locator('[data-spawn-why]').innerText(), /it is research · rule 3/);
+  assert.match(await page.locator('[data-spawn-why]').innerText(), /^it is research$/, 'The reason is plain: no rule number.');
   assert.match(await page.locator('[data-spawn-agent]').innerText(), /Researcher/);
   assert.equal(await page.locator('[data-spawn-repo]').count(), 0, 'Research has no repo field.');
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/);
@@ -94,7 +94,8 @@ try {
   await page.locator('[data-spawn-why]').getByText('your choice').waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').count(), 0, 'A manual choice highlights no rule.');
   await page.locator('[data-spawn-target]').selectOption('');
-  await page.locator('[data-spawn-why]').getByText('rule 4').waitFor();
+  await page.locator('[data-spawn-route] .sp-rules .hit[data-rule="4"]').waitFor();
+  assert.doesNotMatch(await page.locator('[data-spawn-why]').innerText(), /rule \d/);
 
   step('Save as a proposal: request.json has the preset, the proposed target and the owner as origin; the sheet closes with a toast');
   await page.locator('[data-preset="market-research"]').click();

@@ -167,6 +167,35 @@ try {
   assert.equal(await refusedAlert.locator('[data-alert-run]').getAttribute('data-alert-run'), ids.refused);
   assert.equal(await refusedAlert.locator('[data-alert-retry]').count(), 0, 'A refused approval is not retried.');
 
+  step('ws-edv: a click on the board past an open drawer is not lost; Retry tells Work at once');
+  const redo = id('retry-from-work', 'a9a9');
+  routine.set({ status: 401 });
+  seed.request(proposal(now, redo, 'Work that is retried from the board'));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await approve(page, fixture, redo);
+  routine.set({ status: 200 });
+  const work = await open({ width: 1280, height: 900 });
+  await work.addInitScript(() => { window.__wrote = 0; window.addEventListener('buw:hub-wrote', () => { window.__wrote += 1; }); });
+  await work.goto(`${fixture.url}#/~hub/work/magic-loops`);
+  const redoCard = work.locator(`[data-card="request:${redo}"]`);
+  const firedCard = work.locator(`[data-card="request:${ids.fail}"]`);
+  await redoCard.waitFor();
+  await firedCard.waitFor();
+  await redoCard.evaluate(node => node.click());
+  const workDrawer = work.locator('[data-run-drawer]');
+  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
+  const at = await firedCard.boundingBox();
+  assert.ok(at && at.x + at.width / 2 < 1280 - 380 && at.y + 16 < 900, 'The other card is on screen, left of the drawer.');
+  await work.mouse.click(at.x + at.width / 2, at.y + 16);
+  await workDrawer.locator(`[data-run-view="${ids.fail}"]`).waitFor();
+  await workDrawer.locator('[data-run-state-chip]').waitFor();
+  await redoCard.evaluate(node => node.click());
+  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
+  const before = await work.evaluate(() => window.__wrote);
+  await workDrawer.locator('[data-run-fire-retry]').click();
+  await workDrawer.locator('[data-run-cloud="fired"]').waitFor();
+  assert.ok(await work.evaluate(() => window.__wrote) > before, 'Retry told the other screens, so Work reads again at once.');
+
   step('a usage limit: the request waits and says when it tries again');
   routine.set({ status: 429 });
   seed.request(proposal(now, ids.limit, 'Work that meets the usage limit'));
@@ -174,7 +203,7 @@ try {
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.limit)}`);
   const limit = page.locator('[data-run-cloud="waiting"]');
   await limit.waitFor();
-  assert.match(await limit.innerText(), /^Waiting: cloud usage limit\. Tries again at \d\d:\d\d(?: [AP]M)?\./);
+  assert.match(await limit.innerText(), /^Waiting on the usage pause: cloud runs are paused after a usage limit, which is separate from today's count\. Tries again at \d\d:\d\d(?: [AP]M)?\./);
   assert.equal(await limit.getAttribute('data-cloud-reason'), 'usage-limit');
   assert.equal(await limit.locator('[data-run-fire-retry]').count(), 0);
   assert.equal(await page.locator('[data-run-stop]').count(), 1, 'A waiting request can be stopped.');
@@ -184,6 +213,19 @@ try {
   await page.locator('[data-today-cloud]').waitFor();
   await noSecrets(page);
   assert.ok(fake.objects.size > 0);
+
+  step('ws-edv: Work says a waiting card waits on the usage pause');
+  const waitBoard = await open({ width: 1280, height: 900 });
+  await waitBoard.goto(`${fixture.url}#/~hub/work/magic-loops`);
+  const limited = waitBoard.locator(`[data-card="request:${ids.limit}"]`);
+  await limited.waitFor({ state: 'attached' });
+  await shot(waitBoard, 'work-usage-pause');
+  await waitBoard.setViewportSize({ width: 390, height: 844 });
+  await waitBoard.locator('[data-lane-chip="ready"]').evaluate(node => node.click());
+  await waitBoard.waitForTimeout(300);
+  await shot(waitBoard, 'work-usage-pause-phone');
+  await waitBoard.setViewportSize({ width: 1280, height: 900 });
+  assert.match(await limited.locator('.wk-why').innerText(), /^waiting on the cloud usage pause$/);
 
   step('the cap and the dry run: the first fire says nothing was sent, the second waits at the cap');
   const capped = await startHubFixture({ signing: true, env: { ...ENV, HUB_CLOUD_DAILY: '1', HUB_ROUTINE_DRY_RUN: '1' } });
