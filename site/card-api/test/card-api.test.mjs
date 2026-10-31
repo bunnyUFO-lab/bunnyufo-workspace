@@ -743,13 +743,21 @@ test('inbox: run files go to pc-runner, to cloud-<project> for its own project\'
       fake.seed(`sections/${inbox}/requests/s-1/request.json`, JSON.stringify({ id: 's-1', project: 'sprite-studio' }), 'application/json');
       fake.seed(`sections/${inbox}/requests/bad-1/request.json`, 'not json', 'text/plain');
       let n = 0;
+      let tookIt = false;
       const put = (token, id, file) => call('PUT', `/sections/${inbox}/files/requests/${id}/${file}`, { token, body: bytes(`{"n":${n += 1}}`), base64: true });
       const upload = (token, id, file) => call('POST', `/sections/${inbox}/uploads`, { token, body: { files: [{ path: `requests/${id}/${file}` }] } });
       for (const file of RUN_FILES) {
         const label = `${inbox} ${file}`;
         assert.equal((await put('tok-all', 'm-1', file)).status, 200, `${label} passphrase`);
-        assert.equal((await put('tok-pc-runner', 'm-1', file)).status, 200, `${label} pc-runner on any request`);
-        assert.equal((await put('tok-pc-runner', 'nothing-here', file)).status, 200, `${label} pc-runner, no request.json yet`);
+        // pc-runner's run and result files follow its take: a request whose taken.json does not name the PC runner is refused.
+        const gated = /^(run-|result)/.test(file);
+        if (gated && !tookIt) {
+          assert.equal((await put('tok-pc-runner', 'm-1', file)).status, 403, `${label} pc-runner before the take`);
+          fake.seed(`sections/${inbox}/requests/m-1/taken.json`, JSON.stringify({ runner: 'pc', host: 'pc', at: '2026-10-30T10:00:00Z' }), 'application/json');
+          tookIt = true;
+        }
+        assert.equal((await put('tok-pc-runner', 'm-1', file)).status, 200, `${label} pc-runner on a request it took`);
+        assert.equal((await put('tok-pc-runner', 'nothing-here', file)).status, gated ? 403 : 200, `${label} pc-runner, no request.json yet`);
         assert.equal((await put('tok-cloud-ml', 'm-1', file)).status, 200, `${label} own project`);
         assert.equal((await upload('tok-cloud-ml', 'm-1', file)).status, 200, `${label} own project by upload URL`);
         for (const [token, id] of [['tok-cloud-ml', 's-1'], ['tok-cloud-ml', 'nothing-here'], ['tok-cloud-ml', 'bad-1']]) {
@@ -904,6 +912,37 @@ test('moved and deleted cards: a write is refused, a read says where it went, re
     // Live cards and other tokens are untouched.
     assert.equal((await call('GET', '/sections/bunnylink/cards/loops-plan')).status, 200);
     assert.equal((await call('PUT', '/sections/magic-loops/cards/loops-plan', { body: plan, token: 'tok-reader' })).status, 403);
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: pc-runner writes run-* and result files only for a request taken by the PC runner; taken.json, report.md and other tokens are not gated by it', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    for (const inbox of ['inbox', 'inbox-dev']) {
+      const put = (token, id, file, headers = {}) => call('PUT', `/sections/${inbox}/files/requests/${id}/${file}`, { token, body: bytes('{"n":1}'), base64: true, headers });
+      const files = ['run-20261030T101500123Z-ab12.json', 'result.json'];
+      // Never taken: refused with the reason, and nothing is stored.
+      for (const file of files) {
+        const refused = await put('tok-pc-runner', 'n-1', file, { 'If-None-Match': '*' });
+        assert.equal(refused.status, 403, `${inbox} ${file}`);
+        assert.match(refused.data.error, /taken\.json is not there/);
+        assert.equal(fake.text(`sections/${inbox}/requests/n-1/${file}`), null);
+      }
+      // The claim comes first: taken.json and the report are not gated, and then the run files go.
+      assert.equal((await put('tok-pc-runner', 'n-1', 'taken.json', { 'If-None-Match': '*' })).status, 200, 'the take itself');
+      // A taken.json that names another runner (or none) is not the PC runner's take.
+      assert.equal((await put('tok-pc-runner', 'n-1', 'run-20261030T101500123Z-ab12.json')).status, 403, 'taken.json without runner: pc');
+      fake.seed(`sections/${inbox}/requests/n-1/taken.json`, JSON.stringify({ runner: 'cloud' }), 'application/json');
+      assert.equal((await put('tok-pc-runner', 'n-1', 'result.json')).status, 403, 'taken by the cloud runner');
+      fake.seed(`sections/${inbox}/requests/n-1/taken.json`, JSON.stringify({ runner: 'pc', host: 'pc' }), 'application/json');
+      for (const file of files) assert.equal((await put('tok-pc-runner', 'n-1', file)).status, 200, `${inbox} ${file} after the take`);
+      assert.equal((await put('tok-pc-runner', 'n-1', 'report.md')).status, 200, 'the report is not gated');
+      // The passphrase is not limited, and a cloud token keeps its own project rule.
+      assert.equal((await put('tok-all', 'n-2', 'result.json')).status, 200, 'the passphrase needs no take');
+    }
   } finally {
     await fake.close();
   }

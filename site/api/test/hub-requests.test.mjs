@@ -260,6 +260,34 @@ test('a request with a fresh run file lists as running; with a stale one it is l
   } finally { await close(); }
 });
 
+test('a run file stamped in the future does not keep a dead run running or show in its timeline; a little clock skew is fine', async () => {
+  const { get, put, close } = await fixture();
+  try {
+    const dead = rid('dead', 'd111');
+    const skew = rid('skew', 'k111');
+    const taken = { runner: 'pc', host: 'test-pc', nonce: 'n'.repeat(22), at: ago(60).toISOString() };
+    const future = runName(new Date(NOW.getTime() + 60 * MIN), 'f111');
+    put(preset(dead, { target: 'pc' }), { 'approved.json': approvedFor(dead), 'taken.json': taken, [runName(ago(40))]: { v: 1, state: 'working', lastAction: 'real' }, [future]: { v: 1, state: 'working', lastAction: 'planted' } });
+    put(preset(skew, { target: 'pc' }), { 'approved.json': approvedFor(skew), 'taken.json': taken, [runName(new Date(NOW.getTime() + MIN), 'k222')]: { v: 1, state: 'working' } });
+    const rows = (await get('/hub/inbox?filter=requests')).body.items;
+    assert.deepEqual(Object.fromEntries(rows.map(row => [row.id, row.state])), { [dead]: 'lost', [skew]: 'running' }, 'future stamp: lost; one minute ahead: still running');
+    const detail = (await get(`/hub/requests/${dead}`)).body;
+    assert.equal(detail.state, 'lost');
+    assert.deepEqual(detail.runs.map(run => run.lastAction), ['real'], 'the planted line is not in the timeline');
+    assert.ok(!detail.run?.lastAt || new Date(detail.run.lastAt).getTime() < NOW.getTime(), 'lastAt is not in the future');
+  } finally { await close(); }
+});
+
+test('runFileTime ignores a time more than the skew ahead of now, and only then', () => {
+  const name = date => runName(date);
+  assert.equal(runFileTime(name(new Date(NOW.getTime() + 60 * MIN))), new Date(NOW.getTime() + 60 * MIN).getTime(), 'without a clock it reads the name as before');
+  assert.equal(runFileTime(name(new Date(NOW.getTime() + 60 * MIN)), NOW), null);
+  assert.equal(runFileTime(name(new Date(NOW.getTime() + 3 * MIN)), NOW), null);
+  assert.equal(runFileTime(name(new Date(NOW.getTime() + 90 * 1000)), NOW), new Date(NOW.getTime() + 90 * 1000).getTime());
+  assert.equal(runFileTime(name(ago(5)), NOW), ago(5).getTime());
+  assert.equal(runFileTime('result.json', NOW), null);
+});
+
 test('Needs you lists a proposed preset request as an approval; the filter, the counts and Today agree', async () => {
   const { get, put, close } = await fixture();
   try {

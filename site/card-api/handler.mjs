@@ -190,7 +190,15 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   const runnerOnly = async (caller, sectionId, file) => {
     const match = INBOXES.has(sectionId) && caller.rights.write !== null ? RUNNER_FILES.exec(file) : null;
     if (!match) return;
-    if (caller.name === 'pc-runner') return;
+    if (caller.name === 'pc-runner') {
+      // A run's progress and result files only follow its take: `taken.json` (written by the runner when it claims the request) must be there first.
+      // taken.json and report.md themselves are not gated (taken is the claim; the report is read with the result, after the take).
+      if (/^(run-[^/]+|result)\.json$/i.test(match[2] ?? '')) {
+        const taken = await bucket.getJson(keyOf(sectionId, `requests/${match[1]}/taken.json`)).catch(() => null);
+        if (taken?.value?.runner !== 'pc') throw new HttpError(403, 'A run file follows the PC runner taking the request: taken.json is not there.');
+      }
+      return;
+    }
     const project = /^cloud-([a-z0-9][a-z0-9-]*)$/.exec(caller.name ?? '')?.[1];
     if (project) {
       const got = await bucket.getJson(keyOf(sectionId, `requests/${match[1]}/request.json`)).catch(() => null);
