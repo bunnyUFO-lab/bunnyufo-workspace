@@ -175,6 +175,8 @@ export interface Ask {
   decisions?: AskDecision[]
   /** The sprite flow: what an avatar Ask points at (an agent's file; checked again where it is used). */
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
+  /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */
+  rerun?: { request?: string; kind?: string; ask?: string }
   state: AskState
   snoozedUntil?: string
   answer?: AskAnswer

@@ -22,6 +22,7 @@ import { applyMarks, checkMarkRequest, markEntry, markKey, markState } from './h
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
+import { createRerun } from './hub-rerun.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
@@ -263,6 +264,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   // The sprite flow: an answer to an avatar Ask starts the sheet run or chooses the sheet (hub-avatar.mjs).
   const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
+  // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
+  const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, log });
+
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
   const notify = createNotify({ env, fetchImpl, log: line => log(scrub(line, 400)) });
@@ -724,7 +728,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     await writeAnswer(id, answer);
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
-    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}) } };
+    const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });
+    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}) } };
   }
 
   // --- Discord: the bot's two routes (see docs/workspaces.md, "Answers from Discord") ---
@@ -1103,6 +1108,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The cloud routines module (fire, record, cap), for the tests. */
     routines,
     avatar: avatarFlow,
+    rerun: rerunFlow,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,

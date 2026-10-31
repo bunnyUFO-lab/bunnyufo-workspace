@@ -9,7 +9,7 @@
 import { checkDrawing } from './card-writes.mjs';
 import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
-import { createPublicKey } from 'node:crypto';
+import { createHash, createPublicKey } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, staleSince, validId, validProject } from './hub-model.mjs';
@@ -146,6 +146,16 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     };
   }
   return out;
+}
+
+/**
+ * The id of the copy a rerun makes: one per original request (sha256 tail, like `sheetRequestId`), so a second Ask, a second
+ * answer, a retry or a restarted server all meet the same id. Anyone can work the id out, so a request found at it counts
+ * only when the site wrote it for this original.
+ */
+export function rerunRequestId(requestId) {
+  const tail = createHash('sha256').update(`rerun:${requestId}`).digest('hex').slice(0, 4);
+  return `${String(requestId).slice(0, 115)}-${tail}`;
 }
 
 /**
@@ -515,25 +525,24 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
-   * `POST /hub/requests/:id/again { target?, text?, title?, doneWhen? }`: for an expired, failed, lost or proposed request. Makes a
-   * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
-   * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
-   * `moved` is the cloud move (`move-to-cloud`): the id the copy must take. The old request was stopped first, naming that id, so the
-   * copy is made under it and the old request is not stopped again.
+   * The copy of a request that `replaces` it, written as the owner's: the one place that builds it (Approve again, the cloud move
+   * and a rerun). The old request must be in one of `states`. `raw` is the owner's edit (text, title, model, doneWhen);
+   * `target` overrides the target; `followUp` and `fromAsk` replace the old ones; `fixedId` is a create-only id.
+   * → `{ made, target, state }`; nothing is approved or retired here.
    */
-  async function againRoute(id, raw, user, at, { moved = null } = {}) {
-    needKey();
+  async function copyFor(id, { states, raw = {}, target: forced, user, at, followUp: newFollow, fromAsk, fixedId = null }) {
     const { parts, state } = await loadOne(id, at);
-    if (!(moved ? ['stopped'] : ['expired', 'failed', 'lost', 'proposed']).includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
+    if (!states.includes(state)) throw fail(`That request is ${state}; it cannot be approved again.`, 409);
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
     const { id: _id, ...request } = checkedRequest(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
-    const target = raw?.target ?? parts.approved?.target ?? request.target;
+    const target = forced ?? raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { origin: oldOrigin, followUp, ...kept } = request;
+    const { origin: oldOrigin, followUp: oldFollow, ...kept } = request;
+    const followUp = newFollow ?? oldFollow;
     // "Done when" may be rewritten (an empty one removes it); the length check is the one a new request gets.
     if (raw?.doneWhen !== undefined && typeof raw.doneWhen !== 'string') throw fail('"Done when" is text.', 400);
     const { doneWhen: _oldDone, ...withoutDone } = kept;
@@ -544,10 +553,23 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // Only a "done when" the owner changed (or removed) is the owner's; one sent back as it was keeps its author.
     const ownerChangedDone = raw?.doneWhen !== undefined && raw.doneWhen.trim() !== String(request.doneWhen ?? '').trim();
     const doneBy = ownerChangedDone ? null : doneWhenAuthor(request, oldOrigin);
-    const clean = checkRequest({ ...copy, ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
+    const clean = checkRequest({ ...copy, ...(fromAsk ? { fromAsk } : {}), ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
-    }), null, moved);
+    }), null, fixedId);
+    return { made, target, state };
+  }
+
+  /**
+   * `POST /hub/requests/:id/again { target?, text?, title?, doneWhen? }`: for an expired, failed, lost or proposed request. Makes a
+   * new request copied from it (`replaces` the old id), approves that with the target, and retires the old one: a
+   * proposal is declined, the others get a signed stop naming the new id. The old approved.json stays as it is.
+   * `moved` is the cloud move (`move-to-cloud`): the id the copy must take. The old request was stopped first, naming that id, so the
+   * copy is made under it and the old request is not stopped again.
+   */
+  async function againRoute(id, raw, user, at, { moved = null } = {}) {
+    needKey();
+    const { made, target, state } = await copyFor(id, { states: moved ? ['stopped'] : ['expired', 'failed', 'lost', 'proposed'], raw, user, at, fixedId: moved });
     let approval;
     try {
       approval = await approveRequest(made.id, { target, by: user, at });
@@ -688,5 +710,36 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved };
   }
 
-  return { createFixed, verifiedRun, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  /**
+   * The request and its approval for a rerun: like `verifiedRun`, but any preset, only a `pc` approval, only a request that ran
+   * and ended (state `failed`, `lost` or `expired`), and never the Bunnylink project. The one stop it accepts is this module's own,
+   * `run again as <copy>`, signed with the server key, so a second Ask can find the copy that already exists.
+   * Throws a 409 with the reason; never reads an approval it did not sign.
+   */
+  async function verifiedPcRun(id, at) {
+    needKey();
+    const { names, request, state } = await loadOne(id, at);
+    if (!names.has('approved.json')) throw fail('That request was never approved.', 409);
+    const pub = createPublicKey(signingKey);
+    const [stored, signed, stop] = await Promise.all([
+      bucket.getBytes(key(`requests/${id}/request.json`)), bucket.getJson(key(`requests/${id}/approved.json`)),
+      names.has('stop.json') ? bucket.getJson(key(`requests/${id}/stop.json`)) : null,
+    ]);
+    const approved = signed?.value;
+    if (!stored || !approved) throw fail('That request cannot be read.', 409);
+    if (!verify(approved, pub)) throw fail('The approval of that request does not verify.', 409);
+    if (approved.request !== id || approved.requestSha256 !== sha256Hex(stored.buffer)) throw fail('The approval does not match that request.', 409);
+    if (approved.target !== 'pc') throw fail('That request was not approved for the Gaming PC.', 409);
+    if (request.project === 'bunnylink') throw fail(BUNNYLINK_AT_PC, 409);
+    if (names.has('declined.json')) throw fail('That request was declined.', 409);
+    if (names.has('stop.json')) {
+      const own = stop?.value && verify(stop.value, pub) && stop.value.request === id && stop.value.reason === `run again as ${rerunRequestId(id)}`;
+      if (!own) throw fail('That request was stopped, so it cannot run again.', 409);
+      return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: true };
+    }
+    if (!['failed', 'lost', 'expired'].includes(state)) throw fail(`That request is ${state}; only a failed, lost or expired one can run again.`, 409);
+    return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
+  }
+
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
 }

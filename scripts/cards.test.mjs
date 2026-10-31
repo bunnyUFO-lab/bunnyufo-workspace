@@ -741,6 +741,45 @@ test('ask create: the avatar field of the sprite flow survives into ask.json; a 
   } finally { await close(); }
 });
 
+test('ask create: the rerun field of the watcher Ask survives into ask.json; a malformed one is refused with the reason', async () => {
+  const { fake, cli, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'ask.json');
+    const made = async rerun => {
+      await writeFile(file, JSON.stringify({ question: 'Allow it and run it again?', options: [{ id: 'allowed', label: 'Run it again' }, { id: 'denied', label: 'Keep it denied' }], requirePasskey: true, ...(rerun === undefined ? {} : { rerun }) }));
+      return cli('api', 'ask', 'create', '--project', 'sprite-studio', '--file', file);
+    };
+    const stored = result => fake.json(`sections/inbox/asks/${result.stdout.trim().split('\n').at(-1)}/ask.json`);
+    const request = '20261031-sprite-studio-walk-cycle-a1b2';
+
+    const denied = await made({ request, kind: 'denied' });
+    assert.equal(denied.code, 0, denied.stderr);
+    assert.deepEqual(stored(denied).rerun, { request, kind: 'denied' });
+    assert.equal(stored(denied).requirePasskey, true);
+    const proceed = await made({ request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
+    assert.equal(proceed.code, 0, proceed.stderr);
+    assert.deepEqual(stored(proceed).rerun, { request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
+    const none = await made(undefined);
+    assert.equal(none.code, 0, none.stderr);
+    assert.ok(!('rerun' in stored(none)), 'Without it nothing is written.');
+
+    const refused = [
+      ['a string', 'x', /rerun is an object/],
+      ['no request', { kind: 'denied' }, /rerun\.request is a request id/],
+      ['a bad kind', { request, kind: 'now' }, /rerun\.kind is denied or continue/],
+      ['continue without its Ask', { request, kind: 'continue' }, /rerun\.ask is the id/],
+      ['an Ask on a denial', { request, kind: 'denied', ask: 'x-1' }, /only for kind continue/],
+      ['an unknown field', { request, kind: 'denied', target: 'cloud' }, /rerun has no field target/],
+    ];
+    for (const [name, rerun, message] of refused) {
+      const result = await made(rerun);
+      assert.equal(result.code, 1, name);
+      assert.match(result.stderr, /ask\.json is not valid/, name);
+      assert.match(result.stderr, message, name);
+    }
+  } finally { await close(); }
+});
+
 test('BUW_INBOX_SECTION=inbox-dev writes under sections/inbox-dev, touches nothing in inbox, and sends no ping', async () => {
   const { fake, cli, keys, dir, close } = await setup();
   const hook = await webhook();

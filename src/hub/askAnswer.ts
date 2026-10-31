@@ -10,8 +10,16 @@ export interface Editing { optionId: string | null; image?: string; w: number; h
 /** What the owner did to take an Ask off the queue. */
 export type AskVerb = 'answered' | 'snoozed' | 'cancelled' | 'reviewed'
 
-/** What the server says an answer set going: the avatar flow's line, or null for any other answer. */
+/** What the server says an answer set going: the avatar flow's line or the rerun's, or null for any other answer. */
 export function avatarNotice(result: unknown): string | null {
+  const rerun = (result as { rerun?: { started?: boolean; request?: string; kind?: string; already?: boolean; message?: string; why?: string } } | null)?.rerun
+  if (rerun && typeof rerun === 'object') {
+    if (rerun.started !== true) return `Not run again: ${text(rerun.why)}`
+    if (rerun.already === true) return text(rerun.message)
+    return rerun.kind === 'continue'
+      ? 'A new run starts on the Gaming PC within a few minutes, with your answer.'
+      : `Approved again as ${text(rerun.request)}. It starts on the Gaming PC within a few minutes of the allow lines being in.`
+  }
   const avatar = (result as { avatar?: { started?: boolean; message?: string; chosen?: boolean; why?: string } } | null)?.avatar
   if (!avatar || typeof avatar !== 'object') return null
   if (avatar.started === true) return text(avatar.message)
