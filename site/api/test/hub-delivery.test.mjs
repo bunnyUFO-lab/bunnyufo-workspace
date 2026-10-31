@@ -55,6 +55,12 @@ test('deliveryOf: a bad how, an unsafe link or an overlong folder is dropped', (
   assert.equal(links.url, undefined);
   assert.equal(links.appUrl, undefined);
   assert.equal(run({ answer: answer(1), watchers: [watcher({ url: 'https://claude.ai/code/x"onload=1' })] }).url, undefined);
+  for (const bad of ['https://example.test/x', 'https://claude.ai.evil.example/x', 'https://evil.example/claude.ai', 'https://claude.ai@evil.example/x', 'https://claude.ai:8443@evil.example/', 'https://claude.ai:8443/x', 'https://xn--claude-ai-9za.example/x', 'https://claude.aievil.example/x', 'https://evilclaude.ai/x', 'claude://evil.example/x', 'claude://claude.ai.evil.example/x', 'claude://claude.ai@evil.example/x', 'https://claude.ai\@evil.example/x', 'HTTP://claude.ai/x']) {
+    const got = run({ answer: answer(1), watchers: [watcher({ url: bad, appUrl: bad })] });
+    assert.equal(got.url, undefined, bad);
+    assert.equal(got.appUrl, undefined, bad);
+  }
+  for (const good of ['https://claude.ai', 'https://claude.ai/code/session_x', 'claude://claude.ai/code/session_x?a=1#b']) assert.equal(run({ answer: answer(1), watchers: [watcher({ url: good })] }).url, good);
   const long = run({ answer: answer(1), watchers: [watcher({ folder: 'f'.repeat(121), host: 'h'.repeat(121) })] });
   assert.equal(long.folder, undefined);
   assert.equal(long.host, undefined);
@@ -104,5 +110,8 @@ test('GET /api/hub/asks/:id carries delivery for an answered Ask only', async ()
     assert.equal(delivered.state, 'delivered');
     assert.equal(delivered.how, 'turn');
     assert.equal(delivered.folder, 'demo-repo');
+    // An overwritten file shows its new body, not the one read before.
+    seed.put(`asks/${done.id}/delivered.json`, { v: 1, at: ago(1), session: 'abcd1234-5678', host: 'pc-one', how: 'start' });
+    assert.equal((await get(`/hub/asks/${done.id}`)).delivery.how, 'start');
   } finally { await close(); }
 });

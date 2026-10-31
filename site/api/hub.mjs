@@ -457,7 +457,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const [answer, pickup, cancel] = await Promise.all([read('answer.json'), read('pickup.json'), read('cancel.json')]);
     // Agent-written files: where the answer went (delivered.json) and which sessions watch the Ask (watch-*.json, at most 3).
     const watchNames = [...names].filter(name => /^watch-[A-Za-z0-9_-]{1,40}\.json$/.test(name)).sort().slice(0, DELIVERY_WATCHERS);
-    const [delivered, ...watchers] = answer ? await Promise.all([read('delivered.json'), ...watchNames.map(read)]) : [];
+    // Read fresh, never cached: another writer's token may have replaced them.
+    const readFresh = async name => (await fresh(`asks/${id}/${name}`))?.value;
+    const [delivered, ...watchers] = answer ? await Promise.all([readFresh('delivered.json'), ...watchNames.map(readFresh)]) : [];
     const delivery = deliveryOf({ answer, delivered, watchers, at });
     return {
       ...ask, ...state,
