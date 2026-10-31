@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { remarkBreaks } from './chatText'
 import { copyText } from './copyText'
 
 type CopyState = 'idle' | 'copied' | 'oneLine' | 'manual'
@@ -9,7 +10,7 @@ type CopyState = 'idle' | 'copied' | 'oneLine' | 'manual'
  * A fenced code block with a Copy button. A plain multi-line PowerShell block is copied as one line (see copyText), and the
  * button says so. If the clipboard says no, the text is selected and the button says to press and hold.
  */
-function CodeBlock({ children }: { children?: ReactNode }) {
+export function CodeBlock({ children }: { children?: ReactNode }) {
   const block = useRef<HTMLPreElement>(null)
   const [state, setState] = useState<CopyState>('idle')
   const timer = useRef(0)
@@ -49,13 +50,14 @@ function CodeBlock({ children }: { children?: ReactNode }) {
  * Text that came from an agent or from Hermes. Markdown with GFM, no raw HTML (no rehype-raw), and
  * react-markdown's default URL transform, which drops javascript: links. Links open in a new tab
  * unless they point at this site, which `onSameOrigin` may handle in-app. With `copy`, each fenced code block
- * (not inline code) gets a Copy button; other screens leave it off.
+ * (not inline code) gets a Copy button; other screens leave it off. With `breaks`, a newline inside a paragraph is a
+ * line break, as chat apps show replies.
  */
-export default function Md({ text, onSameOrigin, copy = false }: { text: string; onSameOrigin?: (url: URL) => void; copy?: boolean }) {
+export default function Md({ text, onSameOrigin, copy = false, breaks = false }: { text: string; onSameOrigin?: (url: URL) => void; copy?: boolean; breaks?: boolean }) {
   return (
     <div className="hub-md">
       <SameOrigin.Provider value={onSameOrigin}>
-        <Markdown remarkPlugins={[remarkGfm]} components={copy ? WITH_COPY : PLAIN}>{text}</Markdown>
+        <Markdown remarkPlugins={breaks ? GFM_BREAKS : GFM} components={copy ? WITH_COPY : PLAIN}>{text}</Markdown>
       </SameOrigin.Provider>
     </div>
   )
@@ -81,3 +83,5 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
 // followed was lost: the button under the mouse was gone by mouseup.
 const PLAIN: Components = { a: Link }
 const WITH_COPY: Components = { pre: CodeBlock, a: Link }
+const GFM = [remarkGfm]
+const GFM_BREAKS = [remarkGfm, remarkBreaks]

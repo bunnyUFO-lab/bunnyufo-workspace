@@ -12,7 +12,8 @@ import { StreamCut, plainText, streamChat } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
-import Md from './Md'
+import Md, { CodeBlock } from './Md'
+import { splitFences } from './chatText'
 import { useHubData } from './useHub'
 import { onAsk, takeAsk } from './askHermes'
 import './chatRuns.css'
@@ -137,12 +138,23 @@ function Who({ id, name, agents, size, bare }: { id: string; name: string; agent
   return <span className="hub-who" data-who={id}><AgentSprite sprite={sprite} size={size} title={name} />{!bare && <span className="hub-who-name">{name}</span>}</span>
 }
 
+/** The owner's own words as typed, with any fenced block shown as code (and its Copy button) instead of its backticks. */
+function OwnerText({ text }: { text: string }) {
+  return (
+    <div className="hub-md">
+      {splitFences(text).map((part, index) => part.kind === 'code'
+        ? <CodeBlock key={index}><code className={part.lang ? `language-${part.lang}` : undefined}>{part.code}</code></CodeBlock>
+        : <p key={index} className="hub-note-text">{part.text}</p>)}
+    </div>
+  )
+}
+
 function Bubble({ line, conversation, models, who, agents }: { line: Shown; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[] }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
     <div className={`hub-bubble ${line.role}`}>
       {line.role === 'assistant' && who && <Who id={who.id} name={who.name} agents={agents} size={22} />}
-      {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} /> : line.text && <p className="hub-note-text">{line.text}</p>}
+      {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} copy breaks /> : line.text && <OwnerText text={line.text} />}
       {urls.length > 0 && (
         <div className="hub-bubble-images" data-bubble-images>
           {urls.map((url, index) => <HubImage key={url} url={url} open className="hub-bubble-image" alt={`Picture ${index + 1}`} />)}
@@ -435,7 +447,7 @@ function ChatView({ id }: { id?: string }) {
           {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} who={who} agents={agents} />))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
-              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} /> : <span className="hub-muted">…</span>}
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}
               <ToolLines tools={tools} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}
             </div>

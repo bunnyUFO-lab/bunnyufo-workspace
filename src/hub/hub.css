@@ -341,6 +341,10 @@
 .hub-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; min-height: 160px; }
 .hub-bubble { max-width: 88%; padding: 9px 13px; border-radius: var(--radius-lg); background: var(--surface-2); overflow-wrap: anywhere; font-size: 0.9rem; }
 .hub-bubble p { margin: 0; }
+/* Paragraphs, lists and code in a bubble get room between them, as chat apps show them. */
+.hub-bubble .hub-md > * { margin-block: 0; }
+.hub-bubble .hub-md > * + * { margin-top: 0.6em; }
+.hub-bubble .hub-md ul, .hub-bubble .hub-md ol { padding-left: 1.3em; }
 .hub-bubble.user { align-self: flex-end; background: var(--pink-dim); }
 .hub-bubble.assistant { align-self: flex-start; }
 .hub-created { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
