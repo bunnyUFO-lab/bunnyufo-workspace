@@ -88,10 +88,11 @@ export default function AskView({ id }: { id: string }) {
           <li key={key} className={index < stepIndex ? 'past' : index === stepIndex ? 'on' : ''} aria-current={index === stepIndex ? 'step' : undefined}>{label}</li>
         ))}
         {ask.requirePasskey === true && <li className="tag" title="This Ask is answered in the Hub with a passkey, never from Discord">Passkey only</li>}
-        {ask.rerun && typeof ask.rerun === 'object' && <li className="tag" title="Answering this Ask runs the work again on the Gaming PC">Runs again</li>}
-        {Array.isArray(ask.rerun?.allow) && ask.rerun.allow.length > 0 && <li className="tag" title="The Allow option adds these rules to the project's PC allow list">Allows on PC</li>}
+        {ask.rerun && typeof ask.rerun === 'object' && !ask.rerunBlocked && <li className="tag" title="Answering this Ask runs the work again on the Gaming PC">Runs again</li>}
+        {Array.isArray(ask.rerun?.allow) && ask.rerun.allow.length > 0 && !ask.rerunBlocked && <li className="tag" title="The Allow option adds these rules to the project's PC allow list">Allows on PC</li>}
         {SIDE[ask.state] && <li className="side on">{SIDE[ask.state]}{ask.state === 'snoozed' && ask.snoozedUntil ? ` until ${when(ask.snoozedUntil)}` : ''}</li>}
       </ol>
+      {ask.rerunBlocked && <p className="hub-muted" role="note" data-rerun-blocked>This Ask asks to run something again. Answering it starts nothing: {text(ask.rerunBlocked)}</p>}
       <section className="hub-panel">
         <p className="hub-muted">{from.tool || from.host ? `From ${from.tool || 'an agent'}${from.host ? ` on ${from.host}` : ''}, ` : 'From an unknown sender, '}{when(ask.createdAt)}.</p>
         <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={verb => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id))} view />

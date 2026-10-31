@@ -30,7 +30,7 @@ try {
   const gone = { request: askId('rerun-gone', 'e5f6'), kind: 'denied' };
   const seedAsk = (tail, field) => {
     const id = askId('rerun', tail);
-    fixture.seed.ask({ ...askJson({ id, project: 'sprite-studio', question, options: OPTIONS, context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: field });
+    fixture.seed.ask({ ...askJson({ id, project: 'sprite-studio', question, options: OPTIONS, context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: field }, { writer: 'pc-runner' });
     return id;
   };
   // A second run, for the Ask that can allow rules from the phone.
@@ -40,7 +40,7 @@ try {
   fixture.seed.put('requests/' + made2.body.id + '/result.json', { v: 1, outcome: 'failed', summary: 'Denied a tool call.', reason: 'denied', by: 'run', at: new Date(Date.now() - 5 * 60000).toISOString() });
   const RULE = 'Bash(ping -n 1 host.example.test)';
   const allowId = askId('rerun-allow', 'g7h8');
-  fixture.seed.ask({ ...askJson({ id: allowId, project: 'sprite-studio', question, options: [{ id: 'allow', label: 'Allow it and run it again' }, ...OPTIONS], context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: { request: made2.body.id, kind: 'denied', allow: [RULE] } });
+  fixture.seed.ask({ ...askJson({ id: allowId, project: 'sprite-studio', question, options: [{ id: 'allow', label: 'Allow it and run it again' }, ...OPTIONS], context: CONTEXT, allowDrawing: false }), requirePasskey: true, rerun: { request: made2.body.id, kind: 'denied', allow: [RULE] } }, { writer: 'pc-runner' });
   const asks = { '1280': { one: seedAsk('a1b2', rerun), two: seedAsk('b2c3', rerun), keep: seedAsk('c3d4', gone), lost: seedAsk('d4e5', gone) }, '375': { keep: seedAsk('f6a7', gone), lost: seedAsk('a7b8', gone) } };
   await new Promise(resolve => setTimeout(resolve, 150));
 

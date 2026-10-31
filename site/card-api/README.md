@@ -213,6 +213,10 @@ What it refuses:
   shared tokens, the passphrase), and metadata sent by a caller is ignored: only the handler sets it. The Hub's policy
   approval signs only when the stored `origin` and this `writer` agree, so policy never signs a request from a token
   that is not named `agent` or `agent-*`
+- `writer` metadata on `asks/*/ask.json`: a limited token's ask.json is stored with `x-amz-meta-writer: pc-runner` (the token named
+  `pc-runner`, the PC watcher's), `agent` (`agent`/`agent-<name>`) or `other` (any other limited token); the passphrase's carries
+  nothing. Only the handler sets it (a caller's `x-amz-meta-*` headers are ignored, and ask.json cannot go through an upload URL).
+  The Hub starts a run from an Ask's `rerun` pointer only when this is `pc-runner`
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB
