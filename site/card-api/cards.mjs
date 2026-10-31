@@ -50,6 +50,9 @@
 //        Never put a secret in an Ask: its question and option labels can reach Discord.
 //        "avatar" in the file marks an Ask of the sprite flow: { agent, request, subject? } (pick one of four variants) or { agent, sheet }
 //        (use this sheet?); the Hub acts on the answer. Use it with --require-passkey.
+//        "rerun" in the file marks an Ask whose answer runs a finished PC run again: { request, kind: 'denied' } (a denied run: "I ran the
+//        allow lines; run it again") or { request, kind: 'continue', ask } (the run ended before its Ask `ask` was answered). The Hub checks
+//        every claim in it, makes one approved copy of the run and signs it; only an Ask with --require-passkey can do that.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
@@ -707,6 +710,7 @@ function askFromFile(raw, flags, id) {
     ...(raw.decisions ? { decisions: raw.decisions } : {}),
     ...(raw.image ? { image: raw.image } : {}),
     ...(raw.avatar !== undefined ? { avatar: raw.avatar } : {}),
+    ...(raw.rerun !== undefined ? { rerun: raw.rerun } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
     ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
@@ -722,6 +726,8 @@ const AVATAR_SHEET_RE = /^sheet-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}$/;
 /** Keep equal to SUBJECT_RE in site/api/presets.mjs (a test does). */
 const AVATAR_SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
 const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+/** The `rerun` field of an Ask: a run to run again (`denied`), or a run that ended before its own Ask was answered (`continue`). */
+const RERUN_KINDS = ['denied', 'continue'];
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -828,6 +834,19 @@ function validateAsk(ask, imageNames) {
         if (typeof avatar.request !== 'string' || !AVATAR_REQUEST_RE.test(avatar.request)) problems.push('avatar needs a request id (or a sheet)');
         if (avatar.subject !== undefined && (typeof avatar.subject !== 'string' || !AVATAR_SUBJECT_RE.test(avatar.subject))) problems.push('avatar.subject is a path of up to 200 letters, digits, spaces and . _ / : - (no quotes or backticks)');
       }
+    }
+  }
+  if (ask.rerun !== undefined) {
+    const rerun = ask.rerun;
+    if (!rerun || typeof rerun !== 'object' || Array.isArray(rerun)) problems.push('rerun is an object');
+    else {
+      const known = Object.keys(rerun).filter(name => !['request', 'kind', 'ask'].includes(name));
+      if (known.length) problems.push(`rerun has no field ${known.join(', ')}`);
+      if (typeof rerun.request !== 'string' || !AVATAR_REQUEST_RE.test(rerun.request)) problems.push('rerun.request is a request id');
+      if (!RERUN_KINDS.includes(rerun.kind)) problems.push(`rerun.kind is ${RERUN_KINDS.join(' or ')}`);
+      if (rerun.kind === 'continue') {
+        if (typeof rerun.ask !== 'string' || !AVATAR_REQUEST_RE.test(rerun.ask)) problems.push('rerun.ask is the id of the Ask the run left open');
+      } else if (rerun.ask !== undefined) problems.push('rerun.ask is only for kind continue');
     }
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
