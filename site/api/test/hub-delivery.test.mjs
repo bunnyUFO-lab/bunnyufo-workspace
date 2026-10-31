@@ -9,7 +9,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { deliveryOf } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { askJson, seeder } from './hub-fixtures.mjs';
+import { askJson, checklistJson, seeder } from './hub-fixtures.mjs';
 
 const NOW = new Date('2026-10-31T12:00:00Z');
 const ago = minutes => new Date(NOW.getTime() - minutes * 60000).toISOString();
@@ -113,5 +113,37 @@ test('GET /api/hub/asks/:id carries delivery for an answered Ask only', async ()
     // An overwritten file shows its new body, not the one read before.
     seed.put(`asks/${done.id}/delivered.json`, { v: 1, at: ago(1), session: 'abcd1234-5678', host: 'pc-one', how: 'start' });
     assert.equal((await get(`/hub/asks/${done.id}`)).delivery.how, 'start');
+  } finally { await close(); }
+});
+
+test('GET /api/hub/checklists/:id carries delivery for a submitted checklist only, read fresh, with the same link rule', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
+    const list = tail => checklistJson({ id: `${day}-probe-list-${tail}`, now: NOW });
+    const open = list('b1b1');
+    seed.checklist(open);
+    seed.put(`checklists/${open.id}/watch-abcd1234.json`, watcher());
+    assert.equal('delivery' in await get(`/hub/checklists/${open.id}`), false, 'An unsubmitted checklist has none.');
+    const none = list('b1b2');
+    seed.checklist(none);
+    seed.submit(none.id, { at: ago(1) });
+    assert.deepEqual((await get(`/hub/checklists/${none.id}`)).delivery, { state: 'none' });
+    const stale = list('b1b3');
+    seed.checklist(stale);
+    seed.submit(stale.id, { at: ago(9) });
+    seed.put(`checklists/${stale.id}/watch-abcd1234.json`, watcher({ url: 'https://claude.ai.evil.example/x', appUrl: 'claude://claude.ai/code/s' }));
+    const late = (await get(`/hub/checklists/${stale.id}`)).delivery;
+    assert.equal(late.state, 'stale');
+    assert.equal(late.url, undefined, 'A look-alike host gets no link.');
+    assert.equal(late.appUrl, 'claude://claude.ai/code/s');
+    const done = list('b1b4');
+    seed.checklist(done);
+    seed.submit(done.id, { at: ago(9) });
+    seed.put(`checklists/${done.id}/watch-abcd1234.json`, watcher());
+    seed.put(`checklists/${done.id}/delivered.json`, { v: 1, at: ago(1), session: 'abcd1234-5678', host: 'pc-one', how: 'turn' });
+    assert.equal((await get(`/hub/checklists/${done.id}`)).delivery.how, 'turn');
+    seed.put(`checklists/${done.id}/delivered.json`, { v: 1, at: ago(1), session: 'abcd1234-5678', host: 'pc-one', how: 'woke' });
+    assert.equal((await get(`/hub/checklists/${done.id}`)).delivery.how, 'woke', 'An overwritten file shows its new body.');
   } finally { await close(); }
 });

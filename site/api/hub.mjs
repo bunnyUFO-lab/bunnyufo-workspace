@@ -449,18 +449,26 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { ask: readAsk(ask, id), names };
   }
 
+  /**
+   * Where an answer (or a checklist's submission) went: agent-written `delivered.json` and up to 3 `watch-*.json` in the
+   * item's folder, read fresh (another writer's token may have replaced them), checked by `deliveryOf`. Nothing when there is
+   * no answer yet.
+   */
+  async function deliveryFor(folderPath, names, answer, at) {
+    if (!answer) return undefined;
+    const watchNames = [...names].filter(name => /^watch-[A-Za-z0-9_-]{1,40}\.json$/.test(name)).sort().slice(0, DELIVERY_WATCHERS);
+    const readFresh = async name => (names.has(name) ? (await fresh(`${folderPath}/${name}`))?.value : undefined);
+    const [delivered, ...watchers] = await Promise.all([readFresh('delivered.json'), ...watchNames.map(readFresh)]);
+    return deliveryOf({ answer, delivered, watchers, at });
+  }
+
   async function askDetail(id, at) {
     const { ask, names } = await askFolder(id);
     const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
     const state = askState(names, ask, at, snooze);
     const read = async name => (names.has(name) ? cached(`asks/${id}/${name}`) : undefined);
     const [answer, pickup, cancel] = await Promise.all([read('answer.json'), read('pickup.json'), read('cancel.json')]);
-    // Agent-written files: where the answer went (delivered.json) and which sessions watch the Ask (watch-*.json, at most 3).
-    const watchNames = [...names].filter(name => /^watch-[A-Za-z0-9_-]{1,40}\.json$/.test(name)).sort().slice(0, DELIVERY_WATCHERS);
-    // Read fresh, never cached: another writer's token may have replaced them.
-    const readFresh = async name => (await fresh(`asks/${id}/${name}`))?.value;
-    const [delivered, ...watchers] = answer ? await Promise.all([readFresh('delivered.json'), ...watchNames.map(readFresh)]) : [];
-    const delivery = deliveryOf({ answer, delivered, watchers, at });
+    const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     return {
       ...ask, ...state,
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
@@ -480,19 +488,21 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { checklist: { ...checklist, id }, names };
   }
 
-  async function checklistDetail(id) {
+  async function checklistDetail(id, at = now()) {
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
     const { done, total, marks } = checklistProgress(checklist, names);
     const read = async name => (names.has(name) ? cached(`checklists/${id}/${name}`) : undefined);
     const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
     const pictures = checklistEvidence(names);
+    const delivery = await deliveryFor(`checklists/${id}`, names, submit, at);
     return {
       ...checklist, state, done, total,
       evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
       shots: pictures.shots,
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
       ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
+      ...(delivery ? { delivery } : {}),
       files: [...names].sort(),
     };
   }
@@ -1094,7 +1104,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** help: the stored item a help chat is about, as its own detail route reads it. 400 for a kind that is none of the four, 404 for a missing item. */
   async function loadHelpItem(kind, id, at) {
     if (kind === 'ask') return askDetail(id, at);
-    if (kind === 'checklist') return checklistDetail(id);
+    if (kind === 'checklist') return checklistDetail(id, at);
     if (kind === 'review') return reviewDetailFor(id, at);
     if (kind === 'blocked') {
       const { events } = await loadEvents(at);
@@ -1198,13 +1208,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const rows = await pool(POOL, items, async item => {
               const row = { ...item, needs: needsKindOf(item), describe: describeItem(item, at) };
               if (!withDetail.has(item)) return row;
-              try { return { ...row, detail: item.kind === 'ask' ? await askDetail(item.id, at) : await checklistDetail(item.id) }; } catch { return row; }
+              try { return { ...row, detail: item.kind === 'ask' ? await askDetail(item.id, at) : await checklistDetail(item.id, at) }; } catch { return row; }
             });
             reply({ items: rows, counts });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/checklists\/([^/]+)$/.exec(route))) {
-            reply(await checklistDetail(decodeURIComponent(match[1])));
+            reply(await checklistDetail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/reviews\/([^/]+)$/.exec(route))) {
             reply(await reviewDetailFor(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/hermes-approvals\/([^/]+)$/.exec(route))) {
