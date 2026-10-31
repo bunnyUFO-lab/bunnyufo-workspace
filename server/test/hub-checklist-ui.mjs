@@ -1,6 +1,6 @@
 // Run after npm run build. A checklist (#/~hub/checklist/<id>) through a real browser on a phone (390 x 844, touch), over
 // the fixture service with its two checklists: the Steps chip and the Needs you badge, the guide that starts open, 44 px tap
-// targets, Copy, ticks that show at once and survive a reload, an untick, a failed tick, Submit with its one warning,
+// targets, Copy (a plain PowerShell block as one line), ticks that show at once and survive a reload, an untick, a failed tick, Submit with its one warning,
 // the submitted list, and the read-only host. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
@@ -83,8 +83,8 @@ try {
   assert.equal(await page.locator('[data-progress]').innerText(), '1 of 4 done');
   assert.equal(await page.getByRole('progressbar').getAttribute('aria-valuenow'), '1');
   assert.deepEqual(await page.locator('.hub-cl-group').allTextContents(), ['Discord developer portal', 'Your server']);
-  await page.locator('[data-item="02"] pre').waitFor();
-  assert.match(await page.locator('[data-item="02"] pre').innerText(), /bunnylink-secret set discord-bot-token/);
+  await page.locator('[data-item="02"] pre').first().waitFor();
+  assert.match(await page.locator('[data-item="02"] pre').first().innerText(), /bunnylink-secret set discord-bot-token/);
   assert.equal(await page.locator('[data-item="02"] .hub-cl-more a', { hasText: 'Open details' }).getAttribute('href'), 'https://example.test/discord/bot');
   assert.equal(await page.locator('[data-item="02"] .hub-cl-more a', { hasText: 'the portal guide' }).getAttribute('target'), '_blank');
   assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
@@ -100,12 +100,30 @@ try {
   await tall(page.locator('.hub-cl .hub-btn'), 'a button');
   for (const box of await page.locator('[data-box]').all()) assert.ok((await box.boundingBox()).width >= 44, 'and 44 px wide');
 
-  step('Copy puts the block on the clipboard and says Copied');
-  await page.locator('.hub-copy').tap();
-  await page.locator('.hub-copy', { hasText: 'Copied' }).waitFor();
+  step('Copy puts the block on the clipboard and says Copied; the ssh block keeps its lines');
+  const [copyBash, copyPowerShell] = [page.locator('.hub-copy').nth(0), page.locator('.hub-copy').nth(1)];
+  await copyBash.tap();
+  await page.locator('.hub-copy', { hasText: /^Copied$/ }).waitFor();
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(clipboard.split(/\r?\n/).join('\n'), 'ssh root@host.example.test\nbunnylink-secret set discord-bot-token');
-  await page.locator('.hub-copy', { hasText: /^Copy$/ }).waitFor({ timeout: 4000 });
+  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: 4000 });
+
+  step('a plain multi-line PowerShell block is copied as one line, and the button says so');
+  await copyPowerShell.tap();
+  await page.locator('.hub-copy', { hasText: 'Copied as one line' }).waitFor();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'cd C:\\Users\\owner\\discord-bot; npm run check');
+  assert.match(await page.locator('[data-item="02"] pre').nth(1).innerText(), /discord-bot\nnpm run check/, 'The block still shows its two lines.');
+  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: 6000 });
+
+  step('with a mouse, the first click on Copy copies (the step it is in becomes the target on pointerdown and re-renders)');
+  const desk = await open({ width: 1100, height: 900 }, { permissions: ['clipboard-read', 'clipboard-write'] });
+  await desk.goto(`${fixture.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
+  await desk.locator('[data-item="02"] pre').nth(1).waitFor();
+  assert.equal(await desk.locator('.hub-cl-item.target').count(), 0, 'No step is the target yet, so the click below makes one.');
+  await desk.locator('[data-item="02"] .hub-copy').nth(1).click();
+  await desk.locator('.hub-copy', { hasText: 'Copied as one line' }).waitFor({ timeout: 3000 });
+  assert.equal(await desk.evaluate(() => navigator.clipboard.readText()), 'cd C:\\Users\\owner\\discord-bot; npm run check');
+  assert.equal(await desk.locator('[data-item="02"].target').count(), 1);
 
   step('a tap shows at once, the item ignores taps while it is saving, others can be ticked, and the ticks are new files');
   const before = snapshot();
