@@ -96,7 +96,11 @@ export function createRerun({ requests, readAsk, writerOf = async () => null, lo
     return own ? loaded : null;
   }
 
-  /** Why this Ask may not start a run, or null: only the PC watcher's token writes a rerun Ask, and a run's own Ask never does. */
+  /**
+   * Why this Ask may not start a run, or null: only the PC watcher's token may write a rerun Ask. A PC run holds that same token in its environment,
+   * so the mark excludes every other token (a cloud run, a bot, an agent session) but not a run's own code: the PC's checks (the rules equal what the
+   * watcher computed, the rerun gate, the copy's signed approval) are what hold against a run. `from.request` is only a cheap extra refusal.
+   */
   async function untrusted(ask) {
     if (ask.from?.request) return 'This Ask was written by a run, so it cannot start a run.';
     const writer = await writerOf(ask.id).catch(() => null);
