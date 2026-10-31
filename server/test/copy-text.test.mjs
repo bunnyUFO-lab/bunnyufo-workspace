@@ -42,13 +42,35 @@ test('lines that belong together keep the block as shown', () => {
     ['$text = @"', 'two', '"@'],
     ['<#', 'notes', '#>', 'git pull'],
     ['$x =', '42'],
+    // A string that spans lines (review of #122): joined, its text would change with no error.
+    ['Set-Content -Path x.env -Value "A=1', 'B=2"'],
+    ["Write-Output 'one", "# not a comment", "two'"],
+    ['git commit -m "first line', '', 'second line"', 'git push'],
+    // An operator, a bracket or a statement left open: joined, PowerShell could not parse it.
+    ['if ($a -and', '$b) { "yes" }'],
+    ['$n = (1 + 2', ') * 3'],
+    ['$list = @(1, 2', ')'],
+    ['try { Get-Item x } ', 'catch { "no" }'],
+    ['if ($a) { "a" }', 'else { "b" }'],
   ];
   for (const lines of kept) assert.equal(copyText(block(lines), 'powershell').oneLine, false, lines.join(' / '));
 });
 
+test('an even number of quotes on every line still joins', () => {
+  const code = block(['git commit -m "fix the jump"', "git tag 'v1'", 'git push']);
+  assert.equal(copyText(code, 'powershell').text, 'git commit -m "fix the jump"; git tag \'v1\'; git push');
+});
+
 test('a session opened before the last line keeps the block as shown; one opened last still joins', () => {
-  for (const first of ['ssh root@host.example.test', 'Enter-PSSession -ComputerName box', 'docker exec -it web sh', 'wsl', 'python']) {
-    assert.equal(copyText(block([first, 'ls']), 'powershell').oneLine, false, first);
+  const sessions = [
+    'ssh root@host.example.test', 'Enter-PSSession -ComputerName box', 'docker exec -it web sh', 'kubectl exec -ti pod -- sh',
+    'wsl', 'wsl -d Ubuntu', 'claude', 'claude --model opus', 'claude.exe', 'python', 'python -i setup.py', 'py', 'node',
+    'cmd', 'cmd /k echo hi', 'powershell', 'pwsh -NoExit -Command Get-Date', 'bash', 'bash -l', 'psql -U app', 'sqlite3 x.db',
+  ];
+  for (const first of sessions) assert.equal(copyText(block([first, 'ls']), 'powershell').oneLine, false, first);
+  // Commands that run and return still join.
+  for (const first of ['claude plugin list', 'claude auth status', 'claude -p "hi"', 'python tools/x.py', 'node dispatch.mjs status', 'cmd /c dir', 'bash run.sh', 'claudette']) {
+    assert.equal(copyText(block([first, 'ls']), 'powershell').oneLine, true, first);
   }
   assert.deepEqual(copyText(block(['cd C:\\x', 'ssh root@host.example.test']), 'powershell'), { text: 'cd C:\\x; ssh root@host.example.test', oneLine: true });
 });
