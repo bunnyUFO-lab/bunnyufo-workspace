@@ -70,9 +70,9 @@ const freeCentre = page => page.evaluate(() => {
   return { x: box.left + box.width / 2, y: box.top + h / 2 };
 });
 
-/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-8x1 (one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
-const DESKTOP_EXPANDED = '28675ac95a75b45d4f4bfd15badc2cd3176dce3bcc15518dd9b727157531e71d';
-const DESKTOP_EXPANDED_NO_SPRINTS = '4c9d060d15873f69d509cd2c703f6392c0dd5560f55165b413fb2bcac0a1e7c4';
+/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-744 (an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
+const DESKTOP_EXPANDED = '4f175fb85ab94b242a8cc2459c61934fd3754f87695144e065dddd1b08ff5aaf';
+const DESKTOP_EXPANDED_NO_SPRINTS = '9c2076b6295834641504bc0f876a51d9fa9387a6fc3156526ddd3efb288cc8f6';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
 // The Wayfinder row of the project just opened: waits for the map under it (they mount together), then requires exactly one row. A second row is a double mount, never a timing slip.
@@ -132,6 +132,22 @@ try {
   await noSideways(phone, 'Roadmap upright, expanded');
   await inside('upright, expanded');
   await nowClear(phone, 'upright, expanded');
+  step('ws-744: every chevron is a 44 px target on touch with a name, an open milestone keeps its count, and the map clears the control bar');
+  const chevrons = await phone.evaluate(() => [...document.querySelectorAll('[data-toggle]')].map(element => {
+    const rect = element.querySelector('.hub-map-chev-hit').getBoundingClientRect();
+    return { id: element.dataset.toggle, w: rect.width, h: rect.height, label: element.getAttribute('aria-label') };
+  }));
+  assert.ok(chevrons.length >= 4, 'Expanded, the milestones and features have chevrons.');
+  for (const chevron of chevrons) {
+    assert.ok(chevron.w >= 43.5 && chevron.h >= 43.5, `${chevron.id}: the touch target is at least 44 px (${chevron.w} x ${chevron.h}).`);
+    assert.match(chevron.label ?? '', /^(Open|Close) \S/, `${chevron.id}: the chevron has a name.`);
+  }
+  assert.match(await phone.locator('[data-node="ml-m2"] .hub-map-count').last().textContent(), /^\d+\/\d+$/, 'The open milestone still shows its done/total.');
+  const lowest = await phone.evaluate(() => {
+    const bar = document.querySelector('.hub-map-controls').getBoundingClientRect().top;
+    return { bar, bottom: Math.max(...[...document.querySelectorAll('.hub-map-box svg [data-node] text')].map(text => text.getBoundingClientRect().bottom)) };
+  });
+  assert.ok(lowest.bottom <= lowest.bar, `After Expand all the last label (${lowest.bottom}) is above the control bar (${lowest.bar}).`);
   assert.ok(await phone.locator('[data-kind="t"]').count() >= 9, 'Every task is drawn.');
   await phone.locator('.hub-map-controls button:has-text("Sprints")').tap();
   await phone.waitForTimeout(500);
@@ -168,7 +184,10 @@ try {
   await axisIs(bare, 'x', 'Landscape is horizontal.');
   const box = await bare.locator('.hub-map-box').boundingBox();
   const nowAt = await centreOf(bare.locator('.hub-map-now'));
-  assert.ok(Math.hypot(nowAt.x - (box.x + box.width / 2), nowAt.y - (box.y + box.height / 2)) <= 12, `"Now" is centred (${nowAt.x},${nowAt.y}).`);
+  // The middle of what the hint (top) and the control bar (bottom) leave.
+  const room = await bare.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-controls').getBoundingClientRect().top }));
+  const roomMid = ((room.top ? room.top + 8 : box.y) + room.bottom - 8) / 2;
+  assert.ok(Math.hypot(nowAt.x - (box.x + box.width / 2), nowAt.y - roomMid) <= 12, `"Now" is centred (${nowAt.x},${nowAt.y} vs ${roomMid}).`);
 
   step('a window between the thresholds keeps the axis it had');
   const between = async (page, what) => {
@@ -203,6 +222,10 @@ try {
   assert.equal(await axisOf(big), 'x');
   await nowClear(big, 'desktop, collapsed');
   await big.locator('button:has-text("Expand all")').click();
+  step('ws-744: on a desktop a chevron is a 32 px target');
+  await big.waitForTimeout(400);
+  const bigHits = await big.evaluate(() => [...document.querySelectorAll('[data-toggle] .hub-map-chev-hit')].map(element => element.getBoundingClientRect().width));
+  assert.ok(bigHits.length > 0 && bigHits.every(width => width >= 31.5), `Desktop chevron targets are at least 32 px (${bigHits.join(', ')}).`);
   await big.waitForTimeout(500);
   const plain = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
   assert.equal(sha(plain), DESKTOP_EXPANDED_NO_SPRINTS, 'Expanded, without sprints, the svg is the recorded drawing.');
