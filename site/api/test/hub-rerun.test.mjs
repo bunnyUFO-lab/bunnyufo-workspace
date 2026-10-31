@@ -72,9 +72,10 @@ async function fixture({ discord = false } = {}) {
     }
     return made.body.id;
   };
-  const rerunAsk = (tail, rerun, extra = {}) => {
+  /** A rerun Ask as the PC watcher's token writes it (`writer` is the card API's mark; pass `null` for none). */
+  const rerunAsk = (tail, rerun, extra = {}, writer = 'pc-runner') => {
     const ask = { ...askJson({ id: askId(tail), project: 'sprite-studio', now: NOW, options: DENIED_OPTIONS, question: 'Run "Walk cycle" was denied `ping`. Allow it and run it again?', allowDrawing: false }), requirePasskey: true, rerun, ...extra };
-    seed.ask(ask);
+    seed.ask(ask, { writer: writer ?? undefined });
     return ask.id;
   };
   /** The run's own Ask (open when it ended) that a continue Ask points at. */
@@ -665,5 +666,62 @@ test('a rule with a hidden or odd character, or a broad shape, is refused by the
     assert.match(done.body.rerun.why, /rules could not be read/);
     assert.deepEqual([...f.fake.objects.keys()].filter(name => name.endsWith('/allow-grant.json')), []);
     assert.equal(f.copies(original).length, 0);
+  } finally { await f.close(); }
+});
+
+// --- Only the PC watcher's token may write a rerun Ask (ws-a5g.4.15) ---
+
+test('a rerun Ask without the watcher\'s writer mark starts nothing, signs nothing, and the page says why', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const cases = [
+      ['no mark (older, or the passphrase)', null, /no writer mark/],
+      ['an agent token', 'agent', /another token \(agent\)/],
+      ['another limited token', 'other', /another token \(other\)/],
+      ['a forged value', 'pc-runner-x', /another token/],
+    ];
+    let number = 0;
+    for (const [name, writer, why] of cases) {
+      number += 1;
+      for (const choice of ['allowed', 'allow']) {
+        const ask = f.rerunAsk(`d${number}${choice === 'allow' ? 'a' : 'b'}0`.slice(0, 4).padEnd(4, '0'), { request: original, kind: 'denied', allow: RULES }, { options: ALLOW_OPTIONS }, writer);
+        const detail = (await f.call('GET', `/hub/asks/${ask}`)).body;
+        assert.match(detail.rerunBlocked, why, `${name}: the page says why`);
+        const done = await f.answer(ask, choice);
+        assert.equal(done.status, 201, name);
+        assert.equal(done.body.state, 'answered', 'the answer stands');
+        assert.equal(done.body.rerun.started, false, `${name} ${choice}`);
+        assert.match(done.body.rerun.why, why, `${name} ${choice}`);
+      }
+    }
+    // A continue Ask the same.
+    const left = f.runAsk('b0b0', original);
+    const proceed = f.rerunAsk('e1e1', { request: original, kind: 'continue', ask: left }, { options: [...RUN_OPTIONS, { id: 'drop', label: "Don't run it again" }] }, 'agent');
+    assert.equal((await f.answer(proceed, 'alpha')).body.rerun.started, false);
+    // Nothing was made or signed: no copy, no grant, no stop.
+    assert.equal(f.copies(original).length, 0);
+    assert.deepEqual([...f.fake.objects.keys()].filter(name => name.endsWith('/allow-grant.json')), []);
+    assert.equal(f.fake.objects.has(f.file(original, 'stop.json')), false);
+  } finally { await f.close(); }
+});
+
+test('a rerun Ask the watcher\'s token wrote still starts, has no blocked note, and one that names a run in from.request does not', async () => {
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const good = f.rerunAsk('a1b2', { request: original, kind: 'denied' });
+    assert.equal((await f.call('GET', `/hub/asks/${good}`)).body.rerunBlocked, undefined);
+    assert.equal((await f.answer(good, 'allowed')).body.rerun.started, true);
+    // A run's own Ask carries from.request; even with the watcher's mark, a rerun pointer in it starts nothing.
+    const other = await f.run({ text: 'Second job' });
+    const fromRun = f.rerunAsk('c3d4', { request: other, kind: 'denied' }, { from: { session: 'run', host: 'pc', tool: 'claude-code', request: other } });
+    const done = await f.answer(fromRun, 'allowed');
+    assert.equal(done.body.rerun.started, false);
+    assert.match(done.body.rerun.why, /written by a run/);
+    assert.equal(f.copies(other).length, 0);
+    // An Ask with no rerun field has no blocked note, whatever its writer.
+    const plain = f.rerunAsk('e5f6', undefined, {}, 'agent');
+    assert.equal((await f.call('GET', `/hub/asks/${plain}`)).body.rerunBlocked, undefined);
   } finally { await f.close(); }
 });

@@ -116,6 +116,7 @@ import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from '
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Node's fetch ignores HTTPS_PROXY unless told at startup (Node 22.21 and later), and a cloud
 // session reaches the internet only through its proxy. Start again with it on; an older Node
@@ -562,7 +563,38 @@ async function spool(entry) {
 }
 
 /**
- * Send up to 20 spooled `put` entries, oldest first. Sent (200) or already there (412) or older
+ * The only files a spooled `put` may write: an event (`events/<yyyy-mm-dd>/<name>.json`, what this client spools) and a run's progress file
+ * (`requests/<id>/run-<stamp>-<rand4>.json`, what the hub-hooks mod spools, replayed only inside the run that owns that request). The spool is a plain file any local process can append to, and a
+ * replay runs under whichever token the next command holds, so anything else (ask.json, request.json, approvals, stops, grants, answers) is
+ * dropped, never sent: otherwise a line could get an Ask marked as the PC watcher's, or replace the mark of a request.
+ */
+const SPOOL_EVENT = /^events\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9._-]+\.json$/;
+const SPOOL_RUN_FILE = /^requests\/([A-Za-z0-9._-]+)\/run-\d{8}T\d{9}Z-[a-z0-9]{4}\.json$/;
+/**
+ * A run file is replayed only by the run it belongs to: a PC run (BUW_RUN_FOLDER=1, which the watcher does not have) and its own request, read from the
+ * run checkout's `.claude/run-current.json` (beside this client in `.claude/bin/`, else under the working directory). Anywhere else, a spooled run file is
+ * dropped: under the watcher's token it would let a local process plant a future-stamped run file (a dead run reads as running) or fake timeline lines.
+ */
+function ownRunRequest() {
+  if (process.env.BUW_RUN_FOLDER !== '1') return null;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const file of [path.join(here, '..', 'run-current.json'), path.join(process.cwd(), '.claude', 'run-current.json')]) {
+    try {
+      const id = JSON.parse(readFileSync(file, 'utf8'))?.requestId;
+      if (typeof id === 'string' && /^[A-Za-z0-9._-]+$/.test(id)) return id;
+    } catch { /* no such file: try the next */ }
+  }
+  return null;
+}
+const spoolable = (file, ownRequest) => {
+  if (typeof file !== 'string' || file.includes('..')) return false;
+  if (SPOOL_EVENT.test(file)) return true;
+  const run = SPOOL_RUN_FILE.exec(file);
+  return !!run && ownRequest !== null && run[1] === ownRequest;
+};
+
+/**
+ * Send up to 20 spooled `put` entries, oldest first. Only the two shapes above are replayed, always as a create-only JSON file. Sent (200) or already there (412) or older
  * than a day (or with no readable time): dropped. Any other answer, 4xx included (this command's
  * token may just be unable to write the inbox), or no answer: kept. Other kinds of line belong to the hooks and stay.
  */
@@ -575,6 +607,7 @@ async function replaySpool() {
     return;
   }
   const lines = text.split(/\r?\n/).filter(Boolean);
+  const ownRequest = ownRunRequest();
   const keep = [];
   let tried = 0;
   let down = false;
@@ -589,6 +622,10 @@ async function replaySpool() {
       keep.push(line);
       continue;
     }
+    if (!spoolable(entry.path, ownRequest) || typeof entry.body !== 'string') {
+      console.error(`(spool: dropped a line for ${String(entry.path).replace(/[^\x20-\x7e]/g, '?').slice(0, 80)}: only events, and a run's own progress files, are replayed)`);
+      continue;
+    }
     if (!(Date.now() - Date.parse(entry.at) <= DAY)) continue;     // older than a day, or no readable time: expired
     if (down || tried >= 20) {
       keep.push(line);
@@ -596,7 +633,7 @@ async function replaySpool() {
     }
     tried += 1;
     try {
-      const result = await putInbox(inboxPath(entry.path), entry.body, { section: entry.section, createOnly: entry.createOnly !== false, contentType: entry.contentType, retry: false });
+      const result = await putInbox(inboxPath(entry.path), entry.body, { section: entry.section, createOnly: true, contentType: 'application/json', retry: false });
       if (result.state === 'transient') {
         down = true;
         keep.push(line);

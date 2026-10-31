@@ -265,7 +265,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
-  const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, log });
+  const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
@@ -461,8 +461,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const readFresh = async name => (await fresh(`asks/${id}/${name}`))?.value;
     const [delivered, ...watchers] = answer ? await Promise.all([readFresh('delivered.json'), ...watchNames.map(readFresh)]) : [];
     const delivery = deliveryOf({ answer, delivered, watchers, at });
+    // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
+    const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
     return {
       ...ask, ...state,
+      ...(rerunBlocked ? { rerunBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
       files: [...names].sort(),

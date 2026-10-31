@@ -906,3 +906,37 @@ test('moved and deleted cards: a write is refused, a read says where it went, re
     await fake.close();
   }
 });
+
+test('inbox: ask.json carries the writer mark of the token kind (pc-runner, agent, other), the passphrase none, and no client header changes it', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    const body = JSON.stringify({ id: 'x', project: 'magic-loops', question: 'Q?', options: [] });
+    const write = (inbox, token, id, headers = {}) => call('PUT', `/sections/${inbox}/files/asks/${id}/ask.json`, { token, body: Buffer.from(body), base64: true, headers: { 'If-None-Match': '*', ...headers } });
+    const metaOf = (inbox, id) => fake.objects.get(`sections/${inbox}/asks/${id}/ask.json`).metadata;
+    for (const inbox of ['inbox', 'inbox-dev']) {
+      // The client tries to claim the watcher's mark (any case) and a second field: only the handler's value is stored.
+      const forged = { 'x-amz-meta-writer': 'pc-runner', 'X-Amz-Meta-Writer': 'pc-runner', 'x-amz-meta-extra': 'y' };
+      assert.equal((await write(inbox, 'tok-pc-runner', 'p-1', forged)).status, 200);
+      assert.deepEqual(metaOf(inbox, 'p-1'), { writer: 'pc-runner' }, `${inbox}: the watcher's token`);
+      assert.equal((await write(inbox, 'tok-agent', 'a-1', forged)).status, 200);
+      assert.deepEqual(metaOf(inbox, 'a-1'), { writer: 'agent' }, `${inbox}: an agent token cannot claim pc-runner`);
+      assert.equal((await write(inbox, 'tok-cloud-ml', 'c-1', forged)).status, 200);
+      assert.deepEqual(metaOf(inbox, 'c-1'), { writer: 'other' }, `${inbox}: a cloud token cannot claim pc-runner`);
+    }
+    for (const [token, id] of [['tok-hermes-main', 'h-1'], ['tok-hermes', 'h-2'], ['tok-cloud', 'o-1'], ['tok-agentish', 'o-3']]) {
+      assert.equal((await write('inbox', token, id, { 'x-amz-meta-writer': 'pc-runner' })).status, 200, token);
+      assert.deepEqual(fake.objects.get(`sections/inbox/asks/${id}/ask.json`).metadata, { writer: 'other' }, `${token}: other, never pc-runner`);
+    }
+    // The passphrase's own ask.json carries nothing, and a header does not give it a mark.
+    assert.equal((await write('inbox', 'tok-all', 'z-1', { 'x-amz-meta-writer': 'pc-runner' })).status, 200);
+    assert.deepEqual(metaOf('inbox', 'z-1'), {});
+    // Other Ask files and other tokens' other files carry nothing; ask.json is still create-only and not an upload URL.
+    assert.equal((await call('PUT', '/sections/inbox/files/asks/p-1/picture.png', { token: 'tok-pc-runner', body: Buffer.from('x'), base64: true, headers: { 'x-amz-meta-writer': 'pc-runner' } })).status, 200);
+    assert.deepEqual(fake.objects.get('sections/inbox/asks/p-1/picture.png').metadata, {});
+    assert.equal((await call('PUT', '/sections/inbox/files/asks/p-1/ask.json', { token: 'tok-pc-runner', body: Buffer.from(body), base64: true })).status, 403, 'not replaceable');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-pc-runner', body: { files: [{ path: 'asks/u-1/ask.json' }] } })).status, 403, 'not by upload URL');
+  } finally {
+    await fake.close();
+  }
+});

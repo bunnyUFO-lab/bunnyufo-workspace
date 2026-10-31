@@ -123,9 +123,10 @@ export function seeder(fake, prefix = INBOX) {
   const put = (rel, body, type = 'application/json', metadata = {}) => fake.seed(`${prefix}/${rel}`, typeof body === 'string' || Buffer.isBuffer(body) ? body : `${JSON.stringify(body, null, 2)}\n`, type, metadata);
   return {
     put,
-    ask(ask, { files = {}, extra = {} } = {}) {
+    /** `writer` is the card API's mark on ask.json (`pc-runner`, `agent`, `other`); none is the passphrase's or an older Ask. */
+    ask(ask, { files = {}, extra = {}, writer } = {}) {
       const folder = `asks/${ask.id}`;
-      put(`${folder}/ask.json`, ask);
+      put(`${folder}/ask.json`, ask, 'application/json', writer ? { writer } : {});
       if (typeof ask.image === 'string') put(`${folder}/${ask.image}`, solidPng(320, 240, 0x90), 'image/png');
       for (const option of ask.options ?? []) if (option.image) put(`${folder}/${option.image}`, solidPng(160, 120, 0x60 + option.id.charCodeAt(0) % 8 * 16), 'image/png');
       for (const [name, body] of Object.entries(extra)) put(`${folder}/${name}`, body);

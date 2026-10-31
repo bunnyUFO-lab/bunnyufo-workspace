@@ -203,11 +203,17 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    * is an agent session (named `agent` or `agent-<name>`), nothing for anyone else (pc-runner, cloud-<project>,
    * hermes-main, the old shared tokens, the passphrase). Only this function sets it; a caller's own `x-amz-meta-*`
    * headers are never forwarded. The site API's policy approval signs only when the stored `origin` and this agree.
+   * An `asks/<id>/ask.json` put by a limited token is tagged too, with the token's kind: `pc-runner` for the PC watcher's token
+   * (the only one whose Ask the Hub lets carry a `rerun` pointer, see site/api/hub-rerun.mjs; PC runs hold this token too, so it excludes other tokens, not a run), `agent` for `agent`/`agent-<name>`, `other` for any
+   * other limited token. The passphrase's own ask.json carries nothing.
    */
   const writerMetadata = (caller, sectionId, file) => {
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
+      return { writer: caller.name === 'pc-runner' ? 'pc-runner' : /^agent(-[\w.-]+)?$/.test(caller.name ?? '') ? 'agent' : 'other' };
+    }
     return caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
       ? { writer: 'agent' } : undefined;
   };
