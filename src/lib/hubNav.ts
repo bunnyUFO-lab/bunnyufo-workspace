@@ -16,6 +16,9 @@ export function hubRows(caps: Pick<HostCapabilities, 'write' | 'chat'>): [HubScr
   return rows.filter(row => row[3]).map(([screen, label, icon]) => [screen, label, icon])
 }
 
+/** Where Chat would be, for a visitor who may only read: one line saying it exists and what it needs. Null once Chat is offered, or where the assistant is simply not set up. */
+export const chatNote = (caps: Pick<HostCapabilities, 'write' | 'chat'>): string | null => (!caps.write && !caps.chat ? 'Chat with the assistant needs you to be signed in.' : null)
+
 export type HubGroup = 'operate' | 'plan' | 'know' | 'run'
 
 /**

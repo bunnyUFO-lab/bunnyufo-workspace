@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
+import { KIND_LABEL as NEEDS_LABEL, needsKind } from '../lib/needsKinds'
 import { hubHash, reviewHash } from '../lib/route'
 import { openRun } from './runStore'
 import { requestStateWord } from './working'
@@ -93,7 +94,9 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     const sent = item.state === 'submitted' ? 'Submitted' : item.state === 'picked-up' ? 'Picked up' : ''
     const progress = item.kind === 'checklist' ? (sent ? (open > 0 ? `${sent} · ${open} open` : sent) : `${item.done ?? 0} of ${item.total ?? 0}`) : ''
     const state = item.kind === 'checklist' ? progress : item.kind === 'ask' ? (item.state ?? 'open').replace('-', ' ') : item.kind === 'request' ? (item.stale ? requestStateWord(item.state ?? '', item.stale, {}) : item.state === 'taken' ? `taken as ${item.bead ?? 'a task'}` : item.state === 'done' || item.state === 'failed' ? item.state : 'open') : ''
-    const meta = [KIND_LABEL[item.kind], item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
+    // A sent list is no longer "To do": it carries its kind and its state, not both a to-do and a picked-up.
+    const kindLabel = item.kind === 'checklist' && sent ? NEEDS_LABEL[needsKind(item)] : KIND_LABEL[item.kind]
+    const meta = [kindLabel, item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
     if (item.kind === 'review') return <ReviewRow item={item} meta={meta} />
     if (item.kind === 'blocked') return <BlockedRow item={item} meta={meta} />
     const body = (
