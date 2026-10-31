@@ -31,6 +31,20 @@ const noSideways = async (page, what) => {
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
   assert.ok(widths.hub <= widths.hubInner, `${what}: the Hub scrolls sideways (${widths.hub} > ${widths.hubInner}).`);
 };
+/** The "now" marker (dot, ring and pill) never meets a circle, a chevron, a mark or a label of the map: the bounding boxes of its parts do not intersect theirs. */
+const nowClear = async (page, what) => {
+  const hits = await page.evaluate(() => {
+    const now = document.querySelector('.hub-map-nowg');
+    if (!now) return ['no now marker'];
+    const parts = [...now.children].map(child => child.getBoundingClientRect());
+    return [...document.querySelectorAll('.hub-map-box svg [data-node] *')].filter(element => {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || !rect.height || element.closest('.hub-map-nowg')) return false;
+      return parts.some(part => rect.left < part.right && rect.right > part.left && rect.top < part.bottom && rect.bottom > part.top);
+    }).map(element => `${element.tagName} ${element.textContent.slice(0, 24)} of ${element.closest('[data-node]').dataset.node}`);
+  });
+  assert.deepEqual(hits, [], `${what}: "now" meets nothing.`);
+};
 const go = async (page, hash) => { await page.evaluate(value => { location.hash = value; }, hash); };
 const viewOf = async page => (await page.locator('.hub-map-box').getAttribute('data-view')).split(',').map(Number);
 const centreOf = async locator => { const rect = await locator.boundingBox(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; };
@@ -88,6 +102,7 @@ try {
     assert.deepEqual(past, [], `${what}: no text lies outside the box.`);
   };
   await inside('upright, collapsed');
+  await nowClear(phone, 'upright, collapsed');
 
   step('a pinch on Milestone 2 opens it and keeps it between the fingers');
   await phone.locator('button:has-text("Fit")').tap();
@@ -116,6 +131,7 @@ try {
   await phone.waitForTimeout(500);
   await noSideways(phone, 'Roadmap upright, expanded');
   await inside('upright, expanded');
+  await nowClear(phone, 'upright, expanded');
   assert.ok(await phone.locator('[data-kind="t"]').count() >= 9, 'Every task is drawn.');
   await phone.locator('.hub-map-controls button:has-text("Sprints")').tap();
   await phone.waitForTimeout(500);
@@ -185,6 +201,7 @@ try {
   const big = await open({ width: 1920, height: 1080 });
   await showMap(big);
   assert.equal(await axisOf(big), 'x');
+  await nowClear(big, 'desktop, collapsed');
   await big.locator('button:has-text("Expand all")').click();
   await big.waitForTimeout(500);
   const plain = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
@@ -193,6 +210,13 @@ try {
   await big.waitForTimeout(500);
   const withSprints = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
   assert.equal(sha(withSprints), DESKTOP_EXPANDED, 'Expanded, with sprints, the svg is the recorded drawing.');
+  await nowClear(big, 'desktop, expanded, with sprints');
+  const laptop = await open({ width: 1280, height: 800 });
+  await showMap(laptop);
+  await nowClear(laptop, 'laptop, collapsed');
+  await laptop.locator('button:has-text("Expand all")').click();
+  await laptop.waitForTimeout(500);
+  await nowClear(laptop, 'laptop, expanded');
   await noSideways(big, 'Roadmap at 1920');
 }
 {
