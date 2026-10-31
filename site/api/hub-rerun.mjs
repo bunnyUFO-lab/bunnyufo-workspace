@@ -21,9 +21,10 @@ import { validId } from './hub-model.mjs';
 const KINDS = ['denied', 'continue'];
 /** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool. Keep validRerunRule equal to the one in site/card-api/cards.mjs. */
 const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
-const RERUN_BAD_CHAR_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|[^\S ]/u;
+// Printable ASCII only: a rule must read the same as what is signed (no format, filler, separator, private-use or combining characters).
+const RERUN_ASCII_RE = /^[\x20-\x7e]+$/;
 function validRerunRule(rule) {
-  if (typeof rule !== 'string' || rule.length > 300 || RERUN_BAD_CHAR_RE.test(rule)) return false;
+  if (typeof rule !== 'string' || rule.length > 300 || !RERUN_ASCII_RE.test(rule)) return false;
   if (RERUN_MCP_RE.test(rule)) return true;
   const match = /^Bash\((.*)\)$/s.exec(rule);
   if (!match) return false;

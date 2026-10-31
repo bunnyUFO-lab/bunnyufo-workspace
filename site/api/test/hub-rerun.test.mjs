@@ -652,7 +652,7 @@ test('a rule with a hidden or odd character, or a broad shape, is refused by the
     assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', rule] }), { request: r, kind: 'denied', allowBad: true }, `${name} among good rules`);
   }
   // What stays: an exact command, the watcher's trailing prefix form, a space inside, and an exact MCP tool.
-  for (const rule of ['Bash(ping -n 1 example.com)', 'Bash(ping:*)', 'Bash(python tools/x.py --check)', 'Bash(git status:*)', 'mcp__bunnylink__status', 'Bash(echo café)']) {
+  for (const rule of ['Bash(ping -n 1 example.com)', 'Bash(ping:*)', 'Bash(python tools/x.py --check)', 'Bash(git status:*)', 'mcp__bunnylink__status']) {
     assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: [rule] }), { request: r, kind: 'denied', allow: [rule] }, rule);
   }
   // Answering "allow" on such an Ask signs nothing.

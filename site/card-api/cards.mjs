@@ -734,9 +734,10 @@ const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 const RERUN_KINDS = ['denied', 'continue'];
 /** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool (the PC checks the policy). Keep validRerunRule equal to the one in site/api/hub-rerun.mjs. */
 const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
-const RERUN_BAD_CHAR_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|[^\S ]/u;
+// Printable ASCII only: a rule must read the same as what is signed (no format, filler, separator, private-use or combining characters).
+const RERUN_ASCII_RE = /^[\x20-\x7e]+$/;
 function validRerunRule(rule) {
-  if (typeof rule !== 'string' || rule.length > 300 || RERUN_BAD_CHAR_RE.test(rule)) return false;
+  if (typeof rule !== 'string' || rule.length > 300 || !RERUN_ASCII_RE.test(rule)) return false;
   if (RERUN_MCP_RE.test(rule)) return true;
   const match = /^Bash\((.*)\)$/s.exec(rule);
   if (!match) return false;
@@ -871,7 +872,7 @@ function validateAsk(ask, imageNames) {
         if (rerun.kind !== 'denied') problems.push('rerun.allow is only for kind denied');
         else if (!Array.isArray(rules) || rules.length < 1 || rules.length > 5 || new Set(rules).size !== rules.length
           || !rules.every(validRerunRule)) {
-          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, no control, format or odd space characters, no * except one trailing :*');
+          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, printable ASCII only, no * except one trailing :*');
         }
       }
     }
