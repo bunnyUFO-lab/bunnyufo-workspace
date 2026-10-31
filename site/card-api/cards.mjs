@@ -732,8 +732,21 @@ const AVATAR_SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
 const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 /** The `rerun` field of an Ask: a run to run again (`denied`), or a run that ended before its own Ask was answered (`continue`). */
 const RERUN_KINDS = ['denied', 'continue'];
-/** One phone-allowed rule: an exact Bash command rule or an exact MCP tool (the PC checks the policy). Keep equal to RERUN_RULE_RE in site/api/hub-rerun.mjs. */
-const RERUN_RULE_RE = /^(Bash\(.+\)|mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+)$/s;
+/** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool (the PC checks the policy). Keep validRerunRule equal to the one in site/api/hub-rerun.mjs. */
+const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
+const RERUN_BAD_CHAR_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|[^\S ]/u;
+function validRerunRule(rule) {
+  if (typeof rule !== 'string' || rule.length > 300 || RERUN_BAD_CHAR_RE.test(rule)) return false;
+  if (RERUN_MCP_RE.test(rule)) return true;
+  const match = /^Bash\((.*)\)$/s.exec(rule);
+  if (!match) return false;
+  const body = match[1];
+  if (body === '' || body !== body.trim() || body.includes('Bash(')) return false;
+  const stars = body.split('*').length - 1;
+  if (stars === 0) return true;
+  // One trailing `:*` after a non-empty prefix is the watcher's own prefix form; any other `*` is a wildcard a run could steer.
+  return stars === 1 && body.endsWith(':*') && body.slice(0, -2).trim() !== '';
+}
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -857,8 +870,8 @@ function validateAsk(ask, imageNames) {
         const rules = rerun.allow;
         if (rerun.kind !== 'denied') problems.push('rerun.allow is only for kind denied');
         else if (!Array.isArray(rules) || rules.length < 1 || rules.length > 5 || new Set(rules).size !== rules.length
-          || rules.some(rule => typeof rule !== 'string' || rule.length > 300 || !RERUN_RULE_RE.test(rule) || /[\u0000-\u001f\u007f-\u009f]/.test(rule))) {
-          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, with no control characters');
+          || !rules.every(validRerunRule)) {
+          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, no control, format or odd space characters, no * except one trailing :*');
         }
       }
     }

@@ -19,11 +19,23 @@ import { rerunRequestId } from './hub-requests.mjs';
 import { validId } from './hub-model.mjs';
 
 const KINDS = ['denied', 'continue'];
-/** One phone-allowed rule: an exact Bash command rule or an exact MCP tool. Keep equal to RERUN_RULE_RE in site/card-api/cards.mjs. */
-const RERUN_RULE_RE = /^(Bash\(.+\)|mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+)$/s;
-const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+/** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool. Keep validRerunRule equal to the one in site/card-api/cards.mjs. */
+const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
+const RERUN_BAD_CHAR_RE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|[^\S ]/u;
+function validRerunRule(rule) {
+  if (typeof rule !== 'string' || rule.length > 300 || RERUN_BAD_CHAR_RE.test(rule)) return false;
+  if (RERUN_MCP_RE.test(rule)) return true;
+  const match = /^Bash\((.*)\)$/s.exec(rule);
+  if (!match) return false;
+  const body = match[1];
+  if (body === '' || body !== body.trim() || body.includes('Bash(')) return false;
+  const stars = body.split('*').length - 1;
+  if (stars === 0) return true;
+  // One trailing `:*` after a non-empty prefix is the watcher's own prefix form; any other `*` is a wildcard a run could steer.
+  return stars === 1 && body.endsWith(':*') && body.slice(0, -2).trim() !== '';
+}
 const validAllow = rules => Array.isArray(rules) && rules.length >= 1 && rules.length <= 5 && new Set(rules).size === rules.length
-  && rules.every(rule => typeof rule === 'string' && rule.length <= 300 && RERUN_RULE_RE.test(rule) && !CONTROL_RE.test(rule));
+  && rules.every(validRerunRule);
 const NO_NOTE = 'The owner asked to run it again without an answer.';
 const LIMITS = { question: 600, answer: 2000 };
 

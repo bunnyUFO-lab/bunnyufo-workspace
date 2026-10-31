@@ -632,3 +632,38 @@ test('a grant never passes as an approval or a stop', async () => {
     assert.match(asStop, /was stopped/);
   } finally { await rm(home, { recursive: true, force: true }); await f.close(); }
 });
+
+test('a rule with a hidden or odd character, or a broad shape, is refused by the field check and by the card client', async () => {
+  const r = `${day}-sprite-studio-walk-a1b2`;
+  const hidden = [
+    ['a right-to-left override', 'Bash(echo ‮)'], ['a line separator', 'Bash(echo  x)'], ['a paragraph separator', 'Bash(echo  x)'],
+    ['a zero-width space', 'Bash(echo ​x)'], ['a zero-width joiner', 'Bash(echo ‍x)'], ['a byte order mark', 'Bash(echo ﻿x)'],
+    ['a no-break space', 'Bash(echo x)'], ['an em space', 'Bash(echo x)'], ['a tab', 'Bash(echo\tx)'], ['a next-line character', 'Bash(echo \u0085x)'],
+    ['a newline', 'Bash(echo\nx)'], ['a delete character', 'Bash(echo \u007fx)'], ['a soft hyphen', 'Bash(ec­ho x)'],
+  ];
+  const broad = [
+    ['bare Bash', 'Bash'], ['an empty body', 'Bash()'], ['a body of spaces', 'Bash( )'], ['a leading space', 'Bash( echo)'], ['a trailing space', 'Bash(echo )'],
+    ['everything', 'Bash(*)'], ['a lone prefix star', 'Bash(:*)'], ['a space before the prefix star', 'Bash( :*)'], ['two stars', 'Bash(**)'], ['a star in the middle', 'Bash(echo * x)'],
+    ['a prefix star then more', 'Bash(echo:* x)'], ['two prefix stars', 'Bash(echo:*:*)'], ['a star without the colon', 'Bash(echo*)'], ['a second Bash(', 'Bash(echo Bash(x))'],
+    ['a Read rule', 'Read(//c/**)'], ['an Edit rule', 'Edit(x)'], ['a bare tool', 'WebFetch'], ['an mcp tool with a star', 'mcp__server__*'], ['an mcp server only', 'mcp__server'], ['an mcp wildcard', 'mcp__*__tool'],
+  ];
+  for (const [name, rule] of [...hidden, ...broad]) {
+    assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: [rule] }), { request: r, kind: 'denied', allowBad: true }, name);
+    assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', rule] }), { request: r, kind: 'denied', allowBad: true }, `${name} among good rules`);
+  }
+  // What stays: an exact command, the watcher's trailing prefix form, a space inside, and an exact MCP tool.
+  for (const rule of ['Bash(ping -n 1 example.com)', 'Bash(ping:*)', 'Bash(python tools/x.py --check)', 'Bash(git status:*)', 'mcp__bunnylink__status', 'Bash(echo café)']) {
+    assert.deepEqual(checkRerunField({ request: r, kind: 'denied', allow: [rule] }), { request: r, kind: 'denied', allow: [rule] }, rule);
+  }
+  // Answering "allow" on such an Ask signs nothing.
+  const f = await fixture();
+  try {
+    const original = await f.run();
+    const bad = f.rerunAsk('a1b2', { request: original, kind: 'denied', allow: ['Bash(echo ‮)'] }, { options: ALLOW_OPTIONS });
+    const done = await f.answer(bad, 'allow');
+    assert.equal(done.body.rerun.started, false);
+    assert.match(done.body.rerun.why, /rules could not be read/);
+    assert.deepEqual([...f.fake.objects.keys()].filter(name => name.endsWith('/allow-grant.json')), []);
+    assert.equal(f.copies(original).length, 0);
+  } finally { await f.close(); }
+});
