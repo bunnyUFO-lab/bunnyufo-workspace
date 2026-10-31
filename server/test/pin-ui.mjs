@@ -75,12 +75,13 @@ const published = [[one, await readFile(path.join(one, 'workspace.json'), 'utf8'
 // driven here the way a hand drives it: press, move, release. `edge` aims at the top or
 // bottom of the target instead of its middle, which is how a place in the list is chosen.
 const dragCard = async (page, source, target, edge) => {
-  // The sidebar slides in and out; measure once it has stopped moving.
+  // The sidebar slides in and out; measure once it has stopped moving. Before the slide starts it
+  // sits still off the left edge, which is not "settled" (that read made a drag start off screen).
   await source.waitFor();
   let settled = null;
-  for (let tries = 0; tries < 40; tries++) {
+  for (let tries = 0; tries < 100; tries++) {
     const box = await source.boundingBox();
-    if (settled && box.x === settled.x && box.y === settled.y) break;
+    if (settled && box.x >= 0 && box.x === settled.x && box.y === settled.y) break;
     settled = box;
     await new Promise(resolve => setTimeout(resolve, 50));
   }

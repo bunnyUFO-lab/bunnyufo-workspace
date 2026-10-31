@@ -212,12 +212,15 @@ try {
   assert.equal(await real.locator('[data-spawn-note]').innerText(), 'Write what it should do.');
   await real.locator('[data-spawn-text]').fill('Why do runs stall');
   assert.equal(await real.locator('[data-spawn-go]').isDisabled(), false);
-  await real.route('**/api/hub/requests/*/approve', async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); });
+  // A slow approve. The handler is named so unroute can wait for it: an unroute that does not wait
+  // lets the page finish the request itself, and the late route.continue() throws "Route is already handled".
+  const slowApprove = async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); };
+  await real.route('**/api/hub/requests/*/approve', slowApprove);
   await real.locator('[data-spawn-go]').click();
   await real.locator('[data-spawn-go]', { hasText: 'Approving…' }).waitFor();
   assert.equal(await real.locator('[data-spawn-go]').getAttribute('aria-busy'), 'true');
   await real.locator('[data-spawn-toast]').waitFor();
-  await real.unroute('**/api/hub/requests/*/approve');
+  await real.unroute('**/api/hub/requests/*/approve', slowApprove, { behavior: 'wait' });
 
   step('Edit: Done when can be changed, and an Edit that leaves the text alone keeps "written by"');
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
