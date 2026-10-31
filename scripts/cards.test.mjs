@@ -1351,3 +1351,50 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 }
+
+for (const via of ['api', 's3']) {
+  test(`sheet put (${via}): team/<agent>/sheet-<stamp>.png then .json for the agent on the run's own request; nothing else goes through`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const id = RUN_ID.replace('research-tugs', 'avatar-sheet');
+      const stamp = '20261030T101500Z-ab12';
+      fake.seed(`sections/inbox/requests/${id}/request.json`, JSON.stringify({ id, project: 'example', preset: 'agent-avatar-sheet', agent: 'claude', origin: { kind: 'owner', name: 'o' } }), 'application/json');
+      const other = RUN_ID.replace('research-tugs', 'plain');
+      fake.seed(`sections/inbox/requests/${other}/request.json`, JSON.stringify({ id: other, project: 'example', preset: 'code-task', origin: { kind: 'owner', name: 'o' } }), 'application/json');
+      const png = path.join(dir, 'sheet.png');
+      const json = path.join(dir, 'sheet.json');
+      await writeFile(png, Buffer.concat([PNG_BYTES, Buffer.from('pixels')]));
+      await writeFile(json, JSON.stringify({ v: 1, agent: 'claude', source: { request: id, choice: 'a' } }));
+      const args = (over = {}) => ['sheet', 'put', '--request', over.request ?? id, '--stamp', over.stamp ?? stamp, '--png', over.png ?? png, '--meta', over.json ?? json];
+
+      // refused before anything is written
+      assert.equal((await cli(via, ...args({ stamp: '2026-10-30' }))).code, 1);
+      assert.equal((await cli(via, ...args({ stamp: stamp.toUpperCase() }))).code, 1);
+      assert.equal((await cli(via, ...args({ request: other }))).code, 1, 'not a sheet request');
+      assert.equal((await cli(via, ...args({ request: RUN_ID.replace('research-tugs', 'none') }))).code, 2);
+      await writeFile(path.join(dir, 'bad.png'), 'GIF89a');
+      assert.equal((await cli(via, ...args({ png: path.join(dir, 'bad.png') }))).code, 1, 'not a PNG');
+      await writeFile(path.join(dir, 'other.json'), JSON.stringify({ source: { request: other } }));
+      assert.equal((await cli(via, ...args({ json: path.join(dir, 'other.json') }))).code, 1, 'JSON of another request');
+      await writeFile(path.join(dir, 'big.json'), JSON.stringify({ v: 1, agent: 'claude', source: { request: id }, pad: 'x'.repeat(17 * 1024) }));
+      const big = await cli(via, ...args({ json: path.join(dir, 'big.json') }));
+      assert.equal(big.code, 1);
+      assert.match(big.stderr, /over 16 KB/);
+      await writeFile(path.join(dir, 'agent.json'), JSON.stringify({ v: 1, agent: 'codex', source: { request: id } }));
+      const wrongAgent = await cli(via, ...args({ json: path.join(dir, 'agent.json') }));
+      assert.equal(wrongAgent.code, 1);
+      assert.match(wrongAgent.stderr, /names agent "codex"/);
+      await writeFile(path.join(dir, 'noagent.json'), JSON.stringify({ source: { request: id } }));
+      assert.equal((await cli(via, ...args({ json: path.join(dir, 'noagent.json') }))).code, 1, 'no agent field');
+      assert.equal([...fake.objects.keys()].filter(key => key.includes('/team/')).length, 0);
+
+      const done = await cli(via, ...args());
+      assert.equal(done.code, 0, done.stderr);
+      assert.deepEqual(done.stdout.trim().split('\n'), [`team/claude/sheet-${stamp}.png`, `team/claude/sheet-${stamp}.json`]);
+      assert.deepEqual([...fake.objects.keys()].filter(key => key.includes('/team/')).sort(), [`sections/inbox/team/claude/sheet-${stamp}.json`, `sections/inbox/team/claude/sheet-${stamp}.png`]);
+      assert.equal(fake.objects.get(`sections/inbox/team/claude/sheet-${stamp}.png`).body.subarray(0, 8).equals(PNG_BYTES), true);
+      assert.equal(JSON.parse(fake.objects.get(`sections/inbox/team/claude/sheet-${stamp}.json`).body.toString()).source.request, id);
+      assert.equal((await cli(via, ...args())).code, 1, 'create-only: the same stamp is refused');
+    } finally { await close(); }
+  });
+}

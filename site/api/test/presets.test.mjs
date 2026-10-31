@@ -116,7 +116,32 @@ test('code and docs briefs name the branch; docs changes only Markdown', () => {
   const docs = renderBrief({ preset: 'docs', request: request() });
   assert.match(docs, /Change only `\*\.md` files and files under `docs\/`/);
   assert.match(docs, /claude\/run-20261029-magic-loops-x-a1b2/);
-  assert.match(docs, /cards request finish/);
+  assert.match(docs, /finish the request as your run's rules say/);
+});
+
+test('PC runs finish, ask and upload through the run tools: no PC-target brief names cards ask create, cards put or cards request finish', () => {
+  for (const preset of PRESETS.filter(entry => entry.targets.includes('pc'))) {
+    const brief = renderBrief({ preset, request: request({ agent: 'claude', fromAsk: 'a-1', choice: 'a', subject: 'Characters/claude avatar' }) });
+    assert.doesNotMatch(brief, /cards ask create|cards put|cards request finish/, preset.id);
+  }
+  // The cloud routine prompt (docs/cloud-routines.md, step 9) still tells a cloud run how to finish: the generic templates only point at "your run's rules".
+  for (const id of ['code-task', 'docs']) assert.match(renderBrief({ preset: id, request: request() }), /finish the request as your run's rules say\./, id);
+});
+
+test('the avatar presets name run-ask.mjs, run-sheet.mjs and run-finish.mjs, pictures in ask-images/ and the avatar field', () => {
+  const variants = renderBrief({ preset: 'agent-avatar', request: request({ agent: 'claude' }) });
+  assert.match(variants, /node \.claude\/bin\/run-ask\.mjs/);
+  assert.match(variants, /node \.claude\/bin\/run-finish\.mjs/);
+  assert.match(variants, /ask-images\//);
+  assert.match(variants, /`image`/);
+  assert.match(variants, /"agent": "claude", "request": "20261029-magic-loops-x-a1b2"/);
+  assert.doesNotMatch(variants, /run-sheet/);
+  const sheet = renderBrief({ preset: 'agent-avatar-sheet', request: request({ agent: 'claude', fromAsk: 'a-1', choice: 'b', subject: 'Characters/claude avatar' }) });
+  for (const tool of ['run-ask.mjs', 'run-sheet.mjs', 'run-finish.mjs']) assert.match(sheet, new RegExp(`node \\.claude/bin/${tool.replace('.', '\\.')}`), tool);
+  assert.match(sheet, /sheet\.json/);
+  assert.match(sheet, /"agent": "claude", "sheet": "sheet-<stamp>"/);
+  assert.match(sheet, /team\/claude\/sheet-<stamp>\.png/);
+  assert.match(sheet, /run-finish\.json/);
 });
 
 test('a follow-up block shows only when the request has one', () => {
@@ -175,7 +200,7 @@ test('agent-avatar routes to the PC and both avatar briefs name the request, the
     assert.ok(brief.includes('`claude`'), id);
     assert.ok(brief.includes('source: "pc"'), id);
     assert.match(brief, /cloud source/, id);
-    assert.match(brief, /--require-passkey/, id);
+    assert.match(brief, /`requirePasskey` set to true/, id);
     assert.match(brief, /Do not wait for the answer/, id);
     assert.match(brief, new RegExp(`at most ${presetOf(id).minutes} minutes`), id);
   }

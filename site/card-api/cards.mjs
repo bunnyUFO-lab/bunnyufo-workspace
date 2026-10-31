@@ -100,6 +100,8 @@
 //        --preset makes a request the owner approves in the Hub (no --when); it pings #needs-you like an Ask, linking
 //        /#/~hub/request/<id>. --target is only a proposal. origin is { kind: run } when --origin-run or BUW_REQUEST_ID
 //        is set, else { kind: agent }; never owner.
+//   cards sheet put --request <id> --stamp <YYYYMMDDTHHMMSSZ-xxxx> --png <file> --meta <file>   an avatar sheet run's sheet: team/<agent>/sheet-<stamp>.png, then .json (create-only).
+//        The agent is the one on that request (preset agent-avatar-sheet), never an argument. The JSON must name the request in source.request. PC runs reach it through run-sheet.mjs.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 //   cards mark list --project <p> [--json]                            the owner's marks on the Roadmap that no agent has applied yet (bead, verdict, time, reason), oldest first
 //   cards mark applied --project <p> --bead <id>                      after `bd close`: writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
@@ -120,7 +122,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | beads push --project <p> | mark list|applied --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -1574,6 +1576,42 @@ async function requestState(rawId) {
   console.log(await requestStateOf(id, names));
 }
 
+// --- An avatar sheet (the sprite flow): team/<agent>/sheet-<stamp>.png and .json, written by the sheet run ---
+
+const SHEET_STAMP_RE = /^\d{8}T\d{6}Z-[a-z0-9]{4}$/;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * Uploads a finished sheet as the agent of the run's own request: the PNG, then the JSON (the Hub lists a sheet by its JSON, so it is
+ * never listed before its picture). The agent comes from `requests/<id>/request.json` (preset agent-avatar-sheet), not from an argument.
+ */
+async function sheetPut(flags) {
+  const usage = 'Usage: sheet put --request <id> --stamp <YYYYMMDDTHHMMSSZ-xxxx> --png <file> --meta <file>';
+  const id = idSafe(flags.request ?? process.env.BUW_REQUEST_ID);
+  if (!id || !flags.stamp || !flags.png || !flags.meta) throw new Error(usage);
+  if (!SHEET_STAMP_RE.test(flags.stamp)) throw new Error('--stamp is <YYYYMMDDTHHMMSSZ>-<4 lower-case letters or digits>.');
+  const request = await readJson(inboxPath('requests', id, 'request.json'));
+  if (!request) { console.error(`No request ${id}.`); throw new Exit(2); }
+  if (request.preset !== 'agent-avatar-sheet') throw new Error(`${id} is not an avatar sheet request.`);
+  if (typeof request.agent !== 'string' || !AVATAR_SLUG_RE.test(request.agent)) throw new Error(`${id} names no agent.`);
+  const png = await readFile(flags.png);
+  if (png.length > MAX_INLINE) throw new Error('The sheet PNG is over 4 MB.');
+  if (png.length < PNG_SIGNATURE.length || !png.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) throw new Error('The sheet PNG is not a PNG.');
+  const jsonBytes = await readFile(flags.meta);
+  if (jsonBytes.length > 16 * 1024) throw new Error('The sheet JSON is over 16 KB (the Hub would not list it).');
+  let json;
+  try { json = JSON.parse(jsonBytes.toString('utf8')); } catch { throw new Error('The sheet JSON is not JSON.'); }
+  if (json?.source?.request !== id) throw new Error(`The sheet JSON needs source.request equal to ${id}.`);
+  if (json.agent !== request.agent) throw new Error(`The sheet JSON names agent ${JSON.stringify(json.agent ?? null)}, but ${id} is for ${request.agent}; the Hub would not list it.`);
+  const name = `sheet-${flags.stamp}`;
+  const pngFile = inboxPath('team', request.agent, `${name}.png`);
+  const jsonFile = inboxPath('team', request.agent, `${name}.json`);
+  if (await mustPut(pngFile, png, { createOnly: true, contentType: 'image/png' }) === 'exists') throw new Error(`${pngFile} is there already; use a new stamp.`);
+  if (await mustPut(jsonFile, jsonBytes.toString('utf8'), { createOnly: true }) === 'exists') throw new Error(`${jsonFile} is there already; use a new stamp.`);
+  console.log(pngFile);
+  console.log(jsonFile);
+}
+
 // --- Beads ---
 
 /** A worktree root as it is hashed and stored: forward slashes, no trailing slash. */
@@ -1731,6 +1769,7 @@ async function inbox(command, args) {
     if (!flags.bead) throw new Error('Usage: request take <id> --bead <bead id>');
     return claim('requests', idSafe(id), 'taken.json', pickupBody(flags));
   }
+  if (command === 'sheet' && sub === 'put') return sheetPut(flags);
   if (command === 'beads' && sub === 'push') return beadsPush(flags);
   if (command === 'mark' && sub === 'list') return markList(flags);
   if (command === 'mark' && sub === 'applied') return markApplied(flags);
@@ -1741,7 +1780,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'ask', 'checklist', 'request', 'beads', 'mark'].includes(first)) {
+  if (['event', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;
