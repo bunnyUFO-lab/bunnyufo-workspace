@@ -10,7 +10,7 @@ const REPLY_MAX = 2000
 /** The states with no reply box at all: Approve, Approve again and Decline already cover them. */
 const NO_BOX = new Set(['proposed', 'declined', 'expired', 'lost', 'open', ''])
 /** The states where an ended Hermes job takes a reply. */
-const CAN_REPLY = new Set(['done', 'failed', 'asking', 'stopped'])
+const CAN_REPLY = new Set(['done', 'failed', 'asking', 'stopped', 'running'])
 
 interface ReplyGate {
   /** Why the box is off, in words; null when it takes a reply. */
@@ -32,6 +32,7 @@ function replyGate({ state, target, approved, hasRun, continuedTo, canWrite }: {
   if (state === 'approved' || (state === 'taken' && !hasRun)) return { reason: 'You can reply once Hermes has started.' }
   if (state === 'stopping') return { reason: 'Stopping. Reply after it has stopped.' }
   if (!CAN_REPLY.has(state)) return { reason: 'You can reply once the run has ended.' }
+  if (state === 'running' && !hasRun) return { reason: 'You can reply once Hermes has started.' }
   return { reason: null }
 }
 
@@ -40,12 +41,13 @@ function replyGate({ state, target, approved, hasRun, continuedTo, canWrite }: {
  * has ended a reply starts a continuation (a new request); `onGone` opens it. The box is shown off, with its reason, wherever a
  * person would look for it.
  */
-export default function RunReply({ id, state, target, approved, hasRun, continuedTo, onGone }: {
-  id: string; state: string; target?: string; approved: boolean; hasRun: boolean; continuedTo?: string; onGone?: (id: string) => void
+export default function RunReply({ id, state, target, approved, hasRun, continuedTo, onGone, onSent }: {
+  id: string; state: string; target?: string; approved: boolean; hasRun: boolean; continuedTo?: string; onGone?: (id: string) => void; onSent?: () => void
 }) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
   const gate = replyGate({ state, target, approved, hasRun, continuedTo, canWrite: host.write })
   if (!gate) return null
   const off = gate.reason !== null
@@ -57,9 +59,14 @@ export default function RunReply({ id, state, target, approved, hasRun, continue
     setBusy(true)
     setProblem(null)
     try {
-      const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(id)}/reply`, { text })
+      setNote(null)
+      const made = await hubPost<{ id: string; delivery?: 'sent' | 'queued'; reason?: string }>(`/requests/${encodeURIComponent(id)}/reply`, { text })
       setDraft('')
-      onGone?.(made.id)
+      // While the run goes the answer says how it was delivered (the line appears from the stream); after the end it is a new request.
+      if (made.delivery) {
+        if (made.delivery === 'queued') setNote(`${made.reason ?? 'Hermes could not take it now.'} It goes out as the next run when this one ends.`)
+        onSent?.()
+      } else onGone?.(made.id)
     } catch (failure) {
       setProblem(failure instanceof HubError || failure instanceof Error ? failure.message : 'It did not work.')
     } finally { setBusy(false) }
@@ -87,6 +94,7 @@ export default function RunReply({ id, state, target, approved, hasRun, continue
             : gate.reason}
         </p>
       )}
+      {note && <p className="hub-muted rd-reply-why" role="status" data-reply-note>{note}</p>}
       {problem && <p className="hub-error" role="alert" data-reply-error>{problem}</p>}
     </div>
   )

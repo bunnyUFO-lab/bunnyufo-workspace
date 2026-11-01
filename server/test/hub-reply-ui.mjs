@@ -104,7 +104,7 @@ try {
   await page.locator('[data-run-continues]').waitFor();
   assert.equal((await page.locator('[data-run-view] [data-run-state-chip]').first().innerText()).trim().length > 0, true);
 
-  step('a PC job, a job not started and a job still going show the box off, each with its reason');
+  step('a PC job, a job not started and a taken one that no run is following show the box off, each with its reason');
   const reasons = [
     [live.url, ids.pc, /^Replies go to Hermes jobs\. A PC or cloud run can’t take a message yet\.$/],
     [idle.url, ids.waiting, /^You can reply once Hermes has started\.$/],
@@ -155,6 +155,115 @@ try {
   await page.locator(`[data-run-view="${never}"] [data-run-state-chip]`, { hasText: 'Failed' }).waitFor();
   assert.equal(await page.locator(`[data-run-view="${never}"] [data-run-again]`).count(), 1);
   assert.equal(await page.locator(`[data-run-view="${never}"] ${GATE}`).count(), 0, 'No reply box without a Hermes run.');
+
+  step('while it runs: a reply shows "You:" as sent, then read after the next tool, and the box clears');
+  const steerIds = { read: id('steer-read-b1b1'), refused: id('steer-refused-b2b2'), stopped: id('steer-stopped-b3b3') };
+  const slow = await startHubFixture({
+    signing: true, hermes: true,
+    hermesOptions: { runScript: ['Reading sources. ', { wait: 2500 }, { tool: 'web_search', preview: 'wooden tug games' }, { wait: 6000 }, 'Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
+  });
+  fixtures.push(slow);
+  slow.seed.request(proposal(slow.now, 'failed', 'Research that can be steered', { id: steerIds.read }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const steerer = await open({ width: 1280, height: 1000 });
+  await steerer.goto(`${slow.url}#/~hub/needs`);
+  await steerer.locator(`[data-need="approval-${steerIds.read}"] [data-approval-approve]`).click();
+  await steerer.locator('[data-next-note]').waitFor();
+  await steerer.goto(`${slow.url}#/~hub/request/${encodeURIComponent(steerIds.read)}`);
+  const readView = steerer.locator(`[data-run-view="${steerIds.read}"]`);
+  await readView.locator('[data-run-text]', { hasText: 'Reading sources.' }).waitFor();
+  const steerBox = readView.locator(GATE);
+  assert.equal(await steerBox.getAttribute('data-reply-off'), null, 'The box is on while it runs.');
+  await steerBox.locator('[data-reply-input]').fill('Look at the wooden one too');
+  await steerBox.locator('[data-reply-input]').press('Enter');
+  const you = readView.locator('[data-run-you]');
+  await you.waitFor();
+  assert.match(await you.innerText(), /^You: Look at the wooden one too\s+sent$/);
+  assert.equal(await you.getAttribute('data-run-you'), 'sent');
+  assert.equal(await steerBox.locator('[data-reply-input]').inputValue(), '', 'The textarea cleared.');
+  assert.equal(await steerer.evaluate(() => window.location.hash.includes('/request/')), true, 'The page stays on this run.');
+  await readView.locator('[data-run-you="read"]').waitFor({ timeout: 20000 });
+  assert.equal((await readView.locator('[data-run-you-state]').innerText()).trim(), 'read');
+  assert.equal(slow.hermes.steers[0].input, 'Message from the owner while you work: Look at the wooden one too');
+  await readView.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: 30000 });
+  assert.match(await readView.locator('[data-step="reply"]').innerText(), /^You: Look at the wooden one too · sent$/);
+  assert.equal(await readView.locator('[data-step="continued"]').count(), 0, 'It was read, so no second run.');
+
+  step('Hermes cannot take it: the line says queued, and when the run completes it goes out as the next run, linked in the Timeline');
+  const refuse = await startHubFixture({
+    signing: true, hermes: true,
+    hermesOptions: { refuseSteer: true, runScript: ['Reading sources. ', { wait: 3000 }, 'Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
+  });
+  fixtures.push(refuse);
+  refuse.seed.request(proposal(refuse.now, 'failed', 'Research that Hermes refuses to steer', { id: steerIds.refused }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const refused = await open({ width: 1280, height: 1000 });
+  await refused.goto(`${refuse.url}#/~hub/needs`);
+  await refused.locator(`[data-need="approval-${steerIds.refused}"] [data-approval-approve]`).click();
+  await refused.locator('[data-next-note]').waitFor();
+  await refused.goto(`${refuse.url}#/~hub/request/${encodeURIComponent(steerIds.refused)}`);
+  const refusedView = refused.locator(`[data-run-view="${steerIds.refused}"]`);
+  await refusedView.locator('[data-run-text]', { hasText: 'Reading sources.' }).waitFor();
+  await refusedView.locator('[data-reply-input]').fill('Also compare prices');
+  await refusedView.locator('[data-reply-send]').click();
+  await refusedView.locator('[data-run-you="queued"]').waitFor();
+  assert.match(await refusedView.locator('[data-reply-note]').innerText(), /goes out as the next run when this one ends/);
+  const nextLink = refusedView.locator('[data-run-reply-to]');
+  await nextLink.waitFor({ timeout: 30000 });
+  assert.match(await refusedView.locator('[data-step="reply"]').innerText(), /^You: Also compare prices · sent as the next run → /);
+  const nextRun = (await nextLink.innerText()).trim();
+  assert.equal(refuse.fake.json(`sections/inbox/requests/${nextRun}/request.json`).continues.replies[0], 'Also compare prices');
+
+  step('Stop: the reply is not sent on its own; it says "not sent: the run stopped" with Send it now, which continues it');
+  const hold = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Working. ', { hold: true }] } });
+  fixtures.push(hold);
+  hold.seed.request(proposal(hold.now, 'failed', 'Research that is stopped', { id: steerIds.stopped }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const stopper = await open({ width: 1280, height: 1000 });
+  await stopper.goto(`${hold.url}#/~hub/needs`);
+  await stopper.locator(`[data-need="approval-${steerIds.stopped}"] [data-approval-approve]`).click();
+  await stopper.locator('[data-next-note]').waitFor();
+  await stopper.goto(`${hold.url}#/~hub/request/${encodeURIComponent(steerIds.stopped)}`);
+  const held = stopper.locator(`[data-run-view="${steerIds.stopped}"]`);
+  await held.locator('[data-run-text]', { hasText: 'Working.' }).waitFor();
+  await held.locator('[data-reply-input]').fill('Only the cheap ones');
+  await held.locator('[data-reply-send]').click();
+  await held.locator('[data-run-you="sent"]').waitFor();
+  await held.locator('[data-run-stop]').click();
+  await held.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
+  const queuedRow = held.locator('[data-step="reply"]');
+  await queuedRow.locator('[data-run-reply-queued]').waitFor();
+  assert.match(await queuedRow.innerText(), /^You: Only the cheap ones · not sent: the run stopped\s+Send it now$/);
+  assert.equal(hold.fake.objects.has(`sections/inbox/requests/${steerIds.stopped}/continued.json`), false, 'Nothing went out on its own.');
+  await queuedRow.locator('[data-run-send-now]').click();
+  await stopper.waitForFunction(original => !decodeURIComponent(window.location.hash).includes(original), steerIds.stopped);
+  await stopper.locator('[data-run-continues]').waitFor();
+  assert.equal(hold.hermes.runs.length, 2, 'Send it now started the next run.');
+
+  step('a run that ends asking takes the queued reply as the answer: the Timeline says "sent as the next run" and offers no Send it now');
+  const askId = id('steer-asking-b4b4');
+  const asking = await startHubFixture({
+    signing: true, hermes: true,
+    hermesOptions: { refuseSteer: true, runScript: ['Looking. ', { wait: 3000 }, 'Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' },
+  });
+  fixtures.push(asking);
+  asking.seed.request(proposal(asking.now, 'failed', 'Research that ends with a question', { id: askId }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const asker = await open({ width: 1280, height: 1000 });
+  await asker.goto(`${asking.url}#/~hub/needs`);
+  await asker.locator(`[data-need="approval-${askId}"] [data-approval-approve]`).click();
+  await asker.locator('[data-next-note]').waitFor();
+  await asker.goto(`${asking.url}#/~hub/request/${encodeURIComponent(askId)}`);
+  const askView = asker.locator(`[data-run-view="${askId}"]`);
+  await askView.locator('[data-run-text]', { hasText: 'Looking.' }).waitFor();
+  await askView.locator('[data-reply-input]').fill('The wooden one');
+  await askView.locator('[data-reply-send]').click();
+  await askView.locator('[data-run-you="queued"]').waitFor();
+  await askView.locator('[data-run-reply-to]').waitFor({ timeout: 30000 });
+  assert.match(await askView.locator('[data-step="reply"]').innerText(), /^You: The wooden one · sent as the next run → /);
+  assert.equal(await askView.locator('[data-run-send-now]').count(), 0, 'It was carried; there is nothing to send again.');
+  const answerId = (await askView.locator('[data-run-reply-to]').innerText()).trim();
+  assert.equal(asking.fake.json(`sections/inbox/requests/${answerId}/request.json`).followUp.answer, 'The wooden one');
 
   step('phone: the box fits the screen with no sideways scroll, on the request page');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });

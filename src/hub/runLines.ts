@@ -3,6 +3,8 @@ export type LiveLine =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; id: string; tool: string; preview: string; state: 'running' | 'done' | 'failed'; startedAt: number }
   | { kind: 'approval'; id: string; command: string; description: string; settled: boolean }
+  /** The owner's reply while the run went: `sent` (Hermes took it), `read` (a tool result came after it) or `queued` (Hermes could not take it, or the run ended first). */
+  | { kind: 'reply'; text: string; at: string; state: 'sent' | 'read' | 'queued' }
 
 /** The most live text kept, and the most lines: nothing upstream caps a run's output, so the page does. */
 export const MAX_TEXT = 20_000
@@ -37,7 +39,16 @@ function fold(lines: LiveLine[], event: string, data: Record<string, unknown>, n
     const failed = data.error === true
     let at = lines.findIndex(line => line.kind === 'tool' && line.state === 'running' && (!id || line.id === id))
     if (at < 0) at = -1
-    return at < 0 ? lines : lines.map((line, index) => (index === at && line.kind === 'tool' ? { ...line, state: failed ? 'failed' : 'done' } : line))
+    // A tool result after a sent reply is where Hermes reads it.
+    return lines.map((line, index) => (index === at && line.kind === 'tool' ? { ...line, state: failed ? 'failed' : 'done' } : line.kind === 'reply' && line.state === 'sent' ? { ...line, state: 'read' } : line))
+  }
+  if (event === 'reply') {
+    const text = str(data.text)
+    return text ? [...lines, { kind: 'reply', text, at: str(data.at), state: data.delivery === 'sent' ? 'sent' : 'queued' }] : lines
+  }
+  // The run ended before it read a reply Hermes had taken: it waits for the next run.
+  if (event === 'run.completed' || event === 'run.failed' || event === 'run.cancelled' || event === 'run.interrupted') {
+    return lines.map(line => (line.kind === 'reply' && line.state === 'sent' ? { ...line, state: 'queued' } : line))
   }
   if (event === 'approval.request') return [...lines, { kind: 'approval', id: str(data.prompt_id) || `a${lines.length}`, command: str(data.command), description: str(data.description), settled: false }]
   if (event === 'approval.settled') return lines.map(line => (line.kind === 'approval' && !line.settled ? { ...line, settled: true } : line))
