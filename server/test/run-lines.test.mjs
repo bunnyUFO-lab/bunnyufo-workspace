@@ -38,3 +38,16 @@ test('a tool line remembers when it started, and the time reads in seconds then 
   assert.equal(elapsedLabel(130_000), '2 min 10 s');
   assert.equal(elapsedLabel(-5), '0 s');
 });
+
+test('a reply line is sent, turns read on the next tool result, and is queued when Hermes could not take it or the run ended first', () => {
+  const sent = fold([['message.delta', { delta: 'Working. ' }], ['reply', { text: 'Also the wooden one', at: '2026-11-01T10:00:00Z', delivery: 'sent' }]]);
+  assert.deepEqual(sent.map(line => line.kind), ['text', 'reply']);
+  assert.deepEqual([sent[1].text, sent[1].state], ['Also the wooden one', 'sent']);
+  const read = fold([['reply', { text: 'A', at: 'x', delivery: 'sent' }], ['run.steered', { accepted: true }], ['tool.started', { tool: 't', tool_call_id: 'a' }], ['tool.completed', { tool_call_id: 'a' }]]);
+  assert.equal(read[0].state, 'read', 'run.steered changes nothing; the tool result after it is the read.');
+  const refused = fold([['reply', { text: 'B', at: 'x', delivery: 'queued' }], ['tool.started', { tool: 't', tool_call_id: 'a' }], ['tool.completed', { tool_call_id: 'a' }]]);
+  assert.equal(refused[0].state, 'queued', 'A queued reply is never read by the run.');
+  const ended = fold([['reply', { text: 'C', at: 'x', delivery: 'sent' }], ['run.completed', {}]]);
+  assert.equal(ended[0].state, 'queued', 'The run ended before reading it.');
+  assert.equal(fold([['reply', { text: '', delivery: 'sent' }]]).length, 0);
+});

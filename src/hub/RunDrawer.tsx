@@ -36,6 +36,8 @@ interface RunDetail extends RequestDetail {
   fires?: CloudFire[]
   /** The request this one was continued as, when the owner replied after it ended. */
   continued?: { to: string; at?: string }
+  /** The owner's replies, newest first; `queued` is not delivered yet (or the run ended without reading it). */
+  replies?: { id: string; text: string; at: string; by?: string; delivery: 'sent' | 'queued' | 'continued'; to?: string }[]
 }
 
 interface CloudFire { at: string; ok: boolean; status?: number; session?: string; reason?: string; dryRun?: boolean }
@@ -92,6 +94,9 @@ const reasonWord = (reason: string) => (reason === 'approval-refused' ? 'the app
 
 const STOPPABLE = new Set(['approved', 'taken', 'running', 'lost', 'asking'])
 const AGAIN = new Set(['expired', 'failed', 'lost'])
+/** A queued reply the run will not carry on its own: the owner stopped it, it timed out or failed, or it finished before the Hub sent it. */
+const sendNow = (state: string) => ['stopped', 'failed', 'lost', 'done', 'asking', 'expired'].includes(state)
+const notSent = (state: string) => (state === 'stopped' ? 'not sent: the run stopped' : state === 'failed' || state === 'lost' ? 'not sent: the run failed' : 'not sent')
 const LIVE_STATES = new Set(['approved', 'taken', 'running', 'stopping'])
 const RUN_WORD: Record<string, string> = { started: 'Started', working: 'Working', 'turn-ended': 'Turn ended', 'usage-limit': 'Usage limit' }
 
@@ -123,6 +128,7 @@ function Live({ lines, ended }: { lines: LiveLine[]; ended: boolean }) {
     <div className="rd-live" data-run-live aria-live="polite">
       {lines.map((line, index) => {
         if (line.kind === 'text') return <p key={index} className="rd-text" data-run-text>{line.text}</p>
+        if (line.kind === 'reply') return <p key={index} className="rd-you" data-run-you={line.state}><b>You:</b> {line.text} <span className="rd-you-s" data-run-you-state>{line.state}</span></p>
         if (line.kind === 'tool') return <p key={index} className={`rd-tool ${line.state}`} data-run-tool={line.state}><span className="rd-tool-n">{line.tool}</span> <span className="rd-tool-p">{line.preview}</span><span className="rd-tool-s">{line.state === 'running' ? <>running · <Elapsed since={line.startedAt} /></> : line.state === 'failed' ? 'failed' : 'done'}</span></p>
         return (
           <div key={index} className="rd-approval" data-run-approval>
@@ -208,7 +214,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   }, [reload])
 
   if (!detail) return <p className="hub-muted">{error ?? 'Loading…'}</p>
-  const { request, approved, taken, runs = [], result, retry, stop, cloud, fires = [] } = detail
+  const { request, approved, taken, runs = [], result, retry, stop, cloud, fires = [], replies = [] } = detail
   const movedId = movedTo(stop?.reason)
   const cloudShown = cloud && state === 'approved' ? cloudLine(cloud, fires) : null
   const dry = !!cloud?.dryRun || fires.some(fire => fire.dryRun)
@@ -261,6 +267,17 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         {fires.map(fire => (
           <li key={fire.at + String(fire.ok)} data-step="fire"><b>{fire.ok ? 'Fired' : 'Fire failed'}</b> {fire.ok ? 'in the cloud' : fireReason(fire.reason)} · {clock(fire.at)}{fire.dryRun ? ' (dev: nothing was sent)' : ''}{fire.ok && sessionUrl(fire.session) && <> · <a href={sessionUrl(fire.session)} target="_blank" rel="noopener noreferrer">Open session</a></>}</li>
         ))}
+        {replies.map(row => (
+          <li key={row.id} data-step="reply" data-reply-delivery={row.delivery}>
+            <b>You:</b> {row.text} · {row.delivery === 'continued' && row.to
+              ? <>sent as the next run → <a href={hubHash('request', row.to)} data-run-reply-to>{row.to}</a></>
+              : row.delivery === 'sent' ? 'sent'
+                : <span data-run-reply-queued>{sendNow(state) ? <>{notSent(state)}{host.write && <> <button type="button" className="hub-btn" disabled={busy} onClick={() => void act(async () => {
+                  const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(id)}/reply`, { text: row.text })
+                  onGone?.(made.id)
+                })} data-run-send-now>Send it now</button></>}</> : 'queued; it goes out as the next run when this one ends'}</span>}
+          </li>
+        ))}
         {taken && <li data-step="taken"><b>Taken</b> by {taken.runner ?? taken.host ?? 'a runner'}{taken.host && taken.runner ? ` on ${taken.host}` : ''} · {clock(taken.at)}</li>}
         {approved && <li data-step="approved"><b data-run-by>{by}</b> · {clock(approved.at)}</li>}
         {request.continues && <li data-step="continues"><b>Continues</b> ← <a href={hubHash('request', request.continues.from)} data-run-continues>{request.continues.from}</a></li>}
@@ -294,7 +311,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         </>
       )}
 
-      <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} />
+      <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
       {problem && <p className="hub-error" role="alert" data-run-error>{problem}</p>}
       {(stoppable || again) && (
         <div className="ni-a rd-foot">

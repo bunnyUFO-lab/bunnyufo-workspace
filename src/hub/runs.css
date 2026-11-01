@@ -137,3 +137,11 @@
 .rd-reply .hub-compose textarea:disabled { opacity: 0.6; }
 .rd-reply .hub-compose .hub-btn { min-height: 44px; }
 .rd-reply-why { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+
+/* The owner's replies in the Run list (ws-q9y.6): the Chat user bubble's colour, no new palette. */
+.rd-you { margin: 0; align-self: flex-end; max-width: 92%; padding: 6px 10px; border-radius: var(--radius); background: var(--pink-dim); font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.rd-you b { font-weight: 600; }
+.rd-you-s { margin-left: 6px; font-size: 11px; color: var(--text-dim); }
+.rd-you[data-run-you="read"] .rd-you-s { color: var(--green); }
+.rd-you[data-run-you="queued"] .rd-you-s { color: var(--amber); }
+.rd-timeline [data-run-send-now] { min-height: 36px; margin-left: 4px; }
