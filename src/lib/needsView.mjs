@@ -62,13 +62,13 @@ function sessionTool(item) {
   return TOOL_NAME[tool] ?? tool.charAt(0).toUpperCase() + tool.slice(1)
 }
 
-/** What a session waits on: `permission`, `question` or `waiting`. The hub-hooks mod posts `blocked` only for a permission prompt. */
+/** What a session waits on: `permission`, `question` or `waiting`. The hub-hooks mod posts `blocked` for permission prompts and for questions without saying which, so with no reason it is `waiting`. */
 export function sessionWait(item) {
   const reason = String(item.reason ?? '').toLowerCase()
   if (/permission/.test(reason)) return 'permission'
   if (/question|elicitation|\bask/.test(reason)) return 'question'
   if (reason) return 'waiting'
-  return item.source === 'hub-hooks' ? 'permission' : 'waiting'
+  return 'waiting'
 }
 
 /** The label of a blocked session: "Claude permission", "Codex question", "Session waiting". */

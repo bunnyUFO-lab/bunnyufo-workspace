@@ -32,7 +32,7 @@ try {
   seed.ask(ask('magic-loops', 'dash', 'a222', 20));
   seed.checklist(checklistJson({ id: id('magic-loops', 'setup', 'c111'), project: 'magic-loops', now: minutesAgo(now, 30) }));
   seed.ask(ask('sprite-studio', 'palette', 'b111', 40));
-  seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 50), project: 'sprite-studio', session: 'sess-ss', title: 'Permission needed: run the sprite batch', source: 'hub-hooks' }));
+  seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 50), project: 'sprite-studio', session: 'sess-ss', title: 'Permission needed: run the sprite batch', source: 'hub-hooks', extra: { reason: 'permission' } }));
   seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(now, 60), project: 'bunnylink', bead: 'bl-9a2', title: 'PR ready for review: gate script', url: 'https://example.test/pr/7' }));
   const approval = id('bunnylink', 'look-at-the-gate', 'e5e5');
   seed.request({ id: approval, project: 'bunnylink', createdAt: minutesAgo(now, 70).toISOString(), by: 'owner', text: 'Look at the gate script', preset: 'code-task', repo: 'example/bunnylink', target: 'at-pc', origin: { kind: 'owner', name: 'owner' } });
@@ -68,6 +68,13 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
   assert.equal((await page.locator('.ni[data-kind="unstick"] .ni-meta .ni-chip').first().innerText()).trim(), 'Claude permission');
   assert.equal((await page.locator('.hub-chip[data-filter="unstick"]').innerText()).replace(/\s+/g, ' ').trim(), 'Sessions 1');
+
+  step('the Hermes ping link, needs/approval, lands on All as it always did');
+  await page.goto(`${fixture.url}#/~hub/needs/approval`);
+  await page.reload();
+  await page.waitForFunction(() => location.hash === '#/~hub/needs/all');
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
+  assert.equal(await page.locator('.hub-chip.on').getAttribute('data-filter'), 'all');
 
   step('the old Unstick address redirects to Sessions in place, and a project rides along');
   const before = await page.evaluate(() => history.length);

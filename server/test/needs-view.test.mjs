@@ -55,14 +55,16 @@ test('per-project counts become the picker options, by name, with the chosen pro
 
 test('a blocked session is labelled with its tool and what it waits on', () => {
   const table = [
-    [{ source: 'hub-hooks' }, 'Claude permission'],
+    [{ source: 'hub-hooks' }, 'Claude waiting'],
+    [{ source: 'hub-hooks', reason: 'permission' }, 'Claude permission'],
+    [{ source: 'hub-hooks', reason: 'question' }, 'Claude question'],
     [{ tool: 'claude-code', reason: 'permission_prompt' }, 'Claude permission'],
     [{ tool: 'claude-code', reason: 'elicitation_dialog' }, 'Claude question'],
     [{ tool: 'claude', reason: 'question' }, 'Claude question'],
     [{ tool: 'codex', reason: 'permission_prompt' }, 'Codex permission'],
     [{ tool: 'Codex' }, 'Codex waiting'],
     [{ tool: 'hermes', reason: 'idle_prompt' }, 'Hermes waiting'],
-    [{ tool: 'aider', source: 'hub-hooks' }, 'Aider permission'],
+    [{ tool: 'aider', source: 'hub-hooks' }, 'Aider waiting'],
     [{ tool: 'aider', reason: 'task done' }, 'Aider waiting'],
     [{ source: 'test' }, 'Session waiting'],
     [{}, 'Session waiting'],
