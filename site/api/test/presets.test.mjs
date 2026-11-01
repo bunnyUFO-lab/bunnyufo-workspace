@@ -382,6 +382,10 @@ test('sprite-set is a real PC brief: Sprite Studio on the PC source, saved in th
   assert.match(brief, /python \.claude\/bin\/fetch_frames\.py/);
   assert.match(brief, /ask-images\/rows\.json/);
   assert.match(brief, /Never write `\.meta` files/);
+  assert.match(brief, /must not claim a postprocessor exists/);
+  assert.match(brief, /Point, no compression, the pixels per unit/);
+  assert.match(brief, /provenance\.py check/);
+  assert.doesNotMatch(brief, /skill's import postprocessor sets/);
   for (const tool of ['run-commit.mjs', 'run-push.mjs', 'run-pr.mjs', 'run-finish.mjs']) assert.match(brief, new RegExp(`node \.claude/bin/${tool.replace('.', '\.')}`), tool);
   assert.match(brief, /on branch `claude\/run-20261029-magic-loops-x-a1b2`[^\n]*Never merge it\./);
   assert.match(brief, /"outcome": "pr"/);
