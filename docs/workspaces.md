@@ -400,7 +400,12 @@ Presets live in `site/api/presets.mjs`, in code, so no inbox token can rewrite a
 `research`, `market-research`, `game-teardown`, `playtest-build`, `sprite-set`, `agent-avatar`, and the hidden
 `agent-avatar-sheet`, which only the Hub starts (after the owner picks a variant) and a request body cannot name. A run is never
 longer than `MAX_RUN_MINUTES` (120): research kinds and `agent-avatar` 30, `docs` 60, the rest and `agent-avatar-sheet` 120. Hermes
-presets have `model: null` and the site never sends a provider or model on an ordinary run. The target
+presets have `model: null` and the site never sends a provider or model on an ordinary run. `playtest-build` and `sprite-set`
+are real PC briefs (`opensWindows` true and false): the first runs the EditMode tests, builds WebGL with the repository's own
+tooling, playtests by the window rule and keeps the build on the PC (no deploy, no PR, outcome `card`); the second draws with
+Sprite Studio on the `pc` source, saves the PNGs in the repository and opens a PR (outcome `pr`). Neither carries an `allow`
+list: each command a brief needs must already be in the project's PC allow list, or the run finishes `failed` /
+`blocked-command`. The target
 comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the preset or request needs
 something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
 `project-defaults.mjs` is `pc`: `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's

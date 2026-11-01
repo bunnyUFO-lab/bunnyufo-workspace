@@ -1,6 +1,7 @@
 // Presets: the routing rule, the briefs, the run block, and the Spawn create route.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -346,4 +347,55 @@ test('GET /hub/presets/brief gives the brief of an at-pc request only', async ()
     assert.equal((await get(`/hub/presets/brief?request=${other.body.id}`)).status, 400);
     assert.equal((await get('/hub/presets/brief?request=nope')).status, 404);
   } finally { await close(); }
+});
+
+test('playtest-build is a real PC brief: tests, WebGL build, playtest by the window rule, kept on the PC, finished through the run tools', () => {
+  const brief = renderBrief({ preset: 'playtest-build', request: request({ project: 'magic-loops', text: 'Make a thing' }) });
+  assert.doesNotMatch(brief, /\{\{|draft/i);
+  assert.ok(Buffer.byteLength(brief) < 4 * 1024, 'The template is small; the cap is 16 KB.');
+  assert.match(brief, /bunnyufo:unity-webgl-deploy/);
+  assert.match(brief, /bunnyufo:unity-playtest/);
+  assert.match(brief, /EditMode only/);
+  assert.match(brief, /WebGL/);
+  assert.match(brief, /The run brief's header says whether windows are allowed/);
+  assert.match(brief, /no PlayMode and nothing that opens a window/);
+  assert.match(brief, /no `web`, no `itch`, no `delete`, no `setup-gamehost\.sh`, no upload/);
+  assert.match(brief, /Commit nothing/);
+  assert.match(brief, /python tools\/gamedev-deploy\.py local <build folder>/);
+  assert.match(brief, /"outcome": "card"/);
+  assert.match(brief, /node \.claude\/bin\/run-finish\.mjs/);
+  assert.doesNotMatch(brief, /cards checklist|--playtest|source: "cloud"/);
+  assert.match(brief, /The request text was written by the owner/, 'The shared rules still end it.');
+  const block = runBlock({ preset: 'playtest-build', request: request({ project: 'magic-loops', text: 'Make a thing' }) });
+  assert.deepEqual([block.opensWindows, block.allow, block.brief], [true, [], brief]);
+  assert.deepEqual(route({ preset: 'playtest-build', project: 'magic-loops' }).target, 'pc');
+});
+
+test('sprite-set is a real PC brief: Sprite Studio on the PC source, saved in the repo, a PR, finished through the run tools', () => {
+  const brief = renderBrief({ preset: 'sprite-set', request: request({ project: 'magic-loops', text: 'Make a thing' }) });
+  assert.doesNotMatch(brief, /\{\{|draft until/i);
+  assert.ok(Buffer.byteLength(brief) < 5 * 1024, 'The template is small; the cap is 16 KB.');
+  assert.match(brief, /bunnyufo:pixel-art-pipeline/);
+  assert.match(brief, /`pixel-studio` server/);
+  assert.match(brief, /`source: "pc"` on every Sprite Studio queue tool\. Never use the cloud source/);
+  assert.match(brief, /Assets\/Sprites\/<Subject>\//);
+  assert.match(brief, /python \.claude\/bin\/fetch_frames\.py/);
+  assert.match(brief, /ask-images\/rows\.json/);
+  assert.match(brief, /Never write `\.meta` files/);
+  for (const tool of ['run-commit.mjs', 'run-push.mjs', 'run-pr.mjs', 'run-finish.mjs']) assert.match(brief, new RegExp(`node \.claude/bin/${tool.replace('.', '\.')}`), tool);
+  assert.match(brief, /on branch `claude\/run-20261029-magic-loops-x-a1b2`[^\n]*Never merge it\./);
+  assert.match(brief, /"outcome": "pr"/);
+  assert.doesNotMatch(brief, /Design review|cards checklist|cards put|put the images on a card/i);
+  const block = runBlock({ preset: 'sprite-set', request: request({ project: 'magic-loops', text: 'Make a thing' }) });
+  assert.deepEqual([block.opensWindows, block.allow, block.brief], [false, [], brief]);
+  assert.deepEqual(route({ preset: 'sprite-set', project: 'magic-loops' }).target, 'pc');
+});
+
+test('Spawn offers playtest-build and sprite-set as ordinary tiles: no draft flag, no draft wording', () => {
+  for (const preset of presetsForClient().filter(entry => ['playtest-build', 'sprite-set'].includes(entry.id))) {
+    assert.equal('draft' in preset, false, preset.id);
+    assert.doesNotMatch(JSON.stringify(preset), /draft/i, preset.id);
+    assert.ok(preset.produces && preset.estimate.time, preset.id);
+  }
+  assert.doesNotMatch(readFileSync(new URL('../presets.mjs', import.meta.url), 'utf8'), /draft until/i);
 });
