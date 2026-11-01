@@ -9,7 +9,7 @@ import { agentDetails, EXPORT_MAX_BYTES, SECRET_PATTERNS, SOUL_MAX_BYTES, STALE_
 import { agentConfigJson } from './hub-fixtures.mjs';
 
 // The vectors are a copy of scripts/assistant/config-export/secret-vectors.json in the homelab repo (proxmox-bunnylink), where the
-// exporter on the Hermes host is tested against the same set. Update both together. Two inputs carry a JSON escape (an underscore, an A) so that the repository leak check does not flag the file; JSON.parse gives the original text.
+// exporter on the Hermes host is tested against the same set. Update both together. Four inputs carry a JSON escape so that the repository leak check does not flag the file; JSON.parse gives the original text.
 const VECTORS = JSON.parse(readFileSync(new URL('./fixtures/secret-vectors.json', import.meta.url), 'utf8'));
 const NOW = new Date('2026-11-01T12:00:00Z');
 const agentOf = id => AGENTS.find(agent => agent.id === id);
