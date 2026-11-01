@@ -17,9 +17,10 @@
 // The card list is read, changed and written back conditionally, and read again when someone else
 // wrote in between: two people adding cards from two devices both end up in it.
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { moveCard, moveProgress } from './card-move.mjs';
+import { renameOver } from './safe-rename.mjs';
 import { claimExpired, finishPurge } from './card-purge.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
@@ -114,7 +115,7 @@ export function capRetired(retired, limit = MAX_RETIRED) {
 }
 
 /** A store over a folder on disk: the local service's workspace. */
-export function folderStore(root) {
+export function folderStore(root, { fs: io } = {}) {
   const full = file => {
     const target = path.resolve(root, ...file.split('/'));
     if (target !== path.resolve(root) && !target.startsWith(path.resolve(root) + path.sep)) throw fail('That path is outside the workspace.');
@@ -167,7 +168,7 @@ export function folderStore(root) {
       await mkdir(path.dirname(target), { recursive: true });
       const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
       await copyFile(source.resolve(file), temp);
-      await rename(temp, target);
+      await renameOver(temp, target, io);
       return { etag: md5(await readFile(target)) };
     },
     write(file, body, { ifMatch } = {}) {
@@ -179,7 +180,7 @@ export function folderStore(root) {
         await mkdir(path.dirname(target), { recursive: true });
         const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
         await writeFile(temp, body);
-        await rename(temp, target);
+        await renameOver(temp, target, io);
         return { etag: md5(Buffer.from(body)) };
       });
       queue = done.catch(() => {});

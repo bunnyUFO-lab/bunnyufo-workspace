@@ -16,7 +16,8 @@
 //
 // Both services use this module: the local one imports it from here, and site/api is rsynced
 // whole to the server, so it travels with the deploy.
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { renameOver } from './safe-rename.mjs';
 import path from 'node:path';
 
 /** @typedef {{ pinned?: boolean, pinOrder?: number, status?: 'active'|'archived', restoredAt?: string, tags?: string[], emoji?: string }} CardState */
@@ -152,7 +153,7 @@ export function createCardStore(file) {
       await mkdir(path.dirname(file), { recursive: true });
       const temporary = `${file}.new`;
       await writeFile(temporary, `${JSON.stringify({ version: 1, cards }, null, 2)}\n`, { mode: 0o644 });
-      await rename(temporary, file);
+      await renameOver(temporary, file);
       return cards[key] ?? {};
     });
     // The chain must survive a failed write, or every later one is rejected with its error.
@@ -168,7 +169,7 @@ export function createCardStore(file) {
       await mkdir(path.dirname(file), { recursive: true });
       const temporary = `${file}.new`;
       await writeFile(temporary, `${JSON.stringify({ version: 1, cards }, null, 2)}\n`, { mode: 0o644 });
-      await rename(temporary, file);
+      await renameOver(temporary, file);
       return cards[to] ?? null;
     });
     writing = done.catch(() => {});
