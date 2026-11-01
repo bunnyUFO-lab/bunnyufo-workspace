@@ -15,6 +15,8 @@ type Props = {
   openLabel: string
   /** Extra attributes for the input (data-* hooks). */
   inputAttrs?: Record<string, string>
+  /** Extra class names for the root (a toolbar placement, say). */
+  className?: string
 }
 
 /**
@@ -22,7 +24,19 @@ type Props = {
  * focusing the input (no phone keyboard), the text focuses the input and filters. Free text is never committed: blur or a
  * second Escape puts the current value's label back.
  */
-export default function Combobox({ id, value, options, onChange, disabled, openLabel, inputAttrs }: Props) {
+/** True when a scrolling ancestor (or the window) has carried the field out of view, so its open list would hang over nothing. */
+function scrolledOut(field: HTMLElement | null, box: DOMRect): boolean {
+  if (box.bottom < 0 || box.top > innerHeight) return true
+  for (let node = field?.parentElement; node && node !== document.body; node = node.parentElement) {
+    const { overflowX, overflowY } = getComputedStyle(node)
+    if (!/(auto|scroll)/.test(overflowX + overflowY)) continue
+    const clip = node.getBoundingClientRect()
+    if (box.bottom <= clip.top || box.top >= clip.bottom || box.right <= clip.left || box.left >= clip.right) return true
+  }
+  return false
+}
+
+export default function Combobox({ id, value, options, onChange, disabled, openLabel, inputAttrs, className }: Props) {
   const uid = useId()
   const listId = `${uid}-list`
   const root = useRef<HTMLDivElement>(null)
@@ -56,14 +70,21 @@ export default function Combobox({ id, value, options, onChange, disabled, openL
     const up = below < 200 && above > below
     const room = Math.max(120, Math.min(280, up ? above : below))
     setPlace({ left: box.left, width: box.width, maxHeight: room, ...(up ? { bottom: innerHeight - box.top + gap } : { top: box.bottom + gap }) })
-  }, [])
+  }, [close])
   useLayoutEffect(() => {
     if (!open) return
     position()
+    // The field may be carried away by the page or by a scrolling sheet: then the list goes with it, rather than hang over nothing.
+    const scrolled = (event: Event) => {
+      if (list.current?.contains(event.target as Node)) return
+      const box = root.current?.getBoundingClientRect()
+      if (box && scrolledOut(root.current, box)) close()
+      else position()
+    }
     addEventListener('resize', position)
-    addEventListener('scroll', position, true)
-    return () => { removeEventListener('resize', position); removeEventListener('scroll', position, true) }
-  }, [open, position])
+    addEventListener('scroll', scrolled, true)
+    return () => { removeEventListener('resize', position); removeEventListener('scroll', scrolled, true) }
+  }, [open, position, close])
 
   useEffect(() => {
     if (!open || active < 0) return
@@ -87,7 +108,7 @@ export default function Combobox({ id, value, options, onChange, disabled, openL
   }
 
   return (
-    <div className="cb" ref={root} onKeyDown={key} onBlur={event => { if (!root.current?.contains(event.relatedTarget as Node | null)) restore() }}>
+    <div className={`cb${className ? ` ${className}` : ''}`} ref={root} onKeyDown={key} onBlur={event => { if (!root.current?.contains(event.relatedTarget as Node | null)) restore() }}>
       <input
         ref={input} id={id} className="cb-input" type="text" role="combobox" autoComplete="off" spellCheck={false}
         aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-haspopup="listbox"
@@ -104,7 +125,9 @@ export default function Combobox({ id, value, options, onChange, disabled, openL
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {open && (
-        <ul id={listId} ref={list} className="cb-list" role="listbox" aria-label={openLabel} style={place} onMouseDown={event => event.preventDefault()}>
+        <ul id={listId} ref={list} className="cb-list" role="listbox" aria-label={openLabel} style={place} onMouseDown={event => event.preventDefault()}
+          // Inside a wrapping <label>, a click on an option would be forwarded to the input and open the list again.
+          onClick={event => event.preventDefault()}>
           {shown.length === 0 && <li className="cb-none" role="presentation">No match</li>}
           {shown.map((option, index) => (
             <li key={option.value} id={`${uid}-o${index}`} role="option" aria-selected={option.value === value} data-value={option.value}

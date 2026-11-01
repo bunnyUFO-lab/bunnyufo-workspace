@@ -136,6 +136,18 @@ try {
 
   await heading('notes').getByRole('button', { name: /More for the notes category/ }).click();
   await pick(page, 'Merge into…');
+  // The target is a typeable list: typing filters it, Escape closes the list and not the dialog, Enter picks.
+  const into = page.getByLabel('Merge into');
+  assert.notEqual(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'combobox', 'the dialog opens with the list closed');
+  await into.click();
+  await into.fill('oth');
+  assert.deepEqual(await page.locator('.lib-dialog [role="option"]').allInnerTexts(), ['other'], 'typing filters the categories');
+  await page.keyboard.press('Escape');
+  await page.locator('.lib-dialog [role="listbox"]').waitFor({ state: 'detached' });
+  await page.locator('.lib-dialog').waitFor();
+  await into.fill('GAME');
+  await page.keyboard.press('Enter');
+  assert.equal(await into.getAttribute('data-value'), 'game-ideas', 'Enter picks the match');
   await page.getByRole('button', { name: 'Merge…' }).click();
   await page.getByText(/Merge 1 card into game ideas\?/).waitFor();
   await page.getByRole('button', { name: 'Merge', exact: true }).click();
@@ -196,7 +208,12 @@ try {
   // 5. Move a card to the other workspace and open it from its old link.
   await card('deck').getByRole('button', { name: /More for Deck/ }).click();
   await pick(page, 'Move to workspace…');
-  await page.getByLabel('Move to').selectOption('beta');
+  const moveTo = page.getByLabel('Move to');
+  await moveTo.click();
+  await moveTo.fill('bet');
+  assert.deepEqual(await page.locator('.lib-dialog [role="option"]').allInnerTexts(), ['Beta'], 'typing filters the workspaces');
+  await page.keyboard.press('Enter');
+  assert.equal(await moveTo.getAttribute('data-value'), 'beta');
   await page.getByText(/Links keep working/).waitFor();
   await page.getByRole('button', { name: 'Move', exact: true }).click();
   await page.waitForFunction(() => location.hash.startsWith('#/deck'));
@@ -227,6 +244,18 @@ try {
   box = await page.locator('.lib-dialog').boundingBox();
   assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the move dialog is a sheet (${JSON.stringify(box)})`);
   assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll');
+  // At phone width the workspace list opens inside the sheet, filters, and picks.
+  const phoneTo = page.getByLabel('Move to');
+  await phoneTo.tap();
+  await phoneTo.fill('bet');
+  const options = page.locator('.lib-dialog [role="option"]');
+  assert.deepEqual(await options.allInnerTexts(), ['Beta']);
+  const listBox = await page.locator('.lib-dialog [role="listbox"]').boundingBox();
+  assert.ok(listBox.x >= 0 && listBox.x + listBox.width <= 375, `the list fits the phone (${JSON.stringify(listBox)})`);
+  await options.first().tap();
+  assert.equal(await phoneTo.getAttribute('data-value'), 'beta');
+  assert.equal(await phoneTo.getAttribute('aria-expanded'), 'false', 'a tap on an option closes the list and does not reopen it through the label');
+  assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll with the list used');
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Overview', exact: true }).tap();
   await page.locator('.step-tab-more').tap();

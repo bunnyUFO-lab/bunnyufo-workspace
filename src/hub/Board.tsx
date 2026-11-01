@@ -8,6 +8,7 @@ import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
+import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
 import './work.css'
 import { defaultLane } from './workLanes'
@@ -50,10 +51,8 @@ export default function Board({ project: wanted, focus }: { project?: string; fo
   const focusLane = focusKey && data ? LANES.find(([lane]) => data.lanes[lane].some(card => card.key === focusKey))?.[0] : undefined
   const active = picked ?? focusLane ?? (data ? defaultLane(data.counts) : 'running')
   // Each scroller that can hide something shows a fade at its cut edge (the Roadmap's pattern).
-  const projectChips = useRef<HTMLDivElement>(null)
   const laneChips = useRef<HTMLDivElement>(null)
   const laneGrid = useRef<HTMLDivElement>(null)
-  const projectEdges = useOverflowEdges(projectChips, [list.length, project, all])
   const laneChipEdges = useOverflowEdges(laneChips, [data])
   const laneEdges = useOverflowEdges(laneGrid, [project, data])
   // Open the lane that holds the item (a collapsed one too) and bring its card into view.
@@ -66,17 +65,11 @@ export default function Board({ project: wanted, focus }: { project?: string; fo
     setExpanded(value => ({ ...value, [focusLane]: true }))
     requestAnimationFrame(() => requestAnimationFrame(() => laneGrid.current?.querySelector(`[data-card="${CSS.escape(focusKey)}"]`)?.scrollIntoView({ block: 'center', inline: 'center' })))
   }, [focusKey, focusLane])
-  useEffect(() => { projectChips.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [list.length, project, all])
   useEffect(() => { laneChips.current?.querySelector('.wk-lane-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [active, data])
 
   return (
     <div className="work">
-      <div className="hub-chips-wrap" data-overflow={projectEdges}>
-        <div className="hub-chips one-row" aria-label="Project" ref={projectChips}>
-          <a className={`hub-chip${all ? ' on' : ''}`} href={hubHash('work', 'all')}>All</a>
-          {list.map(item => <a key={item.id} className={`hub-chip${!all && item.id === project ? ' on' : ''}`} href={hubHash('work', item.id)}>{item.name}</a>)}
-        </div>
-      </div>
+      <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
       {project && host.write && <div className="work-spawn"><button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}

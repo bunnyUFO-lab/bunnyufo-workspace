@@ -1,6 +1,10 @@
 /* Combobox: the input looks like the Spawn sheet's other fields (see .sp-field in runs.css). */
 .cb { position: relative; display: flex; min-width: 0; }
-.cb-input { flex: 1; min-width: 0; text-overflow: ellipsis; }
+.cb .cb-input { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; min-height: 44px; padding: 10px 44px 10px 12px; font: inherit; font-size: 14px; color: var(--t1); background: var(--ground); border: 1px solid var(--line2); border-radius: 10px; text-overflow: ellipsis; }
+.cb .cb-input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cb .cb-input:disabled { opacity: 0.6; }
+/* In a toolbar row (Roadmap, Work, Activity): a fixed-ish width that still shrinks on a phone. */
+.cb.cb-bar { flex: 0 1 300px; width: 300px; max-width: 100%; }
 .sp-field .cb-input { padding-right: 44px; }
 .cb-chev { position: absolute; top: 0; right: 0; width: 44px; height: 100%; min-height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-radius: 0 10px 10px 0; }
 .cb-chev:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -12,3 +16,4 @@
 .cb-opt.on { background: var(--pink-dim); }
 .cb-opt.sel { color: var(--pink-bright, var(--pink)); }
 .cb-none { color: var(--text-dim); cursor: default; }
+.hub-project-pick { margin: 0 0 12px; }

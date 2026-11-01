@@ -1,0 +1,149 @@
+// Run after npm run build. The project pickers that became Comboboxes, through a real browser: the Roadmap, Work, Activity and
+// Sketch project pickers over a list longer than ten projects, at desktop and phone width. Each one filters as you type, Enter
+// or a tap picks, Escape puts the chosen project back, nothing scrolls sideways, and an open list closes when the field scrolls
+// away. The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
+import { chromium, expect } from '@playwright/test';
+import assert from 'node:assert/strict';
+import { startHubFixture } from './hub-fixture.mjs';
+import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
+
+const step = name => console.log(`- ${name}`);
+const channel = process.env.BUW_TEST_BROWSER || 'msedge';
+const browser = await chromium.launch({ headless: true, channel });
+const contexts = [];
+let fixture;
+
+const TREES = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'gum', 'hazel', 'ironwood', 'juniper', 'larch', 'maple'];
+const DRAFT = '20261030-1200-pickers';
+
+const open = async (viewport, options = {}) => {
+  const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  contexts.push(context);
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  page.on('pageerror', error => { throw error; });
+  return page;
+};
+const noSideways = async (page, what) => {
+  const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+  assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
+};
+
+/** Where each picker lives: its address, the section that holds it, and how to tell `maple` was chosen. */
+const PICKERS = [
+  { name: 'Roadmap', hash: '#/~hub/map', scope: '.hub-map-chips', after: page => page.waitForFunction(() => location.hash.startsWith('#/~hub/map/maple')) },
+  { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work/maple') },
+  { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top', after: page => page.waitForFunction(() => document.querySelector('.hub-top [role="combobox"]').dataset.value === 'maple') },
+  { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]', after: page => page.waitForFunction(() => document.querySelector('[aria-label="Send to agent"] [role="combobox"]').dataset.value === 'maple') },
+];
+
+try {
+  fixture = await startHubFixture({ work: true });
+  for (const tree of TREES) {
+    fixture.seed.beads(tree, [beadsIssue({ id: `${tree.slice(0, 2)}-1`, title: `${tree} task`, created: '2026-10-01T10:00:00Z' })], { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: 1, repo: `example/${tree}` });
+  }
+  fixture.fake.seed(`inbox/drawings/${DRAFT}/drawing.excalidraw`, JSON.stringify({ type: 'excalidraw', version: 2, elements: [], appState: {} }), 'application/json');
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
+    for (const picker of PICKERS) {
+      step(`${picker.name} at ${label}: the project list filters as you type, and a pick changes the project`);
+      const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+      await page.goto(`${fixture.url}${picker.hash}`);
+      const field = page.locator(picker.scope).getByRole('combobox', { name: 'Project' });
+      await field.waitFor();
+      if (touch) await field.tap(); else await field.click();
+      const options = page.locator(`${picker.scope} [role="option"]`);
+      await options.first().waitFor();
+      assert.ok(await options.count() > 10, `${picker.name}: the list passes ten projects (${await options.count()}).`);
+      await field.fill('MAP');
+      assert.deepEqual(await options.evaluateAll(list => list.map(item => item.dataset.value)), ['maple'], `${picker.name}: typing filters.`);
+      const box = await page.locator(`${picker.scope} [role="listbox"]`).boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, `${picker.name}: the list fits the screen (${JSON.stringify(box)}).`);
+      if (touch) await options.first().tap(); else await page.keyboard.press('Enter');
+      await picker.after(page);
+      // The screen may redraw for the new project: wait until the picker shows it before using it again.
+      await expect(field).toHaveValue('Maple');
+      await expect(field).toHaveAttribute('data-value', 'maple');
+      assert.equal(await field.getAttribute('aria-expanded'), 'false', `${picker.name}: picking closes the list.`);
+      await noSideways(page, `${picker.name} at ${label}`);
+      await field.fill('zzz');
+      assert.equal(await page.locator(`${picker.scope} .cb-none`).innerText(), 'No match');
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+      const state = await page.evaluate(() => ({ active: document.activeElement?.outerHTML.slice(0, 80), hash: location.hash, value: document.querySelector('[role="combobox"][aria-label="Project"]')?.value }));
+      assert.equal(await field.inputValue(), 'Maple', `${picker.name}: Escape puts the chosen project back. ${JSON.stringify(state)}`);
+      await page.context().close();
+    }
+  }
+
+  step('The chevron opens the roadmap list without the keyboard: the input is not focused');
+  {
+    const page = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+    await page.goto(`${fixture.url}#/~hub/map`);
+    await page.getByRole('combobox', { name: 'Project' }).waitFor();
+    await page.getByRole('button', { name: 'Show projects' }).tap();
+    await page.locator('.hub-map-chips [role="listbox"]').waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'combobox'), false);
+    await page.context().close();
+  }
+
+  step('An open list closes when its field scrolls out of the page');
+  {
+    const page = await open({ width: 390, height: 600 }, { hasTouch: true, isMobile: true });
+    await page.goto(`${fixture.url}#/~hub/work`);
+    const field = page.locator('.work').getByRole('combobox', { name: 'Project' });
+    await field.waitFor();
+    await page.locator('.wk-lane:visible .wk-card').first().waitFor();
+    await field.tap();
+    await page.locator('.work [role="listbox"]').waitFor();
+    await page.evaluate(() => {
+      const spacer = document.createElement('div');
+      spacer.style.height = '4000px';
+      document.querySelector('.work').append(spacer);
+      for (const node of [document.scrollingElement, ...document.querySelectorAll('*')]) {
+        if (node === document.scrollingElement || (node.scrollHeight > node.clientHeight + 20 && getComputedStyle(node).overflowY !== 'visible')) node.scrollTop += 3000;
+      }
+    });
+    const bottom = await field.evaluate(node => node.getBoundingClientRect().bottom);
+    assert.ok(bottom < 0, `the test scrolled the field away (${bottom}).`);
+    await page.locator('.work [role="listbox"]').waitFor({ state: 'detached' });
+    await page.context().close();
+  }
+  // Ten or fewer projects: the same pickers stay chips, one tap each. Activity's filter was a dropdown already and stays one.
+  const small = await startHubFixture({ work: true });
+  try {
+    small.fake.seed(`inbox/drawings/${DRAFT}/drawing.excalidraw`, JSON.stringify({ type: 'excalidraw', version: 2, elements: [], appState: {} }), 'application/json');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
+      for (const picker of PICKERS.filter(item => item.name !== 'Activity')) {
+        step(`${picker.name} at ${label} with ten projects or fewer: chips, not a list`);
+        const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+        await page.goto(`${small.url}${picker.hash}`);
+        const row = page.locator(`${picker.scope} [aria-label="Project"].hub-chips`);
+        await row.waitFor();
+        assert.equal(await page.locator(`${picker.scope} [role="combobox"]`).count(), 0, `${picker.name}: no dropdown.`);
+        const chips = row.locator('.hub-chip');
+        await chips.nth(1).waitFor();
+        assert.ok(await chips.count() >= 2 && await chips.count() <= 11, `${picker.name}: chips (${await chips.count()}).`);
+        assert.equal(await row.locator('.hub-chip.on').count(), 1);
+        const other = chips.locator('xpath=self::*[not(contains(@class,"on")) and not(normalize-space()="All")]').first();
+        const name = (await other.innerText()).trim();
+        if (touch) await other.tap(); else await other.click();
+        await row.locator('.hub-chip.on', { hasText: name }).waitFor();
+        await noSideways(page, `${picker.name} chips at ${label}`);
+        await page.context().close();
+      }
+      step(`Activity at ${label} with ten projects or fewer: still a list`);
+      const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+      await page.goto(`${small.url}#/~hub/activity`);
+      await page.locator('.hub-top').getByRole('combobox', { name: 'Project' }).waitFor();
+      await page.context().close();
+    }
+  } finally { await small.close().catch(() => {}); }
+  console.log('hub-project-pickers-ui: passed');
+} finally {
+  for (const context of contexts) await context.close().catch(() => {});
+  await browser.close();
+  await fixture?.close?.().catch(() => {});
+}
