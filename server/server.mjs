@@ -95,6 +95,8 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
   // is what gets published, and which cards you keep in front of you is not. In the cards bucket
   // when there is one (shared with the site), else in .buw. See site/api/card-state.mjs.
   const cardState = await chooseCardStore({ stateDir, registryFile, bucketOptions });
+  // Where a long card move keeps its progress, so a restart carries on instead of starting again.
+  const moveLog = folderStore(path.join(stateDir, 'card-moves'));
   // The Hub (site/api/hub.mjs) over the same bucket, when this machine has one: the inbox the site shows.
   const hubEnv = { ...process.env, ...hubOptions?.env };
   const hubBucket = await chooseBucket({ registryFile, env: hubEnv, bucketOptions });
@@ -227,7 +229,7 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
         // folder, so its writes queue behind each other. Not into the starter examples: those ship
         // with the app and an update would take a card made there away.
         const card = await cardRoute({
-          method, route: url.pathname.slice(4), query: url.searchParams, data, state: cardState,
+          method, route: url.pathname.slice(4), query: url.searchParams, data, state: cardState, moves: moveLog,
           writerFor: async id => {
             const found = (await allWorkspaces()).find(item => item.id === (id || active.id));
             if (!found) throw Object.assign(new Error(`No workspace "${id}" in this session.`), { status: 404 });

@@ -17,9 +17,10 @@
 // The card list is read, changed and written back conditionally, and read again when someone else
 // wrote in between: two people adding cards from two devices both end up in it.
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { moveCard } from './card-move.mjs';
+import { moveCard, moveProgress } from './card-move.mjs';
+import { renameOver } from './safe-rename.mjs';
 import { claimExpired, finishPurge } from './card-purge.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
@@ -114,7 +115,7 @@ export function capRetired(retired, limit = MAX_RETIRED) {
 }
 
 /** A store over a folder on disk: the local service's workspace. */
-export function folderStore(root) {
+export function folderStore(root, { fs: io } = {}) {
   const full = file => {
     const target = path.resolve(root, ...file.split('/'));
     if (target !== path.resolve(root) && !target.startsWith(path.resolve(root) + path.sep)) throw fail('That path is outside the workspace.');
@@ -142,6 +143,13 @@ export function folderStore(root) {
       }
     },
     resolve: full,
+    /**
+     * Delete one file. Only a card move calls this (card-move.mjs), to take out its own copy of a file the
+     * source deleted during that unfinished move. The Trash is never emptied locally (`purges` is not set).
+     */
+    async remove(file) {
+      await rm(full(file), { force: true });
+    },
     async list(prefix) {
       const trimmed = prefix.replace(/\/+$/, '');
       const base = full(trimmed || '.');
@@ -167,7 +175,7 @@ export function folderStore(root) {
       await mkdir(path.dirname(target), { recursive: true });
       const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
       await copyFile(source.resolve(file), temp);
-      await rename(temp, target);
+      await renameOver(temp, target, io);
       return { etag: md5(await readFile(target)) };
     },
     write(file, body, { ifMatch } = {}) {
@@ -179,7 +187,7 @@ export function folderStore(root) {
         await mkdir(path.dirname(target), { recursive: true });
         const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
         await writeFile(temp, body);
-        await rename(temp, target);
+        await renameOver(temp, target, io);
         return { etag: md5(Buffer.from(body)) };
       });
       queue = done.catch(() => {});
@@ -215,7 +223,11 @@ export function bucketStore(bucket, prefix) {
         throw error;
       }
     },
-    /** Delete one object. Used by the Trash purge (card-purge.mjs) and by nothing else. */
+    /**
+     * Delete one object. Two callers, and no others: the Trash purge (card-purge.mjs), and a card move
+     * (card-move.mjs) taking out its own copy of a file the source deleted during that unfinished move.
+     */
+    purges: true,
     async remove(file) {
       await bucket.del(key(file));
     },
@@ -467,7 +479,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
      * those cards' own folders, and the removed tabs' own files, deleted. Only on the site's bucket.
      */
     async purgeTrash() {
-      if (typeof store.remove !== 'function') throw fail('The Trash is only emptied on the published site.', 501);
+      if (store.purges !== true) throw fail('The Trash is only emptied on the published site.', 501);
       // 1. Claim: the expired records become tombstones, in one conditional write (none when nothing is due).
       const plan = await editList(async list => claimExpired(list, today(now())), { quiet: true });
       // 2. Delete: only under the tombstones' folders and the pending tabs' own files, and never a file a live tab uses.
@@ -766,8 +778,14 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
  * for the workspace a request names, or throws 404. Returns the answer, or undefined for a path
  * that is not one of these.
  */
-export async function cardRoute({ method, route, query, data, writerFor, state }) {
+export async function cardRoute({ method, route, query, data, writerFor, state, moves }) {
   if (!route.startsWith('/cards')) return undefined;
+  if (method === 'GET' && route === '/cards/move/progress') {
+    // Read-only, for the progress bar of a long move; names the source workspace and card.
+    const workspace = query.get('workspace');
+    await writerFor(workspace);
+    return { status: 200, body: { progress: await moveProgress({ moves, workspace, id: query.get('id') }) } };
+  }
   if (method === 'GET' && route === '/cards/markdown') {
     const writer = await writerFor(query.get('workspace'));
     return { status: 200, body: await writer.readMarkdown({ id: query.get('id'), path: query.get('path') }) };
@@ -788,7 +806,9 @@ export async function cardRoute({ method, route, query, data, writerFor, state }
   if (route === '/cards/move') {
     if (!data.to || data.to === data.workspace) throw fail('Say which other workspace to move the card to.');
     const target = await writerFor(data.to, { target: true });
-    return { status: 200, body: await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, now: writer.now }) };
+    // A move too big for one request answers 202 with its progress; asking again carries on.
+    const body = await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, moves, now: writer.now });
+    return { status: body.pending ? 202 : 200, body };
   }
   if (route === '/cards/trash/purge') return { status: 200, body: await writer.purgeTrash() };
   if (route === '/cards/category') return { status: 200, body: await writer.renameCategory(data) };

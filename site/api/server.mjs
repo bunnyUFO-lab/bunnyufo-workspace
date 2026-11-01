@@ -142,6 +142,8 @@ export function createSiteApi({
   deployedRef = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '.deployed-ref'),
 } = {}) {
   const cards = bucket ? createBucketCardStore(bucket, { key: stateKey }) : createCardStore(stateFile);
+  // Where a long card move keeps its progress, so a restart carries on instead of starting again.
+  const moves = bucket ? bucketStore(bucket, `${stateKey.replace(/\.json$/, '')}-moves`) : undefined;
   /** The development copy's write boundary: a card section is writable only when `dev.writable` says so. */
   const mayWrite = id => {
     if (dev && !dev.writable(String(id ?? ''))) {
@@ -387,9 +389,9 @@ export function createSiteApi({
         const found = section.id;
         return cardWriter(bucketStore(bucket, keyOf(found, '').replace(/\/$/, '')), { section: found });
       };
-      if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing' || route === '/cards/responses')) {
+      if (request.method === 'GET' && (route === '/cards/markdown' || route === '/cards/drawing' || route === '/cards/responses' || route === '/cards/move/progress')) {
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
-        const answer = await cardRoute({ method: 'GET', route, query: url.searchParams, data: {}, writerFor });
+        const answer = await cardRoute({ method: 'GET', route, query: url.searchParams, data: {}, writerFor, moves });
         return json(response, answer.status, answer.body);
       }
 
@@ -404,7 +406,7 @@ export function createSiteApi({
         } else mayWrite(data.workspace);
         if (route === '/cards/move') mayWrite(data.to);
       }
-      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor, state: cards });
+      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor, state: cards, moves });
       if (card) return json(response, card.status, card.body);
 
       // Archiving, pinning and tagging write the state object and answer at once. The card's files

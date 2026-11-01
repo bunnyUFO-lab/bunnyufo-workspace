@@ -217,8 +217,22 @@ try {
   await page.keyboard.press('Enter');
   assert.equal(await moveTo.getAttribute('data-value'), 'beta');
   await page.getByText(/Links keep working/).waitFor();
+  // A big card moves in slices: the first answer says 300 of 600 files are copied, the second (held back a moment) finishes it.
+  let asked = 0;
+  await page.route('**/api/cards/move', async route => {
+    asked += 1;
+    if (asked === 1) return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ pending: true, from: 'alpha', to: 'beta', files: 300, progress: { done: 300, total: 600, doneBytes: 3 * 1024 * 1024, bytes: 6 * 1024 * 1024 } }) });
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    return route.continue();
+  });
   await page.getByRole('button', { name: 'Move', exact: true }).click();
-  await page.waitForFunction(() => location.hash.startsWith('#/deck'));
+  const progress = page.locator('.lib-progress');
+  await progress.getByText('Copying 300 of 600 files (3 MB of 6 MB)').waitFor();
+  assert.equal(await progress.locator('progress').getAttribute('value'), '300', 'the bar shows the files copied');
+  assert.equal(await page.getByRole('button', { name: 'Moving…' }).isDisabled(), true, 'the dialog is locked while it moves');
+  await page.waitForFunction(() => location.hash.startsWith('#/deck')).catch(async error => { throw new Error(`${error.message}; dialog says: ${await page.locator('.lib-dialog').innerText().catch(() => '(gone)')}`); });
+  assert.equal(asked, 2, 'the page asked again after the pending answer');
+  await page.unroute('**/api/cards/move');
   await page.locator('.crumb-current', { hasText: 'Deck' }).waitFor();
   assert.deepEqual((await listOf(beta)).entities.map(item => item.id), ['deck']);
   assert.equal((await listOf(alpha)).retired.deck.to, 'beta');
