@@ -83,7 +83,7 @@ test('with no tracked repo it is a 400 with the picker hint; a repo from the kno
 test('a posted repo outside the known list, or on a request that has its own repo, is a 400', async () => {
   const f = await fixture({ tracked: { 'workspace-app': 'example/probe' } });
   try {
-    const bare = f.put({ repo: undefined });
+    const bare = f.put({ repo: undefined, project: 'sprite-studio' });
     const unknown = await f.post(`/hub/requests/${bare.id}/approve`, { target: 'cloud', repo: 'example/unlisted' });
     assert.equal(unknown.status, 400);
     assert.match(unknown.body.error, /not a repo the Hub knows/);
@@ -126,5 +126,50 @@ test('a PC approval of a request with no repo carries the project repo; with non
     const b = f.put({ repo: undefined, target: 'pc', project: 'sprite-studio' });
     assert.equal((await f.post(`/hub/requests/${b.id}/approve`, { target: 'pc' })).status, 201);
     assert.equal(f.approved(b.id).repo, null);
+  } finally { await f.close(); }
+});
+
+test('a posted repo is a 400 for the PC, and for a cloud request whose project already has a repo', async () => {
+  const f = await fixture({ tracked: { 'workspace-app': 'example/probe' } });
+  try {
+    const pc = f.put({ repo: undefined, target: 'pc', project: 'sprite-studio' });
+    const onPc = await f.post(`/hub/requests/${pc.id}/approve`, { target: 'pc', repo: 'example/picked' });
+    assert.equal(onPc.status, 400);
+    assert.match(onPc.body.error, /Only a cloud run/);
+    const tracked = f.put({ repo: undefined });
+    const over = await f.post(`/hub/requests/${tracked.id}/approve`, { target: 'cloud', repo: 'example/picked' });
+    assert.equal(over.status, 400);
+    assert.match(over.body.error, /already has a repo/);
+    for (const id of [pc.id, tracked.id]) assert.equal(f.approved(id), null, 'nothing signed');
+    const fine = await f.post(`/hub/requests/${tracked.id}/approve`, { target: 'cloud' });
+    assert.equal(fine.status, 201, JSON.stringify(fine.body));
+    assert.equal(f.approved(tracked.id).repo, 'example/probe');
+  } finally { await f.close(); }
+});
+
+test('Approve again with a picked repo signs the copy with it; the guards run on it and a bad pick writes no copy', async () => {
+  const f = await fixture({ tracked: { 'workspace-app': 'example/probe' } });
+  const folders = () => [...new Set([...f.fake.objects.keys()].map(name => /requests\/([^/]+)\//.exec(name)?.[1]).filter(Boolean))].sort();
+  try {
+    const old = f.put({ repo: undefined, project: 'sprite-studio' });
+    const before = folders();
+    for (const [repo, pattern] of [['example/secret-box', /never run for you/], ['example/unlisted', /not a repo the Hub knows/]]) {
+      const refused = await f.post(`/hub/requests/${old.id}/again`, { target: 'cloud', repo });
+      assert.equal(refused.status, 400, repo);
+      assert.match(refused.body.error, pattern);
+    }
+    assert.deepEqual(folders(), before, 'no copy was written');
+    const none = await f.post(`/hub/requests/${old.id}/again`, { target: 'cloud' });
+    assert.equal(none.status, 400);
+    assert.match(none.body.error, /Pick a repo, or run it on the PC/);
+    const again = await f.post(`/hub/requests/${old.id}/again`, { target: 'cloud', repo: 'example/picked' });
+    assert.equal(again.status, 201, JSON.stringify(again.body));
+    assert.equal(f.approved(again.body.id).repo, 'example/picked');
+    assert.equal(f.fake.json(`sections/inbox/requests/${again.body.id}/request.json`).repo, 'example/picked');
+    // A project that has its own repo takes no pick, and the PC never does.
+    const owned = f.put({ repo: undefined });
+    assert.equal((await f.post(`/hub/requests/${owned.id}/again`, { target: 'cloud', repo: 'example/picked' })).status, 400);
+    const pc = f.put({ repo: undefined, target: 'pc', project: 'sprite-studio' });
+    assert.equal((await f.post(`/hub/requests/${pc.id}/again`, { target: 'pc', repo: 'example/picked' })).status, 400);
   } finally { await f.close(); }
 });

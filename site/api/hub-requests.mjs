@@ -540,19 +540,18 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
-   * The repo an approval for `chosen` is signed with. Only the PC and the cloud have one. A request's own repo is final (a posted one is refused);
-   * without one, a posted repo must be in Spawn's list, else the project's tracked repo is used. Undefined when none resolves.
+   * The repo an approval for `chosen` is signed with, in this order: the request's own, then its project's tracked repo. A repo posted from the
+   * sheet is taken only when the target is the cloud, the request has no repo and its project has none, and only from Spawn's list; any other
+   * posted repo is a 400 (a PC approval signed with another project's repo would be refused by the PC). Undefined when none resolves.
    */
   async function resolveRepo(request, chosen, posted) {
-    if (posted !== undefined && posted !== null && posted !== '') {
-      if (typeof posted !== 'string' || !validRepo(posted)) throw fail('The repo is owner/name.', 400);
-      if (request.repo) throw fail('That request already has a repo; it cannot be changed here.', 400);
-      if (!(await knownRepos()).some(entry => entry.repo === posted)) throw fail(`${posted} is not a repo the Hub knows.`, 400);
-    }
-    if (chosen !== 'pc' && chosen !== 'cloud') return request.repo;
-    if (request.repo) return request.repo;
-    if (posted) return posted;
-    return (await projectRepo(request.project).catch(() => undefined)) || undefined;
+    const tracked = chosen === 'pc' || chosen === 'cloud' ? (request.repo || (await projectRepo(request.project).catch(() => undefined)) || undefined) : request.repo;
+    if (posted === undefined || posted === null || posted === '') return tracked;
+    if (typeof posted !== 'string' || !validRepo(posted)) throw fail('The repo is owner/name.', 400);
+    if (chosen !== 'cloud') throw fail('Only a cloud run takes a repo picked here.', 400);
+    if (tracked) throw fail('That request already has a repo; it cannot be changed here.', 400);
+    if (!(await knownRepos()).some(entry => entry.repo === posted)) throw fail(`${posted} is not a repo the Hub knows.`, 400);
+    return posted;
   }
 
   /**
