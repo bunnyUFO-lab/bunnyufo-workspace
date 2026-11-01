@@ -13,6 +13,12 @@
 //   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms? } (ms: how long the step runs before it completes) | { approval: { command?, description? } }
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
 //                  | { end: 'output' } | { fail: 'error text' }. Default: the `chunks` as deltas.
+//   refuseSteer    POST /v1/runs/:id/steer always answers 409 steer_not_accepted
+//   steerMissing   the steer route answers 404 not_found (an older Hermes without it)
+//   steerBroken    the steer route answers 500
+//   ignoreSteer    the steer is accepted (200, run.steered) but the run never reads it, as if the Codex path dropped it: it ends up in
+//                  `pending_steer`. Without it the text is read after the run's next tool.completed.
+//   hermes.steers  one record per accepted steer: { run_id, input }
 //   askApproval    true adds a protected-file write that asks for approval after the first delta
 //   endWith        the final output (default: the deltas joined); end it with a question mark for a run that asks
 //   failWith       every run fails with this error text (the whole chain failed)
@@ -46,7 +52,7 @@ const notFound = response => json(response, 404, openaiError('Run not found', 'i
 export async function startFakeHermes({
   key = 'test-key', chunks = ['Hel', 'lo ', 'there'], delayMs = 20, onTurn, fail = false, hold = false, refuseImages = false,
   runScript, askApproval = false, endWith, failWith, chain = DEFAULT_CHAIN, providerFailures = {}, forgetRuns = false,
-  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false, approvalAgeMs = 0, approvalChoices,
+  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false, approvalAgeMs = 0, approvalChoices, refuseSteer = false, steerMissing = false, steerBroken = false, ignoreSteer = false,
 } = {}) {
   const requests = [];
   const state = { closedEarly: 0 };
@@ -54,6 +60,7 @@ export async function startFakeHermes({
   const runs = [];
   const approvals = [];
   const stops = [];
+  const steers = [];
   const byId = new Map();
   const byKey = new Map();
 
@@ -61,6 +68,8 @@ export async function startFakeHermes({
     if (TERMINAL.has(run.status)) return null; // a finished run emits nothing more (an interrupt ends it from outside)
     const entry = { event, run_id: run.id, timestamp: Date.now() / 1000, ...fields, seq: run.events.length };
     run.events.push(entry);
+    // A steer is read when the run's next tool result comes in.
+    if (event === 'tool.completed' && !ignoreSteer) run.pendingSteer = [];
     for (const listener of [...run.listeners]) listener();
     return entry;
   };
@@ -159,13 +168,13 @@ export async function startFakeHermes({
     run.output = endWith !== undefined && !run.stopped ? endWith : text;
     if (run.stopped) {
       run.usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
-      emit(run, 'run.cancelled', { completed: false, partial: false, interrupted: true, turn_exit_reason: run.stopReason });
+      emit(run, 'run.cancelled', { completed: false, partial: false, interrupted: true, turn_exit_reason: run.stopReason, ...(run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}) });
       return finish(run, 'cancelled');
     }
     const out = Math.max(1, Math.ceil(run.output.length / 4));
     run.usage = { input_tokens: 21749, output_tokens: out, total_tokens: 21749 + out };
     run.runtime = runtimeOf(run);
-    emit(run, 'run.completed', { output: run.output, usage: run.usage, runtime: run.runtime, completed: true, partial: false, interrupted: false });
+    emit(run, 'run.completed', { output: run.output, usage: run.usage, runtime: run.runtime, completed: true, partial: false, interrupted: false, ...(run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}) });
     return finish(run, 'completed');
   };
   const view = run => {
@@ -173,7 +182,7 @@ export async function startFakeHermes({
     return {
       object: 'hermes.run', model: 'main', created_at: run.created, pending_controls: run.pending, run_id: run.id, status: run.status,
       session_id: run.id, admission_id: run.admission, execution_generation: 1,
-      output: done ? run.output : '', usage: done ? run.usage : {}, ...(run.status === 'completed' ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
+      output: done ? run.output : '', usage: done ? run.usage : {}, ...(done && run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}), ...(run.status === 'completed' ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
     };
   };
   const activeRuns = () => runs.filter(run => !TERMINAL.has(run.status)).length;
@@ -222,7 +231,7 @@ export async function startFakeHermes({
       const run = {
         id: `run_${randomUUID().replaceAll('-', '')}`, body, key: idem, status: 'running', output: '', usage: {}, error: undefined, events: [],
         listeners: new Set(), wakers: new Set(), pending: [], created: Date.now() / 1000, admission: randomBytes(16).toString('hex'),
-        stopped: false, stopReason: '', released: null, answer: null, servedBy: null, routeSource: 'global', runtime: undefined, endedAt: 0, approvals: [],
+        pendingSteer: [], stopped: false, stopReason: '', released: null, answer: null, servedBy: null, routeSource: 'global', runtime: undefined, endedAt: 0, approvals: [],
         requested: body.provider ? { provider: body.provider, model: body.model ?? '' } : {},
       };
       runs.push(run); byId.set(run.id, run); if (idem) byKey.set(idem, run);
@@ -241,6 +250,21 @@ export async function startFakeHermes({
       stops.push(run.id);
       wakeAll(run); run.answer?.('stopped');
       return json(response, 200, { run_id: run.id, status: 'stopping', admission_id: run.admission });
+    }
+    if (action === 'steer' && request.method === 'POST') {
+      if (steerMissing) return json(response, 404, openaiError('Not found', 'invalid_request_error', 'not_found'));
+      if (steerBroken) return json(response, 500, openaiError('boom', 'server_error', 'internal_error'));
+      let body = null;
+      try { body = JSON.parse(raw.toString('utf8')); } catch { /* answered below */ }
+      const input = [body?.input, body?.message, body?.text].find(value => typeof value === 'string' && value.trim());
+      if (!input) return json(response, 400, openaiError('invalid_steer_input', 'invalid_request_error', 'invalid_steer_input'));
+      // Only a run that is running takes it: waiting for an approval and stopping do not.
+      if (run.status !== 'running' || run.stopped) return json(response, 409, openaiError('run_not_accepting_steer', 'invalid_request_error', 'run_not_accepting_steer'));
+      if (refuseSteer) return json(response, 409, openaiError('steer_not_accepted', 'invalid_request_error', 'steer_not_accepted'));
+      run.pendingSteer.push(input);
+      steers.push({ run_id: run.id, input });
+      emit(run, 'run.steered', { accepted: true });
+      return json(response, 200, { object: 'hermes.run.steer', run_id: run.id, accepted: true });
     }
     if (action === 'approval' && request.method === 'POST') {
       let body = null;
@@ -294,7 +318,7 @@ export async function startFakeHermes({
   });
   await listenOnGoodPort(server, '127.0.0.1');
   return {
-    url: `http://127.0.0.1:${server.address().port}`, requests, state, runs, approvals, stops,
+    url: `http://127.0.0.1:${server.address().port}`, requests, state, runs, approvals, stops, steers,
     release: (id, output) => { const run = byId.get(id); run.released = { output }; wakeAll(run); },
     forget: id => { byId.delete(id); },
     // A gateway shutdown: a live run ends `interrupted` (event run.interrupted), as Hermes does.

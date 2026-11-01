@@ -9,7 +9,7 @@
 import { checkDrawing } from './card-writes.mjs';
 import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
-import { createHash, createPublicKey } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, staleSince, validId, validProject } from './hub-model.mjs';
@@ -21,7 +21,7 @@ export const MOVE_AFTER_MS = 6 * 3600 * 1000;
 /** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
-export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80, reply: 2000, replies: 5 };
+export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80, reply: 2000, replies: 5, maxReplies: 10 };
 /** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
@@ -185,7 +185,7 @@ export function rerunRequestId(requestId) {
 export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, bunnylinkRepo = async () => null, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], neverRepos = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
-  const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
+  const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, steer: async () => ({ delivery: 'queued', reason: 'Hermes is not set up on this host.' }), retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
   const clash = message => fail(message, 409);
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
@@ -342,10 +342,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names, at) }), at);
     // The signed claim of a continuation (`continued.json`); one that does not verify for this request is not shown.
     const continued = claim && publicKey && verify(claim, publicKey) && claim.request === id && validId(claim.to) ? { to: claim.to, at: claim.at } : null;
+    const replyList = await replyDetails(id, names, continued?.to ?? null);
     return {
       request,
       state,
       ...(stale ? { stale } : {}),
+      ...(replyList.length ? { replies: replyList } : {}),
       ...(shown ? { approved: shown } : {}),
       ...(parts.taken ? { taken: parts.taken } : {}),
       runs,
@@ -817,8 +819,101 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const { parts, state } = await loadOne(id, at);
     if (parts.approved && parts.approved.target !== 'hermes') throw fail(NOT_HERMES, 400);
     if (state === 'asking') return answerRunRoute(id, { text: reply }, user, at);
-    if (state === 'running') throw clash('That run is still going.');
+    if (state === 'running') return { status: 201, body: await steerReply(id, reply, user, at) };
     return { status: 201, body: await continueRequest(id, { replies: [reply], user, at }) };
+  }
+
+  const REPLY_FILE = /^reply-(\d{8}T\d{6,9}Z-[0-9a-f]{4})\.json$/;
+  /** What Hermes is told when the owner replies while it works. */
+  const STEER_PREFIX = 'Message from the owner while you work: ';
+  const validTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+  /**
+   * The owner's replies to a request, verified: `reply-<stamp>-<hex>.json` files that carry the server's signature, `kind: owner-reply`
+   * and this request's id. A file that does not verify is ignored (an agent cannot write one: the card API keeps them owner-only, and
+   * a forged one fails here). `sentAt` is the time Hermes accepted it (`reply-<stamp>-<hex>.sent.json`); newest first.
+   */
+  async function verifiedReplies(id, names) {
+    if (!publicKey) return [];
+    const files = [...names].filter(name => REPLY_FILE.test(name)).sort().reverse().slice(0, REQUEST_LIMITS.maxReplies * 3);
+    const rows = await pool(8, files, async file => {
+      const body = await cached(`requests/${id}/${file}`).catch(() => null);
+      if (!body || !verify(body, publicKey) || body.kind !== 'owner-reply' || body.request !== id || typeof body.text !== 'string' || !validTime(body.at)) return null;
+      const sentName = file.replace(/\.json$/, '.sent.json');
+      const sent = names.has(sentName) ? await cached(`requests/${id}/${sentName}`).catch(() => null) : null;
+      return { file, text: body.text, at: body.at, by: body.by, sentAt: sent?.accepted === true && validTime(sent.at) ? sent.at : null };
+    });
+    return rows.filter(Boolean);
+  }
+
+  /** The `replies` of the detail: `{ id, text, at, by, delivery: sent | queued | continued, to? }`, newest first. */
+  async function replyDetails(id, names, to) {
+    const rows = await verifiedReplies(id, names);
+    if (!rows.length) return [];
+    // The texts the continuation carried: those replies went out as the next run.
+    const carried = to ? (await cached(`requests/${to}/request.json`).catch(() => null))?.continues?.replies ?? [] : [];
+    // Text Hermes took and the run ended without reading (the result keeps it): that reply is queued, not sent.
+    const unread = names.has('result.json') ? (await cached(`requests/${id}/result.json`).catch(() => null))?.unreadReplies ?? [] : [];
+    return rows.slice(0, LIST_CAP).map(row => {
+      const gone = to && carried.includes(row.text);
+      const sent = row.sentAt && !unread.some(entry => String(entry).includes(row.text));
+      return { id: row.file, text: row.text, at: row.at, by: row.by, delivery: gone ? 'continued' : sent ? 'sent' : 'queued', ...(gone ? { to } : {}) };
+    });
+  }
+
+  /** The signed owner's reply, create-only; written before anything is sent so the words survive a crash. */
+  async function writeReply(id, { text: words, user, at }) {
+    const stamp = at.toISOString().replace(/[-:.]/g, '');
+    const file = `reply-${stamp}-${randomBytes(2).toString('hex')}.json`;
+    const body = sign({ v: 1, kind: 'owner-reply', request: id, text: words, at: at.toISOString(), by: user, nonce: newNonce() }, signingKey);
+    await writeSigned(id, file, body, 'That reply is already written.');
+    return file;
+  }
+
+  /**
+   * A reply to a run that is going: write the signed reply file, send it into the run (`steer`), and record that Hermes took it.
+   * Hermes refusing or being unreachable never loses it: the file stays and the reply is `queued` (it goes out as the next run when
+   * this one ends, or the owner sends it by hand). -> `{ id, delivery: 'sent' | 'queued', reason? }`
+   */
+  async function steerReply(id, words, user, at) {
+    needKey();
+    const { names, parts } = await loadOne(id, at);
+    if (!names.has('hermes-run.json')) throw clash('Hermes has not started that run yet.');
+    if (parts.approved?.target !== 'hermes') throw fail(NOT_HERMES, 400);
+    if ([...names].filter(name => REPLY_FILE.test(name)).length >= REQUEST_LIMITS.maxReplies) throw clash(`That job has ${REQUEST_LIMITS.maxReplies} replies already; wait for it to end.`);
+    const file = await writeReply(id, { text: words, user, at });
+    let outcome;
+    try { outcome = await live.steer(id, { text: `${STEER_PREFIX}${words}`, reply: words, at }); } catch (error) {
+      log(`[hub] steer for ${id} failed: ${scrub(error.message, 120)}`);
+      outcome = { delivery: 'queued', reason: 'Hermes could not be reached.' };
+    }
+    if (outcome.delivery === 'sent') {
+      await putCreateOnly(`requests/${id}/${file.replace(/\.json$/, '.sent.json')}`, `${JSON.stringify({ at: at.toISOString(), accepted: true }, null, 2)}\n`, 'application/json', clash('sent'))
+        .catch(error => { if (error.status !== 409) log(`[hub] could not record a delivered reply for ${id}: ${scrub(error.message, 120)}`); });
+    }
+    return { id: file, delivery: outcome.delivery === 'sent' ? 'sent' : 'queued', ...(outcome.reason ? { reason: outcome.reason } : {}) };
+  }
+
+  /**
+   * At the end of a Hermes run: send what the owner said and Hermes did not read. Only for a run that completed (state `done` or
+   * `asking`), with no stop and no time-out: after Stop, a time-out or a failure the replies wait for the owner's "Send it now".
+   * The authority is the owner's own signed reply file (verified here, for this request); the approval is signed through the
+   * ordinary path, as the owner who wrote the first reply. `pendingSteer` is the text Hermes never read; `retryAt` makes replies
+   * sent to the run before the quota retry count as unread. Errors are the caller's to log. -> the answer, or null.
+   */
+  async function sendQueuedReplies(id, { at, completed, timedOut = false, pendingSteer = [], retryAt = null }) {
+    if (!completed || timedOut || !signingKey) return null;
+    const { names, state } = await loadOne(id, at);
+    if (names.has('stop.json') || names.has('continued.json') || !['done', 'asking'].includes(state)) return null;
+    const unread = (await verifiedReplies(id, names)).filter(row => !row.sentAt || (retryAt && Date.parse(row.sentAt) < Date.parse(retryAt)) || pendingSteer.some(unreadText => String(unreadText).includes(row.text)));
+    if (!unread.length) return null;
+    unread.reverse(); // oldest first
+    const user = unread[0].by;
+    if (typeof user !== 'string' || !user) return null;
+    let texts = [...new Set(unread.map(row => row.text))];
+    if (state === 'asking') return answerRunRoute(id, { text: texts.join('\n').slice(0, REQUEST_LIMITS.answer) }, user, at);
+    if (texts.length > REQUEST_LIMITS.replies) texts = [...texts.slice(0, REQUEST_LIMITS.replies - 1), texts.slice(REQUEST_LIMITS.replies - 1).join(' / ').slice(0, REQUEST_LIMITS.reply)];
+    return continueRequest(id, { replies: texts, user, at });
   }
 
   /**
@@ -929,5 +1024,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
   }
 
-  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, hooks: live };
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, sendQueuedReplies, hooks: live };
 }
