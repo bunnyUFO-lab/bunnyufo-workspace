@@ -275,8 +275,8 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
           <div className="rd-result" data-run-result>
             {detail?.nothing && <p data-run-nothing><b>Done, nothing to change.</b></p>}
             {result.reason === 'approval-refused'
-              ? <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>
-              : result.summary && <p>{result.summary}</p>}
+              && <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>}
+            {result.summary && <p>{result.summary}</p>}
             {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
             <div className="rd-links">
               {prHref && <a className="hub-btn" href={prHref} target="_blank" rel="noopener noreferrer" data-run-pr>Open the PR</a>}
@@ -319,8 +319,10 @@ function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       // A click on the backdrop closes the drawer and then goes on to what is under it, so the first click on the board is not lost.
       const { clientX, clientY } = event
       dialog.current?.close()
+      // Only to what opens a run (a card, a row, an Open run link): never to a button, a link or a field that acts, so a tap that meant to dismiss cannot Approve, Stop or Retry.
       const under = document.elementFromPoint(clientX, clientY)
-      if (under instanceof HTMLElement && under !== document.body && under !== document.documentElement) under.click()
+      if (!(under instanceof HTMLElement) || under.closest('button, input, select, textarea, label, summary')) return
+      under.closest<HTMLElement>('[data-run-open]')?.click()
     }}>
       <div className="sp-head">
         <h2 id="run-drawer-title">Run</h2>
@@ -345,19 +347,21 @@ function PcStart() {
 }
 
 export default function RunDrawerHost() {
-  const [id, setId] = useState<string | null>(null)
+  // An object per opening: the close event of a drawer that a click re-opened (even on the same run) belongs to the old one.
+  const [shown, setShown] = useState<{ id: string; n: number } | null>(null)
+  const opened = useRef(0)
   const opener = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const open = () => {
       const next = takeRun()
       if (!next) return
       if (!(document.activeElement instanceof HTMLElement && document.activeElement.closest('dialog'))) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setId(next)
+      setShown({ id: next, n: ++opened.current })
     }
     window.addEventListener(RUN_EVENT, open)
     return () => window.removeEventListener(RUN_EVENT, open)
   }, [])
-  const showing = !!id
+  const showing = !!shown
   useEffect(() => {
     if (showing) return
     const back = opener.current
@@ -365,5 +369,5 @@ export default function RunDrawerHost() {
     if (back && document.contains(back)) back.focus({ preventScroll: true })
   }, [showing])
   // The close event comes a moment after close(): by then a click that went on to another run may have set the next id, which stays.
-  return id ? <RunDrawer key={id} id={id} onClose={() => setId(current => (current === id ? null : current))} /> : null
+  return shown ? <RunDrawer key={shown.n} id={shown.id} onClose={() => setShown(current => (current === shown ? null : current))} /> : null
 }

@@ -108,7 +108,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     )
     if (item.kind === 'ask') return <a className="hub-row click" href={hubHash('ask', item.id)}>{body}</a>
     if (item.kind === 'checklist') return <a className="hub-row click" href={hubHash('checklist', item.id)} data-checklist-open>{body}</a>
-    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id}>{body}</a>
+    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id} data-run-open={item.id}>{body}</a>
     return <div className="hub-row">{body}</div>
   }
   if (!event) return null
@@ -139,7 +139,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
         <span className="hub-row-actions">
           {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer" data-run-pr>Review on GitHub</a>}
           {card && <a className="hub-btn" href={card} data-run-event-card>Open card</a>}
-          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open>Open run</a>
+          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open data-run-open={event.request}>Open run</a>
         </span>
         <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       </div>

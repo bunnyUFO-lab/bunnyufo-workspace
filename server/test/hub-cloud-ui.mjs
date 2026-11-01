@@ -166,6 +166,9 @@ try {
   await refusedAlert.waitFor();
   assert.equal(await refusedAlert.locator('[data-alert-run]').getAttribute('data-alert-run'), ids.refused);
   assert.equal(await refusedAlert.locator('[data-alert-retry]').count(), 0, 'A refused approval is not retried.');
+  await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.refused)}`);
+  await page.locator('[data-run-refused]').waitFor();
+  assert.match(await page.locator('[data-run-result]').innerText(), /did not accept the approval[\s\S]*approval refused: bad signature/, 'The plain sentence comes first and the summary stays.');
 
   step('ws-edv: a click on the board past an open drawer is not lost; Retry tells Work at once');
   const redo = id('retry-from-work', 'a9a9');
@@ -189,6 +192,20 @@ try {
   await work.mouse.click(at.x + at.width / 2, at.y + 16);
   await workDrawer.locator(`[data-run-view="${ids.fail}"]`).waitFor();
   await workDrawer.locator('[data-run-state-chip]').waitFor();
+  await redoCard.evaluate(node => node.click());
+  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
+  step('ws-edv: a backdrop click on the same card opens it again, and over a button it only dismisses');
+  const own = await redoCard.boundingBox();
+  await work.mouse.click(own.x + own.width / 2, own.y + 16);
+  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
+  await work.waitForTimeout(400);
+  assert.equal(await work.locator('[data-run-drawer]').count(), 1, 'The drawer stayed open on the same run.');
+  const spawn = await work.locator('[data-spawn-open]').boundingBox();
+  assert.ok(spawn && spawn.x + spawn.width / 2 < 1280 - 380, 'The Spawn work button is left of the drawer.');
+  await work.mouse.click(spawn.x + spawn.width / 2, spawn.y + spawn.height / 2);
+  await work.locator('[data-run-drawer]').waitFor({ state: 'detached' });
+  await work.waitForTimeout(400);
+  assert.equal(await work.locator('dialog[open]').count(), 0, 'The tap only dismissed the drawer: the button under it did not run.');
   await redoCard.evaluate(node => node.click());
   await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
   const before = await work.evaluate(() => window.__wrote);

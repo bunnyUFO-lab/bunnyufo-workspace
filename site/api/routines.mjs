@@ -273,7 +273,7 @@ export function createRoutines({ env = {}, fetchImpl = fetch, bucket, key, reque
    */
   const handOff = (id, { at = now() } = {}) => exclusive(async () => {
     const checked = await verifyApproval(id, at);
-    if (!checked.ok) return { fired: false, reason: 'check-failed', waiting: `The approval failed the server's check (${CHECK_WORDS[checked.reason] ?? 'it could not be verified'}).` };
+    if (!checked.ok) return { fired: false, reason: 'check-failed', waiting: `The approval failed the server's check (${CHECK_WORDS[checked.reason] ?? `it could not be verified: ${checked.reason}`}).` };
     const room = await capacity(at);
     if (!room.under) return { fired: false, reason: 'daily-cap', next: room.next, waiting: 'The daily limit for cloud runs is used.' };
     // Another fire may have got in while this waited for the lock (a sweep, Retry): never fire twice.
