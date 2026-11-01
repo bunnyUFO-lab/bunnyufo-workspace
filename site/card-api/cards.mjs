@@ -115,7 +115,7 @@
 //        The agent is the one on that request (preset agent-avatar-sheet), never an argument. The JSON must name the request in source.request. PC runs reach it through run-sheet.mjs.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 //   cards mark list --project <p> [--json]                            the owner's marks on the Roadmap that no agent has applied yet (bead, verdict, time, reason), oldest first
-//   cards mark applied --project <p> --bead <id>                      after `bd close`: writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
+//   cards mark applied --project <p> --bead <id>                      after `bd close` (done, not-needed) or `bd label remove <id> needs-owner` (unblock): writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
 import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
 import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -1785,11 +1785,12 @@ async function beadsPush(flags) {
 }
 
 // --- The owner's marks on the Roadmap: bead-marks/<project>/<bead>/<stamp>-<verdict>-<rand4>.json ---
-// The Hub writes done, not-needed and undo; an agent that closed the issue in Beads writes applied. A mark is
-// active when the newest owner verdict is done or not-needed and no applied note names its file. (The Hub's
+// The Hub writes done, not-needed, unblock and undo; an agent that closed the issue in Beads (or took the
+// needs-owner label off, for unblock) writes applied. A mark is active when the newest owner verdict is not undo
+// and no applied note names its file. (The Hub's
 // own copy of this rule is site/api/hub-marks.mjs; it also looks at who wrote each verdict file.)
 
-const MARK_NAME = /^(\d{8}T\d{9}Z)-(done|not-needed|undo|applied)-([a-z0-9]{4})\.json$/;
+const MARK_NAME = /^(\d{8}T\d{9}Z)-(done|not-needed|unblock|undo|applied)-([a-z0-9]{4})\.json$/;
 const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
 const markProject = flags => {
   if (!flags.project || !/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('Usage: mark list|applied --project <p> [--bead <id>]');
@@ -1826,7 +1827,7 @@ async function markList(flags) {
 
 async function markApplied(flags) {
   const project = markProject(flags);
-  if (!BEAD_ID.test(flags.bead ?? '')) throw new Error('Usage: mark applied --project <p> --bead <bead id>');
+  if (!BEAD_ID.test(flags.bead ?? '')) throw new Error('Usage: mark applied --project <p> --bead <bead id> (after `bd close` for done and not-needed, or `bd label remove <id> needs-owner` for unblock)');
   const [mark] = await activeMarks(project, flags.bead);
   if (!mark) return console.log('nothing to apply');
   const body = { v: 1, project, bead: flags.bead, verdict: 'applied', at: isoNow(), by: hostName(), mark: mark.file, ...(sessionEnv() ? { session: sessionEnv() } : {}) };

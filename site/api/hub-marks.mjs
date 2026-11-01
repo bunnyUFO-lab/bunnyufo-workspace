@@ -1,14 +1,14 @@
-// The owner's marks on the Roadmap, with no I/O: "done" and "no longer needed" for a task that waits
-// on the owner with nothing in Needs you. A mark is a create-only file in the inbox,
+// The owner's marks on the Roadmap, with no I/O: "done", "no longer needed" and "unblock" (it does not
+// wait on the owner) for a task that waits on the owner. A mark is a create-only file in the inbox,
 //   bead-marks/<project>/<bead id>/<stamp>-<verdict>-<rand4>.json
-// where the verdict is done | not-needed | undo (written by the Hub only) or applied (written by an
-// agent after `bd close`). Nothing here writes into Beads: the Roadmap shows an overlay that turns an
+// where the verdict is done | not-needed | unblock | undo (written by the Hub only) or applied (written by an
+// agent after `bd close` or `bd label remove <id> needs-owner`). Nothing here writes into Beads: the Roadmap shows an overlay that turns an
 // open issue closed until Beads says so itself.
 
-export const MARK_FILE = /^(\d{8}T\d{9}Z)-(done|not-needed|undo|applied)-([a-z0-9]{4})\.json$/;
+export const MARK_FILE = /^(\d{8}T\d{9}Z)-(done|not-needed|unblock|undo|applied)-([a-z0-9]{4})\.json$/;
 export const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
 export const REASON_MAX = 200;
-const OWNER_VERDICTS = new Set(['done', 'not-needed', 'undo']);
+const OWNER_VERDICTS = new Set(['done', 'not-needed', 'unblock', 'undo']);
 
 export const markReason = verdict => (verdict === 'not-needed' ? 'Not needed (you, on the Roadmap)' : 'Done (you, on the Roadmap)');
 
@@ -34,12 +34,12 @@ export function markEntry(rel, body, writer = null) {
 }
 
 /**
- * Where one bead stands. The current owner verdict is the newest done / not-needed / undo written by
+ * Where one bead stands. The current owner verdict is the newest done / not-needed / unblock / undo written by
  * the Hub (a verdict file with a writer was put through the card API and is ignored). It is active
  * when it is done or not-needed, no `applied` file names it, and the issue is not closed.
  * Null when the owner never marked the bead.
  */
-export function markState(entries, { closed = false } = {}) {
+export function markState(entries, { closed = false, waiting = true } = {}) {
   const owner = entries.filter(entry => OWNER_VERDICTS.has(entry.verdict) && !entry.writer).sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
   const current = owner.at(-1);
   if (!current) return null;
@@ -47,25 +47,35 @@ export function markState(entries, { closed = false } = {}) {
   const marked = current.verdict !== 'undo';
   return {
     verdict: current.verdict, at: current.at, file: current.file, ...(current.reason ? { reason: current.reason } : {}),
-    applied: marked && applied, active: marked && !applied && !closed,
+    applied: marked && applied, active: marked && !applied && !closed && (current.verdict !== 'unblock' || waiting),
   };
 }
 
 /** `marksByBead` keys: `<project>/<bead>`. */
 export const markKey = (project, bead) => `${project}/${bead}`;
 
+/** The raw issue still waits on the owner: it has the needs-owner label or status blocked. */
+export const isWaiting = issue => (issue.labels ?? []).includes('needs-owner') || issue.status === 'blocked';
+
 /**
  * Copies of `issues` where an active mark closes the issue: status closed, `closed_at` the mark's time,
  * a close reason and `_mark`. It only ever turns an open issue closed, so it stops by itself once Beads
- * says closed or an `applied` file exists. `project` names the project of every issue, or each issue's own `project`.
+ * says closed or an `applied` file exists. An active unblock instead drops the needs-owner label and
+ * turns status blocked into open (with `_mark`, and no close fields). `project` names the project of every issue, or each issue's own `project`.
  * @param marksByBead Map of `<project>/<bead>` to that bead's entries
  */
 export function applyMarks(issues, marksByBead, project) {
   return issues.map(issue => {
     const entries = marksByBead.get(markKey(project ?? issue.project, issue.id));
     if (!entries?.length) return issue;
-    const state = markState(entries, { closed: issue.status === 'closed' });
+    const state = markState(entries, { closed: issue.status === 'closed', waiting: isWaiting(issue) });
     if (!state?.active) return issue;
+    if (state.verdict === 'unblock') {
+      return {
+        ...issue, labels: (issue.labels ?? []).filter(label => label !== 'needs-owner'), ...(issue.status === 'blocked' ? { status: 'open' } : {}),
+        _mark: { verdict: 'unblock', at: state.at, file: state.file },
+      };
+    }
     return { ...issue, status: 'closed', closed_at: state.at, close_reason: markReason(state.verdict), _mark: { verdict: state.verdict, at: state.at, file: state.file } };
   });
 }
@@ -74,7 +84,7 @@ export function applyMarks(issues, marksByBead, project) {
 export function checkMarkRequest(raw) {
   const bead = typeof raw?.bead === 'string' ? raw.bead : '';
   if (!BEAD_ID.test(bead)) throw new Error('bead must be a Beads issue id.');
-  if (!['done', 'not-needed', 'undo'].includes(raw?.verdict)) throw new Error('verdict must be done, not-needed or undo.');
+  if (!['done', 'not-needed', 'unblock', 'undo'].includes(raw?.verdict)) throw new Error('verdict must be done, not-needed, unblock or undo.');
   let reason = '';
   if (raw.reason !== undefined && raw.reason !== null) {
     if (typeof raw.reason !== 'string') throw new Error('reason must be text.');

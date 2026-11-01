@@ -1535,13 +1535,14 @@ for (const via of ['api', 's3']) {
       const shut = mark('dr-d', '20261030T080000000Z', 'done', '2026-10-30T08:00:00.000Z');
       fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-d/20261030T081000000Z-applied-cd34.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-d', verdict: 'applied', at: '2026-10-30T08:10:00.000Z', by: 'pc', mark: shut }), 'application/json');
       mark('dr-e', '20261030T120000000Z', 'done', '2026-10-30T12:00:00.000Z');
+      const unblock = mark('dr-f', '20261030T130000000Z', 'unblock', '2026-10-30T13:00:00.000Z');
       fake.seed('sections/inbox-dev/bead-marks/another/an-1/20261030T120000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'another', bead: 'an-1', verdict: 'done', at: '2026-10-30T12:00:00.000Z', by: 'owner' }), 'application/json');
 
       const listed = await cli(via, 'mark', 'list', '--project', 'dev-roadmap');
       assert.equal(listed.code, 0, listed.stderr);
-      assert.deepEqual(listed.stdout.trim().split('\n'), ['dr-a\tdone\t2026-10-30T10:00:00.000Z', 'dr-c\tnot-needed\t2026-10-30T11:00:00.000Z\tSuperseded', 'dr-e\tdone\t2026-10-30T12:00:00.000Z'], 'Oldest first; undone and applied marks are not listed.');
+      assert.deepEqual(listed.stdout.trim().split('\n'), ['dr-a\tdone\t2026-10-30T10:00:00.000Z', 'dr-c\tnot-needed\t2026-10-30T11:00:00.000Z\tSuperseded', 'dr-e\tdone\t2026-10-30T12:00:00.000Z', 'dr-f\tunblock\t2026-10-30T13:00:00.000Z'], 'Oldest first; undone and applied marks are not listed.');
       const json = JSON.parse((await cli(via, 'mark', 'list', '--project', 'dev-roadmap', '--json')).stdout);
-      assert.deepEqual(json.map(item => [item.bead, item.verdict, item.reason]), [['dr-a', 'done', undefined], ['dr-c', 'not-needed', 'Superseded'], ['dr-e', 'done', undefined]]);
+      assert.deepEqual(json.map(item => [item.bead, item.verdict, item.reason]), [['dr-a', 'done', undefined], ['dr-c', 'not-needed', 'Superseded'], ['dr-e', 'done', undefined], ['dr-f', 'unblock', undefined]]);
 
       const applied = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', 'dr-a');
       assert.equal(applied.code, 0, applied.stderr);
@@ -1549,7 +1550,10 @@ for (const via of ['api', 's3']) {
       const note = fake.json(`sections/inbox-dev/${applied.stdout.trim()}`);
       assert.deepEqual([note.v, note.verdict, note.bead, note.mark], [1, 'applied', 'dr-a', '20261030T100000000Z-done-ab12.json']);
       assert.match(note.by, /^[a-z0-9-]+$/);
-      assert.deepEqual((await cli(via, 'mark', 'list', '--project', 'dev-roadmap')).stdout.trim().split('\n').map(line => line.split('\t')[0]), ['dr-c', 'dr-e']);
+      assert.deepEqual((await cli(via, 'mark', 'list', '--project', 'dev-roadmap')).stdout.trim().split('\n').map(line => line.split('\t')[0]), ['dr-c', 'dr-e', 'dr-f']);
+      const unblocked = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', 'dr-f');
+      assert.equal(unblocked.code, 0, unblocked.stderr);
+      assert.equal(fake.json(`sections/inbox-dev/${unblocked.stdout.trim()}`).mark, unblock, 'The note names the unblock file.');
       for (const bead of ['dr-a', 'dr-b', 'dr-d']) {
         const none = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', bead);
         assert.equal(none.code, 0, none.stderr);

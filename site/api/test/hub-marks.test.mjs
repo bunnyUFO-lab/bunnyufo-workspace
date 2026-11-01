@@ -7,9 +7,9 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { applyMarks, checkMarkRequest, markEntry, markState } from '../hub-marks.mjs';
+import { applyMarks, checkMarkRequest, markEntry, markState, MARK_FILE } from '../hub-marks.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { askJson, beadsIssue, eventJson, jsonl, minutesAgo, seeder, threeOptions } from './hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, eventJson, jsonl, minutesAgo, seeder, threeOptions } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
@@ -49,6 +49,34 @@ test('markState: the newest owner verdict, applied, closed, and a verdict put th
   assert.equal(markState([entry('p', 'p-1', '20261030T100000000Z', 'done', {}, 'card-api')]), null, 'A verdict with a card API writer is ignored.');
 });
 
+test('unblock: its file parses, and it is active only while the issue still waits on the owner', () => {
+  assert.ok(MARK_FILE.test('20261030T100000000Z-unblock-ab12.json'));
+  const unblock = entry('p', 'p-1', '20261030T100000000Z', 'unblock', { reason: 'dropped' });
+  assert.equal(unblock.verdict, 'unblock');
+  assert.equal(markState([unblock]).active, true, 'Waiting is the default.');
+  assert.equal(markState([unblock], { waiting: true }).active, true);
+  assert.equal(markState([unblock], { waiting: false }).active, false, 'The label is gone and the issue is not blocked: Beads caught up.');
+  assert.equal(markState([unblock], { closed: true, waiting: true }).active, false, 'Closed.');
+  const applied = entry('p', 'p-1', '20261030T130000000Z', 'applied', { mark: unblock.file, by: 'pc' });
+  const after = markState([unblock, applied], { waiting: true });
+  assert.deepEqual([after.active, after.applied], [false, true]);
+  assert.equal(markState([entry('p', 'p-1', '20261030T100000000Z', 'done')], { waiting: false }).active, true, 'done ignores waiting.');
+  assert.equal(markState([entry('p', 'p-1', '20261030T100000000Z', 'not-needed')], { waiting: false }).active, true, 'not-needed ignores waiting.');
+});
+
+test('applyMarks with an unblock drops needs-owner and opens a blocked issue, and never closes it', () => {
+  const labelled = beadsIssue({ id: 'p-lab', labels: ['needs-owner', 'sprint:x'] });
+  const blocked = beadsIssue({ id: 'p-blk', status: 'blocked', labels: ['needs-owner'] });
+  const gone = beadsIssue({ id: 'p-gone', labels: ['sprint:x'] });
+  const marks = new Map(['p-lab', 'p-blk', 'p-gone'].map(id => [`p/${id}`, [entry('p', id, '20261030T100000000Z', 'unblock')]]));
+  const byId = Object.fromEntries(applyMarks([labelled, blocked, gone], marks, 'p').map(issue => [issue.id, issue]));
+  assert.deepEqual(byId['p-lab'].labels, ['sprint:x']);
+  assert.deepEqual([byId['p-lab'].status, byId['p-lab'].closed_at, byId['p-lab'].close_reason, byId['p-lab']._mark.verdict], ['open', undefined, undefined, 'unblock']);
+  assert.deepEqual([byId['p-blk'].status, byId['p-blk'].labels], ['open', []]);
+  assert.equal(byId['p-gone'], gone, 'Nothing waits any more: the mark has ended.');
+  assert.deepEqual(labelled.labels, ['needs-owner', 'sprint:x'], 'The input is not changed.');
+});
+
 test('applyMarks closes only issues with an active mark, and leaves the rest as they were', () => {
   const issues = [
     beadsIssue({ id: 'p-open', labels: ['needs-owner'] }), beadsIssue({ id: 'p-undone' }), beadsIssue({ id: 'p-applied' }),
@@ -73,6 +101,7 @@ test('applyMarks closes only issues with an active mark, and leaves the rest as 
 test('checkMarkRequest: a bead id, a verdict, and a reason of at most 200 characters for not-needed only', () => {
   assert.deepEqual(checkMarkRequest({ bead: 'ws-7nz.2.2', verdict: 'not-needed', reason: ' Not   any more ' }), { bead: 'ws-7nz.2.2', verdict: 'not-needed', reason: 'Not any more' });
   assert.equal(checkMarkRequest({ bead: 'p-1', verdict: 'done', reason: 'ignored' }).reason, '');
+  assert.deepEqual(checkMarkRequest({ bead: 'p-1', verdict: 'unblock', reason: 'ignored' }), { bead: 'p-1', verdict: 'unblock', reason: '' });
   for (const bad of [{}, { bead: 'P-1', verdict: 'done' }, { bead: '../x', verdict: 'done' }, { bead: 'p-1', verdict: 'maybe' }, { bead: 'p-1', verdict: 'not-needed', reason: 'x'.repeat(201) }, { bead: 'p-1', verdict: 'not-needed', reason: 5 }]) {
     assert.throws(() => checkMarkRequest(bad), undefined, JSON.stringify(bad));
   }
@@ -120,7 +149,6 @@ test('the route: who may mark, what is refused and why', async () => {
     assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-ghost', verdict: 'done' })).status, 404, 'A bead that is not in that project.');
     assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'maybe' })).status, 400);
     const refusals = [
-      ['mk-ask', 'This has an Ask; answer it in Needs you.'], ['mk-inbox', 'This has an item in Needs you; finish it there.'],
       ['mk-plain', 'This is not waiting on you.'], ['mk-shut', 'Already closed in Beads.'], ['mk-f', 'This is not waiting on you.'],
     ];
     for (const [bead, message] of refusals) {
@@ -222,5 +250,81 @@ test('Work agrees with the Roadmap: a marked task leaves the blocked lane', asyn
     assert.equal(laneOf((await get('/hub/work?project=mk')).body, 'bead:mk-label'), 'done');
     assert.equal(laneOf((await get('/hub/work')).body, 'bead:mk-label'), 'done', 'Without a project too.');
     assert.equal(laneOf((await get('/hub/work')).body, 'bead:mk-ask'), 'blocked', 'Another task is not touched.');
+  } finally { await close(); }
+});
+
+test('the route: unblock on a label-only task writes an unblock file and moves the card to ready', async () => {
+  const { post, get, marks, fake, taskOf, close } = await fixture();
+  try {
+    const laneOf = (work, key) => Object.entries(work.lanes).find(([, cards]) => cards.some(card => card.key === key))?.[0];
+    const answer = await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'unblock' });
+    assert.deepEqual([answer.status, answer.body.state, answer.body.verdict], [201, 'marked', 'unblock'], JSON.stringify(answer.body));
+    const [file] = marks();
+    assert.match(file, /^sections\/inbox\/bead-marks\/mk\/mk-label\/\d{8}T\d{9}Z-unblock-[a-z0-9]{4}\.json$/);
+    assert.deepEqual([fake.json(file).verdict, fake.json(file).by], ['unblock', 'owner']);
+    const task = await taskOf('mk-label');
+    assert.deepEqual([task.state, task.status, task.mark.verdict, task.mark.pending], ['next', 'open', 'unblock', true]);
+    assert.equal(laneOf((await get('/hub/work?project=mk')).body, 'bead:mk-label'), 'ready');
+    const again = await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'unblock' });
+    assert.deepEqual([again.status, marks().length], [200, 1], 'A repeat is a no-op.');
+    const undo = await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'undo' });
+    assert.deepEqual([undo.status, undo.body], [201, { state: 'unmarked' }]);
+    assert.equal((await taskOf('mk-label')).state, 'you');
+  } finally { await close(); }
+});
+
+test('the route: undo after an applied unblock says how to put the label back', async () => {
+  const { post, seed, marks, close } = await fixture();
+  try {
+    await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'unblock' });
+    const name = marks()[0].split('/').at(-1);
+    seed.put('bead-marks/mk/mk-label/20991231T000000000Z-applied-zz99.json', { v: 1, project: 'mk', bead: 'mk-label', verdict: 'applied', at: new Date().toISOString(), by: 'pc', mark: name }, 'application/json', { writer: 'card-api' });
+    const undo = await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'undo' });
+    assert.deepEqual([undo.status, undo.body.error], [409, 'Already applied in Beads; add the label back with bd label add mk-label needs-owner.']);
+  } finally { await close(); }
+});
+
+test('the route: a mark is allowed while an Ask or another Needs you item names the task, and the newest verdict wins', async () => {
+  const { post, taskOf, marks, close } = await fixture();
+  try {
+    const done = await post('/hub/map/mk/marks', { bead: 'mk-ask', verdict: 'done' });
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-inbox', verdict: 'unblock' })).status, 201, 'A review item names it.');
+    assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-inbox', verdict: 'done' })).status, 201, 'The newest wins (done after unblock).');
+    assert.equal((await taskOf('mk-inbox')).mark.verdict, 'done');
+    assert.equal(marks().length, 3);
+  } finally { await close(); }
+});
+
+test('GET /hub/unasked lists label-only beads, matches Work, and leaves out asked, checklist, marked, closed and group issues', async () => {
+  const { post, get, seed, close } = await fixture();
+  try {
+    seed.checklist(checklistJson({ id: `${day}-mk-steps-c1d2`, project: 'mk', bead: 'mk-plain', now: minutesAgo(NOW, 30) }));
+    const work = (await get('/hub/work')).body;
+    const unasked = (await get('/hub/unasked')).body;
+    assert.deepEqual(unasked.items.map(item => item.id), ['mk-label']);
+    assert.deepEqual(Object.keys(unasked.items[0]).sort(), ['href', 'id', 'project', 'status', 'title']);
+    assert.equal(unasked.items.length, work.lanes.blocked.filter(card => card.nothingAsked).length, 'The same count as Work.');
+    const card = work.lanes.blocked.find(item => item.id === 'mk-label');
+    assert.deepEqual([card.why, card.nothingAsked, 'asked' in card], ['needs you · nothing asked yet', true, false]);
+    const askCard = work.lanes.blocked.find(item => item.id === 'mk-ask');
+    assert.deepEqual(askCard.asked, { kind: 'ask', id: `${day}-mk-pick-the-arc-a1b2`, href: `#/~hub/ask/${day}-mk-pick-the-arc-a1b2` });
+    assert.equal(askCard.why, 'needs you');
+    const review = work.lanes.blocked.find(item => item.id === 'mk-inbox');
+    assert.deepEqual([review.asked.kind, review.asked.href], ['review', '#/~hub/needs']);
+    const plain = work.lanes.blocked.find(item => item.id === 'mk-plain');
+    assert.deepEqual([plain.asked.kind, plain.asked.href], ['checklist', `#/~hub/checklist/${day}-mk-steps-c1d2`], 'An open checklist with a bead and no label.');
+    assert.equal(work.lanes.blocked.some(item => item.id === 'mk-f' || item.id === 'mk-m' || item.id === 'mk-shut'), false);
+    await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'unblock' });
+    assert.deepEqual((await get('/hub/unasked')).body.items, [], 'A marked one drops out.');
+  } finally { await close(); }
+});
+
+test('GET /hub/map/:project gives a task with an open checklist you: checklist', async () => {
+  const { get, seed, close } = await fixture();
+  try {
+    seed.checklist(checklistJson({ id: `${day}-mk-steps-c1d2`, project: 'mk', bead: 'mk-plain', now: minutesAgo(NOW, 30) }));
+    const task = (await get('/hub/map/mk')).body.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).find(item => item.id === 'mk-plain');
+    assert.deepEqual([task.state, task.you, task.checklist], ['you', 'checklist', `${day}-mk-steps-c1d2`]);
   } finally { await close(); }
 });
