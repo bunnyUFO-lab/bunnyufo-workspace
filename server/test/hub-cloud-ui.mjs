@@ -220,7 +220,7 @@ try {
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.limit)}`);
   const limit = page.locator('[data-run-cloud="waiting"]');
   await limit.waitFor();
-  assert.match(await limit.innerText(), /^Waiting on the usage pause: cloud runs are paused after a usage limit, which is separate from today's count\. Tries again at \d\d:\d\d(?: [AP]M)?\./);
+  assert.match(await limit.innerText(), /^Waiting on the usage pause: cloud runs are paused after a usage limit, which is separate from today's count\. Tries again at (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)?\./); // a time on another day carries its weekday
   assert.equal(await limit.getAttribute('data-cloud-reason'), 'usage-limit');
   assert.equal(await limit.locator('[data-run-fire-retry]').count(), 0);
   assert.equal(await page.locator('[data-run-stop]').count(), 1, 'A waiting request can be stopped.');
