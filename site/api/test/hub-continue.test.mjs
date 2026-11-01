@@ -110,7 +110,7 @@ test('a failed or stopped Hermes job can be continued; an answered one cannot', 
   } finally { await asking.close(); }
 });
 
-test('a PC job is 400, a job that has not ended is 409, a request nobody approved is 409', async () => {
+test('a PC job is 400, a job that is going takes the reply as a steer, a request nobody approved is 409', async () => {
   const s = await stack({ hermesOptions: { runScript: [{ hold: true }] } });
   const idle = await stack({ noHermes: true });
   try {
@@ -125,9 +125,10 @@ test('a PC job is 400, a job that has not ended is 409, a request nobody approve
     const running = s.propose('running');
     await approve(api, running);
     await until(async () => (await api.get(`/hub/requests/${running}`)).body.state === 'running', 'running');
+    // A reply to a run that is going goes into the run (steer) and never starts a continuation.
     const going = await api.post(`/hub/requests/${running}/reply`, { text: 'Hello' });
-    assert.equal(going.status, 409);
-    assert.match(going.body.error, /still going/);
+    assert.equal(going.status, 201);
+    assert.equal(going.body.delivery, 'sent');
     assert.equal(s.file(running, 'continued.json'), null);
 
     const proposed = s.propose('proposed');

@@ -139,6 +139,19 @@ export function createHermesRuns({ env = {}, fetchImpl = fetch, timeoutMs = TIME
       return true;
     },
 
+    /**
+     * Send text into a running run (`POST /v1/runs/:id/steer { input }`); Hermes adds it after the run's next tool result.
+     * `{ accepted: true }` on 200; `{ accepted: false, code, status }` when Hermes will not take it now (409 not running or not
+     * accepted, 400, 404 for a run or a route it does not know, and any other answer, which the caller treats as "queued").
+     * Throws a HermesError (`unreachable`) when Hermes cannot be reached. There is no capabilities call: a refusal is simply "queued".
+     */
+    async steer(runId, text) {
+      const response = await call('POST', `/v1/runs/${encodeURIComponent(runId)}/steer`, { input: text });
+      if (response.ok) return { accepted: true };
+      const { code } = await reason(response);
+      return { accepted: false, code, status: response.status };
+    },
+
     /** Ask Hermes to stop the run. A run that already ended answers with its status, which is fine. */
     async stop(runId) {
       const response = await call('POST', `/v1/runs/${encodeURIComponent(runId)}/stop`, {});

@@ -18,7 +18,7 @@ import { resetOf } from './plan-pauses.mjs';
 import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
 
 export const MAX_HERMES_RUNS = 3;
-const FORWARD = new Set(['message.delta', 'tool.started', 'tool.completed', 'approval.request', 'approval.settled', 'run.completed', 'run.failed', 'run.cancelled', 'run.interrupted']);
+const FORWARD = new Set(['message.delta', 'tool.started', 'tool.completed', 'approval.request', 'approval.settled', 'run.steered', 'reply', 'run.completed', 'run.failed', 'run.cancelled', 'run.interrupted']);
 const THROTTLE_MS = 30_000;
 const REATTACH_MAX = 10;
 const SSE_KEEPALIVE_MS = 15_000;
@@ -155,12 +155,54 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
         await startRetry(context, at, run);
         return;
       } else {
-        await writeResult(id, outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() }), run.output);
+        const outcome = outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() });
+        // What the owner said that Hermes took and never read: kept in the result so the page can say "queued", not "sent".
+        const pending = pendingOf(run);
+        const unread = pending ? await requests.unreadSentIds(id, pending, at).catch(() => []) : [];
+        await writeResult(id, unread.length ? { ...outcome, unreadReplies: unread.slice(0, 20) } : outcome, run.output);
+        await sendQueued(id, follower, run, at);
       }
     } finally {
       if (byRequest.get(id) === follower.runId) byRequest.delete(id);
     }
     startWaiting().catch(error => log(`[hermes] could not start a waiting run: ${error.message}`));
+  }
+
+  /**
+   * What the owner replied while the run went and Hermes did not read goes out as the next run, for a run that completed and was neither
+   * stopped nor timed out (hub-requests `sendQueuedReplies` checks the files and signs). Never blocks the result.
+   */
+  async function sendQueued(id, follower, run, at) {
+    try {
+      await requests.sendQueuedReplies(id, {
+        at, completed: run.status === 'completed', timedOut: follower.timedOut, pendingSteer: pendingOf(run), retryAt: follower.context.retry ? follower.context.startedAt : null,
+      });
+    } catch (error) { log(`[hermes] could not send the queued reply of ${id}: ${error.message}`); }
+  }
+
+  /** The text Hermes took and never read: one newline-joined string in Hermes 0.22.5 (a list is joined the same way), '' when there is none. */
+  const pendingOf = run => [].concat(run?.pending_steer ?? []).map(entry => (typeof entry === 'string' ? entry : String(entry?.text ?? entry?.input ?? ''))).filter(Boolean).join('\n');
+
+  /**
+   * The hook for a reply while the run goes: steer the run being followed (the quota retry's, when there is one). Hermes saying no,
+   * not knowing the route, or being unreachable all answer `queued`: the reply is already written and goes out when the run ends.
+   */
+  async function steer(id, { text, reply, at = now() }) {
+    let runId = byRequest.get(id);
+    if (!runId) { await reattach(at); runId = byRequest.get(id); }
+    if (!runId) return { delivery: 'queued', reason: 'Hermes is not following this run right now.' };
+    let delivery = 'queued';
+    let reason;
+    try {
+      const answer = await runs.steer(runId, text);
+      if (answer.accepted) delivery = 'sent';
+      else reason = answer.status === 404 ? 'This Hermes cannot take a message while it works.' : answer.status === 409 ? 'Hermes cannot take a message right now.' : 'Hermes did not take the message.';
+    } catch (error) {
+      log(`[hermes] could not steer ${runId}: ${error.message}`);
+      reason = 'Hermes could not be reached.';
+    }
+    followers.note(runId, { event: 'reply', data: { text: reply, at: at.toISOString(), delivery } });
+    return { delivery, ...(reason ? { reason } : {}) };
   }
 
   /** The newest assistant card made after the run started, or null. */
@@ -272,6 +314,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
   requests.hooks.hermesLive = id => byRequest.has(id);
   requests.hooks.handOff.hermes = handOff;
   requests.hooks.stopRun = stopRun;
+  requests.hooks.steer = steer;
 
   return {
     runs, followers, handOff, startWaiting, reattach, pageLoad, stopRun, streamEvents, isLive: id => byRequest.has(id),

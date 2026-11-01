@@ -125,6 +125,13 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
       follower.listeners.add(listener);
       return () => follower.listeners.delete(listener);
     },
+    /** Publish an entry of the Hub's own (a reply) into the buffer and to the listeners, without calling `onEvent`. False when no follower has the run. */
+    note(runId, entry) {
+      const follower = followers.get(runId);
+      if (!follower) return false;
+      publish(follower, { seq: null, ...entry });
+      return true;
+    },
     isLive: runId => followers.has(runId),
     get: runId => followers.get(runId) ?? null,
     count: () => followers.size,

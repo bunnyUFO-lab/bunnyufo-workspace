@@ -840,3 +840,33 @@ test('rewriting the text keeps an agent\'s "done when" marked as the agent\'s in
     assert.match(s.file(answered.body.id, 'approved.json').run.brief, /this "done when" was written by an agent \(some-agent\), not by the owner/);
   } finally { await s.close(); }
 });
+
+test('steer: 200 is accepted; 409, 400, 404 and a 500 are "not accepted" with the code; an unreachable Hermes throws', async () => {
+  const { createHermesRuns, HermesError } = await import('../hermes-runs.mjs');
+  const fake = await startFakeHermes({ key: 'k', delayMs: 5, runScript: ['hello ', { hold: true }] });
+  const refusing = await startFakeHermes({ key: 'k', refuseSteer: true, runScript: [{ hold: true }] });
+  const old = await startFakeHermes({ key: 'k', steerMissing: true, runScript: [{ hold: true }] });
+  const broken = await startFakeHermes({ key: 'k', steerBroken: true, runScript: [{ hold: true }] });
+  try {
+    const client = url => createHermesRuns({ env: { HERMES_URL: url, HERMES_API_KEY: 'k' }, timeoutMs: 500 });
+    const runs = client(fake.url);
+    const { runId } = await runs.start({ input: 'go' });
+    await until(() => fake.runs[0].events.length > 0, 'the run to start');
+    assert.deepEqual(await runs.steer(runId, 'more'), { accepted: true });
+    assert.equal(fake.steers[0].input, 'more');
+    assert.equal(fake.runs[0].events.some(event => event.event === 'run.steered'), true);
+    assert.deepEqual(await runs.steer(runId, '  '), { accepted: false, code: 'invalid_steer_input', status: 400 });
+    assert.deepEqual(await runs.steer('run_nope', 'x'), { accepted: false, code: 'run_not_found', status: 404 });
+    for (const [hermes, expected] of [[refusing, { code: 'steer_not_accepted', status: 409 }], [old, { code: 'not_found', status: 404 }], [broken, { code: 'internal_error', status: 500 }]]) {
+      const other = client(hermes.url);
+      const started = await other.start({ input: 'go' });
+      await until(() => hermes.runs[0].status === 'running', 'running');
+      assert.deepEqual(await other.steer(started.runId, 'x'), { accepted: false, ...expected });
+    }
+    // A run that is stopping does not take it.
+    await runs.stop(runId);
+    assert.equal((await runs.steer(runId, 'late')).code, 'run_not_accepting_steer');
+    await fake.close();
+    await assert.rejects(() => runs.steer(runId, 'x'), error => error instanceof HermesError && error.code === 'unreachable');
+  } finally { await refusing.close(); await old.close(); await broken.close(); await fake.close().catch(() => {}); }
+});
