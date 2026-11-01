@@ -20,6 +20,7 @@ import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
+import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
 import { AgentSprite } from './team/AgentSprite'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
@@ -175,7 +176,16 @@ function Bubble({ line, conversation, models, who, agents }: { line: Shown; conv
 
 export default function Chat({ id }: { id?: string }) {
   if (!host.chat) return <p className="hub-empty">Chat is not set up on this host.</p>
-  return <ChatView key={id ?? 'new'} id={id} />
+  return <ChatShell id={id} />
+}
+
+// A start from Spawn always lands in a fresh conversation. On a new Chat that is already showing (it may be empty, or busy with a
+// reply that is still streaming) the view is remounted, so it opens like New chat does: the agent's own model, no earlier pick,
+// the text as a draft. On a stored conversation the address change to a new chat remounts it anyway.
+function ChatShell({ id }: { id?: string }) {
+  const [fresh, setFresh] = useState(0)
+  useEffect(() => onChatStart(() => { if (!id) setFresh(count => count + 1) }), [id])
+  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} />
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
@@ -190,7 +200,9 @@ function ChatView({ id }: { id?: string }) {
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
   const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[] }>('/chat')
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
-  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : HERMES] })
+  // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
+  const [start] = useState(() => (id || help ? null : peekChatStart()))
+  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : start?.persona ?? HERMES] })
   const [persona, setPersona] = useState(initialPersona)   // persona: who the chat talks to; fixed once the chat has a line
   // model: what the owner picked in this conversation (or the chat's own last choice), or null: then the persona's preferred model, else Auto.
   const [picked, setPicked] = useState<string | null>(initialModel)
@@ -201,7 +213,7 @@ function ChatView({ id }: { id?: string }) {
   const preferred = who?.model && models.some(entry => entry.id === who.model) ? who.model : AUTO   // model: the agent's own default, until the owner picks one
   const model = picked ?? preferred
   const [pending, setPending] = useState<string | null>(null)
-  const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : ''))
+  const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : start?.draft ?? ''))
   const [images, setImages] = useState<Prepared[]>([])
   const [preparing, setPreparing] = useState(0)
   const [trayNote, setTrayNote] = useState<string | null>(null)
@@ -403,6 +415,12 @@ function ChatView({ id }: { id?: string }) {
     if (text) void sendRef.current(text)
   }, [id])
   useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
+
+  // The start is used once: drop it, and put the cursor in the composer when it came with a draft.
+  useEffect(() => {
+    takeChatStart()
+    if (start) input.current?.focus()
+  }, [start])
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }

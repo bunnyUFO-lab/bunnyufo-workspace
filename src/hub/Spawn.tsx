@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { host } from '../lib/host'
-import type { HubProject } from '../lib/hub'
+import type { ChatPersona, HubProject } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import type { ApproveAnswer, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
 import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, estimateCost, guessPreset } from '../lib/hubSpawn'
@@ -10,6 +10,7 @@ import { hubHash } from '../lib/route'
 import { openFromClick } from './ItemRow'
 import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
+import { startChat } from './chatStart'
 import type { SpawnOptions } from './spawnStore'
 import './runs.css'
 
@@ -24,6 +25,7 @@ const ICONS: Record<string, string> = {
   chart: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
   face: '<circle cx="12" cy="12" r="8.5"/><path d="M9 10v.01M15 10v.01M9 15c1.7 1.5 4.3 1.5 6 0"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
 }
@@ -43,6 +45,7 @@ const policyLine = (kinds: string[]) => {
 }
 
 const AUTO = 'auto'
+const HERMES = 'hermes'
 
 const startsNote = (target: SpawnTarget) => (target === 'hermes' ? 'Starts on Hermes right away.' : target === 'pc' ? 'Starts on the PC within a few minutes.' : target === 'cloud' ? 'Starts in the cloud.' : 'You start it at the PC.')
 
@@ -74,6 +77,10 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [route, setRoute] = useState<SpawnRoute | null>(null)
   const [routeError, setRouteError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Chat: a choice next to the templates. It opens Chat instead of filing a request. `personas` is null until Chat's list is read
+  // (and stays null where Chat is not set up), so the tile is offered only for an agent Chat can talk to.
+  const [chat, setChat] = useState(false)
+  const [personas, setPersonas] = useState<ChatPersona[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -97,6 +104,12 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       answer => setKnown(answer?.repos ?? []),
       () => { /* no list: the field still takes owner/name */ },
     )
+    if (host.chat) {
+      hubGet<{ personas?: ChatPersona[] }>('/chat', controller.signal).then(
+        answer => setPersonas(answer?.personas ?? []),
+        () => { /* no list: no Chat tile */ },
+      )
+    }
     hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
       answer => {
         // An answer that is not JSON reads as null: treat it as no projects, never as a thrown error.
@@ -111,13 +124,18 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
 
   const offers = (item: { id: string }) => item.id !== 'agent-avatar' || !!agent
   const preset = data?.presets.find(item => item.id === presetId && offers(item)) ?? data?.presets.find(offers) ?? null
-  const wantsRepo = !!preset?.fields.includes('repo')
+  // The agent a chat talks to: the one whose job the chosen template is, else the avatar's agent, else Hermes. An agent Chat has no persona for gets no tile.
+  const chatPersona = personas === null ? undefined : personas.find(entry => entry.preset === preset?.id) ?? (preset?.id === 'agent-avatar' && agent ? personas.find(entry => entry.id === agent) : undefined)
+  const chatAgentName = chatPersona?.name ?? (preset?.id === 'agent-avatar' && agent && agent !== HERMES ? null : 'Hermes')
+  const chatOffered = !edit && !!host.chat && personas !== null && chatAgentName !== null
+  const chatting = chat && chatOffered
+  const wantsRepo = !chatting && !!preset?.fields.includes('repo')
   const repoValid = !repo.trim() || /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/.test(repo.trim())
   const projectRepo = known.find(item => item.project === project)
 
   // The server decides where it runs; ask again 150 ms after the last change.
   useEffect(() => {
-    if (!preset || !project || !repoValid) return undefined
+    if (!preset || !project || !repoValid || chatting) return undefined
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       const query = new URLSearchParams({ preset: preset.id, project })
@@ -128,7 +146,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
       )
     }, 150)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [preset, project, repo, wantsRepo, repoValid])
+  }, [preset, project, repo, wantsRepo, repoValid, chatting])
 
   // A preset with fewer targets than the chosen one drops the choice.
   // Bunnylink work is never sent anywhere: the only place is "You, at the PC", and there is nothing to choose.
@@ -144,11 +162,18 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const sendModel = target === 'hermes' && picked && picked.id !== AUTO ? picked.id : undefined
   const canApprove = host.approve && !atPc
   const trimmed = text.trim()
-  const ready = !!preset && !!project && !!trimmed && repoValid && !!target && !busy
+  const ready = chatting || (!!preset && !!project && !!trimmed && repoValid && !!target && !busy)
   // Why the button is off, first thing first.
-  const missing = busy ? null : !trimmed ? 'Write what it should do.' : !project ? 'Pick a project.' : !repoValid ? 'The repo is owner/name.' : !target ? (routeError ?? 'Working out where it runs…') : null
+  const missing = chatting ? null : busy ? null : !trimmed ? 'Write what it should do.' : !project ? 'Pick a project.' : !repoValid ? 'The repo is owner/name.' : !target ? (routeError ?? 'Working out where it runs…') : null
 
   const send = useCallback(async () => {
+    if (chatting) {
+      // Files nothing: no request, no card, no write. Chat opens on a new conversation with the agent and the text as a draft.
+      startChat({ persona: chatPersona?.id ?? HERMES, draft: trimmed })
+      window.location.hash = hubHash('chat')
+      onClose()
+      return
+    }
     if (!preset || !target) return
     setBusy(true)
     setError(null)
@@ -190,10 +215,10 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel])
+  }, [chatting, chatPersona, onClose, preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel])
 
   const machine = target ? MACHINE[target] : null
-  const button = busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
+  const button = chatting ? 'Open chat' : busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
   const ids = { project: `${uid}-project`, repo: `${uid}-repo`, text: `${uid}-text`, done: `${uid}-done`, where: `${uid}-where`, model: `${uid}-model` }
 
   return (
@@ -219,13 +244,18 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
               <div className="sp-label" id={`${uid}-tpl`}>Template</div>
               <div className="sp-tpls" role="group" aria-labelledby={`${uid}-tpl`}>
                 {data.presets.filter(item => offers(item) && (!edit || item.id === preset.id)).map(item => (
-                  <button key={item.id} type="button" className={`sp-tpl${item.id === preset.id ? ' on' : ''}`} aria-pressed={item.id === preset.id} disabled={!!edit} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride('') }}>
+                  <button key={item.id} type="button" className={`sp-tpl${!chatting && item.id === preset.id ? ' on' : ''}`} aria-pressed={!chatting && item.id === preset.id} disabled={!!edit} data-preset={item.id} onClick={() => { setPresetId(item.id); setOverride(''); setChat(false) }}>
                     <Icon name={item.icon} />{item.label}
                   </button>
                 ))}
+                {chatOffered && (
+                  <button type="button" className={`sp-tpl${chatting ? ' on' : ''}`} aria-pressed={chatting} data-spawn-chat={chatPersona?.id ?? HERMES} onClick={() => { setChat(true); setOverride('') }}>
+                    <Icon name="chat" />Chat with {chatAgentName}
+                  </button>
+                )}
               </div>
             </div>
-            <div className={wantsRepo ? 'sp-two' : 'sp-one'}>
+            {!chatting && <div className={wantsRepo ? 'sp-two' : 'sp-one'}>
               <label className="sp-field" htmlFor={ids.project}>Project
                 <select id={ids.project} value={project} disabled={!!edit} onChange={event => { setProject(event.target.value); setOverride('') }} data-spawn-project>
                   {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -246,17 +276,17 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                   {!edit && otherRepo && <input value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/name" aria-label="Repo as owner/name" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} autoFocus data-spawn-repo />}
                 </div>
               )}
-            </div>
-            <p className="sp-agent" data-spawn-agent>Agent · <b>{preset.agent}</b></p>
-            <label className="sp-field" htmlFor={ids.text}>What should it do?
-              <textarea id={ids.text} value={text} onChange={event => setText(event.target.value)} placeholder={preset.example} rows={4} maxLength={4000} data-spawn-text />
+            </div>}
+            <p className="sp-agent" data-spawn-agent>Agent · <b>{chatting ? chatAgentName : preset.agent}</b></p>
+            <label className="sp-field" htmlFor={ids.text}>{chatting ? 'What do you want to ask?' : 'What should it do?'}
+              <textarea id={ids.text} value={text} onChange={event => setText(event.target.value)} placeholder={chatting ? 'Ask anything. It becomes the first message, not sent yet.' : preset.example} rows={4} maxLength={4000} data-spawn-text />
             </label>
-            {preset.fields.includes('doneWhen') && (
+            {!chatting && preset.fields.includes('doneWhen') && (
               <label className="sp-field" htmlFor={ids.done}>Done when
                 <input id={ids.done} value={doneWhen} onChange={event => setDoneWhen(event.target.value)} maxLength={400} autoComplete="off" data-spawn-done />
               </label>
             )}
-            <div>
+            {!chatting && <div>
               <div className="sp-label" id={ids.where}>Runs on</div>
               <div className="sp-route" role="group" aria-labelledby={ids.where} data-spawn-route={target ?? ''}>
                 {machine && route ? (
@@ -284,8 +314,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                   </>
                 ) : <p className="hub-muted" role={routeError ? 'alert' : undefined}>{routeError ?? 'Working out where it runs…'}</p>}
               </div>
-            </div>
-            {models.length > 0 && picked && (
+            </div>}
+            {!chatting && models.length > 0 && picked && (
               <div className="sp-model-row" data-spawn-model-row>
                 <label className="sp-label" htmlFor={ids.model}>Model</label>
                 <div className="sp-model">
@@ -296,11 +326,11 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                 </div>
               </div>
             )}
-            <div className="sp-est" data-spawn-estimate>
+            {!chatting && <div className="sp-est" data-spawn-estimate>
               <div><span>Estimated cost</span><b>{estimateCost(preset.estimate.cost, target, sendModel ? picked?.label : undefined)}</b></div>
               <div><span>Time</span><b>{preset.estimate.time}</b></div>
               <div className="wide"><span>Result</span><b>{preset.produces}</b></div>
-            </div>
+            </div>}
           </>
         )}
         {error && <p className="hub-error" role="alert" data-spawn-error>{error}</p>}
@@ -311,7 +341,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         <span className="sp-go">
           <button type="button" className="hub-btn pri" disabled={!ready} aria-busy={busy} onClick={() => void send()} data-spawn-go>{button}</button>
           <span className="sp-note" data-spawn-note>
-            {missing ? missing : atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
+            {chatting ? `Opens a new chat with ${chatAgentName}. Nothing is filed.` : missing ? missing : atPc ? 'You start it at the PC. Copy its prompt from the item in Needs you.' : canApprove && target ? startsNote(target) : host.approveReason ?? 'Waits in Needs you until it is approved.'}
           </span>
         </span>
       </div>
