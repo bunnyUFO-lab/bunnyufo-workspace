@@ -10,6 +10,7 @@ import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -221,7 +222,7 @@ try {
         return send(200, name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html', await readFile(path.join(root, 'dist', name)));
       } catch { return send(200, 'text/html', await readFile(path.join(root, 'dist', 'index.html'))); }
     });
-    await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(stub, '127.0.0.1');
     try {
       const guest = await open(viewport, options);
       await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-t`);

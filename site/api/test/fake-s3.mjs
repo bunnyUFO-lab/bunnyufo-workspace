@@ -3,6 +3,7 @@
 // DELETE, CopyObject and ListObjectsV2 with prefix, delimiter and continuation. Signatures are not checked.
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const escapeXml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -10,6 +11,7 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
   /** key -> { body: Buffer, etag, contentType, lastModified } */
   const objects = new Map();
   const log = [];
+  const faults = { fail: null };
   const error = (response, status, code, message = code) => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${escapeXml(message)}</Message></Error>`;
     response.writeHead(status, { 'Content-Type': 'application/xml', 'Content-Length': Buffer.byteLength(xml) });
@@ -22,6 +24,8 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     const key = decodeURIComponent(rest.join('/'));
     log.push({ method: request.method, key, headers: request.headers });
     if (name !== bucket) return error(response, 404, 'NoSuchBucket');
+    // A test may make some keys fail with a storage error: `fake.fail = key => key.endsWith('x.json')`.
+    if (faults.fail?.(key, request.method)) return error(response, 500, 'InternalError');
 
     if (request.method === 'GET' && url.searchParams.get('list-type') === '2') {
       const prefix = url.searchParams.get('prefix') || '';
@@ -90,10 +94,12 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
   });
   // Longer than the client's pool keeps an idle connection, so a test that pauses never reuses one this end just closed.
   server.keepAliveTimeout = 30_000;
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const endpoint = `http://127.0.0.1:${server.address().port}`;
   return {
     bucket, endpoint, objects, log,
+    get fail() { return faults.fail; },
+    set fail(value) { faults.fail = value; },
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
     /** The text of one object, or null. */
     text: key => objects.get(key)?.body.toString('utf8') ?? null,

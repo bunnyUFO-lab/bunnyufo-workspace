@@ -17,6 +17,7 @@ import { createHub } from '../../api/hub.mjs';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
 import { askJson, seeder } from '../../api/test/hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const OWNER = '100000000000000001';
 const OTHER = '100000000000000002';
@@ -331,7 +332,7 @@ test('end to end: a click through the real site API puts answer.json in the buck
   const hub = createHub({ bucket, enabled: true, env: { HUB_DISCORD_TOKEN_SHA256: createHash('sha256').update(token).digest('hex'), HUB_DISCORD_OWNER_ID: OWNER }, log: () => {} });
   const root = await mkdtemp(path.join(tmpdir(), 'asks-e2e-'));
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 's.json'), requireRemoteUser: true, hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   try {
     const now = new Date();
     const id = `${now.toISOString().slice(0, 10).replace(/-/g, '')}-probe-e2e-a1b2`;

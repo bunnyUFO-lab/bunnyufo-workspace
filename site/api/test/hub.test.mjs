@@ -11,6 +11,7 @@ import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildI
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
 import { askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const NOW = new Date();
@@ -27,7 +28,7 @@ async function fixture({ hub = true, requireRemoteUser = true, hubOptions = {}, 
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hubInstance = createHub({ bucket: wrapBucket(bucket), enabled: hub, ...hubOptions });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub: hubInstance, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = (method, route, data, headers = {}) => fetch(`${origin}/api${route}`, {
     method, headers: { ...(method === 'GET' ? {} : { Origin: SITE }), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
@@ -401,7 +402,7 @@ test("a blocked item clears on its own session's next event, not another's", asy
 
     // A new Hub on the same bucket has no cache to lean on: the state is in the files.
     const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true }) });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(server, '127.0.0.1');
     try {
       const fresh = async route => ({ body: await (await fetch(`http://127.0.0.1:${server.address().port}/api${route}`)).json() });
       assert.deepEqual((await blocked(fresh)).map(item => item.session), ['sess-c']);
@@ -445,7 +446,7 @@ test('the Inbox filters: question, answered, requests', async () => {
     seed.request(requestJson({ id: id('req', 'r111'), now: NOW }));
     const ids = async filter => (await get(`/hub/inbox?filter=${filter}`)).body.items.map(item => item.id).sort();
     assert.deepEqual(await ids('question'), [open.id], 'Only open Asks wait on you.');
-    assert.deepEqual(await ids('answered'), [answered.id, taken.id].sort());
+    assert.deepEqual(await ids('answered'), [answered.id], 'Answered holds what is waiting to be picked up; picked-up work is with the agent now.');
     assert.deepEqual(await ids('all'), [open.id]);
     assert.deepEqual(await ids('requests'), [id('req', 'r111')]);
   } finally { await close(); }
@@ -588,7 +589,7 @@ test('a review leaves Needs you once it is marked done, and stays gone', async (
     // A new Hub on the same bucket has no cache to lean on.
     const other = createHub({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), enabled: true });
     const server = createSiteApi({ bucket: createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }), templateDir: path.join(tmpdir(), 'none'), stateFile: path.join(tmpdir(), `buw-state-${Date.now()}.json`), sectionsTtl: 0, requireRemoteUser: true, hub: other });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(server, '127.0.0.1');
     try {
       const fresh = await (await fetch(`http://127.0.0.1:${server.address().port}/api/hub/inbox?filter=reviews`)).json();
       assert.deepEqual(fresh.items.map(item => item.id).sort(), [bare, withUrl].sort());
@@ -665,7 +666,7 @@ test('with the Hub off every /hub/ route answers 404 and capabilities say so', a
     assert.equal((await post('/hub/requests', { project: 'probe', text: 'x', when: 'nightly' })).status, 404);
     assert.equal((await (await call('GET', '/capabilities')).json()).hub, false);
     const bare = createSiteApi({ requireRemoteUser: false });
-    await new Promise(resolve => bare.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(bare, '127.0.0.1');
     const caps = await (await fetch(`http://127.0.0.1:${bare.address().port}/api/capabilities`)).json();
     bare.close();
     assert.deepEqual([caps.hub, caps.chat], [false, false]);
@@ -1059,7 +1060,7 @@ test('Needs you counts an open checklist, a fully ticked one too, and drops subm
     const todo = (await get('/hub/inbox?filter=steps')).body.items;
     assert.deepEqual(todo.map(item => [item.id, item.state]), [[open.id, 'open'], [full.id, 'open']], 'Open lists only, newest first.');
     const history = (await get('/hub/inbox?filter=answered')).body.items;
-    assert.deepEqual(history.map(item => [item.id, item.state]), [[submitted.id, 'submitted'], [picked.id, 'picked-up']], 'Submitted and picked-up lists are history; cancelled is gone.');
+    assert.deepEqual(history.map(item => [item.id, item.state]), [[submitted.id, 'submitted']], 'Submitted lists are history; picked-up and cancelled ones are not.');
     assert.equal((await get('/hub/inbox?filter=bogus')).body.items.length, 2, 'An unknown filter is Needs you.');
   } finally { await close(); }
 });

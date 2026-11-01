@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { startHubFixture } from './hub-fixture.mjs';
 import { eventJson } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -110,7 +111,7 @@ try {
   assert.equal(await view.locator('[data-done-hint]').isVisible(), true);
   assert.match(await page.locator('.hub-review-reader').innerText(), /Pick a file to read it here\./);
   await page.locator('[data-back-top]').waitFor();
-  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs');
+  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
   assert.equal(await page.locator('[data-hub-link="needs"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Needs you current.');
   await go(page, `#/~hub/review/${partFile}`);
   await page.locator('[data-section="status"]').waitFor();
@@ -158,7 +159,7 @@ try {
   await page.getByRole('heading', { name: 'Brief heading' }).waitFor();
   await go(page, '#/~hub/review/nope.json');
   await page.getByText('This review is not in the last 7 days.').waitFor();
-  assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs');
+  assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
 
   step('an old event with only a title opens with honest empty states and a working Mark done');
   await go(page, '#/~hub/needs/pr');
@@ -300,7 +301,7 @@ try {
       return send(200, name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html', await readFile(path.join(dist, name)));
     } catch { return send(200, 'text/html', await readFile(path.join(dist, 'index.html'))); }
   });
-  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(stub, '127.0.0.1');
   try {
     const guest = await open({ width: 1200, height: 800 });
     await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/review/${reviewId}`);

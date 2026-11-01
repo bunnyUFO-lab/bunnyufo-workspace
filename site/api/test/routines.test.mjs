@@ -16,6 +16,7 @@ import { sha256Hex, sign } from '../signing.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { createFakeRoutine } from './fake-routine.mjs';
 import { requestJson } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const MIN = 60000;
@@ -43,7 +44,7 @@ async function fixture({ env = {}, routine = createFakeRoutine() } = {}) {
   const logs = [];
   const hub = createHub({ bucket, enabled: true, now, env: { ...ENV, ...env }, fetchImpl: routine.fetchImpl, log: line => logs.push(String(line)) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   await hub.routines.sweep(); // the sweep at start is over before a test seeds anything
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, url, data, headers = {}) => {
@@ -424,6 +425,9 @@ test('a forged approved.json is never fired and raises an alert in Today', async
     assert.equal(f.routine.calls.length, 0);
     assert.equal(f.fires(request.id).length, 0, 'Nothing is written.');
     assert.ok(f.logs.some(line => line.includes(`skip ${request.id}: bad signature`)));
+    const handed = await f.hub.routines.handOff(request.id);
+    assert.equal(handed.fired, false);
+    assert.equal(handed.waiting, "The approval failed the server's check (the approval could not be verified as yours).", 'The owner reads words, not "bad signature".');
     const today = (await f.call('GET', '/hub/today')).body;
     assert.ok(today.alerts.some(alert => alert.title === "Approval for Forged job failed the server's check" && alert.request === request.id), JSON.stringify(today.alerts));
     // A request.json changed after signing fails too.

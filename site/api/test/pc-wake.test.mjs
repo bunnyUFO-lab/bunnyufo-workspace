@@ -12,6 +12,7 @@ import { createHub } from '../hub.mjs';
 import { wakeState } from '../pc-wake.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { pcStatusJson, requestJson, seedPcStatus } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const MIN = 60000;
@@ -54,7 +55,7 @@ async function fakeController() {
     request.on('data', chunk => { size += chunk.length; });
     request.on('end', () => { calls.push({ method: request.method, path: request.url, size }); response.statusCode = answer.status; response.end('{}'); });
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   return { calls, answer, url: `http://127.0.0.1:${server.address().port}${SECRET_PATH}`, close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections?.(); }) };
 }
 
@@ -68,7 +69,7 @@ async function fixture({ env = {}, controller = true } = {}) {
   const clock = { time: NOW.getTime() };
   const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env: { ...SIGNING, ...(wakeServer ? { HUB_WAKE_URL: wakeServer.url } : {}), ...env }, log: () => {} });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, data, headers = {}) => {
     const answered = await fetch(`${origin}/api${route}`, { method, headers: { ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }), ...headers }, body: method === 'GET' ? undefined : JSON.stringify(data ?? {}) });

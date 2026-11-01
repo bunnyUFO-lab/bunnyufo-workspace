@@ -10,6 +10,7 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { bucketStore, cardWriter, folderStore } from '../card-writes.mjs';
 import { parseDay, purgeOn, safeFile, safeFolder } from '../card-purge.mjs';
 import { createSiteApi } from '../server.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 // Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
 const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
@@ -363,7 +364,7 @@ test('the route is a gated write: Origin, Remote-User and the development copy',
   const root = await mkdtemp(path.join(tmpdir(), 'buw-purge-api-'));
   const serve = async options => {
     const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'state.json'), sectionsTtl: 0, ...options });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    await listenOnGoodPort(server, '127.0.0.1');
     return { server, url: `http://127.0.0.1:${server.address().port}/api/cards/trash/purge` };
   };
   const post = (url, workspace, headers = {}) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify({ workspace }) });

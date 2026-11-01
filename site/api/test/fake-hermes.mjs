@@ -28,6 +28,7 @@
 //   keepaliveMs    default 10000; reportServed fills runtime.provider and model
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const DEFAULT_CHAIN = [
   { provider: 'openai-codex', model: 'gpt-6-sol' },
@@ -291,7 +292,7 @@ export async function startFakeHermes({
     response.writeHead(404);
     return response.end();
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   return {
     url: `http://127.0.0.1:${server.address().port}`, requests, state, runs, approvals, stops,
     release: (id, output) => { const run = byId.get(id); run.released = { output }; wakeAll(run); },

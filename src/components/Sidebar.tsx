@@ -6,7 +6,7 @@ import { cardKey } from '../lib/order'
 import { entityHash, homeLink, hubHash, type HubScreen } from '../lib/route'
 import { host } from '../lib/host'
 import { canManage } from '../lib/library'
-import { hubGroups } from '../lib/hubNav'
+import { chatNote, hubGroups } from '../lib/hubNav'
 import { categoryIcon, groupIcon } from '../lib/categories'
 import { useCollapsedSections } from '../lib/collapse'
 import { cardUrl } from '../local/client'
@@ -165,6 +165,7 @@ function HubNav({ screen, needsYou, library, onHome }: { screen: HubScreen | nul
               {key === 'needs' && needsYou > 0 && <span className="hub-inbox-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Needs you, ${needsYou} waiting for you`}>{needsYou}</span>}
             </a>
           ))}
+          {group.id === 'plan' && chatNote(host) && <p className="hub-link-note" data-hub-chat-note>{chatNote(host)}</p>}
         </div>
       ))}
     </nav>

@@ -246,7 +246,7 @@ test('the horizontal layout describes what ProgressMap draws today', () => {
     assert.deepEqual(band.labelAt, { x: band.rect.x + 10, y: band.rect.y + 15, anchor: 'start' });
   }
   const milestoneNode = layout.nodes.find(item => item.id === 'm1');
-  assert.deepEqual(milestoneNode.label, { x: milestoneNode.x, y: milestoneNode.y + 34, anchor: 'middle' }, 'an open milestone titles below');
+  assert.deepEqual(milestoneNode.label, { x: milestoneNode.x, y: milestoneNode.y + 34, anchor: 'middle', count: `${milestoneNode.done}/${milestoneNode.total}` }, 'an open milestone titles below, its done/total after the title');
   const featureNode = layout.nodes.find(item => item.id === 'm2-a');
   assert.deepEqual(featureNode.elbow, { x: layout.branches.find(item => item.id === 'm2-a').points[1][0], y: featureNode.y });
   assert.deepEqual(featureNode.center, { x: featureNode.x + 22, y: featureNode.y });

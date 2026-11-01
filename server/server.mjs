@@ -5,6 +5,7 @@ import os from 'node:os';
 import { watch } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Files, serveFile } from './files.mjs';
+import { listenOnGoodPort } from './listen.mjs';
 import { importFile, moveFile, MAX_FILE_BYTES } from './file-transfers.mjs';
 import { ContextLibrary } from './context.mjs';
 import { McpInventory } from './mcp.mjs';
@@ -65,11 +66,12 @@ async function configuredCardApi() {
   return typeof value === 'string' && /^https?:\/\//.test(value) ? value.replace(/\/+$/, '') : null;
 }
 
-const listen = (server, { host = '127.0.0.1', port = 0, publicOrigin } = {}) =>
-  new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => resolve(publicOrigin || `http://${host.includes(':') ? `[${host}]` : host}:${server.address().port}`));
-  });
+const listen = async (server, { host = '127.0.0.1', port = 0, publicOrigin } = {}) => {
+  // Port 0 asks the OS; skip the ports a browser refuses (see listen.mjs).
+  if (port === 0) port = (await listenOnGoodPort(server, host)).port;
+  else await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
+  return publicOrigin || `http://${host.includes(':') ? `[${host}]` : host}:${server.address().port}`;
+};
 
 // registryFile: the user's workspace registry (see workspaces.mjs). Without one (tests), only
 // `content` or the app's own workspace/ is used. content: a folder or id that pins the workspace.

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -92,7 +93,7 @@ try {
   await busyPage.goto(`${busy.url}#/~hub/today`);
   await busyPage.locator('.today-head').waitFor();
   assert.match(await busyPage.locator('.today-head h2').innerText(), /^Good (morning|afternoon|evening)$/);
-  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d$/);
+  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d( [AP]M)?$/);
   assert.match(await busyPage.locator('.today-head p').innerText(), /^5 things wait on you\. 1 session is running\.$/);
   assert.equal((await busyPage.locator('[data-today-open] .today-num').innerText()).trim(), '5', 'The Open button counts everything that needs you.');
   assert.equal((await busyPage.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '5');
@@ -314,7 +315,7 @@ try {
       return send(200, file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', await readFile(path.join(dist, file)));
     } catch { return send(200, 'text/html', await readFile(path.join(dist, 'index.html'))); }
   });
-  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(stub, '127.0.0.1');
   try {
     const guest = await open({ width: 1200, height: 800 });
     await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/needs`);
@@ -797,7 +798,10 @@ try {
   await page.locator('button:has-text("Now")').click();
   const now = await centreOf(page.locator('.hub-map-now'));
   const frameNow = await page.locator('.hub-map-box').boundingBox();
-  assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - (frameNow.y + frameNow.height / 2)) < 3, 'Now is in the middle of the box.');
+  // The middle of what the hint (top) and the control bar (bottom) leave free.
+  const room = await page.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-controls').getBoundingClientRect().top }));
+  const roomMid = ((room.top ? room.top + 8 : frameNow.y) + room.bottom - 8) / 2;
+  assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - roomMid) < 3, `Now is in the middle of the room the map has (${now.x},${now.y} vs ${roomMid}).`);
   await page.locator('button:has-text("Collapse")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
 

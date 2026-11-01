@@ -53,7 +53,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').getAttribute('data-rule'), '3');
   assert.equal(await page.locator('[data-spawn-route] .sp-rules li').count(), 5);
-  assert.match(await page.locator('[data-spawn-why]').innerText(), /it is research · rule 3/);
+  assert.match(await page.locator('[data-spawn-why]').innerText(), /^it is research$/, 'The reason is plain: no rule number.');
   assert.match(await page.locator('[data-spawn-agent]').innerText(), /Researcher/);
   assert.equal(await page.locator('[data-spawn-repo]').count(), 0, 'Research has no repo field.');
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/);
@@ -94,7 +94,8 @@ try {
   await page.locator('[data-spawn-why]').getByText('your choice').waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').count(), 0, 'A manual choice highlights no rule.');
   await page.locator('[data-spawn-target]').selectOption('');
-  await page.locator('[data-spawn-why]').getByText('rule 4').waitFor();
+  await page.locator('[data-spawn-route] .sp-rules .hit[data-rule="4"]').waitFor();
+  assert.doesNotMatch(await page.locator('[data-spawn-why]').innerText(), /rule \d/);
 
   step('Save as a proposal: request.json has the preset, the proposed target and the owner as origin; the sheet closes with a toast');
   await page.locator('[data-preset="market-research"]').click();
@@ -212,12 +213,15 @@ try {
   assert.equal(await real.locator('[data-spawn-note]').innerText(), 'Write what it should do.');
   await real.locator('[data-spawn-text]').fill('Why do runs stall');
   assert.equal(await real.locator('[data-spawn-go]').isDisabled(), false);
-  await real.route('**/api/hub/requests/*/approve', async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); });
+  // A slow approve. The handler is named so unroute can wait for it: an unroute that does not wait
+  // lets the page finish the request itself, and the late route.continue() throws "Route is already handled".
+  const slowApprove = async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); };
+  await real.route('**/api/hub/requests/*/approve', slowApprove);
   await real.locator('[data-spawn-go]').click();
   await real.locator('[data-spawn-go]', { hasText: 'Approving…' }).waitFor();
   assert.equal(await real.locator('[data-spawn-go]').getAttribute('aria-busy'), 'true');
   await real.locator('[data-spawn-toast]').waitFor();
-  await real.unroute('**/api/hub/requests/*/approve');
+  await real.unroute('**/api/hub/requests/*/approve', slowApprove, { behavior: 'wait' });
 
   step('Edit: Done when can be changed, and an Edit that leaves the text alone keeps "written by"');
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');

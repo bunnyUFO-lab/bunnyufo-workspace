@@ -8,6 +8,7 @@ import { createSiteApi, allowedOriginsFrom, writeOriginsFor } from '../server.mj
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const user = { 'Remote-User': 'owner' };
@@ -26,7 +27,7 @@ async function fixture({ allowedOrigins = [SITE], requireRemoteUser = true } = {
     bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser,
     hub: createHub({ bucket, enabled: true, env: { HUB_DISCORD_TOKEN_SHA256: 'a'.repeat(64), HUB_DISCORD_OWNER_ID: '100000000000000001' } }), allowedOrigins,
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const base = `http://127.0.0.1:${server.address().port}/api`;
   const send = async (route, { method = 'POST', headers = {}, body = JSON.stringify(pin) } = {}) => {
     const answer = await fetch(base + route, { method, headers, body: method === 'GET' || method === 'OPTIONS' ? undefined : body });

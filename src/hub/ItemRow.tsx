@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
+import { KIND_LABEL as NEEDS_LABEL, needsKind } from '../lib/needsKinds'
 import { hubHash, reviewHash } from '../lib/route'
 import { openRun } from './runStore'
 import { requestStateWord } from './working'
@@ -93,7 +94,9 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     const sent = item.state === 'submitted' ? 'Submitted' : item.state === 'picked-up' ? 'Picked up' : ''
     const progress = item.kind === 'checklist' ? (sent ? (open > 0 ? `${sent} · ${open} open` : sent) : `${item.done ?? 0} of ${item.total ?? 0}`) : ''
     const state = item.kind === 'checklist' ? progress : item.kind === 'ask' ? (item.state ?? 'open').replace('-', ' ') : item.kind === 'request' ? (item.stale ? requestStateWord(item.state ?? '', item.stale, {}) : item.state === 'taken' ? `taken as ${item.bead ?? 'a task'}` : item.state === 'done' || item.state === 'failed' ? item.state : 'open') : ''
-    const meta = [KIND_LABEL[item.kind], item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
+    // A sent list is no longer "To do": it carries its kind and its state, not both a to-do and a picked-up.
+    const kindLabel = item.kind === 'checklist' && sent ? NEEDS_LABEL[needsKind(item)] : KIND_LABEL[item.kind]
+    const meta = [kindLabel, item.project, state, item.kind === 'blocked' && item.host ? item.host : '', ago(item.at)].filter(Boolean).join(' · ')
     if (item.kind === 'review') return <ReviewRow item={item} meta={meta} />
     if (item.kind === 'blocked') return <BlockedRow item={item} meta={meta} />
     const body = (
@@ -108,7 +111,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     )
     if (item.kind === 'ask') return <a className="hub-row click" href={hubHash('ask', item.id)}>{body}</a>
     if (item.kind === 'checklist') return <a className="hub-row click" href={hubHash('checklist', item.id)} data-checklist-open>{body}</a>
-    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id}>{body}</a>
+    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id} data-run-open={item.id}>{body}</a>
     return <div className="hub-row">{body}</div>
   }
   if (!event) return null
@@ -139,7 +142,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
         <span className="hub-row-actions">
           {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer" data-run-pr>Review on GitHub</a>}
           {card && <a className="hub-btn" href={card} data-run-event-card>Open card</a>}
-          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open>Open run</a>
+          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open data-run-open={event.request}>Open run</a>
         </span>
         <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       </div>

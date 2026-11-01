@@ -14,6 +14,7 @@ import { createHub } from '../hub.mjs';
 import { askRev } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, eventJson, seeder } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const OWNER = '100000000000000001';
 const OTHER = '100000000000000002';
@@ -35,7 +36,7 @@ async function fixture({ discord = true, token = `buwd_${randomBytes(32).toStrin
   const env = discord ? { HUB_DISCORD_TOKEN_SHA256: sha(token), HUB_DISCORD_OWNER_ID: OWNER } : {};
   const hub = createHub({ bucket, enabled: true, env, log: line => logs.push(line) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, allowedOrigins: ['https://site.example'], hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const port = server.address().port;
   const origin = `http://127.0.0.1:${port}`;
   const call = async (method, route, { body, headers = {} } = {}) => {
@@ -263,7 +264,7 @@ test('8. without a bearer, or with a wrong one, 401; without the env keys, 404',
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   const hub = createHub({ bucket, enabled: true, env: { HUB_DISCORD_TOKEN_SHA256: sha('t') } });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 's.json'), requireRemoteUser: true, hub });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   try {
     const answer = await fetch(`http://127.0.0.1:${server.address().port}/api/hub/discord/asks`, { headers: { Authorization: 'Bearer t' } });
     assert.equal(answer.status, 404, 'Without the owner id the routes are off.');

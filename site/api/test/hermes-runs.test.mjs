@@ -427,7 +427,7 @@ async function startWebhook() {
     response.writeHead(204);
     response.end();
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   return { posts, url: `http://127.0.0.1:${server.address().port}/hook-secret-path`, close: () => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }) };
 }
 
@@ -649,6 +649,7 @@ test('a bare 404 from Hermes (a wrong HERMES_URL) is not read as "no longer has 
 // --- run questions ---
 
 import { questionOf } from '../run-outcome.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 test('questionOf: the last paragraph, plain, ending in ?, at most 600 characters; a CARD line wins', () => {
   assert.equal(questionOf('Which of the two games do you mean?'), 'Which of the two games do you mean?');

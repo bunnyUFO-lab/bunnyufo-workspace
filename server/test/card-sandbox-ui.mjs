@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createSiteApi } from '../../site/api/server.mjs';
 import { createBucket } from '../../site/api/s3.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.join(root, 'dist');
@@ -31,7 +32,7 @@ const seed = (key, body, type) => fake.seed(key, body, type);
 
 const log = [];
 const site = http.createServer();
-await new Promise(resolve => site.listen(0, '127.0.0.1', resolve));
+await listenOnGoodPort(site, '127.0.0.1');
 const port = site.address().port;
 const appOrigin = `http://app.example.localhost:${port}`;
 const contentOrigin = `http://cards.example.localhost:${port}`;

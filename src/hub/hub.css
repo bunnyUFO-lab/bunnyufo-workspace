@@ -247,7 +247,10 @@
 .hub-map-node:focus { outline: none; }
 .hub-map-node:focus-visible circle:first-of-type { stroke-width: 5; }
 .hub-map-ring { fill: none; stroke: var(--pink); stroke-width: 2; pointer-events: none; }
-.hub-map-chev { cursor: pointer; outline: none; }
+.hub-map-chev { cursor: pointer; outline: none; --hit: 32; }
+@media (pointer: coarse) { .hub-map-chev { --hit: 44; } }
+/* The hit ring is 40 units across; below the zoom where that is --hit px on screen, the whole button grows so it stays that size. */
+.hub-map-chev { transform: scale(max(1, calc(var(--hit) / var(--k, 1) / 40))); }
 .hub-map-chev-hit { fill: transparent; pointer-events: all; }
 .hub-map-chev-ring { fill: var(--surface-solid); stroke: var(--hairline-strong); }
 .hub-map-chev:hover .hub-map-chev-ring, .hub-map-chev:focus-visible .hub-map-chev-ring { stroke: var(--pink); stroke-width: 2.5; }

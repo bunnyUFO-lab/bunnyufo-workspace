@@ -10,6 +10,7 @@ import { createHub } from '../hub.mjs';
 import { applyMarks, checkMarkRequest, markEntry, markState } from '../hub-marks.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { askJson, beadsIssue, eventJson, jsonl, minutesAgo, seeder, threeOptions } from './hub-fixtures.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const NOW = new Date();
 const SITE = 'https://site.example';
@@ -85,7 +86,7 @@ async function fixture({ requireRemoteUser = true } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const post = async (route, data, headers = { 'Remote-User': 'owner' }) => {

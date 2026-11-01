@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import type { ChatApproval, ChatLine, ChatModel, ChatPersona, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
-import { HubError, hubGet, hubPost, remember } from '../lib/hub'
+import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseHelpId, reviewHash } from '../lib/route'
@@ -30,6 +30,12 @@ const AUTO = 'auto'
 const HERMES = 'hermes'   // persona: no persona, Hermes itself
 
 /** What the tags call a model: its label, or the bare id when the server no longer lists it. */
+/** When a conversation was last used, in the Hub's clock: the time today, the date and time before. */
+const when = (iso: string) => {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toDateString() === new Date().toDateString() ? clock(iso) : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock(iso)}`
+}
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
 /** The menu text: the paid ones say API. */
 const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? entry.label : `${entry.label} · API`)
@@ -397,6 +403,8 @@ function ChatView({ id }: { id?: string }) {
   }
 
   const conversations = list.data?.conversations ?? []
+  // Two chats with the same title are told apart by the time they were last used.
+  const sameTitle = new Set(conversations.filter((item, index) => conversations.some((other, at) => at !== index && other.title === item.title)).map(item => item.title))
   const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
   const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
   const agents = team.data?.agents ?? []
@@ -420,6 +428,7 @@ function ChatView({ id }: { id?: string }) {
         {conversations.map(item => (
           <a key={item.id} className={`hub-chat-item${item.id === id ? ' on' : ''}`} href={hubHash('chat', item.id)} onClick={() => setDrawer(false)} data-conversation={item.id}>
             <span>{item.title}</span>
+            {sameTitle.has(item.title) && item.updated && <span className="hub-muted" data-conversation-time>{when(item.updated)}</span>}
             <span className="hub-muted">{item.count} messages{item.persona && <> · <span className="hub-chat-tag" data-conversation-persona>{personas.find(entry => entry.id === item.persona)?.name ?? item.persona}</span></>}{item.model && item.model !== AUTO && <> · <span className="hub-chat-tag" data-conversation-model>{nameOf(models, item.model)}</span></>}</span>
           </a>
         ))}

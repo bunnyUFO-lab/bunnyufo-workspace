@@ -9,6 +9,7 @@ import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { png } from './png.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
 const md5 = data => createHash('md5').update(data).digest('hex');
@@ -24,7 +25,7 @@ async function fixture() {
   fake.seed('sections/one/alpha/take-2b.png', original, 'image/png');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0 });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const request = (route, data) => fetch(`${origin}/api${route}`, {
     method: data === undefined ? 'GET' : 'POST',

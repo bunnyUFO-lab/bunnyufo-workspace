@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo, pcStatusJson, seedPcStatus } from '../../site/api/test/hub-fixtures.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -24,7 +25,7 @@ const open = async (viewport, options = {}) => {
 const controller = async () => {
   const calls = [];
   const server = http.createServer((request, response) => { request.resume(); request.on('end', () => { calls.push(request.method); response.end('{}'); }); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   servers.push(server);
   return { calls, url: `http://127.0.0.1:${server.address().port}/hook/placeholder` };
 };

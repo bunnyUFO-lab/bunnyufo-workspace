@@ -9,6 +9,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { validRepo } from '../hub-requests.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const NOW = new Date();
@@ -22,7 +23,7 @@ async function fixture({ env = {}, tracked = {} } = {}) {
   for (const [project, repo] of Object.entries(tracked)) fake.seed(`sections/${project}/workspace.json`, JSON.stringify({ name: project, tracked: { repo }, entities: [] }), 'application/json');
   const hub = createHub({ bucket, enabled: true, now: () => NOW, env });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: false, hub, allowedOrigins: [SITE] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, data) => {
     const answer = await fetch(`${origin}/api${route}`, { method, headers: { Origin: SITE, 'Content-Type': 'application/json', 'Remote-User': 'owner' }, ...(method === 'GET' ? {} : { body: JSON.stringify(data ?? {}) }) });

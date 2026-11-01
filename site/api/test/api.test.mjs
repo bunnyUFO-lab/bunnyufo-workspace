@@ -8,6 +8,7 @@ import http from 'node:http';
 import { createSiteApi, slugify } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 /** A request with a Host of our choosing (fetch will not send one): the status and the headers. */
 const asHost = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
@@ -51,7 +52,7 @@ async function fixture({ template = true, bucket: withBucket = true, requireRemo
   }
 
   const server = createSiteApi({ bucket: withBucket ? bucket : null, templateDir, stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, siteUrl, cardApi, contentOrigin, dev, stateKey, deployedRef, ...(requireRemoteUser ? { allowedOrigins: ['https://site.example'] } : {}) });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const request = (route, data, method, headers = {}) => fetch(`${origin}/api${route}`, {
     method: method ?? (data === undefined ? 'GET' : 'POST'),
@@ -611,7 +612,7 @@ test('an S3 body that fails mid-download ends that one response; the server keep
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1', fetchImpl });
   const root = await mkdtemp(path.join(tmpdir(), 'buw-site-api-'));
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'state.json'), sectionsTtl: 0 });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
     // The download is cut short: the client sees a failure, not a complete file.

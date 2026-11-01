@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
 import { createCardApi, handler, parseRef, parseScope, parseTokens } from '../handler.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -83,7 +84,7 @@ async function serve(api) {
     response.writeHead(result.statusCode, result.headers);
     response.end(result.isBase64Encoded ? Buffer.from(result.body, 'base64') : result.body);
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   server.url = `http://127.0.0.1:${server.address().port}`;
   return server;
 }
@@ -239,7 +240,7 @@ test('inbox: delivered.json and watch-<session>.json are create-only for a limit
   const { fake, call } = await setup();
   try {
     const put = (token, file, headers) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{"v":1}'), base64: true, headers });
-    for (const file of ['asks/x-1/delivered.json', 'asks/x-1/watch-abcd1234.json']) {
+    for (const file of ['asks/x-1/delivered.json', 'asks/x-1/watch-abcd1234.json', 'checklists/x-2/delivered.json', 'checklists/x-2/watch-abcd1234.json']) {
       assert.equal((await put('tok-cloud', file, { 'If-None-Match': '*' })).status, 200, `${file} the first create`);
       assert.equal((await put('tok-cloud', file, { 'If-None-Match': '*' })).status, 412, `${file} a second create finds it`);
       const replace = await put('tok-cloud', file);
@@ -252,6 +253,7 @@ test('inbox: delivered.json and watch-<session>.json are create-only for a limit
     }
     assert.equal(fake.text('sections/inbox/asks/x-1/delivered.json'), '{"v":1}');
     assert.equal((await put('tok-all', 'asks/x-1/delivered.json')).status, 200, 'The passphrase may replace.');
+    assert.equal((await put('tok-all', 'checklists/x-2/delivered.json')).status, 200, 'The passphrase may replace a checklist copy too.');
     assert.equal((await call('DELETE', '/sections/inbox/files/asks/x-1/watch-abcd1234.json', { token: 'tok-all' })).status, 200, 'The passphrase may delete.');
   } finally {
     await fake.close();

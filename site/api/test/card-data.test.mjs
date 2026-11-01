@@ -13,6 +13,7 @@ import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { attachCardBridge, createBridgeHandler, isBridgeRequest } from '../../../src/lib/card-bridge.mjs';
+import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const source = await readFile(path.join(repo, 'workspace/_shared/card-data.js'), 'utf8');
@@ -31,7 +32,7 @@ async function setup() {
   fake.seed('sections/games/2026_sounds/answers.md', 'first', 'text/markdown');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const server = createSiteApi({ bucket, stateFile: path.join(root, 'state.json'), sectionsTtl: 0, requireRemoteUser: true, allowedOrigins: [APP] });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const requests = [];
 

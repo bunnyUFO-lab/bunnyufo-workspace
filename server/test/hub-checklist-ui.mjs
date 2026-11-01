@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FIXTURE_CHECKLIST, SUBMITTED_CHECKLIST, startHubFixture } from './hub-fixture.mjs';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const step = name => console.log(`- ${name}`);
@@ -65,7 +66,7 @@ try {
   await page.locator('.hub-chip[data-filter="answered"]').tap();
   const history = page.locator('.hub-row', { hasText: 'Update the router settings' });
   await history.waitFor();
-  assert.match(await history.locator('.hub-row-meta').innerText(), /^To do · probe · Submitted · 1 open · /);
+  assert.match(await history.locator('.hub-row-meta').innerText(), /^Steps · probe · Submitted · 1 open · /);
   await page.locator('.hub-chip[data-filter="steps"]').tap();
   await row.waitFor();
   await noSideways(page, 'Steps');
@@ -202,7 +203,7 @@ try {
   await page.locator('.hub-chip[data-filter="answered"]').tap();
   const submittedRow = page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' });
   await submittedRow.waitFor();
-  assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^To do · probe · Submitted · 2 open · /);
+  assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^Steps · probe · Submitted · 2 open · /);
 
   step('a submitted list is read-only, with the time and the note');
   await submittedRow.tap();
@@ -257,7 +258,7 @@ try {
       return send(200, name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html', await readFile(path.join(dist, name)));
     } catch { return send(200, 'text/html', await readFile(path.join(dist, 'index.html'))); }
   });
-  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve));
+  await listenOnGoodPort(stub, '127.0.0.1');
   try {
     const guest = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
     await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/checklist/${FIXTURE_CHECKLIST}`);

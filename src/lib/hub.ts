@@ -237,6 +237,8 @@ export interface Checklist {
   lookFor?: string
   submit?: { help?: HelpAttached; at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
   pickup?: { at: string; host: string; session?: string }
+  /** Where the submission went, from files an agent wrote (the server checked every field). Only a submitted checklist has it. */
+  delivery?: AskDelivery
   cancel?: { at: string; by: string }
   files: string[]
   /** The newest picture per step (by step number, "03") and the playtest screenshots; files in the checklist's folder, shown through `fileUrl`. */

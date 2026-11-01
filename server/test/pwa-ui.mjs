@@ -9,6 +9,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const today = new Date().toISOString().slice(0, 10);
@@ -37,7 +38,7 @@ const server = http.createServer(async (request, response) => {
   }
   return send(200, 'text/html', await readFile(path.join(root, 'dist', 'index.html')));
 });
-await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
+await listenOnGoodPort(server, '0.0.0.0');
 const origin = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });

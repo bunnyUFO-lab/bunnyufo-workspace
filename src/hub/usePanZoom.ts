@@ -32,6 +32,8 @@ export interface PanZoomOptions {
   onZoom?: (zoom: ZoomReport) => void
   /** Fit and the first view may enlarge the content up to this scale (default 1). */
   fitMax?: number
+  /** Room at the top and bottom of the box that overlays (a control bar) cover: Fit and the first view keep the content out of it. */
+  insets?: () => { top: number; bottom: number }
 }
 
 /**
@@ -49,6 +51,8 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
   const zoomed = useRef(options.onZoom)
   zoomed.current = options.onZoom
   const fitMax = options.fitMax ?? 1
+  const insetsRef = useRef(options.insets)
+  insetsRef.current = options.insets
   /** The latest user zoom since the last paint: the pointer, and the scale before the first of them. */
   const pending = useRef<{ at: { x: number; y: number }; k0: number } | null>(null)
   const rebaser = useRef<() => void>(() => {})
@@ -64,6 +68,8 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
     if (!el || !st) return
     st.style.transform = viewString(view.current)
     el.dataset.view = dataView(view.current)
+    // The scale, for CSS that keeps a target at a size on screen whatever the zoom (the map's chevrons).
+    el.style.setProperty('--k', String(view.current.k))
     const zoom = pending.current
     pending.current = null
     if (zoom && view.current.k !== zoom.k0) zoomed.current?.({ dir: view.current.k > zoom.k0 ? 1 : -1, at: zoom.at, k: view.current.k })
@@ -90,7 +96,12 @@ export function usePanZoom(box: RefObject<HTMLDivElement | null>, stage: RefObje
     current: () => ({ ...view.current }),
     setContent: next => { content.current = next },
     go,
-    fit: (animate = true) => go(fitView(content.current, size(), fitMax), animate),
+    fit: (animate = true) => {
+      const { top, bottom } = insetsRef.current?.() ?? { top: 0, bottom: 0 }
+      const whole = size()
+      const inside = fitView(content.current, { w: whole.w, h: Math.max(whole.h - top - bottom, 1) }, fitMax)
+      go({ ...inside, y: inside.y + top }, animate)
+    },
     zoomBy: (factor, animate = true) => {
       const { w, h } = size()
       const at = { x: w / 2, y: h / 2 }

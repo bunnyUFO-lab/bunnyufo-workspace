@@ -6,6 +6,7 @@ import {mkdtemp,writeFile,stat} from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { listenOnGoodPort } from '../listen.mjs';
 
 async function rendered(chunks) {
   const result=[];
@@ -35,7 +36,7 @@ test('HTML GET and HEAD agree on byte length while ranges remain full transforme
   const file=path.join(dir,'report.html'),source='<!doctype html><html><head></head><body>Пример 🐽</body></html>';
   await writeFile(file,source); const info=await stat(file);
   const server=http.createServer((request,response)=>{void serveReport(request,response,file,info,{});});
-  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  await listenOnGoodPort(server, '127.0.0.1');
   try{
     const url=`http://127.0.0.1:${server.address().port}/report.html`;
     const head=await fetch(url,{method:'HEAD'}),get=await fetch(url),body=Buffer.from(await get.arrayBuffer());
