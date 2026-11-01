@@ -203,6 +203,40 @@ try {
   await askPage.waitForFunction(() => /^Cancelled/.test(document.querySelector('[data-next-note]')?.textContent ?? ''));
   assert.doesNotMatch(await askPage.locator('[data-next-note]').innerText(), /Marked done/);
 
+  step('A cloud request with no repo: one tap when its project has a repo, a picker when it has none (desktop and 390 px)');
+  const cloud = await startHubFixture({ signing: true, env: { HUB_ROUTINE_DRY_RUN: '1', HUB_KNOWN_REPOS: 'example/picked,example/other', CLAUDE_ROUTINE_APP_URL: 'https://routine.example.test/v1/fire/X', CLAUDE_ROUTINE_APP_TOKEN: 't', CLAUDE_ROUTINE_APP_REPO: 'example/app', CLAUDE_ROUTINE_PICKED_URL: 'https://routine.example.test/v1/fire/Y', CLAUDE_ROUTINE_PICKED_TOKEN: 't', CLAUDE_ROUTINE_PICKED_REPO: 'example/picked' } });
+  fixtures.push(cloud);
+  cloud.fake.seed('sections/workspace-app/workspace.json', JSON.stringify({ name: 'Workspace app', tracked: { repo: 'example/app' }, entities: [] }), 'application/json');
+  const repoIds = { tracked: `${day}-workspace-app-cloud-with-repo-a8a8`, bare: `${day}-sprite-studio-cloud-no-repo-b9b9`, phone: `${day}-sprite-studio-cloud-on-phone-c8c8` };
+  const cloudBase = (id, project) => ({ id, project, createdAt: minutesAgo(cloud.now, 20).toISOString(), by: 'owner', text: `Tidy the ${project} readme`, preset: 'code-task', target: 'cloud', origin: { kind: 'owner', name: 'owner' } })
+  for (const [id, project] of [[repoIds.tracked, 'workspace-app'], [repoIds.bare, 'sprite-studio'], [repoIds.phone, 'sprite-studio']]) cloud.seed.request(cloudBase(id, project));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const cloudPage = await open({ width: 1280, height: 900 });
+  await cloudPage.goto(`${cloud.url}#/~hub/request/${encodeURIComponent(repoIds.tracked)}`);
+  await cloudPage.locator('[data-approval-approve]').waitFor();
+  assert.equal(await cloudPage.locator('[data-approval-repo-box]').count(), 0, 'No picker when the project has a repo.');
+  await cloudPage.locator('[data-approval-approve]').click();
+  await cloudPage.locator('[data-next-note]').waitFor();
+  assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.tracked}/approved.json`).repo, 'example/app', 'Signed with the project repo.');
+  await cloudPage.goto(`${cloud.url}#/~hub/request/${encodeURIComponent(repoIds.bare)}`);
+  await cloudPage.locator('[data-approval-repo-box]').waitFor();
+  assert.equal(await cloudPage.locator('[data-approval-approve]').isDisabled(), true, 'Approve waits for a repo.');
+  await cloudPage.screenshot({ path: process.env.BUW_PR_SHOTS ? `${process.env.BUW_PR_SHOTS}/picker-desktop.png` : undefined });
+  await cloudPage.locator('[data-approval-repo]').click();
+  await cloudPage.getByRole('option', { name: 'example/picked' }).click();
+  assert.equal(await cloudPage.locator('[data-approval-approve]').isDisabled(), false);
+  await cloudPage.locator('[data-approval-approve]').click();
+  await cloudPage.locator('[data-next-note]').waitFor();
+  assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.bare}/approved.json`).repo, 'example/picked', 'Signed with the picked repo.');
+  assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.bare}/request.json`).repo, undefined, 'request.json is not rewritten.');
+  const narrow = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  await narrow.goto(`${cloud.url}#/~hub/request/${encodeURIComponent(repoIds.phone)}`);
+  await narrow.locator('[data-approval-repo-box]').waitFor();
+  const narrowWidths = await narrow.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+  assert.ok(narrowWidths.scroll <= narrowWidths.inner, `The page scrolls sideways at 390 px (${narrowWidths.scroll} > ${narrowWidths.inner}).`);
+  assert.ok((await narrow.locator('[data-approval-repo]').boundingBox()).height >= 36, 'The picker can be tapped.');
+  await narrow.screenshot({ path: process.env.BUW_PR_SHOTS ? `${process.env.BUW_PR_SHOTS}/picker-phone.png` : undefined });
+
   console.log('hub-approval-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

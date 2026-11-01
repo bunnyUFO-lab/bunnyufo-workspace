@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { host } from '../lib/host'
 import type { Item } from '../lib/hub'
 import { ago, hubGet, hubPost } from '../lib/hub'
@@ -8,6 +8,7 @@ import type { SettledVerb } from '../lib/nextItem.mjs'
 import { hubHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
+import Combobox from './Combobox'
 import { RunView } from './RunDrawer'
 import { cachedPresets, loadPresets } from './spawnData'
 import { openSpawn } from './spawnStore'
@@ -22,6 +23,8 @@ export interface RequestDetail {
     doneWhen?: string; agent?: string; model?: string; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
+  /** The repo Approve signs a request that has none of its own with: its project's tracked repo. Absent when there is none. */
+  projectRepo?: string
   /** When a taken run last gave word, if that is past its limit: the request is then silent, not running. */
   stale?: string
   approved?: { target: SpawnTarget; by: string; at: string; expires: string; limits?: { minutes: number } }
@@ -65,6 +68,9 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
   const [reason, setReason] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
   const [brief, setBrief] = useState<string | null>(null)
+  const [pickedRepo, setPickedRepo] = useState('')
+  const [known, setKnown] = useState<{ repo: string; project?: string }[]>([])
+  const repoId = useId()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -80,7 +86,15 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
   const machine = MACHINE[target]
   const why = choice ? 'you chose it' : route && route.target === target ? route.why : request.target === target ? 'proposed with the request' : ''
   const expired = state === 'expired'
-  const canSign = host.approve && !atPc
+  // A cloud run with no repo of its own and none on its project asks for one here, so Approve never ends in an error with nothing to do.
+  const needsRepo = target === 'cloud' && !request.repo && !detail.projectRepo
+  const canSign = host.approve && !atPc && !(needsRepo && !pickedRepo)
+  useEffect(() => {
+    if (!needsRepo) return
+    const controller = new AbortController()
+    hubGet<{ repos: { repo: string; project?: string }[] }>('/presets/repos', controller.signal).then(answer => setKnown(answer?.repos ?? []), () => { /* no list: the PC is still the way out */ })
+    return () => controller.abort()
+  }, [needsRepo])
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true)
@@ -88,7 +102,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
     try { await work() } catch (failure) { setError(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false) }
   }
   const approve = () => run(async () => {
-    await hubPost(`/requests/${encodeURIComponent(id)}/${expired ? 'again' : 'approve'}`, { target })
+    await hubPost(`/requests/${encodeURIComponent(id)}/${expired ? 'again' : 'approve'}`, { target, ...(needsRepo && pickedRepo ? { repo: pickedRepo } : {}) })
     onSettled('approved')
   })
   const decline = () => run(async () => {
@@ -123,6 +137,13 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
               {preset.targets.map(item => <option key={item} value={item}>{MACHINE[item].name}</option>)}
             </select>
           )}
+          {needsRepo && host.write && (
+            <div className="ap-repo" data-approval-repo-box>
+              <label htmlFor={repoId}>Repo for the cloud run</label>
+              <Combobox id={repoId} value={pickedRepo} options={[{ value: '', label: 'Pick a repo' }, ...known.map(item => ({ value: item.repo, label: item.repo, keywords: item.project ? [item.project] : [] }))]} onChange={setPickedRepo} openLabel="Show repositories" inputAttrs={{ 'data-approval-repo': '' }} />
+              <span className="sp-faint">Or run it on the PC.</span>
+            </div>
+          )}
         </dd></div>
         <div><dt>Side effects</dt><dd data-approval-effect>{sideEffect(preset, request.repo)}</dd></div>
         <div><dt>Time limit</dt><dd>Up to {detail.approved?.limits?.minutes ?? preset.minutes} minutes</dd></div>
@@ -150,7 +171,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
         )}
         {host.write && atPc && <><span className="sp" /><button type="button" className="hub-btn" disabled={busy} onClick={() => void markDone()} data-approval-done>Mark done</button></>}
       </div>
-      {host.write && !atPc && !canSign && <p className="hub-muted" data-approval-reason-off>{host.approveReason ?? 'Approving needs a signed-in session on a host that can sign.'}</p>}
+      {host.write && !atPc && !host.approve && <p className="hub-muted" data-approval-reason-off>{host.approveReason ?? 'Approving needs a signed-in session on a host that can sign.'}</p>}
       {copied && <p className="hub-muted" role="status" data-approval-copied>{copied}</p>}
     </>
   )

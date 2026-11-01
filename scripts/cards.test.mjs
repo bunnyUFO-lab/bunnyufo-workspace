@@ -1142,6 +1142,19 @@ test('request create pings #needs-you once with the request link only for a pres
   } finally { await hook.close(); await close(); }
 });
 
+test('request create for the cloud needs a repo: refused without one, filed with one', async () => {
+  const { cli, close } = await setup();
+  try {
+    const refused = await cli('api', 'request', 'create', '--project', 'magic-loops', '--text', 'Tidy the readme', '--preset', 'code-task', '--target', 'cloud');
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /A cloud request needs --repo owner\/name \(the project's repo is not known here\)\./);
+    const pc = await cli('api', 'request', 'create', '--project', 'magic-loops', '--text', 'Tidy the readme', '--preset', 'code-task', '--target', 'pc');
+    assert.equal(pc.code, 0, pc.stderr);
+    const filed = await cli('api', 'request', 'create', '--project', 'magic-loops', '--text', 'Tidy the readme again', '--preset', 'code-task', '--target', 'cloud', '--repo', 'example/probe');
+    assert.equal(filed.code, 0, filed.stderr);
+  } finally { await close(); }
+});
+
 test('the avatar subject pattern in cards.mjs equals SUBJECT_RE in site/api/presets.mjs', async () => {
   const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
   const presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href);

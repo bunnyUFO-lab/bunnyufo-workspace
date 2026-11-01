@@ -1433,6 +1433,8 @@ async function requestCreate(flags) {
   if (flags.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(flags.repo)) throw new Error('--repo is owner/name.');
   if (flags['done-when'] !== undefined && flags['done-when'].length > 400) throw new Error('--done-when is at most 400 characters.');
   if (flags.target !== undefined && !REQUEST_TARGETS.includes(flags.target)) throw new Error(`--target is one of: ${REQUEST_TARGETS.join(', ')}.`);
+  // A cloud run needs a repo. The card API does not show a section's tracked repo to a client, so this cannot fill it in: say so now rather than file a request that stops at Approve.
+  if (flags.target === 'cloud' && !flags.repo) throw new Error('A cloud request needs --repo owner/name (the project\'s repo is not known here).');
   const needs = flags.needs === undefined ? undefined : [...new Set(flags.needs.split(',').map(item => item.trim()).filter(Boolean))];
   if (needs?.some(item => !REQUEST_NEEDS.includes(item))) throw new Error(`--needs is a comma list of: ${REQUEST_NEEDS.join(', ')}.`);
   const when = flags.when ?? 'next-sprint';

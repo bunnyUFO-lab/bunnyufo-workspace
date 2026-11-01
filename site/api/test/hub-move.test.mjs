@@ -283,3 +283,19 @@ test('the 409 for a request that cannot move names its state; the offer carries 
     assert.match(answer.body.error, /That request is stopped; it cannot move to the cloud\./);
   } finally { await f.close(); }
 });
+
+test('a request with no repo is judged on its project tracked repo, and the cloud copy is signed with it', async () => {
+  const f = await fixture();
+  try {
+    f.fake.seed('sections/probe/workspace.json', JSON.stringify({ name: 'Probe', tracked: { repo: 'example/probe' }, entities: [] }), 'application/json');
+    const request = await f.pcRequest({ repo: undefined });
+    assert.equal(f.fake.json(`sections/inbox/requests/${request.id}/approved.json`).repo, 'example/probe', 'the PC approval already carries the resolved repo');
+    f.clock.time = START + 6 * HOUR;
+    assert.deepEqual((await f.offers()).map(offer => offer.request), [request.id]);
+    const moved = await f.post(`/hub/requests/${request.id}/move-to-cloud`);
+    assert.equal(moved.status, 201, JSON.stringify(moved.body));
+    assert.equal(f.fake.json(`sections/inbox/requests/${moved.body.id}/request.json`).repo, undefined, 'request.json is not rewritten');
+    assert.equal(f.fake.json(`sections/inbox/requests/${moved.body.id}/approved.json`).repo, 'example/probe');
+    assert.equal(f.routine.calls.length, 1);
+  } finally { await f.close(); }
+});
