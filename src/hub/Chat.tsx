@@ -23,6 +23,7 @@ import { takeHelpDraft } from './flash'
 import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
 import { AgentSprite } from './team/AgentSprite'
+import { chooseModel, pauseNote, type ChatPause } from './chatModel'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
 
 const READ_KEY = 'buw.hub.readAloud'
@@ -37,6 +38,8 @@ const when = (iso: string) => {
   if (Number.isNaN(date.getTime())) return ''
   return date.toDateString() === new Date().toDateString() ? clock(iso) : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock(iso)}`
 }
+/** A time in a pause note: the time today, with the weekday when it falls on another day. */
+const pauseWhen = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : `${new Date(iso).toLocaleDateString([], { weekday: 'short' })} ${clock(iso)}`)
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
 /** The menu text: Auto says what it tries first, the paid ones say API, Codex (the ChatGPT plan) says neither. */
 const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? `${entry.label} · Codex first` : /no API cost/.test(entry.note) ? entry.label : `${entry.label} · API`)
@@ -198,7 +201,7 @@ const isPicture = (file: File) => file.type.startsWith('image/')
 function ChatView({ id }: { id?: string }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
-  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[] }>('/chat')
+  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[] }>('/chat')
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
   // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
   const [start] = useState(() => (id || help ? null : peekChatStart()))
@@ -211,7 +214,12 @@ function ChatView({ id }: { id?: string }) {
   const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
   const who = personas.find(entry => entry.id === persona) ?? null   // null is Hermes
   const preferred = who?.model && models.some(entry => entry.id === who.model) ? who.model : AUTO   // model: the agent's own default, until the owner picks one
-  const model = picked ?? preferred
+  // pauses: the plans the Hub saw hit a usage limit. The default falls to the next model in the chain; a hand pick stays, with the same note.
+  const [clockNow, setClockNow] = useState(() => Date.now())   // a pause ends by itself: look again every half minute
+  useEffect(() => { const timer = setInterval(() => setClockNow(Date.now()), 30_000); return () => clearInterval(timer) }, [])
+  const choice = chooseModel({ picked, preferred, chain: list.data?.chain ?? [], pauses: list.data?.pauses ?? [], now: clockNow })
+  const model = choice.model
+  const pauseText = choice.pause ? pauseNote(nameOf(models, choice.pause.model), choice.pause, pauseWhen, choice.using ? nameOf(models, choice.using) : undefined) : null
   const [pending, setPending] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : start?.draft ?? ''))
   const [images, setImages] = useState<Prepared[]>([])
@@ -517,6 +525,7 @@ function ChatView({ id }: { id?: string }) {
                   <option value={JOB}>Start a job instead…</option>
                 </select>
                 <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
+                {pauseText && <span className="hub-model-pause" role="status" data-chat-model-pause data-pause-model={choice.pause?.model}>{pauseText}</span>}
               </>
             )}
             {speaks && (

@@ -10,6 +10,9 @@ export const CHAT_MODELS = [
   { id: 'deepseek-flash', label: 'DeepSeek Flash', note: 'DeepSeek API, cheapest', provider: 'deepseek', model: 'deepseek-flash' },
 ];
 
+/** The order Auto tries, and so the order a paused default falls down: Codex, then Sonnet, then DeepSeek. */
+export const CHAT_CHAIN = ['codex', 'sonnet', 'deepseek-flash'];
+
 /** The entry for an id. Nothing, null or '' is Auto; any other value that is not a listed id is a 400. */
 export function chatModelOf(value) {
   if (value === undefined || value === null || value === '') return CHAT_MODELS[0];

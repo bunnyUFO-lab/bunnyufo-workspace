@@ -423,11 +423,13 @@ one it is `failed` ("finished without a card"). When Hermes drops a run's event 
 reader) the follower polls the status instead; only a 404 on the status ends the request `unknown`
 (`hermes-forgot`, pointing at the newest `assistant` card made after the start). A run that fails with `429` or
 `quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`, key
-`<id>-retry`), recorded in `hermes-retry.json`; a second quota failure is `failed` with reason `usage-limit`. The
+`<id>-retry`), recorded in `hermes-retry.json` (with `until` when the error named a reset time); a second quota failure is `failed` with reason `usage-limit`. The
 follower stops a run at `limits.minutes` (`time-limit`). At most 3 Hermes runs go at a time: a fourth approval is
 signed and waits in `approved` (`waiting` in the answer); a run that ends, and a sweep every 60 s, start the oldest
 waiting one. After a restart, the hub and the page loads (at most once per 30 s) re-attach to every run without a
 result. `HERMES_URL` and `HERMES_API_KEY` must be set; without them an approval waits.
+
+Plan pauses (`plan-pauses.mjs`). `GET /hub/chat` also sends `chain` (the order Auto tries: Codex, Sonnet, DeepSeek) and `pauses`: the models whose plan the Hub saw hit a usage limit, `{ model, seen, until, reported }`. The evidence is a `hermes-retry.json` (the first run was on Hermes's default chain, which starts on Codex) and a chat turn whose run failed on quota (kept in memory, for the model picked, or Codex on Auto). A pause ends at the reset time the error carried (`reported: true`), else one hour after it was seen; nothing calls a provider. Chat starts a paused default on the next unpaused model in the chain and says why; a model picked by hand stays, with the same note. The cloud usage pause (`routines.mjs`) is a different plan and is not part of this.
 
 Hermes approvals: Hermes asks before it writes a protected instruction file (in practice the only thing that asks in
 Hermes's sandbox). Each ask becomes `hermes-approvals/<yyyymmdd>-hermes-<4>-<4>/approval.json` (`runId`, `requestId` and

@@ -17,7 +17,8 @@ import { Readable, pipeline } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
-import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
+import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient } from './chat-models.mjs';
+import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
@@ -37,7 +38,7 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
@@ -316,7 +317,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           else if (event.event === 'run.completed') {
             if (!reply && typeof data.output === 'string' && data.output) { reply = data.output; emit('delta', { text: reply }); }
             ended = true; finishedByHermes = true;
-          } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; }
+          } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; planPauses?.note(choice.provider ?? DEFAULT_PROVIDER, data.error); }   // pauses: a quota failure pauses the plan it ran on
           else if (event.event === 'run.cancelled' || event.event === 'run.interrupted') { failure = 'The run was stopped.'; ended = true; finishedByHermes = true; }
           if (ended) break;
         }
@@ -430,7 +431,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient() });   // model: persona:
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(), chain: CHAT_CHAIN, pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);

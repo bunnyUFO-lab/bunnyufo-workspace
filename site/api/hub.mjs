@@ -33,6 +33,7 @@ import { createPolicy } from './policy.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
+import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
@@ -1181,7 +1182,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     throw fail('No such kind of item.');
   }
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
 
   const self = {
     enabled: on,
