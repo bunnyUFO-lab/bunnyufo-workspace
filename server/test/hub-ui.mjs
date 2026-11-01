@@ -845,11 +845,11 @@ try {
   assert.ok(tall.axis === 'y' && tall.h > tall.w, `The map is taller than it is wide, and vertical (${tall.axis}, ${tall.w} x ${tall.h}).`);
   await noSideways(phone, 'Progress map');
   const tops = await phone.evaluate(() => ({
-    chips: [...document.querySelectorAll('.hub-chips a')].map(item => Math.round(item.getBoundingClientRect().top)),
+    picker: (() => { const box = document.querySelector('.hub-map-chips .cb').getBoundingClientRect(); return { top: box.top, height: box.height, right: box.right }; })(),
     bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
-  assert.ok(tops.chips.length > 1 && new Set(tops.chips).size === 1, `The project chips share one row (${tops.chips}).`);
+  assert.ok(tops.picker.height >= 44 && tops.picker.right <= 390, `The project picker is one 44 px field inside the screen (${JSON.stringify(tops.picker)}).`);
   assert.ok(tops.bar.length >= 6 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap > .hub-map-controls').count(), 1, 'The toolbar floats inside the map.');
   assert.ok(await phone.locator('.hub-hint-touch').isVisible() && !(await phone.locator('.hub-hint-mouse').isVisible()), 'The phone shows the touch hint.');
