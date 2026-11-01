@@ -27,3 +27,7 @@
 .hub-chat-with .hub-persona { flex: 0 1 auto; width: auto; }
 .hub-chat-main > .hub-top .hub-chat-toggle { flex: 0 0 auto; }
 .hub-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A model whose plan the Hub saw hit a usage limit (ws-q9y.9): the reason sits on its own line under the menu, at every width. */
+.hub-chat-extras:has(.hub-model-pause) { flex-wrap: wrap; }
+.hub-model-pause { order: 3; flex: 1 1 100%; min-width: 0; font-size: 0.78rem; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }

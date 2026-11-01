@@ -14,6 +14,7 @@ import { TERMINAL, createFollowers } from './hermes-follower.mjs';
 import { chatModelOf } from './chat-models.mjs';
 import { createHermesRuns } from './hermes-runs.mjs';
 import { createScrub } from './scrub.mjs';
+import { resetOf } from './plan-pauses.mjs';
 import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
 
 export const MAX_HERMES_RUNS = 3;
@@ -120,9 +121,10 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     });
   }
 
-  async function startRetry(context, at) {
+  async function startRetry(context, at, failed) {
     const { id, approved } = context;
     const provider = 'anthropic';
+    const until = resetOf(failed?.error, at);   // a reset time the error carried; the chat's model menu says when Codex is back
     let runId;
     try {
       ({ runId } = await runs.start({ input: approved.run.brief, provider, model: retryModel, idempotencyKey: `${id}-retry` }));
@@ -130,7 +132,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
       await writeResult(id, startFailedOutcome({ reason: `the retry on Anthropic failed: ${scrub(error.message)}`, at: at.toISOString() }));
       return;
     }
-    await writeOnce(id, 'hermes-retry.json', { runId, at: at.toISOString(), provider, model: retryModel, reason: 'quota' });
+    await writeOnce(id, 'hermes-retry.json', { runId, at: at.toISOString(), provider, model: retryModel, reason: 'quota', ...(until ? { until } : {}) });
     attach(id, runId, approved, { retry: true, startedAt: at.toISOString(), limitFrom: context.limitFrom });
   }
 
@@ -150,7 +152,7 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
       if (unknown) {
         await writeResult(id, unknownOutcome({ card: await newestCardSince(context.startedAt), at: at.toISOString() }));
       } else if (run.status === 'failed' && isQuotaError(run.error) && !context.approved?.run?.model && !context.retry && !names.has('hermes-retry.json') && !stopped && !follower.timedOut) {
-        await startRetry(context, at);
+        await startRetry(context, at, run);
         return;
       } else {
         await writeResult(id, outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() }), run.output);

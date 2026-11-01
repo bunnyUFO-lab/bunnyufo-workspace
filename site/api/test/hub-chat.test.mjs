@@ -771,6 +771,32 @@ test('model: GET /hub/chat lists the choices and a conversation last non-auto mo
   } finally { await close(); }
 });
 
+test('pauses: a turn that fails on a usage limit pauses the plan it ran on, in the list; other failures do not', async () => {
+  const quiet = await fixture({ env: RUNS });
+  try {
+    const listed = await (await quiet.call('GET', '/hub/chat')).json();
+    assert.deepEqual(listed.chain, ['codex', 'sonnet', 'deepseek-flash']);
+    assert.deepEqual(listed.pauses, []);
+  } finally { await quiet.close(); }
+  const boom = await fixture({ env: RUNS, hermes: { failWith: 'something broke' } });
+  try {
+    assert.equal((await chat(boom.call, { text: 'hello' })).events.at(-1).event, 'error');
+    assert.deepEqual((await (await boom.call('GET', '/hub/chat')).json()).pauses, []);
+  } finally { await boom.close(); }
+  const limited = await fixture({ env: RUNS, hermes: { failWith: '429 usage limit reached, try again in 90 minutes' } });
+  try {
+    assert.equal((await chat(limited.call, { text: 'on Auto' })).events.at(-1).event, 'error');
+    let pauses = (await (await limited.call('GET', '/hub/chat')).json()).pauses;
+    assert.deepEqual(pauses.map(pause => pause.model), ['codex'], 'Auto runs the default chain, which starts on Codex');
+    assert.equal(pauses[0].reported, true);
+    assert.ok(new Date(pauses[0].until).getTime() > Date.now() + 80 * 60_000);
+    assert.ok(!('provider' in pauses[0]));
+    await chat(limited.call, { text: 'on Sonnet', model: 'sonnet' });
+    pauses = (await (await limited.call('GET', '/hub/chat')).json()).pauses;
+    assert.deepEqual(pauses.map(pause => pause.model).sort(), ['codex', 'haiku', 'sonnet'], 'a provider pause covers each of its models');
+  } finally { await limited.close(); }
+});
+
 // --- Personas -------------------------------------------------------------------------------------------------------
 
 test('persona: no persona (or hermes) sends the run as before and stores no persona', async () => {
