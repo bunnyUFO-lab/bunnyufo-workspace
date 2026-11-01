@@ -7,12 +7,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
-import { pickOption } from './combobox.mjs';
 
-// The project picker is a Combobox: pick by id, and read which project is open from its value.
-const picker = page => page.getByRole('combobox', { name: 'Project' });
-const choose = (page, id) => pickOption(picker(page), id);
-const shows = (page, id) => page.locator(`[role="combobox"][aria-label="Project"][data-value="${id}"]`).waitFor();
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
@@ -250,48 +245,46 @@ try {
   await noSideways(big, 'Roadmap at 1920');
 }
 {
-  step('a first visit opens Magic Loops, and the picker lists them in the table order');
+  step('a first visit opens Magic Loops, and the chips follow the table order');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
   await desk.goto(`${fixture.url}#/~hub/map`);
   await desk.locator('.hub-map-wrap').waitFor();
-  assert.equal(await picker(desk).inputValue(), 'Magic Loops', 'A first visit opens the first project in table order.');
-  await picker(desk).click();
-  const names = await desk.locator('.hub-map-chips [role="option"]').allInnerTexts();
-  await desk.keyboard.press('Escape');
+  assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'A first visit opens the first project in table order.');
+  const names = await desk.locator('.hub-map-chips .hub-chip').allInnerTexts();
   assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Nosprint', 'Wayfind']);
 
   step('the Runs on chip: full text at desktop width, the rule as its title');
   const chip = desk.locator('.hub-runs');
   assert.equal(await chip.innerText(), 'Runs on: Gaming PC');
   assert.equal(await chip.getAttribute('title'), 'Work for this project runs on the PC by default.');
-  await choose(desk, 'workspace-app');
-  await shows(desk, 'workspace-app');
+  await desk.locator('.hub-chip', { hasText: 'Workspace app' }).click();
+  await desk.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
   assert.equal(await chip.innerText(), 'Runs on: cloud');
   assert.equal(await chip.getAttribute('title'), 'This project lives in a GitHub repository, so its work runs in the cloud.');
-  await choose(desk, 'nosprint');
-  await shows(desk, 'nosprint');
+  await desk.locator('.hub-chip', { hasText: 'Nosprint' }).click();
+  await desk.locator('.hub-chip.on', { hasText: 'Nosprint' }).waitFor();
   assert.equal(await desk.locator('.hub-runs').count(), 0, 'A project outside the table has no chip.');
 
   step('at phone width: short text, one line, nothing sideways');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map`);
   await phone.locator('.hub-map-wrap').waitFor();
-  assert.equal(await picker(phone).inputValue(), 'Magic Loops');
+  assert.equal(await phone.locator('.hub-chip.on').innerText(), 'Magic Loops');
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs on PC');
   assert.equal(await phone.locator('.hub-runs').getAttribute('title'), 'Work for this project runs on the PC by default.');
   assert.match(await phone.locator('.hub-runs').getAttribute('aria-label'), /^Runs on: Gaming PC/);
   await noSideways(phone, 'Roadmap at 390');
-  const heights = await phone.evaluate(() => ({ row: document.querySelector('.hub-map-chips').getBoundingClientRect().height, chips: document.querySelector('.hub-map-chips .cb').getBoundingClientRect().height }));
-  console.log(`  picker row height at 390: ${heights.row} (the picker alone: ${heights.chips})`);
-  assert.ok(heights.row <= heights.chips + 0.5, `The picker row is no taller than the picker (${heights.row} > ${heights.chips}).`);
-  await choose(phone, 'workspace-app');
-  await shows(phone, 'workspace-app');
+  const heights = await phone.evaluate(() => ({ row: document.querySelector('.hub-map-chips').getBoundingClientRect().height, chips: document.querySelector('.hub-map-chips .hub-chips-wrap').getBoundingClientRect().height }));
+  console.log(`  chips row height at 390: ${heights.row} (the project chips alone, as on main: ${heights.chips})`);
+  assert.ok(heights.row <= heights.chips + 0.5, `The chips row is no taller than on main (${heights.row} > ${heights.chips}).`);
+  await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
+  await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs in cloud');
   await noSideways(phone, 'Roadmap at 390 with the longer chip');
 
   step('a tap on the Runs on chip shows the rule; a second tap, Escape and a tap outside hide it');
-  await choose(phone, 'magic-loops');
-  await shows(phone, 'magic-loops');
+  await phone.locator('.hub-chip', { hasText: 'Magic Loops' }).click();
+  await phone.locator('.hub-chip.on', { hasText: 'Magic Loops' }).waitFor();
   const ruleText = 'Work for this project runs on the PC by default.';
   const rule = phone.locator('.hub-runs-rule');
   assert.equal(await rule.count(), 0);
@@ -308,8 +301,8 @@ try {
   await phone.locator('.hub-runs').tap();
   await phone.touchscreen.tap(20, 600);
   assert.equal(await rule.count(), 0, 'A tap outside hides it.');
-  await choose(phone, 'workspace-app');
-  await shows(phone, 'workspace-app');
+  await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
+  await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');

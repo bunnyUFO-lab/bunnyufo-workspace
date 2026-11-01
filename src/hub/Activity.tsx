@@ -34,7 +34,7 @@ export default function Activity({ filter }: { filter?: string }) {
     <>
       <div className="hub-top">
         <label className="hub-muted" htmlFor="hub-activity-project">Project</label>
-        <ProjectPicker id="hub-activity-project" projects={projects.data?.projects ?? []} value={project || 'all'} allValue="all" onChange={id => setProject(id === 'all' ? '' : id)} />
+        <ProjectPicker id="hub-activity-project" projects={projects.data?.projects ?? []} value={project || 'all'} allValue="all" onChange={id => setProject(id === 'all' ? '' : id)} alwaysList inRow />
       </div>
       <div className="hub-chips">
         {FILTERS.map(([key, label]) => (

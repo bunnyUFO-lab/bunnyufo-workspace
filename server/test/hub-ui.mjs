@@ -13,7 +13,6 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pickOption } from './combobox.mjs';
 import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
@@ -845,11 +844,11 @@ try {
   assert.ok(tall.axis === 'y' && tall.h > tall.w, `The map is taller than it is wide, and vertical (${tall.axis}, ${tall.w} x ${tall.h}).`);
   await noSideways(phone, 'Progress map');
   const tops = await phone.evaluate(() => ({
-    picker: (() => { const box = document.querySelector('.hub-map-chips .cb').getBoundingClientRect(); return { top: box.top, height: box.height, right: box.right }; })(),
+    chips: [...document.querySelectorAll('.hub-chips a')].map(item => Math.round(item.getBoundingClientRect().top)),
     bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
-  assert.ok(tops.picker.height >= 44 && tops.picker.right <= 390, `The project picker is one 44 px field inside the screen (${JSON.stringify(tops.picker)}).`);
+  assert.ok(tops.chips.length > 1 && new Set(tops.chips).size === 1, `The project chips share one row (${tops.chips}).`);
   assert.ok(tops.bar.length >= 6 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap > .hub-map-controls').count(), 1, 'The toolbar floats inside the map.');
   assert.ok(await phone.locator('.hub-hint-touch').isVisible() && !(await phone.locator('.hub-hint-mouse').isVisible()), 'The phone shows the touch hint.');
@@ -1072,7 +1071,7 @@ try {
   assert.ok(inked > 50, 'The stroke is on the canvas after a reload.');
   await page.locator('.drawing-bar button', { hasText: /^Cancel$/ }).click();
   await page.locator('[aria-label="Send to agent"]').waitFor();
-  await pickOption(page.locator('[aria-label="Send to agent"]').getByRole('combobox', { name: 'Project' }), 'probe');
+  await page.locator('[aria-label="Send to agent"] .hub-chip', { hasText: 'Probe' }).click();
   await page.locator('[aria-label="Send to agent"] textarea').fill('Make the arc look like my sketch');
   await page.locator('button:has-text("Send request")').click();
   await page.locator('.hub-ok', { hasText: 'Sent as' }).waitFor();

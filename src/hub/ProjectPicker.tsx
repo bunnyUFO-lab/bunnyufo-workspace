@@ -1,6 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { HubProject } from '../lib/hub'
+import { useOverflowEdges } from '../lib/useOverflowEdges'
 import Combobox from './Combobox'
+
+/** Up to this many projects the picker is a row of chips (one tap); past it, a typeable list. "All" does not count. */
+export const CHIP_LIMIT = 10
 
 type Props = {
   projects: Pick<HubProject, 'id' | 'name'>[]
@@ -11,14 +15,40 @@ type Props = {
   /** Adds a first "All" row whose value is this. */
   allValue?: string
   allLabel?: string
-  disabled?: boolean
+  /** Chips are links when this gives their address, buttons otherwise. */
+  href?: (id: string) => string
+  /** Chips scroll in one row instead of wrapping. */
+  oneRow?: boolean
+  /** The picker sits in a toolbar row that supplies its own spacing. */
+  inRow?: boolean
+  /** A dropdown at any count (Activity's filter was one already). */
+  alwaysList?: boolean
 }
 
-/** The Hub's project picker: a typeable list, because projects are added by the owner and pass ten. Matches the name or the id. */
-export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', disabled }: Props) {
+/** The Hub's project picker: chips while the owner has ten or fewer projects, a typeable list once there are more. Matches the name or the id. */
+export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList }: Props) {
   const options = useMemo(() => [
     ...(allValue === undefined ? [] : [{ value: allValue, label: allLabel }]),
     ...projects.map(item => ({ value: item.id, label: item.name, keywords: [item.id] })),
   ], [projects, allValue, allLabel])
-  return <Combobox className="cb-bar" id={id} value={value} options={options} onChange={onChange} disabled={disabled} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
+  const chips = !alwaysList && projects.length <= CHIP_LIMIT
+  const row = useRef<HTMLDivElement>(null)
+  const edges = useOverflowEdges(row, [options.length, value, chips])
+  useEffect(() => { if (oneRow) row.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [oneRow, options.length, value])
+
+  if (chips) {
+    const list = (
+      <div className={`hub-chips${oneRow ? ' one-row' : ''}`} aria-label="Project" data-value={value} ref={row}>
+        {options.map(option => {
+          const cls = `hub-chip${option.value === value ? ' on' : ''}`
+          return href
+            ? <a key={option.value} className={cls} href={href(option.value)}>{option.label}</a>
+            : <button key={option.value} type="button" className={cls} onClick={() => onChange(option.value)}>{option.label}</button>
+        })}
+      </div>
+    )
+    return oneRow ? <div className="hub-chips-wrap" data-overflow={edges}>{list}</div> : list
+  }
+  const field = <Combobox className="cb-bar" id={id} value={value} options={options} onChange={onChange} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
+  return inRow ? field : <div className="hub-project-pick">{field}</div>
 }

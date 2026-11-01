@@ -188,7 +188,7 @@ function NewRequest({ draft }: { draft: string }) {
   }
   return (
     <div>
-      <div className="hub-project-pick"><ProjectPicker id="hub-sketch-project" projects={list} value={project ?? ''} onChange={setChosen} /></div>
+      <ProjectPicker id="hub-sketch-project" projects={list} value={project ?? ''} onChange={setChosen} />
       <label className="hub-field">What should happen?
         <textarea value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={4000} />
       </label>

@@ -53,7 +53,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
     <>
       <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
       <div className="hub-map-chips">
-        <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} />
+        <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} href={id => hubHash('map', id)} oneRow inRow />
         <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}

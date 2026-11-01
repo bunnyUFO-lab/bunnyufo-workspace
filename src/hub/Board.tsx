@@ -69,7 +69,7 @@ export default function Board({ project: wanted, focus }: { project?: string; fo
 
   return (
     <div className="work">
-      <div className="hub-project-pick"><ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} /></div>
+      <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
       {project && host.write && <div className="work-spawn"><button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
