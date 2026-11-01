@@ -20,7 +20,7 @@ import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
-import { onChatStart, takeChatStart } from './chatStart'
+import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
 import { AgentSprite } from './team/AgentSprite'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
@@ -200,7 +200,9 @@ function ChatView({ id }: { id?: string }) {
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
   const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[] }>('/chat')
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
-  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : HERMES] })
+  // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
+  const [start] = useState(() => (id || help ? null : peekChatStart()))
+  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : start?.persona ?? HERMES] })
   const [persona, setPersona] = useState(initialPersona)   // persona: who the chat talks to; fixed once the chat has a line
   // model: what the owner picked in this conversation (or the chat's own last choice), or null: then the persona's preferred model, else Auto.
   const [picked, setPicked] = useState<string | null>(initialModel)
@@ -211,7 +213,7 @@ function ChatView({ id }: { id?: string }) {
   const preferred = who?.model && models.some(entry => entry.id === who.model) ? who.model : AUTO   // model: the agent's own default, until the owner picks one
   const model = picked ?? preferred
   const [pending, setPending] = useState<string | null>(null)
-  const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : ''))
+  const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : start?.draft ?? ''))
   const [images, setImages] = useState<Prepared[]>([])
   const [preparing, setPreparing] = useState(0)
   const [trayNote, setTrayNote] = useState<string | null>(null)
@@ -414,14 +416,11 @@ function ChatView({ id }: { id?: string }) {
   }, [id])
   useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
 
-  // "Chat with <agent>" from Spawn: a fresh Chat takes the start the moment it mounts, once (see Chat above).
+  // The start is used once: drop it, and put the cursor in the composer when it came with a draft.
   useEffect(() => {
-    const start = takeChatStart()
-    if (!start || id || help) return
-    setPersona(start.persona)
-    setDraft(start.draft)
-    input.current?.focus()
-  }, [id, help])
+    takeChatStart()
+    if (start) input.current?.focus()
+  }, [start])
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }

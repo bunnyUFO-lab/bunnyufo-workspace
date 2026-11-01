@@ -13,11 +13,16 @@ export function startChat(start: ChatStart) {
   window.dispatchEvent(new Event(EVENT))
 }
 
-/** The queued start, once. */
+/** The queued start without taking it: safe where React may run an initializer twice. */
+export function peekChatStart(): ChatStart | null {
+  return waiting && Date.now() - waiting.at < FRESH_MS ? waiting.start : null
+}
+
+/** Drop the queued start: the Chat that read it with peekChatStart calls this once it is showing. */
 export function takeChatStart(): ChatStart | null {
-  const value = waiting
+  const value = peekChatStart()
   waiting = null
-  return value && Date.now() - value.at < FRESH_MS ? value.start : null
+  return value
 }
 
 export const onChatStart = (listener: () => void) => {
