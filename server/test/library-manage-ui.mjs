@@ -336,6 +336,30 @@ try {
       assert.equal(await menu.getByRole('menuitemradio', { name: 'Old Stuff' }).count(), 0, 'and is not a switch target');
       assert.ok(await sitePage.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), `no sideways scroll at ${size.width}`);
 
+      // Escape closes the open workspace menu first and the list second; closing the list forgets both.
+      const group = menu.getByRole('group', { name: 'Manage Section One' });
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await group.waitFor();
+      await sitePage.keyboard.press('Escape');
+      await group.waitFor({ state: 'detached' });
+      assert.equal(await menu.isVisible(), true, 'the first Escape leaves the list open');
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await menu.getByRole('button', { name: 'Rename…' }).click();
+      await menu.getByRole('textbox', { name: 'New name for Section One' }).fill('Half typed');
+      await sitePage.keyboard.press('Escape');
+      await menu.getByRole('textbox', { name: 'New name for Section One' }).waitFor({ state: 'detached' });
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await group.waitFor();
+      await sitePage.keyboard.press('Escape');
+      await sitePage.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
+      await pop('Section One');
+      assert.equal(await group.count(), 0, 'a reopened list has no open workspace menu');
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await menu.getByRole('button', { name: 'Rename…' }).click();
+      assert.equal(await menu.getByRole('textbox', { name: 'New name for Section One' }).inputValue(), 'Section One', 'and no half-typed name');
+      await menu.getByRole('button', { name: 'Cancel' }).click();
+
       // Rename: Escape cancels and sends nothing, Enter saves, the address stays.
       await menu.getByRole('button', { name: 'Manage Section One' }).click();
       await menu.getByRole('button', { name: 'Rename…' }).click();

@@ -185,6 +185,14 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
     }
   }
 
+  // Escape closes an open workspace menu (the one behind a ⋯) before it closes the list: this listener runs
+  // first (capture) and keeps the key from reaching the list's own.
+  useEffect(() => {
+    if (!manage) return
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); setManage('') } }
+    document.addEventListener('keydown', escape, true)
+    return () => document.removeEventListener('keydown', escape, true)
+  }, [manage])
   useEffect(() => {
     if (!open) return
     const close = (event: MouseEvent | KeyboardEvent) => {
@@ -192,7 +200,8 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
     }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', close)
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close) }
+    // Closing the list drops a half-open ⋯ menu, a half-typed rename and an old error with it.
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); setManage(''); setEditing(''); setError('') }
   }, [open])
 
   // One section and no way to add another: nothing to open a menu for.
@@ -235,9 +244,9 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
             </div>}
           </>}
         </div>)}
-      {archivedSites.length > 0 && canWrite && <>
+      {archivedSites.some(site => site.id !== activeSite?.id) && canWrite && <>
         <p className="workspace-menu-title">Archived</p>
-        {archivedSites.map(site => <div key={site.id} className="workspace-menu-row workspace-menu-archived">
+        {archivedSites.filter(site => site.id !== activeSite?.id).map(site => <div key={site.id} className="workspace-menu-row workspace-menu-archived">
           <span className="workspace-menu-name">{site.name}</span>
           <button type="button" className="workspace-menu-restore" disabled={!!busy} aria-label={`Restore ${site.name}`} onClick={() => void archive(site, false)}>Restore</button>
         </div>)}

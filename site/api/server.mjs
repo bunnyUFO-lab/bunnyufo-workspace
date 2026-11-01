@@ -27,6 +27,7 @@ import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
 import { contentTypeOf } from './s3.mjs';
+import { isLiveCard } from './card-liveness.mjs';
 
 const STATUSES = ['active', 'archived'];
 const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
@@ -479,6 +480,8 @@ export function createSiteApi({
         if (renaming) {
           name = String(data.name ?? '').trim();
           if (!name || name.length > 60) throw new Error('A workspace name is 1 to 60 characters.');
+          // No control characters, line breaks or direction overrides: the name is shown in titles, chips and logs.
+          if (/[\x00-\x1F\x7F-\x9F\u{200E}\u{200F}\u{202A}-\u{202E}\u{2066}-\u{2069}]/u.test(name)) throw new Error('A workspace name cannot hold control characters, line breaks or text-direction marks.');
         } else if (typeof data.archived !== 'boolean') {
           throw new Error('Say whether to archive (true) or restore (false).');
         }
@@ -495,8 +498,8 @@ export function createSiteApi({
             if (data.archived) {
               // Only a workspace with nothing active can be put away; the state overlay (pins, archived cards) counts.
               const overlay = await cards.all();
-              const live = list.entities.filter(item => item && (overlay[`${section.id}/${item.id}`]?.status ?? item.status) !== 'archived');
-              if (live.length) throw Object.assign(new Error(`"${section.name}" still has ${live.length} active card${live.length === 1 ? '' : 's'}. Archive or move them first.`), { status: 409 });
+              const live = list.entities.filter(item => item && isLiveCard(item, overlay[`${section.id}/${item.id}`]));
+              if (live.length) throw Object.assign(new Error(`"${section.name}" still has ${live.length} active card${live.length === 1 ? '' : 's'}. Archive them first (cards untouched for a week count as archived already).`), { status: 409 });
               list.archived = true;
             } else {
               delete list.archived;
