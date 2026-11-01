@@ -17,7 +17,7 @@
 // The card list is read, changed and written back conditionally, and read again when someone else
 // wrote in between: two people adding cards from two devices both end up in it.
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { moveCard, moveProgress } from './card-move.mjs';
 import { renameOver } from './safe-rename.mjs';
@@ -143,6 +143,13 @@ export function folderStore(root, { fs: io } = {}) {
       }
     },
     resolve: full,
+    /**
+     * Delete one file. Only a card move calls this (card-move.mjs), to take out its own copy of a file the
+     * source deleted during that unfinished move. The Trash is never emptied locally (`purges` is not set).
+     */
+    async remove(file) {
+      await rm(full(file), { force: true });
+    },
     async list(prefix) {
       const trimmed = prefix.replace(/\/+$/, '');
       const base = full(trimmed || '.');
@@ -216,7 +223,11 @@ export function bucketStore(bucket, prefix) {
         throw error;
       }
     },
-    /** Delete one object. Used by the Trash purge (card-purge.mjs) and by nothing else. */
+    /**
+     * Delete one object. Two callers, and no others: the Trash purge (card-purge.mjs), and a card move
+     * (card-move.mjs) taking out its own copy of a file the source deleted during that unfinished move.
+     */
+    purges: true,
     async remove(file) {
       await bucket.del(key(file));
     },
@@ -468,7 +479,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
      * those cards' own folders, and the removed tabs' own files, deleted. Only on the site's bucket.
      */
     async purgeTrash() {
-      if (typeof store.remove !== 'function') throw fail('The Trash is only emptied on the published site.', 501);
+      if (store.purges !== true) throw fail('The Trash is only emptied on the published site.', 501);
       // 1. Claim: the expired records become tombstones, in one conditional write (none when nothing is due).
       const plan = await editList(async list => claimExpired(list, today(now())), { quiet: true });
       // 2. Delete: only under the tombstones' folders and the pending tabs' own files, and never a file a live tab uses.

@@ -2,7 +2,7 @@
 // viewer data, its state, the failures a move has to survive, and the promise that nothing is deleted.
 import baseTest from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createBucket } from '../s3.mjs';
@@ -542,4 +542,37 @@ test('the lease is renewed on a timer while a slow copy runs', async () => {
     await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, renewMs: 10 });
     assert.equal(seenLease, 50_000, 'the lease moved forward while the copy was still running');
   } finally { await w.close(); }
+});
+
+test('on folders a file the source dropped between slices does not stay in the target folder', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-move-'));
+  const make = async (name, entities) => {
+    const dir = path.join(root, name);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'workspace.json'), JSON.stringify({ name, entities }));
+    return dir;
+  };
+  const a = await make('a', [entity('deck')]);
+  const b = await make('b', []);
+  await mkdir(path.join(a, '2026-10-29_deck', 'many'), { recursive: true });
+  for (let n = 0; n < 60; n += 1) await writeFile(path.join(a, '2026-10-29_deck', 'many', `${String(n).padStart(2, '0')}.txt`), `file ${n}`);
+  const from = cardWriter(folderStore(a), { section: 'a', now });
+  const to = cardWriter(folderStore(b), { section: 'b', now });
+  const moves = memoryMoveLog();
+  let t = 0;
+  const original = to.store.copyFrom.bind(to.store);
+  to.store.copyFrom = async (...args) => { const result = await original(...args); t += 10; return result; };
+  const first = await moveCard({ from, to, id: 'deck', moves, now, clock: () => t, budgetMs: 100, concurrency: 1 });
+  assert.equal(first.pending, true);
+  const copied = (await readdir(path.join(b, '2026-10-29_deck', 'many'))).sort();
+  assert.ok(copied.length > 0 && copied.length < 60);
+  await rm(path.join(a, '2026-10-29_deck', 'many', copied[0]));
+  let answer;
+  for (let n = 0; n < 30 && (!answer || answer.pending); n += 1) answer = await moveCard({ from, to, id: 'deck', moves, now, clock: () => t, budgetMs: 100, concurrency: 1 });
+  assert.equal(answer.pending, undefined);
+  const after = await readdir(path.join(b, '2026-10-29_deck', 'many'));
+  assert.equal(after.length, 59);
+  assert.ok(!after.includes(copied[0]), 'the dropped file is gone from the target folder');
+  // The folder store still never empties the Trash.
+  assert.equal(to.store.purges, undefined);
 });
