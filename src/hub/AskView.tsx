@@ -68,7 +68,7 @@ export default function AskView({ id }: { id: string }) {
       {ask.rerunBlocked && <p className="hub-muted" role="note" data-rerun-blocked>This Ask asks to run something again. Answering it starts nothing: {text(ask.rerunBlocked)}</p>}
       <section className="hub-panel">
         <p className="hub-muted">{from.tool || from.host ? `From ${from.tool || 'an agent'}${from.host ? ` on ${from.host}` : ''}, ` : 'From an unknown sender, '}{when(ask.createdAt)}.</p>
-        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={verb => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id))} view />
+        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail)} view />
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {answer && ask.delivery && !ask.pickup && <Delivery noun="Ask" project={ask.project} delivery={ask.delivery} />}

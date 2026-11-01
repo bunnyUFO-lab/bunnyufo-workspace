@@ -15,7 +15,9 @@
 .needs-empty { padding: 28px 4px; }
 .nq-next { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 12px; padding: 4px 4px 4px 14px; scroll-margin-top: 12px; border-radius: var(--r3); background: color-mix(in srgb, var(--accent) 8%, var(--s1)); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--t1); font-size: 0.88rem; }
 .nq .nq-next { margin-bottom: 0; }
-.nq-next-text { flex: 1; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nq-next-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 6px 0; }
+.nq-next-detail { display: block; color: var(--t2); white-space: normal; overflow-wrap: anywhere; }
+.nq-next-text { min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nq-next-v { font-weight: 600; }
 .nq-next-n { color: var(--t2); }
 .nq-next-n i { font-style: normal; color: var(--t1); }

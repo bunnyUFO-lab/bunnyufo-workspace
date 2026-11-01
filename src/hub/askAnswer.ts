@@ -55,7 +55,7 @@ export function designKind(ask: Ask): 'review' | 'pick' | null {
  * Everything the owner does to one Ask: pick an option, write a note, draw, and then send, snooze or cancel.
  * The list card and the Ask's own view share it; only the own view (`handoff`) takes a drawing handed over from Sketch. `onSettled` runs after a write that took the Ask off the queue.
  */
-export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false, help }: { reload: () => void; onSettled?: (verb: AskVerb) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean; help?: { chat: string } }) {
+export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false, help }: { reload: () => void; onSettled?: (verb: AskVerb, detail?: string) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean; help?: { chat: string } }) {
   const [choice, setChoice] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [verdicts, setVerdicts] = useState<Verdicts>({})
@@ -90,8 +90,9 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     setProblem(null)
     setNotice(null)
     try {
-      setNotice(avatarNotice(await run()))
-      onSettled?.(verb)
+      const said = avatarNotice(await run())
+      setNotice(said)
+      onSettled?.(verb, said ?? undefined)
       reload()
     } catch (failure) {
       if (failure instanceof HubError && failure.status === 409) {
