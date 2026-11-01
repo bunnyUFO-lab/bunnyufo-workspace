@@ -240,6 +240,31 @@ try {
   await stopper.locator('[data-run-continues]').waitFor();
   assert.equal(hold.hermes.runs.length, 2, 'Send it now started the next run.');
 
+  step('a run that ends asking takes the queued reply as the answer: the Timeline says "sent as the next run" and offers no Send it now');
+  const askId = id('steer-asking-b4b4');
+  const asking = await startHubFixture({
+    signing: true, hermes: true,
+    hermesOptions: { refuseSteer: true, runScript: ['Looking. ', { wait: 3000 }, 'Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' },
+  });
+  fixtures.push(asking);
+  asking.seed.request(proposal(asking.now, 'failed', 'Research that ends with a question', { id: askId }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const asker = await open({ width: 1280, height: 1000 });
+  await asker.goto(`${asking.url}#/~hub/needs`);
+  await asker.locator(`[data-need="approval-${askId}"] [data-approval-approve]`).click();
+  await asker.locator('[data-next-note]').waitFor();
+  await asker.goto(`${asking.url}#/~hub/request/${encodeURIComponent(askId)}`);
+  const askView = asker.locator(`[data-run-view="${askId}"]`);
+  await askView.locator('[data-run-text]', { hasText: 'Looking.' }).waitFor();
+  await askView.locator('[data-reply-input]').fill('The wooden one');
+  await askView.locator('[data-reply-send]').click();
+  await askView.locator('[data-run-you="queued"]').waitFor();
+  await askView.locator('[data-run-reply-to]').waitFor({ timeout: 30000 });
+  assert.match(await askView.locator('[data-step="reply"]').innerText(), /^You: The wooden one · sent as the next run → /);
+  assert.equal(await askView.locator('[data-run-send-now]').count(), 0, 'It was carried; there is nothing to send again.');
+  const answerId = (await askView.locator('[data-run-reply-to]').innerText()).trim();
+  assert.equal(asking.fake.json(`sections/inbox/requests/${answerId}/request.json`).followUp.answer, 'The wooden one');
+
   step('phone: the box fits the screen with no sideways scroll, on the request page');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.pc)}`);
