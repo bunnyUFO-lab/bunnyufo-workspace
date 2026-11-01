@@ -18,10 +18,10 @@ const LANES: [WorkLane, string][] = [
 const COLLAPSE = 10
 const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'Beads task'], request: ['✉', 'Request'], hermes: ['☁', 'Hermes run'] }
 
-function Card({ card, showProject, projectName }: { card: WorkCard; showProject: boolean; projectName: string }) {
+function Card({ card, showProject, projectName, focused }: { card: WorkCard; showProject: boolean; projectName: string; focused?: boolean }) {
   const [glyph, source] = SOURCE[card.source]
   return (
-    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}`} href={card.href} data-card={card.key} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} onClick={card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
+    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={card.href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} onClick={card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
       <span className="wk-title">{card.title}</span>
       {card.why && <span className="wk-why">{card.why}</span>}
       <span className="wk-meta">
@@ -36,7 +36,7 @@ function Card({ card, showProject, projectName }: { card: WorkCard; showProject:
 }
 
 /** Work's Lanes tab: `project` is a project id, `all` for every project, or absent for the default one. */
-export default function Board({ project: wanted }: { project?: string }) {
+export default function Board({ project: wanted, focus }: { project?: string; focus?: string }) {
   const all = wanted === 'all'
   const { list, project: chosen, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen
@@ -45,7 +45,10 @@ export default function Board({ project: wanted }: { project?: string }) {
   const [picked, setPicked] = useState<WorkLane | null>(null)
   const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
   const data = work.data
-  const active = picked ?? (data ? defaultLane(data.counts) : 'running')
+  const focusKey = focus && !all ? `bead:${focus}` : undefined
+  // The lane that holds the item a link pointed at, once the board has loaded; undefined when the board does not have it.
+  const focusLane = focusKey && data ? LANES.find(([lane]) => data.lanes[lane].some(card => card.key === focusKey))?.[0] : undefined
+  const active = picked ?? focusLane ?? (data ? defaultLane(data.counts) : 'running')
   // Each scroller that can hide something shows a fade at its cut edge (the Roadmap's pattern).
   const projectChips = useRef<HTMLDivElement>(null)
   const laneChips = useRef<HTMLDivElement>(null)
@@ -53,6 +56,16 @@ export default function Board({ project: wanted }: { project?: string }) {
   const projectEdges = useOverflowEdges(projectChips, [list.length, project, all])
   const laneChipEdges = useOverflowEdges(laneChips, [data])
   const laneEdges = useOverflowEdges(laneGrid, [project, data])
+  // Open the lane that holds the item (a collapsed one too) and bring its card into view.
+  // Once per link: a refresh of the board must not pull the person back from a lane they moved to.
+  const focused = useRef('')
+  useEffect(() => {
+    if (!focusKey || !focusLane || focused.current === focusKey) return
+    focused.current = focusKey
+    setPicked(focusLane)
+    setExpanded(value => ({ ...value, [focusLane]: true }))
+    requestAnimationFrame(() => requestAnimationFrame(() => laneGrid.current?.querySelector(`[data-card="${CSS.escape(focusKey)}"]`)?.scrollIntoView({ block: 'center', inline: 'center' })))
+  }, [focusKey, focusLane])
   useEffect(() => { projectChips.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [list.length, project, all])
   useEffect(() => { laneChips.current?.querySelector('.wk-lane-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [active, data])
 
@@ -70,6 +83,7 @@ export default function Board({ project: wanted }: { project?: string }) {
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
       {!listing && !listError && !project && !all && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
       {(work.error || listError) && <p className="hub-error" role="alert">{work.error ?? listError}</p>}
+      {data && focus && !all && !focusLane && <p className="hub-muted" role="status" data-board-note>{focus} is not on the board: it may be closed long ago, a group, or in another project.</p>}
       {data && (
         <>
           <div className="wk-chips-wrap" data-overflow={laneChipEdges}>
@@ -90,7 +104,7 @@ export default function Board({ project: wanted }: { project?: string }) {
               return (
                 <section key={lane} className="wk-lane" data-lane={lane} aria-label={label}>
                   <h3>{label} <span>{data.counts[lane]}</span></h3>
-                  {shown.map(card => <Card key={card.key} card={card} showProject={all} projectName={nameOf(card.project)} />)}
+                  {shown.map(card => <Card key={card.key} card={card} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} />)}
                   {!cards.length && <p className="hub-empty">Nothing here.</p>}
                   {collapsible && (
                     <button type="button" className="hub-btn wk-more" onClick={() => setExpanded(value => ({ ...value, [lane]: !value[lane] }))}>

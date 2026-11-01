@@ -1,5 +1,5 @@
 import './hub.css'
-import type { HubRoute } from '../lib/route'
+import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
 import Activity from './Activity'
 import AgentDetails from './AgentDetails'
@@ -34,7 +34,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'request' && (route.id ? <ApprovalView key={route.id} id={route.id} /> : <Needs filter="approval" />)}
-      {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={route.id} /></WorkTabs>}
+      {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
       {route.screen === 'team' && <Team />}
       {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}

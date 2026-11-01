@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react'
 import type { Item } from '../lib/hub'
 import { appUrl as safeApp, sessionUrl } from '../lib/hub'
-import type { WorkingItem } from '../lib/hubPc'
-import { hubHash, mapHash } from '../lib/route'
+import type { WorkingItem, WorkingLinks } from '../lib/hubPc'
+import { hubHash, mapHash, workHash } from '../lib/route'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
 import { stateOf } from './team/spriteState'
@@ -17,6 +17,28 @@ const HERMES_SPRITE = defaultSprite('hermes', 'Hermes')
 function needsHref(item: WorkingItem, blocked: Item[]) {
   const match = blocked.find(entry => entry.kind === 'blocked' && entry.session === item.id)
   return hubHash('needs', match ? match.file ?? match.id : undefined)
+}
+
+/** A card link is a site path (`/<section>#/<card>`), nothing else. */
+const SAFE_CARD = /^\/[\w%-]+#\/[\w%.~-]+$/
+
+/** Chips under a row's title: the Beads items it touched (open on the Work board) and the cards it wrote. */
+function Links({ links }: { links: WorkingLinks }) {
+  const beads = links.beads ?? []
+  const cards = (links.cards ?? []).filter(card => SAFE_CARD.test(card.href))
+  if (!beads.length && !cards.length) return null
+  return (
+    <span className="wn-links" data-wn-links>
+      {beads.map(bead => (
+        <a key={`${bead.project}/${bead.id}`} className="wn-chip" href={workHash(bead.project, bead.id)} data-bead-chip={bead.id} title={bead.title ? `${bead.id}: ${bead.title}` : bead.id} aria-label={`${bead.id}${bead.title ? `, ${bead.title}` : ''}, open on the Work board`}>{bead.id}</a>
+      ))}
+      {!!links.moreBeads && <span className="wn-chip more" title={`${links.moreBeads} more items`} aria-label={`${links.moreBeads} more items`}>+{links.moreBeads}</span>}
+      {cards.map(card => (
+        <a key={card.href} className="wn-chip card" href={card.href} data-card-chip={card.card} title={card.title} aria-label={`Card: ${card.title}`}><span aria-hidden="true">▤</span> {card.title}</a>
+      ))}
+      {!!links.moreCards && <span className="wn-chip more" title={`${links.moreCards} more cards`} aria-label={`${links.moreCards} more cards`}>+{links.moreCards}</span>}
+    </span>
+  )
 }
 
 function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: number }) {
@@ -39,8 +61,9 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
         <b>{title}</b>
         <small>
           {what}
-          {item.bead && <>{what ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
+          {item.bead && !item.links?.beads?.length && <>{what ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
         </small>
+        {item.links && <Links links={item.links} />}
       </span>
       <span className="wn-meta">
         <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{runStateLabel(item, now)}</span>
