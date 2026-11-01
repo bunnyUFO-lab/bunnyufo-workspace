@@ -1,0 +1,14 @@
+/* Combobox: the input looks like the Spawn sheet's other fields (see .sp-field in runs.css). */
+.cb { position: relative; display: flex; min-width: 0; }
+.cb-input { flex: 1; min-width: 0; text-overflow: ellipsis; }
+.sp-field .cb-input { padding-right: 44px; }
+.cb-chev { position: absolute; top: 0; right: 0; width: 44px; height: 100%; min-height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-radius: 0 10px 10px 0; }
+.cb-chev:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cb-chev:disabled { cursor: default; opacity: 0.5; }
+.cb-chev svg { width: 16px; height: 16px; }
+.cb-input[aria-expanded="true"] ~ .cb-chev svg { transform: rotate(180deg); }
+.cb-list { position: fixed; z-index: 10; margin: 0; padding: 4px; list-style: none; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; background: var(--s2); border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4); }
+.cb-opt, .cb-none { min-height: 40px; padding: 9px 10px; border-radius: 7px; font-size: 14px; color: var(--t1); overflow-wrap: anywhere; display: flex; align-items: center; cursor: pointer; }
+.cb-opt.on { background: var(--pink-dim); }
+.cb-opt.sel { color: var(--pink-bright, var(--pink)); }
+.cb-none { color: var(--text-dim); cursor: default; }

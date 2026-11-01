@@ -142,7 +142,7 @@ try {
   await spawn.waitFor();
   assert.equal(await spawn.locator('[data-preset="agent-avatar"]').getAttribute('aria-pressed'), 'true');
   assert.equal(await spawn.locator('[data-preset]').count(), 8, 'Opened for an agent, Spawn offers Agent avatar.');
-  await desk.waitForFunction(() => document.querySelector('[data-spawn-project]')?.value === 'sprite-studio');
+  await desk.waitForFunction(() => document.querySelector('[data-spawn-project]')?.dataset.value === 'sprite-studio');
   assert.equal(await spawn.locator('[data-spawn-text]').inputValue(), 'Pixel sprite for Hermes: chats, plans and dispatches');
   assert.match(await spawn.locator('[data-spawn-agent]').innerText(), /Artist/);
   await spawn.locator('[data-spawn-machine]', { hasText: 'The PC' }).waitFor();

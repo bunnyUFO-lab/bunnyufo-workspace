@@ -11,6 +11,8 @@ import { openFromClick } from './ItemRow'
 import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
 import { startChat } from './chatStart'
+import Combobox from './Combobox'
+import type { ComboOption } from './comboboxLogic'
 import type { SpawnOptions } from './spawnStore'
 import './runs.css'
 
@@ -132,6 +134,12 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const wantsRepo = !chatting && !!preset?.fields.includes('repo')
   const repoValid = !repo.trim() || /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/.test(repo.trim())
   const projectRepo = known.find(item => item.project === project)
+  const projectOptions: ComboOption[] = projects.map(item => ({ value: item.id, label: item.name, keywords: [item.id] }))
+  const repoOptions: ComboOption[] = [
+    { value: '', label: projectRepo ? `${projectRepo.repo} (this project's)` : "The project's repo", keywords: projectRepo ? [projectRepo.repo] : [] },
+    ...known.filter(item => item.repo !== projectRepo?.repo).map(item => ({ value: item.repo, label: `${item.repo}${item.project ? ` · ${projects.find(row => row.id === item.project)?.name ?? item.project}` : ''}`, keywords: item.project ? [item.project] : [] })),
+    { value: OTHER, label: 'Another repo…', always: true },
+  ]
 
   // The server decides where it runs; ask again 150 ms after the last change.
   useEffect(() => {
@@ -256,22 +264,17 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
               </div>
             </div>
             {!chatting && <div className={wantsRepo ? 'sp-two' : 'sp-one'}>
-              <label className="sp-field" htmlFor={ids.project}>Project
-                <select id={ids.project} value={project} disabled={!!edit} onChange={event => { setProject(event.target.value); setOverride('') }} data-spawn-project>
-                  {projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
+              <div className="sp-field">
+                <label htmlFor={ids.project}>Project</label>
+                <Combobox id={ids.project} value={project} options={projectOptions} onChange={value => { setProject(value); setOverride('') }} disabled={!!edit} openLabel="Show projects" inputAttrs={{ 'data-spawn-project': '' }} />
+              </div>
               {wantsRepo && (
                 <div className="sp-field">
                   <label htmlFor={ids.repo}>Repo</label>
                   {edit ? (
                     <input id={ids.repo} value={repo} disabled readOnly data-spawn-repo />
                   ) : (
-                    <select id={ids.repo} value={otherRepo ? OTHER : repo} onChange={event => { const value = event.target.value; setOtherRepo(value === OTHER); setRepo(value === OTHER ? '' : value) }} data-spawn-repo-pick>
-                      <option value="">{projectRepo ? `${projectRepo.repo} (this project's)` : "The project's repo"}</option>
-                      {known.filter(item => item.repo !== projectRepo?.repo).map(item => <option key={item.repo} value={item.repo}>{item.repo}{item.project ? ` · ${projects.find(row => row.id === item.project)?.name ?? item.project}` : ''}</option>)}
-                      <option value={OTHER}>Another repo…</option>
-                    </select>
+                    <Combobox id={ids.repo} value={otherRepo ? OTHER : repo} options={repoOptions} onChange={value => { setOtherRepo(value === OTHER); setRepo(value === OTHER ? '' : value) }} openLabel="Show repositories" inputAttrs={{ 'data-spawn-repo-pick': '' }} />
                   )}
                   {!edit && otherRepo && <input value={repo} onChange={event => setRepo(event.target.value)} placeholder="owner/name" aria-label="Repo as owner/name" autoComplete="off" spellCheck={false} aria-invalid={!repoValid} autoFocus data-spawn-repo />}
                 </div>

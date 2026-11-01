@@ -4,6 +4,7 @@
 // and the bottom sheet at phone width. The default fixture has no signing key, so Spawn can only save a proposal.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
@@ -48,7 +49,7 @@ try {
   assert.equal(await page.locator('[data-spawn-sheet] [data-spawn-text]').getAttribute('placeholder'), 'Add a wall-jump tutorial to the first level', 'The preset example is the placeholder.');
 
   step('Market research on Magic Loops: rule 3 is highlighted and the machine is Hermes; the agent is named as text');
-  await page.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(page.locator('[data-spawn-project]'), 'magic-loops');
   await page.locator('[data-preset="market-research"]').click();
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').getAttribute('data-rule'), '3');
@@ -61,7 +62,7 @@ try {
   assert.equal(await page.locator('[data-spawn-go]').isDisabled(), true, 'No text, no send.');
 
   step('Bunnylink: the PC is yours to start, the button adds it to Needs you');
-  await page.locator('[data-spawn-project]').selectOption('bunnylink');
+  await pickOption(page.locator('[data-spawn-project]'), 'bunnylink');
   await page.locator('[data-spawn-machine]', { hasText: 'You, at the PC' }).waitFor();
   await page.locator('[data-spawn-route] .sp-rules .hit[data-rule="1"]').waitFor();
   assert.equal(await page.locator('[data-spawn-route] .sp-rules .hit').getAttribute('data-rule'), '1');
@@ -72,22 +73,24 @@ try {
   assert.match(await page.locator('[data-spawn-note]').innerText(), /start it at the PC/);
 
   step('A code task shows the repo field; a bad repo blocks the button; Auto and the machine choice');
-  await page.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(page.locator('[data-spawn-project]'), 'magic-loops');
   await page.locator('[data-preset="code-task"]').click();
   await page.locator('[data-spawn-repo-pick]').waitFor();
   const pick = page.locator('[data-spawn-repo-pick]');
-  assert.match(await pick.locator('option:checked').innerText(), /^example\/magic-loops \(this project's\)$/, 'The own repo of the project is the default.');
-  assert.deepEqual(await pick.locator('option').allInnerTexts(), ["example/magic-loops (this project's)", 'example/sprite-studio · sprite-studio', 'Another repo…']);
-  await pick.selectOption({ label: 'example/sprite-studio · sprite-studio' });
-  assert.equal(await pick.inputValue(), 'example/sprite-studio');
+  const optionsOf = async input => input.locator('xpath=ancestor::div[contains(@class,"cb")][1]').locator('[role="option"]').allInnerTexts();
+  assert.equal(await pick.inputValue(), "example/magic-loops (this project's)", 'The own repo of the project is the default.');
+  await pick.click();
+  assert.deepEqual(await optionsOf(pick), ["example/magic-loops (this project's)", 'example/sprite-studio · sprite-studio', 'Another repo…']);
+  await pickOption(pick, 'example/sprite-studio');
+  assert.equal(await pick.getAttribute('data-value'), 'example/sprite-studio');
   assert.equal(await page.locator('input[data-spawn-repo]').count(), 0, 'A known repo needs no typing.');
-  await pick.selectOption('__other');
+  await pickOption(pick, '__other');
   await page.locator('input[data-spawn-repo]').fill('not a repo');
   assert.equal(await page.locator('[data-spawn-go]').isDisabled(), true);
   assert.equal(await page.locator('[data-spawn-note]').innerText(), 'The repo is owner/name.');
   await page.locator('input[data-spawn-repo]').fill('Some-Org/other.repo');
   assert.equal(await page.locator('[data-spawn-go]').isDisabled(), false, 'A well-formed repo is accepted.');
-  await pick.selectOption('');
+  await pickOption(pick, '');
   assert.equal(await page.locator('input[data-spawn-repo]').count(), 0);
   await page.locator('[data-spawn-machine]', { hasText: 'The PC' }).waitFor();
   await page.locator('[data-spawn-target]').selectOption('cloud');
@@ -99,7 +102,7 @@ try {
 
   step('Save as a proposal: request.json has the preset, the proposed target and the owner as origin; the sheet closes with a toast');
   await page.locator('[data-preset="market-research"]').click();
-  await page.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(page.locator('[data-spawn-project]'), 'magic-loops');
   await page.locator('[data-spawn-text]').fill('Market research on tug-of-war card games');
   await page.locator('[data-spawn-done]').fill('A card with three takeaways');
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
@@ -162,7 +165,7 @@ try {
   assert.equal(await page.locator('[data-spawn-policy]').count(), 0, 'Without a policy the line is absent.');
   const approve = async (preset, text, toast, target) => {
     await signed.locator('[data-spawn-open]').click();
-    await signed.locator('[data-spawn-project]').selectOption('magic-loops');
+    await pickOption(signed.locator('[data-spawn-project]'), 'magic-loops');
     await signed.locator(`[data-preset="${preset}"]`).click();
     await signed.locator('[data-spawn-machine]').waitFor();
     await signed.locator('[data-spawn-text]').fill(text);
@@ -189,7 +192,7 @@ try {
   await real.goto(`${keyed.url}#/~hub/today`);
   const spawnReal = async (preset, text, toast) => {
     await real.locator('[data-spawn-open]').click();
-    await real.locator('[data-spawn-project]').selectOption('magic-loops');
+    await pickOption(real.locator('[data-spawn-project]'), 'magic-loops');
     await real.locator(`[data-preset="${preset}"]`).click();
     await real.locator('[data-spawn-text]').fill(text);
     await real.locator('[data-spawn-why]').waitFor();
@@ -206,7 +209,7 @@ try {
 
   step('Approve says why it is off, and reads Approving… while it works');
   await real.locator('[data-spawn-open]').click();
-  await real.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(real.locator('[data-spawn-project]'), 'magic-loops');
   await real.locator('[data-preset="research"]').click();
   await real.locator('[data-spawn-why]').waitFor();
   assert.equal(await real.locator('[data-spawn-go]').isDisabled(), true);

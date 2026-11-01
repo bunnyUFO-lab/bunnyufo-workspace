@@ -4,6 +4,7 @@
 // Spawn's toast after Approve links to the run. Desktop and phone. Data is the fixture's own fake S3.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, iso, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
@@ -95,7 +96,7 @@ try {
   await spawn.route('**/api/hub/requests/*/approve', route => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ state: 'approved', approved: {} }) }));
   await spawn.goto(`${fx.url}#/~hub/today`);
   await spawn.locator('[data-spawn-open]').click();
-  await spawn.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(spawn.locator('[data-spawn-project]'), 'magic-loops');
   await spawn.locator('[data-preset="research"]').click();
   await spawn.locator('[data-spawn-text]').fill('Why do runs stall');
   await spawn.locator('[data-spawn-go]').click();

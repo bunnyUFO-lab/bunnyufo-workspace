@@ -195,7 +195,7 @@ try {
   assert.equal(await desk.locator('button:has-text("Ask an agent to do something")').count(), 0, 'The old request form is gone.');
   await desk.locator('button[data-spawn-open]', { hasText: 'Spawn work' }).click();
   await desk.locator('[data-spawn-sheet]').waitFor();
-  assert.equal(await desk.locator('[data-spawn-project]').inputValue(), 'magic-loops', 'Spawn opens on the project Work shows.');
+  assert.equal(await desk.locator('[data-spawn-project]').getAttribute('data-value'), 'magic-loops', 'Spawn opens on the project Work shows.');
   await desk.locator('[data-spawn-text]').fill('Add wall-slide dust particles');
   // The write refreshes Work in the background: wait for that answer here so the reload below reads its own.
   await Promise.all([desk.waitForResponse(response => response.url().includes('/api/hub/work')), desk.locator('[data-spawn-go]').click()]);
