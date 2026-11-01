@@ -129,11 +129,19 @@ export function deliveryOf({ answer, delivered, watchers, at }) {
 /** A run that has said nothing for this long is not running; a request taken this long ago with no run is lost. */
 export const RUN_STALE_MS = 20 * 60 * 1000;
 
-/** The time a run file's name carries: `run-<yyyymmddThhmmssmmmZ>-<rand4>.json`, or null. */
-export function runFileTime(name) {
+/** How far ahead of the Hub's clock a run file's time may be (clock skew between the PC and the Hub); a later one is not believed. */
+export const RUN_FILE_SKEW_MS = 2 * 60 * 1000;
+
+/**
+ * The time a run file's name carries: `run-<yyyymmddThhmmssmmmZ>-<rand4>.json`, or null. With `now` (a Date or ms), a time later than
+ * now + RUN_FILE_SKEW_MS is null too: the name is written by whoever holds a runner token, so a future stamp must not keep a dead run "running".
+ */
+export function runFileTime(name, now = null) {
   const match = /^run-(\d{8}T\d{9}Z)-[a-z0-9]{4}\.json$/.exec(String(name));
   const time = match ? new Date(stampIso(match[1])).getTime() : NaN;
-  return Number.isNaN(time) ? null : time;
+  if (Number.isNaN(time)) return null;
+  const nowMs = now == null ? null : now instanceof Date ? now.getTime() : Number(now);
+  return nowMs !== null && Number.isFinite(nowMs) && time > nowMs + RUN_FILE_SKEW_MS ? null : time;
 }
 
 export { nothingToDo };
