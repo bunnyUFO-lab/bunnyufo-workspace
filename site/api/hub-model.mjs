@@ -550,7 +550,7 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
   const since = now.getTime() - DAY;
   // The dismiss and restore marks are bookkeeping, not news.
-  const recent = events.filter(event => new Date(event.ts).getTime() >= since && !ALERT_MARKS.includes(event.kind));
+  const recent = events.filter(event => new Date(event.ts).getTime() >= since && !ALERT_MARKS.includes(event.kind) && event.kind !== 'session-items');
   const nothingIds = new Set(requests.filter(item => item.nothing).map(item => item.id));
   const requestAlerts = requests
     .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)

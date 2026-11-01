@@ -18,6 +18,7 @@ import {
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
+import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
 import { applyMarks, checkMarkRequest, markEntry, markKey, markState } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
@@ -994,6 +995,25 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return withRunEvents(events, requests, { now: at, cardHref: card => cards.get(card) });
   }
 
+  /** Working now rows with the Beads items and cards each is about (`links`): see hub-links.mjs. Never fails the page. */
+  async function linkedWorking(working, events) {
+    try {
+      const touched = touchedBySession(events);
+      const issues = new Map(await Promise.all(projectsToLoad(working, touched).map(async id => [id, (await loadBeads(id).catch(() => null))?.issues ?? []])));
+      if ([...touched.values()].some(row => row.cards.length)) await refreshCardIndex();
+      const index = cardIndex.byRef;
+      const resolveCard = (section, card) => {
+        if (section) return index.get(`${section}/${card}`) ?? index.get(`${section}#${card}`) ?? null;
+        for (const [ref, row] of index) if (ref.endsWith(`#${card}`)) return row;
+        return null;
+      };
+      return withLinks(working, { events, issuesOf: id => issues.get(id) ?? [], defaultPrefixOf: id => PROJECT_DEFAULTS.find(row => row.id === id)?.prefix, resolveCard });
+    } catch (error) {
+      log(`[hub] could not link Working now: ${scrub(error.message)}`);
+      return working;
+    }
+  }
+
   /** The sprint card an old review belongs to, found from its title; its files are the ones the summary names that exist. */
   async function inferCard(detail) {
     const card = findSprintCard(detail.title, await allCards());
@@ -1235,7 +1255,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
             const cloud = cloudOn ? await routines.capacity(at, { memo: true }).catch(() => null) : null;
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
-            const working = workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS });
+            const working = await linkedWorking(workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS }), window.events);
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
           } else if (route === '/hub/pc') {
@@ -1281,7 +1301,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const [window, requests] = await Promise.all([loadEvents(at), loadRequests(at)]);
             const events = await eventsWithRuns(window.events, requests, at);
             reply({
-              events: events.filter(event => !ALERT_MARKS.includes(event.kind) && new Date(event.ts).getTime() >= since && (!project || event.project === project)),
+              events: events.filter(event => !ALERT_MARKS.includes(event.kind) && event.kind !== SESSION_ITEMS && new Date(event.ts).getTime() >= since && (!project || event.project === project)),
               truncated: window.truncated,
             });
           } else if (route === '/hub/projects') {

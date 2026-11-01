@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, work = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -149,6 +149,20 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     seedPcStatus(fake, pcStatusJson({ now, minutesOld: 1, sessions: [
       { id: 'lane-sess', name: 'Lanes work', status: 'busy', kind: 'interactive', folder: 'probe-lanes', repo: 'probe', project: 'lanes', branch: 'sprint/ws-doing-lanes', startedAt: minutesAgo(now, 30).toISOString() },
     ] }));
+  }
+
+  if (links) {
+    // Off by default; needs `work`. The PC reports two sessions: `lane-sess` told the Hub what it touched (three Beads items and a card, one of them
+    // not on the board) and its branch names a fourth item; `old-sess` is a session from before the field (a title id the copy lacks, no chips).
+    const owned = pcStatusJson({ now, minutesOld: 0, sessions: [
+      { id: 'lane-sess', name: 'Lanes work', status: 'busy', kind: 'interactive', folder: 'probe-lanes', repo: 'probe', project: 'lanes', branch: 'sprint/ws-doing-lanes', startedAt: minutesAgo(now, 30).toISOString() },
+      { id: 'old-sess', name: 'Older session about ws-nothere', status: 'idle', kind: 'interactive', folder: 'probe-old', repo: 'probe', project: 'lanes', branch: 'main', startedAt: minutesAgo(now, 90).toISOString() },
+    ] });
+    seedPcStatus(fake, owned);
+    fake.seed('sections/one/workspace.json', JSON.stringify({ entities: [{ id: 'hub', folder: 'hub', title: 'The hub card', created: today, updated: today }] }), 'application/json');
+    seed.event(eventJson({ kind: 'session-items', ts: minutesAgo(now, 2), project: 'lanes', session: 'lane-sess', title: 'lanes: session items', extra: {
+      touched: { beads: [{ project: 'lanes', id: 'ws-pr' }, { project: 'lanes', id: 'ws-ready' }, { project: 'lanes', id: 'ws-gone' }], cards: [{ section: 'one', card: 'hub' }, { card: 'not-listed' }] },
+    } }));
   }
 
   if (sheets) {

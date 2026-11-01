@@ -65,6 +65,19 @@ export function mapHash(project: string, node?: string): string {
   return node ? `${base}/${encodeURIComponent(node)}` : base
 }
 
+/** `#/~hub/work/<project>/<bead>`: the Work board, with that item's card scrolled into view and highlighted. */
+export function workHash(project: string, bead: string): string {
+  return `#/~hub/work/${encodeURIComponent(project)}/${encodeURIComponent(bead)}`
+}
+
+/** The project and bead out of a Work route id (`<project>[/<bead>]`); `all` and a bare project have no bead. */
+export function parseWorkId(id: string | undefined): { project?: string; bead?: string } {
+  if (!id) return {}
+  const [project, ...rest] = id.split('/')
+  const bead = rest.join('/')
+  return { project: project || undefined, ...(bead && project !== 'all' ? { bead } : {}) }
+}
+
 /**
  * `#/~hub/review/<event file>[/<card file path>]`. Each segment is encoded on its own and the path
  * keeps its slashes; `parseHash` joins them back into `route.id`, which ReviewView splits on the

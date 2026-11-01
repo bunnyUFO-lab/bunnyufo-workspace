@@ -47,3 +47,4 @@
   .wk-lanes[data-active="running"] .wk-lane[data-lane="running"], .wk-lanes[data-active="blocked"] .wk-lane[data-lane="blocked"],
   .wk-lanes[data-active="review"] .wk-lane[data-lane="review"], .wk-lanes[data-active="done"] .wk-lane[data-lane="done"] { display: block; }
 }
+.wk-card.focus { border-color: var(--accent, var(--t2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--t2)) 40%, transparent); }

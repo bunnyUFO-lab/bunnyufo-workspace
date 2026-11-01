@@ -49,6 +49,14 @@ export interface PcWake {
   wakeAvailable: boolean
 }
 
+/** What a Working now row is about: Beads items (opened on the Work board) and Library cards, from site/api/hub-links.mjs. */
+export interface WorkingLinks {
+  beads?: { project: string; id: string; title?: string }[]
+  moreBeads?: number
+  cards?: { section?: string; card: string; title: string; href: string }[]
+  moreCards?: number
+}
+
 export interface WorkingItem {
   id: string
   source: 'pc' | 'events' | 'run'
@@ -62,6 +70,8 @@ export interface WorkingItem {
   project?: string
   branch?: string
   bead?: string
+  /** Absent on rows from sessions that never reported what they touched. */
+  links?: WorkingLinks
   /** `stale`: a run past its time limit with no word since; `since` is then when it last gave word. */
   state: 'working' | 'needs-you' | 'stopping' | 'idle' | 'stale'
   since: string

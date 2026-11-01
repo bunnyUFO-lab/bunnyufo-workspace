@@ -41,3 +41,13 @@ a.wn-bead:hover { text-decoration: underline; }
 .wn-stale { opacity: 0.72; }
 .wn-stale .wn-state { font-weight: 500; color: var(--t3); }
 .wn-stale .wn-text b { color: var(--t2); }
+
+/* Links under a row's title: Beads items open on the Work board, cards open the card. */
+.wn-links { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; min-width: 0; }
+.wn-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 24px; padding: 1px 8px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11.5px; color: var(--t2); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a.wn-chip:hover { color: var(--t1); border-color: var(--t3); }
+a.wn-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.wn-chip:not(.card):not(.more) { font-family: var(--mono); }
+.wn-chip.card { max-width: 220px; }
+.wn-chip.more { color: var(--t3); }
+@media (max-width: 520px) { .wn-chip { min-height: 28px; } .wn-chip.card { max-width: 100%; } }
