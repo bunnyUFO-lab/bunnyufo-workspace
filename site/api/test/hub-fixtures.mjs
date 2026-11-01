@@ -237,3 +237,38 @@ export function teamSheet(agent, { stamp = '20261029T100000Z', rand = 'ab12', wi
   };
   return { id, png, json, files: { [`${id}.png`]: png, [`${id}.json`]: json } };
 }
+
+/**
+ * A v1 settings export as the Hermes host's exporter writes it (made-up values; the "secret" is a fake key made of repeated letters).
+ * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`.
+ */
+export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {} } = {}) {
+  const profile = name => ({
+    model: { provider: 'openai-codex', default: name === 'main' ? 'gpt-6-sol' : 'claude-haiku-5-5' },
+    fallbacks: name === 'main'
+      ? [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }, { provider: 'deepseek', model: 'deepseek-v4-pro' }]
+      : [{ provider: 'deepseek', model: 'deepseek-v4-pro' }],
+    toolsets: ['web', 'terminal'],
+    platformToolsets: { discord: ['web'] },
+    skills: { autoLoad: ['simplify-text'], installed: ['spend-digest', 'brief-writer'] },
+    terminal: { backend: 'docker', containerMemoryMb: 512 },
+    soul: { text: soulText ?? `## Role\nYou are ${name === 'main' ? 'Hermes' : 'Briefs'}, the owner's assistant.\nAlways answer in plain words.\n`, sha256: 'a'.repeat(64), bytes: 120, truncated: false, redacted: 0 },
+    cron: name === 'briefs' ? [{ name: 'Daily brief', schedule: '0 8 * * *', enabled: true, prompt: 'Write the daily projects brief.' }] : [],
+    ...extraProfile,
+  });
+  return {
+    v: 1, exportedAt: iso(minutesAgo(now, exportedMinutesAgo)), changedAt: iso(minutesAgo(now, changedMinutesAgo)),
+    profiles: { main: profile('main'), briefs: profile('briefs') },
+    ownerSkills: ['simplify-text', 'spend-digest'],
+  };
+}
+
+/**
+ * Put an export into fake S3 under `<prefix>/agent-config/export-<stamp>.json`, marked `writer: hermes-config` the way the card API
+ * marks it (`writer: null` leaves it unmarked, as the passphrase's would be). Returns the key below the prefix.
+ */
+export function seedAgentConfig(fake, exported, { writer = 'hermes-config', prefix = INBOX, text } = {}) {
+  const stamp = new Date(exported.exportedAt).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  fake.seed(`${prefix}/agent-config/export-${stamp}.json`, text ?? `${JSON.stringify(exported)}\n`, 'application/json', writer ? { writer } : {});
+  return `agent-config/export-${stamp}.json`;
+}
