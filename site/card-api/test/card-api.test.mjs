@@ -50,6 +50,7 @@ async function setup() {
     `agent-session=${sha('tok-agent')}:read=*;write=inbox|inbox-dev`,
     `hermes-main=${sha('tok-hermes-main')}:read=*;write=inbox|assistant`,
     `agentish=${sha('tok-agentish')}:read=*;write=inbox`,
+    `hermes-config=${sha('tok-hermes-config')}:write=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
   const call = async (method, rawPath, { token = 'tok-all', body, query, base64, headers = {} } = {}) => {
@@ -809,6 +810,51 @@ test('inbox: request.json is create-only for a limited writer, which cannot clai
     assert.equal((await write('tok-hermes', agent, { 'If-None-Match': '*' })).status, 412, 'not twice');
     assert.equal((await call('DELETE', url, { token: 'tok-deleter' })).status, 403, 'a limited deleter keeps off it');
     assert.equal((await write('tok-all', owner)).status, 200, 'the passphrase may replace, and may write origin owner');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: agent-config/ takes create-only exports from the hermes-config token alone, and marks them', async () => {
+  const { fake, call } = await setup();
+  try {
+    const file = 'agent-config/export-20261101T101500Z.json';
+    const url = name => `/sections/inbox/files/${name}`;
+    const put = (token, name, headers = { 'If-None-Match': '*' }) => call('PUT', url(name), { token, body: Buffer.from('{"v":1}'), base64: true, headers });
+    const created = await put('tok-hermes-config', file, { 'If-None-Match': '*', 'x-amz-meta-writer': 'agent', 'X-Amz-Meta-Extra': 'y' });
+    assert.equal(created.status, 200);
+    assert.deepEqual(fake.objects.get(`sections/inbox/${file}`).metadata, { writer: 'hermes-config' }, 'the mark is the handler own, caller metadata is not stored');
+    assert.equal((await put('tok-hermes-config', file)).status, 412, 'not replaced');
+    assert.equal((await put('tok-hermes-config', 'agent-config/export-20261101T111500Z.json', {})).status, 403, 'a replace-able write (no If-None-Match) is refused');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-hermes-config', body: { files: [{ path: 'agent-config/export-20261101T121500Z.json' }] } })).status, 403, 'no upload URL');
+    for (const name of ['agent-config/current.json', 'agent-config/export-2026.json', 'agent-config/sub/export-20261101T131500Z.json', 'agent-config/export-20261101T131500Z.json.bak', 'agent-config/export-20261101T13Z.json']) {
+      assert.equal((await put('tok-hermes-config', name)).status, 403, name);
+    }
+    // The exporter writes nothing else in the inbox.
+    for (const name of ['asks/x/ask.json', 'requests/x/request.json', 'events/e.json', 'team/hermes/note.json']) {
+      assert.equal((await put('tok-hermes-config', name)).status, 403, `hermes-config: ${name}`);
+    }
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-hermes-config', body: { files: [{ path: 'events/e.json' }] } })).status, 403, 'hermes-config: no upload URL elsewhere');
+    // Nobody else limited may write there, with any case of the folder.
+    for (const token of ['tok-hermes-main', 'tok-hermes', 'tok-agent', 'tok-pc-runner', 'tok-cloud', 'tok-deleter']) {
+      assert.equal((await put(token, 'agent-config/export-20261101T141500Z.json')).status, 403, token);
+      assert.equal((await put(token, 'Agent-Config/export-20261101T141500Z.json')).status, 403, `${token} (case)`);
+    }
+    assert.equal(fake.text('sections/inbox/agent-config/export-20261101T141500Z.json'), null);
+    // A limited deleter cannot remove an export.
+    assert.equal((await call('DELETE', url(file), { token: 'tok-deleter' })).status, 403);
+    assert.ok(fake.text(`sections/inbox/${file}`));
+    // The passphrase is not limited and its file carries no mark (the Hub ignores it).
+    assert.equal((await put('tok-all', 'agent-config/export-20261101T151500Z.json')).status, 200);
+    assert.deepEqual(fake.objects.get('sections/inbox/agent-config/export-20261101T151500Z.json').metadata, {});
+    // The token reads and deletes nothing, and creates no cards.
+    assert.equal((await call('GET', '/sections', { token: 'tok-hermes-config' })).status, 200);
+    assert.equal((await call('GET', url(file), { token: 'tok-hermes-config' })).status, 403);
+    assert.equal((await call('DELETE', url(file), { token: 'tok-hermes-config' })).status, 403);
+    // The development inbox follows the same rules.
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    assert.equal((await call('PUT', `/sections/inbox-dev/files/${file}`, { token: 'tok-hermes-config', body: Buffer.from('{}'), base64: true, headers: { 'If-None-Match': '*' } })).status, 403, 'its token has no right on inbox-dev');
+    assert.equal((await call('PUT', `/sections/inbox-dev/files/${file}`, { token: 'tok-devbot', body: Buffer.from('{}'), base64: true, headers: { 'If-None-Match': '*' } })).status, 403, 'devbot is refused there');
   } finally {
     await fake.close();
   }

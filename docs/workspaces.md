@@ -860,6 +860,10 @@ Statuses: Claude Code is `needs-you` if a session is, else `working` if one is, 
 
 An avatar choice is the owner's. The site writes it as a create-only file, `inbox/team/<agent>/avatar-<YYYYMMDDTHHMMSSZ>-<rand4>.json` = `{ kind, key | salt, at, by }`, and the newest name is the current sprite; none means the default. Undo posts the previous choice again. The write is guarded in two places: the route needs a signed-in user and an allowed origin like every Hub write, and the card API refuses `team/<agent>/avatar-*.json` to any token that is not unrestricted (`OWNER_FILES`, for PUT, upload URLs and DELETE), so an agent cannot set or clear an avatar. `BUILTIN_KEYS` is a copy of the client list in `src/hub/team/sprites.ts`; `site/api/test/hub-team.test.mjs` fails if the two differ.
 
+### Agent config exports (card API rule)
+
+The Hermes host publishes a redacted copy of its profile settings as create-only files, `inbox/agent-config/export-<YYYYMMDDTHHMMSSZ>.json`, so the Hub can show an agent's model settings and prompts. The card API accepts these only from a token named `hermes-config` (rights `write=inbox`), only with `If-None-Match: *` and never through an upload URL; that token may write nothing else in the inbox, no other limited token may write under `agent-config/`, and a limited deleter cannot remove them. A file the token creates is stored with the object metadata `writer: hermes-config`, set by the handler alone (a caller's `x-amz-meta-*` headers are never forwarded). The passphrase can still write there, but its files carry no mark, so the Hub ignores them. Adding the token to `BUW_CARD_TOKENS` needs the card API deployed with this rule first.
+
 ### Custom sprites
 
 A custom sprite is a pet sheet an agent made on the Gaming PC: `inbox/team/<agent>/sheet-<YYYYMMDDTHHMMSSZ>-<rand4>.png` and a `.json` of the same name. The PNG is 1536 x 1872 (8 columns by 9 rows of 192 x 208 frames, art drawn at 48 x 52 and scaled x4); the rows are `idle`, `run-right`, `run-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review`. The JSON is `{ v: 1, agent, frame, cols, rows: [{ state, frames, fps }], source?, sha256, at }`.
