@@ -103,7 +103,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     milestoneX.set(milestone.id, x)
     const mx = vertical ? 0 : x
     const my = vertical ? x : SPINE_Y
-    const titleLines = vertical ? wrap(milestone.title, 40) : [milestone.title]
+    // An open milestone's count follows its title on the same line, so the title gives up that room: the drawing stays as narrow as before the count.
+    const titleLines = vertical ? wrap(milestone.title, isOpen ? 40 - count.length - 2 : 40) : [milestone.title]
     /** Horizontal: where the first branch leaves the spine, clear of the open milestone's title, which sits centred below the circle and would meet the diagonals. */
     const first = isOpen && !vertical ? Math.max(34, ((milestone.title.length + count.length + 2) * 6.8) / 2 + 6) : 34
     const levels = Math.ceil(milestone.features.length / 2)
