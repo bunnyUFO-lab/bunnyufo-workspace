@@ -20,6 +20,7 @@ import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
+import { onChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
 import { AgentSprite } from './team/AgentSprite'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
@@ -403,6 +404,23 @@ function ChatView({ id }: { id?: string }) {
     if (text) void sendRef.current(text)
   }, [id])
   useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
+
+  // "Chat with <agent>" from Spawn: this agent and the typed text as a draft, not sent. Only a new, empty conversation takes it.
+  const emptyNew = !id && !help && !messages.length && pending === null
+  const emptyNewRef = useRef(emptyNew)
+  useEffect(() => { emptyNewRef.current = emptyNew })
+  useEffect(() => {
+    const apply = () => {
+      if (!emptyNewRef.current) return
+      const start = takeChatStart()
+      if (!start) return
+      setPersona(start.persona)
+      setDraft(start.draft)
+      input.current?.focus()
+    }
+    apply()
+    return onChatStart(apply)
+  }, [])
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
