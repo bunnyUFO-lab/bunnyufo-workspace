@@ -2,6 +2,7 @@
 // of the prototype's layout (constants and rules unchanged); the SVG itself is drawn by
 // ProgressMap.tsx from what this returns, as React elements, so a title can never become markup.
 import type { MapMilestone, ProgressMap, Sign, TaskState } from '../lib/hub'
+import type { Hidden } from './mapFilter'
 
 export const SPINE_Y = 230
 export const LV = 78
@@ -28,8 +29,8 @@ const drawnLines = (label: Label, title: string): string[] => {
   const lines = label.lines ?? [title]
   return label.count ? [...lines.slice(0, -1), `${lines[lines.length - 1]}  ${label.count}`] : lines
 }
-interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; label: Label; center: At }
-export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean; countAt: At; chevronAt: At }
+interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; /** Tasks the filter hides under this node: its count reads shown/(shown + hidden). */ hidden: number; label: Label; center: At }
+export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean; /** The circle's radius. */ radius: number; /** The filter left it no task: a small dot with an "n hidden" line. */ thin: boolean; countAt: At; chevronAt: At }
 /** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. */
 export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; elbow: At; countAt: At; chevronAt: At }
 export interface TaskNode extends Base { kind: 't'; milestone: string; feature: string; side: 1 | -1; slot: number; signs: Sign[]; lines: string[]; up: boolean }
@@ -83,9 +84,10 @@ const textWidth = (lines: string[], size: number) => Math.max(0, ...lines.map(li
 
 /**
  * @param open ids of the milestones and features that are open
+ * @param hidden what the filter took out of each milestone and feature (see mapFilter.ts); left out, nothing is hidden
  * @param axis 'x': the spine runs left to right, titles and labels sit above and below it. 'y': it runs top to bottom, text stays horizontal and sits beside it.
  */
-export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSprints: boolean, axis: 'x' | 'y' = 'x'): Layout {
+export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSprints: boolean, axis: 'x' | 'y' = 'x', hidden?: ReadonlyMap<string, Hidden>): Layout {
   const vertical = axis === 'y'
   /** Where the next milestone starts along the spine. */
   let x = vertical ? 60 : 120
@@ -96,29 +98,32 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   const milestoneEnd = new Map<string, number>()
   model.milestones.forEach((milestone: MapMilestone, index) => {
     const tasks = milestone.features.flatMap(feature => feature.tasks)
-    const count = `${tasks.filter(task => task.state === 'done').length}/${tasks.length}`
+    const lost = hidden?.get(milestone.id)?.n ?? 0
+    const thin = lost > 0 && tasks.length === 0
+    const count = lost ? `${tasks.length}/${tasks.length + lost}` : `${tasks.filter(task => task.state === 'done').length}/${tasks.length}`
     const col = MILESTONE_COLORS[index % MILESTONE_COLORS.length]
-    const isOpen = open.has(milestone.id)
-    const radius = isOpen ? 15 : 26
+    const isOpen = open.has(milestone.id) && !thin
+    const radius = thin ? 11 : isOpen ? 15 : 26
     milestoneX.set(milestone.id, x)
     const mx = vertical ? 0 : x
     const my = vertical ? x : SPINE_Y
     // An open milestone's count follows its title on the same line, so the title gives up that room: the drawing stays as narrow as before the count.
-    const titleLines = vertical ? wrap(milestone.title, isOpen ? 40 - count.length - 2 : 40) : [milestone.title]
+    const hiddenText = `${lost} hidden`
+    const titleLines = vertical ? wrap(thin ? `${milestone.title} · ${hiddenText}` : milestone.title, isOpen ? 40 - count.length - 2 : 40) : [thin ? `${milestone.title} · ${hiddenText}` : milestone.title]
     /** Horizontal: where the first branch leaves the spine, clear of the open milestone's title, which sits centred below the circle and would meet the diagonals. */
     const first = isOpen && !vertical ? Math.max(34, ((milestone.title.length + count.length + 2) * 6.8) / 2 + 6) : 34
     const levels = Math.ceil(milestone.features.length / 2)
     nodes.push({
-      kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen,
-      done: tasks.filter(task => task.state === 'done').length, total: tasks.length, marks: marksOf(tasks.map(task => task.signs)),
+      kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen, radius, thin,
+      done: tasks.filter(task => task.state === 'done').length, total: tasks.length, hidden: lost, marks: marksOf(tasks.map(task => task.signs)),
       center: { x: mx, y: my },
       label: vertical
         ? { x: radius + 10, y: my + 4 - (titleLines.length - 1) * 7, anchor: 'start', lines: titleLines, step: 14, count: isOpen ? count : undefined }
-        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle', count: isOpen ? count : undefined },
+        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle', count: isOpen ? count : undefined, ...(thin ? { lines: titleLines } : {}) },
       countAt: { x: mx, y: my + 4 },
       chevronAt: { x: mx - 42, y: my },
     })
-    let span = vertical ? 100 : Math.max(170, (milestone.title.length + (isOpen ? count.length + 2 : 0)) * 7 + 30)
+    let span = vertical ? 100 : Math.max(thin ? 120 : 170, (titleLines[0].length + (isOpen ? count.length + 2 : 0)) * 7 + 30)
     // Vertical: the next feature's band starts here.
     let cursor = x + radius + 20
     if (isOpen) {
@@ -139,7 +144,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           branches.push({ id: feature.id, milestone: milestone.id, points: [[0, y0], [bx, y1], [bx, y2]], col, lit: state !== 'later' })
           nodes.push({
             kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: bx, y: y2, side, state, col, open: featureOpen,
-            done: featureDone, total: feature.tasks.length, marks: featureMarks,
+            done: featureDone, total: feature.tasks.length, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
             center: { x: bx, y: cy }, elbow: { x: bx, y: y1 },
             label: { x: bx + side * (FR + 8), y: cy + 4, anchor: side < 0 ? 'end' : 'start', lines, step: 14 },
             countAt: { x: bx, y: cy + 4 }, chevronAt: { x: bx, y: y1 },
@@ -151,7 +156,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
               nodes.push({
                 kind: 't', id: task.id, milestone: milestone.id, feature: feature.id, title: task.title, x: bx, y: ty, side, slot,
                 state: task.state, col, signs: task.signs, lines: taskLines, up: false,
-                done: task.state === 'done' ? 1 : 0, total: 1, marks: marksOf([task.signs]),
+                done: task.state === 'done' ? 1 : 0, total: 1, hidden: 0, marks: marksOf([task.signs]),
                 center: { x: bx, y: ty },
                 label: { x: bx + side * 16, y: ty + 4 - (taskLines.length - 1) * 6, anchor: side < 0 ? 'end' : 'start', lines: taskLines, step: 12 },
               })
@@ -171,7 +176,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const cx = ex + FR
         nodes.push({
           kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen,
-          done: featureDone, total: feature.tasks.length, marks: featureMarks,
+          done: featureDone, total: feature.tasks.length, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
           center: { x: cx, y: by }, elbow: { x: bx + BR, y: by },
           label: featureOpen ? { x: cx + FR + 8, y: by + 4, anchor: 'start', lines, step: 14 } : { x: bx + BR + 16, y: by + (side < 0 ? -10 : 18), anchor: 'start', lines, step: 14 },
           countAt: { x: cx, y: by + 4 }, chevronAt: { x: bx + BR, y: by },
@@ -185,7 +190,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
             nodes.push({
               kind: 't', id: task.id, milestone: milestone.id, feature: feature.id, title: task.title, x: tx, y: by, side, slot,
               state: task.state, col, signs: task.signs, lines: taskLines, up,
-              done: task.state === 'done' ? 1 : 0, total: 1, marks: marksOf([task.signs]),
+              done: task.state === 'done' ? 1 : 0, total: 1, hidden: 0, marks: marksOf([task.signs]),
               center: { x: tx, y: by },
               label: { x: tx, y: ty, anchor: 'middle', lines: taskLines, step: 12 },
             })
@@ -200,13 +205,15 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     x += span
   })
   const end = x + 40
-  const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')))
+  /** What the filter took out of a milestone: it still counts for where "now" is. */
+  const lostOf = (id: string) => hidden?.get(id) ?? { n: 0, done: 0 }
+  const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')) || lostOf(milestone.id).n > lostOf(milestone.id).done)
   /** The marker is a dot with a ring, and a pill below it (horizontal) or beside it (vertical). Its box, with a margin, when the dot sits `at` along the spine. */
   const markerBox = (at: number): Box => (vertical ? [-15, at - 15, 56, at + 15] : [at - 22, SPINE_Y - 15, at + 22, SPINE_Y + 35])
   /** What "now" must stay clear of: every node's circle, chevron, marks and label. */
   const obstacles: Box[] = []
   for (const node of nodes) {
-    const radius = node.kind === 'm' ? (node.open ? 15 : 26) : node.kind === 'f' ? FR : 8
+    const radius = node.kind === 'm' ? node.radius : node.kind === 'f' ? FR : 8
     const around = (at: At, reach: number): Box => [at.x - reach, at.y - reach, at.x + reach, at.y + reach]
     obstacles.push(around(node.center, radius + 3))
     if (node.kind !== 't') obstacles.push(around(node.chevronAt, 15))
@@ -230,12 +237,13 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   if (firstOpen >= 0) {
     const milestone = model.milestones[firstOpen]
     const tasks = milestone.features.flatMap(feature => feature.tasks)
-    const fraction = tasks.length ? tasks.filter(task => task.state === 'done').length / tasks.length : 0
+    const lost = lostOf(milestone.id)
+    const fraction = tasks.length + lost.n ? (tasks.filter(task => task.state === 'done').length + lost.done) / (tasks.length + lost.n) : 0
     const here = milestoneX.get(milestone.id) ?? 0
     const next = model.milestones[firstOpen + 1] ? milestoneX.get(model.milestones[firstOpen + 1].id) ?? end - 40 : end - 40
     nowAlong = here + fraction * (next - here) * 0.6
     // "Now" is a landmark: it never sits under the milestone's circle. Vertical, its pill also clears the title's second line.
-    const radius = open.has(milestone.id) ? 15 : 26
+    const radius = nodes.find((node): node is MilestoneNode => node.kind === 'm' && node.id === milestone.id)?.radius ?? 26
     if (vertical) {
       if (Math.abs(nowAlong - here) <= radius + 16) nowAlong = here + radius + 20
     } else if (Math.abs(nowAlong - here) <= radius + 8) nowAlong = here + radius + 12

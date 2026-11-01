@@ -1,0 +1,1195 @@
+{
+ "open": {
+  "axis": "x",
+  "slots": [
+   {
+    "id": "m1",
+    "from": "-Infinity",
+    "to": 264
+   },
+   {
+    "id": "m2",
+    "from": 264,
+    "to": 1113
+   },
+   {
+    "id": "m3",
+    "from": 1113,
+    "to": "Infinity"
+   }
+  ],
+  "width": 1694.4,
+  "height": 470,
+  "spine": {
+   "from": [
+    16,
+    230
+   ],
+   "to": [
+    1680.4,
+    230
+   ]
+  },
+  "now": {
+   "x": 515.675,
+   "y": 230
+  },
+  "nodes": [
+   {
+    "kind": "m",
+    "id": "m1",
+    "title": "Foundations",
+    "x": 120,
+    "y": 230,
+    "state": "done",
+    "col": "var(--red)",
+    "index": 0,
+    "open": false,
+    "radius": 11,
+    "thin": true,
+    "done": 0,
+    "total": 0,
+    "hidden": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 120,
+     "y": 230
+    },
+    "label": {
+     "x": 120,
+     "y": 192,
+     "anchor": "middle",
+     "lines": [
+      "Foundations · 2 hidden"
+     ]
+    },
+    "countAt": {
+     "x": 120,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 78,
+     "y": 230
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m2",
+    "title": "The long milestone title that needs wrapping",
+    "x": 304,
+    "y": 230,
+    "state": "doing",
+    "col": "var(--amber)",
+    "index": 1,
+    "open": true,
+    "radius": 15,
+    "thin": false,
+    "done": 0,
+    "total": 7,
+    "hidden": 1,
+    "marks": {
+     "working": true,
+     "idle": true,
+     "prs": 1,
+     "review": 1,
+     "failing": 1,
+     "fresh": true,
+     "deployed": false
+    },
+    "center": {
+     "x": 304,
+     "y": 230
+    },
+    "label": {
+     "x": 304,
+     "y": 264,
+     "anchor": "middle",
+     "count": "7/8"
+    },
+    "countAt": {
+     "x": 304,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 262,
+     "y": 230
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-a",
+    "milestone": "m2",
+    "title": "Combat",
+    "x": 870.6,
+    "y": 152,
+    "side": -1,
+    "state": "doing",
+    "col": "var(--amber)",
+    "open": true,
+    "done": 0,
+    "total": 2,
+    "hidden": 1,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 892.6,
+     "y": 152
+    },
+    "elbow": {
+     "x": 612.6,
+     "y": 152
+    },
+    "label": {
+     "x": 922.6,
+     "y": 156,
+     "anchor": "start",
+     "lines": [
+      "Combat"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 892.6,
+     "y": 156
+    },
+    "chevronAt": {
+     "x": 612.6,
+     "y": 152
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t4",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Damage numbers that float up and fade out slowly",
+    "x": 648.6,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "doing",
+    "col": "var(--amber)",
+    "signs": [
+     "working",
+     "pr"
+    ],
+    "lines": [
+     "Damage numbers that float u…"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": true,
+     "idle": false,
+     "prs": 1,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 648.6,
+     "y": 152
+    },
+    "label": {
+     "x": 648.6,
+     "y": 130,
+     "anchor": "middle",
+     "lines": [
+      "Damage numbers that float u…"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t5",
+    "milestone": "m2",
+    "feature": "m2-a",
+    "title": "Knockback",
+    "x": 740.6,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "next",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Knockback"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 740.6,
+     "y": 152
+    },
+    "label": {
+     "x": 740.6,
+     "y": 184,
+     "anchor": "middle",
+     "lines": [
+      "Knockback"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-b",
+    "milestone": "m2",
+    "title": "A feature with a rather long title indeed",
+    "x": 870.6,
+    "y": 308,
+    "side": 1,
+    "state": "next",
+    "col": "var(--amber)",
+    "open": true,
+    "done": 0,
+    "total": 2,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": true,
+     "deployed": false
+    },
+    "center": {
+     "x": 892.6,
+     "y": 308
+    },
+    "elbow": {
+     "x": 612.6,
+     "y": 308
+    },
+    "label": {
+     "x": 922.6,
+     "y": 312,
+     "anchor": "start",
+     "lines": [
+      "A feature with a rather lon…"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 892.6,
+     "y": 312
+    },
+    "chevronAt": {
+     "x": 612.6,
+     "y": 308
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t6",
+    "milestone": "m2",
+    "feature": "m2-b",
+    "title": "Spawn tables",
+    "x": 648.6,
+    "y": 308,
+    "side": 1,
+    "slot": 0,
+    "state": "next",
+    "col": "var(--amber)",
+    "signs": [
+     "new"
+    ],
+    "lines": [
+     "Spawn tables"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": true,
+     "deployed": false
+    },
+    "center": {
+     "x": 648.6,
+     "y": 308
+    },
+    "label": {
+     "x": 648.6,
+     "y": 340,
+     "anchor": "middle",
+     "lines": [
+      "Spawn tables"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t7",
+    "milestone": "m2",
+    "feature": "m2-b",
+    "title": "Waves",
+    "x": 740.6,
+    "y": 308,
+    "side": 1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Waves"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 740.6,
+     "y": 308
+    },
+    "label": {
+     "x": 740.6,
+     "y": 286,
+     "anchor": "middle",
+     "lines": [
+      "Waves"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-c",
+    "milestone": "m2",
+    "title": "Loot",
+    "x": 730.6,
+    "y": 74,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 752.6,
+     "y": 74
+    },
+    "elbow": {
+     "x": 564.6,
+     "y": 74
+    },
+    "label": {
+     "x": 782.6,
+     "y": 78,
+     "anchor": "start",
+     "lines": [
+      "Loot"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 752.6,
+     "y": 78
+    },
+    "chevronAt": {
+     "x": 564.6,
+     "y": 74
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t8",
+    "milestone": "m2",
+    "feature": "m2-c",
+    "title": "Drop rates",
+    "x": 600.6,
+    "y": 74,
+    "side": -1,
+    "slot": 0,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [],
+    "lines": [
+     "Drop rates"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 600.6,
+     "y": 74
+    },
+    "label": {
+     "x": 600.6,
+     "y": 52,
+     "anchor": "middle",
+     "lines": [
+      "Drop rates"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-d",
+    "milestone": "m2",
+    "title": "Audio",
+    "x": 822.6,
+    "y": 386,
+    "side": 1,
+    "state": "you",
+    "col": "var(--amber)",
+    "open": true,
+    "done": 0,
+    "total": 2,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": true,
+     "prs": 0,
+     "review": 1,
+     "failing": 1,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 844.6,
+     "y": 386
+    },
+    "elbow": {
+     "x": 564.6,
+     "y": 386
+    },
+    "label": {
+     "x": 874.6,
+     "y": 390,
+     "anchor": "start",
+     "lines": [
+      "Audio"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 844.6,
+     "y": 390
+    },
+    "chevronAt": {
+     "x": 564.6,
+     "y": 386
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t9",
+    "milestone": "m2",
+    "feature": "m2-d",
+    "title": "Mix the sound effects",
+    "x": 600.6,
+    "y": 386,
+    "side": 1,
+    "slot": 0,
+    "state": "you",
+    "col": "var(--amber)",
+    "signs": [
+     "review"
+    ],
+    "lines": [
+     "Mix the sound effects"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 1,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 600.6,
+     "y": 386
+    },
+    "label": {
+     "x": 600.6,
+     "y": 418,
+     "anchor": "middle",
+     "lines": [
+      "Mix the sound effects"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t10",
+    "milestone": "m2",
+    "feature": "m2-d",
+    "title": "Music loops",
+    "x": 692.6,
+    "y": 386,
+    "side": 1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--amber)",
+    "signs": [
+     "ci-failed",
+     "idle"
+    ],
+    "lines": [
+     "Music loops"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": true,
+     "prs": 0,
+     "review": 0,
+     "failing": 1,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 692.6,
+     "y": 386
+    },
+    "label": {
+     "x": 692.6,
+     "y": 364,
+     "anchor": "middle",
+     "lines": [
+      "Music loops"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m2-e",
+    "milestone": "m2",
+    "title": "Polish",
+    "x": 590.6,
+    "y": -4,
+    "side": -1,
+    "state": "later",
+    "col": "var(--amber)",
+    "open": true,
+    "done": 0,
+    "total": 0,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 612.6,
+     "y": -4
+    },
+    "elbow": {
+     "x": 516.6,
+     "y": -4
+    },
+    "label": {
+     "x": 642.6,
+     "y": 0,
+     "anchor": "start",
+     "lines": [
+      "Polish"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 612.6,
+     "y": 0
+    },
+    "chevronAt": {
+     "x": 516.6,
+     "y": -4
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m3",
+    "title": "Launch",
+    "x": 1153,
+    "y": 230,
+    "state": "later",
+    "col": "var(--blue)",
+    "index": 2,
+    "open": true,
+    "radius": 15,
+    "thin": false,
+    "done": 0,
+    "total": 2,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 1153,
+     "y": 230
+    },
+    "label": {
+     "x": 1153,
+     "y": 264,
+     "anchor": "middle",
+     "count": "0/2"
+    },
+    "countAt": {
+     "x": 1153,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 1111,
+     "y": 230
+    }
+   },
+   {
+    "kind": "f",
+    "id": "m3-a",
+    "milestone": "m3",
+    "title": "Store page",
+    "x": 1494.4,
+    "y": 152,
+    "side": -1,
+    "state": "later",
+    "col": "var(--blue)",
+    "open": true,
+    "done": 0,
+    "total": 2,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 1516.4,
+     "y": 152
+    },
+    "elbow": {
+     "x": 1236.4,
+     "y": 152
+    },
+    "label": {
+     "x": 1546.4,
+     "y": 156,
+     "anchor": "start",
+     "lines": [
+      "Store page"
+     ],
+     "step": 14
+    },
+    "countAt": {
+     "x": 1516.4,
+     "y": 156
+    },
+    "chevronAt": {
+     "x": 1236.4,
+     "y": 152
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t11",
+    "milestone": "m3",
+    "feature": "m3-a",
+    "title": "Trailer",
+    "x": 1272.4,
+    "y": 152,
+    "side": -1,
+    "slot": 0,
+    "state": "later",
+    "col": "var(--blue)",
+    "signs": [],
+    "lines": [
+     "Trailer"
+    ],
+    "up": true,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 1272.4,
+     "y": 152
+    },
+    "label": {
+     "x": 1272.4,
+     "y": 130,
+     "anchor": "middle",
+     "lines": [
+      "Trailer"
+     ],
+     "step": 12
+    }
+   },
+   {
+    "kind": "t",
+    "id": "t12",
+    "milestone": "m3",
+    "feature": "m3-a",
+    "title": "Screenshots",
+    "x": 1364.4,
+    "y": 152,
+    "side": -1,
+    "slot": 1,
+    "state": "later",
+    "col": "var(--blue)",
+    "signs": [],
+    "lines": [
+     "Screenshots"
+    ],
+    "up": false,
+    "done": 0,
+    "total": 1,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 1364.4,
+     "y": 152
+    },
+    "label": {
+     "x": 1364.4,
+     "y": 184,
+     "anchor": "middle",
+     "lines": [
+      "Screenshots"
+     ],
+     "step": 12
+    }
+   }
+  ],
+  "branches": [
+   {
+    "id": "m2-a",
+    "milestone": "m2",
+    "points": [
+     [
+      572.6,
+      230
+     ],
+     [
+      612.6,
+      152
+     ],
+     [
+      870.6,
+      152
+     ]
+    ],
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-b",
+    "milestone": "m2",
+    "points": [
+     [
+      572.6,
+      230
+     ],
+     [
+      612.6,
+      308
+     ],
+     [
+      870.6,
+      308
+     ]
+    ],
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-c",
+    "milestone": "m2",
+    "points": [
+     [
+      524.6,
+      230
+     ],
+     [
+      564.6,
+      74
+     ],
+     [
+      730.6,
+      74
+     ]
+    ],
+    "col": "var(--amber)",
+    "lit": false
+   },
+   {
+    "id": "m2-d",
+    "milestone": "m2",
+    "points": [
+     [
+      524.6,
+      230
+     ],
+     [
+      564.6,
+      386
+     ],
+     [
+      822.6,
+      386
+     ]
+    ],
+    "col": "var(--amber)",
+    "lit": true
+   },
+   {
+    "id": "m2-e",
+    "milestone": "m2",
+    "points": [
+     [
+      476.6,
+      230
+     ],
+     [
+      516.6,
+      -4
+     ],
+     [
+      590.6,
+      -4
+     ]
+    ],
+    "col": "var(--amber)",
+    "lit": false
+   },
+   {
+    "id": "m3-a",
+    "milestone": "m3",
+    "points": [
+     [
+      1196.4,
+      230
+     ],
+     [
+      1236.4,
+      152
+     ],
+     [
+      1494.4,
+      152
+     ]
+    ],
+    "col": "var(--blue)",
+    "lit": false
+   }
+  ],
+  "bands": [
+   {
+    "name": "Sprint 1",
+    "rect": {
+     "x": 90,
+     "y": 300,
+     "w": 419.7,
+     "h": 22
+    },
+    "labelAt": {
+     "x": 100,
+     "y": 315,
+     "anchor": "start"
+    },
+    "partsAt": {
+     "x": 163.2,
+     "y": 315
+    },
+    "col": "var(--purple)",
+    "parts": "2 of 2 tasks of Foundations · 1 of 10 tasks of The long mileston…"
+   },
+   {
+    "name": "Sprint 2",
+    "rect": {
+     "x": 274,
+     "y": 330,
+     "w": 909,
+     "h": 22
+    },
+    "labelAt": {
+     "x": 284,
+     "y": 345,
+     "anchor": "start"
+    },
+    "partsAt": {
+     "x": 347.2,
+     "y": 345
+    },
+    "col": "var(--blue)",
+    "parts": "0 of 10 tasks of The long mileston… · 0 of 2 tasks of Launch"
+   }
+  ]
+ },
+ "closed": {
+  "axis": "x",
+  "slots": [
+   {
+    "id": "m1",
+    "from": "-Infinity",
+    "to": 264
+   },
+   {
+    "id": "m2",
+    "from": 264,
+    "to": 602
+   },
+   {
+    "id": "m3",
+    "from": 602,
+    "to": "Infinity"
+   }
+  ],
+  "width": 852,
+  "height": 470,
+  "spine": {
+   "from": [
+    16,
+    230
+   ],
+   "to": [
+    838,
+    230
+   ]
+  },
+  "now": {
+   "x": 358,
+   "y": 230
+  },
+  "nodes": [
+   {
+    "kind": "m",
+    "id": "m1",
+    "title": "Foundations",
+    "x": 120,
+    "y": 230,
+    "state": "done",
+    "col": "var(--red)",
+    "index": 0,
+    "open": false,
+    "radius": 11,
+    "thin": true,
+    "done": 0,
+    "total": 0,
+    "hidden": 2,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 120,
+     "y": 230
+    },
+    "label": {
+     "x": 120,
+     "y": 192,
+     "anchor": "middle",
+     "lines": [
+      "Foundations · 2 hidden"
+     ]
+    },
+    "countAt": {
+     "x": 120,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 78,
+     "y": 230
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m2",
+    "title": "The long milestone title that needs wrapping",
+    "x": 304,
+    "y": 230,
+    "state": "doing",
+    "col": "var(--amber)",
+    "index": 1,
+    "open": false,
+    "radius": 26,
+    "thin": false,
+    "done": 0,
+    "total": 7,
+    "hidden": 1,
+    "marks": {
+     "working": true,
+     "idle": true,
+     "prs": 1,
+     "review": 1,
+     "failing": 1,
+     "fresh": true,
+     "deployed": false
+    },
+    "center": {
+     "x": 304,
+     "y": 230
+    },
+    "label": {
+     "x": 304,
+     "y": 278,
+     "anchor": "middle"
+    },
+    "countAt": {
+     "x": 304,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 262,
+     "y": 230
+    }
+   },
+   {
+    "kind": "m",
+    "id": "m3",
+    "title": "Launch",
+    "x": 642,
+    "y": 230,
+    "state": "later",
+    "col": "var(--blue)",
+    "index": 2,
+    "open": false,
+    "radius": 26,
+    "thin": false,
+    "done": 0,
+    "total": 2,
+    "hidden": 0,
+    "marks": {
+     "working": false,
+     "idle": false,
+     "prs": 0,
+     "review": 0,
+     "failing": 0,
+     "fresh": false,
+     "deployed": false
+    },
+    "center": {
+     "x": 642,
+     "y": 230
+    },
+    "label": {
+     "x": 642,
+     "y": 192,
+     "anchor": "middle"
+    },
+    "countAt": {
+     "x": 642,
+     "y": 234
+    },
+    "chevronAt": {
+     "x": 600,
+     "y": 230
+    }
+   }
+  ],
+  "branches": [],
+  "bands": []
+ }
+}

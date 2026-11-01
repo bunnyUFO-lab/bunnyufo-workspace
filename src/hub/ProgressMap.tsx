@@ -7,6 +7,8 @@ import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
+import MapFilterPanel from './MapFilterPanel'
+import { ALL_FILTER, OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, type MapFilter } from './mapFilter'
 import { FIT_MAX, centreOn, clamp, fitScale } from './panZoom'
 import { usePanZoom } from './usePanZoom'
 import type { ZoomReport } from './usePanZoom'
@@ -17,6 +19,10 @@ import { useHubData } from './useHub'
 import { useProject } from './useProject'
 
 const HINT_KEY = 'hub-map-hint-seen'
+const FILTER_KEY = 'hub-map-filter'
+/** The viewer's saved filter; a missing or bad value is the default (Open). */
+const savedFilter = (): MapFilter => { try { const raw = localStorage.getItem(FILTER_KEY); return raw ? parseFilter(JSON.parse(raw)) : OPEN_FILTER } catch { return OPEN_FILTER } }
+const saveFilter = (filter: MapFilter) => { try { if (isOpenFilter(filter)) localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, JSON.stringify(filter)) } catch { /* private mode: it is the default next time */ } }
 const PAD = 16
 const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
 /** Where a node's circle is centred in the drawing (a feature's node sits right of the end of its branch). */
@@ -134,7 +140,10 @@ function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
   )
 }
 
-function MapView({ model, project, nodeId }: { model: MapModel; project: string; nodeId?: string }) {
+function MapView({ model: fullModel, project, nodeId }: { model: MapModel; project: string; nodeId?: string }) {
+  const [filter, setFilter] = useState<MapFilter>(savedFilter)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const { model, hidden } = useMemo(() => filterMap(fullModel, filter), [fullModel, filter])
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const [sprints, setSprints] = useState(false)
   const [hint, setHint] = useState(() => !hintSeen())
@@ -151,6 +160,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   const lastSemantic = useRef(0)
   const wrap = useRef<HTMLDivElement>(null)
   const keyButton = useRef<HTMLButtonElement>(null)
+  const filterButton = useRef<HTMLButtonElement>(null)
   const [keyOpen, setKeyOpen] = useState(false)
   const zoomFn = useRef<(zoom: ZoomReport) => void>(() => {})
   const pushed = useRef(false)
@@ -179,7 +189,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   const axisNow = useRef(axis)
   const shown = useRef<string | null>(null)
   const vertical = axis === 'y'
-  const layout = useMemo(() => layoutMap(model, open, sprints, axis), [model, open, sprints, axis])
+  const layout = useMemo(() => layoutMap(model, open, sprints, axis, hidden), [model, open, sprints, axis, hidden])
   const byId = useMemo(() => new Map(layout.nodes.map(node => [node.id, node])), [layout])
   const toStage = (point: { x: number; y: number }) => ({ x: point.x - origin.current.x, y: point.y - origin.current.y })
   const nowPoint = () => toStage(layout.now)
@@ -259,7 +269,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   }, [layout])
 
   // The panel the model has for the address; an id the model does not know opens nothing and leaves the address alone.
-  const shownId = nodeId && find(model, nodeId) ? nodeId : null
+  const shownId = nodeId && find(fullModel, nodeId) ? nodeId : null
   useLayoutEffect(() => { shown.current = shownId }, [shownId])
 
   // Semantic zoom: the milestone, then the feature, under the pointer opens as you zoom in; what zoom opened folds as you zoom out.
@@ -268,7 +278,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     zoomFn.current = ({ dir, at, k }) => {
       if (relayoutPending.current || performance.now() - lastSemantic.current < SETTLE_MS) return
       const view = pz.current()
-      const here = shownId ? find(model, shownId) : null
+      const here = shownId ? find(fullModel, shownId) : null
       // The ancestors of the node whose panel is open stay open, so the selection stays drawn.
       const keep = new Set<string>()
       if (here) { keep.add(here.milestone.id); if (here.kind !== 'm') keep.add(here.feature.id) }
@@ -369,6 +379,15 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); act() }
   }
 
+  /** Show everything, with the node's milestone and feature open so it is drawn. */
+  const showAll = (id: string) => {
+    const found = find(fullModel, id)
+    saveFilter(ALL_FILTER)
+    refit(() => { setFilter(ALL_FILTER); if (found) setOpen(value => new Set([...value, found.milestone.id, ...(found.kind === 't' ? [found.feature.id] : [])])) })
+  }
+  const applyFilter = (next: MapFilter) => { saveFilter(next); refit(() => setFilter(next)) }
+  const tasksIn = (map: MapModel) => map.milestones.reduce((sum, milestone) => sum + milestone.features.reduce((inner, feature) => inner + feature.tasks.length, 0), 0)
+  const empty = tasksIn(model) === 0 && tasksIn(fullModel) > 0
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
@@ -386,14 +405,22 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
 
   return (
     <>
-      <div className="hub-map-wrap" ref={wrap} onKeyDown={event => { if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() } }}>
+      <div className="hub-map-wrap" ref={wrap} onKeyDown={event => {
+        if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() }
+        if (event.key === 'Escape' && filterOpen) { event.stopPropagation(); setFilterOpen(false); filterButton.current?.focus() }
+      }}>
         <div className="hub-map-controls" ref={controls}>
           <button type="button" className="hub-btn" onClick={() => pz.fit(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
           <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
           <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
           <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
-          <button type="button" className={`hub-btn${keyOpen ? ' pri' : ''}`} ref={keyButton} aria-expanded={keyOpen} aria-controls="hub-map-key" onClick={() => setKeyOpen(value => !value)}>Key</button>
+          <button type="button" className={`hub-btn${filterOpen ? ' pri' : ''}`} ref={filterButton} aria-expanded={filterOpen} aria-controls="hub-map-filter" onClick={() => { setFilterOpen(value => !value); setKeyOpen(false) }}>Filter</button>
+          <span className={`hub-filter-chip${isOpenFilter(filter) ? '' : ' changed'}`} data-filter-chip>
+            <button type="button" className="hub-filter-chip-text" title="Change the filter" onClick={() => { setFilterOpen(true); setKeyOpen(false) }}>{filterLabel(filter)}</button>
+            {!isOpenFilter(filter) && <button type="button" className="hub-filter-chip-x" aria-label="Reset the filter to Open" onClick={() => applyFilter(OPEN_FILTER)}>×</button>}
+          </span>
+          <button type="button" className={`hub-btn${keyOpen ? ' pri' : ''}`} ref={keyButton} aria-expanded={keyOpen} aria-controls="hub-map-key" onClick={() => { setKeyOpen(value => !value); setFilterOpen(false) }}>Key</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
@@ -435,7 +462,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                     <title>{nodeTip(feature.title, feature.id)}</title>
                     <circle cx={cx} cy={feature.center.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
                     {shownId === feature.id && <circle cx={cx} cy={feature.center.y} r={radius + 5} className="hub-map-ring" />}
-                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.done}/{feature.total}</text>
+                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.hidden ? `${feature.total}/${feature.total + feature.hidden}` : `${feature.done}/${feature.total}`}</text>
                     <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.center.y - radius + 2} />
                     <MapTitle label={feature.label} title={feature.title} vertical={vertical} fontWeight="600" className="hub-map-title" />
                   </g>
@@ -444,7 +471,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                 )
               })}
               {layout.nodes.filter((item): item is MilestoneNode => item.kind === 'm').map(milestone => {
-                const radius = milestone.open ? 15 : 26
+                const radius = milestone.radius
                 return (
                   <Fragment key={milestone.id}>
                   <g data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className={`hub-map-node${shownId === milestone.id ? ' selected' : ''}`}
@@ -452,11 +479,11 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                     <title>{nodeTip(milestone.title, milestone.id)}</title>
                     <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" style={{ stroke: milestone.col, fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
                     {shownId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 6} className="hub-map-ring" />}
-                    {!milestone.open && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.done}/{milestone.total}</text>}
+                    {!milestone.open && !milestone.thin && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.hidden ? `${milestone.total}/${milestone.total + milestone.hidden}` : `${milestone.done}/${milestone.total}`}</text>}
                     <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
                     <MapTitle label={milestone.label} title={milestone.title} vertical={vertical} fontWeight="700" style={{ fill: milestone.col }} />
                   </g>
-                  <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />
+                  {!milestone.thin && <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />}
                   </Fragment>
                 )
               })}
@@ -471,7 +498,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
           </svg>
         </div>
         </div>
-        {(hint || (sprints && model.sprints.length === 0)) && (
+        {(hint || (sprints && model.sprints.length === 0) || empty) && (
           <div className="hub-map-top" ref={hintBar}>
             {hint && (
               <p className="hub-muted hub-map-hint" data-hint>
@@ -479,9 +506,11 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
                 <button type="button" className="hub-map-hint-x" aria-label="Hide the hint" onClick={dismissHint}>×</button>
               </p>
             )}
+            {empty && <p className="hub-muted hub-map-note" data-no-match>No tasks match this filter. <button type="button" className="hub-link-btn" onClick={() => applyFilter(OPEN_FILTER)}>Reset</button></p>}
             {sprints && model.sprints.length === 0 && <p className="hub-muted hub-map-note" data-no-sprints>No sprints in this Beads copy yet. Tasks labelled <code>sprint:&lt;name&gt;</code> show here as bands.</p>}
           </div>
         )}
+        {filterOpen && <MapFilterPanel filter={filter} shown={tasksIn(model)} total={tasksIn(fullModel)} onChange={applyFilter} onClose={() => { setFilterOpen(false); filterButton.current?.focus() }} />}
         {keyOpen && (
           <div className="hub-legend" id="hub-map-key" aria-label="Legend">
             {model.ageMinutes != null && <p className="hub-muted hub-legend-age">Beads copy from {copyAge(model.ageMinutes)}</p>}
@@ -490,7 +519,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} onOpen={openPanel} />}
+      {shownId && <MapPanel model={fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }

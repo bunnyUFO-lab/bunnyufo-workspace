@@ -251,6 +251,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       ...(prUrl ? { prUrl } : {}),
       ...(prs.length ? { prs } : {}),
       ...(issue.closed_at ? { closedAt: issue.closed_at } : {}),
+      ...(issue.updated_at ? { updatedAt: issue.updated_at } : {}),
       createdAt: issue.created_at,
     };
   };
