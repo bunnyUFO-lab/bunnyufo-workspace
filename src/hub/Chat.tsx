@@ -110,7 +110,7 @@ function ApprovalCard({ approval, onAnswered }: { approval: ChatApproval; onAnsw
   )
 }
 
-/** The page of the item a help chat is about (Unstick has none: it opens Needs you on its card). */
+/** The page of the item a help chat is about (a session has none: it opens Needs you on its card). */
 function itemLink(kind: HelpKind, id: string): { href: string; focus?: string } {
   if (kind === 'ask') return { href: hubHash('ask', id) }
   if (kind === 'checklist') return { href: hubHash('checklist', id) }

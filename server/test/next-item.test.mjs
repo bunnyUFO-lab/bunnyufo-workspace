@@ -54,11 +54,11 @@ test('with no order to go by, the first item left is next', () => {
   assert.equal(pickNext([ask('a'), null, ask('b')], 'ask-a').id, 'b', 'A null row is ignored.');
 });
 
-test('itemLink: each kind opens on its own page; a session goes to Unstick with its card in focus', () => {
+test('itemLink: each kind opens on its own page; a session goes to Sessions with its card in focus', () => {
   assert.deepEqual(itemLink(ask('20261029-probe-x-a1b2')), { hash: '#/~hub/ask/20261029-probe-x-a1b2' });
   assert.deepEqual(itemLink(list('c1')), { hash: '#/~hub/checklist/c1' });
   assert.deepEqual(itemLink({ kind: 'review', id: '120000-pc-000001.json' }), { hash: '#/~hub/review/120000-pc-000001.json' });
-  assert.deepEqual(itemLink(stuck('sess-1')), { hash: '#/~hub/needs/unstick', focus: 'blocked-sess-1' });
+  assert.deepEqual(itemLink(stuck('sess-1')), { hash: '#/~hub/needs/sessions', focus: 'blocked-sess-1' });
 });
 
 test('NOTE_VERB: one word per action', () => {

@@ -126,7 +126,7 @@ try {
 
   step('Ctrl+K: "spawn <text>" lists the command first; Enter opens the sheet with the text and the guessed preset');
   await page.keyboard.press('Control+k');
-  await page.locator('input[role="combobox"]').fill('spawn teardown of how balatro teaches its rules');
+  await page.locator('.pal input[role="combobox"]').fill('spawn teardown of how balatro teaches its rules');
   const first = page.locator('.pal-i').first();
   assert.equal((await first.locator('.pal-i-label').innerText()).trim(), 'Spawn: teardown of how balatro teaches its rules');
   await page.keyboard.press('Enter');
@@ -138,7 +138,7 @@ try {
   step('Ctrl+K from a card page goes to the Hub and opens the sheet there');
   await page.evaluate(() => { location.hash = '#/hub'; });
   await page.keyboard.press('Control+k');
-  await page.locator('input[role="combobox"]').fill('market research on tug-of-war');
+  await page.locator('.pal input[role="combobox"]').fill('market research on tug-of-war');
   await page.locator('.pal-i', { hasText: 'Spawn: market research on tug-of-war' }).click();
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-preset="market-research"]').getAttribute('aria-pressed'), 'true');

@@ -23,14 +23,20 @@ type Props = {
   inRow?: boolean
   /** A dropdown at any count (Activity's filter was one already). */
   alwaysList?: boolean
+  /** How many items each project has (and `allCount` the "All" row): shown beside the name. */
+  counts?: Record<string, number>
+  allCount?: number
 }
 
 /** The Hub's project picker: chips while the owner has ten or fewer projects, a typeable list once there are more. Matches the name or the id. */
-export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList }: Props) {
+export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList, counts, allCount }: Props) {
   const options = useMemo(() => [
     ...(allValue === undefined ? [] : [{ value: allValue, label: allLabel }]),
     ...projects.map(item => ({ value: item.id, label: item.name, keywords: [item.id] })),
   ], [projects, allValue, allLabel])
+  const countOf = (option: string) => (option === allValue ? allCount : counts?.[option])
+  // A count is its own number on a chip, and part of the label in the typeable list.
+  const listOptions = useMemo(() => options.map(option => { const n = option.value === allValue ? allCount : counts?.[option.value]; return n === undefined ? option : { ...option, label: `${option.label} (${n})` } }), [options, allValue, allCount, counts])
   const chips = !alwaysList && projects.length <= CHIP_LIMIT
   const row = useRef<HTMLDivElement>(null)
   const edges = useOverflowEdges(row, [options.length, value, chips])
@@ -42,13 +48,13 @@ export default function ProjectPicker({ projects, value, onChange, id, allValue,
         {options.map(option => {
           const cls = `hub-chip${option.value === value ? ' on' : ''}`
           return href
-            ? <a key={option.value} className={cls} href={href(option.value)}>{option.label}</a>
-            : <button key={option.value} type="button" className={cls} onClick={() => onChange(option.value)}>{option.label}</button>
+            ? <a key={option.value} className={cls} href={href(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</a>
+            : <button key={option.value} type="button" className={cls} onClick={() => onChange(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</button>
         })}
       </div>
     )
     return oneRow ? <div className="hub-chips-wrap" data-overflow={edges}>{list}</div> : list
   }
-  const field = <Combobox className="cb-bar" id={id} value={value} options={options} onChange={onChange} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
+  const field = <Combobox className="cb-bar" id={id} value={value} options={listOptions} onChange={onChange} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
   return inRow ? field : <div className="hub-project-pick">{field}</div>
 }

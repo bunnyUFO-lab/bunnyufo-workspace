@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { HubEvent, Item, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
-import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
+import { KIND_ICON, itemLabel, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
@@ -168,7 +168,7 @@ export default function Today() {
             <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
             <span className="nrow-text">
               <b>{item.title}</b>
-              <small>{[KIND_LABEL[kind], who(item), ago(item.at)].filter(Boolean).join(' · ')}</small>
+              <small>{[itemLabel(item), who(item), ago(item.at)].filter(Boolean).join(' · ')}</small>
             </span>
             <span className="nrow-go"><Icon paths={ICON_ARROW} /></span>
           </a>

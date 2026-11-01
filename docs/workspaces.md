@@ -325,7 +325,7 @@ user (`Remote-User`), like every other write.
 
 | Route | Does |
 |---|---|
-| `GET /api/hub/today`, `/inbox?filter=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
+| `GET /api/hub/today`, `/inbox?filter=&project=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first); an answered Ask also carries `delivery`: where the answer went, from `delivered.json` and up to 3 `watch-*.json` (see below) |
 | `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder |
 | `POST /api/hub/checklists/:id/items/:item` | `{ done: boolean }`: tick or untick one item. Writes one create-only `tick-` or `untick-` file; nothing when the item already is as asked; 409 unless the list is `open`. Answers with the fresh detail |
@@ -356,6 +356,8 @@ user (`Remote-User`), like every other write.
 | `POST /api/hub/chat/stop` | `{ run }`: ends a reply that this relay is carrying (the `run` from `started`). 404 for any other run, 401 without a user, and the usual Origin check. A closed page is not a stop |
 
 Voice input was removed on 2026-10-29; see git history to bring it back.
+
+`/inbox?filter=<kind>&project=<id>` keeps the rows of one project. `counts` then count that project, and `projects` (`{ <id>: n }`) counts the unfiltered list per project, for the picker. Filters are `all`, the kinds (`question`, `design`, `steps`, `playtest`, `unstick`, `pr`, `approval`), `approvals` (request approvals only: a Hermes approval is under `all` and `approval`), `answered` and `requests`; the Needs you address uses `sessions` for `unstick`. A row with no `project` takes its request's. A blocked row carries `tool`, `source` and `reason` when its event does, and the page labels it "Claude permission", "Codex question" or "Session waiting" from them (the hub-hooks mod counts as Claude; with no `reason` of `permission` or `question` the label ends in "waiting").
 
 A blocked session stays in Needs you until any later event from the same session arrives (a
 `resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts

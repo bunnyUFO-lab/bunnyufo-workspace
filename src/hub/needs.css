@@ -169,3 +169,19 @@
 .hub-attach-help label { display: inline-flex; align-items: flex-start; gap: 8px; min-width: 0; flex: 1 1 220px; }
 .hub-attach-help input { margin-top: 3px; flex: none; }
 .hub-attach-help a { color: var(--accent); font-weight: 600; padding: 10px 0; }
+
+/* The project filter sits in the row with the kind chips; on a phone it takes its own line above them. */
+.needs-bar { display: flex; align-items: flex-start; gap: 10px 12px; margin-bottom: 14px; }
+.needs-bar .hub-chips-wrap { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
+.needs-project { flex: 0 1 240px; min-width: 0; }
+.needs-project .cb.cb-bar { flex: 1 1 auto; width: 100%; }
+.ni-meta a.ni-project { text-decoration: none; color: var(--t2); }
+.ni-meta a.ni-project:hover { color: var(--t1); border-color: var(--t3); }
+.ni-meta a.ni-project:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-top a.hub-pill.ni-project { text-decoration: none; }
+.hub-top a.hub-pill.ni-project:hover { color: var(--text-bright); }
+@media (max-width: 640px) {
+  .needs-bar { flex-direction: column; align-items: stretch; }
+  .needs-project { flex: none; }
+  .ni-meta a.ni-project { min-height: 28px; }
+}

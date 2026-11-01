@@ -1,4 +1,5 @@
 import type { Item } from '../lib/hub'
+import { needsHref } from '../lib/needsView.mjs'
 import { hubHash, reviewHash } from '../lib/route'
 
 // The item a screen should open on: Today's rows set it, the Needs you list takes it once the list has loaded.
@@ -21,6 +22,7 @@ export function itemPage(item: Item): string | undefined {
 
 // The chip the owner last had open on Needs you, so the way back from an item lands on it and not on All.
 let lastFilter = 'all'
-export const rememberFilter = (filter: string) => { lastFilter = filter }
+let lastProject = ''
+export const rememberFilter = (filter: string, project = '') => { lastFilter = filter; lastProject = project }
 /** Where "Back to Needs you" goes: the list as it was left. */
-export const needsHash = () => (lastFilter === 'all' ? hubHash('needs') : hubHash('needs', lastFilter))
+export const needsHash = () => (lastFilter === 'all' && !lastProject ? hubHash('needs') : needsHref(lastFilter, lastProject))

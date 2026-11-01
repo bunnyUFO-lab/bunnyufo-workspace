@@ -1,6 +1,7 @@
 import type { Ask, Checklist, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
-import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
+import { KIND_ICON, KIND_LABEL, itemLabel, needsKind } from '../lib/needsKinds'
+import { metaParts } from '../lib/needsView.mjs'
 import type { SettledVerb } from '../lib/nextItem.mjs'
 import { reviewHash } from '../lib/route'
 import AskBody from './AskBody'
@@ -13,6 +14,8 @@ import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
+import type { ProjectNames } from './ProjectChip'
+import ProjectChip from './ProjectChip'
 import type { HelpTarget } from './helpDraft'
 
 /** What the owner did to take an item off the queue, as `onSettled` reports it. */
@@ -69,13 +72,17 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
  * One card of the Needs you list: who is asking, the four cells, and the body and actions for its kind, so an item is
  * answered where it stands. `onSettled` runs after every successful action that takes the item off the queue.
  */
-export default function NeedsItem({ item, at, reload, onSettled, leaving = false }: {
+export default function NeedsItem({ item, at, reload, onSettled, leaving = false, names = null, filter = 'all' }: {
   item: Item
   /** When the list last arrived: a checklist body keeps its own newer tick answer until then. */
   at: Date | null
   reload: () => void
   onSettled: (item: Item, verb: SettleVerb, extra?: SettleExtra) => void
   leaving?: boolean
+  /** Display names of the projects, by id. */
+  names?: ProjectNames | null
+  /** The kind chip the list is on: the project chip's link keeps it. */
+  filter?: string
 }) {
   const kind = needsKind(item)
   const needsDetail = !item.detail && (item.kind === 'ask' || item.kind === 'checklist')
@@ -89,7 +96,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
   const helpKind = item.kind === 'ask' || item.kind === 'checklist' || item.kind === 'review' || item.kind === 'blocked' ? item.kind : null
   const help: HelpTarget | null = helpKind && kind !== 'approval' ? { kind: helpKind, id: item.id, label: KIND_LABEL[kind].toLowerCase(), title: item.title } : null
   const who = info?.who || item.host || ''
-  const meta = [who, `asked ${ago(item.at)}`, item.bead ?? item.project].filter(Boolean)
+  const meta = metaParts({ project: item.project, who, asked: `asked ${ago(item.at)}`, bead: item.bead, names })
   const cells: [string, string | undefined][] = [['What', info?.what], ['State', info?.state], ['Next action', info?.next], ['Blocker', info?.blocker]]
 
   return (
@@ -99,7 +106,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
           <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
           <div className="ni-hm">
             <h3 className="ni-t" id={`ni-${key}`} tabIndex={-1}>{page ? <a href={page}>{item.title}</a> : item.title}</h3>
-            <div className="ni-meta"><span className="ni-chip">{item.kind === 'hermes-approval' ? 'Hermes approval' : item.kind === 'run-question' ? 'Hermes asks' : KIND_LABEL[kind]}</span>{meta.map(part => <span key={part}>{part}</span>)}</div>
+            <div className="ni-meta"><span className="ni-chip">{item.kind === 'hermes-approval' ? 'Hermes approval' : item.kind === 'run-question' ? 'Hermes asks' : itemLabel(item)}</span>{meta.map(part => part.kind === 'project' ? <ProjectChip key="project" id={part.id} names={names} filter={filter} /> : <span key={part.text}>{part.text}</span>)}</div>
           </div>
           {help && <GetHelp target={help} />}
         </header>

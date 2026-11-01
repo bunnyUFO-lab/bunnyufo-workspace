@@ -12,6 +12,7 @@ import Md from './Md'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
 import { needsHash } from './needsFocus'
+import { PageProjectChip } from './ProjectChip'
 
 const LEG_LABEL: Record<Verdict['leg'], string> = { smoke: 'Smoke tests', review: 'Review', qa: 'QA' }
 const DOT: Record<Verdict['result'], string> = { pass: 'g', fail: 'r', noted: 'y' }
@@ -163,7 +164,7 @@ export default function ReviewView({ route }: { route: string }) {
         <div className="hub-top">
           <h2>{detail.title}</h2>
           <span>
-            {detail.project && <span className="hub-pill">{detail.project}</span>}
+            <PageProjectChip id={detail.project} />
             {detail.source && <> <span className="hub-pill">{detail.source}</span></>}
           </span>
           <GetHelp className="hub-top-help" target={{ kind: 'review', id, label: 'review', title: detail.title }} />

@@ -102,7 +102,7 @@ try {
   assert.match(await busyPage.locator('.today-all').innerText(), /^All 5/);
   const kindRows = await busyPage.locator('.hub-panel[aria-label="Needs you"] .nrow small').allInnerTexts();
   assert.equal(kindRows.length, 3, 'Today shows only the top three of five.');
-  for (const row of kindRows) assert.match(row, /^(Question|Steps|PR review|Unstick|Approval) · /, `Row "${row}" starts with its kind.`);
+  for (const row of kindRows) assert.match(row, /^(Question|Steps|PR review|(?:Claude|Codex|Session) \w+|Approval) · /, `Row "${row}" starts with its kind.`);
   assert.equal((await busyPage.locator('.hub-kpi[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await busyPage.locator('[data-alert]').innerText(), /Nightly brief failed[\s\S]*529/);
   await busyPage.setViewportSize({ width: 375, height: 812 });
@@ -128,7 +128,7 @@ try {
   assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
   const fixtureBlocked = page.locator('.ni', { hasText: 'Permission needed' });
   assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^Open the Claude app on pc\.example\.test$/);
-  assert.equal(await fixtureBlocked.locator('a').count(), 0, 'No link: it is words, not a button.');
+  assert.equal(await fixtureBlocked.locator('a:not(.ni-project)').count(), 0, 'No link: it is words, not a button.');
   assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
   // One shared source: the sidebar's Needs you entry and the phone bar's badge say the same.
   assert.equal(await page.locator('[data-hub-inbox-badge]').innerText(), '3');

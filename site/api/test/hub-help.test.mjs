@@ -137,7 +137,7 @@ test('a review quotes its legs and counts its screenshots; a blocked session quo
   assert.match(built.text, /Screenshots: 2 \(not included here\)/);
   assert.equal(built.pictures.length, 0);
   const blocked = await buildHelpContext('blocked', { id: 'sess-1', title: 'Blocked: need a token', at: NOW, project: 'probe', host: 'pc.example.test', summary: 'The deploy asks for a login.' }, { id: 'sess-1', ...files() });
-  assert.match(blocked.text, /Item: Unstick/);
+  assert.match(blocked.text, /Item: Session/);
   assert.match(blocked.text, /Blocked session: The deploy asks for a login\./);
   assert.match(blocked.text, /Owner so far: not resolved yet\./);
   assert.equal(blocked.pictures.length, 0);

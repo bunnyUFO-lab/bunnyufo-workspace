@@ -95,7 +95,7 @@ try {
   assert.deepEqual(await steps.locator('.four dd').allInnerTexts(), ['Steps only you can do', '1 of 4 done', 'Tick each step, then Submit', 'Your hands']);
   assert.deepEqual(await page.locator('.ni[data-kind="pr"] .four dd').allInnerTexts(), ['A pull request ready for you', 'Ready for review', 'Open it or mark it done', 'Merging stays yours']);
   assert.deepEqual(await page.locator('.ni[data-kind="unstick"] .four dd').allInnerTexts(), ['A session waiting on you', 'Paused at a prompt', 'Open the session', 'Your answer in the session']);
-  assert.match(await ask.locator('.ni-meta').innerText(), /^Question\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/);
+  assert.match(await ask.locator('.ni-meta').innerText(), /^Question\s*Probe\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/);
   assert.equal(await ask.locator('.hub-option').count(), 3, 'The options are in the card.');
   assert.equal(await steps.locator('[data-item]').count(), 4, 'The steps are in the card.');
 
@@ -103,7 +103,7 @@ try {
   for (const [old, now] of [['needs/todo', 'steps'], ['needs/blocked', 'unstick'], ['inbox/asks', 'question'], ['needs/needs-you', 'all'], ['needs/reviews', 'pr']]) {
     await go(page, `#/~hub/${old}`);
     await page.waitForFunction(value => document.querySelector('.hub-chip.on')?.getAttribute('data-filter') === value, now);
-    assert.equal(await page.evaluate(() => location.hash), `#/~hub/needs/${now}`, `${old} is rewritten.`);
+    assert.equal(await page.evaluate(() => location.hash), `#/~hub/needs/${now === 'unstick' ? 'sessions' : now}`, `${old} is rewritten.`);
   }
   await go(page, '#/~hub/needs/steps');
   await page.locator('.ni[data-kind="steps"]').waitFor();
@@ -376,24 +376,24 @@ try {
   await reduced.locator('[data-submit]').click();
   await reduced.locator('[data-next-note]', { hasText: 'Submitted · next: Stuck session' }).waitFor();
   await reduced.locator('.ni[data-kind="unstick"].flash').waitFor();
-  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/unstick', 'The Ask came before the list in the queue, so the next item is the blocked session: no page of its own, so the Unstick chip.');
+  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/sessions', 'The Ask came before the list in the queue, so the next item is the blocked session: no page of its own, so the Sessions chip.');
   assert.equal(await reduced.locator('[data-next-note] [data-next-back]').getAttribute('href'), `#/~hub/checklist/${listOne.id}`);
   await reduced.goBack();
   await reduced.locator('.hub-cl[data-state="submitted"]').waitFor();
 
-  step('an Unstick item has no page of its own: its link is the Unstick chip with the card in focus; the last Mark done leaves the empty state with the note');
+  step('a Sessions item has no page of its own: its link is the Sessions chip with the card in focus; the last Mark done leaves the empty state with the note');
   await go(reduced, `#/~hub/ask/${q1.id}`);
   await reduced.locator('textarea').fill('one is fine');
   await reduced.getByRole('button', { name: 'Send answer' }).click();
   await reduced.locator('[data-next-note]', { hasText: 'Answered · next: Stuck session' }).waitFor();
-  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/unstick');
+  assert.equal(await reduced.evaluate(() => location.hash), '#/~hub/needs/sessions');
   await reduced.locator('.ni[data-kind="unstick"]').waitFor();
   await reduced.locator('.ni[data-kind="unstick"] .ni-t').waitFor();
   await reduced.locator('.ni[data-kind="unstick"]').getByRole('button', { name: 'Mark done' }).click();
   await reduced.locator('.needs-empty').waitFor();
   const empty = reduced.locator('[data-next-note]');
   assert.equal(flat(await empty.textContent()), 'Marked done. Nothing else waits on you.Back');
-  assert.equal(await empty.locator('[data-next-back]').getAttribute('href'), '#/~hub/needs/unstick');
+  assert.equal(await empty.locator('[data-next-back]').getAttribute('href'), '#/~hub/needs/sessions');
   assert.equal(await reduced.locator('.hub-chip.on').getAttribute('data-filter'), 'unstick');
 
   step('Snooze counts as settled: from a deep link the next item opens');
