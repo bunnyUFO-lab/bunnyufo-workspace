@@ -819,13 +819,13 @@ The Gaming PC's report script writes a status file about once a minute to `inbox
 
 The site reads the newest file in this hour and the one before (the day prefixes only when both are empty), never from a cache. A file that fails `validStatus` (wrong version, bad host or time, over 30 sessions) counts as no file; inside a valid one, folders and repos are cut to their last path segment, links must be real session links, and unknown fields are dropped.
 
-Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status: `busy` is `working`, `idle` is `idle`, and a session with an open `blocked` event is `needs-you`. A running session from a `session-started` event on another host is added. Events from the PC's own host are dropped while its status is fresh. With no fresh status it is the event-derived list, as before. The Beads id comes from the branch name and the project's prefix in `site/api/project-defaults.mjs`.
+Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status: `busy` is `working`, `idle` is `idle`, and a session with an open `blocked` event is `needs-you`. A running session from a `session-started` event on another host is added. Events from the PC's own host are dropped while its status is fresh. With no fresh status it is the event-derived list, as before. A session whose plugin posts a heartbeat (a `session-items` event with no `touched`, at most every 10 minutes while the session works) counts as having given word: it keeps an event-derived row Working past the two quiet hours instead of "No word since". A heartbeat never resolves a blocked session and is not listed in Activity. The Beads id comes from the branch name and the project's prefix in `site/api/project-defaults.mjs`.
 
 ### Work
 
 `GET /api/hub/work[?project=<id>]` returns `{ lanes, counts, at }`: six lanes (`backlog`, `ready`, `running`, `blocked`, `review`, `done`) of cards `{ key, source, id, project, title, lane, state, why?, signs, live?, updatedAt, href }`. `source` is `beads`, `request` or `hermes`; `key` is `bead:<id>`, `request:<id>` or `run:<id>`. Without `project` it covers every project with a Beads copy plus all requests; with one, that project's issues and requests. `counts` are real totals: Backlog keeps the newest 50 cards and Done the newest 30 of the last 14 days.
 
-| Source | Backlog | Ready | Running | Blocked | Review | Done |
+| Source | Backlog | Ready | In progress (`running`) | Blocked | Review | Done |
 |---|---|---|---|---|---|---|
 | Beads issue | `deferred` | `open` with every blocker closed | `in_progress` | `blocked`; `open` with an open blocker; an open Ask on the bead or label `needs-owner` (why: "needs you") | not closed and an open `pr-opened` or `ready-for-review` event | `closed` |
 | Request | `open` and `proposed`, and any unknown state | `approved`, `taken` | `running`, `stopping` | `lost`, `failed`, `at-pc`, `asking` (why: "asked you a question"), `expired` | `done` with an open PR on its bead | `done` |
