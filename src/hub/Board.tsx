@@ -14,7 +14,7 @@ import './work.css'
 import { defaultLane } from './workLanes'
 
 const LANES: [WorkLane, string][] = [
-  ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'Running'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
+  ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'In progress'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
 ]
 const COLLAPSE = 10
 const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'Beads task'], request: ['✉', 'Request'], hermes: ['☁', 'Hermes run'] }

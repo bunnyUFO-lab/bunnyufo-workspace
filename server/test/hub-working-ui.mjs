@@ -134,6 +134,29 @@ try {
     await page.close();
   }
 
+  step('a heartbeat keeps a long-running event session working; one without reads "No word since"; neither is in Activity and a heartbeat does not resolve a blocked session');
+  const beat = await startHubFixture({ pc: 'stale', heartbeat: true });
+  fixtures.push(beat);
+  {
+    const page = await open({ width: 1280, height: 900 }, beat);
+    const panel = page.locator('[aria-label="Working now"]');
+    assert.equal(await panel.locator('[data-working="working"]').filter({ hasText: /silent · running/ }).count(), 0, 'Without a heartbeat the 3-hour-old session is not working.');
+    const quiet = panel.locator('[data-working="stale"]').filter({ hasText: /silent · running/ });
+    assert.equal(await quiet.count(), 1);
+    assert.match(await quiet.innerText(), /No word since/);
+    assert.equal(await panel.locator('[data-working="working"]').filter({ hasText: /beat · running/ }).count(), 1, 'A heartbeat 4 minutes ago keeps the session working.');
+    assert.doesNotMatch(await panel.locator('[data-working="working"]').filter({ hasText: /beat · running/ }).innerText(), /No word/);
+    await page.goto(`${beat.url}#/~hub/activity`);
+    await page.locator('.hub-top').first().waitFor();
+    await page.waitForTimeout(800);
+    assert.match(await page.locator('body').innerText(), /blocked: needs permission/, 'Activity lists the events that are news.');
+    assert.doesNotMatch(await page.locator('body').innerText(), /beat: working|blocked: working/, 'A heartbeat is not news: it is not in Activity.');
+    await page.goto(`${beat.url}#/~hub/today`);
+    await page.locator('.today-head').waitFor();
+    assert.match(await page.locator('body').innerText(), /needs permission/, 'A heartbeat does not resolve a blocked session: it stays in Needs you.');
+    await page.close();
+  }
+
   step('a fixture with no PC status shows no tile and "Nothing is running."');
   const bare = await startHubFixture({ seedData: false });
   fixtures.push(bare);

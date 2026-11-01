@@ -45,6 +45,8 @@ try {
   assert.deepEqual(await idsOf(page, 'blocked'), ['ws-ask', 'ws-owner', 'ws-stuck', 'ws-wait']);
   assert.deepEqual(await idsOf(page, 'review'), ['ws-pr']);
   assert.deepEqual(await idsOf(page, 'done'), ['ws-fresh']);
+  assert.equal((await page.locator('.wk-lane[data-lane="running"] > h3').textContent()).replace(/\s+/g, ' ').trim(), 'In progress 1', 'The lane that counts Beads items and requests is called In progress, not Running.');
+  assert.equal(await page.locator('.wk-lane h3', { hasText: /^Running/ }).count(), 0);
   const count = lane => page.locator(`.wk-lane[data-lane="${lane}"] > h3 span`).innerText();
   assert.deepEqual([await count('backlog'), await count('blocked'), await count('done')], ['14', '4', '1']);
   assert.equal(await page.locator('.wk-lane[data-lane="backlog"] .wk-card').count(), 10, 'The Backlog shows ten and folds the rest.');
@@ -121,12 +123,13 @@ try {
   await page.locator('[data-work-tab="lanes"]').click();
   await page.locator('.wk-lane').first().waitFor();
 
-  step('phone: one lane at a time, Running first, the chip switches it, nothing scrolls sideways');
+  step('phone: one lane at a time, In progress first, the chip switches it, nothing scrolls sideways');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${lanes.url}#/~hub/work/lanes`);
   await phone.locator('.wk-lane-chips').waitFor();
   assert.deepEqual(await visibleLanes(phone), ['running']);
   assert.equal(await phone.locator('[data-lane-chip="running"]').getAttribute('aria-pressed'), 'true');
+  assert.match(await phone.locator('[data-lane-chip="running"]').innerText(), /In progress\s*1/);
   assert.match(await phone.locator('[data-lane-chip="blocked"]').innerText(), /Blocked\s*4/);
   await phone.locator('[data-lane-chip="blocked"]').tap();
   assert.deepEqual(await visibleLanes(phone), ['blocked']);

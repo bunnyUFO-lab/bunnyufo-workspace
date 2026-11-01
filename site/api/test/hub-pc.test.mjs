@@ -8,6 +8,7 @@ import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
 import { beadOfBranch, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
+import { buildToday } from '../hub-model.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
@@ -91,6 +92,29 @@ test('workingNow: a blocked event makes one needs-you and one working, ordered',
   assert.equal(items[0].bead, undefined, 'ml-wj-t2 is longer than the id pattern allows after the prefix.');
   assert.equal(items[1].bead, 'ws-b1z.11');
   assert.ok(items.every(item => item.source === 'pc' && item.host === 'test-pc' && item.agent === 'claude'));
+});
+
+test('workingNow: a heartbeat (a session-items event with no ids) is a word; the same session without one reads stale', () => {
+  const started = ts => eventJson({ kind: 'session-started', ts, session: 'a', host: 'test-pc', title: 'x', project: 'probe' });
+  const silent = withFile([started(minutesAgo(NOW, 180))]);
+  assert.equal(workingNow({ events: silent, at: NOW })[0].state, 'stale');
+  const beat = withFile([started(minutesAgo(NOW, 180)), eventJson({ kind: 'session-items', ts: minutesAgo(NOW, 4), session: 'a', host: 'test-pc', title: 'probe: working', project: 'probe' })]);
+  const rows = workingNow({ events: beat, at: NOW });
+  assert.equal(rows[0].state, 'working');
+  // A heartbeat from the future is no word.
+  const future = withFile([started(minutesAgo(NOW, 180)), eventJson({ kind: 'session-items', ts: minutesAgo(NOW, -30), session: 'a', host: 'test-pc', title: 'x', project: 'probe' })]);
+  assert.equal(workingNow({ events: future, at: NOW })[0].state, 'stale');
+});
+
+test('buildToday: a heartbeat is not in Recent, and does not resolve a blocked session', () => {
+  const events = withFile([
+    eventJson({ kind: 'session-started', ts: minutesAgo(NOW, 30), session: 'a', host: 'test-pc', title: 'x', project: 'probe' }),
+    eventJson({ kind: 'blocked', ts: minutesAgo(NOW, 20), session: 'a', host: 'test-pc', title: 'needs you', project: 'probe' }),
+    eventJson({ kind: 'session-items', ts: minutesAgo(NOW, 5), session: 'a', host: 'test-pc', title: 'probe: working', project: 'probe' }),
+  ]).reverse();
+  const today = buildToday({ asks: [], events, now: NOW });
+  assert.equal(today.recent.some(event => event.kind === 'session-items'), false);
+  assert.equal(today.needsYou.filter(item => item.kind === 'blocked').length, 1);
 });
 
 test('workingNow: a 20-minute-old status falls back to events; a cloud session sits beside PC sessions', () => {

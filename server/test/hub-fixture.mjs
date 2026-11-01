@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, work = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -133,6 +133,16 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     // Off by default. Four sessions that started 36 hours to 3 days ago and never ended, and one that started 20 minutes ago.
     for (const [session, hours] of [['old-bot', 36], ['old-sheet', 48], ['old-loops', 60], ['old-link', 72]]) seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, hours * 60), session, host: 'test-pc', title: `${session} session`, project: 'probe' }));
     seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, 20), session: 'live-one', host: 'cloud', title: 'Live cloud session', project: 'probe' }));
+  }
+
+  if (heartbeat) {
+    // Off by default (`'without'` leaves out beat-one's heartbeat, for a before picture). Two sessions that started 3 hours ago on a host with no PC status: `beat-one` posted a heartbeat (a session-items event with
+    // no `touched`) 4 minutes ago, `silent-one` never did. A third, `blocked-one`, is blocked and only a heartbeat followed.
+    for (const session of ['beat-one', 'silent-one']) seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, 180), session, host: 'test-pc', title: `${session} session`, project: session.split('-')[0] }));
+    if (heartbeat !== 'without') seed.event(eventJson({ kind: 'session-items', ts: minutesAgo(now, 4), session: 'beat-one', host: 'test-pc', title: 'beat: working', project: 'beat' }));
+    seed.event(eventJson({ kind: 'session-started', ts: minutesAgo(now, 150), session: 'blocked-one', host: 'test-pc', title: 'blocked-one session', project: 'blocked' }));
+    seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(now, 140), session: 'blocked-one', host: 'test-pc', title: 'blocked: needs permission', project: 'blocked' }));
+    seed.event(eventJson({ kind: 'session-items', ts: minutesAgo(now, 3), session: 'blocked-one', host: 'test-pc', title: 'blocked: working', project: 'blocked' }));
   }
 
   if (work) {
