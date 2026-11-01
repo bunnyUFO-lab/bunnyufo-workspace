@@ -55,6 +55,25 @@ const AVATAR_SHEET = `The owner picked a variant of the avatar for the agent \`{
 5. Put \`preview.png\` in \`ask-images/\` at the checkout root. Write \`ask.json\`: the question "Use this sheet for {{agent}}?", \`requirePasskey\` set to true, options \`use\` ("Use it") and \`skip\` ("Not this one"), \`image\` set to \`preview.png\`, and \`avatar\` set to \`{ "agent": "{{agent}}", "sheet": "sheet-<stamp>" }\`. Create it with \`node .claude/bin/run-ask.mjs\` (no arguments). The picture is context only: the Hub draws the real sheet.
 6. Do not wait for the answer. Write \`report.md\` and \`run-finish.json\` (\`{ "outcome": "card", "summary": "<one line>" }\`), then finish with \`node .claude/bin/run-finish.mjs\` (no arguments).`;
 
+// The two Unity runs. Both run on the PC through the dispatch rules (the `bunnyufo:dispatch` skill): only allow-listed commands,
+// `run-commit.mjs` / `run-push.mjs` / `run-pr.mjs` / `run-ask.mjs` / `run-finish.mjs`, never a merge. The shared lines still say "never
+// deploy": a playtest build stays on the PC, and the owner publishes it.
+const PLAYTEST_BUILD = `Build the project's playable WebGL build on this PC and playtest it. The job above says what to build and what to look at. Use the \`bunnyufo:unity-webgl-deploy\` and \`bunnyufo:unity-playtest\` skills for how, but only the commands the allow list names: a command that is denied is final (the run brief's rules).
+1. Read the repository's \`CLAUDE.md\` for how it builds and tests. The project must not be open in the Unity editor (\`tasklist\`); if Unity is running on it, stop and finish as \`failed\` with that reason.
+2. Run its light tests first, EditMode only, with the command \`CLAUDE.md\` names. If they fail, do not build: report the first failure with its message.
+3. Build for WebGL with the repository's own build tooling (\`unity build\` with the WebGL target, or the script \`CLAUDE.md\` names), into a folder git ignores. Never write a build script, never change Build Settings or scenes. A WebGL build is slow: start it once, wait for it, never start a second. If the build fails, report the first error line and stop.
+4. Playtest it. The run brief's header says whether windows are allowed. If they are, run the playtest tooling the repository has for the job above (the bot batch, the screenshot tour or a PlayMode run, as \`CLAUDE.md\` describes it), and say what you looked at. If they are not, run no PlayMode and nothing that opens a window, and say that you skipped it. \`unity command\` is denied in a run, so the skill's Play Mode steps are not available here.
+5. Keep it on this PC: no \`web\`, no \`itch\`, no \`delete\`, no \`setup-gamehost.sh\`, no upload. Commit nothing: the build folder must stay out of git, and \`git status\` should show no tracked change when you finish. If it does, say so in the report; do not commit it.
+6. Write \`report.md\`: the Unity version, the build folder and its size, the \`index.html\` path inside it, how long the build took, the tests that ran and their result, what the playtest tried and saw (a clean console is not proof that it works), anything skipped and why, and the line for the owner to look at it: \`python tools/gamedev-deploy.py local <build folder>\` from the Workspace. Finish with \`run-finish.json\` as \`{ "outcome": "card", "summary": "<one line: built, where, what was tried>" }\` (there is no PR: nothing was committed), then \`node .claude/bin/run-finish.mjs\` (no arguments).`;
+
+const SPRITE_SET = `Make the sprites described above with Sprite Studio's MCP tools (the \`pixel-studio\` server) and keep them where the project keeps its art. Use the \`bunnyufo:pixel-art-pipeline\` skill; read its "Working rules" first.
+1. Pass \`source: "pc"\` on every Sprite Studio queue tool. Never use the cloud source, even when the PC is busy: the job waits. Call \`list_sources\` and \`gpu_status\` first, and \`free_gpu("art")\` before a heavy job.
+2. Settle the art direction once: height in pixels, palette, view and a Sprite Studio style (\`list_styles\`) from the job above and the project's art notes. If something that matters is still open, ask the owner one question (\`ask.json\`, then wait as the run brief says) rather than guess.
+3. Find or create the subject, draw 2 to 4 variants (\`generate_drafts\`), \`view\` every one, pick one and say why, then \`make_sprite\`. Make directions or animations only when the job asks, always from the accepted sprite's path. Wait with \`wait_for_job\`; never resubmit a job that is queued or running. \`view\` every result and run again with another seed on drift. Keep pixels honest: scale only by whole multiples. A set that still drifts after two tries ships as the best one, and the report says so.
+4. Save the results where the skill says. A Unity project keeps its sprites in the repository: put them in \`Assets/Sprites/<Subject>/\` (or the folder the project's \`CLAUDE.md\` names). Download them with \`python .claude/bin/fetch_frames.py\` (no curl): write the map (row name to the asset id from \`get\`, or its file URLs) to \`ask-images/rows.json\` (that folder is never committed), then run it with \`--studio\` set to the origin of those URLs, \`--map ask-images/rows.json\` and \`--out\` the sprite folder; it writes \`<row>/<nn>.png\`. Never write \`.meta\` files; Unity makes them when the owner opens the project, and the PR says so. A run cannot copy in the skill's import postprocessor: if the project has none that sets Point filtering and no compression for \`Assets/Sprites\`, the report and the PR must name the import settings to apply (Point, no compression, the pixels per unit you used), and must not claim a postprocessor exists. Follow the project's \`CLAUDE.md\` asset rules too (Magic Loops needs a clean \`python tools/assets/provenance.py check\` for new assets): run the check if the allow list names it, otherwise say in the report that it still needs running. If the project keeps no art in its repository, commit nothing.
+5. With files to keep: commit with \`node .claude/bin/run-commit.mjs\`, push with \`node .claude/bin/run-push.mjs\` and open the pull request with \`node .claude/bin/run-pr.mjs\` on branch \`claude/run-{{requestId}}\`; the PR body lists the Sprite Studio paths, sizes, palette and style, and the variants you rejected. Never merge it.
+6. Write \`report.md\`: what was made (Sprite Studio paths, so the owner can continue there), where it was saved, which source ran each job and what it cost (the PC is free), what drifted or was redone, and what is left. Finish with \`run-finish.json\`: \`{ "outcome": "pr", "pr": "<url>", "summary": "<one line>" }\`, or, with no PR, \`{ "outcome": "card", "summary": "<one line>" }\`, then \`node .claude/bin/run-finish.mjs\` (no arguments).`;
+
 export const PRESETS = [
   {
     id: 'code-task', label: 'Code task', icon: 'code', agent: 'Builder', kind: 'code', needs: [], targets: ['pc', 'cloud'], sideEffect: 'pr',
@@ -98,18 +117,16 @@ When the pull request is open, finish the request as your run's rules say.`),
   {
     id: 'playtest-build', label: 'Playtest build', icon: 'play', agent: 'Builder', kind: 'build', needs: ['unity'], targets: ['pc'], sideEffect: 'build',
     model: 'sonnet', permissionMode: null, opensWindows: true, allow: [], minutes: 120, fields: ['text', 'doneWhen'],
-    example: 'Build the current branch for web and make a playtest list', produces: 'a build link and a Playtest item',
+    example: 'Build the current branch for web and playtest the new level', produces: 'a WebGL build on the PC and a report',
     estimate: { cost: 'about $2 API · Sonnet', time: 'about 40 min' },
-    // draft until M3b
-    template: wrap('Build the project as described above and publish the build. Then create a Playtest item with the build link, using `cards checklist create --playtest`.\nWhen the work is done, finish the request as your run\'s rules say.'),
+    template: wrap(PLAYTEST_BUILD),
   },
   {
     id: 'sprite-set', label: 'Sprite set', icon: 'image', agent: 'Artist', kind: 'art', needs: ['comfyui', 'sprite-studio', 'gpu'], targets: ['pc'], sideEffect: 'images',
     model: 'sonnet', permissionMode: null, opensWindows: false, allow: [], minutes: 120, fields: ['text', 'doneWhen'],
-    example: 'A walk cycle for the lantern keeper, 8 frames', produces: 'images on a card and a Design review item',
+    example: 'A walk cycle for the lantern keeper, 8 frames', produces: 'a PR with the sprites, or a report',
     estimate: { cost: 'about $1 API · Sonnet, plus GPU time', time: 'about 40 min' },
-    // draft until M3b
-    template: wrap('Make the sprites described above with Sprite Studio. Put the images on a card and create a Design review item for them.\nWhen the work is done, finish the request as your run\'s rules say.'),
+    template: wrap(SPRITE_SET),
   },
   {
     id: 'agent-avatar', label: 'Agent avatar', icon: 'face', agent: 'Artist', kind: 'art', needs: ['sprite-studio', 'gpu'], targets: ['pc'], sideEffect: 'images',
