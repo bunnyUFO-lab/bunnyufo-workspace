@@ -157,8 +157,9 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
       } else {
         const outcome = outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() });
         // What the owner said that Hermes took and never read: kept in the result so the page can say "queued", not "sent".
-        const unread = pendingOf(run).slice(0, 10).map(entry => entry.slice(0, 2100));
-        await writeResult(id, unread.length ? { ...outcome, unreadReplies: unread } : outcome, run.output);
+        const pending = pendingOf(run);
+        const unread = pending ? await requests.unreadSentIds(id, pending, at).catch(() => []) : [];
+        await writeResult(id, unread.length ? { ...outcome, unreadReplies: unread.slice(0, 20) } : outcome, run.output);
         await sendQueued(id, follower, run, at);
       }
     } finally {
@@ -179,8 +180,8 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     } catch (error) { log(`[hermes] could not send the queued reply of ${id}: ${error.message}`); }
   }
 
-  /** The text Hermes took and never read, as a list of strings (it may come as one string or a list). */
-  const pendingOf = run => [].concat(run?.pending_steer ?? []).map(entry => (typeof entry === 'string' ? entry : String(entry?.text ?? entry?.input ?? ''))).filter(Boolean);
+  /** The text Hermes took and never read: one newline-joined string in Hermes 0.22.5 (a list is joined the same way), '' when there is none. */
+  const pendingOf = run => [].concat(run?.pending_steer ?? []).map(entry => (typeof entry === 'string' ? entry : String(entry?.text ?? entry?.input ?? ''))).filter(Boolean).join('\n');
 
   /**
    * The hook for a reply while the run goes: steer the run being followed (the quota retry's, when there is one). Hermes saying no,

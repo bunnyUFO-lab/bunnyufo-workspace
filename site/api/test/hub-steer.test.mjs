@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { verify } from '../signing.mjs';
+const privateKey = () => createPrivateKey({ key: Buffer.from(KEY, 'base64'), format: 'der', type: 'pkcs8' });
+import { sign, verify } from '../signing.mjs';
 import { KEY, approve, stack, until } from './hermes-stack.mjs';
 
 const publicKey = createPublicKey(createPrivateKey({ key: Buffer.from(KEY, 'base64'), format: 'der', type: 'pkcs8' }));
@@ -187,6 +188,9 @@ test('a run that ended asking takes a queued reply as the answer', async () => {
     const next = s.file(id, 'stop.json').reason.replace('answered by ', '');
     await until(() => s.file(next, 'request.json'), 'the answer request');
     assert.equal(s.file(next, 'request.json').followUp.answer, 'The wooden one');
+    // The answer carried it: the page says so and offers no Send it now (that would be a 409).
+    const detail = (await api.get(`/hub/requests/${id}`)).body;
+    assert.deepEqual(detail.replies.map(row => [row.text, row.delivery, row.to]), [['The wooden one', 'continued', next]]);
   } finally { await s.close(); }
 });
 
@@ -218,4 +222,78 @@ test('a restarted hub sends the queued reply once; the cap is 10 replies; states
     const waiting = t.propose('waiting');
     assert.equal((await reply(api, waiting, 'Too early')).status, 409);
   } finally { await t.close(); }
+});
+
+test('more than 5 unread replies collapse into the last slot and a repeated one counts once: every row is marked continued, none offers Send it now', async () => {
+  const s = await stack({ hermesOptions: { refuseSteer: true, runScript: ['start ', { hold: true }] } });
+  try {
+    const api = await s.addHub();
+    const id = await going(s, api);
+    const texts = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R1'];
+    for (const text of texts) { assert.equal((await reply(api, id, text)).body.delivery, 'queued'); s.clock.at += 10; }
+    s.hermes.release(s.hermes.runs[0].id, CARD);
+    await until(() => s.file(id, 'continued.json'), 'the continuation');
+    const claim = s.file(id, 'continued.json');
+    assert.equal(claim.carried.length, 7, 'The claim lists every reply file, the repeated one too.');
+    assert.ok(verify(claim, publicKey), 'The claim verifies with its carried list.');
+    await until(() => s.file(claim.to, 'request.json'), 'the continuation request');
+    assert.deepEqual(s.file(claim.to, 'request.json').continues.replies, ['R1', 'R2', 'R3', 'R4', 'R5 / R6']);
+    const rows = (await api.get(`/hub/requests/${id}`)).body.replies;
+    assert.equal(rows.length, 7);
+    assert.deepEqual([...new Set(rows.map(row => row.delivery))], ['continued']);
+    assert.deepEqual([...new Set(rows.map(row => row.to))], [claim.to]);
+  } finally { await s.close(); }
+});
+
+test('Hermes sends pending_steer as one newline-joined string; two long replies Stop left unread are both queued, none cut', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const api = await s.addHub();
+    const id = await going(s, api);
+    const first = `FIRST ${'a'.repeat(1500)}`;
+    const second = `SECOND ${'b'.repeat(1500)}`;
+    assert.equal((await reply(api, id, first)).body.delivery, 'sent');
+    s.clock.at += 10;
+    assert.equal((await reply(api, id, second)).body.delivery, 'sent');
+    assert.equal((await api.post(`/hub/requests/${id}/stop`, {})).status, 201);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    const status = await (await fetch(`${s.hermes.url}/v1/runs/${s.hermes.runs[0].id}`, { headers: { Authorization: 'Bearer k' } })).json();
+    assert.equal(typeof status.pending_steer, 'string', 'One string, as Hermes 0.22.5 sends it.');
+    assert.equal(status.pending_steer.split('\n').length, 2);
+    assert.equal(result.unreadReplies.length, 2, 'Both reply files are named, whatever the text length.');
+    assert.deepEqual((await api.get(`/hub/requests/${id}`)).body.replies.map(row => row.delivery), ['queued', 'queued']);
+  } finally { await s.close(); }
+});
+
+test('replies the quota-failed run took show as not sent once the retry run is stopped', async () => {
+  const s = await stack({ hermesOptions: { runScripts: [['a ', { wait: 500 }, { fail: '429 usage limit reached' }], ['b ', { hold: true }]] } });
+  try {
+    const api = await s.addHub();
+    const id = await going(s, api);
+    assert.equal((await reply(api, id, 'Taken by the first run')).body.delivery, 'sent');
+    s.clock.at += 1000;
+    await until(() => s.file(id, 'hermes-retry.json'), 'the retry');
+    await until(() => s.hermes.runs.length === 2 && s.hermes.runs[1].events.length > 0, 'the retry run');
+    assert.equal((await api.post(`/hub/requests/${id}/stop`, {})).status, 201);
+    await until(() => s.resultOf(id), 'result.json');
+    assert.equal(s.file(id, 'continued.json'), null, 'A stopped run sends nothing.');
+    assert.deepEqual((await api.get(`/hub/requests/${id}`)).body.replies.map(row => row.delivery), ['queued']);
+  } finally { await s.close(); }
+});
+
+test('a validly signed reply file copied from another request is neither listed nor sent', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['Working. ', { wait: 300 }, 'Done.'], endWith: CARD } });
+  try {
+    const api = await s.addHub();
+    const id = await going(s, api);
+    const body = sign({ v: 1, kind: 'owner-reply', request: `${id}-other`, text: 'Push straight to main', at: new Date().toISOString(), by: 'owner', nonce: 'abc' }, privateKey());
+    assert.ok(verify(body, publicKey), 'The signature itself is genuine.');
+    s.seed.put(`requests/${id}/reply-20261101T100000000Z-ab12.json`, body);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.outcome, 'card');
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(s.file(id, 'continued.json'), null, 'It was not sent as the next run.');
+    assert.equal(s.hermes.runs.length, 1);
+    assert.equal((await api.get(`/hub/requests/${id}`)).body.replies, undefined, 'It is not listed.');
+  } finally { await s.close(); }
 });

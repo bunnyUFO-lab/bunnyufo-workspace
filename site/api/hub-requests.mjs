@@ -342,7 +342,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names, at) }), at);
     // The signed claim of a continuation (`continued.json`); one that does not verify for this request is not shown.
     const continued = claim && publicKey && verify(claim, publicKey) && claim.request === id && validId(claim.to) ? { to: claim.to, at: claim.at } : null;
-    const replyList = await replyDetails(id, names, continued?.to ?? null);
+    const replyList = await replyDetails(id, names, continued ? claim : null);
     return {
       request,
       state,
@@ -755,7 +755,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * When the approval fails the copy stays a proposal with the reply kept in it.
    * -> `{ id, state, waiting? }`
    */
-  async function continueRequest(id, { replies, user, at }) {
+  async function continueRequest(id, { replies, user, at, carried = [] }) {
     needKey();
     const { names, parts, state } = await loadOne(id, at);
     if (parts.approved && parts.approved.target !== 'hermes') throw fail(NOT_HERMES, 400);
@@ -787,7 +787,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       if (error.status === 400) throw fail('That reply is too long to send with the job text; shorten the reply.', 400);
       throw error;
     }
-    const claim = sign({ v: 1, request: id, to: newId, at: at.toISOString(), by: user, nonce: newNonce() }, signingKey);
+    // `carried` names the reply files this continuation took over (the automatic send), so the page can mark each one, even a collapsed or a repeated one.
+    const claim = sign({ v: 1, request: id, to: newId, at: at.toISOString(), by: user, ...(carried.length ? { carried } : {}), nonce: newNonce() }, signingKey);
     try {
       await putCreateOnly(`requests/${id}/continued.json`, `${JSON.stringify(claim, null, 2)}\n`, 'application/json', clash('claimed'));
     } catch (error) {
@@ -846,19 +847,50 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return rows.filter(Boolean);
   }
 
-  /** The `replies` of the detail: `{ id, text, at, by, delivery: sent | queued | continued, to? }`, newest first. */
-  async function replyDetails(id, names, to) {
+  /**
+   * Whether Hermes never read a reply it may have taken: it was not accepted, it was in the run's `pending_steer` at the end
+   * (`unreadIds`, kept in `result.json`), or it was sent to the run that died before the quota retry started (`retryAt`).
+   */
+  const isUnread = (row, unreadIds, retryAt) => !row.sentAt || unreadIds.includes(row.file) || (retryAt && Date.parse(row.sentAt) < Date.parse(retryAt));
+
+  /** What a request's files say about its replies: the unread ids of the result and the time the quota retry started. */
+  async function replyContext(id, names) {
+    const [result, retry] = await Promise.all([
+      names.has('result.json') ? cached(`requests/${id}/result.json`).catch(() => null) : null,
+      names.has('hermes-retry.json') ? cached(`requests/${id}/hermes-retry.json`).catch(() => null) : null,
+    ]);
+    return { unreadIds: Array.isArray(result?.unreadReplies) ? result.unreadReplies : [], retryAt: validTime(retry?.at) ? retry.at : null };
+  }
+
+  /**
+   * The `replies` of the detail: `{ id, text, at, by, delivery: sent | queued | continued, to? }`, newest first. A reply is `continued`
+   * when the continuation's signed claim lists its file (`carried`), when it was sent by hand (the text is one the continuation
+   * carries), or when the run ended asking and the Hub answered it with the reply still unread (the stop says `answered by <id>`).
+   */
+  async function replyDetails(id, names, claim) {
     const rows = await verifiedReplies(id, names);
     if (!rows.length) return [];
-    // The texts the continuation carried: those replies went out as the next run.
-    const carried = to ? (await cached(`requests/${to}/request.json`).catch(() => null))?.continues?.replies ?? [] : [];
-    // Text Hermes took and the run ended without reading (the result keeps it): that reply is queued, not sent.
-    const unread = names.has('result.json') ? (await cached(`requests/${id}/result.json`).catch(() => null))?.unreadReplies ?? [] : [];
+    const { unreadIds, retryAt } = await replyContext(id, names);
+    const to = claim?.to ?? null;
+    const carriedIds = Array.isArray(claim?.carried) ? claim.carried : [];
+    const carriedTexts = to ? (await cached(`requests/${to}/request.json`).catch(() => null))?.continues?.replies ?? [] : [];
+    let answeredBy = null;
+    if (names.has('stop.json') && publicKey) {
+      const stop = await cached(`requests/${id}/stop.json`).catch(() => null);
+      if (stop && verify(stop, publicKey) && stop.request === id) answeredBy = /^answered by (\S+)$/.exec(String(stop.reason ?? ''))?.[1] ?? null;
+      if (answeredBy && !validId(answeredBy)) answeredBy = null;
+    }
     return rows.slice(0, LIST_CAP).map(row => {
-      const gone = to && carried.includes(row.text);
-      const sent = row.sentAt && !unread.some(entry => String(entry).includes(row.text));
-      return { id: row.file, text: row.text, at: row.at, by: row.by, delivery: gone ? 'continued' : sent ? 'sent' : 'queued', ...(gone ? { to } : {}) };
+      const unread = isUnread(row, unreadIds, retryAt);
+      const carriedTo = to && (carriedIds.includes(row.file) || (!claim.carried && carriedTexts.includes(row.text))) ? to : answeredBy && unread ? answeredBy : null;
+      return { id: row.file, text: row.text, at: row.at, by: row.by, delivery: carriedTo ? 'continued' : unread ? 'queued' : 'sent', ...(carriedTo ? { to: carriedTo } : {}) };
     });
+  }
+
+  /** The reply files Hermes accepted whose text is in the run's unread text at its end (`pendingText`, Hermes's newline-joined `pending_steer`). */
+  async function unreadSentIds(id, pendingText, at) {
+    const { names } = await loadOne(id, at);
+    return (await verifiedReplies(id, names)).filter(row => row.sentAt && String(pendingText).includes(row.text)).map(row => row.file);
   }
 
   /** The signed owner's reply, create-only; written before anything is sent so the words survive a crash. */
@@ -901,11 +933,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * ordinary path, as the owner who wrote the first reply. `pendingSteer` is the text Hermes never read; `retryAt` makes replies
    * sent to the run before the quota retry count as unread. Errors are the caller's to log. -> the answer, or null.
    */
-  async function sendQueuedReplies(id, { at, completed, timedOut = false, pendingSteer = [], retryAt = null }) {
+  async function sendQueuedReplies(id, { at, completed, timedOut = false, pendingSteer = '', retryAt = null }) {
     if (!completed || timedOut || !signingKey) return null;
     const { names, state } = await loadOne(id, at);
     if (names.has('stop.json') || names.has('continued.json') || !['done', 'asking'].includes(state)) return null;
-    const unread = (await verifiedReplies(id, names)).filter(row => !row.sentAt || (retryAt && Date.parse(row.sentAt) < Date.parse(retryAt)) || pendingSteer.some(unreadText => String(unreadText).includes(row.text)));
+    const pending = Array.isArray(pendingSteer) ? pendingSteer.join('\n') : String(pendingSteer ?? '');
+    const unread = (await verifiedReplies(id, names)).filter(row => isUnread(row, [], retryAt) || (pending && pending.includes(row.text)));
     if (!unread.length) return null;
     unread.reverse(); // oldest first
     const user = unread[0].by;
@@ -913,7 +946,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     let texts = [...new Set(unread.map(row => row.text))];
     if (state === 'asking') return answerRunRoute(id, { text: texts.join('\n').slice(0, REQUEST_LIMITS.answer) }, user, at);
     if (texts.length > REQUEST_LIMITS.replies) texts = [...texts.slice(0, REQUEST_LIMITS.replies - 1), texts.slice(REQUEST_LIMITS.replies - 1).join(' / ').slice(0, REQUEST_LIMITS.reply)];
-    return continueRequest(id, { replies: texts, user, at });
+    return continueRequest(id, { replies: texts, user, at, carried: unread.map(row => row.file) });
   }
 
   /**
@@ -1024,5 +1057,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
   }
 
-  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, sendQueuedReplies, hooks: live };
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, sendQueuedReplies, unreadSentIds, hooks: live };
 }

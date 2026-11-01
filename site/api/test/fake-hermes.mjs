@@ -18,6 +18,8 @@
 //   steerBroken    the steer route answers 500
 //   ignoreSteer    the steer is accepted (200, run.steered) but the run never reads it, as if the Codex path dropped it: it ends up in
 //                  `pending_steer`. Without it the text is read after the run's next tool.completed.
+//   pending_steer  on a terminal event and status: the unread text, newline-joined in ONE string, as Hermes 0.22.5 sends it
+//   runScripts     one script per run, in the order the runs start (the quota retry is the second); a run past the list uses runScript
 //   hermes.steers  one record per accepted steer: { run_id, input }
 //   askApproval    true adds a protected-file write that asks for approval after the first delta
 //   endWith        the final output (default: the deltas joined); end it with a question mark for a run that asks
@@ -52,7 +54,7 @@ const notFound = response => json(response, 404, openaiError('Run not found', 'i
 export async function startFakeHermes({
   key = 'test-key', chunks = ['Hel', 'lo ', 'there'], delayMs = 20, onTurn, fail = false, hold = false, refuseImages = false,
   runScript, askApproval = false, endWith, failWith, chain = DEFAULT_CHAIN, providerFailures = {}, forgetRuns = false,
-  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false, approvalAgeMs = 0, approvalChoices, refuseSteer = false, steerMissing = false, steerBroken = false, ignoreSteer = false,
+  dropBufferAfterMs = 0, approvalTimeoutMs = 300_000, busy = false, maxConcurrent = 10, dropStreamAfter = 0, keepaliveMs = 10_000, reportServed = false, approvalAgeMs = 0, approvalChoices, runScripts, refuseSteer = false, steerMissing = false, steerBroken = false, ignoreSteer = false,
 } = {}) {
   const requests = [];
   const state = { closedEarly: 0 };
@@ -123,7 +125,7 @@ export async function startFakeHermes({
     return answer;
   };
   const execute = async run => {
-    const steps = [...(runScript ?? chunks)];
+    const steps = [...(runScripts?.[runs.indexOf(run)] ?? runScript ?? chunks)];
     if (askApproval) steps.splice(Math.min(1, steps.length), 0, { approval: {} });
     const { requested } = run;
     // The named provider alone, or the first of the chain that works.
@@ -168,13 +170,13 @@ export async function startFakeHermes({
     run.output = endWith !== undefined && !run.stopped ? endWith : text;
     if (run.stopped) {
       run.usage = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
-      emit(run, 'run.cancelled', { completed: false, partial: false, interrupted: true, turn_exit_reason: run.stopReason, ...(run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}) });
+      emit(run, 'run.cancelled', { completed: false, partial: false, interrupted: true, turn_exit_reason: run.stopReason, ...(run.pendingSteer.length ? { pending_steer: run.pendingSteer.join('\n') } : {}) });
       return finish(run, 'cancelled');
     }
     const out = Math.max(1, Math.ceil(run.output.length / 4));
     run.usage = { input_tokens: 21749, output_tokens: out, total_tokens: 21749 + out };
     run.runtime = runtimeOf(run);
-    emit(run, 'run.completed', { output: run.output, usage: run.usage, runtime: run.runtime, completed: true, partial: false, interrupted: false, ...(run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}) });
+    emit(run, 'run.completed', { output: run.output, usage: run.usage, runtime: run.runtime, completed: true, partial: false, interrupted: false, ...(run.pendingSteer.length ? { pending_steer: run.pendingSteer.join('\n') } : {}) });
     return finish(run, 'completed');
   };
   const view = run => {
@@ -182,7 +184,7 @@ export async function startFakeHermes({
     return {
       object: 'hermes.run', model: 'main', created_at: run.created, pending_controls: run.pending, run_id: run.id, status: run.status,
       session_id: run.id, admission_id: run.admission, execution_generation: 1,
-      output: done ? run.output : '', usage: done ? run.usage : {}, ...(done && run.pendingSteer.length ? { pending_steer: [...run.pendingSteer] } : {}), ...(run.status === 'completed' ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
+      output: done ? run.output : '', usage: done ? run.usage : {}, ...(done && run.pendingSteer.length ? { pending_steer: run.pendingSteer.join('\n') } : {}), ...(run.status === 'completed' ? { runtime: run.runtime } : {}), ...(run.error ? { error: run.error } : {}),
     };
   };
   const activeRuns = () => runs.filter(run => !TERMINAL.has(run.status)).length;
