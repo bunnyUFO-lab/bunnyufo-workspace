@@ -91,7 +91,7 @@ try {
   assert.ok((await doing.getAttribute('class')).includes('live'));
   assert.equal(await doing.locator('.wk-src').getAttribute('title'), 'Beads task');
   assert.equal(await page.locator('.wk-card.live').count(), 1, 'Only the working card glows.');
-  assert.match(await doing.getAttribute('href'), /^#\/~hub\/map\/lanes\/ws-doing$/);
+  assert.match(await doing.getAttribute('href'), /^#\/~hub\/work\/lanes\/ws-doing$/);
   const why = page.locator('[data-card="bead:ws-ask"] .wk-why');
   assert.equal((await why.innerText()).trim(), 'needs you');
   assert.notEqual(await why.evaluate(node => getComputedStyle(node).color), await page.locator('[data-card="bead:ws-ask"] .wk-title').evaluate(node => getComputedStyle(node).color), 'The why line has its own colour.');
