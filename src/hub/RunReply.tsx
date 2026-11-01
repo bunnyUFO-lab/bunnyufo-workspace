@@ -26,7 +26,8 @@ function replyGate({ state, target, approved, hasRun, continuedTo, canWrite }: {
   if (NO_BOX.has(state) || !approved) return null
   if (target !== 'hermes') return { reason: 'Replies go to Hermes jobs. A PC or cloud run can’t take a message yet.' }
   if (continuedTo) return { reason: 'Continued as', continuedTo }
-  if (state === 'stopped' && !hasRun) return null
+  // Stopped or failed before Hermes ever ran: nothing to continue (Approve again covers it).
+  if ((state === 'stopped' || state === 'failed') && !hasRun) return null
   if (!canWrite) return { reason: 'Sign in to reply.' }
   if (state === 'approved' || (state === 'taken' && !hasRun)) return { reason: 'You can reply once Hermes has started.' }
   if (state === 'stopping') return { reason: 'Stopping. Reply after it has stopped.' }

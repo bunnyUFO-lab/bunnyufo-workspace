@@ -145,6 +145,17 @@ try {
   assert.equal(await failedBox.locator('[data-reply-input]').inputValue(), 'Try another angle');
   await page.unroute('**/api/hub/requests/*/reply');
 
+  step('a Hermes job that failed before it started has no box (nothing to continue); Approve again stays');
+  const never = id('never-started-a9a9');
+  idle.seed.request(proposal(idle.now, 'failed', 'Research that never started', { id: never }));
+  idle.seed.put(`requests/${never}/approved.json`, approvedFile(never, 'hermes', idle.now));
+  idle.seed.put(`requests/${never}/taken.json`, { runner: 'hermes', host: 'hub', at: minutesAgo(idle.now, 9).toISOString() });
+  idle.seed.put(`requests/${never}/result.json`, { v: 1, outcome: 'failed', summary: 'Hermes could not start it.', reason: 'start-failed', by: 'hub', at: minutesAgo(idle.now, 8).toISOString() });
+  await page.goto(`${idle.url}#/~hub/request/${encodeURIComponent(never)}`);
+  await page.locator(`[data-run-view="${never}"] [data-run-state-chip]`, { hasText: 'Failed' }).waitFor();
+  assert.equal(await page.locator(`[data-run-view="${never}"] [data-run-again]`).count(), 1);
+  assert.equal(await page.locator(`[data-run-view="${never}"] ${GATE}`).count(), 0, 'No reply box without a Hermes run.');
+
   step('phone: the box fits the screen with no sideways scroll, on the request page');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.pc)}`);
