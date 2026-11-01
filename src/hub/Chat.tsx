@@ -176,7 +176,16 @@ function Bubble({ line, conversation, models, who, agents }: { line: Shown; conv
 
 export default function Chat({ id }: { id?: string }) {
   if (!host.chat) return <p className="hub-empty">Chat is not set up on this host.</p>
-  return <ChatView key={id ?? 'new'} id={id} />
+  return <ChatShell id={id} />
+}
+
+// A start from Spawn always lands in a fresh conversation. On a new Chat that is already showing (it may be empty, or busy with a
+// reply that is still streaming) the view is remounted, so it opens like New chat does: the agent's own model, no earlier pick,
+// the text as a draft. On a stored conversation the address change to a new chat remounts it anyway.
+function ChatShell({ id }: { id?: string }) {
+  const [fresh, setFresh] = useState(0)
+  useEffect(() => onChatStart(() => { if (!id) setFresh(count => count + 1) }), [id])
+  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} />
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
@@ -405,22 +414,14 @@ function ChatView({ id }: { id?: string }) {
   }, [id])
   useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
 
-  // "Chat with <agent>" from Spawn: this agent and the typed text as a draft, not sent. Only a new, empty conversation takes it.
-  const emptyNew = !id && !help && !messages.length && pending === null
-  const emptyNewRef = useRef(emptyNew)
-  useEffect(() => { emptyNewRef.current = emptyNew })
+  // "Chat with <agent>" from Spawn: a fresh Chat takes the start the moment it mounts, once (see Chat above).
   useEffect(() => {
-    const apply = () => {
-      if (!emptyNewRef.current) return
-      const start = takeChatStart()
-      if (!start) return
-      setPersona(start.persona)
-      setDraft(start.draft)
-      input.current?.focus()
-    }
-    apply()
-    return onChatStart(apply)
-  }, [])
+    const start = takeChatStart()
+    if (!start || id || help) return
+    setPersona(start.persona)
+    setDraft(start.draft)
+    input.current?.focus()
+  }, [id, help])
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }

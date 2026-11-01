@@ -4,11 +4,12 @@
 export interface ChatStart { persona: string; draft: string }
 
 const EVENT = 'buw-chat-start'
-let waiting: ChatStart | null = null
+let waiting: { start: ChatStart; at: number } | null = null
+const FRESH_MS = 5000   // a start that no Chat took in this time is dropped: it never outlives the open that made it
 
 /** Queue a start and tell a Chat that is already showing. */
 export function startChat(start: ChatStart) {
-  waiting = start
+  waiting = { start, at: Date.now() }
   window.dispatchEvent(new Event(EVENT))
 }
 
@@ -16,7 +17,7 @@ export function startChat(start: ChatStart) {
 export function takeChatStart(): ChatStart | null {
   const value = waiting
   waiting = null
-  return value
+  return value && Date.now() - value.at < FRESH_MS ? value.start : null
 }
 
 export const onChatStart = (listener: () => void) => {

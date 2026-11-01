@@ -90,6 +90,47 @@ try {
   assert.deepEqual(writes.filter(line => !/\/chat(\/|$)/.test(line)), [], 'Only the chat turn itself wrote.');
   assert.deepEqual(requestsIn(fx), []);
 
+  step('An earlier manual model pick does not survive the switch: the new agent opens on its own model');
+  await page.goto(`${fx.url}#/~hub/chat`);
+  await page.locator('[data-chat-model]').selectOption('sonnet');
+  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Sonnet · API');
+  await page.locator('[data-chat-model]').selectOption({ label: 'Start a job instead…' });
+  await page.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
+  await page.locator('[data-preset="game-teardown"]').click();
+  await page.locator('[data-spawn-chat]', { hasText: 'Chat with Teardown' }).click();
+  await page.locator('[data-spawn-text]').fill('How does it teach?');
+  await page.locator('[data-spawn-go]').click();
+  await page.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'teardown');
+  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex');
+  assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'How does it teach?');
+
+  step('Busy: a reply is still streaming; Open chat lands in a fresh conversation, and nothing stays queued for a later open');
+  const slow = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { runScript: ['Working. ', { hold: true }] } });
+  fixtures.push(slow);
+  const other = await open({ width: 1280, height: 900 });
+  await other.goto(`${slow.url}#/~hub/chat`);
+  await other.locator('textarea[aria-label="Message"]').fill('Hold on');
+  await other.keyboard.press('Enter');
+  await other.locator('[data-pending]').waitFor();
+  assert.equal(await other.locator('.hub-bubble.user').count(), 1);
+  await other.keyboard.press('Control+k');
+  await other.locator('input[role="combobox"]').fill('spawn compare two card games');
+  await other.keyboard.press('Enter');
+  await other.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
+  await other.locator('[data-preset="research"]').click();
+  await other.locator('[data-spawn-chat]', { hasText: 'Chat with Researcher' }).click();
+  await other.locator('[data-spawn-text]').fill('A second thought');
+  await other.locator('[data-spawn-go]').click();
+  await other.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'researcher');
+  assert.equal(await other.locator('textarea[aria-label="Message"]').inputValue(), 'A second thought');
+  assert.equal(await other.locator('.hub-bubble').count(), 0, 'A fresh conversation, not the busy one.');
+  assert.equal(await other.locator('[data-chat-model] option:checked').innerText(), 'Codex');
+  await other.goto(`${slow.url}#/~hub/needs`);
+  await other.goto(`${slow.url}#/~hub/chat`);
+  await other.locator('[data-chat-persona]').waitFor();
+  assert.equal(await other.locator('[data-chat-persona]').inputValue(), 'hermes', 'No old start comes back.');
+  assert.equal(await other.locator('textarea[aria-label="Message"]').inputValue(), '');
+
   step('Another template is unchanged: its fields and estimate come back');
   await page.goto(`${fx.url}#/~hub/today`);
   await page.locator('[data-spawn-open]').click();
