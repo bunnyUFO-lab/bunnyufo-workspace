@@ -9,6 +9,8 @@
 export const EXPORT_MAX_BYTES = 256 * 1024;
 /** An export older than this means the exporter has stopped (it publishes at least every 6 h). */
 export const STALE_SECONDS = 7 * 3600;
+/** How far ahead of the site's clock an export (its name or its exportedAt) may be stamped before it is distrusted. */
+export const FUTURE_SKEW_SECONDS = 5 * 60;
 /** The card API token name, and the value of the `writer` mark on its files. */
 export const WRITER = 'hermes-config';
 
@@ -176,8 +178,11 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
   if (!profile) freshness = { state: 'none' };
   else if (!exported || !block) freshness = { state: 'missing' };
   else {
-    const ageSeconds = Math.max(0, Math.floor((at.getTime() - new Date(exported.exportedAt).getTime()) / 1000));
-    freshness = { state: ageSeconds >= STALE_SECONDS ? 'stale' : 'fresh', exportedAt: exported.exportedAt, ...(exported.changedAt ? { changedAt: exported.changedAt } : {}), ageSeconds };
+    const raw = Math.floor((at.getTime() - new Date(exported.exportedAt).getTime()) / 1000);
+    const ageSeconds = Math.max(0, raw);
+    // An export stamped in the future (a clock that ran ahead, or a forged time) is not fresh: past the allowed skew it reads as stale.
+    const ahead = raw < -FUTURE_SKEW_SECONDS;
+    freshness = { state: ahead || ageSeconds >= STALE_SECONDS ? 'stale' : 'fresh', exportedAt: exported.exportedAt, ...(exported.changedAt ? { changedAt: exported.changedAt } : {}), ageSeconds };
   }
 
   let settings = null;

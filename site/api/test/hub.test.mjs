@@ -1770,3 +1770,30 @@ test('agent details: an unknown agent is 404, and with requireRemoteUser a missi
     assert.equal((await open.call('GET', '/hub/team/hermes/details')).status, 200, 'without the rule an anonymous read is as for the other reads');
   } finally { await open.close(); }
 });
+
+test('agent details: an export named for the future is skipped, and an oversize one is not even downloaded', async () => {
+  const downloads = [];
+  const { fake, call, close } = await fixture({ wrapBucket: bucket => new Proxy(bucket, { get: (target, prop) => (prop === 'getText' ? key => { downloads.push(key); return target.getText(key); } : target[prop]) }) });
+  try {
+    const owner = { 'Remote-User': 'owner' };
+    const details = async () => (await call('GET', '/hub/team/hermes/details', undefined, owner)).json();
+    const good = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 90, soulText: 'real soul' }));
+    // Named 10 minutes ahead: skipped, so the real one still wins and the future file is never read.
+    const future = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: -10, soulText: 'future soul' }));
+    let body = await details();
+    assert.equal(body.prompts[0].text, 'real soul');
+    assert.ok(!downloads.some(name => name.endsWith(future)), 'the future-named file was not downloaded');
+    // Oversize by its head: not downloaded.
+    const big = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 30 }), { text: JSON.stringify({ pad: 'x'.repeat(260 * 1024) }) });
+    downloads.length = 0;
+    body = await details();
+    assert.equal(body.prompts[0].text, 'real soul');
+    assert.ok(!downloads.some(name => name.endsWith(big)), 'the oversize file was not downloaded');
+    assert.ok(downloads.some(name => name.endsWith(good)) || body.freshness.state === 'fresh');
+    // Bytes, not characters: 200k two-byte characters is over the cap although it is under it in characters.
+    fake.objects.delete(`sections/inbox/${big}`);
+    const wide = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 20 }), { text: JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), pad: 'é'.repeat(140 * 1024) }) });
+    body = await details();
+    assert.equal(body.prompts[0].text, 'real soul', wide);
+  } finally { await close(); }
+});

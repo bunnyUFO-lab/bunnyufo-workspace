@@ -35,7 +35,7 @@ import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
-import { agentDetails, EXPORT_MAX_BYTES, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
+import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { CHAT_PERSONAS } from './chat-personas.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
@@ -371,7 +371,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       const { objects } = await bucket.list(key(`agent-config/export-${month}`));
       for (const object of objects) {
         const name = object.key.slice(folder('agent-config').length);
-        if (/^export-\d{8}T\d{6,9}Z\.json$/.test(name)) names.push(name);
+        const stamp = /^export-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})\d{0,3}Z\.json$/.exec(name);
+        if (!stamp) continue;
+        // A name stamped more than the allowed skew ahead is skipped, so a future-stamped file cannot sit on top of the newest real one.
+        const made = Date.UTC(+stamp[1], +stamp[2] - 1, +stamp[3], +stamp[4], +stamp[5], +stamp[6]);
+        if (made > at.getTime() + FUTURE_SKEW_SECONDS * 1000) continue;
+        names.push(name);
       }
     }
     for (const name of names.sort().slice(-3).reverse()) {
@@ -380,8 +385,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       if (hit?.configExport) return hit.configExport;
       const head = await bucket.head(key(rel)).catch(error => { if (error.status === 404) return null; throw error; });
       if (head?.metadata?.writer !== CONFIG_WRITER) continue;
+      // The size in bytes is checked before the download, and again on the text that came.
+      if (head.size > EXPORT_MAX_BYTES) continue;
       const got = await fresh(rel);
-      const exported = got && got.text.length <= EXPORT_MAX_BYTES ? validExport(got.value) : null;
+      const exported = got && Buffer.byteLength(got.text) <= EXPORT_MAX_BYTES ? validExport(got.value) : null;
       if (!exported) continue;
       remember(key(rel), { configExport: exported });
       return exported;

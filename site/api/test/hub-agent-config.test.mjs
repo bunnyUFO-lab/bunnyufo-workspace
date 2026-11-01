@@ -147,6 +147,11 @@ test('freshness: 6:59:59 is fresh, 7:00:00 is stale, no export is missing, Claud
   assert.equal(detailsOf('hermes', exportAt(ago(7 * 3600))).freshness.state, 'stale');
   assert.equal(detailsOf('hermes', exportAt(ago(0))).freshness.ageSeconds, 0);
   assert.equal(detailsOf('hermes', exportAt(new Date(at.getTime() + 60000).toISOString())).freshness.ageSeconds, 0, 'a future stamp is age 0');
+  const ahead = detailsOf('hermes', exportAt(new Date(at.getTime() + 5 * 60000).toISOString()));
+  assert.equal(ahead.freshness.state, 'fresh', 'five minutes of clock skew is allowed');
+  const wayAhead = detailsOf('hermes', exportAt(new Date(at.getTime() + 5 * 60000 + 1000).toISOString()));
+  assert.equal(wayAhead.freshness.state, 'stale', 'stamped in the future beyond the skew: stale, not fresh');
+  assert.equal(wayAhead.freshness.ageSeconds, 0);
   const missing = detailsOf('hermes', null);
   assert.deepEqual(missing.freshness, { state: 'missing' });
   assert.equal(missing.settings, null);
