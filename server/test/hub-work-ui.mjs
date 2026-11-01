@@ -63,6 +63,23 @@ try {
   await narrow.waitForFunction(() => document.querySelector('.wk-lanes-wrap')?.getAttribute('data-overflow') === 'start');
   assert.ok(await narrow.locator('.wk-lane').first().evaluate(el => el.getBoundingClientRect().width) >= 240, 'A lane is never narrower than 240 px.');
 
+  step('wide screens: at 1920 and 2560 every lane is inside the viewport and the lanes fill the width');
+  for (const width of [1920, 2560]) {
+    const wide = await open({ width, height: 1080 });
+    await wide.goto(`${lanes.url}#/~hub/work/lanes`);
+    await wide.locator('.wk-lane').first().waitFor();
+    const boxes = await wide.evaluate(() => {
+      const wrap = document.querySelector('.wk-lanes').getBoundingClientRect();
+      return { inner: innerWidth, scroll: document.scrollingElement.scrollWidth, wrap: { left: wrap.left, right: wrap.right }, lanes: [...document.querySelectorAll('.wk-lane')].map(el => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right }; }), overflow: document.querySelector('.wk-lanes-wrap').getAttribute('data-overflow') };
+    });
+    assert.equal(boxes.lanes.length, 6);
+    for (const box of boxes.lanes) assert.ok(box.left >= 0 && box.right <= boxes.inner, `${width} px: a lane is cut off (${box.left}-${box.right} of ${boxes.inner}).`);
+    assert.ok(!boxes.overflow, `${width} px: the lanes need no sideways scroll, no edge fade.`);
+    assert.ok(boxes.lanes.at(-1).right >= boxes.wrap.right - 2 && boxes.lanes[0].left <= boxes.wrap.left + 2, `${width} px: the lanes fill their area.`);
+    assert.ok(boxes.wrap.right - boxes.wrap.left > 1100 + 300, `${width} px: the lanes are wider than the reading column.`);
+    await noSideways(wide, `Work at ${width} px`);
+  }
+
   step('cards: title first, the id, a source icon, why in amber on Blocked, a live dot only on the working card, each a link');
   const doing = page.locator('[data-card="bead:ws-doing"]');
   assert.equal(await doing.evaluate(card => card.tagName), 'A');

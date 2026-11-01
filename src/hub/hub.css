@@ -160,6 +160,8 @@
   -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
+/* Wide by nature: the lanes and the team's roster leave the reading width and use the whole content area. */
+.hub[data-screen="work"], .hub[data-screen="team"] { max-width: none; padding-inline: clamp(16px, 2vw, 32px); }
 .hub[data-screen="map"] { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: 8px; }
 .hub[data-screen="map"] > .hub-map-chips { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .hub-map-chips > .hub-chips-wrap { flex: 1; min-width: 0; margin: 0; }
