@@ -11,6 +11,7 @@ import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
 import { needsHash } from './needsFocus'
+import { PageProjectChip } from './ProjectChip'
 
 const STEPS: [string, string][] = [['open', 'Open'], ['answered', 'Answered'], ['picked-up', 'Picked up']]
 const SIDE: Record<string, string> = { snoozed: 'Snoozed', expired: 'Expired', cancelled: 'Cancelled' }
@@ -53,7 +54,7 @@ export default function AskView({ id }: { id: string }) {
       {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{text(ask.question)}</h2>
-        <span><span className="hub-pill">{text(ask.project)}</span>{text(ask.bead) && <> <span className="hub-pill">{text(ask.bead)}</span></>}</span>
+        <span><PageProjectChip id={text(ask.project)} />{text(ask.bead) && <> <span className="hub-pill">{text(ask.bead)}</span></>}</span>
         <GetHelp className="hub-top-help" target={{ kind: 'ask', id: ask.id, label: ask.decisions || ask.image ? 'design review' : 'question', title: text(ask.question) }} />
       </div>
       <ol className="hub-steps" aria-label="State">

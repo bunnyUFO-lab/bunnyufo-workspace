@@ -4,12 +4,14 @@ import { host } from '../lib/host'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import type { NeedsKind } from '../lib/needsKinds'
 import { KIND_LABEL, KIND_PLURAL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
-import { hubHash } from '../lib/route'
+import { filterSlug, needsHref, parseNeedsRoute, projectOptions } from '../lib/needsView.mjs'
 import type { Handoff } from './flash'
 import { takeHandoff } from './flash'
 import { NOTE_VERB } from '../lib/nextItem.mjs'
 import { pickNext } from '../lib/nextItem.mjs'
 import NextNote from './NextNote'
+import ProjectPicker from './ProjectPicker'
+import { useProjectNames } from './ProjectChip'
 import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
 import NeedsItem from './NeedsItem'
@@ -19,14 +21,15 @@ import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import './needs.css'
 
-interface Inbox { items: Item[]; counts?: Record<string, number> }
+interface Inbox { items: Item[]; counts?: Record<string, number>; projects?: Record<string, number> }
 
 const CHIPS: [string, string][] = [
-  ['all', 'All'], ['question', KIND_LABEL.question], ['design', KIND_LABEL.design], ['steps', KIND_LABEL.steps],
+  ['all', 'All'], ['approvals', 'Approvals'], ['question', KIND_LABEL.question], ['steps', KIND_LABEL.steps], ['design', KIND_LABEL.design],
   ['playtest', KIND_LABEL.playtest], ['unstick', KIND_LABEL.unstick], ['pr', KIND_LABEL.pr], ['answered', 'Answered'],
 ]
 const EMPTY: Record<string, string> = {
   all: 'Nothing waits on you. Agents ping #needs-you when something does.',
+  approvals: 'No request waits for your approval.',
   question: 'No question waits on you.',
   design: 'No design review waits on you.',
   steps: 'No steps wait on you. When an agent needs you to do a set of steps, it posts them here.',
@@ -43,10 +46,15 @@ const reducedMotion = () => typeof window.matchMedia === 'function' && window.ma
  * Needs you: one list of cards, one per thing that waits on the owner, each answered where it stands. A chip narrows
  * the list to one kind; the old filter names in links still land on the right chip.
  */
-export default function Needs({ filter }: { filter?: string }) {
+export default function Needs({ filter: address }: { filter?: string }) {
+  // The address is `<filter>[/<project>]`, or the name of one item to focus where a filter would go.
+  const route = parseNeedsRoute(address, isKnownFilter)
+  const filter = route.filter
+  const project = route.project
   const active = canonicalFilter(filter)
   const isHistory = active === 'answered' || active === 'requests'
-  const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${active}${isHistory ? '' : '&detail=1'}`)
+  const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${active}${project ? `&project=${encodeURIComponent(project)}` : ''}${isHistory ? '' : '&detail=1'}`)
+  const names = useProjectNames()
   // The note after the last action: from this list, or handed over by the page the owner settled an item on.
   const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
   const [settled, setSettled] = useState<ReadonlySet<string>>(new Set())
@@ -55,22 +63,23 @@ export default function Needs({ filter }: { filter?: string }) {
   const wanted = useRef<string | null>(null)
   if (wanted.current === null) wanted.current = takeFocus()
   // A link to one item (#/~hub/needs/<event file>, from Working now) names it where a filter would go: the list opens on All, focused on it.
-  const linked = useRef(filter && !isKnownFilter(filter) ? filter : '')
+  const linked = useRef(route.linked)
 
-  useEffect(() => { rememberFilter(active) }, [active])
+  useEffect(() => { rememberFilter(active, project) }, [active, project])
 
   // The note belongs to the list it was left on: another chip starts clean.
-  const lastFilter = useRef(active)
+  const listKey = `${active}/${project}`
+  const lastFilter = useRef(listKey)
   useEffect(() => {
-    if (lastFilter.current === active) return
-    lastFilter.current = active
+    if (lastFilter.current === listKey) return
+    lastFilter.current = listKey
     setNote(null)
-  }, [active])
+  }, [listKey])
 
   // An old filter name in the address becomes the new one, in place: the address stays one entry in the history.
   useEffect(() => {
-    if (filter && filter !== active) window.history.replaceState(window.history.state, '', hubHash('needs', active))
-  }, [filter, active])
+    if (address && filter !== filterSlug(active)) window.history.replaceState(window.history.state, '', needsHref(active, project))
+  }, [address, filter, active, project])
 
   // A row on Today opens the list on its item: scroll to it and flash it. A key the list does not hold is ignored.
   useEffect(() => {
@@ -106,7 +115,7 @@ export default function Needs({ filter }: { filter?: string }) {
     const elsewhere = !next && active !== 'all' && !isHistory ? Math.max(0, (data?.counts?.all ?? 0) - (data?.counts?.[active] ?? 0)) : 0
     const plural = KIND_PLURAL[active as NeedsKind] as string | undefined
     setNote({
-      handoff: { verb: NOTE_VERB[verb], ...(extra?.detail ? { detail: extra.detail } : {}), ...(extra?.link ? { link: extra.link } : {}), title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? hubHash('needs', 'unstick') },
+      handoff: { verb: NOTE_VERB[verb], ...(extra?.detail ? { detail: extra.detail } : {}), ...(extra?.link ? { link: extra.link } : {}), title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? needsHref('unstick') },
       index, nextKey: next ? itemKey(next) : null,
     })
     window.setTimeout(() => setLeaving(previous => previous.filter(ghost => itemKey(ghost.item) !== key)), reducedMotion() ? 0 : LEAVE_MS)
@@ -131,6 +140,13 @@ export default function Needs({ filter }: { filter?: string }) {
   const waiting = counts?.all ?? 0
   const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === active || (counts?.[key] ?? 0) > 0)
   if (active === 'requests') visible.push(['requests', 'Requests'])
+  const options = projectOptions(data?.projects, names, project)
+  const total = Object.values(data?.projects ?? {}).reduce((sum, n) => sum + n, 0)
+  const chosenName = names?.[project] || project
+  // With a project chosen the empty list says so and offers the way out; the link keeps the kind chip.
+  const empty = (className: string) => project
+    ? <p className={className} data-project-empty>Nothing for {chosenName} waits on you. <a href={needsHref(active, '')} data-show-all-projects>Show all projects</a></p>
+    : <p className={className}>{EMPTY[active]}</p>
   const chipRow = useRef<HTMLDivElement>(null)
   const overflow = useOverflowEdges(chipRow, [visible.length, active])
   // Only the row scrolls, never the page: a scrollIntoView would undo the jump to a linked card.
@@ -157,23 +173,31 @@ export default function Needs({ filter }: { filter?: string }) {
           </div>
         )}
       </header>
+      <div className="needs-bar">
+      {(options.length > 0 || project) && (
+        <div className="needs-project" data-needs-project>
+          <ProjectPicker id="hub-needs-project" projects={options} value={project || 'all'} allValue="all" allLabel="All projects" counts={Object.fromEntries(options.map(option => [option.id, option.count]))} allCount={total}
+            onChange={id => { window.location.hash = needsHref(active, id === 'all' ? '' : id) }} alwaysList inRow />
+        </div>
+      )}
       <div className="hub-chips-wrap" data-overflow={overflow}>
       <div className="hub-chips one-row" role="group" aria-label="Needs you filter" ref={chipRow}>
         {visible.map(([key, label]) => {
           const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
           return (
-            <a key={key} className={`hub-chip${key === active ? ' on' : ''}`} href={hubHash('needs', key)} aria-current={key === active ? 'true' : undefined} data-filter={key}>
+            <a key={key} className={`hub-chip${key === active ? ' on' : ''}`} href={needsHref(key, project)} aria-current={key === active ? 'true' : undefined} data-filter={key}>
               {label}{count !== undefined && <span className="n">{count}</span>}
             </a>
           )
         })}
       </div>
       </div>
+      </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {data ? (
         isHistory ? (
           <section className="hub-panel">
-            {shown.length ? shown.map(item => <ItemRow key={itemKey(item)} item={item} />) : <p className="hub-empty">{EMPTY[active]}</p>}
+            {shown.length ? shown.map(item => <ItemRow key={itemKey(item)} item={item} />) : empty('hub-empty')}
           </section>
         ) : (
           <>
@@ -187,13 +211,13 @@ export default function Needs({ filter }: { filter?: string }) {
                   return (
                     <Fragment key={itemKey(item)}>
                       {slot}
-                      <NeedsItem item={item} at={at} reload={reload} onSettled={handleSettled} leaving={ghost} />
+                      <NeedsItem item={item} at={at} reload={reload} onSettled={handleSettled} leaving={ghost} names={names} filter={active} />
                     </Fragment>
                   )
                 })}
                 {note && shown.length > 0 && noteSlot >= shown.length && <NextNote note={note.handoff} />}
               </div>
-            ) : <p className="hub-empty needs-empty">{EMPTY[active]}</p>}
+            ) : empty('hub-empty needs-empty')}
           </>
         )
       ) : !error && loading && <p className="hub-empty">Loading…</p>}

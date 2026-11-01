@@ -2,6 +2,7 @@
 // site/api/hub-model.mjs (`needsKindOf`, `NEEDS_KINDS`, `INBOX_FILTER_ALIASES`) holds the server's copy of
 // these rules: change both together.
 import type { Item } from './hub'
+import { sessionLabel } from './needsView.mjs'
 
 export type NeedsKind = 'question' | 'design' | 'steps' | 'playtest' | 'unstick' | 'pr' | 'approval'
 
@@ -20,12 +21,12 @@ export function needsKind(item: Item): NeedsKind {
 }
 
 export const KIND_LABEL: Record<NeedsKind, string> = {
-  question: 'Question', design: 'Design review', steps: 'Steps', playtest: 'Playtest', unstick: 'Unstick', pr: 'PR review', approval: 'Approval',
+  question: 'Question', design: 'Design review', steps: 'Steps', playtest: 'Playtest', unstick: 'Sessions', pr: 'PR review', approval: 'Approval',
 }
 
 /** The kind in the plural, lower case, for a sentence: "No more design reviews." */
 export const KIND_PLURAL: Record<NeedsKind, string> = {
-  question: 'questions', design: 'design reviews', steps: 'steps', playtest: 'playtests', unstick: 'sessions to unstick', pr: 'PR reviews', approval: 'approvals',
+  question: 'questions', design: 'design reviews', steps: 'steps', playtest: 'playtests', unstick: 'sessions', pr: 'PR reviews', approval: 'approvals',
 }
 
 /** Inner markup of a 24 px stroke icon, one per kind. */
@@ -40,10 +41,10 @@ export const KIND_ICON: Record<NeedsKind, string> = {
 }
 
 /** The chips of the Needs you list, in order. `answered` is history; `requests` shows only when it is the open filter. */
-export const NEEDS_FILTERS = ['all', 'question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'answered', 'requests'] as const
+export const NEEDS_FILTERS = ['all', 'approvals', 'question', 'design', 'steps', 'playtest', 'unstick', 'pr', 'answered', 'requests'] as const
 
 /** Old filter names, kept so links in Discord history and bookmarks land on the right chip. */
-const FILTER_ALIAS: Record<string, string> = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick' }
+const FILTER_ALIAS: Record<string, string> = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick', sessions: 'unstick' }
 
 /** The filter a URL names, old names mapped to the new ones; an unknown or missing name is `all`. */
 /** Whether `raw` is a filter key or an old alias of one (anything else in the address is an item id). */
@@ -53,3 +54,6 @@ export function canonicalFilter(raw: string | undefined): string {
   const mapped = raw && Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) ? FILTER_ALIAS[raw] : raw
   return mapped && (NEEDS_FILTERS as readonly string[]).includes(mapped) ? mapped : 'all'
 }
+
+/** The label on an item's type chip: a blocked session names its tool and what it waits on ("Claude permission"). */
+export const itemLabel = (item: Item): string => (item.kind === 'blocked' ? sessionLabel(item) : KIND_LABEL[needsKind(item)])

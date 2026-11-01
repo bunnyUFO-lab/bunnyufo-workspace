@@ -14,6 +14,7 @@ import { openSpawn } from './spawnStore'
 import { goNext, useQueueOrder } from './useGoNext'
 import { useHubData } from './useHub'
 import './runs.css'
+import { PageProjectChip } from './ProjectChip'
 
 /** The parts of `GET /hub/requests/:id` this view reads. */
 export interface RequestDetail {
@@ -193,8 +194,7 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
         {actionable && writtenByOther(detail) && <p className="ap-warn" role="note" data-approval-warning>Written by {whoWrote(detail)}, not by you. Read it before approving.</p>}
         <div className="ni-chips">
           {preset && <span className="ni-chip" data-approval-preset>{preset.label}</span>}
-          <span className="ni-chip">{request.project}</span>
-          <span className={`ni-chip ap-state-chip ${state}`} data-approval-state>{STATE_LABEL[state] ?? state}</span>
+                    <span className={`ni-chip ap-state-chip ${state}`} data-approval-state>{STATE_LABEL[state] ?? state}</span>
           {request.by && <span className="hub-muted">asked by {request.by}, {ago(request.createdAt)}</span>}
         </div>
         <p className="ap-text" data-approval-text>{request.text}</p>
@@ -226,7 +226,7 @@ export default function ApprovalView({ id }: { id: string }) {
       {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{title}</h2>
-        <span><span className="hub-pill">{detail.request.project}</span> <span className="hub-pill">{detail.request.id}</span></span>
+        <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill">{detail.request.id}</span></span>
       </div>
       <section className="hub-panel ap-page" aria-label="Request">
         <ApprovalBody id={id} onSettled={settle} page />

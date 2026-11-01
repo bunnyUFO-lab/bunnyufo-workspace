@@ -37,6 +37,9 @@ export interface Item {
   /** A checklist row: items ticked and items in all. */
   done?: number
   total?: number
+  /** A blocked session's event: what posted it and why, when it says (`notification_type` or `reason`). */
+  source?: string
+  reason?: string
   /** The sending tool of an Ask or a checklist. */
   tool?: string
   /** A review row: each leg's result, and the screenshots that came with it. */

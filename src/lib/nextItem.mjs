@@ -35,12 +35,12 @@ export function pickNext(items, settledKey, previousKeys = []) {
   return remaining[0];
 }
 
-/** Where an item opens: its own page, or for a session that has none the Unstick chip with the card in focus. */
+/** Where an item opens: its own page, or for a session that has none the Sessions chip with the card in focus. */
 export function itemLink(item) {
   const id = encodeURIComponent(item.id);
   if (item.kind === 'ask') return { hash: `#/~hub/ask/${id}` };
   if (item.kind === 'checklist') return { hash: `#/~hub/checklist/${id}` };
   if (item.kind === 'review') return { hash: `#/~hub/review/${id}` };
   if (item.kind === 'approval' || item.kind === 'request') return { hash: `#/~hub/request/${id}` };
-  return { hash: '#/~hub/needs/unstick', focus: itemKey(item) };
+  return { hash: '#/~hub/needs/sessions', focus: itemKey(item) };
 }

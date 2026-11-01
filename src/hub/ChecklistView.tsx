@@ -13,6 +13,7 @@ import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
 import { needsHash } from './needsFocus'
+import { PageProjectChip } from './ProjectChip'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 
@@ -39,7 +40,7 @@ export default function ChecklistView({ id }: { id: string }) {
       <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
-        <span><span className="hub-pill">{text(detail.project)}</span>{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
+        <span><PageProjectChip id={text(detail.project)} />{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
         <GetHelp className="hub-top-help" target={{ kind: 'checklist', id: detail.id, label: detail.kind === 'playtest' ? 'playtest' : 'checklist', title: text(detail.title) }} />
       </div>
       <p className="hub-muted">Posted {ago(detail.createdAt)}{text(detail.from?.host) ? ` from ${text(detail.from?.host)}` : ''}.</p>

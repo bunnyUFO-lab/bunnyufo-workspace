@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, fillProjects, inProject, projectCounts, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
 import { agentConfigJson, askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seedAgentConfig, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -255,6 +255,47 @@ test('a design review is its own kind in Needs you, with its own four sentences,
     assert.equal(discordEligible({ ...askJson({ id: 'x', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowDrawing: false }), decisions: threeDecisions() }).ok, false);
     assert.equal(discordEligible({ ...askJson({ id: 'x', options: [{ id: 'A', label: 'Yes' }, { id: 'B', label: 'No' }], allowDrawing: false }), image: 'a.png' }).ok, false);
   } finally { await close(); }
+});
+
+test('every Needs you row names its project, and ?project= narrows the list, the counts and nothing else', async () => {
+  const { seed, get, close } = await fixture();
+  try {
+    seed.ask(askJson({ id: id('one', 'a111'), project: 'magic-loops', now: NOW, options: plainOptions(), allowDrawing: false }));
+    seed.ask(askJson({ id: id('two', 'b111'), project: 'sprite-studio', now: new Date(NOW.getTime() - 1000), options: plainOptions(), allowDrawing: false }));
+    seed.checklist(checklistJson({ id: id('steps', 'c111'), project: 'magic-loops', now: new Date(NOW.getTime() - 2000) }));
+    seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(NOW.getTime() - 3000), project: 'bunnylink', bead: 'bl-1', title: 'PR ready: one' }));
+    seed.event(eventJson({ kind: 'blocked', ts: new Date(NOW.getTime() - 4000), project: 'sprite-studio', session: 'sess-1', title: 'Permission needed' }));
+    const all = (await get('/hub/inbox?filter=all')).body;
+    assert.deepEqual(all.items.map(item => [item.kind, item.project]).sort(), [['ask', 'magic-loops'], ['ask', 'sprite-studio'], ['blocked', 'sprite-studio'], ['checklist', 'magic-loops'], ['review', 'bunnylink']]);
+    assert.deepEqual(all.projects, { 'magic-loops': 2, 'sprite-studio': 2, bunnylink: 1 });
+    assert.equal(all.counts.all, 5);
+    const narrowed = (await get('/hub/inbox?filter=all&project=sprite-studio')).body;
+    assert.deepEqual(narrowed.items.map(item => item.kind).sort(), ['ask', 'blocked']);
+    assert.equal(narrowed.counts.all, 2);
+    assert.equal(narrowed.counts.question, 1);
+    assert.equal(narrowed.counts.unstick, 1);
+    assert.equal(narrowed.counts.steps, 0);
+    assert.deepEqual(narrowed.projects, all.projects, 'The picker keeps listing every project of the list.');
+    const kind = (await get('/hub/inbox?filter=question&project=magic-loops')).body;
+    assert.deepEqual(kind.items.map(item => item.id), [id('one', 'a111')]);
+    assert.deepEqual(kind.projects, { 'magic-loops': 1, 'sprite-studio': 1 });
+    assert.deepEqual((await get('/hub/inbox?filter=all&project=nothing')).body.items, []);
+  } finally { await close(); }
+});
+
+test('fillProjects gives a row without a project its request project; projectCounts and inProject read it', () => {
+  const requests = [{ id: 'r1', project: 'magic-loops' }, { id: 'r2', project: 'bunnylink' }];
+  const rows = fillProjects([
+    { kind: 'hermes-approval', id: 'h1', request: 'r1' },
+    { kind: 'hermes-approval', id: 'h2', request: 'r2', project: 'sprite-studio' },
+    { kind: 'run-question', id: 'r2' },
+    { kind: 'hermes-approval', id: 'h3' },
+    { kind: 'ask', id: 'a1', project: '' },
+  ], requests);
+  assert.deepEqual(rows.map(row => row.project), ['magic-loops', 'sprite-studio', 'bunnylink', undefined, '']);
+  assert.deepEqual(projectCounts(rows), { 'magic-loops': 1, 'sprite-studio': 1, bunnylink: 1 });
+  assert.deepEqual(inProject(rows, 'bunnylink').map(row => row.id), ['r2']);
+  assert.equal(inProject(rows, '').length, 5);
 });
 
 test('a malformed decisions or image field is dropped, so the Ask shows as a plain Question and logs once', async () => {
@@ -1486,7 +1527,7 @@ test('the old filter names answer through the API with the same rows as the new 
     }
     const all = (await get('/hub/inbox')).body;
     assert.deepEqual(all.items.map(item => item.needs), ['question', 'steps', 'pr', 'unstick'], 'The default is all, in the order Today uses.');
-    assert.deepEqual(all.counts, { all: 4, question: 1, design: 0, steps: 1, playtest: 0, unstick: 1, pr: 1, approval: 0 });
+    assert.deepEqual(all.counts, { all: 4, question: 1, design: 0, steps: 1, playtest: 0, unstick: 1, pr: 1, approval: 0, approvals: 0 });
   } finally { await close(); }
 });
 

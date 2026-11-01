@@ -510,7 +510,11 @@ export function deriveEventItems(events) {
       const resolved = !!event.session && after(event, other => other.session === event.session && other.kind !== 'session-items');
       if (resolved || done.has(event.file)) continue;
       const appUrl = blockedAppUrl(event.appUrl);
-      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, file: event.file, ...(appUrl ? { appUrl } : {}) }));
+      const word = (value, length = 40) => (typeof value === 'string' && value.trim() ? clip(value.trim(), length) : undefined);
+      const tool = word(event.tool) ?? word(event.from?.tool);
+      const source = word(event.source);
+      const reason = word(event.notification_type) ?? word(event.reason);
+      blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, file: event.file, ...(appUrl ? { appUrl } : {}), ...(tool ? { tool } : {}), ...(source ? { source } : {}), ...(reason ? { reason } : {}) }));
     } else if (event.kind === 'session-started' && event.session) {
       // A later start from the same session replaces this one: a session runs once, whatever restarted it.
       const ended = after(event, other => other.session === event.session && (other.kind === 'session-ended' || other.kind === 'session-started'));
@@ -608,10 +612,11 @@ export function needsKindOf(item) {
   }
 }
 
-export const INBOX_FILTERS = ['all', ...NEEDS_KINDS, 'answered', 'requests'];
+// `approvals` is the request approvals alone (Approve, Edit, Decline); `approval` is every row of that kind, Hermes's too.
+export const INBOX_FILTERS = ['all', ...NEEDS_KINDS, 'approvals', 'answered', 'requests'];
 
 /** Old filter names, kept so links in Discord history and bookmarks still land on the right chip. */
-export const INBOX_FILTER_ALIASES = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick' };
+export const INBOX_FILTER_ALIASES = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick', sessions: 'unstick' };
 
 /** The filter a request names, old names mapped to new ones; anything unknown is `all`. */
 export function inboxFilter(raw) {
@@ -628,14 +633,39 @@ export function buildInbox({ filter: raw, asks, checklists = [], requests, herme
     return [...asks.filter(item => item.state === 'answered'), ...checklists.filter(item => item.state === 'submitted')].sort(newest);
   }
   const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now }).needsYou;
+  if (filter === 'approvals') return needs.filter(item => item.kind === 'approval');
   return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);
+}
+
+/**
+ * Rows with a project: one that carries none (a Hermes approval whose request is known, say) takes its request's project.
+ * `requests` are the request rows, which always name one.
+ */
+export function fillProjects(items, requests = []) {
+  const byId = new Map(requests.map(request => [request.id, request.project]));
+  return items.map(item => {
+    if (typeof item.project === 'string' && item.project) return item;
+    const project = byId.get(item.request ?? item.id);
+    return project ? { ...item, project } : item;
+  });
+}
+
+/** Keep the rows of one project; no project keeps them all. */
+export const inProject = (items, project) => (project ? items.filter(item => item.project === project) : items);
+
+/** How many rows each project has, as `{ project: count }`; rows without a project are left out. */
+export function projectCounts(items) {
+  const counts = {};
+  for (const item of items) if (typeof item.project === 'string' && item.project) counts[item.project] = (counts[item.project] ?? 0) + 1;
+  return counts;
 }
 
 /** How many items wait per kind (and in all): the chips' numbers. */
 export function inboxCounts(needsYou) {
   const counts = { all: needsYou.length };
   for (const kind of NEEDS_KINDS) counts[kind] = 0;
-  for (const item of needsYou) { const kind = needsKindOf(item); if (kind in counts) counts[kind] += 1; }
+  counts.approvals = 0;
+  for (const item of needsYou) { const kind = needsKindOf(item); if (kind in counts) counts[kind] += 1; if (item.kind === 'approval') counts.approvals += 1; }
   return counts;
 }
 
