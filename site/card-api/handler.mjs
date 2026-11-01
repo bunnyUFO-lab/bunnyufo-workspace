@@ -177,6 +177,24 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       throw new HttpError(403, 'Agents write only applied marks, once.');
     }
   };
+  /** The Hermes host's redacted settings export: create-only, one file per publish. */
+  const AGENT_CONFIG_FILE = /^agent-config\/export-\d{8}T\d{6,9}Z\.json$/i;
+  /**
+   * In the inbox, `agent-config/` is for the token named `hermes-config` only (the exporter on the Hermes host), which may
+   * create `export-<stamp>.json` once (If-None-Match: *, never an upload URL) and nothing else in the inbox. The passphrase is not limited.
+   */
+  const agentConfigOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null) return;
+    const inFolder = /^agent-config\//i.test(file);
+    if (caller.name === 'hermes-config') {
+      if (!inFolder) throw new HttpError(403, 'This token only publishes agent-config exports.');
+    } else if (inFolder) {
+      throw new HttpError(403, 'Only the Hermes config exporter writes agent-config/.');
+    }
+    if (inFolder && (!AGENT_CONFIG_FILE.test(file) || upload || ifNoneMatch !== '*')) {
+      throw new HttpError(403, 'agent-config/export-<stamp>.json is create-only (If-None-Match: *), never by upload URL.');
+    }
+  };
   const ownerOnly = (caller, sectionId, file) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
@@ -225,6 +243,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    // An export the Hermes host published: the only provenance the Hub accepts for it.
+    if (caller.rights.write !== null && caller.name === 'hermes-config' && AGENT_CONFIG_FILE.test(file)) return { writer: 'hermes-config' };
     if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
       return { writer: caller.name === 'pc-runner' ? 'pc-runner' : /^agent(-[\w.-]+)?$/.test(caller.name ?? '') ? 'agent' : 'other' };
     }
@@ -251,7 +271,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file))) {
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file) || /^agent-config\//i.test(file))) {
       throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks, marks and request files.');
     }
   };
@@ -398,6 +418,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
       await section(caller, sectionId, 'write');
       ownerOnly(caller, sectionId, file);
+      agentConfigOnly(caller, sectionId, file, { ifNoneMatch });
       markFiles(caller, sectionId, file, { ifNoneMatch });
       await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
@@ -428,6 +449,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        agentConfigOnly(caller, sectionId, file, { upload: true });
         markFiles(caller, sectionId, file, { upload: true });
         await runnerOnly(caller, sectionId, file);
         askCreateOnly(caller, sectionId, file, { upload: true });

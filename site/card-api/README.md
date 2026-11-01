@@ -107,6 +107,10 @@ The verbs: **read** is every `GET` (and `resolve`), **write** is `PUT` of a card
 out of `GET /sections`. Deploy the handler before putting a rights entry in the tokens file: an
 older handler cannot parse it and answers 500 to everyone.
 
+**The Hermes config exporter's token.** `hermes-config=<sha256>:write=inbox` (make it with `new-token.mjs hermes-config --rights 'write=inbox' --out <file>`).
+It may only create `agent-config/export-<YYYYMMDDTHHMMSSZ>.json` in the inbox (see below). Deploy the handler with the `agent-config/` rule
+*before* adding this token to `BUW_CARD_TOKENS`: an older handler would let a `write=inbox` token write anywhere in the inbox.
+
 ## Use
 
 ```bash
@@ -220,6 +224,10 @@ What it refuses:
   The Hub starts a run from an Ask's `rerun` pointer only when this is `pc-runner`. A PC run holds that token in its environment too, so the
   mark excludes other tokens (a cloud run, a bot, an agent session), not a run's own code; against a run the gate is on the PC (the rules
   must equal what the watcher computed, and the rerun gate)
+- in the `inbox` and `inbox-dev` sections, anything under `agent-config/` from a limited writer unless the token is named `hermes-config`, the path is
+  `agent-config/export-<YYYYMMDDTHHMMSSZ>.json` (stamp `\d{8}T\d{6,9}Z`), the write sends `If-None-Match: *` and it is not an upload URL request (403, no
+  delete for a limited deleter). The `hermes-config` token is refused every other inbox path. A file it creates is stored with the object metadata
+  `x-amz-meta-writer: hermes-config`, set only by the handler; the passphrase's files there carry no mark, and the site API ignores an export without it
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB
