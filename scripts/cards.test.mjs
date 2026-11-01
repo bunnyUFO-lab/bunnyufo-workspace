@@ -757,6 +757,9 @@ test('ask create: the rerun field of the watcher Ask survives into ask.json; a m
     assert.equal(denied.code, 0, denied.stderr);
     assert.deepEqual(stored(denied).rerun, { request, kind: 'denied' });
     assert.equal(stored(denied).requirePasskey, true);
+    const allowing = await made({ request, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', 'mcp__bunnylink__status'] });
+    assert.equal(allowing.code, 0, allowing.stderr);
+    assert.deepEqual(stored(allowing).rerun, { request, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', 'mcp__bunnylink__status'] });
     const proceed = await made({ request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
     assert.equal(proceed.code, 0, proceed.stderr);
     assert.deepEqual(stored(proceed).rerun, { request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
@@ -771,6 +774,34 @@ test('ask create: the rerun field of the watcher Ask survives into ask.json; a m
       ['continue without its Ask', { request, kind: 'continue' }, /rerun\.ask is the id/],
       ['an Ask on a denial', { request, kind: 'denied', ask: 'x-1' }, /only for kind continue/],
       ['an unknown field', { request, kind: 'denied', target: 'cloud' }, /rerun has no field target/],
+      ['allow that is not a list', { request, kind: 'denied', allow: 'Bash(x)' }, /rerun.allow is 1 to 5 different rules/],
+      ['an empty allow', { request, kind: 'denied', allow: [] }, /rerun.allow is 1 to 5/],
+      ['a Read rule', { request, kind: 'denied', allow: ['Read(//c/**)'] }, /rerun.allow is 1 to 5/],
+      ['six rules', { request, kind: 'denied', allow: [1, 2, 3, 4, 5, 6].map(n => 'Bash(echo ' + n + ')') }, /rerun.allow is 1 to 5/],
+      ['a repeated rule', { request, kind: 'denied', allow: ['Bash(x)', 'Bash(x)'] }, /rerun.allow is 1 to 5/],
+      ['a right-to-left override', { request, kind: 'denied', allow: ['Bash(echo \u202e)'] }, /rerun\.allow is 1 to 5/],
+      ['a line separator', { request, kind: 'denied', allow: ['Bash(echo \u2028x)'] }, /rerun\.allow is 1 to 5/],
+      ['a zero-width space', { request, kind: 'denied', allow: ['Bash(echo \u200bx)'] }, /rerun\.allow is 1 to 5/],
+      ['a no-break space', { request, kind: 'denied', allow: ['Bash(echo\u00a0x)'] }, /rerun\.allow is 1 to 5/],
+      ['a tab', { request, kind: 'denied', allow: ['Bash(echo\tx)'] }, /rerun\.allow is 1 to 5/],
+      ['a Hangul filler', { request, kind: 'denied', allow: ['Bash(echo \u3164x)'] }, /rerun\.allow is 1 to 5/],
+      ['a halfwidth Hangul filler', { request, kind: 'denied', allow: ['Bash(echo \uffa0x)'] }, /rerun\.allow is 1 to 5/],
+      ['a Braille blank', { request, kind: 'denied', allow: ['Bash(echo \u2800x)'] }, /rerun\.allow is 1 to 5/],
+      ['a lone surrogate', { request, kind: 'denied', allow: ['Bash(echo \ud800x)'] }, /rerun\.allow is 1 to 5/],
+      ['a private use character', { request, kind: 'denied', allow: ['Bash(echo \ue000x)'] }, /rerun\.allow is 1 to 5/],
+      ['a combining overlay', { request, kind: 'denied', allow: ['Bash(echo \u0336x)'] }, /rerun\.allow is 1 to 5/],
+      ['an accented letter', { request, kind: 'denied', allow: ['Bash(echo \u00e9x)'] }, /rerun\.allow is 1 to 5/],
+      ['bare Bash', { request, kind: 'denied', allow: ['Bash'] }, /rerun\.allow is 1 to 5/],
+      ['an empty body', { request, kind: 'denied', allow: ['Bash()'] }, /rerun\.allow is 1 to 5/],
+      ['a body of spaces', { request, kind: 'denied', allow: ['Bash( )'] }, /rerun\.allow is 1 to 5/],
+      ['a leading space', { request, kind: 'denied', allow: ['Bash( echo)'] }, /rerun\.allow is 1 to 5/],
+      ['everything', { request, kind: 'denied', allow: ['Bash(*)'] }, /rerun\.allow is 1 to 5/],
+      ['a lone prefix star', { request, kind: 'denied', allow: ['Bash(:*)'] }, /rerun\.allow is 1 to 5/],
+      ['a star in the middle', { request, kind: 'denied', allow: ['Bash(echo * x)'] }, /rerun\.allow is 1 to 5/],
+      ['two prefix stars', { request, kind: 'denied', allow: ['Bash(echo:*:*)'] }, /rerun\.allow is 1 to 5/],
+      ['a second Bash(', { request, kind: 'denied', allow: ['Bash(echo Bash(x))'] }, /rerun\.allow is 1 to 5/],
+      ['an mcp wildcard', { request, kind: 'denied', allow: ['mcp__server__*'] }, /rerun\.allow is 1 to 5/],
+      ['allow on a continue Ask', { request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4', allow: ['Bash(x)'] }, /only for kind denied/],
     ];
     for (const [name, rerun, message] of refused) {
       const result = await made(rerun);

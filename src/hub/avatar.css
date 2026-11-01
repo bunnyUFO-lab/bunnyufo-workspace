@@ -5,3 +5,6 @@
 .avatar-states { display: flex; flex-wrap: wrap; gap: 6px; }
 .avatar-states .hub-btn { min-height: 44px; }
 .avatar-states .hub-btn[aria-pressed='true'] { border-color: var(--accent, currentColor); }
+.rerun-allow { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border, rgba(127, 127, 127, 0.35)); border-radius: 10px; background: rgba(127, 127, 127, 0.08); font-size: 0.9rem; }
+.rerun-allow p { margin: 0 0 6px; }
+.rerun-allow-rules { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
