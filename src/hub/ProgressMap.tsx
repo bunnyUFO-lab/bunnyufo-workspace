@@ -8,7 +8,7 @@ import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNo
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
 import MapFilterPanel from './MapFilterPanel'
-import { OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, type MapFilter } from './mapFilter'
+import { ALL_FILTER, OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, type MapFilter } from './mapFilter'
 import { FIT_MAX, centreOn, clamp, fitScale } from './panZoom'
 import { usePanZoom } from './usePanZoom'
 import type { ZoomReport } from './usePanZoom'
@@ -379,8 +379,15 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); act() }
   }
 
+  /** Show everything, with the node's milestone and feature open so it is drawn. */
+  const showAll = (id: string) => {
+    const found = find(fullModel, id)
+    saveFilter(ALL_FILTER)
+    refit(() => { setFilter(ALL_FILTER); if (found) setOpen(value => new Set([...value, found.milestone.id, ...(found.kind === 't' ? [found.feature.id] : [])])) })
+  }
   const applyFilter = (next: MapFilter) => { saveFilter(next); refit(() => setFilter(next)) }
   const tasksIn = (map: MapModel) => map.milestones.reduce((sum, milestone) => sum + milestone.features.reduce((inner, feature) => inner + feature.tasks.length, 0), 0)
+  const empty = tasksIn(model) === 0 && tasksIn(fullModel) > 0
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
@@ -491,7 +498,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
           </svg>
         </div>
         </div>
-        {(hint || (sprints && model.sprints.length === 0)) && (
+        {(hint || (sprints && model.sprints.length === 0) || empty) && (
           <div className="hub-map-top" ref={hintBar}>
             {hint && (
               <p className="hub-muted hub-map-hint" data-hint>
@@ -499,6 +506,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
                 <button type="button" className="hub-map-hint-x" aria-label="Hide the hint" onClick={dismissHint}>×</button>
               </p>
             )}
+            {empty && <p className="hub-muted hub-map-note" data-no-match>No tasks match this filter. <button type="button" className="hub-link-btn" onClick={() => applyFilter(OPEN_FILTER)}>Reset</button></p>}
             {sprints && model.sprints.length === 0 && <p className="hub-muted hub-map-note" data-no-sprints>No sprints in this Beads copy yet. Tasks labelled <code>sprint:&lt;name&gt;</code> show here as bands.</p>}
           </div>
         )}
@@ -511,7 +519,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={model} nodeId={shownId} onClose={closePanel} onOpen={openPanel} />}
+      {shownId && <MapPanel model={fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }

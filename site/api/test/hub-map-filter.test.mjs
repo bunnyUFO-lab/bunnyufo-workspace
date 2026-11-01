@@ -131,6 +131,8 @@ test('a stored filter that is bad or missing falls back to Open', () => {
   assert.equal(parseFilter({ states: 'doing' }), OPEN_FILTER);
   assert.deepEqual(parseFilter({ states: ['done', 'bogus', 'doing'], within: 30, from: 'nope', to: '2026-10-12' }), { states: ['doing', 'done'], within: 30, from: '', to: '2026-10-12' });
   assert.equal(parseFilter({ states: ['doing'], within: 12 }).within, null);
+  assert.deepEqual(parseFilter({ states: ['doing'], within: 7, from: '2026-10-12', to: '2026-10-03' }), { states: ['doing'], within: null, from: '', to: '' }, 'a range that ends before it starts is dropped');
+  assert.deepEqual(parseFilter({ states: ['doing'], from: '2026-10-03', to: '2026-10-03' }).from, '2026-10-03', 'one day is a range');
 });
 
 test('the chip says what is on', () => {

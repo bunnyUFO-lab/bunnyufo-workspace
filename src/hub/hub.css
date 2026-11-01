@@ -522,3 +522,5 @@ button.hub-cl-text { cursor: pointer; }
   .hub-filter .hub-chip, .hub-filter-x { min-height: 40px; }
   .hub-filter-dates input { min-height: 40px; }
 }
+.hub-link-btn { padding: 0; border: 0; background: none; color: var(--pink-bright); font: inherit; text-decoration: underline; cursor: pointer; }
+.hub-map-panel-hidden { margin: 8px 0 0; font-size: 0.8rem; }

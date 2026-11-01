@@ -160,6 +160,54 @@ try {
   await page.locator('.hub-map-box svg').waitFor();
   assert.equal(await chip(page), 'Open');
 
+  step('a link to a task the filter hides still opens its panel, with a note; Show all draws the node');
+  const deep = await open({ width: 1280, height: 800 });
+  await deep.goto(`${fixture.url}#/~hub/map/workspace-app/wa-done`);
+  await deep.locator('#hub-map-panel').waitFor();
+  assert.match(await deep.locator('#hub-map-panel h3').innerText(), /Finished task/);
+  assert.match(await deep.locator('[data-hidden-by-filter]').innerText(), /Hidden by your filter \(Open\)/);
+  assert.equal(await deep.locator('[data-node="wa-done"]').count(), 0, 'the node is not drawn under Open');
+  await deep.locator('[data-hidden-by-filter] button').click();
+  await deep.waitForTimeout(600);
+  assert.equal(await deep.locator('[data-hidden-by-filter]').count(), 0, 'the note is gone');
+  assert.equal(await deep.locator('[data-node="wa-done"]').count(), 1, 'and the node is drawn');
+  assert.equal(await chip(deep), 'All');
+  // A milestone's panel reads the whole tree, not the filtered one.
+  await deep.goto(`${fixture.url}#/~hub/map/workspace-app/wa-m1`);
+  assert.match(await deep.locator('#hub-map-panel').innerText(), /Finished task/);
+
+  step('a filter that matches nothing says so on the map, with a Reset');
+  const none = await open({ width: 1280, height: 800 });
+  await none.addInitScript(([from, to]) => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing'], within: null, from, to })); } catch { /* none */ } }, [ymd(100), ymd(90)]);
+  await showMap(none);
+  assert.match(await none.locator('[data-no-match]').innerText(), /No tasks match this filter/);
+  await none.locator('[data-no-match] button').click();
+  await none.waitForTimeout(500);
+  assert.equal(await none.locator('[data-no-match]').count(), 0);
+  assert.equal(await chip(none), 'Open');
+  // A range that ends before it starts is dropped on load: the map shows its tasks, not an empty one.
+  const backwards = await open({ width: 1280, height: 800 });
+  await backwards.addInitScript(([from, to]) => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later'], within: null, from, to })); } catch { /* none */ } }, [ymd(1), ymd(30)]);
+  await showMap(backwards);
+  assert.equal(await chip(backwards), 'Open');
+  assert.equal(await backwards.locator('[data-no-match]').count(), 0);
+
+  step('storage that throws: the map loads on Open and the filter still works');
+  const broken = await open({ width: 1280, height: 800 });
+  await broken.addInitScript(() => {
+    // Every access to the Roadmap's own keys throws, as in a blocked-storage browser; the rest of the app keeps its storage.
+    for (const method of ['getItem', 'setItem', 'removeItem']) {
+      const real = Storage.prototype[method];
+      Storage.prototype[method] = function guarded(key, ...rest) { if (String(key).startsWith('hub-map')) throw new DOMException('blocked', 'SecurityError'); return real.call(this, key, ...rest); };
+    }
+  });
+  await showMap(broken);
+  assert.equal(await chip(broken), 'Open');
+  await openPanel(broken);
+  await broken.locator('[data-preset="all"]').click();
+  await broken.waitForTimeout(400);
+  assert.equal(await chip(broken), 'All', 'the choice applies for this visit');
+
   step('a phone: the panel is a sheet along the bottom, nothing scrolls sideways');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await showMap(phone);

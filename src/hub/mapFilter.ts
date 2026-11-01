@@ -39,7 +39,11 @@ export function parseFilter(raw: unknown): MapFilter {
   const states = Array.isArray(value.states) ? FILTER_STATES.filter(state => (value.states as unknown[]).includes(state)) : null
   if (!states || !states.length) return OPEN_FILTER
   const within = value.within === 7 || value.within === 30 || value.within === 90 ? value.within : null
-  return { states, within, from: validDay(value.from) ? value.from : '', to: validDay(value.to) ? value.to : '' }
+  const from = validDay(value.from) ? value.from : ''
+  const to = validDay(value.to) ? value.to : ''
+  // A range that ends before it starts matches nothing: it falls back to the default date choice (any).
+  if (from && to && from > to) return { states, within: null, from: '', to: '' }
+  return { states, within, from, to }
 }
 
 /** When a task last changed: updated, else closed, else created; null when none parses. */
