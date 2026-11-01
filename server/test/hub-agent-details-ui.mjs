@@ -127,11 +127,13 @@ try {
   assert.match(flat(await note.innerText()), /^Last read from the Hermes host 9 h ago\. Its export may have stopped, so these settings may be out of date\.$/);
   assert.equal(await details(desk, 'hermes').locator('[data-model-primary]').count(), 1, 'The old settings are still shown.');
 
-  step('no export: the note says the host has not published yet, and the app prompts are below');
+  step('no export: the note says the host has not published yet, and points to the app prompts only when there are some');
   await visit(desk, bare.url, 'hermes');
-  assert.equal(flat(await details(desk, 'hermes').locator('[data-details-freshness]').innerText()), 'The Hermes host has not published its settings yet. The prompts from the app are below.');
+  assert.equal(flat(await details(desk, 'hermes').locator('[data-details-freshness]').innerText()), 'The Hermes host has not published its settings yet.');
+  assert.equal(await details(desk, 'hermes').locator('[data-prompt]').count(), 0, 'Hermes has no app prompts, so none are promised.');
   assert.equal(await details(desk, 'hermes').locator('[data-details-model]').count(), 0);
   await visit(desk, bare.url, 'researcher');
+  assert.equal(flat(await details(desk, 'researcher').locator('[data-details-freshness]').innerText()), 'The Hermes host has not published its settings yet. The prompts from the app are below.');
   assert.deepEqual(await details(desk, 'researcher').locator('[data-prompt]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-prompt'))), ['persona', 'job']);
 
   step('an unknown agent says so, and Back goes to Team');

@@ -6,6 +6,9 @@ import { startFakeHermes } from './fake-hermes.mjs';
 
 import { TIMING, approve, releaseAll, stack, until, wait } from './hermes-stack.mjs';
 
+/** Waits until the hub has a follower for the run in `file` (hermes-run.json or hermes-retry.json). The file is written first, the follower registered a moment later. */
+const followerOf = (s, api, id, file = 'hermes-run.json') => until(() => api.hub.hermes.followers.get(s.file(id, file)?.runId), `a follower for ${file}`);
+
 test('outcomeOf: the CARD line wins, the rest is a failure with a reason', () => {
   const at = '2026-10-29T10:00:00.000Z';
   assert.equal(cardOf('Text\nCARD: assistant/tug-games\n'), 'assistant/tug-games');
@@ -228,6 +231,7 @@ test('stop writes the signed stop, stops the run, and the state is stopped', asy
     const id = s.propose();
     await approve(api, id);
     await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    await followerOf(s, api, id);
     const stopped = await api.post(`/hub/requests/${id}/stop`, { reason: 'No longer needed' });
     assert.equal(stopped.status, 201, JSON.stringify(stopped.body));
     assert.ok(s.file(id, 'stop.json').signature);
@@ -246,6 +250,7 @@ test('a run past limits.minutes is stopped with time-limit (fake clock)', async 
     const id = s.propose();
     await approve(api, id);
     await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    await followerOf(s, api, id);
     assert.equal(s.file(id, 'approved.json').limits.minutes, 30);
     s.clock.at += 29 * 60_000;
     await wait(60);
@@ -354,6 +359,7 @@ test('the time limit stop is retried until Hermes takes it, and a failed stop do
     const id = s.propose();
     await approve(api, id);
     await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    await followerOf(s, api, id);
     s.clock.at += 31 * 60_000;
     const result = await until(() => s.resultOf(id), 'result.json');
     assert.deepEqual([result.outcome, result.reason], ['failed', 'time-limit']);
@@ -378,7 +384,7 @@ test('the quota retry shares the first run\'s time limit instead of starting a n
     await approve(api, id);
     await until(() => s.file(id, 'hermes-retry.json'), 'hermes-retry.json');
     const first = s.file(id, 'hermes-run.json');
-    const follower = api.hub.hermes.followers.get(s.file(id, 'hermes-retry.json').runId);
+    const follower = await followerOf(s, api, id, 'hermes-retry.json');
     assert.equal(follower.context.limitFrom, first.at, 'The limit counts from the first start.');
     assert.notEqual(follower.context.startedAt, first.at);
     s.clock.at += 11 * 60_000; // 31 minutes after the first start, 11 after the retry's

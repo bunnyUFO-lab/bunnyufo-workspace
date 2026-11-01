@@ -33,9 +33,9 @@ function Chips({ items, label }: { items: string[] | undefined; label: string })
   return <ul className="ad-chips" aria-label={label}>{items.map(item => <li key={item}>{item}</li>)}</ul>
 }
 
-function FreshnessNote({ freshness }: { freshness: DetailsFreshness }) {
+function FreshnessNote({ freshness, hasPrompts }: { freshness: DetailsFreshness; hasPrompts: boolean }) {
   if (freshness.state === 'none') return <p className="ad-note team-dim" data-details-freshness="none">Claude Code&apos;s settings live on the PC and are not shown here yet.</p>
-  if (freshness.state === 'missing') return <p className="hub-banner ad-note" role="note" data-details-freshness="missing">The Hermes host has not published its settings yet. The prompts from the app are below.</p>
+  if (freshness.state === 'missing') return <p className="hub-banner ad-note" role="note" data-details-freshness="missing">The Hermes host has not published its settings yet.{hasPrompts ? ' The prompts from the app are below.' : ''}</p>
   const checked = freshness.exportedAt ? ago(freshness.exportedAt) : ''
   if (freshness.state === 'stale') return <p className="hub-banner ad-note" role="note" data-details-freshness="stale">Last read from the Hermes host {checked}. Its export may have stopped, so these settings may be out of date.</p>
   return (
@@ -134,7 +134,7 @@ export default function AgentDetails({ id }: { id: string }) {
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
         <div><dt>Profile</dt><dd data-details-profile-name>{agent.profile ?? 'None'}</dd></div>
       </dl>
-      <FreshnessNote freshness={body.freshness} />
+      <FreshnessNote freshness={body.freshness} hasPrompts={body.prompts.length > 0} />
       {body.settings && <Settings settings={body.settings} />}
       {body.prompts.length > 0 && (
         <section className="ad-section" aria-labelledby="ad-prompts" data-details-prompts>
