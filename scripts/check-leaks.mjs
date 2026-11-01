@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, openSync, readFileSync, readSync, closeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { foreignEmails } from './export-beads.mjs'
 
 const MAX_BUFFER = 1024 * 1024 * 1024
 
@@ -104,6 +105,13 @@ function main() {
     scanned++
     readFileSync(full, 'utf8').split(/\r?\n/).forEach((line, i) => {
       scanLine(patterns, line, (n, text) => out(`${rel}:${i + 1}: pattern #${n}`, text))
+    })
+  }
+
+  // Beads export: no email address but a GitHub noreply or a placeholder-domain one may be committed (needs no patterns file).
+  if (files.includes('.beads/issues.jsonl') && existsSync(join(root, '.beads', 'issues.jsonl'))) {
+    readFileSync(join(root, '.beads', 'issues.jsonl'), 'utf8').split(/\r?\n/).forEach((line, i) => {
+      for (const email of foreignEmails(line)) out(`.beads/issues.jsonl:${i + 1}: email address`, email)
     })
   }
 

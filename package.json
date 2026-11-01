@@ -14,7 +14,7 @@
     "test:site-api": "node --test site/api/test/*.test.mjs site/card-api/test/*.test.mjs site/asks-bot/test/*.test.mjs",
     "test:service": "node --test server/test/*.test.mjs",
     "test:service:ui": "node scripts/run-ui-tests.mjs",
-    "test": "npm run test:service && npm run test:site-api && npm run docs:test && node --test scripts/publish.test.mjs scripts/cards.test.mjs scripts/check-leaks.test.mjs scripts/routine-prompt.test.mjs",
+    "test": "npm run test:service && npm run test:site-api && npm run docs:test && node --test scripts/publish.test.mjs scripts/cards.test.mjs scripts/check-leaks.test.mjs scripts/export-beads.test.mjs scripts/routine-prompt.test.mjs",
     "test:preview": "node scripts/check-preview-ui.mjs",
     "test:template": "node scripts/check-template.mjs && node scripts/docs-sync.mjs --check --template",
     "docs": "node scripts/docs.mjs serve",
