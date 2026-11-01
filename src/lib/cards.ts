@@ -111,11 +111,45 @@ export async function restoreCard(workspace: string, id: string): Promise<Worksp
   return card
 }
 
-/** Move a card to another workspace. Ids and folders stay, so links keep working. */
-export async function moveCard(workspace: string, id: string, to: string, category?: string): Promise<{ card: WorkspaceEntity; from: string; to: string; files: number; warning?: string }> {
-  const answer = await api<{ card: WorkspaceEntity; from: string; to: string; files: number; warning?: string }>('/cards/move', { workspace, id, to, ...(category ? { category } : {}) })
-  changed()
-  return answer
+export type MoveProgress = { done: number; total: number; doneBytes: number; bytes: number }
+type MoveAnswer = { card?: WorkspaceEntity; from: string; to: string; files: number; warning?: string; pending?: boolean; busy?: boolean; progress?: MoveProgress }
+
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * Move a card to another workspace. Ids and folders stay, so links keep working. A big card is moved
+ * in slices: the server answers `pending` with its progress and this asks again until it is done (a
+ * restart or a closed tab loses nothing; pressing Move again carries on). `onProgress` hears the count
+ * of files copied, from the answers and from a poll of the server's progress record between them.
+ */
+export async function moveCard(workspace: string, id: string, to: string, category?: string, onProgress?: (progress: MoveProgress) => void): Promise<MoveAnswer & { card: WorkspaceEntity }> {
+  let waiting = 0
+  let best = -1
+  let polling = true
+  const poll = async () => {
+    while (polling && onProgress) {
+      await pause(1000)
+      if (!polling) break
+      try {
+        const { progress } = await api<{ progress: (MoveProgress & { to: string; phase: string }) | null }>(`/cards/move/progress?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(id)}`)
+        if (progress && progress.to === to && progress.total && polling) onProgress(progress)
+      } catch { /* the move's own answer reports real trouble */ }
+    }
+  }
+  void poll()
+  try {
+    for (;;) {
+      const answer = await api<MoveAnswer>('/cards/move', { workspace, id, to, ...(category ? { category } : {}) })
+      if (!answer.pending && answer.card) { changed(); return answer as MoveAnswer & { card: WorkspaceEntity } }
+      if (answer.progress) onProgress?.(answer.progress)
+      // Another tab is moving it: wait and look again, but not for ever if nothing advances.
+      const done = answer.progress?.done ?? 0
+      waiting = done > best ? 0 : waiting + 1
+      best = Math.max(best, done)
+      if (waiting > 40) throw new Error('The move is not getting anywhere. Press Move again in a moment.')
+      if (answer.busy) await pause(1500)
+    }
+  } finally { polling = false }
 }
 
 /**

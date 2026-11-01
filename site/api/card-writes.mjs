@@ -19,7 +19,7 @@
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { moveCard } from './card-move.mjs';
+import { moveCard, moveProgress } from './card-move.mjs';
 import { claimExpired, finishPurge } from './card-purge.mjs';
 
 export const md5 = text => createHash('md5').update(text).digest('hex');
@@ -766,8 +766,14 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
  * for the workspace a request names, or throws 404. Returns the answer, or undefined for a path
  * that is not one of these.
  */
-export async function cardRoute({ method, route, query, data, writerFor, state }) {
+export async function cardRoute({ method, route, query, data, writerFor, state, moves }) {
   if (!route.startsWith('/cards')) return undefined;
+  if (method === 'GET' && route === '/cards/move/progress') {
+    // Read-only, for the progress bar of a long move; names the source workspace and card.
+    const workspace = query.get('workspace');
+    await writerFor(workspace);
+    return { status: 200, body: { progress: await moveProgress({ moves, workspace, id: query.get('id') }) } };
+  }
   if (method === 'GET' && route === '/cards/markdown') {
     const writer = await writerFor(query.get('workspace'));
     return { status: 200, body: await writer.readMarkdown({ id: query.get('id'), path: query.get('path') }) };
@@ -788,7 +794,9 @@ export async function cardRoute({ method, route, query, data, writerFor, state }
   if (route === '/cards/move') {
     if (!data.to || data.to === data.workspace) throw fail('Say which other workspace to move the card to.');
     const target = await writerFor(data.to, { target: true });
-    return { status: 200, body: await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, now: writer.now }) };
+    // A move too big for one request answers 202 with its progress; asking again carries on.
+    const body = await moveCard({ from: writer, to: target, id: data.id, category: data.category, state, moves, now: writer.now });
+    return { status: body.pending ? 202 : 200, body };
   }
   if (route === '/cards/trash/purge') return { status: 200, body: await writer.purgeTrash() };
   if (route === '/cards/category') return { status: 200, body: await writer.renameCategory(data) };
