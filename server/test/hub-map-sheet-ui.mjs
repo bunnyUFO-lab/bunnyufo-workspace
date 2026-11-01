@@ -176,18 +176,19 @@ try {
     await panel.locator('[data-mark-undo]').click();
     await panel.locator('[data-mark-done]').waitFor();
 
-    step(`${label}: a refusal from the Hub shows in an alert, and the sheet then offers the Ask`);
+    step(`${label}: a refusal from the Hub shows in an alert (Beads closed it meanwhile), and the buttons give way`);
     const race = `sd-t-race-${label}`;
     panel = await sheet(page, race);
     await panel.locator('[data-mark-done]').waitFor();
-    fixture.seed.ask(askJson({ id: askId(`race-${label}`, label === 'phone' ? 'r2r2' : 'r1r1'), bead: race, now: new Date(), options: threeOptions() }));
+    // Beads closes it while the sheet is open (a newer push of the same copy).
+    const closedIssues = issues.map(issue => (issue.id === race ? { ...issue, status: 'closed', closed_at: new Date().toISOString(), updated_at: new Date(Date.now() + 60000).toISOString() } : issue));
+    fixture.seed.beads(PROJECT, closedIssues, { pushedAt: new Date().toISOString(), host: 'pc.example.test', count: closedIssues.length, repo: 'example/sheetdev' });
     await panel.locator('[data-mark-done]').click();
     const alert = panel.locator('[role="alert"]');
     await alert.waitFor();
-    assert.equal(await alert.innerText(), 'This has an Ask; answer it in Needs you.');
-    await panel.locator('a', { hasText: 'Open in Needs you' }).waitFor();
-    assert.equal(await alert.count(), 1, 'The message stays when the sheet learns about the Ask.');
-    assert.equal(await panel.locator('[data-mark-done]').count(), 0, 'The buttons give way to Open in Needs you.');
+    assert.equal(await alert.innerText(), 'Already closed in Beads.');
+    await panel.locator('[data-mark-done]').waitFor({ state: 'detached' });
+    assert.equal(await alert.count(), 1, 'The message stays when the sheet learns it is closed.');
 
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
   }
