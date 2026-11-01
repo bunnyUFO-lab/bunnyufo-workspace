@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { HubEvent, HubProject } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import ItemRow from './ItemRow'
+import ProjectPicker from './ProjectPicker'
 import { useHubData } from './useHub'
 
 const FILTERS: [string, string, (kind: string) => boolean][] = [
@@ -32,10 +33,8 @@ export default function Activity({ filter }: { filter?: string }) {
   return (
     <>
       <div className="hub-top">
-        <label className="hub-muted">Project <select value={project} onChange={event => setProject(event.target.value)} aria-label="Project">
-          <option value="">All</option>
-          {(projects.data?.projects ?? []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
+        <label className="hub-muted" htmlFor="hub-activity-project">Project</label>
+        <ProjectPicker id="hub-activity-project" projects={projects.data?.projects ?? []} value={project || 'all'} allValue="all" onChange={id => setProject(id === 'all' ? '' : id)} />
       </div>
       <div className="hub-chips">
         {FILTERS.map(([key, label]) => (

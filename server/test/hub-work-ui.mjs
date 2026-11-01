@@ -4,6 +4,7 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { pickOption } from './combobox.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -101,10 +102,10 @@ try {
   assert.match(await request.getAttribute('href'), /^#\/~hub\/request\/\d{8}-lanes-/);
 
   step('All shows every project, with the project on each card');
-  await page.locator('.hub-chip', { hasText: /^All$/ }).click();
+  await pickOption(page.getByRole('combobox', { name: 'Project' }), 'all');
   await page.waitForFunction(() => location.hash === '#/~hub/work/all');
   await page.locator('.wk-card .wk-project').first().waitFor();
-  assert.ok(await page.locator('.hub-chip.on', { hasText: /^All$/ }).count() === 1);
+  assert.equal(await page.getByRole('combobox', { name: 'Project' }).inputValue(), 'All');
   assert.ok(await page.locator('.wk-lane[data-lane="running"] .wk-project').count() >= 1);
 
   step('the tabs: Lanes lit on Work, Activity under the same tab strip with Work lit in the nav');
@@ -138,8 +139,8 @@ try {
   await phone.locator('[data-lane-chip="done"]').tap();
   await phone.locator('[data-lane-chip="review"]').tap();
   assert.deepEqual(await visibleLanes(phone), ['review'], 'Review is reachable on a phone.');
-  const rows = await phone.locator('.work > .hub-chips-wrap .hub-chips').evaluate(el => ({ height: el.getBoundingClientRect().height, chip: el.querySelector('.hub-chip').getBoundingClientRect().height }));
-  assert.ok(rows.height <= rows.chip + 2, `The project chips are one row (${rows.height} vs ${rows.chip}).`);
+  const picker = await phone.locator('.work > .hub-project-pick .cb').boundingBox();
+  assert.ok(picker.height >= 44 && picker.x >= 0 && picker.x + picker.width <= 390, `The project picker is one 44 px row inside the screen (${JSON.stringify(picker)}).`);
   await noSideways(phone, 'Work at 390 px');
   await go(phone, '#/~hub/work/all');
   await phone.locator('.wk-lane:visible .wk-card .wk-project').first().waitFor();

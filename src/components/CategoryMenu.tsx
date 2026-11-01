@@ -4,6 +4,7 @@ import { renameCategoryOrder } from '../lib/order'
 import { renameCollapsed } from '../lib/collapse'
 import { canManage, categoriesOf, useLibrary } from '../lib/library'
 import type { MenuItem } from './ItemMenu'
+import Combobox from '../hub/Combobox'
 import Dialog from './Dialog'
 import { showUndo } from '../lib/undo'
 
@@ -51,10 +52,8 @@ function CategoryDialog({ workspace, label, mode, onClose }: { workspace: string
           <label>New name<input value={value} onChange={event => { setValue(event.target.value); setConfirm(false) }} maxLength={48} disabled={busy} /></label>
         ) : (
           <label>Merge into
-            <select value={value} onChange={event => { setValue(event.target.value); setConfirm(false) }} disabled={busy}>
-              {others.map(c => <option key={c.label} value={c.label}>{c.label.replace(/-/g, ' ')}</option>)}
-              {!others.some(c => c.label === 'other') && <option value="other">other</option>}
-            </select>
+            <Combobox id="lib-merge-into" value={value} onChange={next => { setValue(next); setConfirm(false) }} disabled={busy} openLabel="Show categories"
+              options={[...others.map(c => ({ value: c.label, label: c.label.replace(/-/g, ' '), keywords: [c.label] })), ...(others.some(c => c.label === 'other') ? [] : [{ value: 'other', label: 'other' }])]} />
           </label>
         )}
         {confirm && <p className="lib-note" role="alert">Merge {count} card{count === 1 ? '' : 's'} into {target.replace(/-/g, ' ')}? This cannot be undone in one step.</p>}

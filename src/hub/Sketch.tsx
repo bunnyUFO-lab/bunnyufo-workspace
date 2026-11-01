@@ -7,6 +7,7 @@ import { hubHash } from '../lib/route'
 import { authHeaders } from '../local/client'
 import { blankScene, setHandoff, type Drawn } from './drawing'
 import HubImage from './HubImage'
+import ProjectPicker from './ProjectPicker'
 import { useHubData } from './useHub'
 
 const DrawingEditor = lazy(() => import('../components/DrawingEditor'))
@@ -187,9 +188,7 @@ function NewRequest({ draft }: { draft: string }) {
   }
   return (
     <div>
-      <div className="hub-chips" aria-label="Project">
-        {list.map(item => <button key={item.id} type="button" className={`hub-chip${item.id === project ? ' on' : ''}`} onClick={() => setChosen(item.id)}>{item.name}</button>)}
-      </div>
+      <div className="hub-project-pick"><ProjectPicker id="hub-sketch-project" projects={list} value={project ?? ''} onChange={setChosen} /></div>
       <label className="hub-field">What should happen?
         <textarea value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={4000} />
       </label>

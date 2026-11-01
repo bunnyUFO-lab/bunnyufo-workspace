@@ -13,6 +13,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pickOption } from './combobox.mjs';
 import { DISCORD_ASK, FIXTURE_ASK, PASSKEY_ASK, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, eventJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
@@ -1071,7 +1072,7 @@ try {
   assert.ok(inked > 50, 'The stroke is on the canvas after a reload.');
   await page.locator('.drawing-bar button', { hasText: /^Cancel$/ }).click();
   await page.locator('[aria-label="Send to agent"]').waitFor();
-  await page.locator('[aria-label="Send to agent"] .hub-chip', { hasText: 'Probe' }).click();
+  await pickOption(page.locator('[aria-label="Send to agent"]').getByRole('combobox', { name: 'Project' }), 'probe');
   await page.locator('[aria-label="Send to agent"] textarea').fill('Make the arc look like my sketch');
   await page.locator('button:has-text("Send request")').click();
   await page.locator('.hub-ok', { hasText: 'Sent as' }).waitFor();

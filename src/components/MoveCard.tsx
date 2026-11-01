@@ -3,6 +3,7 @@ import type { WorkspaceCard } from '../types'
 import { moveCard } from '../lib/cards'
 import { entityHash } from '../lib/route'
 import { categoriesOf, takesCards, useLibrary } from '../lib/library'
+import Combobox from '../hub/Combobox'
 import Dialog from './Dialog'
 import { showUndo } from '../lib/undo'
 
@@ -33,9 +34,8 @@ export default function MoveCard({ card, onClose }: { card: WorkspaceCard; onClo
       {targets.length === 0 ? <p>There is no other workspace to move it to.</p> : (
         <form className="lib-form" onSubmit={event => { event.preventDefault(); void go() }}>
           <label>Move to
-            <select value={to} onChange={event => setTo(event.target.value)} disabled={busy}>
-              {targets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
+            <Combobox id="lib-move-to" value={to} onChange={setTo} disabled={busy} openLabel="Show workspaces"
+              options={targets.map(w => ({ value: w.id, label: w.name, keywords: [w.id] }))} />
           </label>
           <label>Category
             <input list="lib-move-categories" value={category} onChange={event => setCategory(event.target.value)} placeholder={`Keep (${card.category || 'other'})`} maxLength={48} disabled={busy} />

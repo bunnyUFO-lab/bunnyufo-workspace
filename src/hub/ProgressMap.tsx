@@ -3,7 +3,6 @@ import type { CSSProperties, KeyboardEvent } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
-import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
@@ -16,6 +15,7 @@ import { stableOf, zoomStep } from './semanticZoom'
 import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { useHubData } from './useHub'
+import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
 
 const HINT_KEY = 'hub-map-hint-seen'
@@ -49,18 +49,11 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
   const [wanted, nodeId] = splitId(routeId)
   const { list, project, loading: listing } = useProject(wanted)
   const { data: model, error, loading: mapping } = useHubData<MapModel>(project ? `/map/${encodeURIComponent(project)}` : null)
-  const chips = useRef<HTMLDivElement>(null)
-  const overflow = useOverflowEdges(chips, [list.length, project])
-  useEffect(() => { chips.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [list.length, project])
   return (
     <>
       <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
       <div className="hub-map-chips">
-        <div className="hub-chips-wrap" data-overflow={overflow}>
-          <div className="hub-chips one-row" aria-label="Project" ref={chips}>
-            {list.map(item => <a key={item.id} className={`hub-chip${item.id === project ? ' on' : ''}`} href={hubHash('map', item.id)}>{item.name}</a>)}
-          </div>
-        </div>
+        <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} />
         <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
