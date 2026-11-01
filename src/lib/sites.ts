@@ -27,6 +27,8 @@ export interface Site {
   publishedAt?: string
   /** Holds data, not cards (the inbox): served, but never listed in the switcher or picked as the default. */
   hidden?: boolean
+  /** Put away by hand: left out of the switcher, the chips and the lists, but its files and cards stay. */
+  archived?: boolean
 }
 
 export interface Sites {
@@ -57,7 +59,7 @@ export function sites(): Promise<Sites> {
       // Say so rather than quietly showing a different workspace: an id that is not in the list means
       // that workspace has not published here yet, and its cards are not the ones on screen.
       if (id && !match) return { sites: list, active: null, unknownId: id }
-      return { sites: list, active: match ?? list.find(s => !s.hidden) ?? list[0], unknownId: null }   // no id at all: the root shows the first visible one
+      return { sites: list, active: match ?? list.find(s => !s.hidden && !s.archived) ?? list.find(s => !s.hidden) ?? list[0], unknownId: null }   // no id at all: the root shows the first visible one
     } catch {
       return FALLBACK                                  // no list published: single-workspace site
     }
@@ -72,12 +74,16 @@ export function sites(): Promise<Sites> {
 export let contentBase = '/workspace'
 export let activeSite: Site | null = null
 export let allSites: Site[] = []
+/** Workspaces put away by hand, for the switcher's "Archived" list. */
+export let archivedSites: Site[] = []
 /** Set when the address names a workspace this site does not serve; the app shows that instead of cards. */
 export let unknownSiteId: string | null = null
 
 export async function resolveSite() {
   const { sites: list, active, unknownId } = await sites()
-  allSites = list.filter(site => !site.hidden)
+  // An archived workspace leaves the lists, unless a link opened it: that one still shows, so the link works.
+  allSites = list.filter(site => !site.hidden && (!site.archived || site.id === active?.id))
+  archivedSites = list.filter(site => !site.hidden && site.archived)
   activeSite = active
   unknownSiteId = unknownId
   if (active) contentBase = active.base

@@ -103,6 +103,7 @@ async function loadSite(): Promise<WorkspaceData> {
         repoPath: 'path' in site ? site.path : undefined,
         branch: 'branch' in site ? site.branch : undefined,
         active: site.id === (activeSite?.id ?? 'workspace'),
+        ...('archived' in site && site.archived ? { archived: true } : {}),
         ...(parsed?.retired && typeof parsed.retired === 'object' && Object.keys(parsed.retired).length ? { retired: parsed.retired } : {}),
       }
       return { workspace, entities: Array.isArray(parsed?.entities) ? parsed.entities : [] }

@@ -186,6 +186,9 @@ it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and 
 - `/api/card-state`, `/api/workspace/status`, `/api/workspace/pin`, `/api/workspace/pins` and
   `/api/workspace/tags` read and write `state.json`. `/api/sections` starts a section: the
   `workspace/` template plus an empty card list carrying the name, put into the bucket.
+- `/api/sections/rename` changes a workspace's display name and `/api/sections/archive` hides or
+  restores it (`archived: true` in its `workspace.json`; refused while a card is active as the
+  Library counts it). Neither changes ids, files or links, and nothing is deleted.
 
 The rest of the site is **this app's own browser UI**: card grid, tabs, Markdown and HTML
 reports, the same as the local app. The site's root opens the first section, and `/<id>` opens

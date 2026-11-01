@@ -1775,6 +1775,17 @@ button.open-ext {
 .workspace-menu-add button[type="submit"] { border-color: var(--pink); background: var(--pink-dim); }
 .workspace-menu-add button:disabled { opacity: 0.45; cursor: default; }
 .workspace-menu-note { margin: 2px; font-size: 0.7rem; color: var(--text-muted); }
+.workspace-menu-row { position: relative; display: flex; align-items: center; gap: 4px; }
+.workspace-menu-row > a, .workspace-menu-row > .workspace-menu-name { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid transparent; border-radius: 7px; color: var(--text); text-decoration: none; }
+.workspace-menu-row > a:hover { background: var(--surface-2); }
+.workspace-menu-row > a[aria-checked="true"] { border-color: var(--pink); background: var(--pink-dim); }
+.workspace-menu-archived > .workspace-menu-name { color: var(--text-muted); }
+.workspace-menu-more, .workspace-menu-restore { flex: none; min-width: 32px; min-height: 32px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.75rem; cursor: pointer; }
+.workspace-menu-more:hover, .workspace-menu-restore:hover:not(:disabled) { border-color: var(--pink); }
+.workspace-menu-restore:disabled { opacity: 0.45; cursor: default; }
+.workspace-menu-manage { position: absolute; right: 0; top: calc(100% + 2px); z-index: 2; display: grid; min-width: 140px; padding: 4px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface-solid); box-shadow: 0 8px 20px #0008; }
+.workspace-menu-manage button { padding: 9px 10px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; font-size: 0.78rem; text-align: left; cursor: pointer; }
+.workspace-menu-manage button:hover:not(:disabled) { background: var(--surface-2); }
 .workspace-menu-error { margin: 4px 2px 0; font-size: 0.72rem; color: var(--red); }
 
 /* A pin, an archive or a save that could not be written: the one error bar, drawn by the shell

@@ -626,3 +626,143 @@ test('an S3 body that fails mid-download ends that one response; the server keep
     assert.match(await next.text(), /alpha/);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fake.close(); }
 });
+
+test('renaming a workspace changes its display name and nothing else', async () => {
+  const { request: bare, raw, fake, entity, close } = await fixture({ requireRemoteUser: true });
+  const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
+  try {
+    const before = fake.json('sections/one/workspace.json');
+    const answer = await request('/sections/rename', { workspace: 'one', name: '  Section Uno  ' });
+    assert.equal(answer.status, 200);
+    assert.deepEqual(await answer.json(), { id: 'one', name: 'Section Uno' });
+    const after = fake.json('sections/one/workspace.json');
+    assert.equal(after.name, 'Section Uno');
+    assert.deepEqual(after.entities, before.entities, 'Cards are untouched.');
+    assert.ok(entity('one', 'alpha'));
+    assert.ok(fake.text('sections/one/alpha/index.html'), 'Files stay where they were.');
+    const list = await (await raw('/sites.json')).json();
+    assert.deepEqual(list.find(site => site.id === 'one'), { ...list.find(site => site.id === 'one'), id: 'one', name: 'Section Uno', base: '/w/one' }, 'The id and base stay.');
+    assert.ok(!list.some(site => site.id === 'section-uno'), 'No new id appears.');
+    // Same name again is fine; bad names and unknown workspaces are refused.
+    assert.equal((await request('/sections/rename', { workspace: 'one', name: 'Section Uno' })).status, 200);
+    assert.equal((await request('/sections/rename', { workspace: 'one', name: '   ' })).status, 400);
+    assert.equal((await request('/sections/rename', { workspace: 'one', name: 'x'.repeat(61) })).status, 400);
+    assert.equal((await request('/sections/rename', { workspace: 'nope', name: 'X' })).status, 404);
+    assert.ok(!fake.log.some(entry => entry.method === 'DELETE'), 'Nothing is ever deleted.');
+  } finally { await close(); }
+});
+
+test('archiving hides a workspace, waits until a card is active as the app counts it, and restores', async () => {
+  const { request: bare, raw, fake, close } = await fixture({ requireRemoteUser: true });
+  const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
+  const today = new Date().toISOString().slice(0, 10);
+  const publishCards = (...entities) => fake.seed('sections/one/workspace.json', `${JSON.stringify({ name: 'Section One', entities }, null, 2)}\n`, 'application/json');
+  try {
+    // alpha and gamma were last touched long ago and carry no state: the Library shows them as archived already.
+    const done = await request('/sections/archive', { workspace: 'one', archived: true });
+    assert.equal(done.status, 200, 'An idle workspace can be archived with no clicks first.');
+    assert.deepEqual(await done.json(), { id: 'one', archived: true });
+    assert.equal(fake.json('sections/one/workspace.json').archived, true);
+    assert.equal(fake.json('sections/one/workspace.json').name, 'Section One');
+    assert.equal((await raw('/w/one/alpha/index.html')).status, 200, 'Its files still serve.');
+    assert.equal((await (await raw('/sites.json')).json()).find(site => site.id === 'one').archived, true);
+    assert.ok(!('archived' in (await (await raw('/sites.json')).json()).find(site => site.id === 'two')));
+
+    // Restore puts it back; a non-boolean is a 400.
+    assert.equal((await request('/sections/archive', { workspace: 'one', archived: 'yes' })).status, 400);
+    assert.equal((await request('/sections/archive', { workspace: 'one', archived: false })).status, 200);
+    assert.equal('archived' in fake.json('sections/one/workspace.json'), false);
+
+    // The same card is live when pinned, when touched this week, when it is a sample, or when restored today.
+    const refused = async () => { const answer = await request('/sections/archive', { workspace: 'one', archived: true }); assert.equal(answer.status, 409); return (await answer.json()).error; };
+    assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true })).status, 200);
+    assert.match(await refused(), /1 active card\./, 'A pinned card counts.');
+    assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: false })).status, 200);
+    publishCards(card('alpha'), card('gamma', { updated: today }));
+    assert.match(await refused(), /1 active card\./, 'A card touched today counts.');
+    publishCards(card('alpha'), card('gamma'), card('sample', { sample: true }));
+    assert.match(await refused(), /1 active card\./, 'A sample card counts.');
+    publishCards(card('alpha'), card('gamma'));
+    assert.equal((await request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'archived' })).status, 200);
+    assert.equal((await request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'active' })).status, 200, 'Restoring a card touches it.');
+    assert.match(await refused(), /1 active card\./, 'A card restored today counts.');
+    assert.equal((await request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'archived' })).status, 200);
+    assert.equal((await request('/sections/archive', { workspace: 'one', archived: true })).status, 200, 'Archived by hand, and the rest by date.');
+    assert.ok(!fake.log.some(entry => entry.method === 'DELETE'), 'Nothing is ever deleted.');
+  } finally { await close(); }
+});
+
+test('the date rule the server counts with is the one the app uses', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { ARCHIVE_DAYS } = await import('../card-liveness.mjs');
+  const app = await readFile(new URL('../../../src/lib/workspace.ts', import.meta.url), 'utf8');
+  assert.equal(Number(/export const ARCHIVE_DAYS = (\d+)/.exec(app)?.[1]), ARCHIVE_DAYS);
+});
+
+test('a workspace name with control characters, line breaks or direction marks is refused', async () => {
+  const { request: bare, fake, close } = await fixture({ requireRemoteUser: true });
+  const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
+  try {
+    const bad = ['A\u0007B', 'A\nB', 'A\u0000B', 'A‮evil', 'A⁦B', 'A‏B', 'A\u0085B'];
+    for (const name of bad) assert.equal((await request('/sections/rename', { workspace: 'one', name })).status, 400, JSON.stringify(name));
+    assert.equal(fake.json('sections/one/workspace.json').name, 'Section One');
+    assert.equal((await request('/sections/rename', { workspace: 'one', name: 'Café — Ideas 2027' })).status, 200, 'Ordinary text, accents and dashes are fine.');
+  } finally { await close(); }
+});
+
+test('rename and archive that lose a 412 race keep the other writer, and archive counts again', async () => {
+  const { request: bare, bucket, fake, close } = await fixture({ requireRemoteUser: true });
+  const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const original = bucket.put.bind(bucket);
+    let race = null;
+    bucket.put = async (key, body, options) => {
+      if (race && key === 'sections/one/workspace.json') {
+        const change = race; race = null;
+        const current = await bucket.getJson(key);
+        await original(key, `${JSON.stringify(change(current.value), null, 2)}\n`, { contentType: 'application/json', ifMatch: current.etag });
+      }
+      return original(key, body, options);
+    };
+    race = list => ({ ...list, tracked: { by: 'publish' }, entities: [...list.entities, card('zeta')] });
+    assert.equal((await request('/sections/rename', { workspace: 'one', name: 'Renamed' })).status, 200);
+    let list = fake.json('sections/one/workspace.json');
+    assert.equal(list.name, 'Renamed');
+    assert.deepEqual(list.tracked, { by: 'publish' }, 'The racing writer key survived.');
+    assert.ok(list.entities.some(item => item.id === 'zeta'), 'And its card.');
+
+    // An archive that loses the race to a writer adding a live card is refused on the retry, and writes nothing.
+    race = current => ({ ...current, entities: [...current.entities, card('fresh', { updated: today })] });
+    const answer = await request('/sections/archive', { workspace: 'one', archived: true });
+    assert.equal(answer.status, 409);
+    assert.match((await answer.json()).error, /1 active card\./);
+    list = fake.json('sections/one/workspace.json');
+    assert.equal(list.archived, undefined);
+    assert.ok(list.entities.some(item => item.id === 'fresh'));
+    assert.ok(!fake.log.some(entry => entry.method === 'DELETE'));
+  } finally { await close(); }
+});
+
+test('rename and archive keep the write gates, and refuse data-only workspaces', async () => {
+  const { server, origin, request: bare, fake, close } = await fixture({ requireRemoteUser: true });
+  const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
+  assert.equal((await bare('/sections/rename', { workspace: 'one', name: 'X' })).status, 401, 'Remote-User is required.');
+  try {
+    const noOrigin = await fetch(`${origin}/api/sections/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Remote-User': 'owner' }, body: JSON.stringify({ workspace: 'one', name: 'X' }) });
+    assert.equal(noOrigin.status, 403);
+    assert.equal(fake.json('sections/one/workspace.json').name, 'Section One');
+    fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
+    assert.equal((await request('/sections/rename', { workspace: 'inbox', name: 'X' })).status, 409);
+    assert.equal((await request('/sections/archive', { workspace: 'inbox', archived: true })).status, 409);
+    assert.equal(server.listening, true);
+  } finally { await close(); }
+  const dev = await fixture({ dev: devOnly, stateKey: 'dev-state.json' });
+  try {
+    assert.equal((await dev.request('/sections/rename', { workspace: 'one', name: 'X' })).status, 403);
+    assert.equal((await dev.request('/sections/archive', { workspace: 'one', archived: true })).status, 403);
+    dev.fake.seed('sections/dev-room/workspace.json', '{"name":"Room","entities":[]}\n', 'application/json');
+    assert.equal((await dev.request('/sections/rename', { workspace: 'dev-room', name: 'Room 2' })).status, 200);
+    assert.equal((await dev.request('/sections/archive', { workspace: 'dev-room', archived: true })).status, 200);
+  } finally { await dev.close(); }
+});

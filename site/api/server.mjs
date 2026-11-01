@@ -27,6 +27,7 @@ import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
 import { contentTypeOf } from './s3.mjs';
+import { isLiveCard } from './card-liveness.mjs';
 
 const STATUSES = ['active', 'archived'];
 const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
@@ -190,6 +191,8 @@ export function createSiteApi({
         publishedAt: got.lastModified ? new Date(got.lastModified).toISOString() : undefined,
         // A hidden section holds data (inbox, events), not cards: it is served, but the UI never lists it.
         ...(got.value.hidden === true ? { hidden: true } : {}),
+        // An archived workspace is put away, not deleted: its files and cards stay, the lists leave it out.
+        ...(got.value.archived === true ? { archived: true } : {}),
       });
     }));
     sectionsCache = { map: found, at: Date.now() };
@@ -464,6 +467,54 @@ export function createSiteApi({
         // One pass over the whole list, so the positions it writes are the positions the UI sent.
         const pins = await cards.setPins(ordered.filter(Boolean));
         return json(response, 200, { pins });
+      }
+
+      if (route === '/sections/rename' || route === '/sections/archive') {
+        // Workspace-level edits touch the workspace.json top level only: the display name, or the
+        // `archived` flag. The id, the prefix, the cards and every link stay exactly as they were.
+        const renaming = route === '/sections/rename';
+        const section = await findSection(String(data.workspace ?? ''));
+        mayWrite(section.id);
+        if (section.hidden || /^inbox/.test(section.id)) throw Object.assign(new Error(`"${section.name}" holds data, not cards, so it cannot be ${renaming ? 'renamed' : 'archived'} here.`), { status: 409 });
+        let name = '';
+        if (renaming) {
+          name = String(data.name ?? '').trim();
+          if (!name || name.length > 60) throw new Error('A workspace name is 1 to 60 characters.');
+          // No control characters, line breaks or direction overrides: the name is shown in titles, chips and logs.
+          if (/[\x00-\x1F\x7F-\x9F\u{200E}\u{200F}\u{202A}-\u{202E}\u{2066}-\u{2069}]/u.test(name)) throw new Error('A workspace name cannot hold control characters, line breaks or text-direction marks.');
+        } else if (typeof data.archived !== 'boolean') {
+          throw new Error('Say whether to archive (true) or restore (false).');
+        }
+        const key = keyOf(section.id, 'workspace.json');
+        for (let attempt = 1; ; attempt += 1) {
+          const got = await bucket.getText(key);
+          let list;
+          try { list = JSON.parse(got?.text ?? ''); } catch { throw Object.assign(new Error('This workspace has a workspace.json that is not valid JSON.'), { status: 409 }); }
+          if (!Array.isArray(list?.entities)) throw Object.assign(new Error('That workspace has no card list.'), { status: 409 });
+          if (renaming) {
+            if (list.name === name) { sectionsCache = null; return json(response, 200, { id: section.id, name }); }
+            list.name = name;
+          } else {
+            if (data.archived) {
+              // Only a workspace with nothing active can be put away; the state overlay (pins, archived cards) counts.
+              const overlay = await cards.all();
+              const live = list.entities.filter(item => item && isLiveCard(item, overlay[`${section.id}/${item.id}`]));
+              if (live.length) throw Object.assign(new Error(`"${section.name}" still has ${live.length} active card${live.length === 1 ? '' : 's'}. Archive them first (cards untouched for a week count as archived already).`), { status: 409 });
+              list.archived = true;
+            } else {
+              delete list.archived;
+            }
+          }
+          try {
+            await bucket.put(key, `${JSON.stringify(list, null, 2)}
+`, { contentType: 'application/json', ifMatch: got.etag });
+            break;
+          } catch (error) {
+            if (error.status !== 412 || attempt >= 4) throw error;
+          }
+        }
+        sectionsCache = null;
+        return json(response, 200, renaming ? { id: section.id, name } : { id: section.id, archived: data.archived });
       }
 
       if (route === '/sections') {

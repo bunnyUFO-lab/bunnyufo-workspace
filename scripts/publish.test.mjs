@@ -647,3 +647,26 @@ test('each side deleting a different tab of a two-tab card leaves one tab, and t
     assert.match(lines.join('\n'), /would have no tabs left/);
   } finally { await fake.close(); }
 });
+
+test('a rename or archive made on the site survives the next local publish', async () => {
+  const fake = await startFakeS3();
+  try {
+    const { site, registryFile, bucketOptions } = await workspace(fake);
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    // On the site: the workspace is renamed and archived (only `name` and `archived` change in its card list).
+    const key = 'sections/my-workspace/workspace.json';
+    const remote = JSON.parse(fake.text(key));
+    fake.seed(key, `${JSON.stringify({ ...remote, name: 'Renamed on the site', archived: true }, null, 2)}\n`, 'application/json');
+    // Here: a card is edited and published again, the local list still carrying the old name.
+    await writeFile(path.join(site, 'hub', 'index.md'), '# Hub, edited\n');
+    const local = JSON.parse(await readFile(path.join(site, 'workspace.json'), 'utf8'));
+    local.entities[0].updated = '2026-10-20';
+    await writeFile(path.join(site, 'workspace.json'), JSON.stringify(local, null, 2));
+    await publish({ content: site, registryFile, bucketOptions, log: () => {} });
+    const after = JSON.parse(fake.text(key));
+    assert.equal(after.name, 'Renamed on the site', 'The site rename is not put back.');
+    assert.equal(after.archived, true, 'Nor the archive.');
+    assert.equal(after.entities[0].updated, '2026-10-20', 'The local edit still went up.');
+    assert.equal(fake.text('sections/my-workspace/hub/index.md'), '# Hub, edited\n');
+  } finally { await fake.close(); }
+});
