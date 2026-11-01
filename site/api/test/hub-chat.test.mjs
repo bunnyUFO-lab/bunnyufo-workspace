@@ -316,6 +316,26 @@ test('runs on: a turn streams deltas and a tool line, never names a provider, an
   } finally { await close(); }
 });
 
+test('runs on: a picture in the answer is stored and sent back as a note, never as a data URL', async () => {
+  const data = `![image](data:image/png;base64,${'iVBORw0KGgo'.repeat(2000)}==)`;
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Here it is.\n', data], endWith: `Here it is.\n${data}\nMEDIA:/cache/a.png` } });
+  try {
+    const first = await chatLive(call, { text: 'Draw a bunny' });
+    const done = first.events.at(-1);
+    assert.equal(done.event, 'done');
+    const stored = fake.text(`sections/inbox/chat/${done.data.conversation}.jsonl`);
+    assert.ok(!stored.includes('data:image') && !stored.includes('iVBORw0KGgo'), 'the stored line has no picture');
+    assert.ok(stored.length < 2000);
+    assert.match(lines(fake, done.data.conversation)[1].text, /\[image made by Hermes, not kept here\]/);
+    // An older line that already holds a picture is cleaned on the way back, too.
+    fake.seed(`sections/inbox/chat/${done.data.conversation}.jsonl`, `${stored.trim()}\n${JSON.stringify({ role: 'assistant', text: `old ${data}`, at: new Date().toISOString() })}\n`, 'application/x-ndjson');
+    await chatLive(call, { text: 'Again', conversation: done.data.conversation });
+    const sent = JSON.stringify(upstream.runs[1].body);
+    assert.ok(!sent.includes('data:image') && !sent.includes('iVBORw0KGgo'), 'the history has no picture');
+    assert.match(sent, /image made by Hermes/);
+  } finally { await close(); }
+});
+
 test('runs on: an approval mid-turn arrives as an event, is answered through the route, and the turn completes', async () => {
   const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { askApproval: true, runScript: ['Writing. ', 'Finished.'] } });
   try {
