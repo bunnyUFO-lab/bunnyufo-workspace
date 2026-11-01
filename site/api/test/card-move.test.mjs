@@ -443,3 +443,103 @@ test('a small move writes its progress record and ends it as done', async () => 
     assert.deepEqual([record.phase, record.lease, record.done, record.total], ['done', 0, 4, 4]);
   } finally { await w.close(); }
 });
+
+// ---- Between slices, and a holder that lost the move. ----
+
+/** Run a sliced move until its first pending answer; returns the clock and the moves log. */
+async function firstSlice(w, count) {
+  seedMany(w, count);
+  let t = 0;
+  watchCopies(w.two.store, () => { t += 10; });
+  const moves = bucketStore(w.bucket, 'state-moves');
+  const first = await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, budgetMs: 500 });
+  assert.equal(first.pending, true);
+  return { moves, clock: () => t };
+}
+const inTarget = w => [...w.fake.objects.keys()].filter(key => key.startsWith('sections/two/2026-10-29_deck/many/'));
+
+test('a file deleted from the source between slices does not block the move, and does not reach the target', async () => {
+  const w = await bucketWorld();
+  try {
+    const { moves, clock } = await firstSlice(w, 300);
+    const copiedKey = inTarget(w)[0];
+    const lateKey = [...w.fake.objects.keys()].filter(key => key.startsWith('sections/one/2026-10-29_deck/many/')).map(key => key.replace('sections/one/', 'sections/two/')).find(key => !w.fake.objects.has(key));
+    assert.ok(copiedKey && lateKey);
+    w.fake.objects.delete(copiedKey.replace('sections/two/', 'sections/one/'));
+    w.fake.objects.delete(lateKey.replace('sections/two/', 'sections/one/'));
+    let answer;
+    for (let n = 0; n < 20 && (!answer || answer.pending); n += 1) answer = await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock, budgetMs: 500 });
+    assert.equal(answer.pending, undefined);
+    assert.equal(w.fake.objects.has(copiedKey), false, 'a file the source dropped after it was copied is gone from the target');
+    assert.equal(w.fake.objects.has(lateKey), false);
+    assert.equal(inTarget(w).length, 298);
+    assert.deepEqual(w.list('two').entities.map(item => item.id), ['deck']);
+  } finally { await w.close(); }
+});
+
+test('a file that is not this move\'s and has no source counterpart is still a 409 when no move is unfinished', async () => {
+  const w = await bucketWorld();
+  try {
+    seedMany(w, 5);
+    w.fake.seed('sections/two/2026-10-29_deck/stranger.txt', 'not ours', 'text/plain');
+    await assert.rejects(moveCard({ from: w.one, to: w.two, id: 'deck', moves: bucketStore(w.bucket, 'state-moves'), now }), { status: 409 });
+    assert.equal(w.fake.text('sections/two/2026-10-29_deck/stranger.txt'), 'not ours');
+  } finally { await w.close(); }
+});
+
+test('a file changed in the source between slices is copied again', async () => {
+  const w = await bucketWorld();
+  try {
+    const { moves, clock } = await firstSlice(w, 300);
+    const copiedKey = inTarget(w)[0];
+    w.fake.seed(copiedKey.replace('sections/two/', 'sections/one/'), 'changed between slices', 'text/plain');
+    let answer;
+    for (let n = 0; n < 20 && (!answer || answer.pending); n += 1) answer = await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock, budgetMs: 500 });
+    assert.equal(answer.pending, undefined);
+    assert.equal(w.fake.text(copiedKey), 'changed between slices');
+    assert.equal(inTarget(w).length, 300);
+  } finally { await w.close(); }
+});
+
+test('a stalled holder that wakes after a takeover cannot switch the card over, and its next ask succeeds', async () => {
+  const w = await bucketWorld();
+  try {
+    seedMany(w, 40);
+    const moves = bucketStore(w.bucket, 'state-moves');
+    let t = 0;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let stalled = false;
+    watchCopies(w.two.store, async () => { stalled = true; await gate; });
+    // Holder A stops in every copy it has running (the hook holds every one until released; B copies through its own writer); its timer never fires (renewMs is huge), so its lease goes stale.
+    const a = moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, renewMs: 2 ** 30, run: 'A' });
+    while (!stalled) await new Promise(resolve => setTimeout(resolve, 5));
+    t = 200_000;
+    const b = await moveCard({ from: w.one, to: cardWriter(bucketStore(w.bucket, 'sections/two'), { section: 'two', now }), id: 'deck', moves, now, clock: () => t, renewMs: 2 ** 30, run: 'B' });
+    assert.equal(b.pending, undefined, 'B took over and finished');
+    release();
+    const woke = await a;
+    assert.deepEqual([woke.pending, woke.busy], [true, true], 'A answers busy, not an error');
+    assert.deepEqual(w.list('two').entities.map(item => item.id), ['deck'], 'the card was adopted once');
+    const again = await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, run: 'A' });
+    assert.equal(again.pending, undefined);
+    assert.equal(again.card.id, 'deck');
+  } finally { await w.close(); }
+});
+
+test('the lease is renewed on a timer while a slow copy runs', async () => {
+  const w = await bucketWorld();
+  try {
+    seedMany(w, 3);
+    const moves = bucketStore(w.bucket, 'state-moves');
+    let t = 0;
+    let seenLease = 0;
+    watchCopies(w.two.store, async () => {
+      t = 50_000;
+      await new Promise(resolve => setTimeout(resolve, 80));
+      seenLease = Math.max(seenLease, w.fake.json('state-moves/one--deck.json').lease);
+    });
+    await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, renewMs: 10 });
+    assert.equal(seenLease, 50_000, 'the lease moved forward while the copy was still running');
+  } finally { await w.close(); }
+});

@@ -25,6 +25,7 @@ export const SLICE_MS = 15_000;
 export const CONCURRENCY = 8;
 const LEASE_MS = 60_000;
 const SAVE_EVERY_MS = 700;
+const RENEW_MS = LEASE_MS / 4;
 const ROUNDS = 3;
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -97,6 +98,15 @@ async function claim({ moves, key, run, clock, init }) {
     handle.savedAt = clock();
     chain = chain.then(() => put({ lease: clock() }));
   };
+  /** Keep the lease alive while copies run, whether or not one finished lately. */
+  handle.renew = () => { chain = chain.then(() => put({ lease: clock() })); };
+  /** One conditional write before the card switches over: false when another run took the move over meanwhile. */
+  handle.fence = async () => {
+    chain = chain.then(() => put({ lease: clock() }));
+    await chain;
+    if (handle.failure) throw handle.failure;
+    return !handle.lost;
+  };
   /** End this run (`phase`: paused after a slice or a failure, done at the end) and let go of the lease. */
   handle.settle = async (phase, patch = {}) => {
     Object.assign(handle.record, patch);
@@ -124,7 +134,7 @@ async function copyAll(items, limit, copy, stop) {
   return next >= items.length;
 }
 
-export async function moveCard({ from, to, id, category, state, moves = fallbackLog, now = () => new Date(), clock = Date.now, budgetMs = SLICE_MS, concurrency = CONCURRENCY, run = `${clock()}-${Math.random().toString(36).slice(2)}` }) {
+export async function moveCard({ from, to, id, category, state, moves = fallbackLog, now = () => new Date(), clock = Date.now, budgetMs = SLICE_MS, concurrency = CONCURRENCY, renewMs = RENEW_MS, run = `${clock()}-${Math.random().toString(36).slice(2)}` }) {
   if (!from || !to || from.section === to.section) throw fail('Say which other workspace to move the card to.');
   const [source, target] = await Promise.all([from.readList(), to.readList()]);
   if (target.list.archived === true || target.list.hidden === true) throw fail('That workspace does not take cards.', 409);
@@ -167,12 +177,17 @@ export async function moveCard({ from, to, id, category, state, moves = fallback
     // The target may hold files already: a card that once lived here (moving back), or the part of
     // an earlier attempt. Anything else in those folders is someone else's.
     const there = await listTarget();
+    let ours = false;
     const lived = target.list.retired?.[id]?.folder === entity.folder;
     if (there.length && !lived) {
       const bySource = new Map(snapshot.map(item => [item.file, item]));
       // Files an earlier attempt left may be older than the source's now; the copy below overwrites them.
       // A file the source does not have is someone else's.
-      if (!there.every(item => bySource.has(item.file))) {
+      // The exception is a move of this card to this target that was left unfinished: a file there that
+      // the source no longer has (deleted between slices) is one this move copied.
+      const record = parseRecord(await moves.read(logKey(from.section, id)));
+      ours = record && record.phase !== 'done' && record.to === to.section && record.folder === entity.folder;
+      if (!ours && !there.every(item => bySource.has(item.file))) {
         throw fail(`${target.list.name || to.section} already has files in that card's folder.`, 409);
       }
     }
@@ -182,9 +197,16 @@ export async function moveCard({ from, to, id, category, state, moves = fallback
     handle = claimed.handle;
     copied = handle.record.copied;
     const deadline = clock() + budgetMs;
+    const timer = setInterval(() => handle.renew(), renewMs);
+    timer.unref?.();
     const stop = () => handle.lost || clock() >= deadline;
 
     try {
+      // Files this unfinished move copied that the source has dropped since: remove them, so the target is the source.
+      if (ours && typeof to.store.remove === 'function') {
+        const wanted = new Set(snapshot.map(item => item.file));
+        for (const item of there) if (!wanted.has(item.file)) await to.store.remove(item.file);
+      }
       // Copy what the target lacks, check it, then look at the source again: a file written meanwhile
       // (an agent saving a page) is copied again, for up to three rounds.
       let settled = false;
@@ -217,6 +239,8 @@ export async function moveCard({ from, to, id, category, state, moves = fallback
         settled = dirty.size === 0;
       }
       if (!settled) throw fail('The card changed while it was moving; try again.', 409);
+      // Another run may have taken the move over while this one was stalled: then it is theirs to finish.
+      if (!(await handle.fence())) return { pending: true, busy: true, from: from.section, to: to.section, progress: progressOf(handle.record), files: copied };
 
       const { id: _keep, ...rest } = entity;
       card = { id, ...rest, ...(chosen ? { category: chosen } : {}), updated: today(now) };
@@ -228,7 +252,7 @@ export async function moveCard({ from, to, id, category, state, moves = fallback
     } catch (error) {
       await handle.settle('paused', { error: String(error.message).slice(0, 200), copied }).catch(() => {});
       throw error;
-    }
+    } finally { clearInterval(timer); }
   } else if (chosen && chosen !== already.category) {
     // Retry of a move that also asked for a new category: the target copy gets it too.
     await to.updateCard({ id, category: chosen });

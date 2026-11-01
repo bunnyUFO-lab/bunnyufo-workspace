@@ -230,7 +230,7 @@ try {
   await progress.getByText('Copying 300 of 600 files (3 MB of 6 MB)').waitFor();
   assert.equal(await progress.locator('progress').getAttribute('value'), '300', 'the bar shows the files copied');
   assert.equal(await page.getByRole('button', { name: 'Moving…' }).isDisabled(), true, 'the dialog is locked while it moves');
-  await page.waitForFunction(() => location.hash.startsWith('#/deck'));
+  await page.waitForFunction(() => location.hash.startsWith('#/deck')).catch(async error => { throw new Error(`${error.message}; dialog says: ${await page.locator('.lib-dialog').innerText().catch(() => '(gone)')}`); });
   assert.equal(asked, 2, 'the page asked again after the pending answer');
   await page.unroute('**/api/cards/move');
   await page.locator('.crumb-current', { hasText: 'Deck' }).waitFor();
