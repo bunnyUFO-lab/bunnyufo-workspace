@@ -57,6 +57,11 @@ try {
     const answerWith = async option => { await page.locator(`[data-option="${option}"]`).click(); await page.locator('[data-send]').click(); };
     // Answering from the Ask's own page moves on to the next item at once, so the notice lives in the note there (the owner reads it on the next page).
     const noticeText = async () => { await page.locator('[data-next-note]').waitFor(); await page.locator('[data-next-detail]').waitFor(); return (await page.locator('[data-next-detail]').innerText()).replace(/^\s*·\s*/, ''); };
+    // The notice is its own wrapped line under "Answered · next: …": nothing of it is clipped (no ellipsis, no sideways overflow).
+    const noticeUnclipped = async what => {
+      const box = await page.locator('[data-next-detail]').evaluate(node => { const style = getComputedStyle(node); return { sw: node.scrollWidth, cw: node.clientWidth, sh: node.scrollHeight, ch: node.clientHeight, overflow: style.overflow, ellipsis: style.textOverflow, nowrap: style.whiteSpace === 'nowrap' }; });
+      assert.ok(box.sw <= box.cw && box.sh <= box.ch && !box.nowrap && box.ellipsis !== 'ellipsis', `${what}: the notice is clipped: ${JSON.stringify(box)}`);
+    };
 
     step(`${name}: the Ask shows both tags and the two options`);
     await open(asks[name].keep);
@@ -74,6 +79,7 @@ try {
     await open(asks[name].lost);
     await answerWith('allowed');
     assert.match(await noticeText(), /^Not run again: /);
+    await noticeUnclipped('not run again');
     await noSideways('not run again');
 
     if (name === '1280') {
@@ -94,6 +100,8 @@ try {
       assert.equal(await page.locator('[data-option]').count(), 3);
       await answerWith('allow');
       assert.match(await noticeText(), /^Allowed 1 rule for sprite-studio and approved again as .+. The Gaming PC adds the rule and starts it within a few minutes; it sends an alert when it does.$/);
+      await noticeUnclipped('allowed');
+      await noSideways('allowed');
     }
     await context.close();
   }
