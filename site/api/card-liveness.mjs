@@ -27,5 +27,6 @@ export function isLiveCard(entity, state, now = new Date()) {
   if (card.status === 'archived') return false;
   if (card.pinned || card.sample) return true;
   const touched = String(card.updated ?? card.created ?? '');
+  if (!touched) return true;   // no date at all: the app keeps it among the active ones
   return !(touched < archiveCutoff(now));
 }
