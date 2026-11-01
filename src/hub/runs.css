@@ -130,3 +130,10 @@
   /* A bottom sheet. */
   .run-drawer { inset: auto 0 0 0; width: 100%; max-width: none; height: auto; max-height: 92vh; border: 1px solid var(--line2); border-width: 1px 0 0; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* The reply box (ws-q9y.6): the Chat composer's classes, a line of reason under it when it is off. */
+.rd-reply { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.rd-reply .hub-compose textarea { min-height: 44px; }
+.rd-reply .hub-compose textarea:disabled { opacity: 0.6; }
+.rd-reply .hub-compose .hub-btn { min-height: 44px; }
+.rd-reply-why { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }

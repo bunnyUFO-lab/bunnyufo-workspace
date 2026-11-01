@@ -7,6 +7,7 @@ import { hubHash } from '../lib/route'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
+import RunReply from './RunReply'
 import { RUN_EVENT, takeRun } from './runStore'
 import type { LiveLine } from './runLines'
 import { applyRunEvent, elapsedLabel } from './runLines'
@@ -33,6 +34,8 @@ interface RunDetail extends RequestDetail {
   /** Where an approved cloud request stands, from the site API's fire queue. */
   cloud?: CloudState
   fires?: CloudFire[]
+  /** The request this one was continued as, when the owner replied after it ended. */
+  continued?: { to: string; at?: string }
 }
 
 interface CloudFire { at: string; ok: boolean; status?: number; session?: string; reason?: string; dryRun?: boolean }
@@ -249,6 +252,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
 
       <h4 className="rd-h">Timeline</h4>
       <ol className="rd-timeline" data-run-timeline>
+        {detail.continued && <li data-step="continued"><b>Continued as</b> → <a href={hubHash('request', detail.continued.to)} data-run-continued>{detail.continued.to}</a>{detail.continued.at ? ` · ${clock(detail.continued.at)}` : ''}</li>}
         {stop && <li data-step="stop"><b>{movedId ? 'Moved' : 'Stop'}</b> {movedId ? 'to the cloud' : stop.reason ?? 'stopped'}{stop.at ? ` · ${clock(stop.at)}` : ''}</li>}
         {result && <li data-step="result"><b>{result.outcome === 'failed' ? 'Failed' : 'Finished'}</b> {result.outcome}{result.reason ? ` (${reasonWord(result.reason)})` : ''}{result.at ? ` · ${clock(result.at)}` : ''}</li>}
         {runs.map(run => (
@@ -259,6 +263,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         ))}
         {taken && <li data-step="taken"><b>Taken</b> by {taken.runner ?? taken.host ?? 'a runner'}{taken.host && taken.runner ? ` on ${taken.host}` : ''} · {clock(taken.at)}</li>}
         {approved && <li data-step="approved"><b data-run-by>{by}</b> · {clock(approved.at)}</li>}
+        {request.continues && <li data-step="continues"><b>Continues</b> ← <a href={hubHash('request', request.continues.from)} data-run-continues>{request.continues.from}</a></li>}
         <li data-step="created"><b>Written</b> by {request.by ?? 'someone'} · {ago(request.createdAt)}</li>
       </ol>
 
@@ -289,6 +294,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         </>
       )}
 
+      <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} />
       {problem && <p className="hub-error" role="alert" data-run-error>{problem}</p>}
       {(stoppable || again) && (
         <div className="ni-a rd-foot">
