@@ -169,3 +169,17 @@ test('an agent-written continues is refused and never signed; without a signing 
     assert.equal((await bare.post(`/hub/requests/${id}/reply`, { text: 'Hello' })).status, 503);
   } finally { await s.close(); await keyless.close(); }
 });
+
+test('a brief that cannot fit 16 KB even with no report is refused before anything is written', async () => {
+  const s = await stack({ hermesOptions: { endWith: REPORT } });
+  try {
+    const api = await s.addHub();
+    const id = await ended(s, api, { text: 'j'.repeat(4000) });
+    const replies = Array.from({ length: 5 }, () => 'é'.repeat(2000));
+    await assert.rejects(() => api.hub.requests.continueRequest(id, { replies, user: 'owner', at: new Date() }), error => error.status === 400 && /too long/.test(error.message));
+    assert.equal(s.file(id, 'continued.json'), null, 'No claim was written.');
+    assert.equal((await api.get(`/hub/requests/${id}`)).body.state, 'done');
+    // The original is not locked: a normal reply still works.
+    assert.equal((await api.post(`/hub/requests/${id}/reply`, { text: 'Shorter' })).status, 201);
+  } finally { await s.close(); }
+});

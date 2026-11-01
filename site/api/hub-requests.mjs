@@ -780,6 +780,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // What the approval would refuse is refused before anything is written.
     await refuseUnapprovable(clean, preset, 'hermes');
     const newId = newRequestId(clean.project, clean.text, at);
+    // Render the brief now, with the report cut as designed: one that cannot fit 16 KB even with no report would lock the original for good.
+    try { renderBrief({ preset, request: { ...clean, id: newId }, earlier: await readEarlier(id) }); } catch (error) {
+      if (error.status === 400) throw fail('That reply is too long to send with the job text; shorten the reply.', 400);
+      throw error;
+    }
     const claim = sign({ v: 1, request: id, to: newId, at: at.toISOString(), by: user, nonce: newNonce() }, signingKey);
     try {
       await putCreateOnly(`requests/${id}/continued.json`, `${JSON.stringify(claim, null, 2)}\n`, 'application/json', clash('claimed'));
