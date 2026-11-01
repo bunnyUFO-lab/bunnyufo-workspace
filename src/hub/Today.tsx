@@ -37,7 +37,7 @@ function greeting(hour: number) {
 
 function eyebrow(now: Date) {
   const day = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
-  return `${day} · ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
+  return `${day} · ${clock(now.toISOString())}`
 }
 
 /** Retry on a cloud alert: fires the request again, then tells the other screens. */

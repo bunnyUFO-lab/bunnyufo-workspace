@@ -10,6 +10,7 @@ import HubImage from './HubImage'
 import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
+import { needsHash } from './needsFocus'
 
 const STEPS: [string, string][] = [['open', 'Open'], ['answered', 'Answered'], ['picked-up', 'Picked up']]
 const SIDE: Record<string, string> = { snoozed: 'Snoozed', expired: 'Expired', cancelled: 'Cancelled' }
@@ -70,7 +71,7 @@ export default function AskView({ id }: { id: string }) {
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {answer && ask.delivery && !ask.pickup && <Delivery noun="Ask" project={ask.project} delivery={ask.delivery} />}
       {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
-      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
+      <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>
     </>
   )
 }

@@ -111,7 +111,7 @@ try {
   assert.equal(await view.locator('[data-done-hint]').isVisible(), true);
   assert.match(await page.locator('.hub-review-reader').innerText(), /Pick a file to read it here\./);
   await page.locator('[data-back-top]').waitFor();
-  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs');
+  assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
   assert.equal(await page.locator('[data-hub-link="needs"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Needs you current.');
   await go(page, `#/~hub/review/${partFile}`);
   await page.locator('[data-section="status"]').waitFor();
@@ -159,7 +159,7 @@ try {
   await page.getByRole('heading', { name: 'Brief heading' }).waitFor();
   await go(page, '#/~hub/review/nope.json');
   await page.getByText('This review is not in the last 7 days.').waitFor();
-  assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs');
+  assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
 
   step('an old event with only a title opens with honest empty states and a working Mark done');
   await go(page, '#/~hub/needs/pr');

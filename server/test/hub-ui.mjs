@@ -93,7 +93,7 @@ try {
   await busyPage.goto(`${busy.url}#/~hub/today`);
   await busyPage.locator('.today-head').waitFor();
   assert.match(await busyPage.locator('.today-head h2').innerText(), /^Good (morning|afternoon|evening)$/);
-  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d$/);
+  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d( [AP]M)?$/);
   assert.match(await busyPage.locator('.today-head p').innerText(), /^5 things wait on you\. 1 session is running\.$/);
   assert.equal((await busyPage.locator('[data-today-open] .today-num').innerText()).trim(), '5', 'The Open button counts everything that needs you.');
   assert.equal((await busyPage.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '5');

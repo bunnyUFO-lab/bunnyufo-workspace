@@ -12,6 +12,7 @@ import { VERDICT_LABEL } from './playtest'
 import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
+import { needsHash } from './needsFocus'
 
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 
@@ -24,7 +25,7 @@ export default function ChecklistView({ id }: { id: string }) {
     return (
       <>
         <p className="hub-empty" role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>
-        {error && <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>}
+        {error && <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>}
       </>
     )
   }
@@ -35,7 +36,7 @@ export default function ChecklistView({ id }: { id: string }) {
   return (
     <div className="hub-cl" data-state={detail.state}>
       {handoff && <NextNote note={handoff} />}
-      <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
+      <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
         <span><span className="hub-pill">{text(detail.project)}</span>{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
@@ -70,7 +71,7 @@ export default function ChecklistView({ id }: { id: string }) {
         </section>
       )}
       {submitted && detail.submit && detail.delivery && !detail.pickup && <Delivery noun="checklist" project={detail.project} delivery={detail.delivery} />}
-      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
+      <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>
     </div>
   )
 }
