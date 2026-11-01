@@ -537,7 +537,7 @@ The current verdict is the newest of done, not-needed and undo. A mark is **acti
 
 **Applying marks (agent side).** In a session in that project's repository, for each mark listed by `cards mark list --project <p>`:
 
-1. `bd show <id>`. If it is open: `bd close <id> --reason "Done (owner, Roadmap <date>)"`, or for no longer needed `bd close <id> --reason "Not needed (owner, Roadmap <date>): <reason>"` and `bd update <id> --add-label not-needed`; then `bd export -o .beads/issues.jsonl` and commit it with the session's work, as that repository's rules say.
+1. `bd show <id>`. If it is open: `bd close <id> --reason "Done (owner, Roadmap <date>)"`, or for no longer needed `bd close <id> --reason "Not needed (owner, Roadmap <date>): <reason>"` and `bd update <id> --add-label not-needed`; then `node scripts/export-beads.mjs` and commit `.beads/issues.jsonl` with the session's work, as that repository's rules say.
 2. `cards mark applied --project <p> --bead <id>` (prints `nothing to apply` and exits 0 when no mark is active). If the issue was already closed, only this step is needed.
 
 The `bd close` is what the hub-hooks push sends, so the Roadmap shows the real close within a minute. `BUW_INBOX_SECTION=inbox-dev` points both commands at the development inbox.

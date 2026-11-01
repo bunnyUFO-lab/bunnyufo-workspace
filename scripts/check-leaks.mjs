@@ -107,6 +107,15 @@ function main() {
     })
   }
 
+  // Beads export: no email address but a GitHub noreply one may be committed (needs no patterns file).
+  if (files.includes('.beads/issues.jsonl') && existsSync(join(root, '.beads', 'issues.jsonl'))) {
+    readFileSync(join(root, '.beads', 'issues.jsonl'), 'utf8').split(/\r?\n/).forEach((line, i) => {
+      for (const m of line.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) {
+        if (!/@users\.noreply\.github\.com$/i.test(m[0])) out(`.beads/issues.jsonl:${i + 1}: email address`, m[0])
+      }
+    })
+  }
+
   if (opts.history) {
     const log = git(root, ['log', '-p', '--no-color', '--no-ext-diff', '--format=%x00%H%n%B', opts.history]).toString('utf8')
     for (const chunk of log.split('\0').slice(1)) {

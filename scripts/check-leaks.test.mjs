@@ -140,3 +140,15 @@ test('BUW_LEAK_PATTERNS selects the patterns file', (t) => {
   assert.equal(o.status, 1)
   assert.match(o.stdout, /a\.txt:1: pattern #1/)
 })
+
+test('an email in .beads/issues.jsonl that is not a noreply address fails; noreply passes', (t) => {
+  const r = makeRepo()
+  t.after(r.done)
+  commit(r.dir, { '.beads/issues.jsonl': '{"id":"a","owner":"1+me@users.noreply.github.com"}\n' })
+  assert.equal(run(r.dir, ['--patterns', r.patterns]).status, 0)
+  commit(r.dir, { '.beads/issues.jsonl': '{"id":"a","owner":"someone@example.com"}\n' })
+  const o = run(r.dir, ['--patterns', r.patterns])
+  assert.equal(o.status, 1)
+  assert.match(o.stdout, /\.beads\/issues\.jsonl:1: email address/)
+  assert.doesNotMatch(o.stdout, /someone@example/) // not echoed without --show
+})
