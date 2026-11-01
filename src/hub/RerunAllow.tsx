@@ -9,7 +9,7 @@ function allowRules(ask: Ask): string[] {
 
 export default function RerunAllow({ ask }: { ask: Ask }) {
   const rules = allowRules(ask)
-  if (rules.length === 0) return null
+  if (rules.length === 0 || ask.rerunBlocked) return null
   return (
     <section className="rerun-allow" data-rerun-allow aria-label="The rules the Allow option adds">
       <p><strong>Allow</strong> adds to {text(ask.project)}&apos;s PC allow list, for every later run:</p>

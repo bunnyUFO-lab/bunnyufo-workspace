@@ -19,6 +19,8 @@ import { rerunRequestId } from './hub-requests.mjs';
 import { validId } from './hub-model.mjs';
 
 const KINDS = ['denied', 'continue'];
+/** The writer mark the card API gives an ask.json put by the PC watcher's token (`pc-runner`). */
+const WATCHER = 'pc-runner';
 /** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool. Keep validRerunRule equal to the one in site/card-api/cards.mjs. */
 const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
 // Printable ASCII only: a rule must read the same as what is signed (no format, filler, separator, private-use or combining characters).
@@ -57,8 +59,9 @@ const startsRun = (field, choice) => (field.kind === 'denied' ? choice === 'allo
 /**
  * @param requests  `createRequests(...)`: `verifiedPcRun`, `copyFor`, `writeStop`, `loadOne`, `siteWrote`, `approveRequest`
  * @param readAsk   `(id) → ask.json` (throws when there is none)
+ * @param writerOf  `(askId) → the card API's writer mark of ask.json` (`pc-runner` for the PC watcher's token), read fresh from S3
  */
-export function createRerun({ requests, readAsk, log = () => {} }) {
+export function createRerun({ requests, readAsk, writerOf = async () => null, log = () => {} }) {
   const no = why => ({ started: false, why });
 
   /** The follow-up of a continue Ask, from the run's own Ask (never from the continue Ask's copies of it). */
@@ -93,8 +96,22 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     return own ? loaded : null;
   }
 
+  /**
+   * Why this Ask may not start a run, or null: only the PC watcher's token may write a rerun Ask. A PC run holds that same token in its environment,
+   * so the mark excludes every other token (a cloud run, a bot, an agent session) but not a run's own code: the PC's checks (the rules equal what the
+   * watcher computed, the rerun gate, the copy's signed approval) are what hold against a run. `from.request` is only a cheap extra refusal.
+   */
+  async function untrusted(ask) {
+    if (ask.from?.request) return 'This Ask was written by a run, so it cannot start a run.';
+    const writer = await writerOf(ask.id).catch(() => null);
+    if (writer === WATCHER) return null;
+    return writer ? `This Ask was written by another token (${writer}), not the PC watcher's, so it cannot start a run.` : "This Ask has no writer mark from the PC watcher's token (it is older, or was not written by it), so it cannot start a run.";
+  }
+
   async function start({ ask, field, answer, user, at }) {
     if (ask.requirePasskey !== true) return no('This Ask does not require a passkey, so it cannot start a run.');
+    const why = await untrusted(ask);
+    if (why) return no(why);
     let verified;
     try { verified = await requests.verifiedPcRun(field.request, at); } catch (error) { return no(error.message); }
     const project = verified.request.project;
@@ -176,5 +193,11 @@ export function createRerun({ requests, readAsk, log = () => {} }) {
     }
   }
 
-  return { afterAnswer };
+  /** For the page: why this Ask's rerun would start nothing, or null (also null for an Ask with no rerun field). */
+  async function blockedReason(ask) {
+    if (!ask || ask.rerun === undefined) return null;
+    return untrusted(ask);
+  }
+
+  return { afterAnswer, blockedReason };
 }

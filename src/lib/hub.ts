@@ -177,6 +177,8 @@ export interface Ask {
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */
   rerun?: { request?: string; kind?: string; ask?: string; allow?: string[] }
+  /** Set by the Hub when this Ask's rerun pointer would start nothing (it was not written by the PC watcher's token): the reason. */
+  rerunBlocked?: string
   state: AskState
   snoozedUntil?: string
   answer?: AskAnswer
