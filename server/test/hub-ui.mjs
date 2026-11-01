@@ -798,7 +798,10 @@ try {
   await page.locator('button:has-text("Now")').click();
   const now = await centreOf(page.locator('.hub-map-now'));
   const frameNow = await page.locator('.hub-map-box').boundingBox();
-  assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - (frameNow.y + frameNow.height / 2)) < 3, 'Now is in the middle of the box.');
+  // The middle of what the hint (top) and the control bar (bottom) leave free.
+  const room = await page.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-controls').getBoundingClientRect().top }));
+  const roomMid = ((room.top ? room.top + 8 : frameNow.y) + room.bottom - 8) / 2;
+  assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - roomMid) < 3, `Now is in the middle of the room the map has (${now.x},${now.y} vs ${roomMid}).`);
   await page.locator('button:has-text("Collapse")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
 
