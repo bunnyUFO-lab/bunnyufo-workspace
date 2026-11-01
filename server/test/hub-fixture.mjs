@@ -11,7 +11,7 @@ import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
-import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, pcStatusJson, agentConfigJson, seedAgentConfig, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, work = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -120,6 +120,13 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   if (pc) {
     // Off by default. 'fresh': the PC reported a minute ago, with a busy and an idle session. 'stale': 40 minutes ago, so the PC counts as asleep or off.
     seedPcStatus(fake, pcStatusJson({ now, minutesOld: pc === 'stale' ? 40 : 1 }));
+  }
+
+  if (agentConfig) {
+    // Off by default. The Hermes host's settings export, marked as the card API marks it. 'fresh': published 12 minutes ago, changed 2 days ago. 'stale': 9 hours ago.
+    // The SOUL.md text holds a fake key (as if the host's cleaning had missed it) to show the site cleans it again.
+    const soulText = ['## Role', 'You are the owner\'s assistant.', 'Always answer in plain words.', 'Key for tests: sk-ant-api03-FAKEFAKEFAKEFAKE1234567890', ''].join('\n');
+    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: agentConfig === 'stale' ? 9 * 60 : 12, soulText }));
   }
 
   if (oldSessions) {

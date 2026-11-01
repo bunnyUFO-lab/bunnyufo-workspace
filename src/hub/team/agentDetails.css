@@ -1,0 +1,43 @@
+/* The agent details page (#/~hub/agent/<id>): one column, safe at 390 px. Only the shared tokens. */
+.ad { display: flex; flex-direction: column; gap: 14px; max-width: 760px; min-width: 0; }
+.ad-back { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; color: var(--t2); text-decoration: none; font-size: 13px; }
+.ad-back:hover { color: var(--t1); }
+.ad-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ad-title { min-width: 0; }
+.hub .ad-title h2 { font-family: var(--font); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; margin: 0; overflow-wrap: anywhere; }
+.ad-title p { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.ad-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0; }
+.ad-facts > div { min-width: 0; padding: 7px 10px; border-radius: 10px; background: var(--ground); border: 1px solid var(--line); }
+.ad-facts dt { font-size: 10.5px; color: var(--t3); }
+.ad-facts dd { margin: 0; font: 500 12px var(--mono); overflow-wrap: anywhere; }
+.ad-note { margin: 0; font-size: 12.5px; line-height: 1.5; }
+.hub-banner.ad-note { margin: 0; }
+
+.ad-section { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 16px; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3); }
+.hub .ad-section h3 { margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--t3); }
+.ad-list { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.ad-list > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; min-width: 0; }
+.ad-list dt { font-size: 11.5px; color: var(--t3); }
+.ad-list dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; min-width: 0; }
+.ad-fallbacks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font: 500 12.5px var(--mono); }
+.ad-chips { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.ad-chips li { padding: 3px 10px; border: 1px solid var(--line2); border-radius: 999px; font: 500 12px var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+.ad-platform { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 4px; }
+.ad-platform b { font-weight: 500; font-size: 12.5px; }
+
+.ad-prompt { border: 1px solid var(--line); border-radius: 10px; background: var(--ground); min-width: 0; }
+.ad-prompt > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.ad-prompt > summary:focus-visible { outline: 2px solid var(--t2); outline-offset: 2px; border-radius: 10px; }
+.ad-prompt-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ad-tag { flex: none; padding: 2px 9px; border: 1px solid var(--line2); border-radius: 999px; font-size: 11px; color: var(--t2); }
+.ad-tag.on { color: var(--st-working); border-color: color-mix(in srgb, var(--st-working) 45%, transparent); }
+.ad-pre { margin: 0; padding: 4px 12px 12px; font: 400 12px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 60vh; overflow-y: auto; }
+.ad-prompt-note { margin: 0; padding: 0 12px 10px; font-size: 11.5px; }
+
+.ad-jobs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ad-job-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 6px; }
+.ad-job-head code { font: 500 12px var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+
+.team-details-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; color: var(--t2); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.team-details-link:hover { color: var(--t1); }
+.team-card-foot { flex-wrap: wrap; }

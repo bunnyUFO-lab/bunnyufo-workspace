@@ -43,6 +43,8 @@ export interface TeamAgent {
   runtime: string
   model: string
   role: string
+  /** The Hermes profile it runs on (`main`, `briefs`), none for Claude Code. */
+  profile?: AgentProfile
   /** Spawn presets this agent takes (the research agents); "Give work" opens Spawn on the first. */
   presets?: string[]
   status: AgentStatus
@@ -55,4 +57,50 @@ export interface TeamAgent {
 
 export interface TeamView {
   agents: TeamAgent[]
+}
+
+/** The Hermes profile an agent runs on; none for Claude Code. */
+export type AgentProfile = 'main' | 'briefs' | null
+
+/** One prompt on the details page. `hermes-host` text was read from the Hermes host; `app` text is in the app's code. */
+export interface DetailsPrompt {
+  id: 'soul' | 'persona' | 'job'
+  title: string
+  source: 'hermes-host' | 'app'
+  text: string
+  note?: string
+}
+
+export interface DetailsJob {
+  name: string
+  schedule: string
+  enabled: boolean
+  prompt: string
+}
+
+/** A profile's settings as the Hermes host's export gave them (no SOUL.md, no jobs). Absent parts are omitted. */
+export interface ProfileSettings {
+  model?: { provider?: string; default?: string }
+  fallbacks: { provider: string; model: string }[]
+  toolsets?: string[]
+  platformToolsets?: Record<string, string[]>
+  skills: { autoLoad: string[]; installed: string[] }
+  terminal?: { backend?: string; containerMemoryMb?: number }
+}
+
+/** `fresh` under 7 h, `stale` from 7 h, `missing` when the host has published nothing usable, `none` for an agent without a profile. */
+export interface DetailsFreshness {
+  state: 'fresh' | 'stale' | 'missing' | 'none'
+  exportedAt?: string
+  changedAt?: string
+  ageSeconds?: number
+}
+
+/** GET /api/hub/team/:agent/details */
+export interface AgentDetailsView {
+  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile }
+  freshness: DetailsFreshness
+  settings: ProfileSettings | null
+  prompts: DetailsPrompt[]
+  jobs: DetailsJob[]
 }

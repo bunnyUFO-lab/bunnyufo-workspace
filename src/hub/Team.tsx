@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ago, appUrl, hubPost, remember, sessionUrl } from '../lib/hub'
+import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
 import { stateOf, type AgentActivity } from './team/spriteState'
@@ -59,6 +60,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
       {agent.sessions && agent.sessions.length > 0 && <ul className="team-sessions" aria-label={`${agent.name} sessions`}>{agent.sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>}
       <footer className="team-card-foot">
         <span className="team-dim">{agent.role}</span>
+        <a className="team-details-link" href={hubHash('agent', agent.id)} data-details-open={agent.id} aria-label={`${agent.name}: details`}>Details</a>
         {canPick && agent.presets?.length ? <button type="button" className="hub-btn" onClick={() => openSpawn({ preset: agent.presets?.[0] })} data-give-work={agent.id}>Give work</button> : null}
         {canPick
           ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
