@@ -19,7 +19,7 @@ import './runs.css'
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; agent?: string; model?: string; by?: string; replaces?: string; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; model?: string; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   /** When a taken run last gave word, if that is past its limit: the request is then silent, not running. */
