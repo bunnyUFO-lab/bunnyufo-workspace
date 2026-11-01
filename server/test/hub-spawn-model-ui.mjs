@@ -3,6 +3,7 @@
 // run block and the Hermes run. A PC, cloud or at-the-PC job shows no menu. Phone width has no sideways scroll.
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
@@ -37,7 +38,7 @@ try {
   const openSheet = async (preset, project = 'magic-loops') => {
     await page.locator('[data-spawn-open]').click();
     await page.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
-    await page.locator('[data-spawn-project]').selectOption(project);
+    await pickOption(page.locator('[data-spawn-project]'), project);
     await page.locator(`[data-preset="${preset}"]`).click();
     await page.locator('[data-spawn-why], [data-spawn-machine]').first().waitFor();
   };
@@ -63,10 +64,10 @@ try {
   await page.locator('[data-preset="research"]').click();
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   assert.equal(await page.locator('[data-spawn-model]').count(), 1, 'Back on Hermes the menu is back.');
-  await page.locator('[data-spawn-project]').selectOption('bunnylink');
+  await pickOption(page.locator('[data-spawn-project]'), 'bunnylink');
   await page.locator('[data-spawn-machine]', { hasText: 'You, at the PC' }).waitFor();
   assert.equal(await page.locator('[data-spawn-model]').count(), 0, 'Bunnylink is started at the PC: no menu.');
-  await page.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(page.locator('[data-spawn-project]'), 'magic-loops');
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
 
   step('Auto sends no model: the stored request and the signed block are as they were');
@@ -111,7 +112,7 @@ try {
   await phone.goto(`${fixture.url}#/~hub/needs`);
   await phone.locator('.needs-actions [data-spawn-open]').click();
   await phone.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
-  await phone.locator('[data-spawn-project]').selectOption('magic-loops');
+  await pickOption(phone.locator('[data-spawn-project]'), 'magic-loops');
   await phone.locator('[data-preset="research"]').click();
   await phone.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   await phone.locator('[data-spawn-model]').scrollIntoViewIfNeeded();
