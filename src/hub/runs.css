@@ -80,6 +80,8 @@
 .ap-facts dt { flex: none; width: 88px; font-size: 12px; color: var(--text-dim); }
 .ap-facts dd { margin: 0; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
 .ap-pick { margin-left: 8px; min-height: 44px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--s2); color: var(--t1); font: inherit; font-size: 12.5px; }
+.ap-repo { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-width: 360px; }
+.ap-repo label { font-size: 12px; color: var(--t2); }
 .ap-actions .hub-btn { min-height: 44px; }
 .ap-state-chip.expired, .ap-state-chip.failed, .ap-state-chip.lost { color: var(--red); }
 .ap-state p { margin: 0 0 6px; font-size: 13px; color: var(--t2); }
