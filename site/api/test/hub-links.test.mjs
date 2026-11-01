@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BEAD_CHIPS, CARD_CHIPS, beadRefs, cleanTouched, prefixesOf, projectsToLoad, rowLinks, touchedBySession, withLinks } from '../hub-links.mjs';
+import { deriveEventItems } from '../hub-model.mjs';
 import { workingNow } from '../hub-pc.mjs';
 import { pcStatusJson, eventJson } from './hub-fixtures.mjs';
 
@@ -91,4 +92,20 @@ test('withLinks adds links to the rows that have them and leaves old rows (no ev
   assert.deepEqual(byId['new-sess'].links.beads.map(row => row.id), ['ws-aaa1', 'ws-a5g.4.11']);
   assert.equal(byId['old-sess'].links, undefined);
   assert.equal(byId['old-sess'].title, 'An old session');
+});
+
+test('a session-items event after a permission prompt does not resolve the blocked session; a resumed one does', () => {
+  const at = minutes => new Date(Date.UTC(2026, 10, 1, 10, minutes)).toISOString();
+  const base = [
+    { ...eventJson({ kind: 'session-started', session: 's1', ts: new Date(at(0)) }), file: '1.json' },
+    { ...eventJson({ kind: 'blocked', session: 's1', ts: new Date(at(1)) }), file: '2.json' },
+    { ...eventJson({ kind: 'session-items', session: 's1', ts: new Date(at(2)), extra: { touched: { beads: [bead('p', 'ws-aaa1')], cards: [] } } }), file: '3.json' },
+  ];
+  assert.equal(deriveEventItems(base).blocked.length, 1);
+  assert.equal(deriveEventItems(base).running.length, 1);
+  const resumed = [...base, { ...eventJson({ kind: 'resumed', session: 's1', ts: new Date(at(3)) }), file: '4.json' }];
+  assert.equal(deriveEventItems(resumed).blocked.length, 0);
+  // On the PC path the row stays Needs you.
+  const status = pcStatusJson({ now: new Date(at(4)), sessions: [{ id: 's1', name: 'x', status: 'busy', kind: 'interactive', folder: 'f', repo: 'r', project: 'p', branch: 'main', startedAt: at(0) }] });
+  assert.equal(workingNow({ status, events: base, at: new Date(at(4)) })[0].state, 'needs-you');
 });

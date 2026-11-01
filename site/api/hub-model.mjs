@@ -490,7 +490,7 @@ const eventItem = (kind, event, extra = {}) => ({
  * - review: `ready-for-review` with no later `pr-merged` for the same bead (the same url when
  *   there is no bead), and that no `review-done` event names (its `review` is the review's file name);
  * - blocked: `blocked` with no later event of any kind from the same session (a `resumed`, a
- *   `session-ended`, a newer `blocked`, anything that carries the session). A `blocked` with no
+ *   `session-ended`, a newer `blocked`, anything that carries the session, except a `session-items` event: a timer can post one after the prompt). A `blocked` with no
  *   session stays until the window drops it. Only a real session link (`url`, not the bare
  *   https://claude.ai/code) and a desktop link (`appUrl`) are kept;
  * - running: `session-started` with no later `session-ended` or newer `session-started` for the same session.
@@ -507,7 +507,7 @@ export function deriveEventItems(events) {
       const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
       if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event, reviewExtras(event)));
     } else if (event.kind === 'blocked') {
-      const resolved = !!event.session && after(event, other => other.session === event.session);
+      const resolved = !!event.session && after(event, other => other.session === event.session && other.kind !== 'session-items');
       if (resolved || done.has(event.file)) continue;
       const appUrl = blockedAppUrl(event.appUrl);
       blocked.push(eventItem('blocked', { ...event, url: blockedSessionUrl(event.url) }, { id: event.session || event.file, file: event.file, ...(appUrl ? { appUrl } : {}) }));
