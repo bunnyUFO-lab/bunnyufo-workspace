@@ -21,6 +21,8 @@ const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...options });
   contexts.push(context);
+  // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
+  await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', error => { throw error; });

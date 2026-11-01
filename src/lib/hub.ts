@@ -264,6 +264,8 @@ export interface MapCard { title: string; href: string }
 export interface MapTask {
   id: string; title: string; state: TaskState; status: string; signs: Sign[]; sprints: string[]
   deps: string[]; ask?: string; prUrl?: string; prs?: MapPr[]; closedAt?: string
+  /** When the issue last changed in Beads; the Roadmap's date filter reads it. */
+  updatedAt?: string
   /** Why the task is yellow: an open Ask, or only the `needs-owner` label. */
   you?: 'ask' | 'label'
   /** One or two plain sentences saying what the work is, from the description. */
