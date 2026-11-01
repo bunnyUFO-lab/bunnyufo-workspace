@@ -37,7 +37,7 @@ function greeting(hour: number) {
 
 function eyebrow(now: Date) {
   const day = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
-  return `${day} · ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
+  return `${day} · ${clock(now.toISOString())}`
 }
 
 /** Retry on a cloud alert: fires the request again, then tells the other screens. */
@@ -89,7 +89,7 @@ function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: numb
       {alerts.length ? alerts.slice(0, 5).map(event => (
         <div key={event.key ?? event.file} className="alert-row" data-alert>
           <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
-          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request} data-run-open={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
           {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
           {host.write && event.key && <button type="button" className="hub-btn alert-dismiss" disabled={busy} onClick={() => void send('dismiss', [event.key as string])} aria-label={`Dismiss: ${event.title}`} data-alert-dismiss>Dismiss</button>}
         </div>

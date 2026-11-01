@@ -425,6 +425,9 @@ test('a forged approved.json is never fired and raises an alert in Today', async
     assert.equal(f.routine.calls.length, 0);
     assert.equal(f.fires(request.id).length, 0, 'Nothing is written.');
     assert.ok(f.logs.some(line => line.includes(`skip ${request.id}: bad signature`)));
+    const handed = await f.hub.routines.handOff(request.id);
+    assert.equal(handed.fired, false);
+    assert.equal(handed.waiting, "The approval failed the server's check (the approval could not be verified as yours).", 'The owner reads words, not "bad signature".');
     const today = (await f.call('GET', '/hub/today')).body;
     assert.ok(today.alerts.some(alert => alert.title === "Approval for Forged job failed the server's check" && alert.request === request.id), JSON.stringify(today.alerts));
     // A request.json changed after signing fails too.

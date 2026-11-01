@@ -616,7 +616,8 @@ export function buildInbox({ filter: raw, asks, checklists = [], requests, herme
   const filter = inboxFilter(raw);
   if (filter === 'requests') return [...requests].sort(newest);
   if (filter === 'answered') {
-    return [...asks.filter(item => item.state === 'answered' || item.state === 'picked-up'), ...checklists.filter(item => item.state === 'submitted' || item.state === 'picked-up')].sort(newest);
+    // Answered is what the owner has answered and an agent has not taken yet; picked-up work is the agent's now, and has left the list.
+    return [...asks.filter(item => item.state === 'answered'), ...checklists.filter(item => item.state === 'submitted')].sort(newest);
   }
   const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now }).needsYou;
   return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);

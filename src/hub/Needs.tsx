@@ -14,7 +14,7 @@ import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
 import NeedsItem from './NeedsItem'
 import type { SettleExtra, SettleVerb } from './NeedsItem'
-import { itemKey, takeFocus } from './needsFocus'
+import { itemKey, rememberFilter, takeFocus } from './needsFocus'
 import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import './needs.css'
@@ -56,6 +56,8 @@ export default function Needs({ filter }: { filter?: string }) {
   if (wanted.current === null) wanted.current = takeFocus()
   // A link to one item (#/~hub/needs/<event file>, from Working now) names it where a filter would go: the list opens on All, focused on it.
   const linked = useRef(filter && !isKnownFilter(filter) ? filter : '')
+
+  useEffect(() => { rememberFilter(active) }, [active])
 
   // The note belongs to the list it was left on: another chip starts clean.
   const lastFilter = useRef(active)
