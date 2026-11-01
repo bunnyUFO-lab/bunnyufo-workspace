@@ -76,3 +76,9 @@ test('the page gets model ids, not providers: a provider pause covers each of it
   assert.deepEqual(rows.map(row => row.model).sort(), ['codex', 'haiku', 'sonnet']);
   assert.ok(rows.every(row => !('provider' in row)));
 });
+
+test('a stored reset time further than a week from when it was seen is not believed', () => {
+  const [far] = pausesFrom([{ provider: 'openai-codex', seen: ago(10), until: '2026-12-25T00:00:00.000Z' }], at);
+  assert.equal(far.reported, false);
+  assert.equal(far.until, new Date(at.getTime() - 10 * 60_000 + PAUSE_MS).toISOString());
+});

@@ -58,7 +58,9 @@ export function pausesFrom(evidence, at) {
   }
   const out = [];
   for (const { provider, seen, until } of newest.values()) {
-    const reported = until && Number.isFinite(new Date(until).getTime()) && new Date(until).getTime() > new Date(seen).getTime() ? new Date(until).toISOString() : null;
+    const seenMs = new Date(seen).getTime();
+    const reportedMs = until ? new Date(until).getTime() : NaN;   // a reset time further than MAX_RESET_MS from when it was seen is not believed, as on the write side
+    const reported = Number.isFinite(reportedMs) && reportedMs > seenMs && reportedMs - seenMs <= MAX_RESET_MS ? new Date(reportedMs).toISOString() : null;
     const ends = reported ? new Date(reported).getTime() : new Date(seen).getTime() + PAUSE_MS;
     if (ends <= nowMs) continue;
     out.push({ provider, seen: new Date(seen).toISOString(), until: new Date(ends).toISOString(), reported: reported !== null });

@@ -79,7 +79,7 @@ try {
   await guessed.goto(`${guess.url}#/~hub/chat`);
   await guessed.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(guessed), 'Sonnet · API');
-  assert.match(await noteOf(guessed).innerText(), /^Codex is paused by its usage limit \(seen \d{1,2}:\d\d(?: [AP]M)?\) · using Sonnet$/);
+  assert.match(await noteOf(guessed).innerText(), /^Codex is paused by its usage limit \(seen (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)?\) · using Sonnet$/);
 
   step('no evidence: the default is the agent\'s own');
   const calm = await startHubFixture({ hermes: true, chatRuns: true, seedData: false });
