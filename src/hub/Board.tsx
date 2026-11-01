@@ -65,7 +65,14 @@ function SheetWaiting({ error, onClose }: { error: string | null; onClose: () =>
 }
 
 /** Work's Lanes tab: `project` is a project id, `all` for every project, or absent for the default one. */
-export default function Board({ project: wanted, focus }: { project?: string; focus?: string }) {
+export default function Board(props: { project?: string; focus?: string }) {
+  // The board's own state (lane, folds, scroll) restarts with the board it shows, never with the item a sheet is open on:
+  // the bare `work` address and the default board's own address are the same board.
+  const { project } = useProject(props.project === 'all' ? undefined : props.project)
+  return <BoardView key={props.project === 'all' ? 'all' : project ?? ''} {...props} />
+}
+
+function BoardView({ project: wanted, focus }: { project?: string; focus?: string }) {
   const all = wanted === 'all'
   const { list, project: chosen, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen

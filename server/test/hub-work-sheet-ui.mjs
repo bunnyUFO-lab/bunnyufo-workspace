@@ -187,6 +187,24 @@ try {
     await page.locator('[data-board-note]').waitFor();
     assert.equal(await panelOf(page).count(), 0);
 
+    step(`${label}: from the bare #/~hub/work, a click then Close leaves no extra history entry`);
+    const bare = await open(viewport);
+    await bare.addInitScript(() => { try { localStorage.setItem('buw.hub.project', 'lanes'); } catch { /* about:blank has none */ } });
+    await bare.goto(`${fixture.url}#/~hub/work`);
+    await bare.locator('.wk-lane').first().waitFor({ state: 'attached' });
+    await bare.locator('[data-card="bead:ws-doing"]').waitFor();
+    await bare.locator('[data-card="bead:ws-doing"]').evaluate(element => { element.dataset.mounted = 'yes'; });
+    await clickCard(bare, 'bead:ws-doing');
+    await titled(bare, 'In progress').waitFor();
+    assert.equal(await bare.locator('[data-card="bead:ws-doing"]').getAttribute('data-mounted'), 'yes', 'The board was not remounted by the click.');
+    await bare.getByRole('button', { name: 'Close details' }).click();
+    await bare.waitForFunction(() => location.hash === '#/~hub/work');
+    await panelOf(bare).waitFor({ state: 'detached' });
+    await bare.goBack();
+    await settled(bare);
+    assert.doesNotMatch(bare.url(), /~hub\/work/, 'One Back after Close leaves Work, as before the click.');
+    await bare.close();
+
     step(`${label}: a request card still opens the request`);
     await goBoard(page, board, lane('backlog'));
     const request = page.locator('[data-card^="request:"]');
