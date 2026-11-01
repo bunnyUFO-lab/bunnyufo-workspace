@@ -216,13 +216,24 @@ try {
   assert.equal(await real.locator('[data-spawn-note]').innerText(), 'Write what it should do.');
   await real.locator('[data-spawn-text]').fill('Why do runs stall');
   assert.equal(await real.locator('[data-spawn-go]').isDisabled(), false);
-  // A slow approve. The handler is named so unroute can wait for it: an unroute that does not wait
-  // lets the page finish the request itself, and the late route.continue() throws "Route is already handled".
-  const slowApprove = async route => { await new Promise(resolve => setTimeout(resolve, 1200)); await route.continue(); };
+  // A slow approve. The toast of the earlier approvals can still be on screen, so it proves nothing about this request:
+  // the test waits for the handler to have continued the request and for the page to have its response. A handler left
+  // sleeping past the next navigation would call route.continue() on a request the page already dropped ("Route is already handled").
+  let continued;
+  const handled = new Promise(resolve => { continued = resolve; });
+  const slowApprove = async route => {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      await route.continue();
+    } finally { continued(); }
+  };
   await real.route('**/api/hub/requests/*/approve', slowApprove);
+  const approved = real.waitForResponse(response => /\/api\/hub\/requests\/[^/]+\/approve$/.test(new URL(response.url()).pathname));
   await real.locator('[data-spawn-go]').click();
   await real.locator('[data-spawn-go]', { hasText: 'Approving…' }).waitFor();
   assert.equal(await real.locator('[data-spawn-go]').getAttribute('aria-busy'), 'true');
+  await handled;
+  await approved;
   await real.locator('[data-spawn-toast]').waitFor();
   await real.unroute('**/api/hub/requests/*/approve', slowApprove, { behavior: 'wait' });
 
