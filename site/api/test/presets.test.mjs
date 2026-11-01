@@ -280,7 +280,7 @@ test('GET /hub/presets lists 8 and the rules; /hub/presets/route answers like ro
     assert.equal(status, 200);
     assert.equal(body.presets.length, 8);
     assert.equal(body.rules.length, 5);
-    assert.deepEqual(body.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash'], 'The Spawn menu list is the chat list.');
+    assert.deepEqual(body.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash'], 'The Spawn menu list is the chat list without Codex (Auto tries it first).');
     assert.equal(JSON.stringify(body.models).includes('claude-'), false, 'No provider or model string reaches the page.');
     assert.equal(JSON.stringify(body).includes('template'), false);
     const routed = await get('/hub/presets/route?preset=code-task&project=magic-loops');

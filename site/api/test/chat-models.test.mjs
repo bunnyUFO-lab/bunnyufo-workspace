@@ -24,3 +24,12 @@ test('no entry names an Opus or Pro model (cost guard), and the client list carr
   for (const entry of CHAT_MODELS) assert.doesNotMatch(`${entry.id} ${entry.model ?? ''}`, /opus|pro\b/i, entry.id);
   for (const entry of chatModelsForClient()) assert.deepEqual(Object.keys(entry).sort(), ['id', 'label', 'note']);
 });
+
+test('Codex is listed: the ChatGPT plan, no API cost, Hermes main\'s own provider and model', () => {
+  const codex = CHAT_MODELS.find(entry => entry.id === 'codex');
+  assert.deepEqual({ ...codex }, { id: 'codex', label: 'Codex', note: 'ChatGPT plan, no API cost', provider: 'openai-codex', model: 'gpt-6-sol' });
+  assert.equal(chatModelOf('codex'), codex);
+  assert.deepEqual(chatModelsForClient().find(entry => entry.id === 'codex'), { id: 'codex', label: 'Codex', note: 'ChatGPT plan, no API cost' });
+  assert.equal(CHAT_MODELS[0].id, 'auto', 'Auto stays first');
+  assert.match(CHAT_MODELS[0].note, /^Codex on your ChatGPT plan/, 'and names Codex first');
+});

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { CHAT_MODELS } from '../chat-models.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from '../chat-personas.mjs';
 import { AGENTS } from '../hub-team.mjs';
 import { presetOf } from '../presets.mjs';
@@ -31,5 +32,15 @@ test('chatPersonaOf: nothing and hermes are no persona; a listed id maps; anythi
 });
 
 test('the page sees names and roles, never the prompt', () => {
-  for (const entry of chatPersonasForClient()) assert.deepEqual(Object.keys(entry).sort(), ['id', 'name', 'preset', 'role']);
+  for (const entry of chatPersonasForClient()) assert.deepEqual(Object.keys(entry).sort(), ['id', 'model', 'name', 'preset', 'role']);
+});
+
+test('every persona names a model the chat may ask for (Codex for the research agents), and the page gets it', () => {
+  const listed = new Set(CHAT_MODELS.map(entry => entry.id));
+  for (const persona of CHAT_PERSONAS) {
+    assert.ok(listed.has(persona.model), `${persona.id} prefers ${persona.model}`);
+    assert.equal(persona.model, 'codex', persona.id);
+  }
+  assert.deepEqual(chatPersonasForClient().map(entry => [entry.id, entry.model]), CHAT_PERSONAS.map(entry => [entry.id, entry.model]));
+  for (const entry of chatPersonasForClient()) assert.equal('text' in entry, false, 'still no prompt text');
 });
