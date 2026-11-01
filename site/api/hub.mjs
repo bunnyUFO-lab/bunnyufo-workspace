@@ -35,6 +35,9 @@ import { createChat, isChatRoute } from './hub-chat.mjs';
 import { buildWork } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
+import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
+import { CHAT_PERSONAS } from './chat-personas.mjs';
+import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -42,7 +45,7 @@ import { createWake } from './pc-wake.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -352,6 +355,43 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       const got = await fresh(`pc/${name}`);
       const status = got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
       if (status) return status;
+    }
+    return null;
+  }
+
+  /**
+   * The newest valid settings export of the Hermes host, or null. The files are create-only (`agent-config/export-<stamp>.json`),
+   * so the newest three names of this month and the last are tried, newest first: one must carry the card API's mark
+   * (`writer: hermes-config`, from a head, never from the body), fit the size cap and pass `validExport`. An unmarked file
+   * (the passphrase's, or anyone else's) is never read. The winner is remembered by name; the listing is not.
+   */
+  async function loadAgentConfig(at) {
+    const names = [];
+    for (const month of monthPrefixes(at)) {
+      const { objects } = await bucket.list(key(`agent-config/export-${month}`));
+      for (const object of objects) {
+        const name = object.key.slice(folder('agent-config').length);
+        const stamp = /^export-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})\d{0,3}Z\.json$/.exec(name);
+        if (!stamp) continue;
+        // A name stamped more than the allowed skew ahead is skipped, so a future-stamped file cannot sit on top of the newest real one.
+        const made = Date.UTC(+stamp[1], +stamp[2] - 1, +stamp[3], +stamp[4], +stamp[5], +stamp[6]);
+        if (made > at.getTime() + FUTURE_SKEW_SECONDS * 1000) continue;
+        names.push(name);
+      }
+    }
+    for (const name of names.sort().slice(-3).reverse()) {
+      const rel = `agent-config/${name}`;
+      const hit = cache.get(key(rel));
+      if (hit?.configExport) return hit.configExport;
+      const head = await bucket.head(key(rel)).catch(error => { if (error.status === 404) return null; throw error; });
+      if (head?.metadata?.writer !== CONFIG_WRITER) continue;
+      // The size in bytes is checked before the download, and again on the text that came.
+      if (head.size > EXPORT_MAX_BYTES) continue;
+      const got = await fresh(rel);
+      const exported = got && Buffer.byteLength(got.text) <= EXPORT_MAX_BYTES ? validExport(got.value) : null;
+      if (!exported) continue;
+      remember(key(rel), { configExport: exported });
+      return exported;
     }
     return null;
   }
@@ -1281,6 +1321,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/details$/.exec(route))) {
+            // Prompt text is not for an anonymous LAN read: same rule as the chat reads.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
+            const agent = AGENTS.find(item => item.id === match[1]);
+            if (!agent) throw fail('No such agent.', 404);
+            const exported = agent.profile ? await loadAgentConfig(at) : null;
+            reply(agentDetails({
+              agent, exported, at,
+              persona: CHAT_PERSONAS.find(item => item.id === agent.id) ?? null,
+              preset: agent.presets?.[0] ? presetOf(agent.presets[0]) : null,
+            }));
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/sheets$/.exec(route))) {
             reply(await sheetList(match[1], at));
           } else {

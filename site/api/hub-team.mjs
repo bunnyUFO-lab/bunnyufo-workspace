@@ -12,13 +12,13 @@ export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'arc
 
 /** Checked against the Hermes profile docs (services/assistant.md in the homelab repo) on 2026-10-29. */
 export const AGENTS = [
-  { id: 'hermes', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'chats, plans and dispatches' },
-  { id: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests' },
-  { id: 'claude', name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC' },
+  { id: 'hermes', profile: 'main', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'chats, plans and dispatches' },
+  { id: 'briefs', profile: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests' },
+  { id: 'claude', profile: null, name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC' },
   // The three research agents are Hermes runs. `presets` are the Spawn presets each one takes (Give work opens Spawn on the first).
-  { id: 'researcher', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research'] },
-  { id: 'market-researcher', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'] },
-  { id: 'teardown', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'] },
+  { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research'] },
+  { id: 'market-researcher', profile: 'main', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'] },
+  { id: 'teardown', profile: 'main', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'] },
 ];
 
 export const AVATAR_FILE_RE = /^avatar-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}\.json$/;

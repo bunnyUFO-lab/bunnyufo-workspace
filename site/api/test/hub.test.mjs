@@ -10,7 +10,7 @@ import { createHub, inboxKey } from '../hub.mjs';
 import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
-import { askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seeder, threeOptions } from './hub-fixtures.mjs';
+import { agentConfigJson, askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seedAgentConfig, seeder, threeOptions } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const scene = (elements = []) => JSON.stringify({ type: 'excalidraw', version: 2, source: 'test', elements, appState: {}, files: {} });
@@ -1712,5 +1712,88 @@ test('the stored help excerpt is masked on the server', async () => {
     const stored = JSON.stringify(fake.json(`sections/inbox/checklists/${list.id}/submit.json`).help);
     assert.ok(!stored.includes('ghp_') && !stored.includes('abc123'), stored);
     assert.match(stored, /GITHUB_TOKEN=\[masked\]/);
+  } finally { await close(); }
+});
+
+test('agent details: the newest valid, marked export wins; unmarked, oversize and broken ones are skipped', async () => {
+  const { fake, call, close } = await fixture();
+  try {
+    const owner = { 'Remote-User': 'owner' };
+    const details = async (agent = 'hermes') => { const answer = await call('GET', `/hub/team/${agent}/details`, undefined, owner); return { status: answer.status, body: await answer.json() }; };
+    // Nothing published: missing, with the prompts of the app for a research agent.
+    let got = await details();
+    assert.equal(got.status, 200);
+    assert.deepEqual([got.body.freshness.state, got.body.settings, got.body.prompts], ['missing', null, []]);
+    assert.deepEqual((await details('researcher')).body.prompts.map(prompt => prompt.id), ['persona', 'job']);
+    // An export without the writer mark is ignored.
+    const strays = [seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 30 }), { writer: null })];
+    assert.equal((await details()).body.freshness.state, 'missing', 'no mark, no data');
+    strays.push(seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 29 }), { writer: 'agent' }));
+    assert.equal((await details()).body.freshness.state, 'missing', 'another writer, no data');
+    for (const name of strays) fake.objects.delete(`sections/inbox/${name}`);
+    // A marked one is used, its secrets cleaned again.
+    const older = agentConfigJson({ now: NOW, exportedMinutesAgo: 120, soulText: 'older soul' });
+    seedAgentConfig(fake, older);
+    got = await details();
+    assert.equal(got.body.freshness.state, 'fresh');
+    assert.equal(got.body.prompts[0].text, 'older soul');
+    assert.deepEqual(got.body.settings.model, { provider: 'openai-codex', default: 'gpt-6-sol' });
+    // The newest valid one wins over a newer broken one and a newer oversize one (the three newest files are tried).
+    seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 60, soulText: 'valid soul sk-abcdefghijklmnop1234' }));
+    seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 50 }), { text: '{"v":1,"exportedAt":' });
+    seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 45 }), { text: JSON.stringify({ ...agentConfigJson({ now: NOW, exportedMinutesAgo: 45 }), pad: 'x'.repeat(260 * 1024) }) });
+    got = await details();
+    assert.equal(got.body.prompts[0].text, 'valid soul [redacted]');
+    assert.match(got.body.prompts[0].note, /1 secret-like text was replaced/);
+    assert.ok(!JSON.stringify(got.body).includes('sk-abc'));
+    assert.ok(got.body.freshness.ageSeconds >= 3590 && got.body.freshness.ageSeconds < 3900, 'the age of the export that won');
+    // Briefs shows its jobs; Claude Code shows none and no warning.
+    assert.equal((await details('briefs')).body.jobs[0].name, 'Daily brief');
+    const claude = (await details('claude')).body;
+    assert.deepEqual([claude.freshness.state, claude.settings, claude.prompts], ['none', null, []]);
+  } finally { await close(); }
+});
+
+test('agent details: an unknown agent is 404, and with requireRemoteUser a missing user is 401', async () => {
+  const { fake, call, close } = await fixture();
+  try {
+    seedAgentConfig(fake, agentConfigJson({ now: NOW }));
+    assert.equal((await call('GET', '/hub/team/stranger/details', undefined, { 'Remote-User': 'owner' })).status, 404);
+    assert.equal((await call('GET', '/hub/team/..%2Fasks/details', undefined, { 'Remote-User': 'owner' })).status, 404);
+    const anonymous = await call('GET', '/hub/team/hermes/details');
+    assert.equal(anonymous.status, 401);
+    assert.ok(!JSON.stringify(await anonymous.json()).includes('Role'), 'no prompt text for an anonymous read');
+    assert.equal((await call('GET', '/hub/team/hermes/details', undefined, { 'Remote-User': 'owner' })).status, 200);
+  } finally { await close(); }
+  const open = await fixture({ requireRemoteUser: false });
+  try {
+    assert.equal((await open.call('GET', '/hub/team/hermes/details')).status, 200, 'without the rule an anonymous read is as for the other reads');
+  } finally { await open.close(); }
+});
+
+test('agent details: an export named for the future is skipped, and an oversize one is not even downloaded', async () => {
+  const downloads = [];
+  const { fake, call, close } = await fixture({ wrapBucket: bucket => new Proxy(bucket, { get: (target, prop) => (prop === 'getText' ? key => { downloads.push(key); return target.getText(key); } : target[prop]) }) });
+  try {
+    const owner = { 'Remote-User': 'owner' };
+    const details = async () => (await call('GET', '/hub/team/hermes/details', undefined, owner)).json();
+    const good = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 90, soulText: 'real soul' }));
+    // Named 10 minutes ahead: skipped, so the real one still wins and the future file is never read.
+    const future = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: -10, soulText: 'future soul' }));
+    let body = await details();
+    assert.equal(body.prompts[0].text, 'real soul');
+    assert.ok(!downloads.some(name => name.endsWith(future)), 'the future-named file was not downloaded');
+    // Oversize by its head: not downloaded.
+    const big = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 30 }), { text: JSON.stringify({ pad: 'x'.repeat(260 * 1024) }) });
+    downloads.length = 0;
+    body = await details();
+    assert.equal(body.prompts[0].text, 'real soul');
+    assert.ok(!downloads.some(name => name.endsWith(big)), 'the oversize file was not downloaded');
+    assert.ok(downloads.some(name => name.endsWith(good)) || body.freshness.state === 'fresh');
+    // Bytes, not characters: 200k two-byte characters is over the cap although it is under it in characters.
+    fake.objects.delete(`sections/inbox/${big}`);
+    const wide = seedAgentConfig(fake, agentConfigJson({ now: NOW, exportedMinutesAgo: 20 }), { text: JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), pad: 'é'.repeat(140 * 1024) }) });
+    body = await details();
+    assert.equal(body.prompts[0].text, 'real soul', wide);
   } finally { await close(); }
 });
