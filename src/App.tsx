@@ -49,8 +49,8 @@ const pinRank = (e: WorkspaceCard) =>
 const sortPins = (cards: WorkspaceCard[]) =>
   cards.filter(e => e.pinned).sort((a, b) => pinRank(a) - pinRank(b) || byFreshness(a, b))
 
-/** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. */
-const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+/** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`), a review's file (`review/<event>/<path>`) and Work's item sheet (`work/<board>/<item>`), which keep the screen alive. */
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'map' || hub.screen === 'review' || hub.screen === 'work' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
 /** The route in the address. An old Hub screen name (`inbox`, `board`) is rewritten in place to the new one, so the bar shows it. */
 function readRoute(): Route {

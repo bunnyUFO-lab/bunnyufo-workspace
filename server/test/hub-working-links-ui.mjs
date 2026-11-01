@@ -1,6 +1,6 @@
 // Run after npm run build. Working now rows link to the Work-board items and the Library cards a session touched,
 // through a real browser over the fixture service (work + links): the chips on a row, a Beads chip landing on the
-// Work board with that card highlighted, an item the board does not have showing a note, a card chip opening the
+// Work board with that card highlighted and its sheet open, an item the board does not have showing a note, a card chip opening the
 // card, and a session from before the field rendering with no chips. At 1280 x 800 and 390 x 844.
 // BUW_SHOTS=<prefix> also writes the panel and board screenshots.
 import { chromium } from '@playwright/test';
@@ -66,8 +66,11 @@ try {
     assert.equal(await card.isVisible(), true, 'The lane that holds it is the one showing, on a phone too.');
     assert.equal(await page.locator('[data-board-note]').count(), 0);
     assert.equal(await card.evaluate(el => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; }), true, 'The card is scrolled into view.');
+    await page.locator('dialog#hub-map-panel h3', { hasText: 'Ready to start' }).waitFor();
     await noSideways(page, `Work at ${label} width`);
     if (process.env.BUW_SHOTS) await page.screenshot({ path: `${process.env.BUW_SHOTS}-board-${label}.png` });
+    await page.keyboard.press('Escape');
+    await page.locator('dialog#hub-map-panel').waitFor({ state: 'detached' });
 
     if (label === 'phone') {
       step('phone: a lane the person moved to stays when the board refreshes');

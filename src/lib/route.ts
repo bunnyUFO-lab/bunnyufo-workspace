@@ -65,17 +65,17 @@ export function mapHash(project: string, node?: string): string {
   return node ? `${base}/${encodeURIComponent(node)}` : base
 }
 
-/** `#/~hub/work/<project>/<bead>`: the Work board, with that item's card scrolled into view and highlighted. */
-export function workHash(project: string, bead: string): string {
-  return `#/~hub/work/${encodeURIComponent(project)}/${encodeURIComponent(bead)}`
+/** `#/~hub/work/<board>/<bead>`: the Work board (a project's own, or `all`) with that item's card highlighted and its details sheet open. */
+export function workHash(board: string, bead: string): string {
+  return `#/~hub/work/${encodeURIComponent(board)}/${encodeURIComponent(bead)}`
 }
 
-/** The project and bead out of a Work route id (`<project>[/<bead>]`); `all` and a bare project have no bead. */
+/** The board (a project id or `all`) and bead out of a Work route id (`<board>[/<bead>]`); a bare board has no bead. */
 export function parseWorkId(id: string | undefined): { project?: string; bead?: string } {
   if (!id) return {}
   const [project, ...rest] = id.split('/')
   const bead = rest.join('/')
-  return { project: project || undefined, ...(bead && project !== 'all' ? { bead } : {}) }
+  return { project: project || undefined, ...(bead ? { bead } : {}) }
 }
 
 /**

@@ -27,7 +27,7 @@ export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).repl
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -159,6 +159,12 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     seedPcStatus(fake, pcStatusJson({ now, minutesOld: 1, sessions: [
       { id: 'lane-sess', name: 'Lanes work', status: 'busy', kind: 'interactive', folder: 'probe-lanes', repo: 'probe', project: 'lanes', branch: 'sprint/ws-doing-lanes', startedAt: minutesAgo(now, 30).toISOString() },
     ] }));
+  }
+
+  if (workSide) {
+    // Off by default; needs `work`. A second project with one open task, so the All board holds a card from a project that is not the default one.
+    const side = [beadsIssue({ id: 'sd-one', title: 'Side quest', created: '2026-10-02T10:00:00Z' })];
+    seed.beads('side', side, { pushedAt: minutesAgo(now, 6).toISOString(), host: 'pc.example.test', count: side.length, repo: 'example/side' });
   }
 
   if (links) {

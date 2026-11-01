@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { HubProject, Item, MapCard, MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
 import { safeUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
@@ -83,7 +83,7 @@ function TaskRows({ tasks, onOpen, inboxBeads }: { tasks: MapTask[]; onOpen: (id
  * phone (hub.css). A non-modal dialog, so the map behind it stays usable and App's Escape, which
  * leaves an open dialog alone, does not also fire. It only reads and links; the model decides what it shows.
  */
-export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy }: { model: MapModel; nodeId: string; onClose: () => void; onOpen: (id: string) => void; /** Set when the Roadmap's filter hides this node: what the filter is, and how to show everything. */ hiddenBy?: { filter: string; onShowAll: () => void } }) {
+export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, headerExtra }: { model: MapModel; nodeId: string; onClose: () => void; onOpen: (id: string) => void; /** Something a host screen puts right under the title row (Work's "Show on roadmap"). */ headerExtra?: ReactNode; /** Set when the Roadmap's filter hides this node: what the filter is, and how to show everything. */ hiddenBy?: { filter: string; onShowAll: () => void } }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   const found = find(model, nodeId)
@@ -204,6 +204,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy }: {
           </div>
           <button type="button" className="hub-map-panel-close" aria-label="Close details" onClick={onClose}>×</button>
         </div>
+        {headerExtra}
         {hiddenBy && (
           <p className="hub-muted hub-map-panel-hidden" data-hidden-by-filter>Hidden by your filter ({hiddenBy.filter}) · <button type="button" className="hub-link-btn" onClick={hiddenBy.onShowAll}>Show all</button></p>
         )}

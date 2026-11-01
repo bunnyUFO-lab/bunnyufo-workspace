@@ -48,3 +48,21 @@
   .wk-lanes[data-active="review"] .wk-lane[data-lane="review"], .wk-lanes[data-active="done"] .wk-lane[data-lane="done"] { display: block; }
 }
 .wk-card.focus { border-color: var(--accent, var(--t2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--t2)) 40%, transparent); }
+
+/* An item's details over the board: the Roadmap's panel (hub.css .hub-map-panel). A side panel from 900 px, with the lanes
+   scrolling beside it; below that the bottom sheet the Roadmap shows on a phone. */
+.hub-map-panel .hub-map-panel-roadmap { margin: 6px 0 0; font-size: 0.82rem; }
+.hub-map-panel-roadmap a { color: var(--pink); text-decoration: underline; text-underline-offset: 2px; border-radius: 2px; display: inline-flex; align-items: center; min-height: 44px; }
+.hub-map-panel-roadmap a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (min-width: 900px) {
+  .wk-sheet .hub-map-panel { width: 420px; }
+  .work[data-sheet] { padding-right: 436px; }
+}
+@media (max-width: 899px) {
+  .wk-sheet .hub-map-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.45); }
+  .wk-sheet .hub-map-panel {
+    inset: auto 0 0 0; width: auto; max-height: 75dvh; z-index: 60; padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    border-left: 0; border-top: 1px solid var(--hairline-strong); border-radius: 16px 16px 0 0;
+  }
+  .wk-sheet .hub-map-grab { display: block; width: 40px; height: 4px; margin: -6px auto 10px; border-radius: 2px; background: var(--hairline-strong); }
+}
