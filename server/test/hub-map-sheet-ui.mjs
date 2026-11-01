@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
-import { askJson, beadsIssue, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
 import { listenOnGoodPort } from '../listen.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -28,6 +28,8 @@ const issues = [
   beadsIssue({ id: 'sd-t-hash', title: 'Hash only', parent: 'sd-f-open', created: '2026-10-02T13:00:00Z', description: `a62a2bb4\n\n${BACKFILL}` }),
   beadsIssue({ id: 'sd-t-label', title: 'Register the domain', parent: 'sd-f-open', labels: ['needs-owner'], created: '2026-10-02T14:00:00Z' }),
   beadsIssue({ id: 'sd-t-ask', title: 'Pick the arc', parent: 'sd-f-open', labels: ['needs-owner'], created: '2026-10-02T15:00:00Z' }),
+  beadsIssue({ id: 'sd-f-chk', title: 'Checklist feature', type: 'epic', parent: 'sd-m1', created: '2026-10-02T16:00:00Z' }),
+  beadsIssue({ id: 'sd-t-chk', title: 'Set up the bot', parent: 'sd-f-chk', created: '2026-10-02T17:00:00Z' }),
   beadsIssue({ id: 'sd-f-race', title: 'Race feature', type: 'epic', parent: 'sd-m1', created: '2026-10-03T11:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-desktop', title: 'Race one', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T12:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-phone', title: 'Race two', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T13:00:00Z' }),
@@ -35,6 +37,8 @@ const issues = [
 fixture.seed.beads(PROJECT, issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sheetdev' });
 fixture.fake.seed('sections/sheetlib/workspace.json', JSON.stringify({ name: 'Sheet library', entities: [{ id: 'mission', title: 'Mission control', folder: '2026-10-27_plan' }] }), 'application/json');
 const ASK = askId('sheet-arc', 's1s1');
+const CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-sheetdev-set-up-the-bot-c1c1`;
+fixture.seed.checklist(checklistJson({ id: CHECKLIST, project: PROJECT, bead: 'sd-t-chk', now: minutesAgo(fixture.now, 15) }));
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 fixture.seed.ask(askJson({ id: ASK, bead: 'sd-t-ask', now: minutesAgo(fixture.now, 10), options: threeOptions() }));
 
@@ -121,15 +125,30 @@ try {
     assert.ok((await link.boundingBox()).height >= 43.5, 'The Open PR button is tall enough to tap.');
     await noSideways(page, `${label} done task`);
 
-    step(`${label}: a needs-owner task with no Ask or Inbox item has no Open in Needs you`);
+    const three = async what => {
+      for (const name of ['done', 'not-needed', 'unblock']) assert.equal(await panel.locator(`[data-mark-${name}]`).count(), 1, `${what}: ${name} button`);
+    };
+    step(`${label}: a needs-owner task with nothing asked says so, and still has the three buttons`);
     panel = await sheet(page, 'sd-t-label');
     assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
+    assert.equal(await panel.locator('h4', { hasText: "What's needed" }).count(), 1);
+    assert.match(await panel.locator('[data-nothing-asked]').innerText(), /Nothing asked yet: no Ask or checklist says what you need to do\./);
+    await three('label-only');
+    await noSideways(page, `${label} what's needed`);
 
-    step(`${label}: a task with an Ask still has it, linking the Ask`);
+    step(`${label}: a task with an Ask links the Ask and has the three buttons`);
     panel = await sheet(page, 'sd-t-ask');
-    const button = panel.locator('a', { hasText: 'Open in Needs you' });
+    const button = panel.locator('[data-whats-needed] a', { hasText: 'Open the Ask' });
     assert.equal(await button.count(), 1);
     assert.equal(await button.getAttribute('href'), `#/~hub/ask/${ASK}`);
+    assert.equal(await panel.locator('[data-nothing-asked]').count(), 0);
+    await three('ask');
+
+    step(`${label}: a task with a checklist links the checklist and has the three buttons`);
+    panel = await sheet(page, 'sd-t-chk');
+    const listLink = panel.locator('[data-whats-needed] a', { hasText: 'Open the checklist' });
+    assert.equal(await listLink.getAttribute('href'), `#/~hub/checklist/${CHECKLIST}`);
+    await three('checklist');
 
     step(`${label}: the feature's task list follows the same rule`);
     panel = await sheet(page, 'sd-f-open');
@@ -146,11 +165,13 @@ try {
     assert.equal(await markDone.innerText(), 'Mark done');
     assert.equal(await notNeeded.innerText(), 'No longer needed');
     assert.ok((await markDone.boundingBox()).height >= 43.5 && (await notNeeded.boundingBox()).height >= 43.5, 'The buttons are tall enough to tap.');
-    assert.match(await panel.innerText(), /Closes it in Beads the next time an agent works in Sheetdev\./);
+    assert.match(await panel.innerText(), /Unblock: it doesn't wait on you; agents may pick it up\./);
+    assert.ok((await panel.locator('[data-mark-unblock]').boundingBox()).height >= 43.5, 'Unblock is tall enough to tap.');
     assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
     await markDone.click();
     await panel.locator('[data-mark-pending]').waitFor();
-    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. Beads closes it the next time an agent works in Sheetdev\.\s*Undo$/);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'done');
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · done/);
     assert.equal(await panel.locator('[data-mark-done]').count(), 0);
     await page.reload();
@@ -159,6 +180,18 @@ try {
     await noSideways(page, `${label} pending`);
     await panel.locator('[data-mark-undo]').click();
     await panel.locator('[data-mark-done]').waitFor();
+    assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /needs you/);
+
+    step(`${label}: Unblock shows pending with its own words, the task leaves yellow, and Undo brings the buttons back`);
+    await panel.locator('[data-mark-unblock]').click();
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'unblock');
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this unblocked on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · next up/, 'It is next, not yellow and not closed.');
+    assert.equal(await panel.locator('[data-mark-unblock]').count(), 0);
+    await noSideways(page, `${label} unblock pending`);
+    await panel.locator('[data-mark-undo]').click();
+    await panel.locator('[data-mark-unblock]').waitFor();
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /needs you/);
 
     step(`${label}: No longer needed asks for a reason, then says it was marked not needed`);

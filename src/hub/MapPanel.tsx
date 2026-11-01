@@ -152,11 +152,23 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
           })}</p>
         )}
         {closed && <p className="hub-muted" data-closed>{closed}</p>}
-        {task.state === 'you' && hasNeedsItem(task, inboxBeads) && <div className="hub-actions start"><a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs')}>Open in Needs you</a></div>}
-        <MarkActions
-          task={task} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
-          eligible={task.state === 'you' && task.you === 'label' && !!inbox && !hasNeedsItem(task, inboxBeads)} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
-        />
+        {(task.state === 'you' || task.mark) && (
+          <div className="hub-map-panel-needed" data-whats-needed>
+            <h4>What&apos;s needed</h4>
+            {task.ask
+              ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('ask', task.ask)} data-needed-link="ask">Open the Ask</a></div>
+              : task.checklist
+                ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('checklist', task.checklist)} data-needed-link="checklist">Open the checklist</a></div>
+                : hasNeedsItem(task, inboxBeads)
+                  ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs')} data-needed-link="needs">Open in Needs you</a></div>
+                  : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
+            <MarkActions
+              task={task} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+              eligible={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+            />
+          </div>
+        )}
+        {!(task.state === 'you' || task.mark) && markFailure.id === nodeId && markFailure.message && <p className="hub-error" role="alert">{markFailure.message}</p>}
       </>
     )
   } else {

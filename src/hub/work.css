@@ -66,3 +66,11 @@
   }
   .wk-sheet .hub-map-grab { display: block; width: 40px; height: 4px; margin: -6px auto 10px; border-radius: 2px; background: var(--hairline-strong); }
 }
+
+/* A card with something asked of the owner: the link sits under it, attached. */
+.wk-card-group { margin-bottom: 8px; min-width: 0; }
+.wk-card-group .wk-card { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.wk-asked { display: block; padding: 7px 12px; font-size: 12px; color: var(--amber); text-decoration: none; background: var(--s2); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; }
+.wk-asked:hover { border-color: var(--line2); text-decoration: underline; }
+.wk-asked:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.wk-warn { font-weight: 600; }
