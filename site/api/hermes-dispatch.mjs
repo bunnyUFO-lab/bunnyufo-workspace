@@ -15,6 +15,7 @@ import { chatModelOf } from './chat-models.mjs';
 import { createHermesRuns } from './hermes-runs.mjs';
 import { createScrub } from './scrub.mjs';
 import { resetOf } from './plan-pauses.mjs';
+import { stripInlineImages } from './inline-images.mjs';
 import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
 
 export const MAX_HERMES_RUNS = 3;
@@ -155,11 +156,11 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
         await startRetry(context, at, run);
         return;
       } else {
-        const outcome = outcomeOf({ run: { ...run, error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() });
+        const outcome = outcomeOf({ run: { ...run, output: stripInlineImages(run.output), error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() });
         // What the owner said that Hermes took and never read: kept in the result so the page can say "queued", not "sent".
         const pending = pendingOf(run);
         const unread = pending ? await requests.unreadSentIds(id, pending, at).catch(() => []) : [];
-        await writeResult(id, unread.length ? { ...outcome, unreadReplies: unread.slice(0, 20) } : outcome, run.output);
+        await writeResult(id, unread.length ? { ...outcome, unreadReplies: unread.slice(0, 20) } : outcome, stripInlineImages(run.output));
         await sendQueued(id, follower, run, at);
       }
     } finally {

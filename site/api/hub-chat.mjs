@@ -16,6 +16,7 @@
 import { Readable, pipeline } from 'node:stream';
 import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
+import { stripInlineImages } from './inline-images.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
@@ -115,7 +116,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    */
   async function historyMessages(id, lines, spent) {
     let left = HISTORY_IMAGE_BUDGET - spent;
-    const messages = lines.map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text }));   // help: the context line goes as the first user message
+    const messages = lines.map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) }));   // help: the context line goes as the first user message
     for (let at = lines.length - 1; at >= 0; at -= 1) {
       const pictures = (lines[at].role === 'user' || lines[at].role === 'context') && Array.isArray(lines[at].images) ? lines[at].images.filter(image => IMAGE_FILE.test(String(image?.file))) : [];
       if (!pictures.length) continue;
@@ -244,7 +245,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let runId = null;
     if (runTurn) {
       // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
-      const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: line.text || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+      const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
       try {
         ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}`, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));   // model:
       } catch (error) {
@@ -365,7 +366,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
-    const assistant = { role: 'assistant', text: failure ? `${reply} [interrupted]`.trim() : reply, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
+    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     let contextLine = null;   // help:
     try {
