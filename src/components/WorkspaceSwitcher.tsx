@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api, onServiceEvent, useService } from '../local/client'
-import { activeSite, allSites, siteHref } from '../lib/sites'
-import { useCapabilities } from '../lib/writes'
+import { activeSite, allSites, archivedSites, siteHref } from '../lib/sites'
+import type { Site } from '../lib/sites'
+import { useCanWrite, useCapabilities } from '../lib/writes'
 import { host } from '../lib/host'
 import type { ActiveWorkspace, WorkspaceEntry } from '../local/types'
 
@@ -119,6 +120,37 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const canWrite = useCanWrite()
+  const [manage, setManage] = useState('')       // the workspace whose menu is open
+  const [editing, setEditing] = useState('')     // the workspace being renamed
+  const [draft, setDraft] = useState('')
+
+  // Workspace edits go to /api/sections/...; the site list is read once per page, so a reload shows the result.
+  const edit = async (route: string, data: Record<string, unknown>, label: string) => {
+    setBusy(label); setError('')
+    try {
+      const response = await fetch(`/api/sections/${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      const answer = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(answer.error || 'That change could not be saved.')
+      return true
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem))
+      return false
+    } finally {
+      setBusy('')
+    }
+  }
+  const rename = async (site: Site) => {
+    const wanted = draft.trim()
+    if (!wanted) return
+    if (await edit('rename', { workspace: site.id, name: wanted }, 'Renaming...')) window.location.reload()
+  }
+  const archive = async (site: Site, archived: boolean) => {
+    setManage('')
+    if (!await edit('archive', { workspace: site.id, archived }, archived ? 'Archiving...' : 'Restoring...')) return
+    // Archiving the open workspace leaves it: go to the first one that is left.
+    window.location.assign(archived && site.id === activeSite?.id ? '/' : window.location.pathname)
+  }
 
   // A new workspace is a few puts into the cards bucket and is on the site at once; the site list
   // is cached for a few seconds, so wait for it to appear there and then go to it.
@@ -181,10 +213,35 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
     </button>
     {open && createPortal(<div className="workspace-menu" ref={menu} role="menu" aria-label="Workspaces" style={{ left: place.left, top: place.top }}>
       <p className="workspace-menu-title">Workspaces</p>
-      {allSites.map(site => <a key={site.id} role="menuitemradio" aria-checked={site.id === activeSite?.id}
-        className={site.id === activeSite?.id ? 'workspace-menu-current' : undefined} href={siteHref(site)}>
-        <span className="workspace-menu-name">{site.name}</span>
-      </a>)}
+      {allSites.map(site => editing === site.id
+        ? <form key={site.id} className="workspace-menu-add workspace-menu-rename" onSubmit={event => { event.preventDefault(); void rename(site) }}>
+          <input autoFocus value={draft} maxLength={60} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setEditing('') } }} aria-label={`New name for ${site.name}`} disabled={!!busy} />
+          <span>
+            <button type="submit" disabled={!!busy || !draft.trim()}>{busy || 'Rename'}</button>
+            <button type="button" onClick={() => setEditing('')} disabled={!!busy}>Cancel</button>
+          </span>
+          <small>Only the name changes. The address and every link stay the same.</small>
+        </form>
+        : <div key={site.id} className="workspace-menu-row">
+          <a role="menuitemradio" aria-checked={site.id === activeSite?.id}
+            className={site.id === activeSite?.id ? 'workspace-menu-current' : undefined} href={siteHref(site)}>
+            <span className="workspace-menu-name">{site.name}{site.archived ? ' (archived)' : ''}</span>
+          </a>
+          {canWrite && <>
+            <button type="button" className="workspace-menu-more" aria-label={`Manage ${site.name}`} aria-haspopup="true" aria-expanded={manage === site.id} onClick={() => setManage(manage === site.id ? '' : site.id)}>⋯</button>
+            {manage === site.id && <div className="workspace-menu-manage" role="group" aria-label={`Manage ${site.name}`}>
+              <button type="button" onClick={() => { setDraft(site.name); setEditing(site.id); setManage(''); setError('') }}>Rename…</button>
+              <button type="button" disabled={!!busy} onClick={() => void archive(site, !site.archived)}>{site.archived ? 'Restore' : 'Archive'}</button>
+            </div>}
+          </>}
+        </div>)}
+      {archivedSites.length > 0 && canWrite && <>
+        <p className="workspace-menu-title">Archived</p>
+        {archivedSites.map(site => <div key={site.id} className="workspace-menu-row workspace-menu-archived">
+          <span className="workspace-menu-name">{site.name}</span>
+          <button type="button" className="workspace-menu-restore" disabled={!!busy} aria-label={`Restore ${site.name}`} onClick={() => void archive(site, false)}>Restore</button>
+        </div>)}
+      </>}
       {create && (naming
         ? <form className="workspace-menu-add" onSubmit={event => { event.preventDefault(); void start() }}>
           <input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="Workspace name" aria-label="Workspace name" disabled={!!busy} />

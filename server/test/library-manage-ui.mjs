@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
+import { listenOnGoodPort } from '../listen.mjs';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 
@@ -279,6 +281,98 @@ try {
   await phoneCard('brief').waitFor();
   assert.equal((await listOf(alpha)).entities.some(item => item.id === 'brief'), true, 'Restore on the phone brought the card back');
   await phone.close();
+
+  // The published site's switcher: rename and archive a workspace against a stand-in for the site's data service.
+  const siteData = {
+    one: { name: 'Section One', entities: [entity('alpha', 'Alpha', 'ideas', ['Overview'])] },
+    two: { name: 'Section Two', entities: [{ ...entity('beta', 'Beta', 'ideas', ['Overview']), status: 'archived' }] },
+    old: { name: 'Old Stuff', archived: true, entities: [] },
+  };
+  const siteCalls = [];
+  const sendJson = (response, status, value) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); };
+  const siteServer = http.createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://site');
+    if (url.pathname === '/api/capabilities') return sendJson(response, 200, { write: true, create: true, cards: true });
+    if (url.pathname === '/api/card-state') return sendJson(response, 200, { cards: {} });
+    if (url.pathname === '/sites.json') return sendJson(response, 200, Object.entries(siteData).map(([id, item]) => ({ id, name: item.name, base: `/w/${id}`, ...(item.archived ? { archived: true } : {}) })));
+    const listed = /^\/w\/([^/]+)\/workspace\.json$/.exec(url.pathname);
+    if (listed && siteData[listed[1]]) return sendJson(response, 200, { name: siteData[listed[1]].name, entities: siteData[listed[1]].entities });
+    if (request.method === 'POST' && url.pathname.startsWith('/api/sections/')) {
+      let text = '';
+      for await (const chunk of request) text += chunk;
+      const data = JSON.parse(text);
+      siteCalls.push([url.pathname, data]);
+      const item = siteData[data.workspace];
+      if (url.pathname.endsWith('/rename')) { item.name = data.name; return sendJson(response, 200, { id: data.workspace, name: data.name }); }
+      if (data.archived && item.entities.some(card => card.status !== 'archived')) return sendJson(response, 409, { error: `"${item.name}" still has 1 active card. Archive or move them first.` });
+      item.archived = data.archived || undefined;
+      return sendJson(response, 200, { id: data.workspace, archived: data.archived });
+    }
+    try {
+      const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+      const body = await readFile(path.join(root, 'dist', file));
+      response.writeHead(200, { 'Content-Type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html' });
+      return response.end(body);
+    } catch { response.writeHead(200, { 'Content-Type': 'text/html' }); return response.end(await readFile(path.join(root, 'dist/index.html'))); }
+  });
+  await listenOnGoodPort(siteServer, '127.0.0.1');
+  const siteOrigin = `http://127.0.0.1:${siteServer.address().port}`;
+  try {
+    for (const size of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
+      siteData.one.name = 'Section One'; siteData.two.archived = undefined; siteData.old.archived = true; siteCalls.length = 0;
+      const sitePage = await (await browser.newContext({ viewport: size })).newPage();
+      sitePage.setDefaultTimeout(10000);
+      sitePage.on('pageerror', error => errors.push(error.message));
+      await sitePage.goto(`${siteOrigin}/one`);
+      const opener = name => sitePage.getByRole('button', { name: new RegExp(`^Workspace: ${name}`) }).first();
+      // On a phone the switcher sits in the slide-over menu.
+      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show menu' }); if (await show.isVisible()) await show.click(); };
+      const pop = async name => { await reveal(); await opener(name).click(); };
+      await pop('Section One');
+      const menu = sitePage.getByRole('menu', { name: 'Workspaces' });
+      await menu.waitFor();
+      // The archived one is listed apart, with Restore, and is not a switch target.
+      assert.equal(await menu.getByText('Old Stuff').count(), 1, 'the archived workspace is listed under Archived');
+      assert.equal(await menu.getByRole('menuitemradio', { name: 'Old Stuff' }).count(), 0, 'and is not a switch target');
+      assert.ok(await sitePage.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), `no sideways scroll at ${size.width}`);
+
+      // Rename: Escape cancels and sends nothing, Enter saves, the address stays.
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await menu.getByRole('button', { name: 'Rename…' }).click();
+      const field = menu.getByRole('textbox', { name: 'New name for Section One' });
+      await field.fill('Throwaway');
+      await field.press('Escape');
+      assert.equal(await field.count(), 0, 'Escape cancels');
+      assert.equal(siteCalls.length, 0, 'and sends nothing');
+      await menu.getByRole('button', { name: 'Manage Section One' }).click();
+      await menu.getByRole('button', { name: 'Rename…' }).click();
+      await field.fill('Section Uno');
+      await Promise.all([sitePage.waitForNavigation(), field.press('Enter')]);
+      assert.deepEqual(siteCalls[0], ['/api/sections/rename', { workspace: 'one', name: 'Section Uno' }]);
+      assert.equal(new URL(sitePage.url()).pathname, '/one', 'the address does not change');
+      await reveal();
+      await opener('Section Uno').waitFor();
+
+      // Archive is refused while a card is active, and says why.
+      await pop('Section Uno');
+      await menu.getByRole('button', { name: 'Manage Section Uno' }).click();
+      await menu.getByRole('button', { name: 'Archive' }).click();
+      await menu.getByRole('alert').waitFor();
+      assert.match(await menu.getByRole('alert').textContent(), /still has 1 active card/);
+
+      // Archive the idle one, then restore it from the Archived list.
+      await menu.getByRole('button', { name: 'Manage Section Two' }).click();
+      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Archive' }).click()]);
+      assert.equal(siteData.two.archived, true);
+      await pop('Section Uno');
+      assert.equal(await menu.getByRole('menuitemradio', { name: 'Section Two' }).count(), 0, 'an archived workspace leaves the switcher');
+      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
+      assert.equal(siteData.two.archived, undefined, 'Restore clears the flag');
+      await pop('Section Uno');
+      await menu.getByRole('menuitemradio', { name: 'Section Two' }).waitFor();
+      await sitePage.context().close();
+    }
+  } finally { siteServer.close(); }
 
   assert.deepEqual(errors, [], 'no page errors');
   console.log('library-manage-ui: ok');
