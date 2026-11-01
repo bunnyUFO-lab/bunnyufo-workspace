@@ -5,11 +5,14 @@
 import { AGENTS } from './hub-team.mjs';
 import { RESEARCH, MARKET_EXTRA, TEARDOWN_EXTRA } from './presets.mjs';
 
-/** `id` is the AGENTS id; `preset` is the Spawn preset the agent takes (its `presets[0]`). */
+/**
+ * `id` is the AGENTS id; `preset` is the Spawn preset the agent takes (its `presets[0]`); `model` is the chat-models.mjs id the chat starts on
+ * (the research agents prefer Codex, Hermes main's own primary; the page lets the owner pick another). A test keeps it a listed id.
+ */
 const TABLE = [
-  { id: 'researcher', preset: 'research', extra: '' },
-  { id: 'market-researcher', preset: 'market-research', extra: MARKET_EXTRA },
-  { id: 'teardown', preset: 'game-teardown', extra: TEARDOWN_EXTRA },
+  { id: 'researcher', preset: 'research', model: 'codex', extra: '' },
+  { id: 'market-researcher', preset: 'market-research', model: 'codex', extra: MARKET_EXTRA },
+  { id: 'teardown', preset: 'game-teardown', model: 'codex', extra: TEARDOWN_EXTRA },
 ];
 
 const agentOf = id => AGENTS.find(agent => agent.id === id);
@@ -40,4 +43,4 @@ export function chatPersonaOf(value) {
 export const storedPersona = id => (typeof id === 'string' ? CHAT_PERSONAS.find(entry => entry.id === id) ?? null : null);
 
 /** What the page may see: no prompt text. */
-export const chatPersonasForClient = () => CHAT_PERSONAS.map(({ id, name, role, preset }) => ({ id, name, role, preset }));
+export const chatPersonasForClient = () => CHAT_PERSONAS.map(({ id, name, role, preset, model }) => ({ id, name, role, preset, model }));

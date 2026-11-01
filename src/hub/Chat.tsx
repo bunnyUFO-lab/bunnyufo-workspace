@@ -37,8 +37,8 @@ const when = (iso: string) => {
   return date.toDateString() === new Date().toDateString() ? clock(iso) : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock(iso)}`
 }
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
-/** The menu text: the paid ones say API. */
-const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? entry.label : `${entry.label} · API`)
+/** The menu text: Auto says what it tries first, the paid ones say API, Codex (the ChatGPT plan) says neither. */
+const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? `${entry.label} · Codex first` : /no API cost/.test(entry.note) ? entry.label : `${entry.label} · API`)
 
 const openSameOrigin = (url: URL) => { window.location.assign(url.href) }
 
@@ -190,10 +190,16 @@ function ChatView({ id }: { id?: string }) {
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
   const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[] }>('/chat')
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
-  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : AUTO, hit ? hit.persona : HERMES] })
+  const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : HERMES] })
   const [persona, setPersona] = useState(initialPersona)   // persona: who the chat talks to; fixed once the chat has a line
-  const [model, setModel] = useState(initialModel)   // model:
+  // model: what the owner picked in this conversation (or the chat's own last choice), or null: then the persona's preferred model, else Auto.
+  const [picked, setPicked] = useState<string | null>(initialModel)
   const [messages, setMessages] = useState<Shown[]>(initial ?? [])
+  const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
+  const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
+  const who = personas.find(entry => entry.id === persona) ?? null   // null is Hermes
+  const preferred = who?.model && models.some(entry => entry.id === who.model) ? who.model : AUTO   // model: the agent's own default, until the owner picks one
+  const model = picked ?? preferred
   const [pending, setPending] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : ''))
   const [images, setImages] = useState<Prepared[]>([])
@@ -223,7 +229,7 @@ function ChatView({ id }: { id?: string }) {
     if (!id || initial || help) return undefined
     let stopped = false
     hubGet<{ messages: ChatLine[] }>(`/chat/${encodeURIComponent(id)}`)
-      .then(answer => { if (!stopped) { setMessages(answer.messages); setModel([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES) } })   // model: an old chat opens on its last choice
+      .then(answer => { if (!stopped) { setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES) } })   // model: an old chat opens on its last choice
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
   }, [id, initial, help])
@@ -405,14 +411,11 @@ function ChatView({ id }: { id?: string }) {
   const conversations = list.data?.conversations ?? []
   // Two chats with the same title are told apart by the time they were last used.
   const sameTitle = new Set(conversations.filter((item, index) => conversations.some((other, at) => at !== index && other.title === item.title)).map(item => item.title))
-  const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
-  const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
   const agents = team.data?.agents ?? []
-  const who = personas.find(entry => entry.id === persona) ?? null   // null is Hermes
   const pickable = personas.length > 0 && !id && !help && !messages.length && pending === null
   const pick = (value: string) => {
     if (value === JOB) { openSpawn({ text: draft.trim() || undefined, ...(who ? { preset: who.preset } : {}) }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project
-    setModel(value)
+    setPicked(value)
   }
   // The banner: from the preview of a new help chat, or from the context line a stored one starts with.
   const stored = messages[0]?.role === 'context' && messages[0].about ? messages[0] : null

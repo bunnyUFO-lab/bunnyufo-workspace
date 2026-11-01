@@ -408,7 +408,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
 
   /** `GET /hub/presets`, `/hub/presets/route?preset=&project=&repo=` and `/hub/presets/brief?request=<id>`. */
   async function presetRoutes(path, query, at) {
-    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES, models: chatModelsForClient() };
+    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES, models: chatModelsForClient().filter(entry => entry.id !== 'codex') };   // Spawn's menu is for pinning a paid model; Auto already tries Codex first, so Codex is a chat choice only
     if (path === '/hub/presets/repos') {
       // The repos Spawn offers: each project's own (its section's tracked repo, in the project table's order), then the ones the host lists.
       const seen = new Set();

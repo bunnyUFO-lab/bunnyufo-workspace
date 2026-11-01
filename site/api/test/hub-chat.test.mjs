@@ -763,7 +763,7 @@ test('model: GET /hub/chat lists the choices and a conversation last non-auto mo
     const second = (await chatLive(call, { text: 'Two' })).events.at(-1).data.conversation;
     await chatLive(call, { text: 'Three', conversation: first, model: 'haiku' });
     const listed = await (await call('GET', '/hub/chat')).json();
-    assert.deepEqual(listed.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash']);
+    assert.deepEqual(listed.models.map(entry => entry.id), ['auto', 'codex', 'sonnet', 'haiku', 'deepseek-flash']);
     assert.ok(listed.models.every(entry => !('provider' in entry) && !('model' in entry)));
     const byId = new Map(listed.conversations.map(item => [item.id, item]));
     assert.equal(byId.get(first).model, 'haiku');
