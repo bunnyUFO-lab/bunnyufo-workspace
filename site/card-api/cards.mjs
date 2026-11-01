@@ -53,6 +53,8 @@
 //        "rerun" in the file marks an Ask whose answer runs a finished PC run again: { request, kind: 'denied' } (a denied run: "I ran the
 //        allow lines; run it again") or { request, kind: 'continue', ask } (the run ended before its Ask `ask` was answered). The Hub checks
 //        every claim in it, makes one approved copy of the run and signs it; only an Ask with --require-passkey can do that.
+//        A `denied` rerun may also carry `allow`: 1 to 5 rules (`Bash(<command>)` or `mcp__<server>__<tool>`) that the "allow" option adds to the
+//        project's PC allow list; the Hub signs them in a grant and the PC applies them only when they are the ones it suggested itself.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
@@ -114,6 +116,7 @@ import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from '
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Node's fetch ignores HTTPS_PROXY unless told at startup (Node 22.21 and later), and a cloud
 // session reaches the internet only through its proxy. Start again with it on; an older Node
@@ -560,7 +563,38 @@ async function spool(entry) {
 }
 
 /**
- * Send up to 20 spooled `put` entries, oldest first. Sent (200) or already there (412) or older
+ * The only files a spooled `put` may write: an event (`events/<yyyy-mm-dd>/<name>.json`, what this client spools) and a run's progress file
+ * (`requests/<id>/run-<stamp>-<rand4>.json`, what the hub-hooks mod spools, replayed only inside the run that owns that request). The spool is a plain file any local process can append to, and a
+ * replay runs under whichever token the next command holds, so anything else (ask.json, request.json, approvals, stops, grants, answers) is
+ * dropped, never sent: otherwise a line could get an Ask marked as the PC watcher's, or replace the mark of a request.
+ */
+const SPOOL_EVENT = /^events\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9._-]+\.json$/;
+const SPOOL_RUN_FILE = /^requests\/([A-Za-z0-9._-]+)\/run-\d{8}T\d{9}Z-[a-z0-9]{4}\.json$/;
+/**
+ * A run file is replayed only by the run it belongs to: a PC run (BUW_RUN_FOLDER=1, which the watcher does not have) and its own request, read from the
+ * run checkout's `.claude/run-current.json` (beside this client in `.claude/bin/`, else under the working directory). Anywhere else, a spooled run file is
+ * dropped: under the watcher's token it would let a local process plant a future-stamped run file (a dead run reads as running) or fake timeline lines.
+ */
+function ownRunRequest() {
+  if (process.env.BUW_RUN_FOLDER !== '1') return null;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const file of [path.join(here, '..', 'run-current.json'), path.join(process.cwd(), '.claude', 'run-current.json')]) {
+    try {
+      const id = JSON.parse(readFileSync(file, 'utf8'))?.requestId;
+      if (typeof id === 'string' && /^[A-Za-z0-9._-]+$/.test(id)) return id;
+    } catch { /* no such file: try the next */ }
+  }
+  return null;
+}
+const spoolable = (file, ownRequest) => {
+  if (typeof file !== 'string' || file.includes('..')) return false;
+  if (SPOOL_EVENT.test(file)) return true;
+  const run = SPOOL_RUN_FILE.exec(file);
+  return !!run && ownRequest !== null && run[1] === ownRequest;
+};
+
+/**
+ * Send up to 20 spooled `put` entries, oldest first. Only the two shapes above are replayed, always as a create-only JSON file. Sent (200) or already there (412) or older
  * than a day (or with no readable time): dropped. Any other answer, 4xx included (this command's
  * token may just be unable to write the inbox), or no answer: kept. Other kinds of line belong to the hooks and stay.
  */
@@ -573,6 +607,7 @@ async function replaySpool() {
     return;
   }
   const lines = text.split(/\r?\n/).filter(Boolean);
+  const ownRequest = ownRunRequest();
   const keep = [];
   let tried = 0;
   let down = false;
@@ -587,6 +622,10 @@ async function replaySpool() {
       keep.push(line);
       continue;
     }
+    if (!spoolable(entry.path, ownRequest) || typeof entry.body !== 'string') {
+      console.error(`(spool: dropped a line for ${String(entry.path).replace(/[^\x20-\x7e]/g, '?').slice(0, 80)}: only events, and a run's own progress files, are replayed)`);
+      continue;
+    }
     if (!(Date.now() - Date.parse(entry.at) <= DAY)) continue;     // older than a day, or no readable time: expired
     if (down || tried >= 20) {
       keep.push(line);
@@ -594,7 +633,7 @@ async function replaySpool() {
     }
     tried += 1;
     try {
-      const result = await putInbox(inboxPath(entry.path), entry.body, { section: entry.section, createOnly: entry.createOnly !== false, contentType: entry.contentType, retry: false });
+      const result = await putInbox(inboxPath(entry.path), entry.body, { section: entry.section, createOnly: true, contentType: 'application/json', retry: false });
       if (result.state === 'transient') {
         down = true;
         keep.push(line);
@@ -730,6 +769,22 @@ const AVATAR_SUBJECT_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/:-]{0,199}$/;
 const AVATAR_REQUEST_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 /** The `rerun` field of an Ask: a run to run again (`denied`), or a run that ended before its own Ask was answered (`continue`). */
 const RERUN_KINDS = ['denied', 'continue'];
+/** One phone-allowed rule: an exact Bash command rule (one trailing `:*` allowed) or an exact MCP tool (the PC checks the policy). Keep validRerunRule equal to the one in site/api/hub-rerun.mjs. */
+const RERUN_MCP_RE = /^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/;
+// Printable ASCII only: a rule must read the same as what is signed (no format, filler, separator, private-use or combining characters).
+const RERUN_ASCII_RE = /^[\x20-\x7e]+$/;
+function validRerunRule(rule) {
+  if (typeof rule !== 'string' || rule.length > 300 || !RERUN_ASCII_RE.test(rule)) return false;
+  if (RERUN_MCP_RE.test(rule)) return true;
+  const match = /^Bash\((.*)\)$/s.exec(rule);
+  if (!match) return false;
+  const body = match[1];
+  if (body === '' || body !== body.trim() || body.includes('Bash(')) return false;
+  const stars = body.split('*').length - 1;
+  if (stars === 0) return true;
+  // One trailing `:*` after a non-empty prefix is the watcher's own prefix form; any other `*` is a wildcard a run could steer.
+  return stars === 1 && body.endsWith(':*') && body.slice(0, -2).trim() !== '';
+}
 const DECISION_LIMITS = { count: 10, text: 200, detail: 500 };
 
 /** `--decision "text|detail"` → { id: 'd<n>', text, detail? }. The detail starts at the first "|". */
@@ -842,13 +897,21 @@ function validateAsk(ask, imageNames) {
     const rerun = ask.rerun;
     if (!rerun || typeof rerun !== 'object' || Array.isArray(rerun)) problems.push('rerun is an object');
     else {
-      const known = Object.keys(rerun).filter(name => !['request', 'kind', 'ask'].includes(name));
+      const known = Object.keys(rerun).filter(name => !['request', 'kind', 'ask', 'allow'].includes(name));
       if (known.length) problems.push(`rerun has no field ${known.join(', ')}`);
       if (typeof rerun.request !== 'string' || !AVATAR_REQUEST_RE.test(rerun.request)) problems.push('rerun.request is a request id');
       if (!RERUN_KINDS.includes(rerun.kind)) problems.push(`rerun.kind is ${RERUN_KINDS.join(' or ')}`);
       if (rerun.kind === 'continue') {
         if (typeof rerun.ask !== 'string' || !AVATAR_REQUEST_RE.test(rerun.ask)) problems.push('rerun.ask is the id of the Ask the run left open');
       } else if (rerun.ask !== undefined) problems.push('rerun.ask is only for kind continue');
+      if (rerun.allow !== undefined) {
+        const rules = rerun.allow;
+        if (rerun.kind !== 'denied') problems.push('rerun.allow is only for kind denied');
+        else if (!Array.isArray(rules) || rules.length < 1 || rules.length > 5 || new Set(rules).size !== rules.length
+          || !rules.every(validRerunRule)) {
+          problems.push('rerun.allow is 1 to 5 different rules, each Bash(<command>) or mcp__<server>__<tool>, up to 300 characters, printable ASCII only, no * except one trailing :*');
+        }
+      }
     }
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');

@@ -19,8 +19,15 @@ export const SPRINT_COLORS = ['var(--purple)', 'var(--blue)', 'var(--amber)', 'v
 export interface Marks { working: boolean; idle: boolean; prs: number; review: number; failing: number; fresh: boolean; deployed: boolean }
 
 export interface At { x: number; y: number }
+/** Left, top, right, bottom. */
+type Box = [number, number, number, number]
 /** Where a node's text goes. `y` is the first line's baseline; `lines` (when set) are the wrapped lines, and `step` the distance between them. */
-export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number }
+export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number; /** An open milestone's done/total, drawn after its title: its circle is too small to hold it. */ count?: string }
+/** The lines of a label as drawn, the count (when it has one) after the last. */
+const drawnLines = (label: Label, title: string): string[] => {
+  const lines = label.lines ?? [title]
+  return label.count ? [...lines.slice(0, -1), `${lines[lines.length - 1]}  ${label.count}`] : lines
+}
 interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; label: Label; center: At }
 export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean; countAt: At; chevronAt: At }
 /** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. */
@@ -89,27 +96,29 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   const milestoneEnd = new Map<string, number>()
   model.milestones.forEach((milestone: MapMilestone, index) => {
     const tasks = milestone.features.flatMap(feature => feature.tasks)
+    const count = `${tasks.filter(task => task.state === 'done').length}/${tasks.length}`
     const col = MILESTONE_COLORS[index % MILESTONE_COLORS.length]
     const isOpen = open.has(milestone.id)
     const radius = isOpen ? 15 : 26
     milestoneX.set(milestone.id, x)
     const mx = vertical ? 0 : x
     const my = vertical ? x : SPINE_Y
-    const titleLines = vertical ? wrap(milestone.title, 40) : [milestone.title]
+    // An open milestone's count follows its title on the same line, so the title gives up that room: the drawing stays as narrow as before the count.
+    const titleLines = vertical ? wrap(milestone.title, isOpen ? 40 - count.length - 2 : 40) : [milestone.title]
     /** Horizontal: where the first branch leaves the spine, clear of the open milestone's title, which sits centred below the circle and would meet the diagonals. */
-    const first = isOpen && !vertical ? Math.max(34, (milestone.title.length * 6.8) / 2 + 6) : 34
+    const first = isOpen && !vertical ? Math.max(34, ((milestone.title.length + count.length + 2) * 6.8) / 2 + 6) : 34
     const levels = Math.ceil(milestone.features.length / 2)
     nodes.push({
       kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen,
       done: tasks.filter(task => task.state === 'done').length, total: tasks.length, marks: marksOf(tasks.map(task => task.signs)),
       center: { x: mx, y: my },
       label: vertical
-        ? { x: radius + 10, y: my + 4 - (titleLines.length - 1) * 7, anchor: 'start', lines: titleLines, step: 14 }
-        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle' },
+        ? { x: radius + 10, y: my + 4 - (titleLines.length - 1) * 7, anchor: 'start', lines: titleLines, step: 14, count: isOpen ? count : undefined }
+        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle', count: isOpen ? count : undefined },
       countAt: { x: mx, y: my + 4 },
       chevronAt: { x: mx - 42, y: my },
     })
-    let span = vertical ? 100 : Math.max(170, milestone.title.length * 7 + 30)
+    let span = vertical ? 100 : Math.max(170, (milestone.title.length + (isOpen ? count.length + 2 : 0)) * 7 + 30)
     // Vertical: the next feature's band starts here.
     let cursor = x + radius + 20
     if (isOpen) {
@@ -192,6 +201,31 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   })
   const end = x + 40
   const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')))
+  /** The marker is a dot with a ring, and a pill below it (horizontal) or beside it (vertical). Its box, with a margin, when the dot sits `at` along the spine. */
+  const markerBox = (at: number): Box => (vertical ? [-15, at - 15, 56, at + 15] : [at - 22, SPINE_Y - 15, at + 22, SPINE_Y + 35])
+  /** What "now" must stay clear of: every node's circle, chevron, marks and label. */
+  const obstacles: Box[] = []
+  for (const node of nodes) {
+    const radius = node.kind === 'm' ? (node.open ? 15 : 26) : node.kind === 'f' ? FR : 8
+    const around = (at: At, reach: number): Box => [at.x - reach, at.y - reach, at.x + reach, at.y + reach]
+    obstacles.push(around(node.center, radius + 3))
+    if (node.kind !== 't') obstacles.push(around(node.chevronAt, 15))
+    if (node.kind !== 't') obstacles.push(around({ x: node.center.x + radius, y: node.center.y - radius }, 10))
+    const size = node.kind === 'm' ? 7.6 : node.kind === 'f' ? 6.8 : 5.6
+    const lines = drawnLines(node.label, node.title)
+    const reach = textWidth(lines, size)
+    const left = node.label.anchor === 'end' ? node.label.x - reach : node.label.anchor === 'middle' ? node.label.x - reach / 2 : node.label.x
+    obstacles.push([left - 3, node.label.y - 13, left + reach + 3, node.label.y + 5 + (lines.length - 1) * (node.label.step ?? 14)])
+  }
+  const meets = (a: Box, b: Box) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+  /** The first place from `from` on, no further than `limit`, where the marker touches nothing; `from` itself when there is none. */
+  const clearOfNodes = (from: number, floor: number, limit: number) => {
+    for (let at = Math.max(from, floor); at <= limit; at += 4) {
+      const box = markerBox(at)
+      if (!obstacles.some(obstacle => meets(box, obstacle))) return at
+    }
+    return from
+  }
   let nowAlong = end - 40
   if (firstOpen >= 0) {
     const milestone = model.milestones[firstOpen]
@@ -205,6 +239,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     if (vertical) {
       if (Math.abs(nowAlong - here) <= radius + 16) nowAlong = here + radius + 20
     } else if (Math.abs(nowAlong - here) <= radius + 8) nowAlong = here + radius + 12
+    nowAlong = clearOfNodes(nowAlong, here, Math.max(here, next - 60))
   }
   const bands: Band[] = []
   if (showSprints) {
@@ -255,7 +290,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   let right = 0
   for (const node of nodes) {
     const size = node.kind === 't' ? 5.6 : 6.8
-    const reach = node.label.lines ? textWidth(node.label.lines, size) : 0
+    const reach = node.label.lines || node.label.count ? textWidth(drawnLines(node.label, node.title), size) : 0
     const from = node.label.anchor === 'end' ? node.label.x - reach : node.label.x
     const to = node.label.anchor === 'end' ? node.label.x : node.label.x + reach
     left = Math.min(left, from, node.kind === 'm' ? node.chevronAt.x - 20 : node.center.x - FR)

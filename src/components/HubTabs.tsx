@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { host } from '../lib/host'
-import { HUB_SHORT, hubGroups, hubRows } from '../lib/hubNav'
+import { HUB_SHORT, chatNote, hubGroups, hubRows } from '../lib/hubNav'
 import { homeLink, hubHash, type HubScreen } from '../lib/route'
 
 /**
@@ -70,6 +70,7 @@ export default function HubTabs({ screen, needsYou, onHome, onSearch }: { screen
               ))}
             </div>
           ))}
+          {chatNote(host) && <p className="hub-more-note" data-hub-chat-note>{chatNote(host)}</p>}
           <button type="button" role="menuitem" className="hub-more-search" data-hub-more-search onClick={() => { setOpenOn(null); onSearch() }}>
             <span aria-hidden="true">⌕</span> Search
           </button>

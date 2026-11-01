@@ -176,7 +176,9 @@ export interface Ask {
   /** The sprite flow: what an avatar Ask points at (an agent's file; checked again where it is used). */
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */
-  rerun?: { request?: string; kind?: string; ask?: string }
+  rerun?: { request?: string; kind?: string; ask?: string; allow?: string[] }
+  /** Set by the Hub when this Ask's rerun pointer would start nothing (it was not written by the PC watcher's token): the reason. */
+  rerunBlocked?: string
   state: AskState
   snoozedUntil?: string
   answer?: AskAnswer
@@ -375,7 +377,7 @@ export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; i
 export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; model?: string; persona?: string }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }
 /** An agent a new chat may talk to instead of Hermes: the id is all the page ever sends. */
-export interface ChatPersona { id: string; name: string; role: string; preset: string }
+export interface ChatPersona { id: string; name: string; role: string; preset: string; /** the model id this agent's chat starts on */ model?: string }
 /** A model the chat may ask Hermes for: the id is all the page ever sends. */
 export interface ChatModel { id: string; label: string; note: string }
 /** What Hermes will be given for an item, as the preview route shows it. */

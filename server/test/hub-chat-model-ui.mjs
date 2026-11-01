@@ -27,9 +27,9 @@ try {
   step('New chat: the menu reads Auto and lists the choices and the job entry');
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-model]').waitFor();
-  assert.equal(await selected(page), 'Auto');
+  assert.equal(await selected(page), 'Auto · Codex first');
   const options = await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent));
-  assert.deepEqual(options, ['Auto', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
+  assert.deepEqual(options, ['Auto · Codex first', 'Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
   assert.match(await page.locator('[data-chat-model-note]').innerText(), /Codex/);
 
   step('Haiku: the run names the Anthropic pair, the footer says Haiku, the chat reopens on Haiku and the drawer tags it');
@@ -51,7 +51,7 @@ try {
   step('a new chat after that starts on Auto again, and an Auto turn names no provider');
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-model]').waitFor();
-  assert.equal(await selected(page), 'Auto');
+  assert.equal(await selected(page), 'Auto · Codex first');
   await page.locator('textarea[aria-label="Message"]').fill('Say hi again');
   await page.keyboard.press('Enter');
   await page.locator('.hub-bubble.assistant').first().waitFor();
@@ -70,7 +70,7 @@ try {
   assert.equal(await page.locator('[data-spawn-text]').inputValue(), 'Research tug-of-war card games');
   assert.equal(chatFiles(fx).length, filesBefore);
   assert.equal(fx.hermes.runs.length, 2);
-  assert.equal(await selected(page), 'Auto');
+  assert.equal(await selected(page), 'Auto · Codex first');
 
   step('Get help: the menu shows on Auto');
   await page.goto(`${fx.url}#/~hub/needs`);
@@ -78,7 +78,7 @@ try {
   await page.locator('[data-get-help]').first().click();
   await page.locator('[data-chat-model]').waitFor();
   assert.match(page.url(), /#\/~hub\/chat\/help\//);
-  assert.equal(await selected(page), 'Auto');
+  assert.equal(await selected(page), 'Auto · Codex first');
 
   step('390 px: the menu line does not wrap and the page does not scroll sideways');
   const phone = await open({ width: 390, height: 800 }, { hasTouch: true, isMobile: true });

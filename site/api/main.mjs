@@ -28,6 +28,7 @@
 //   HUB_ROUTINE_BETA        the routines API's beta header, if it changes (default experimental-cc-routine-2026-04-01)
 //   HUB_CLOUD_DAILY         cloud fires per day (default 10); HUB_TIME_ZONE: the IANA zone that defines the day (default UTC)
 //   HUB_CLOUD_NEVER         comma-separated projects that are never offered "Move to the cloud" (default none)
+//   HUB_NEVER_REPOS         comma-separated `owner/name` repos no request is ever signed for, for the PC or the cloud, whatever its project (the Bunnylink project's own repo always counts and the guard fails closed when it cannot be read; invalid entries are dropped; default none)
 //   HUB_ROUTINE_DRY_RUN     `1`: every repo counts as having a routine and nothing is sent (the development copy). It wins over real keys
 //   HERMES_URL, HERMES_API_KEY, HERMES_MODEL   the Hub's chat (Hermes's API server, no /v1; model default hermes-agent)
 //                           Chat stays off, and hidden in the UI, until its keys are here.

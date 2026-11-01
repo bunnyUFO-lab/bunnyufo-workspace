@@ -4,6 +4,7 @@ import { host } from '../lib/host'
 import type { AskVerb } from './askAnswer'
 import AvatarNote from './AvatarNote'
 import { isSheetCheck } from './avatarAsk'
+import RerunAllow from './RerunAllow'
 import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer'
 import HubImage from './HubImage'
 import Md from './Md'
@@ -89,6 +90,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
     <>
       {typeof ask.context === 'string' && ask.context && <Md text={ask.context} />}
       <AvatarNote ask={ask} />
+      <RerunAllow ask={ask} />
       {(picture || decisionRows) && (
         <div className="dr" data-design>
           {picture}

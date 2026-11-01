@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Item, ReviewDetail, ShotPair, Verdict } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { MarkdownView } from '../components/MarkdownDocument'
-import { entityHash, hubHash, reviewHash } from '../lib/route'
+import { entityHash, reviewHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import { goNext, useQueueOrder } from './useGoNext'
@@ -11,6 +11,7 @@ import { ReviewActions } from './ItemRow'
 import Md from './Md'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
+import { needsHash } from './needsFocus'
 
 const LEG_LABEL: Record<Verdict['leg'], string> = { smoke: 'Smoke tests', review: 'Review', qa: 'QA' }
 const DOT: Record<Verdict['result'], string> = { pass: 'g', fail: 'r', noted: 'y' }
@@ -124,7 +125,7 @@ export default function ReviewView({ route }: { route: string }) {
     return (
       <>
         <p className="hub-empty" role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>
-        {error && <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>}
+        {error && <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>}
       </>
     )
   }
@@ -158,7 +159,7 @@ export default function ReviewView({ route }: { route: string }) {
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
       {handoff && <NextNote note={handoff} />}
       <div className="hub-review-head">
-        <p><a className="hub-btn" href={hubHash('needs')} data-back-top>‹ Needs you</a></p>
+        <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>
         <div className="hub-top">
           <h2>{detail.title}</h2>
           <span>
@@ -251,7 +252,7 @@ export default function ReviewView({ route }: { route: string }) {
           ) : <p className="hub-muted">Pick a file to read it here.</p>}
         </section>}
       </div>
-      <p><a className="hub-btn" href={hubHash('needs')}>Back to Needs you</a></p>
+      <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>
     </div>
   )
 }

@@ -523,6 +523,77 @@ test('replay: an entry already there (412) is dropped, one over 24 hours old is 
   } finally { await close(); }
 });
 
+test('replay: only event files (and a run\'s own progress files) are replayed; a spooled ask.json, request.json or approval line is dropped and never sent', async () => {
+  const { fake, cli, spool, close } = await setup();
+  try {
+    const at = () => new Date().toISOString();
+    const line = (file, extra = {}) => JSON.stringify({ v: 1, at: at(), kind: 'put', section: 'inbox', path: file, body: '{"x":1}', contentType: 'application/json', createOnly: true, ...extra });
+    const runFile = 'requests/20261030-sprite-studio-job-a1b2/run-20261030T101500123Z-ab12.json';
+    const refused = [
+      'asks/20261030-sprite-studio-planted-a1b2/ask.json', 'requests/20261030-sprite-studio-job-a1b2/request.json', 'requests/20261030-sprite-studio-job-a1b2/approved.json',
+      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
+      'asks/20261030-sprite-studio-planted-a1b2/delivered.json', 'events/2026-10-30/../../asks/x/ask.json', 'events/not-a-date/x.json', 'events/2026-10-30/sub/x.json', 'events/2026-10-30/x.png',
+      'requests/x/run-bad.json', 'requests/x/y/run-20261030T101500123Z-ab12.json', 'workspace.json', '../events/2026-10-30/x.json',
+    ];
+    // The same line, and a line that asks to replace what is there, are only ever replayed as a create-only JSON file.
+    await writeFile(spool, [
+      ...refused.map(file => line(file)), line('events/2026-10-30/replace.json', { createOnly: false, contentType: 'text/html' }),
+      line('events/2026-10-30/ok.json'), line(runFile),
+    ].join('\n') + '\n');
+    fake.seed('sections/inbox/events/2026-10-30/replace.json', '{"first":true}', 'application/json');
+    // The watcher's context: no BUW_RUN_FOLDER, so the run progress file is dropped too.
+    const done = await cli('api', 'ask', 'list');
+    assert.equal(done.code, 0, done.stderr);
+    assert.equal(fake.text(`sections/inbox/${runFile}`), null, 'a run file is not replayed outside a run');
+    assert.match(done.stderr, /dropped a line for requests\/20261030-sprite-studio-job-a1b2\/run-/);
+    for (const file of refused.filter(name => name !== 'workspace.json')) assert.equal(fake.text(`sections/inbox/${file}`), null, `${file} is never sent`);
+    assert.equal(fake.text('sections/inbox/workspace.json'), '{"name":"Inbox","hidden":true,"entities":[]}', 'workspace.json is not replaced');
+    assert.match(done.stderr, /dropped a line for asks\/20261030-sprite-studio-planted-a1b2\/ask\.json/);
+    assert.equal(fake.text('sections/inbox/events/2026-10-30/ok.json'), '{"x":1}', 'an event replays');
+    assert.equal(fake.text('sections/inbox/events/2026-10-30/replace.json'), '{"first":true}', 'a line saying createOnly false still cannot replace');
+    assert.equal(fake.objects.get('sections/inbox/events/2026-10-30/ok.json').contentType, 'application/json');
+    assert.equal((await readFile(spool, 'utf8')).trim(), '', 'refused lines are dropped, not kept');
+    assert.deepEqual([...fake.objects.keys()].filter(key => /\/asks\//.test(key)), [], 'no Ask was written, so none carries the watcher\'s mark');
+  } finally { await close(); }
+});
+
+test('replay: a run replays the run files of its own request and drops another request\'s; the watcher replays neither', async () => {
+  const { fake, cli, spool, dir, close } = await setup();
+  try {
+    const own = '20261030-sprite-studio-job-a1b2';
+    const other = '20261030-sprite-studio-other-c3d4';
+    const line = (request, stamp) => JSON.stringify({ v: 1, at: new Date().toISOString(), kind: 'put', section: 'inbox', path: `requests/${request}/run-${stamp}.json`, body: '{"state":"working"}', contentType: 'application/json', createOnly: true });
+    const mine = `requests/${own}/run-20261030T101500123Z-ab12.json`;
+    const theirs = `requests/${other}/run-20261030T101500123Z-cd34.json`;
+    const future = `requests/${own}/run-29991231T235959999Z-ff00.json`;
+    const entries = [line(own, '20261030T101500123Z-ab12'), line(other, '20261030T101500123Z-cd34')].join('\n') + '\n';
+    // A run checkout: .claude/run-current.json names its request.
+    await mkdir(path.join(dir, '.claude'), { recursive: true });
+    await writeFile(path.join(dir, '.claude', 'run-current.json'), JSON.stringify({ requestId: own }));
+    // The watcher (no BUW_RUN_FOLDER), even standing in the run checkout: nothing.
+    await writeFile(spool, entries);
+    cli.cwd = dir;
+    assert.equal((await cli('api', 'ask', 'list')).code, 0);
+    assert.equal(fake.text(`sections/inbox/${mine}`), null);
+    assert.equal(fake.text(`sections/inbox/${theirs}`), null);
+    assert.equal((await readFile(spool, 'utf8')).trim(), '', 'both dropped');
+    // A run: its own request's file goes, another request's is dropped and logged, and a future stamp for another request is not sent.
+    await writeFile(spool, entries + JSON.stringify({ v: 1, at: new Date().toISOString(), kind: 'put', section: 'inbox', path: future.replace(own, other), body: '{}', contentType: 'application/json', createOnly: true }) + '\n');
+    cli.env = { BUW_RUN_FOLDER: '1' };
+    const run = await cli('api', 'ask', 'list');
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(fake.text(`sections/inbox/${mine}`), '{"state":"working"}', 'its own request\'s run file replays');
+    assert.equal(fake.text(`sections/inbox/${theirs}`), null, 'another request\'s is dropped');
+    assert.equal(fake.text(`sections/inbox/${future.replace(own, other)}`), null);
+    assert.match(run.stderr, new RegExp(`dropped a line for requests/${other}/run-`));
+    assert.equal((await readFile(spool, 'utf8')).trim(), '');
+    // A run whose checkout names no request replays no run file.
+    await rm(path.join(dir, '.claude', 'run-current.json'));
+    await writeFile(spool, line(own, '20261030T101600123Z-ab13') + '\n');
+    assert.equal((await cli('api', 'ask', 'list')).code, 0);
+    assert.equal(fake.text(`sections/inbox/requests/${own}/run-20261030T101600123Z-ab13.json`), null);
+  } finally { cli.cwd = null; cli.env = {}; await close(); }
+});
 test('replay: a refusal (403 for a read-only token) keeps the line; an unreadable time expires it', async () => {
   const { fake, cli, spool, close } = await setup();
   try {
@@ -757,6 +828,9 @@ test('ask create: the rerun field of the watcher Ask survives into ask.json; a m
     assert.equal(denied.code, 0, denied.stderr);
     assert.deepEqual(stored(denied).rerun, { request, kind: 'denied' });
     assert.equal(stored(denied).requirePasskey, true);
+    const allowing = await made({ request, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', 'mcp__bunnylink__status'] });
+    assert.equal(allowing.code, 0, allowing.stderr);
+    assert.deepEqual(stored(allowing).rerun, { request, kind: 'denied', allow: ['Bash(ping -n 1 example.com)', 'mcp__bunnylink__status'] });
     const proceed = await made({ request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
     assert.equal(proceed.code, 0, proceed.stderr);
     assert.deepEqual(stored(proceed).rerun, { request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4' });
@@ -771,6 +845,34 @@ test('ask create: the rerun field of the watcher Ask survives into ask.json; a m
       ['continue without its Ask', { request, kind: 'continue' }, /rerun\.ask is the id/],
       ['an Ask on a denial', { request, kind: 'denied', ask: 'x-1' }, /only for kind continue/],
       ['an unknown field', { request, kind: 'denied', target: 'cloud' }, /rerun has no field target/],
+      ['allow that is not a list', { request, kind: 'denied', allow: 'Bash(x)' }, /rerun.allow is 1 to 5 different rules/],
+      ['an empty allow', { request, kind: 'denied', allow: [] }, /rerun.allow is 1 to 5/],
+      ['a Read rule', { request, kind: 'denied', allow: ['Read(//c/**)'] }, /rerun.allow is 1 to 5/],
+      ['six rules', { request, kind: 'denied', allow: [1, 2, 3, 4, 5, 6].map(n => 'Bash(echo ' + n + ')') }, /rerun.allow is 1 to 5/],
+      ['a repeated rule', { request, kind: 'denied', allow: ['Bash(x)', 'Bash(x)'] }, /rerun.allow is 1 to 5/],
+      ['a right-to-left override', { request, kind: 'denied', allow: ['Bash(echo \u202e)'] }, /rerun\.allow is 1 to 5/],
+      ['a line separator', { request, kind: 'denied', allow: ['Bash(echo \u2028x)'] }, /rerun\.allow is 1 to 5/],
+      ['a zero-width space', { request, kind: 'denied', allow: ['Bash(echo \u200bx)'] }, /rerun\.allow is 1 to 5/],
+      ['a no-break space', { request, kind: 'denied', allow: ['Bash(echo\u00a0x)'] }, /rerun\.allow is 1 to 5/],
+      ['a tab', { request, kind: 'denied', allow: ['Bash(echo\tx)'] }, /rerun\.allow is 1 to 5/],
+      ['a Hangul filler', { request, kind: 'denied', allow: ['Bash(echo \u3164x)'] }, /rerun\.allow is 1 to 5/],
+      ['a halfwidth Hangul filler', { request, kind: 'denied', allow: ['Bash(echo \uffa0x)'] }, /rerun\.allow is 1 to 5/],
+      ['a Braille blank', { request, kind: 'denied', allow: ['Bash(echo \u2800x)'] }, /rerun\.allow is 1 to 5/],
+      ['a lone surrogate', { request, kind: 'denied', allow: ['Bash(echo \ud800x)'] }, /rerun\.allow is 1 to 5/],
+      ['a private use character', { request, kind: 'denied', allow: ['Bash(echo \ue000x)'] }, /rerun\.allow is 1 to 5/],
+      ['a combining overlay', { request, kind: 'denied', allow: ['Bash(echo \u0336x)'] }, /rerun\.allow is 1 to 5/],
+      ['an accented letter', { request, kind: 'denied', allow: ['Bash(echo \u00e9x)'] }, /rerun\.allow is 1 to 5/],
+      ['bare Bash', { request, kind: 'denied', allow: ['Bash'] }, /rerun\.allow is 1 to 5/],
+      ['an empty body', { request, kind: 'denied', allow: ['Bash()'] }, /rerun\.allow is 1 to 5/],
+      ['a body of spaces', { request, kind: 'denied', allow: ['Bash( )'] }, /rerun\.allow is 1 to 5/],
+      ['a leading space', { request, kind: 'denied', allow: ['Bash( echo)'] }, /rerun\.allow is 1 to 5/],
+      ['everything', { request, kind: 'denied', allow: ['Bash(*)'] }, /rerun\.allow is 1 to 5/],
+      ['a lone prefix star', { request, kind: 'denied', allow: ['Bash(:*)'] }, /rerun\.allow is 1 to 5/],
+      ['a star in the middle', { request, kind: 'denied', allow: ['Bash(echo * x)'] }, /rerun\.allow is 1 to 5/],
+      ['two prefix stars', { request, kind: 'denied', allow: ['Bash(echo:*:*)'] }, /rerun\.allow is 1 to 5/],
+      ['a second Bash(', { request, kind: 'denied', allow: ['Bash(echo Bash(x))'] }, /rerun\.allow is 1 to 5/],
+      ['an mcp wildcard', { request, kind: 'denied', allow: ['mcp__server__*'] }, /rerun\.allow is 1 to 5/],
+      ['allow on a continue Ask', { request, kind: 'continue', ask: '20261031-sprite-studio-alpha-or-beta-c3d4', allow: ['Bash(x)'] }, /only for kind denied/],
     ];
     for (const [name, rerun, message] of refused) {
       const result = await made(rerun);

@@ -160,7 +160,19 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     setHint(false)
     try { localStorage.setItem(HINT_KEY, '1') } catch { /* private mode: it shows again next time */ }
   }, [])
-  const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX })
+  /** The control bar floats over the bottom of the box and the hint over its top: Fit, Now and the first view keep the map between them. */
+  const controls = useRef<HTMLDivElement>(null)
+  const hintBar = useRef<HTMLDivElement>(null)
+  const insets = useCallback(() => {
+    const bar = controls.current?.getBoundingClientRect()
+    const frame = box.current?.getBoundingClientRect()
+    const hint = hintBar.current?.getBoundingClientRect()
+    return {
+      top: hint && frame && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0,
+      bottom: bar && frame && bar.height ? Math.max(0, frame.bottom - bar.top + 8) : 0,
+    }
+  }, [])
+  const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
   /** The spine runs down when the box is taller than wide, as a phone held upright is. */
   const [axis, setAxis] = useState<Axis>(() => (window.innerHeight > window.innerWidth ? 'y' : 'x'))
@@ -176,16 +188,28 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   const freeRect = () => {
     const element = box.current
     const size = pz.box()
+    const { top, bottom } = insets()
+    // With no panel open, the map's room is what the hint and the control bar leave.
+    const clear = { x: 0, y: top, w: size.w, h: Math.max(size.h - top - bottom, 60) }
     const whole = { x: 0, y: 0, w: size.w, h: size.h }
     const panel = document.getElementById('hub-map-panel')
-    if (!element || !panel) return whole
+    if (!element || !panel) return clear
     const rect = element.getBoundingClientRect()
     const cover = panel.getBoundingClientRect()
-    if (!cover.width || !cover.height) return whole
+    if (!cover.width || !cover.height) return clear
     const free = cover.width < window.innerWidth * 0.8
       ? { ...whole, w: clamp(cover.left - rect.left, 0, size.w) }
       : { ...whole, h: clamp(cover.top - rect.top, 0, size.h) }
-    return free.w < 60 || free.h < 60 ? whole : free
+    return free.w < 60 || free.h < 60 ? clear : free
+  }
+
+  /** "Now" in the middle of `free` at scale k, without cutting off the text at either side of the spine: the whole width is centred when it fits, else it is pulled in from the nearer edge. */
+  const viewOnNow = (k: number, free: { x: number; y: number; w: number; h: number }) => {
+    const view = centreOn(nowPoint(), free, k)
+    const width = Number(svg.current?.getAttribute('width')) * k
+    if (!width) return view
+    view.x = width <= free.w ? free.x + (free.w - width) / 2 : clamp(view.x, free.x + free.w - width, free.x)
+    return view
   }
 
   // Once per layout: measure what is drawn, size the SVG and the box to it, and place the view.
@@ -209,7 +233,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
     const size = pz.box()
     if (todo === 'init') {
       // Fitted and centred; a long map on a phone would be too small to read, so it starts at a readable size on "now".
-      if (fitScale({ w, h }, size, FIT_MAX) < 0.6) pz.go(centreOn(nowPoint(), { x: 0, y: 0, w: size.w, h: size.h }, 0.6), false)
+      if (fitScale({ w, h }, size, FIT_MAX) < 0.6) pz.go(viewOnNow(0.6, freeRect()), false)
       else pz.fit(false)
     } else if (todo === 'fit') {
       pz.fit(true)
@@ -347,7 +371,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
 
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
-  const goNow = () => pz.go(centreOn(nowPoint(), freeRect(), Math.max(pz.current().k, 1)), true)
+  const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
 
   /** The "now" pill: below the dot on a horizontal map, to its right on a vertical one. */
   const pill = vertical ? { x: layout.now.x + 16, y: layout.now.y - 8 } : { x: layout.now.x - 18, y: layout.now.y + 14 }
@@ -363,7 +387,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
   return (
     <>
       <div className="hub-map-wrap" ref={wrap} onKeyDown={event => { if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() } }}>
-        <div className="hub-map-controls">
+        <div className="hub-map-controls" ref={controls}>
           <button type="button" className="hub-btn" onClick={() => pz.fit(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
           <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
@@ -448,7 +472,7 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
         </div>
         </div>
         {(hint || (sprints && model.sprints.length === 0)) && (
-          <div className="hub-map-top">
+          <div className="hub-map-top" ref={hintBar}>
             {hint && (
               <p className="hub-muted hub-map-hint" data-hint>
                 <span><span className="hub-hint-mouse">Scroll to zoom in and open · drag to move · click for details</span><span className="hub-hint-touch">Pinch in to open · drag to move · tap for details</span></span>
@@ -474,10 +498,13 @@ function MapView({ model, project, nodeId }: { model: MapModel; project: string;
 /** A milestone's or feature's title at its place in the layout; the vertical layout wraps it into lines. */
 function MapTitle({ label, title, vertical, fontWeight, className, style }: { label: Label; title: string; vertical: boolean; fontWeight: string; className?: string; style?: CSSProperties }) {
   const anchor = vertical || label.anchor === 'middle' ? label.anchor : undefined
-  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}</text>
+  // An open milestone keeps its done/total after the title, as its circle is too small for it.
+  const count = label.count ? <tspan className="hub-map-count" dx="8">{label.count}</tspan> : null
+  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}{count}</text>
+  const last = label.lines.length - 1
   return (
     <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>
-      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}</tspan>)}
+      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}{k === last && count}</tspan>)}
     </text>
   )
 }
@@ -485,10 +512,10 @@ function MapTitle({ label, title, vertical, fontWeight, className, style }: { la
 /** Hover text for a map node: the full title, then the id unless it is a synthetic group (its id has a ~). */
 const nodeTip = (title: string, id: string) => (id.includes('~') ? title : `${title} · ${id}`)
 
-/** The button that opens or closes a milestone or feature, beside its node: a node's tap shows details instead. A transparent ring makes the touch target about 40 px. */
+/** The button that opens or closes a milestone or feature, beside its node: a node's tap shows details instead. The group is scaled up (CSS, from the map's zoom) so its target is at least 32 px on a desktop and 44 px on a touch screen whatever the zoom. */
 function Chevron({ id, title, open, x, y, onToggle }: { id: string; title: string; open: boolean; x: number; y: number; onToggle: () => void }) {
   return (
-    <g role="button" tabIndex={0} data-toggle={id} className="hub-map-chev" aria-expanded={open} aria-label={`${open ? 'Close' : 'Open'} ${title}`}
+    <g role="button" tabIndex={0} data-toggle={id} className="hub-map-chev" style={{ transformOrigin: `${x}px ${y}px` }} aria-expanded={open} aria-label={`${open ? 'Close' : 'Open'} ${title}`}
       onClick={onToggle} onKeyDown={(event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle() } }}>
       <circle cx={x} cy={y} r="20" className="hub-map-chev-hit" />
       <circle cx={x} cy={y} r="10" strokeWidth="1.5" className="hub-map-chev-ring" />

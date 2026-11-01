@@ -256,6 +256,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const hasCloud = repo => dryRun || (!!repo && !!routineFor(routineSet.routines, repo));
   const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
     cloudNever: String(env.HUB_CLOUD_NEVER ?? '').split(',').map(name => name.trim()).filter(Boolean),
+    // The Bunnylink project's own repo, for the repo guard: null when there is no such section, '' when it tracks no repo, throws on a storage error.
+    bunnylinkRepo: async () => { const got = await bucket.getJson(`${prefix}/bunnylink/workspace.json`); return got ? trackedRepo(got.value?.tracked?.repo) ?? '' : null; },
+    neverRepos: String(env.HUB_NEVER_REPOS ?? '').split(',').map(name => name.trim()).filter(Boolean),
     repoProjects: PROJECT_DEFAULTS.map(row => row.id),
     // Repos beyond the projects' own, for Spawn's picker: `HUB_KNOWN_REPOS=owner/name,owner/other`. Bad entries are dropped.
     extraRepos: String(env.HUB_KNOWN_REPOS ?? '').split(',').map(item => item.trim()).filter(Boolean),
@@ -265,7 +268,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
-  const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, log });
+  const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
@@ -469,8 +472,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const read = async name => (names.has(name) ? cached(`asks/${id}/${name}`) : undefined);
     const [answer, pickup, cancel] = await Promise.all([read('answer.json'), read('pickup.json'), read('cancel.json')]);
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
+    // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
+    const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
     return {
       ...ask, ...state,
+      ...(rerunBlocked ? { rerunBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
       files: [...names].sort(),

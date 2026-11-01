@@ -165,8 +165,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|undo-<rand>.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|undo)-[^/]+\.json)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|undo-<rand>.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant)\.json|requests\/[^/]+\/(fire|answer)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|undo)-[^/]+\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -217,11 +217,17 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
    * is an agent session (named `agent` or `agent-<name>`), nothing for anyone else (pc-runner, cloud-<project>,
    * hermes-main, the old shared tokens, the passphrase). Only this function sets it; a caller's own `x-amz-meta-*`
    * headers are never forwarded. The site API's policy approval signs only when the stored `origin` and this agree.
+   * An `asks/<id>/ask.json` put by a limited token is tagged too, with the token's kind: `pc-runner` for the PC watcher's token
+   * (the only one whose Ask the Hub lets carry a `rerun` pointer, see site/api/hub-rerun.mjs; PC runs hold this token too, so it excludes other tokens, not a run), `agent` for `agent`/`agent-<name>`, `other` for any
+   * other limited token. The passphrase's own ask.json carries nothing.
    */
   const writerMetadata = (caller, sectionId, file) => {
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
+      return { writer: caller.name === 'pc-runner' ? 'pc-runner' : /^agent(-[\w.-]+)?$/.test(caller.name ?? '') ? 'agent' : 'other' };
+    }
     return caller.rights.write !== null && /^requests\/[^/]+\/request\.json$/i.test(file) && /^agent(-[\w.-]+)?$/.test(caller.name ?? '')
       ? { writer: 'agent' } : undefined;
   };

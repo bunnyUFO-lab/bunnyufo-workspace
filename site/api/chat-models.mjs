@@ -1,8 +1,10 @@
 // The models a chat may ask Hermes for. The browser sends only an id from this table; the provider and the model strings
-// below are the only ones that ever reach Hermes. No Opus and no Pro model is listed (cost guard).
-// Checked against the assistant notes in the homelab repo on 2026-10-30.
+// below are the only ones that ever reach Hermes. No Opus and no Pro model is listed (cost guard); Codex runs on the ChatGPT plan, with no API cost.
+// Checked against the assistant notes in the homelab repo on 2026-10-30. `openai-codex` / `gpt-6-sol` are Hermes main's own primary there
+// (scripts/assistant/deploy.sh MAIN_PROVIDER / MAIN_MODEL), and `openai-codex` is the provider name `hermes auth reset` takes.
 export const CHAT_MODELS = [
   { id: 'auto', label: 'Auto', note: 'Codex on your ChatGPT plan, then Sonnet, then DeepSeek', provider: null, model: null },
+  { id: 'codex', label: 'Codex', note: 'ChatGPT plan, no API cost', provider: 'openai-codex', model: 'gpt-6-sol' },
   { id: 'sonnet', label: 'Sonnet', note: 'Anthropic API, paid', provider: 'anthropic', model: 'claude-sonnet-5-5' },
   { id: 'haiku', label: 'Haiku', note: 'Anthropic API, paid, cheaper', provider: 'anthropic', model: 'claude-haiku-5-5' },
   { id: 'deepseek-flash', label: 'DeepSeek Flash', note: 'DeepSeek API, cheapest', provider: 'deepseek', model: 'deepseek-flash' },
