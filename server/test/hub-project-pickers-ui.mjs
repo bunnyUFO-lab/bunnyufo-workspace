@@ -110,6 +110,37 @@ try {
     await page.locator('.work [role="listbox"]').waitFor({ state: 'detached' });
     await page.context().close();
   }
+  // Ten or fewer projects: the same pickers stay chips, one tap each. Activity's filter was a dropdown already and stays one.
+  const small = await startHubFixture({ work: true });
+  try {
+    small.fake.seed(`inbox/drawings/${DRAFT}/drawing.excalidraw`, JSON.stringify({ type: 'excalidraw', version: 2, elements: [], appState: {} }), 'application/json');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
+      for (const picker of PICKERS.filter(item => item.name !== 'Activity')) {
+        step(`${picker.name} at ${label} with ten projects or fewer: chips, not a list`);
+        const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+        await page.goto(`${small.url}${picker.hash}`);
+        const row = page.locator(`${picker.scope} [aria-label="Project"].hub-chips`);
+        await row.waitFor();
+        assert.equal(await page.locator(`${picker.scope} [role="combobox"]`).count(), 0, `${picker.name}: no dropdown.`);
+        const chips = row.locator('.hub-chip');
+        await chips.nth(1).waitFor();
+        assert.ok(await chips.count() >= 2 && await chips.count() <= 11, `${picker.name}: chips (${await chips.count()}).`);
+        assert.equal(await row.locator('.hub-chip.on').count(), 1);
+        const other = chips.locator('xpath=self::*[not(contains(@class,"on")) and not(normalize-space()="All")]').first();
+        const name = (await other.innerText()).trim();
+        if (touch) await other.tap(); else await other.click();
+        await row.locator('.hub-chip.on', { hasText: name }).waitFor();
+        await noSideways(page, `${picker.name} chips at ${label}`);
+        await page.context().close();
+      }
+      step(`Activity at ${label} with ten projects or fewer: still a list`);
+      const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+      await page.goto(`${small.url}#/~hub/activity`);
+      await page.locator('.hub-top').getByRole('combobox', { name: 'Project' }).waitFor();
+      await page.context().close();
+    }
+  } finally { await small.close().catch(() => {}); }
   console.log('hub-project-pickers-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
