@@ -55,6 +55,8 @@ try {
     };
     const open = async id => { await page.goto(`${fixture.url}#/~hub/ask/${id}`); await page.locator('[data-option="allowed"]').waitFor(); };
     const answerWith = async option => { await page.locator(`[data-option="${option}"]`).click(); await page.locator('[data-send]').click(); };
+    // Answering from the Ask's own page moves on to the next item at once, so the notice lives in the note there (the owner reads it on the next page).
+    const noticeText = async () => { await page.locator('[data-next-note]').waitFor(); await page.locator('[data-next-detail]').waitFor(); return (await page.locator('[data-next-detail]').innerText()).replace(/^\s*·\s*/, ''); };
 
     step(`${name}: the Ask shows both tags and the two options`);
     await open(asks[name].keep);
@@ -65,25 +67,23 @@ try {
 
     step(`${name}: "Keep it denied" shows no notice`);
     await answerWith('denied');
-    assert.equal(await page.locator('[data-avatar-notice]').count(), 0);
+    await page.locator('[data-next-note]').waitFor();
+    assert.equal(await page.locator('[data-next-detail]').count(), 0);
 
     step(`${name}: an Ask whose run is gone says why it did not run again`);
     await open(asks[name].lost);
     await answerWith('allowed');
-    await page.locator('[data-avatar-notice]').waitFor();
-    assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Not run again: /);
+    assert.match(await noticeText(), /^Not run again: /);
     await noSideways('not run again');
 
     if (name === '1280') {
       step('the first Ask approves a copy, the second says it was already approved');
       await open(asks[name].one);
       await answerWith('allowed');
-      await page.locator('[data-avatar-notice]').waitFor();
-      assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Approved again as .+\. It starts on the Gaming PC within a few minutes of the allow lines being in\.$/);
+      assert.match(await noticeText(), /^Approved again as .+\. It starts on the Gaming PC within a few minutes of the allow lines being in\.$/);
       await open(asks[name].two);
       await answerWith('allowed');
-      await page.locator('[data-avatar-notice]').waitFor();
-      assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Already approved again as /);
+      assert.match(await noticeText(), /^Already approved again as /);
     }
     if (name === '1280') {
       step('1280: the Allow Ask shows the exact rule, the Allows on PC tag and the notice after Allow');
@@ -93,8 +93,7 @@ try {
       assert.deepEqual(await page.locator('.hub-steps .tag').allInnerTexts(), ['Passkey only', 'Runs again', 'Allows on PC']);
       assert.equal(await page.locator('[data-option]').count(), 3);
       await answerWith('allow');
-      await page.locator('[data-avatar-notice]').waitFor();
-      assert.match(await page.locator('[data-avatar-notice]').innerText(), /^Allowed 1 rule for sprite-studio and approved again as .+. The Gaming PC adds the rule and starts it within a few minutes; it sends an alert when it does.$/);
+      assert.match(await noticeText(), /^Allowed 1 rule for sprite-studio and approved again as .+. The Gaming PC adds the rule and starts it within a few minutes; it sends an alert when it does.$/);
     }
     await context.close();
   }

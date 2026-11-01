@@ -19,7 +19,7 @@ const DrawingEditor = lazy(() => import('../components/DrawingEditor'))
 export default function AskBody({ ask, reload, onSettled, onTaken, view = false }: {
   ask: Ask
   reload: () => void
-  onSettled?: (verb: AskVerb) => void
+  onSettled?: (verb: AskVerb, detail?: string) => void
   onTaken?: (answer: AskAnswer | null) => void
   view?: boolean
 }) {
