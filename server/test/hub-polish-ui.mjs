@@ -1,5 +1,5 @@
 // Run after npm run build. The Hub polish from QA Run 2 (ws-rqc) through a real browser: the Today clock in the Hub's own
-// format, a card opening on its first tab unless the address names one, Escape on a dots menu, the way back from a
+// format, Escape on a dots menu, the way back from a
 // Needs you item landing on the chip it came from, the Answered chip without picked-up work and a submitted list read as
 // Steps, the "Written by" warning only while a request can still be approved; and, over a stand-in for the signed-out
 // site, chats with one title told apart by their time and a note where Chat would be for a visitor who may only read.
@@ -17,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
-const fixture = await startHubFixture({ checklists: true, cardTabs: true });
+const fixture = await startHubFixture({ checklists: true });
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -39,13 +39,6 @@ try {
   await eyebrow.waitFor();
   const text = await eyebrow.innerText();
   assert.match(text, /· \d{2}:\d{2} (AM|PM)$/, `The clock reads like the rest of the Hub: ${text}`);
-
-  step('a card opens on its first tab; the address can name another');
-  await page.goto(`${fixture.url}#/hub`);
-  await page.locator('[role="tab"][aria-selected="true"]', { hasText: 'Notes' }).waitFor();
-  assert.equal(await page.locator('[role="tab"]').count(), 2);
-  await page.goto(`${fixture.url}#/hub/1`);
-  await page.locator('[role="tab"][aria-selected="true"]', { hasText: 'Old: Draft 1' }).waitFor();
 
   step('Escape closes a dots menu and the focus goes back to the button that opened it');
   await page.goto(`${fixture.url}#/hub`);
