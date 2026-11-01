@@ -217,8 +217,32 @@ function followUpBlock(follow) {
   ].join('\n');
 }
 
+/** How much of the earlier report a continuation quotes, in characters; the next size is tried when the brief is over 16 KB. */
+const REPORT_QUOTES = [6000, 3000, 0];
+const CARD_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+
+/**
+ * A continuation: the owner replied to a Hermes job that ended. The earlier run's report is quoted line by line and labelled as
+ * the run's words; only the owner's replies (one line each, whitespace collapsed) follow "The owner replied:". `earlier` is
+ * `{ report, card }` as the approval read them from the earlier request.
+ */
+function continueBlock(continues, earlier, quote) {
+  const report = String(earlier?.report ?? '').trim();
+  const shown = report.length > quote ? report.slice(0, quote) : report;
+  const cut = report.length > shown.length;
+  return [
+    '',
+    `This continues request ${continues.from}. What the earlier run wrote (the run's words, not the owner's):`,
+    shown ? quoted(shown) : '> (nothing)',
+    ...(cut ? [`(cut; the full report is on request ${continues.from})`] : []),
+    `The earlier run's card: ${CARD_PATH.test(earlier?.card ?? '') ? earlier.card : 'none'}`,
+    ...continues.replies.map(reply => `The owner replied: ${oneLine(reply)}`),
+    '',
+  ].join('\n');
+}
+
 /** The preset's template filled with the request, in one pass so request text is never read as a placeholder. Throws over 16 KB. */
-export function renderBrief({ preset: given, request }) {
+export function renderBrief({ preset: given, request, earlier }) {
   const preset = asPreset(given);
   if (!preset) throw Object.assign(new Error('No such preset.'), { status: 400 });
   const follow = request.followUp;
@@ -239,7 +263,16 @@ export function renderBrief({ preset: given, request }) {
     fromAsk: request.fromAsk ?? '',
     followUp: follow ? followUpBlock(follow) : '',
   };
-  const brief = preset.template.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? '');
+  const fill = () => preset.template.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? '');
+  if (request.continues) {
+    for (const quote of REPORT_QUOTES) {
+      values.followUp = continueBlock(request.continues, earlier, quote);
+      const brief = fill();
+      if (Buffer.byteLength(brief) <= MAX_BRIEF_BYTES) return brief;
+    }
+    throw Object.assign(new Error('That brief is over 16 KB.'), { status: 400 });
+  }
+  const brief = fill();
   if (Buffer.byteLength(brief) > MAX_BRIEF_BYTES) throw Object.assign(new Error('That brief is over 16 KB.'), { status: 400 });
   return brief;
 }
@@ -249,12 +282,12 @@ export function renderBrief({ preset: given, request }) {
  * chat-models id the owner chose for the job (`request.model`, Hermes only); the dispatcher turns the id into a provider
  * and model from the fixed list. A provider string is never part of the block.
  */
-export function runBlock({ preset: given, request }) {
+export function runBlock({ preset: given, request, earlier }) {
   const preset = asPreset(given);
   if (!preset) throw Object.assign(new Error('No such preset.'), { status: 400 });
   return {
     preset: preset.id, model: preset.model ?? request.model ?? null, permissionMode: preset.permissionMode, opensWindows: preset.opensWindows,
-    allow: [...preset.allow], brief: renderBrief({ preset, request }),
+    allow: [...preset.allow], brief: renderBrief({ preset, request, earlier }),
   };
 }
 

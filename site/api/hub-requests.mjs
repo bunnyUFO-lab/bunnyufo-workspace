@@ -21,7 +21,7 @@ export const MOVE_AFTER_MS = 6 * 3600 * 1000;
 /** Where a request may run: the proposal in `request.json`, and the final target in `approved.json` (never `at-pc`). */
 export const TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 export const ORIGIN_KINDS = ['owner', 'agent', 'run'];
-export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80 };
+export const REQUEST_LIMITS = { subject: 200, text: 4000, title: 120, doneWhen: 400, reason: 400, summary: 500, question: 600, answer: 2000, followSummary: 500, name: 80, reply: 2000, replies: 5 };
 /** `owner/name` as GitHub spells them: an owner of letters, digits and single dashes, a name of letters, digits, dots, dashes and underscores. */
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$)[\w.-]{1,100}$/;
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
@@ -44,11 +44,11 @@ const text = (value, max, what, { required = false } = {}) => {
 /**
  * Check what a request is made from and return the clean fields. Throws a 400 in plain English. `raw` holds
  * `project`, `text` and either `when` (a legacy request) or `preset`; the optional fields are `title`, `repo`,
- * `needs`, `target`, `model`, `doneWhen`, `replaces`, `origin` and `followUp`. Unknown fields are dropped. The id, the
+ * `needs`, `target`, `model`, `doneWhen`, `replaces`, `origin`, `followUp` and `continues`. Unknown fields are dropped. The id, the
  * time and the author are the server's to add.
  *
  * `fromOwner` is true only for the site API acting for a signed-in person: it alone may set `origin.kind`
- * `owner` or a `followUp`. A request an agent makes (the card API, `cards request create`) never is.
+ * `owner`, a `followUp` or `continues`. A request an agent makes (the card API, `cards request create`) never is.
  */
 export function checkRequest(raw, { fromOwner = false } = {}) {
   const fail = message => Object.assign(new Error(message), { status: 400 });
@@ -145,6 +145,15 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
       summary: text(follow.summary, REQUEST_LIMITS.followSummary, 'The follow-up summary') ?? '',
     };
   }
+  // A continuation: the owner's reply to a Hermes job that ended. The earlier report is read at approval, never stored here.
+  if (data.continues !== undefined && data.continues !== null) {
+    if (!fromOwner) throw fail('Only the site can continue a request.');
+    if (out.followUp) throw fail('A request is a follow-up or a continuation, not both.');
+    const next = data.continues;
+    if (typeof next !== 'object' || Array.isArray(next) || !validId(next.from)) throw fail('A continuation names the request it continues.');
+    if (!Array.isArray(next.replies) || next.replies.length < 1 || next.replies.length > REQUEST_LIMITS.replies) throw fail(`A continuation carries 1 to ${REQUEST_LIMITS.replies} replies.`);
+    out.continues = { from: next.from, replies: next.replies.map(reply => text(reply, REQUEST_LIMITS.reply, 'A reply', { required: true })) };
+  }
   return out;
 }
 
@@ -181,6 +190,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   /** Bunnylink work (the homelab) is never signed for the PC or the cloud: the owner starts it at the PC. */
   const BUNNYLINK_AT_PC = 'Bunnylink work is started by you at the PC.';
   const NEVER_REPO = 'That repo is never run for you by the PC or the cloud; start work on it yourself at the PC.';
+  const NOT_HERMES = 'Replies go to Hermes jobs. A PC or cloud run can\'t take a message yet.';
   const MODEL_ON_HERMES = 'A model can be chosen for a job that runs on Hermes.';
 
   /**
@@ -321,8 +331,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   async function requestDetail(id, at) {
     const { names, request, parts, state } = await loadOne(id, at);
     const read = file => (names.has(file) ? cached(`requests/${id}/${file}`) : null);
-    const [stop, declined, hermesRun, retry, runs, fires] = await Promise.all([
-      read('stop.json'), read('declined.json'), read('hermes-run.json'), read('hermes-retry.json'),
+    const [stop, declined, hermesRun, retry, claim, runs, fires] = await Promise.all([
+      read('stop.json'), read('declined.json'), read('hermes-run.json'), read('hermes-retry.json'), read('continued.json'),
       newestFiles(id, names, 'run-', LIST_CAP, at), newestFiles(id, names, 'fire-'),
     ]);
     const { approved } = parts;
@@ -330,6 +340,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const cloud = cloudFull?.fires ? { ...cloudFull, fires: cloudFull.fires.map(publicFire) } : cloudFull;
     const shown = approved && approved.run ? { ...approved, run: Object.fromEntries(Object.entries(approved.run).filter(([name]) => name !== 'brief')) } : approved;
     const stale = staleSince(requestItem(request, state, parts.taken, { ...parts, lastRunAt: newestRun(names, at) }), at);
+    // The signed claim of a continuation (`continued.json`); one that does not verify for this request is not shown.
+    const continued = claim && publicKey && verify(claim, publicKey) && claim.request === id && validId(claim.to) ? { to: claim.to, at: claim.at } : null;
     return {
       request,
       state,
@@ -341,6 +353,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       ...(hermesRun ? { hermesRun } : {}),
       ...(cloud ? { cloud } : {}),
       ...(retry ? { retry } : {}),
+      ...(continued ? { continued } : {}),
       fires: fires.map(publicFire),
       ...(stop ? { stop } : {}),
       ...(declined ? { declined } : {}),
@@ -355,7 +368,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * the owner's (`origin.kind: owner`, set here and never taken from the body) and carries the proposed target.
    */
   async function createRequest(data, user, at) {
-    const { origin: _origin, followUp: _followUp, textOrigin: _textOrigin, doneWhenOrigin: _doneWhenOrigin, ...body } = data ?? {};
+    const { origin: _origin, followUp: _followUp, continues: _continues, textOrigin: _textOrigin, doneWhenOrigin: _doneWhenOrigin, ...body } = data ?? {};
     const clean = checkRequest(body, { fromOwner: true });
     const preset = clean.preset ? presetOf(clean.preset) : null;
     if (clean.preset && !preset) throw fail('There is no such preset.', 400);
@@ -507,6 +520,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (chosen === 'cloud' && !hasCloud(request.repo)) throw fail(`No cloud routine for ${request.repo}.`, 400);
   }
 
+  /** What the earlier run left: its report (or, with none, its summary) and its card. These are the run's words; the brief quotes them as such. */
+  async function readEarlier(from) {
+    const [report, result] = await Promise.all([bucket.getBytes(key(`requests/${from}/report.md`)).catch(() => null), cached(`requests/${from}/result.json`).catch(() => null)]);
+    return { report: report ? report.buffer.toString('utf8').replace(/^\ufeff/, '') : String(result?.summary ?? ''), card: typeof result?.card === 'string' ? result.card : null };
+  }
+
   /**
    * Sign and store `approved.json` for a proposed request, then hand it to its target. The one path that signs
    * an approval: the Approve route, Approve again, a follow-up and policy approval (`by: 'policy'`) all use it.
@@ -527,11 +546,17 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
     const chosen = target ?? request.target;
     await refuseUnapprovable(request, preset, chosen);
+    // A continuation quotes the earlier run's report (read here, not stored in request.json). Only a request the site wrote can carry one.
+    let earlier;
+    if (request.continues) {
+      if (!await siteWrote(id)) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
+      earlier = await readEarlier(request.continues.from);
+    }
     const body = {
       v: 1, request: id, project: request.project, repo: request.repo ?? null, target: chosen,
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
       expires: new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by,
-      run: runBlock({ preset, request }),
+      run: runBlock({ preset, request, earlier }),
     };
     const approved = sign(body, signingKey);
     await writeSigned(id, 'approved.json', approved, 'That request is already approved.');
@@ -618,8 +643,10 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = forced ?? raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { origin: oldOrigin, followUp: oldFollow, ...kept } = request;
+    const { origin: oldOrigin, followUp: oldFollow, continues: oldContinues, ...kept } = request;
     const followUp = newFollow ?? oldFollow;
+    // A copy of a continuation is still one, unless it now carries a follow-up (a request is one or the other).
+    const continues = followUp ? undefined : oldContinues;
     // "Done when" may be rewritten (an empty one removes it); the length check is the one a new request gets.
     if (raw?.doneWhen !== undefined && typeof raw.doneWhen !== 'string') throw fail('"Done when" is text.', 400);
     const { doneWhen: _oldDone, ...withoutDone } = kept;
@@ -630,7 +657,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     // Only a "done when" the owner changed (or removed) is the owner's; one sent back as it was keeps its author.
     const ownerChangedDone = raw?.doneWhen !== undefined && raw.doneWhen.trim() !== String(request.doneWhen ?? '').trim();
     const doneBy = ownerChangedDone ? null : doneWhenAuthor(request, oldOrigin);
-    const clean = checkRequest({ ...copy, ...(fromAsk ? { fromAsk } : {}), ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
+    const clean = checkRequest({ ...copy, ...(continues ? { continues } : {}), ...(fromAsk ? { fromAsk } : {}), ...(raw?.text !== undefined ? { text: raw.text, textOrigin: undefined } : {}), ...(raw?.title !== undefined ? { title: raw.title } : {}), ...(raw?.model !== undefined ? { model: raw.model } : {}), ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneBy ?? undefined, target, replaces: id }, { fromOwner: true });
     // Refuse what the approval would refuse before anything is written: a copy that cannot be approved is never made.
     if (preset.hidden && !clean.fromAsk) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
     await refuseUnapprovable(clean, preset, target);
@@ -693,7 +720,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset?.targets.includes('hermes')) throw fail('Only a Hermes run can be answered this way.', 400);
     const question = String(parts.result?.question ?? '').slice(0, REQUEST_LIMITS.question);
     if (!question) throw fail('That run left no question.', 409);
-    const { origin: oldOrigin, followUp: _older, ...copy } = request;
+    const { origin: oldOrigin, followUp: _older, continues: _continues, ...copy } = request;
     // The job text keeps its author: an answer does not make the owner the writer of text an agent or a run wrote.
     const wroteText = request.textOrigin ?? ((oldOrigin ?? {}).kind === 'owner' ? null : (oldOrigin ?? { kind: 'agent' }));
     const clean = checkRequest({
@@ -717,6 +744,76 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       // The answer is kept in the new proposal; a tap on it signs and starts the run.
       return { status: 201, body: { id: made.id, state: 'proposed', waiting: `Could not start yet: ${scrub(error.message, 80)}` } };
     }
+  }
+
+  /**
+   * A reply to a Hermes job that has ended: a new request that `continues` this one, approved for Hermes through the one signing
+   * path. The original stays as it is. The signed, create-only `continued.json` (`{ v, request, to, at, by, nonce }`) is the claim
+   * and is written before the copy, so of two replies at once only one gets past it (the other is a 409 naming the first).
+   * When the approval fails the copy stays a proposal with the reply kept in it.
+   * -> `{ id, state, waiting? }`
+   */
+  async function continueRequest(id, { replies, user, at }) {
+    needKey();
+    const { names, parts, state } = await loadOne(id, at);
+    if (parts.approved && parts.approved.target !== 'hermes') throw fail(NOT_HERMES, 400);
+    if (state === 'asking') throw clash('That run asked a question; answer it.');
+    if (!['done', 'failed', 'stopped'].includes(state) || parts.approved?.target !== 'hermes' || !names.has('hermes-run.json')) throw clash(`That request is ${state}; only a Hermes job that has ended can be continued.`);
+    if (names.has('continued.json')) throw clash(`Already continued as ${await claimedTo(id)}; reply there.`);
+    if (names.has('stop.json')) {
+      const stop = await cached(`requests/${id}/stop.json`).catch(() => null);
+      const by = /^(?:answered|replaced) by (\S+)$/.exec(String(stop?.reason ?? ''));
+      if (by) throw clash(`That request was already carried on as ${by[1]}; reply there.`);
+    }
+    const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+    if (!stored) throw fail('No such request.', 404);
+    const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const preset = presetOf(request.preset);
+    if (!preset?.targets.includes('hermes')) throw fail('Only a Hermes run can be continued.', 400);
+    const { origin: oldOrigin, followUp: _followUp, continues: _continues, replaces: _replaces, ...copy } = request;
+    // The job text keeps its author: a reply does not make the owner the writer of text an agent or a run wrote.
+    const wroteText = request.textOrigin ?? ((oldOrigin ?? {}).kind === 'owner' ? null : (oldOrigin ?? { kind: 'agent' }));
+    const clean = checkRequest({
+      ...copy, target: 'hermes', origin: { kind: 'owner', name: user }, ...(wroteText ? { textOrigin: wroteText } : {}), doneWhenOrigin: doneWhenAuthor(request, oldOrigin) ?? undefined,
+      continues: { from: id, replies },
+    }, { fromOwner: true });
+    // What the approval would refuse is refused before anything is written.
+    await refuseUnapprovable(clean, preset, 'hermes');
+    const newId = newRequestId(clean.project, clean.text, at);
+    const claim = sign({ v: 1, request: id, to: newId, at: at.toISOString(), by: user, nonce: newNonce() }, signingKey);
+    try {
+      await putCreateOnly(`requests/${id}/continued.json`, `${JSON.stringify(claim, null, 2)}\n`, 'application/json', clash('claimed'));
+    } catch (error) {
+      if (error.status === 409) throw clash(`Already continued as ${await claimedTo(id)}; reply there.`);
+      throw error;
+    }
+    const made = await writeNew(clean.project, clean.text, at, madeId => ({ id: madeId, ...clean, createdAt: at.toISOString(), by: user }), null, newId);
+    try {
+      const approval = await approveRequest(made.id, { target: 'hermes', by: user, at });
+      return { id: made.id, state: approval.state, ...(approval.waiting ? { waiting: approval.waiting } : {}) };
+    } catch (error) {
+      // The reply is kept in the new proposal; a tap on it signs and starts the run.
+      return { id: made.id, state: 'proposed', waiting: `Could not start yet: ${scrub(error.message, 80)}` };
+    }
+  }
+
+  /** The id a verified `continued.json` names (for the 409), or 'another request'. */
+  async function claimedTo(id) {
+    const claim = await bucket.getJson(key(`requests/${id}/continued.json`)).then(found => found?.value).catch(() => null);
+    return claim && publicKey && verify(claim, publicKey) && claim.request === id && validId(claim.to) ? claim.to : 'another request';
+  }
+
+  /**
+   * `POST /hub/requests/:id/reply { text }`: the owner's reply to a Hermes job. A run that asked a question is answered
+   * (`answer-run`); a job that has ended is continued; one still going is a 409 for now.
+   */
+  async function replyRoute(id, raw, user, at) {
+    const reply = text(raw?.text, REQUEST_LIMITS.reply, 'A reply', { required: true });
+    const { parts, state } = await loadOne(id, at);
+    if (parts.approved && parts.approved.target !== 'hermes') throw fail(NOT_HERMES, 400);
+    if (state === 'asking') return answerRunRoute(id, { text: reply }, user, at);
+    if (state === 'running') throw clash('That run is still going.');
+    return { status: 201, body: await continueRequest(id, { replies: [reply], user, at }) };
   }
 
   /**
@@ -747,7 +844,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   const fireRoute = (id, _raw, user, at) => live.retryFire(id, user, at);
 
   /** The POST routes under `/hub/requests/:id/`. Each needs a signed-in user, even where REQUIRE_REMOTE_USER is off. */
-  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'move-to-cloud': moveRoute, 'answer-run': answerRunRoute, fire: fireRoute };
+  const actions = { decline: declineRequest, done: doneRequest, approve: approveRoute, stop: stopRoute, again: againRoute, 'move-to-cloud': moveRoute, 'answer-run': answerRunRoute, reply: replyRoute, fire: fireRoute };
 
   async function post(id, action, raw, user, at) {
     if (!Object.hasOwn(actions, action)) throw fail('Not found', 404);
@@ -827,5 +924,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
   }
 
-  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, hooks: live };
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, hooks: live };
 }

@@ -192,6 +192,19 @@ test('checkRequest: only the site may claim origin owner or add a follow-up', ()
   assert.throws(() => checkRequest({ ...base, followUp: { from: rid('old'), question: 'q', answer: 'a', summary: 's'.repeat(501) } }, { fromOwner: true }), /1 to 500/);
 });
 
+test('checkRequest: continues is the site\'s, one of 1 to 5 replies, and never with a follow-up', () => {
+  const base = { project: 'probe', text: 'x', preset: 'research' };
+  const continues = { from: rid('old'), replies: ['More on the wooden one.'] };
+  assert.throws(() => checkRequest({ ...base, continues }), /Only the site can continue/);
+  assert.deepEqual(checkRequest({ ...base, continues }, { fromOwner: true }).continues, continues);
+  assert.throws(() => checkRequest({ ...base, continues: { ...continues, from: '../x' } }, { fromOwner: true }), /names the request/);
+  assert.throws(() => checkRequest({ ...base, continues: { ...continues, replies: [] } }, { fromOwner: true }), /1 to 5 replies/);
+  assert.throws(() => checkRequest({ ...base, continues: { ...continues, replies: Array(6).fill('a') } }, { fromOwner: true }), /1 to 5 replies/);
+  assert.throws(() => checkRequest({ ...base, continues: { ...continues, replies: ['a'.repeat(2001)] } }, { fromOwner: true }), /1 to 2000/);
+  assert.throws(() => checkRequest({ ...base, continues: { ...continues, replies: ['  '] } }, { fromOwner: true }), /1 to 2000/);
+  assert.throws(() => checkRequest({ ...base, continues, followUp: { from: rid('old'), question: 'q', answer: 'a' } }, { fromOwner: true }), /not both/);
+});
+
 // --- the routes ---
 
 test('the Hub knows the hermes-approvals folder', () => {
