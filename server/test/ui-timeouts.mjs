@@ -61,7 +61,22 @@ const repeatOnConnectError = (proto, name) => {
     }
   };
 };
+// A request the page makes by itself (its first data fetch, its event socket) fails the same way and the app
+// does not repeat it, so the page would sit empty until the test gave up. Reload it, up to three times.
+const watchPage = page => {
+  let reloads = 0;
+  let pending = false;
+  page.on('requestfailed', request => {
+    if (reloads >= 3 || pending || !CONNECT_ERROR.test(request.failure()?.errorText ?? '')) return;
+    let local = false;
+    try { local = new URL(request.url()).origin === new URL(page.url()).origin; } catch { /* about:blank */ }
+    if (!local) return;
+    pending = true;
+    setTimeout(() => { pending = false; reloads += 1; console.log('(steady) a request to the test server timed out; reloading the page'); page.reload().catch(() => {}); }, 500);
+  });
+};
 const patchPage = page => {
+  watchPage(page);
   const proto = Object.getPrototypeOf(page);
   if (patched.has(proto)) return;
   patched.add(proto);
