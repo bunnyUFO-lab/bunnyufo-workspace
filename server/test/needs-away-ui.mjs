@@ -39,6 +39,13 @@ try {
   seed.ask(asked);
   const plain = askJson({ id: `${day}-probe-no-link-b2b2`, now: minutesAgo(now, 1), question: 'A question with no link?', options: plainOptions().slice(0, 2), allowDrawing: false });
   seed.ask(plain);
+  // Links that only look like a session link: the Open the session button never shows for them.
+  const lookalikes = ['https://claude.ai.evil/code/session_abc1', 'http://claude.ai/code/session_abc1', 'https://claude.ai/code/session_abc1/extra', 'https://claude.ai/code/session_abc1?x=1', 'https://evil.test/https://claude.ai/code/session_abc1', 'https://claude.ai/code/'];
+  lookalikes.forEach((url, i) => {
+    const fake = askJson({ id: `${day}-probe-lookalike-${i}-c3c${i}`, now: minutesAgo(now, 1), question: `Lookalike link ${i}?`, options: plainOptions().slice(0, 2), allowDrawing: false });
+    fake.from = { ...fake.from, url };
+    seed.ask(fake);
+  });
   await new Promise(resolve => setTimeout(resolve, 100));
 
   const page = await open({ width: 1280, height: 900 });
@@ -106,6 +113,11 @@ try {
   assert.equal(await lane.locator('[data-ask-session] a').getAttribute('href'), LINK);
   assert.equal(await lane.locator('[data-ask-session] a').getAttribute('target'), '_blank');
   assert.equal(await page.locator('.ni', { hasText: 'A question with no link?' }).locator('[data-ask-session]').count(), 0);
+  for (let i = 0; i < lookalikes.length; i += 1) {
+    const row = page.locator('.ni', { hasText: `Lookalike link ${i}?` });
+    await row.waitFor();
+    assert.equal(await row.locator('[data-ask-session]').count(), 0, `${lookalikes[i]} is refused`);
+  }
   await page.goto(`${fixture.url}#/~hub/ask/${asked.id}`);
   await page.locator('[data-ask-session] a').waitFor();
 

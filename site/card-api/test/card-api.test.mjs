@@ -295,6 +295,29 @@ test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an
   }
 });
 
+test('a section that is not an inbox: presence.json at its root is a 400, and a read sends no x-card-writer', async () => {
+  const { fake, call } = await setup();
+  try {
+    const away = Buffer.from(JSON.stringify({ v: 1, away: true, until: '2099-01-01T00:00:00Z', by: 'x' }));
+    for (const section of ['magic-loops', 'bunnylink']) {
+      for (const method of ['PUT', 'GET', 'DELETE']) {
+        const response = await call(method, `/sections/${section}/files/presence.json`, { token: 'tok-all', body: method === 'PUT' ? away : undefined, base64: true });
+        assert.equal(response.status, 400, `${method} ${section}`);
+      }
+      assert.equal((await call('POST', `/sections/${section}/uploads`, { token: 'tok-all', body: { files: [{ path: 'presence.json' }] } })).status, 400, `${section} by upload URL`);
+    }
+    assert.equal(fake.objects.get('sections/magic-loops/presence.json'), undefined, 'nothing was written');
+    // Files below a card folder read fine, and with no writer header whatever their mark: only the inbox sections speak for the Hub.
+    fake.seed('sections/magic-loops/2026-10-01_loops-plan/presence.json', away, 'application/json');
+    const read = await call('GET', '/sections/magic-loops/files/2026-10-01_loops-plan/presence.json', { token: 'tok-all' });
+    assert.equal(read.status, 200);
+    assert.equal(read.headers['x-card-writer'], undefined);
+    assert.equal((await call('GET', '/sections/inbox/files/presence.json', { token: 'tok-all' })).status, 404, 'the inbox still has its own root file');
+  } finally {
+    await fake.close();
+  }
+});
+
 test('inbox: presence.json (the Away switch) is owned by the Hub; no limited token puts, uploads or removes it, and a read names the writer mark', async () => {
   const { fake, call } = await setup();
   try {

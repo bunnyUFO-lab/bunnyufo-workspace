@@ -384,8 +384,8 @@ export function copyAge(minutes: number): string {
 /** A link from an event or item is shown only when it is plain http(s): the text came from an agent. */
 export const safeUrl = (value: string | undefined): string | undefined => (value && /^https?:\/\//i.test(value) ? value : undefined)
 
-/** A blocked session's web link: https, and never the bare https://claude.ai/code, which opens a new chat. */
-export const sessionUrl = (value: string | undefined): string | undefined => (value && /^https:\/\//i.test(value) && !/^https:\/\/claude\.ai\/code\/?$/i.test(value.trim()) ? value : undefined)
+/** A session's web link: exactly https://claude.ai/code/session_<id>, anchored at both ends. A look-alike host, http, an extra path, a query or the bare https://claude.ai/code (a new chat) is no link: the text came from an agent. */
+export const sessionUrl = (value: string | undefined): string | undefined => (value && /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+$/.test(value) ? value : undefined)
 
 /** The desktop app's link to a session, and nothing else that starts with claude://. */
 export const appUrl = (value: string | undefined): string | undefined => (value && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(value) ? value : undefined)
