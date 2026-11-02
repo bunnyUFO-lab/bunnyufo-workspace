@@ -1039,6 +1039,7 @@ try {
     assert.ok(scene.elements.some(element => element.type === 'freedraw'));
     assert.ok(fixture.fake.objects.get(`${folder}/answer.png`).body.subarray(0, 8).equals(PNG_SIGNATURE), 'The picture is a PNG.');
     assert.ok(fixture.fake.objects.get(`${folder}/b.png`).body.equals(before), 'The option picture is untouched.');
+    await target.locator('.hub-answer img').first().waitFor();
     assert.ok(await target.locator('.hub-answer img').count() === 1, 'The answer shows the drawing.');
   };
 
