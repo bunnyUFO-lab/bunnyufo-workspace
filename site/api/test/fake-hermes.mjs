@@ -34,6 +34,7 @@
 //   dropStreamAfter n  each events connection closes after n events (reconnect with Last-Event-ID)
 //   approvalAgeMs  approval.request timestamp is that far in the past; approvalChoices overrides its choices
 //   keepaliveMs    default 10000; reportServed fills runtime.provider and model
+import './steady-fetch.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
