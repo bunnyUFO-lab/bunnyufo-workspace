@@ -49,12 +49,31 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...options });
   contexts.push(context);
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
+  await context.addInitScript(() => {
+    const real = window.fetch.bind(window);
+    window.__hubPending = 0;
+    window.fetch = (input, init) => {
+      const hub = String(input?.url ?? input).includes('/api/hub/');
+      if (hub) window.__hubPending += 1;
+      const result = real(input, init);
+      if (hub) result.then(() => { window.__hubPending -= 1; }, () => { window.__hubPending -= 1; });
+      return result;
+    };
+  });
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   const errors = [];
   page.on('pageerror', error => errors.push(error));
   page.errors = errors;
+  // `window.__hubPending` counts the page's own Hub fetches that have not settled, so a test can wait until the page has what it asked for.
+  // (Playwright's request events are not used: a request answered through the shared route in ui-timeouts.mjs can leave one unfinished.)
+  page.hubQuiet = async () => {
+    const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await frames();
+    await page.waitForFunction(() => !window.__hubPending);
+    await frames();
+  };
   return page;
 };
 const sheet = async (page, node) => {
@@ -62,8 +81,8 @@ const sheet = async (page, node) => {
   const panel = page.locator('.hub-map-panel');
   await panel.waitFor();
   await page.waitForFunction(id => document.querySelector('.hub-map-panel-heading')?.textContent?.includes(id), node);
-  // The Needs you list loads beside the map; give it a moment so a button's absence means something.
-  await page.waitForTimeout(500);
+  // The Needs you list and the project names load beside the map: wait until they have, so a button's absence means something.
+  await page.hubQuiet();
   return panel;
 };
 const noSideways = async (page, what) => {

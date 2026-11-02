@@ -35,7 +35,8 @@ const open = async (viewport, options = {}) => {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
-  page.on('response', response => { if (response.url().includes('/api/hub/') || response.status() >= 500) requestsSeen.push(`${response.status()} ${response.url().replace(/^https?:[/][/][^/]+/, '').slice(0, 90)}`); });
+  page.on('requestfailed', request => requestsSeen.push(`FAILED ${request.url().replace(/^https?:[/][/][^/]+/, '').slice(0, 90)} ${request.failure()?.errorText ?? ''}`));
+  page.on('response', async response => { if (response.url().includes('/api/hub/') || response.status() >= 500) requestsSeen.push(`${response.status()} ${response.url().replace(/^https?:[/][/][^/]+/, '').slice(0, 90)}${response.status() >= 500 ? ` ${(await response.text().catch(() => '')).slice(0, 200)}` : ''}`); });
   return page;
 };
 const noSideways = async (page, what) => {
@@ -289,11 +290,14 @@ try {
   step('one /api/hub/today request per poll, not one from the menu and one from Today');
   const poll = await open({ width: 1280, height: 800 });
   let todayCalls = 0;
+  let loads = 0;
   poll.on('request', request => { if (new URL(request.url()).pathname === '/api/hub/today') todayCalls += 1; });
+  // On a loaded PC the test helper reloads a page whose connect timed out (ui-timeouts.mjs), and each load asks once.
+  poll.on('load', () => { loads += 1; });
   await poll.goto(`${fixture.url}#/~hub/today`);
   await poll.locator('.hub-kpis').waitFor();
   await poll.waitForTimeout(2000);
-  assert.equal(todayCalls, 1, `Expected one /today request, saw ${todayCalls}.`);
+  assert.equal(todayCalls, loads, `Expected one /today request per page load, saw ${todayCalls} for ${loads}.`);
 
   step('read-only: a host that says write: false shows the banner and no controls');
   const dist = path.join(root, 'dist');
@@ -325,6 +329,9 @@ try {
     await guest.locator('.hub-banner', { hasText: 'Read-only here' }).waitFor();
     assert.match(await guest.locator('.hub-banner a').getAttribute('href'), /^https:\/\/site\.example\.test/);
     assert.match(await guest.locator('.hub-banner').innerText(), /need you to be signed in/);
+    // The banner shows before the rows are drawn: wait for the row, then count.
+    await guest.locator('.ni', { hasText: 'A read-only question' }).waitFor();
+    await guest.locator('.ni', { hasText: 'A read-only review' }).waitFor();
     assert.equal(await guest.locator('.ni', { hasText: 'A read-only question' }).count(), 1);
     assert.match(await guest.locator('.hub-banner').innerText(), /marking reviews done/);
     const readOnlyReview = guest.locator('.ni', { hasText: 'A read-only review' });
@@ -398,7 +405,8 @@ try {
   assert.equal(await keyButton.getAttribute('aria-expanded'), 'false');
   await keyButton.click();
   assert.equal(await keyButton.getAttribute('aria-expanded'), 'true');
-  assert.match(await page.locator('.hub-legend').innerText(), /Beads copy from 20 min ago/);
+  // Seeded 20 minutes before the fixture started; a slow run is a minute or two further on.
+  assert.match(await page.locator('.hub-legend').innerText(), /Beads copy from 2\d min ago/);
   assert.match(await page.locator('.hub-legend').innerText(), /needs you/);
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.hub-legend').count(), 0, 'Escape closes the Key.');
@@ -1277,7 +1285,8 @@ try {
       assert.equal(await ran.locator('[data-chat-approval]').count(), 0, 'The card goes once it is answered.');
       assert.deepEqual(running.hermes.approvals.map(item => item.choice), ['once']);
       assert.equal(running.hermes.requests.length, 0, 'The turn ran on /v1/runs.');
-      await ran.locator('.hub-tool[data-tool="write_file"]').waitFor();
+      // The fake Hermes reports two write_file lines (the one it asks approval for, and the script's own); one of them is enough.
+      await ran.locator('.hub-tool[data-tool="write_file"]').first().waitFor();
       await runCtx.close();
     } finally {
       await running.close();

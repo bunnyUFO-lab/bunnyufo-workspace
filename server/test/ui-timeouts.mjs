@@ -30,8 +30,19 @@ process.on('exit', () => { try { rmSync(home, { recursive: true, force: true });
  * loaded PC the connection to the test server now and then fails with ETIMEDOUT before anything is sent
  * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one only in the first second; a reset never).
  */
-export function steadyFetch(route, options) {
-  return repeatConnect(() => route.fetch(options), error => /ETIMEDOUT/.test(String(error?.message)) ? 'ETIMEDOUT' : /ECONNREFUSED/.test(String(error?.message)) ? 'ECONNREFUSED' : '');
+export async function steadyFetch(route, options) {
+  const codeOf = error => /ETIMEDOUT/.test(String(error?.message)) ? 'ETIMEDOUT' : /ECONNREFUSED/.test(String(error?.message)) ? 'ECONNREFUSED' : '';
+  // A refused connect to a test server that is up happens too on a loaded PC (a full listen backlog on Windows). It is repeated for
+  // 5 s at most, so a fixture that really is gone still fails by name, a few seconds later.
+  const end = Date.now() + 5000;
+  for (;;) {
+    try {
+      return await repeatConnect(() => route.fetch(options), codeOf);
+    } catch (error) {
+      if (codeOf(error) !== 'ECONNREFUSED' || Date.now() > end) throw error;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }
 }
 
 // Navigation on a busy PC: the browser's connect to the test server can time out
@@ -39,8 +50,12 @@ export function steadyFetch(route, options) {
 // `chromium.launch`, so wrap it once: pages it makes repeat a navigation that failed that way.
 import { chromium } from '@playwright/test';
 
-// Only a timed-out connect is repeated. A reset or a refused connect means the server is gone or broke: the test fails at once.
+// Only a timed-out connect is repeated. A reset means the server broke: the test fails at once.
 const CONNECT_ERROR = /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT/;
+// A navigation is also repeated when Chrome's connect was refused (on Windows a busy listener can refuse a connect while its backlog
+// is full) or when it ended on Chrome's error page ("interrupted by another navigation to chrome-error://chromewebdata/"). That is
+// bounded by the six attempts below (about 3 s), so a fixture that really is gone still fails by name a few seconds later.
+const NAVIGATION_ERROR = /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ERR_CONNECTION_REFUSED|chrome-error:\/\/chromewebdata/;
 const patched = new WeakSet();
 const repeatOnConnectError = (proto, name) => {
   const original = proto[name];
@@ -49,7 +64,7 @@ const repeatOnConnectError = (proto, name) => {
       try {
         return await original.apply(this, args);
       } catch (error) {
-        if (attempt >= 6 || !CONNECT_ERROR.test(String(error?.message))) throw error;
+        if (attempt >= 6 || !NAVIGATION_ERROR.test(String(error?.message))) throw error;
         await new Promise(resolve => setTimeout(resolve, 200 * attempt));
       }
     }
@@ -61,6 +76,7 @@ const watchPage = page => {
   let reloads = 0;
   let pending = false;
   page.on('requestfailed', request => {
+    if (/ERR_CONNECTION|ERR_TIMED_OUT|ERR_EMPTY|ERR_FAILED/.test(request.failure()?.errorText ?? '')) console.log(`(steady) request failed: ${request.url().slice(0, 120)} ${request.failure()?.errorText}`);
     if (reloads >= 3 || pending || !CONNECT_ERROR.test(request.failure()?.errorText ?? '')) return;
     let local = false;
     try { local = new URL(request.url()).origin === new URL(page.url()).origin; } catch { /* about:blank */ }
