@@ -68,7 +68,8 @@ try {
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.type('magic');
-  await dialog.locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
+  // The roadmaps come from a second fetch; until they land only the "Spawn: magic" command matches, and Enter would open that.
+  await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
   await page.keyboard.press('Enter');
   await page.locator('.hub[data-screen="map"]').waitFor();
   assert.match(await hashOf(page), /^#\/~hub\/map\/magic-loops/);

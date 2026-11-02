@@ -320,10 +320,19 @@ try {
   await slow.waitFor();
   await motion.route('**/api/hub/inbox*', async route => { await new Promise(resolve => setTimeout(resolve, 700)); await route.continue().catch(() => {}); });
   await slow.locator('textarea').fill('ok');
+  // The card keeps its `leaving` class for about a quarter of a second; a poll can miss that on a busy PC, so the page records it.
+  await motion.evaluate(() => {
+    window.__leaving = null;
+    new MutationObserver(() => {
+      const node = [...document.querySelectorAll('.ni.leaving')].find(item => item.textContent.includes('Leave slowly?'));
+      if (node && !window.__leaving) window.__leaving = { transition: getComputedStyle(node).transitionDuration };
+    }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  });
   await slow.getByRole('button', { name: 'Send answer' }).click();
-  await motion.locator('.ni.leaving', { hasText: 'Leave slowly?' }).waitFor({ timeout: ms(2000) });
-  assert.notEqual(await slow.evaluate(node => getComputedStyle(node).transitionDuration), '0s', 'The collapse is animated when motion is allowed.');
   await slow.waitFor({ state: 'detached' });
+  const leaving = await motion.evaluate(() => window.__leaving);
+  assert.ok(leaving, 'The card was still on screen, marked leaving, while it collapsed.');
+  assert.notEqual(leaving.transition, '0s', 'The collapse is animated when motion is allowed.');
   await motion.unroute('**/api/hub/inbox*');
 
   step('phone: no sideways scroll, targets of at least 44 px, the chips scroll sideways inside their row');

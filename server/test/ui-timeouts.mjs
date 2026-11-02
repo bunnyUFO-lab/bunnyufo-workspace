@@ -77,12 +77,26 @@ const patchPage = page => {
   repeatOnConnectError(proto, 'goto');
   repeatOnConnectError(proto, 'reload');
 };
+// The page's own calls to the test server (/api/...) go through Playwright, which makes them again when the connect timed
+// out: reloading the page would throw away what the test had open (a sheet, a typed answer). A stream (event-stream)
+// is left to the browser, since its body cannot be handed over whole. A test's own `page.route` handlers run before this one.
+const watchContext = context => {
+  context.route(url => { try { return /^(127\.0\.0\.1|localhost)$/.test(url.hostname) && url.pathname.startsWith('/api/'); } catch { return false; } }, async route => {
+    const request = route.request();
+    // The chat reply streams too, though its request does not say so.
+    if (String(request.headers().accept ?? '').includes('text/event-stream') || (request.method() === 'POST' && new URL(request.url()).pathname === '/api/hub/chat')) { await route.fallback(); return; }
+    let response;
+    try { response = await steadyFetch(route); } catch { await route.fallback().catch(() => {}); return; }
+    await route.fulfill({ response }).catch(() => {});
+  }).catch(() => {});
+};
 const launch = chromium.launch.bind(chromium);
 chromium.launch = async (...args) => {
   const browser = await launch(...args);
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (...options) => {
     const context = await newContext(...options);
+    watchContext(context);
     const newPage = context.newPage.bind(context);
     context.newPage = async (...a) => { const page = await newPage(...a); patchPage(page); return page; };
     return context;
