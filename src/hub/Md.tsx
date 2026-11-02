@@ -8,16 +8,20 @@ type CopyState = 'idle' | 'copied' | 'oneLine' | 'manual'
 
 /**
  * A fenced code block with a Copy button. A plain multi-line PowerShell block is copied as one line (see copyText), and the
- * button says so. If the clipboard says no, the text is selected and the button says to press and hold.
+ * button says so. If the clipboard says no, the text is selected and the button says to press and hold. The block scrolls
+ * sideways instead of wrapping, and the button sits at its top right, beside the text. With `exact`, the text is copied
+ * as it is (a checklist item's command), not minus Markdown's last newline.
  */
-export function CodeBlock({ children }: { children?: ReactNode }) {
+export function CodeBlock({ children, exact = false }: { children?: ReactNode; exact?: boolean }) {
   const block = useRef<HTMLPreElement>(null)
   const [state, setState] = useState<CopyState>('idle')
   const timer = useRef(0)
   useEffect(() => () => window.clearTimeout(timer.current), [])
   async function copy() {
     const lang = /language-(\S+)/.exec(block.current?.querySelector('code')?.className ?? '')?.[1]
-    const { text, oneLine } = copyText((block.current?.textContent ?? '').replace(/\n$/, ''), lang)
+    // A fenced block ends in the newline Markdown adds; a command is copied exactly as written.
+    const shown = block.current?.textContent ?? ''
+    const { text, oneLine } = copyText(exact ? shown : shown.replace(/\n$/, ''), lang)
     let next: CopyState = oneLine ? 'oneLine' : 'copied'
     try {
       if (!navigator.clipboard?.writeText) throw new Error('no clipboard')

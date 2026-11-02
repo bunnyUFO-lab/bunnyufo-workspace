@@ -69,7 +69,7 @@
 //   cards ask wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>] [--json]
 //        exit 0 once answered (prints what get prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or when the
 //        Ask expired; a snoozed Ask keeps waiting
-//   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]
+//   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--bead <b>] [--card <url>]
 //        [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
 //        --kind (or "kind" in checklist.json) says what the steps are for, so the Hub badges and filters them: verify (a live check, a
 //        test), setup (install, paste a key, sign in), investigate (find out, look into), develop (build, fix). Anything else is refused;
@@ -77,11 +77,15 @@
 //        put a checklist for the owner to tick off in the Hub (a list of steps, each with an optional guide) and post a
 //        checklist-created event; prints its id, then pings #needs-you like an Ask. The Hub writes ticks and the submission
 //        (owner-only files); nothing is ever overwritten. --file takes the checklist.json shape without id, project,
-//        createdAt, from and the item ids (the CLI adds them): title, context?, card?, items[{ text, group?, guide?, link? }].
+//        createdAt, from and the item ids (the CLI adds them): title, context?, card?, items[{ text, group?, guide?, link?, command?, shell? }].
+//        An item's `command` is exactly the text the owner runs, nothing else (1 to 2000 characters, blank lines around it trimmed): the Hub
+//        shows it under the item as a code block with a Copy button. One command per item; the item text says where to run it. `shell`
+//        (bash, powershell or cmd) is the block's language. --command and --shell attach to the --item before them; --command with no --item
+//        before it is an error. A command in a guide or an Ask goes in a fenced code block, never in prose.
 //        --playtest makes it a Playtest: the items are what to try, --build (https only) is the build to open, --platform
 //        defaults to web, --look-for says what to watch for. The #needs-you ping reads "Playtest: <title>".
 //   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
-//   cards checklist get <id> [--json] [--into <dir>]                        progress, the items, submit.json (for a playtest also its
+//   cards checklist get <id> [--json] [--into <dir>]                        progress, the items (an item's command on the line under it), submit.json (for a playtest also its
 //        build, rating, verdict and issues in plain lines); --into downloads the
 //        owner's pictures (evidence-<step>-….png|jpg per step, shot-….png|jpg per playtest issue) and prints their paths
 //   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
@@ -136,7 +140,7 @@ const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
-  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
+  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** The cards bucket this machine knows of: BUW_S3_BUCKET, else the first one the registry names. */
@@ -1139,7 +1143,8 @@ const pickupBody = flags => ({ at: isoNow(), ...(sessionEnv() ? { session: sessi
 // pickup.json and cancel.json (this command). The state is read from the file names alone.
 
 const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.json$/;
-const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024, build: 2000, lookFor: 2000 };
+const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, command: 2000, context: 4000, link: 2000, file: 256 * 1024, build: 2000, lookFor: 2000 };
+const ITEM_SHELLS = ['bash', 'powershell', 'cmd'];
 const PLAYTEST_PLATFORMS = ['web', 'windows', 'mac', 'linux', 'android', 'ios'];
 
 /** cancel.json → cancelled, pickup.json → picked-up, submit.json → submitted, else open. */
@@ -1159,6 +1164,9 @@ function checklistMarks(names) {
   }
   return new Map([...best].map(([item, { done, at }]) => [item, { done, at }]));
 }
+
+/** A command without the blank lines around it; its own lines, indentation and trailing spaces stay as written. */
+const trimBlankLines = value => value.replace(/^(?:[ \t]*\r?\n)+/, '').replace(/(?:\r?\n[ \t]*)+$/, '');
 
 const isHttps = value => { try { return new URL(value).protocol === 'https:' && /^https:\/\//i.test(value); } catch { return false; } };
 
@@ -1191,6 +1199,9 @@ function validateChecklist(raw) {
       if (!optional(item.group, L.group)) problems.push(`${at}: group is at most ${L.group} characters`);
       if (!optional(item.guide, L.guide)) problems.push(`${at}: guide is at most ${L.guide} characters`);
       if (item.link !== undefined && !link(item.link)) problems.push(`${at}: link is an http:// or https:// link of at most 2000 characters`);
+      if (item.command !== undefined && (typeof item.command !== 'string' || !trimBlankLines(item.command).trim() || trimBlankLines(item.command).length > L.command)) problems.push(`${at}: command is 1 to ${L.command} characters`);
+      if (item.shell !== undefined && !ITEM_SHELLS.includes(item.shell)) problems.push(`${at}: shell is one of: ${ITEM_SHELLS.join(', ')}`);
+      if (item.shell !== undefined && item.command === undefined) problems.push(`${at}: shell goes with a command`);
     });
   }
   return problems;
@@ -1212,6 +1223,7 @@ function checklistFromInput(raw, flags, id) {
     items: raw.items.map((item, index) => ({
       id: String(index + 1).padStart(2, '0'), text: item.text.trim(),
       ...(item.group ? { group: item.group } : {}), ...(item.guide ? { guide: item.guide } : {}), ...(item.link ? { link: item.link } : {}),
+      ...(item.command ? { command: trimBlankLines(item.command), ...(item.shell ? { shell: item.shell } : {}) } : {}),
     })),
   };
 }
@@ -1240,7 +1252,7 @@ async function checklistRead(id) {
   const checklist = await readJson(inboxPath('checklists', id, 'checklist.json'));
   if (!checklist || !Array.isArray(checklist.items)) throw new Error(`checklists/${id}/checklist.json is not a checklist.`);
   const marks = checklistMarks(names);
-  const items = checklist.items.map(item => ({ id: item.id, text: item.text, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) }));
+  const items = checklist.items.map(item => ({ id: item.id, text: item.text, ...(typeof item.command === 'string' ? { command: item.command } : {}), done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) }));
   const read = async name => (names.has(name) ? readJson(inboxPath('checklists', id, name)) : undefined);
   const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
   // The newest picture per step, and the playtest screenshots, from the file names alone.
@@ -1270,6 +1282,7 @@ function printChecklist(view, asJson) {
   console.log(checklist.title);
   for (const item of items) {
     console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
+    if (item.command) console.log(item.command.split('\n').map(line => `     $ ${line}`).join('\n'));
     if (item.evidence) console.log(`     evidence: ${item.evidence}`);
   }
   for (const shot of view.shots ?? []) console.log(`screenshot: ${shot}`);
@@ -1290,7 +1303,7 @@ async function checklistCreate(flags) {
   if (!flags.project || (!flags.file && !flags.title)) throw new Error(usage);
   if (flags.file && (flags.title || flags.item)) throw new Error(`Give --file, or --title with --item, not both. ${usage}`);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is lower-case letters, digits and dashes');
-  const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { title: flags.title, items: (flags.item ?? []).map(text => ({ text })) };
+  const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { title: flags.title, items: (flags.item ?? []).map((text, index) => ({ text, ...(flags.itemCommand?.[index] !== undefined ? { command: flags.itemCommand[index] } : {}), ...(flags.itemShell?.[index] !== undefined ? { shell: flags.itemShell[index] } : {}) })) };
   if (flags.kind !== undefined) {
     if (flags.playtest) throw new Error(`--kind names what the steps are for; a playtest is --playtest, not both. ${usage}`);
     raw.kind = flags.kind;
@@ -1853,6 +1866,14 @@ function parseFlags(args) {
     at += 1;
     if (name === 'image') (flags.image ??= []).push(value);
     else if (name === 'item') (flags.item ??= []).push(value);
+    else if (name === 'command' || name === 'shell') {
+      // These belong to the --item before them: kept by that item's position.
+      if (!flags.item) throw new Error(`--${name} goes after the --item it belongs to.`);
+      const key = name === 'command' ? 'itemCommand' : 'itemShell';
+      const at = flags.item.length - 1;
+      if ((flags[key] ??= {})[at] !== undefined) throw new Error(`One --${name} per --item; a second ${name === 'command' ? 'command is a second item' : 'shell would replace the first'}.`);
+      flags[key][at] = value;
+    }
     else if (name === 'option') (flags.option ??= []).push(value);
     else if (name === 'decision') (flags.decision ??= []).push(value);
     else flags[name] = value;

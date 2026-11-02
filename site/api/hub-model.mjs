@@ -196,7 +196,7 @@ export const CHECKLIST_MARK_RE = /^(tick|untick)-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9
 export const PLATFORMS = ['web', 'windows', 'mac', 'linux', 'android', 'ios'];
 export const PLAYTEST_VERDICTS = { ship: 'Ship it', 'fix-first': 'Fix first', rethink: 'Rethink' };
 export const PLAYTEST_LIMITS = { look: 2000, issues: 30, issue: 500 };
-export const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, context: 4000, link: 2000, file: 256 * 1024, note: 2000 };
+export const CHECKLIST_LIMITS = { title: 200, items: 50, text: 200, group: 80, guide: 4000, command: 2000, context: 4000, link: 2000, file: 256 * 1024, note: 2000 };
 
 const nameList = names => (names instanceof Set ? [...names] : [...names]);
 
@@ -359,6 +359,8 @@ export function checkChecklist(raw) {
       if (item.group !== undefined && !text(item.group, 0, L.group)) problems.push(`${at}: group is at most ${L.group} characters`);
       if (item.guide !== undefined && !text(item.guide, 0, L.guide)) problems.push(`${at}: guide is at most ${L.guide} characters`);
       if (item.link !== undefined && !link(item.link)) problems.push(`${at}: link is an http:// or https:// link of at most 2000 characters`);
+      if (item.command !== undefined && !(typeof item.command === 'string' && item.command.trim().length >= 1 && item.command.length <= L.command)) problems.push(`${at}: command is 1 to ${L.command} characters`);
+      if (item.shell !== undefined && !['bash', 'powershell', 'cmd'].includes(item.shell)) problems.push(`${at}: shell is one of bash, powershell, cmd`);
       if (item.id !== undefined && item.id !== String(index + 1).padStart(2, '0')) problems.push(`${at}: id is its position (${String(index + 1).padStart(2, '0')})`);
     });
   }

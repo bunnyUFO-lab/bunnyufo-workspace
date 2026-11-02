@@ -4,7 +4,7 @@ import type { Checklist, ChecklistItem } from '../lib/hub'
 import { HubError, clock, hubPost, safeUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import HubImage from './HubImage'
-import Md from './Md'
+import Md, { CodeBlock } from './Md'
 import { prepareImage, toBase64 } from './chatImages'
 import { hasFiles, hasText, isTextField, pictureFiles } from '../lib/pastePictures.mjs'
 import { clearTarget, getTarget, setTarget, useTarget } from './stepTarget'
@@ -20,6 +20,12 @@ const VERB: Record<How, string> = { camera: 'Attached to', paste: 'Pasted to', d
 const text = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : '')
 const plural = (count: number, one: string, many: string) => (count === 1 ? one : many)
 const without = <T,>(record: Record<string, T>, key: string): Record<string, T> => Object.fromEntries(Object.entries(record).filter(([name]) => name !== key))
+
+/** Item text with `code` spans shown as code (no Copy button: a command to run is the item's own `command`). */
+const INLINE_CODE = /`([^`\n]+)`/
+function Inline({ value }: { value: string }) {
+  return <>{value.split(INLINE_CODE).map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}</>
+}
 
 /** An item tapped and not yet answered: what the box shows meanwhile, and the time it shows. */
 interface Pending { done: boolean; at: string }
@@ -208,6 +214,8 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           const done = isDone(item)
           const mark = pending[item.id]
           const link = safeUrl(item.link)
+          const command = text(item.command)
+          const shell = ['bash', 'powershell', 'cmd'].includes(item.shell ?? '') ? item.shell : undefined
           // Any step can fail, so with Chat every step opens to its Get help link.
           const more = !!item.guide || !!link || host.chat
           const open = more && isExpanded(item)
@@ -217,7 +225,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           const when = done ? (mark?.at ?? item.at) : undefined
           const body = (
             <>
-              <span className="hub-cl-title" id={labelId}>{text(item.text)}</span>
+              <span className="hub-cl-title" id={labelId}><Inline value={text(item.text)} /></span>
               {done && <span className="hub-cl-meta">done{when ? ` ${clock(when)}` : ''}</span>}
             </>
           )
@@ -257,6 +265,11 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </label>
                 )}
               </div>
+              {command && (
+                <div className="hub-cl-cmd" data-command>
+                  <CodeBlock exact><code className={shell ? `language-${shell}` : undefined}>{command}</code></CodeBlock>
+                </div>
+              )}
               {attached?.step === item.id && <p className="hub-muted" role="status" data-attached-note>{attached.text}</p>}
               {errors[item.id] && <p className="hub-error" role="alert" data-item-error>{errors[item.id]}</p>}
               {open && (
