@@ -243,3 +243,19 @@ test('validStatus passes memory through, rounded, and drops a missing, null, neg
   assert.deepEqual(pcSummary(validStatus(pcStatusJson({ now: NOW })), NOW).memory, { totalGB: 24, availableGB: 9.6 });
   assert.equal(pcSummary(validStatus(old), NOW).memory, null);
 });
+
+test('blockedSessionUrl accepts only the exact session link, like the client', async () => {
+  const { blockedSessionUrl, SESSION_URL_RE } = await import('../hub-model.mjs');
+  const { readFileSync } = await import('node:fs');
+  assert.equal(blockedSessionUrl('https://claude.ai/code/session_Abc123'), 'https://claude.ai/code/session_Abc123');
+  for (const bad of [
+    'https://claude.ai/code', 'https://claude.ai/code/', 'https://claude.ai/code/session_',
+    'https://claude.ai.evil.example/code/session_abc', 'https://evil.example/code/session_abc', 'https://claude.ai@evil.example/code/session_abc',
+    'http://claude.ai/code/session_abc', 'https://claude.ai/code/session_abc/extra', 'https://claude.ai/code/session_abc?x=1',
+    'https://claude.ai/code/session_abc#h', 'https://claude.ai/code/session_a-b', 'https://claude.ai/code/session_abc\n', ' https://claude.ai/code/session_abc',
+    'https://claude.ai/code/x', 'https://example.com', 42, undefined, null,
+  ]) assert.equal(blockedSessionUrl(bad), undefined, String(bad));
+  const client = readFileSync(new URL('../../../src/lib/hub.ts', import.meta.url), 'utf8').match(/export const sessionUrl[^\n]*?(\/\^https:[^\n]*?\$\/)\.test/);
+  assert.ok(client, 'client sessionUrl pattern found');
+  assert.equal(client[1], String(SESSION_URL_RE), 'server and client use the same pattern');
+});

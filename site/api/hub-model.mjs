@@ -511,8 +511,11 @@ const time = ts => {
 /** The bare `https://claude.ai/code` opens a new, empty chat, so it is no link to a session. */
 export const isBareClaudeCode = url => /^https:\/\/claude\.ai\/code\/?$/i.test(String(url ?? '').trim());
 
-/** A blocked session's web link: https, and not the bare one. Anything else is no link. */
-export const blockedSessionUrl = url => (typeof url === 'string' && /^https:\/\//i.test(url) && !isBareClaudeCode(url) ? url : undefined);
+/** A session's web link: exactly https://claude.ai/code/session_<id>, anchored at both ends. The client's `sessionUrl` (src/lib/hub.ts) uses the same pattern; a test keeps them equal. */
+export const SESSION_URL_RE = /^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+$/;
+
+/** A blocked session's web link: only the exact session link. Anything else (bare /code, look-alike host, http, query) is no link. */
+export const blockedSessionUrl = url => (typeof url === 'string' && SESSION_URL_RE.test(url) ? url : undefined);
 
 /** The desktop app's link to a session: exactly `claude://claude.ai/epitaxy/local_<uuid>`. */
 export const blockedAppUrl = url => (typeof url === 'string' && /^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]{36}$/.test(url) ? url : undefined);
