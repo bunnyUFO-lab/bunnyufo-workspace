@@ -78,6 +78,34 @@ const DESKTOP_EXPANDED = '4f175fb85ab94b242a8cc2459c61934fd3754f87695144e065dddd
 const DESKTOP_EXPANDED_NO_SPRINTS = '9c2076b6295834641504bc0f876a51d9fa9387a6fc3156526ddd3efb288cc8f6';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
+// The exact hashes above hold only on the machine that recorded them: the map is laid out from measured text widths, and a
+// Linux runner's fonts measure differently, so every coordinate moves (ws-aql). So the test checks two things. The structure
+// hash (STRUCTURE_*) is the same everywhere: it covers the tags, classes, data-* attributes, colours and label texts in order, and
+// leaves out every number that comes from geometry. The exact hash is checked only where it was recorded (EXACT_ON).
+const EXACT_ON = 'win32';
+const GEOMETRY = new Set(['x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'd', 'points', 'transform', 'viewBox', 'style', 'dx', 'dy', 'textLength', 'font-size']);
+/** The svg both ways: its raw markup, and as lines of tag, non-geometry attributes and own text, indented by depth. */
+const svgForms = page => page.evaluate(geometry => {
+  const skip = new Set(geometry);
+  const lines = [];
+  const walk = (element, depth) => {
+    const attributes = [...element.attributes].filter(attribute => !skip.has(attribute.name)).map(attribute => `${attribute.name}=${attribute.value}`).sort();
+    const own = [...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent.trim()).filter(Boolean).join(' ');
+    lines.push(`${' '.repeat(depth)}${element.tagName.toLowerCase()} ${attributes.join(' ')}${own ? ` "${own}"` : ''}`);
+    for (const child of element.children) walk(child, depth + 1);
+  };
+  const svg = document.querySelector('.hub-map-box svg');
+  walk(svg, 0);
+  return { raw: svg.outerHTML, structure: lines.join(String.fromCharCode(10)) };
+}, [...GEOMETRY]);
+const STRUCTURE_EXPANDED = 'b3e5a56091f7ec82d2c6b29242374683f79be8cbcad9b4cfc69c0e19b4a36faf';
+const STRUCTURE_EXPANDED_NO_SPRINTS = 'fa44f585ff5d46021255e73e7e019d81b1cb0cde4b2191490b2d5ede6f65340b';
+/** Checks a drawing against its recorded hashes; a mismatch says the actual hash, so a recording is one copy away. */
+const sameDrawing = (forms, structureHash, exactHash, what) => {
+  assert.equal(sha(forms.structure), structureHash, `${what}: the structure of the svg changed (structure hash ${sha(forms.structure)}).`);
+  if (process.platform === EXACT_ON) assert.equal(sha(forms.raw), exactHash, `${what}: the svg is the recorded drawing (hash ${sha(forms.raw)}).`);
+};
+
 // The Wayfinder row of the project just opened: waits for the map under it (they mount together), then requires exactly one row. A second row is a double mount, never a timing slip.
 const wayfinder = async (page, what) => {
   await page.locator('.hub-map-wrap').waitFor();
@@ -236,12 +264,10 @@ try {
   const bigHits = await big.evaluate(() => [...document.querySelectorAll('[data-toggle] .hub-map-chev-hit')].map(element => element.getBoundingClientRect().width));
   assert.ok(bigHits.length > 0 && bigHits.every(width => width >= 31.5), `Desktop chevron targets are at least 32 px (${bigHits.join(', ')}).`);
   await big.waitForTimeout(500);
-  const plain = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
-  assert.equal(sha(plain), DESKTOP_EXPANDED_NO_SPRINTS, 'Expanded, without sprints, the svg is the recorded drawing.');
+  sameDrawing(await svgForms(big), STRUCTURE_EXPANDED_NO_SPRINTS, DESKTOP_EXPANDED_NO_SPRINTS, 'Expanded, without sprints');
   await big.locator('.hub-map-controls button:has-text("Sprints")').click();
   await big.waitForTimeout(500);
-  const withSprints = await big.evaluate(() => document.querySelector('.hub-map-box svg').outerHTML);
-  assert.equal(sha(withSprints), DESKTOP_EXPANDED, 'Expanded, with sprints, the svg is the recorded drawing.');
+  sameDrawing(await svgForms(big), STRUCTURE_EXPANDED, DESKTOP_EXPANDED, 'Expanded, with sprints');
   await nowClear(big, 'desktop, expanded, with sprints');
   const laptop = await open({ width: 1280, height: 800 });
   await showMap(laptop);

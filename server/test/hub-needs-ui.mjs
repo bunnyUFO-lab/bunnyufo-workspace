@@ -4,7 +4,7 @@
 // and a blocked session, the Today row that opens on its item, 44 px targets and no sideways scroll at 375 px, and no
 // collapse animation with reduced motion. Nothing is ever overwritten: the bucket only gains files.
 import { chromium, expect } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, editorReady } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, checklistJson, designAskJson, eventJson, playtestJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
@@ -462,8 +462,8 @@ try {
   third.seed.ask(review);
   third.seed.ask(pick);
   const stroke = async target => {
+    await editorReady(target);
     const canvas = target.locator('.drawing-editor canvas.interactive');
-    await canvas.waitFor();
     await target.waitForTimeout(700);
     const box = await canvas.boundingBox();
     await target.locator('.drawing-editor label[title^="Draw"]').click();

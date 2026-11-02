@@ -19,9 +19,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -48,28 +48,40 @@ jobs:
     env:
       BUW_TEST_BROWSER: chromium
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # The browser download is cached by the Playwright version in the lockfile. On a hit only the system
+      # libraries are installed (they are not part of the cache); on a miss the browser comes with them.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache the Playwright browsers
+        id: browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - run: npm run -s build
 
-      # hub-map-ui.mjs compares a hash of the map's svg with one recorded on Windows (Edge). Text widths
-      # differ on Linux, so the hash never matches here. It still runs on the PC (npm run test:service:ui).
-      - name: Leave out the one test that needs Windows fonts
-        run: rm server/test/hub-map-ui.mjs
+      # hub-map-ui.mjs checks the map's svg by structure everywhere and by exact hash only on Windows, where it was
+      # recorded (text widths differ on Linux), so it runs here too.
 
       - name: UI tests, shard ${{ matrix.shard }} of 4
         run: node scripts/run-ui-tests.mjs --shard ${{ matrix.shard }}/4 2>&1 | tee ui-shard-${{ matrix.shard }}.log; exit "${PIPESTATUS[0]}"
 
       - name: Keep the log when a shard fails
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ui-shard-${{ matrix.shard }}-log
           path: ui-shard-${{ matrix.shard }}.log

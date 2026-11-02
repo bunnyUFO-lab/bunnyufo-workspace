@@ -28,13 +28,13 @@ process.on('exit', () => { try { rmSync(home, { recursive: true, force: true });
 /**
  * `route.fetch()` for a test that rewrites a response. Playwright makes that request itself, and on a
  * loaded PC the connection to the test server now and then fails with ETIMEDOUT before anything is sent
- * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one for 5 s at most; a reset never).
+ * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one for 2 s at most; a reset never).
  */
 export async function steadyFetch(route, options) {
   const codeOf = error => /ETIMEDOUT/.test(String(error?.message)) ? 'ETIMEDOUT' : /ECONNREFUSED/.test(String(error?.message)) ? 'ECONNREFUSED' : '';
   // A refused connect to a test server that is up happens too on a loaded PC (a full listen backlog on Windows). It is repeated for
-  // 5 s at most, so a fixture that really is gone still fails by name, a few seconds later.
-  const end = Date.now() + 5000;
+  // 2 s at most, so a fixture that really is gone still fails by name, a few seconds later.
+  const end = Date.now() + 2000;
   for (;;) {
     try {
       return await repeatConnect(() => route.fetch(options), codeOf);
@@ -121,3 +121,19 @@ chromium.launch = async (...args) => {
   browser.newPage = async (...a) => { const page = await browserNewPage(...a); patchPage(page); return page; };
   return browser;
 };
+
+/**
+ * Waits until an open drawing editor can be drawn on: its canvas is there and the container has a height. Excalidraw
+ * can mount into a container that is still 0 px high (after a reload, while the page lays out), and then the canvas is
+ * hidden with height 0 and `waitFor()` on it fails (ws-80j). `page` is the Playwright page.
+ */
+export async function editorReady(page, selector = '.drawing-editor') {
+  const canvas = page.locator(`${selector} canvas.interactive`);
+  await canvas.waitFor({ state: 'attached' });
+  await page.waitForFunction(root => {
+    const element = document.querySelector(`${root} canvas.interactive`);
+    const box = document.querySelector(root)?.getBoundingClientRect();
+    return !!element && !!box && box.height > 0 && element.getBoundingClientRect().height > 0;
+  }, selector, { timeout: ms(15000) });
+  await canvas.waitFor();
+}
