@@ -1,7 +1,7 @@
 // Run after npm run build. Sprites by state on the Team screen, and the Custom tab, through a real browser over the hub fixture.
 // The sheets, the sheet PNGs and the avatar choice are the real routes over seeded sheets; only the team response is patched in the page, to add agents in every state.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo, teamSheet } from '../../site/api/test/hub-fixtures.mjs';
@@ -36,7 +36,7 @@ const open = async (viewport, options = {}) => {
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.route('**/api/hub/team', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     const body = await response.json();
     const base = body.agents.find(agent => agent.id === 'briefs');
     const minutes = ago => new Date(Date.now() - ago * 60_000).toISOString();
@@ -188,7 +188,7 @@ try {
     for (const target of await phone.locator('dialog.sprite-sheet button').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A button in the sheet is ${target} px high.`);
   }
 
-  assert.deepEqual(errors.filter(text => !/Failed to load resource/.test(text)), [], 'no console errors');
+  assert.deepEqual(errors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
   console.log('hub-sprites-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

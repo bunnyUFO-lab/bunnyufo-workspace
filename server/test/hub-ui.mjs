@@ -8,7 +8,7 @@
 // (answer an Ask, seen as Answered, then Picked up); the 409 path;
 // and the read-only banner against a stand-in for the signed-out site.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -382,7 +382,7 @@ try {
   // Part 2 (CUJ 2): the progress map on the fixture's Beads copy of the CUJ 2 project.
   const wallTitle = 'Tune the wall slide friction curve across every surface type';
   await page.route('**/api/hub/map/magic-loops', async route => {
-    const answer = await (await route.fetch()).json();
+    const answer = await (await steadyFetch(route)).json();
     for (const m of answer.milestones) for (const f of m.features) for (const task of f.tasks) if (task.id === 'ml-wj-t2') task.title = wallTitle;
     await route.fulfill({ json: answer });
   });

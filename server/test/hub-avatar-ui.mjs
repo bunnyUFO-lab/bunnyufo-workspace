@@ -77,7 +77,7 @@ try {
     await page.goto(`${fixture.url}#/~hub/ask/${lostId}`);
     await page.locator('[data-avatar-sheet="missing"]').waitFor();
     assert.match(await page.locator('[data-avatar-sheet="missing"]').innerText(), /not ready or failed its check/);
-    assert.deepEqual(errors.filter(text => !/Failed to load resource/.test(text)), [], 'no console errors');
+    assert.deepEqual(errors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
   }
 
   step('with reduced motion the preview does not cycle by itself');

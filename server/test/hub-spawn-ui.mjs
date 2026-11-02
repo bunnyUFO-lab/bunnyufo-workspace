@@ -3,7 +3,7 @@
 // the Approve button and its toasts (the capability is faked here; the approve route has its own test with Approve),
 // and the bottom sheet at phone width. The default fixture has no signing key, so Spawn can only save a proposal.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -149,7 +149,7 @@ try {
   step('Approve: with the capability on the button reads Approve and each target has its toast, and a wait says why');
   const signed = await open({ width: 1280, height: 900 });
   await signed.route('**/api/capabilities', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     await route.fulfill({ response, json: { ...(await response.json()), approve: true, policy: ['research', 'docs'] } });
   });
   const approvals = [];

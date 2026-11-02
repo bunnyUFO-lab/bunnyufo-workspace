@@ -2,7 +2,7 @@
 // The team, the sheets and the avatar choice are the real routes; the team response is patched in the page to add agents
 // in other rooms and states, and /hub/events is answered by the page so the ticker has known lines to show.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { teamSheet } from '../../site/api/test/hub-fixtures.mjs';
@@ -39,7 +39,7 @@ const open = async (viewport, options = {}) => {
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.route('**/api/hub/team', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     const body = await response.json();
     const base = body.agents.find(agent => agent.id === 'briefs');
     body.agents.push(
@@ -165,7 +165,7 @@ try {
   const stopped = eventRequests.length;
   await tick.clock.runFor(70_000);
   assert.equal(eventRequests.length, stopped, 'No /hub/events request after 65 s on Roster.');
-  assert.deepEqual(tickErrors.filter(text => !/Failed to load resource/.test(text)), [], 'no console errors');
+  assert.deepEqual(tickErrors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
 
   step('reduced motion: the ticker does not rotate');
   const { page: still } = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
@@ -180,7 +180,7 @@ try {
   step('the ticker still shows an event when claude is not on the team, without a name or a sprite');
   const { page: bare } = await open({ width: 1280, height: 900 });
   await bare.route('**/api/hub/team', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     const body = await response.json();
     body.agents = body.agents.filter(agent => agent.id !== 'claude');
     await route.fulfill({ response, json: body });
@@ -216,7 +216,7 @@ try {
     await noSideways(phone, `Roster after a desk at ${width}`);
   }
 
-  assert.deepEqual(errors.filter(text => !/Failed to load resource/.test(text)), [], 'no console errors');
+  assert.deepEqual(errors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
   console.log('hub-floor-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

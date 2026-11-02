@@ -2,7 +2,7 @@
 // card from every cell of the table, the Backlog fold, a live card, the phone's one-lane view, the
 // Activity tab with Work lit in the nav, and the Spawn button from the default fixture.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -159,7 +159,7 @@ try {
   step('phone: with nothing running, Blocked is the lane that opens');
   const quiet = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await quiet.route('**/api/hub/work*', async route => {
-    const answer = await (await route.fetch()).json();
+    const answer = await (await steadyFetch(route)).json();
     answer.lanes.ready.push(...answer.lanes.running);
     answer.lanes.running = [];
     answer.counts.ready += answer.counts.running;
@@ -174,7 +174,7 @@ try {
   const longTitle = `${'Alpha beta gamma delta '.repeat(4)}${'x'.repeat(60)} tail`.slice(0, 160);
   const wide = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await wide.route('**/api/hub/work*', async route => {
-    const answer = await (await route.fetch()).json();
+    const answer = await (await steadyFetch(route)).json();
     for (const cards of Object.values(answer.lanes)) for (const card of cards) card.title = longTitle;
     await route.fulfill({ json: answer });
   });
@@ -213,7 +213,7 @@ try {
   // The body is read inside the route, so a later navigation cannot discard it.
   let work = null;
   await desk.route('**/api/hub/work*', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     work = await response.json();
     await route.fulfill({ response, json: work });
   });

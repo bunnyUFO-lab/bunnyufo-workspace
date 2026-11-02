@@ -1,6 +1,6 @@
 // Run after npm run build. The Team screen and its Sprite sheet through a real browser, over the hub fixture.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { BUILTIN, genSprite } from '../../src/hub/team/sprites.ts';
@@ -172,7 +172,7 @@ try {
   const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   contexts.push(guestContext);
   await guestContext.route('**/api/capabilities', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     await route.fulfill({ response, json: { ...(await response.json()), write: false } });
   });
   const guest = await guestContext.newPage();

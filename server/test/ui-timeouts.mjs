@@ -24,3 +24,61 @@ const home = await mkdtemp(path.join(os.tmpdir(), 'buw-ui-home-'));
 process.env.BUW_CONFIG ||= path.join(home, 'config.json');
 process.env.BUW_REGISTRY ||= path.join(home, 'workspaces.json');
 process.on('exit', () => { try { rmSync(home, { recursive: true, force: true }); } catch { /* the OS clears the temp folder */ } });
+
+/**
+ * `route.fetch()` for a test that rewrites a response. Playwright makes that request itself, and on a
+ * loaded PC the connection to the test server now and then fails with ETIMEDOUT before anything is sent
+ * (see steady-fetch.mjs), so a failed connect is repeated.
+ */
+export async function steadyFetch(route, options) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await route.fetch(options);
+    } catch (error) {
+      if (attempt >= 8 || !/ETIMEDOUT|ECONNRESET|ECONNREFUSED/.test(String(error?.message))) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+    }
+  }
+}
+
+// Navigation on a busy PC: the browser's connect to the test server can time out
+// (net::ERR_CONNECTION_TIMED_OUT) before a byte is sent. Every UI test launches its browser through
+// `chromium.launch`, so wrap it once: pages it makes repeat a navigation that failed that way.
+import { chromium } from '@playwright/test';
+
+const CONNECT_ERROR = /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ERR_CONNECTION_RESET/;
+const patched = new WeakSet();
+const repeatOnConnectError = (proto, name) => {
+  const original = proto[name];
+  proto[name] = async function steadyNavigation(...args) {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await original.apply(this, args);
+      } catch (error) {
+        if (attempt >= 6 || !CONNECT_ERROR.test(String(error?.message))) throw error;
+        await new Promise(resolve => setTimeout(resolve, 200 * attempt));
+      }
+    }
+  };
+};
+const patchPage = page => {
+  const proto = Object.getPrototypeOf(page);
+  if (patched.has(proto)) return;
+  patched.add(proto);
+  repeatOnConnectError(proto, 'goto');
+  repeatOnConnectError(proto, 'reload');
+};
+const launch = chromium.launch.bind(chromium);
+chromium.launch = async (...args) => {
+  const browser = await launch(...args);
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...options) => {
+    const context = await newContext(...options);
+    const newPage = context.newPage.bind(context);
+    context.newPage = async (...a) => { const page = await newPage(...a); patchPage(page); return page; };
+    return context;
+  };
+  const browserNewPage = browser.newPage.bind(browser);
+  browser.newPage = async (...a) => { const page = await browserNewPage(...a); patchPage(page); return page; };
+  return browser;
+};

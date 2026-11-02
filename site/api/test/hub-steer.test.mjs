@@ -100,13 +100,15 @@ test('Hermes refusing the steer queues the reply, and a run that completes sends
 
 test('the Codex path: a steer Hermes accepts and never reads, a missing route and a broken route all end as the next run, never a lost reply', async () => {
   for (const [name, options] of [['accepted and ignored', { ignoreSteer: true }], ['route missing', { steerMissing: true }], ['route broken', { steerBroken: true }]]) {
-    const s = await stack({ hermesOptions: { ...options, runScript: ['Reading. ', { wait: 200 }, { tool: 'web_search' }, 'Done.'], endWith: CARD } });
+    const s = await stack({ hermesOptions: { ...options, runScript: ['Reading. ', { tool: 'web_search' }, { hold: true }] } });
     try {
       const api = await s.addHub();
       const id = await going(s, api);
+      // The run stays open until the reply is in: a timed script can end before a slow PC sends the reply.
       const answer = await reply(api, id, `Reply on the ${name} path`);
       assert.equal(answer.status, 201, name);
       assert.equal(answer.body.delivery, options.ignoreSteer ? 'sent' : 'queued', name);
+      s.hermes.release(s.hermes.runs[0].id, CARD);
       await until(() => s.file(id, 'continued.json'), `a continuation (${name})`);
       const to = s.file(id, 'continued.json').to;
       await until(() => s.file(to, 'request.json'), 'the continuation request');
