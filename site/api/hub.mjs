@@ -44,6 +44,7 @@ import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from '
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { createWake } from './pc-wake.mjs';
+import { createPresence } from './hub-presence.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
@@ -69,6 +70,8 @@ const fail = (message, status = 400, extra) => Object.assign(new Error(message),
 export function inboxKey(rel, prefix = 'sections', inbox = 'inbox') {
   if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) throw fail('That is not an inbox section.', 400);
   const text = String(rel ?? '');
+  // The one file at the root of the inbox: the Away switch (hub-presence).
+  if (text === 'presence.json') return `${prefix}/${inbox}/presence.json`;
   const segments = text.split('/');
   if (!text || segments.some(part => !part || part === '..' || part.startsWith('.') || part.startsWith('_') || /[\\\0]/.test(part))) {
     throw fail('That path is not in the inbox.', 400);
@@ -400,6 +403,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
   const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
+  // The Away switch (presence.json): the owner's, read by hub-hooks on the PC.
+  const presence = createPresence({ bucket, key, fail, log: line => log(scrub(line, 200)) });
   requestFiles.hooks.wakeOnApprove = async ({ by, at }) => wake.onApproval({ status: await loadPcStatus(at).catch(() => null), by, at });
 
   /** Hermes `/health` (no key, 1.5 s), cached for 60 s. `null` when HERMES_URL is not set. */
@@ -1290,6 +1295,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });
+          } else if (route === '/hub/presence') {
+            reply(await presence.view(at));
           } else if (route === '/hub/inbox') {
             const filter = inboxFilter(query.get('filter'));
             const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
@@ -1409,6 +1416,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         } else if ((match = /^\/hub\/map\/([^/]+)\/marks$/.exec(route))) {
           if (!user) throw fail('Sign in to mark this.', 401);
           send(await markBead(decodeURIComponent(match[1]), raw, user, at));
+        } else if (route === '/hub/presence') {
+          send(await presence.set(raw, user, at));
         } else if (route === '/hub/pc/wake') {
           if (!user) throw fail('Sign in to wake the PC.', 401);
           send(await wake.send({ by: user, at }));

@@ -689,6 +689,30 @@ Hub answer files.
 
 Reverting this feature leaves every existing `answer.json` valid; without the label code the Hub shows those answers as "by owner".
 
+### Away: answering session questions from the Hub
+
+An "At the PC / Away" switch in the Needs you header lets the owner say that a Claude session's question should not wait
+for a dialog on the PC. Away is on only while the owner has said so, for at most 12 hours (one tap sets 12; the switch turns
+itself off after that).
+
+- **The file.** `presence.json` at the root of the inbox section: `{ v: 1, away, at, until, by }`. `GET /hub/presence`
+  reads it (away only while `until` is ahead, and never more than 12 h ahead); `POST /hub/presence` with
+  `{ away: true, hours? }` (a whole number from 1 to 12, default 12) or `{ away: false }` writes it. The owner must be
+  signed in and the usual Origin check applies. Turning it off writes an already-expired file.
+- **Only the owner writes it.** The card API lists `presence.json` among its owner files, so no agent, PC-runner,
+  Hermes or cloud token can put, replace or remove it (403). The Hub writes it straight to the bucket with no writer
+  mark; anything that goes through the card API (the passphrase included) is stamped `writer: card-api`, and the card API
+  serves each file's stored mark in an `x-card-writer` header (`none` for no mark). The Hub treats a marked file as off.
+- **What reads it.** The `hub-hooks` plugin on the owner's PC (0.1.26 and later), only when `~/.buw/hub.json` has
+  `"remoteQuestions": true` (or `{ "enabled": true, "maxHours": 8 }`). While away, a single-choice `AskUserQuestion`
+  becomes one Hub Ask per question (Discord gets it too), and the owner's answer goes back to the session. hub-hooks
+  counts the file as the owner's only when the card API reports no writer mark; a marked file, a missing header, an
+  expired `until` or one more than 24 h ahead all mean "at the PC". Turn `remoteQuestions` on only after this Hub
+  and the card API change are live.
+- **Permissions stay on Remote Control.** A permission prompt is not answered from the Hub. The Unstick item for a
+  session carries "Open the session" when the session has a Remote Control link; without one it says "No phone link came
+  with this session. Open the Claude app on <host>." An Ask a session files with `from.url` shows the same link.
+
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,

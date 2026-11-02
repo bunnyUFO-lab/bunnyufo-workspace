@@ -14,6 +14,7 @@ import ProjectPicker from './ProjectPicker'
 import { useProjectNames } from './ProjectChip'
 import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
+import AwayToggle from './AwayToggle'
 import NeedsItem from './NeedsItem'
 import type { SettleExtra, SettleVerb } from './NeedsItem'
 import { itemKey, rememberFilter, takeFocus } from './needsFocus'
@@ -168,6 +169,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
           <h2>Needs you</h2>
           <p>Everything that waits on you, in one place. Your answer goes straight back to whoever asked.</p>
         </div>
+        <AwayToggle />
         {(waiting > 0 || host.write) && (
           <div className="needs-actions">
             {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>Spawn</button>}

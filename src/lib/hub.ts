@@ -169,7 +169,7 @@ export interface Ask {
   bead?: string
   createdAt: string
   expiresAt: string
-  from?: { session?: string; host: string; tool: string; run?: string }
+  from?: { session?: string; host: string; tool: string; run?: string; url?: string }
   question: string
   context?: string
   options?: AskOption[]

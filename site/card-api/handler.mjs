@@ -165,8 +165,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|presence\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -243,6 +243,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    // The Away switch is the Hub's own file (it writes it with no mark): anything this API writes there carries one, and hub-hooks ignores it.
+    if (file === 'presence.json') return { writer: 'card-api' };
     // An export the Hermes host published: the only provenance the Hub accepts for it.
     if (caller.rights.write !== null && caller.name === 'hermes-config' && AGENT_CONFIG_FILE.test(file)) return { writer: 'hermes-config' };
     if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
@@ -410,7 +412,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       }
       const got = await bucket.get(key);
       const body = Buffer.from(await new Response(got.body).arrayBuffer());
-      return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag };
+      // The stored writer mark, or `none` for an object with no mark (the Hub's own writes): hub-hooks reads it to tell the owner's presence.json from one put through this API.
+      return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag, writer: got.metadata?.writer || 'none' };
     },
 
     async putFile(caller, sectionId, file, body, contentType, { ifNoneMatch, ifMatch } = {}) {
@@ -541,7 +544,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       } else if (root === 'sections' && kind === 'files' && !rest.length && method === 'GET') {
         result = await routes.listFiles(caller, sectionId, event.queryStringParameters?.prefix);
       } else if (root === 'sections' && kind === 'files' && ['GET', 'PUT', 'DELETE'].includes(method)) {
-        const file = cardPath(rest.join('/'));
+        // One file lives at the root of the inbox, outside any card folder: the Away switch. Limited tokens may read it and never write it (OWNER_FILES).
+        const file = INBOXES.has(sectionId) && rest.join('/') === 'presence.json' ? 'presence.json' : cardPath(rest.join('/'));
         if (!file) throw new HttpError(400, 'A file path is <card folder>/<file>, not starting with "_" or ".".');
         if (method === 'GET') result = await routes.getFile(caller, sectionId, file);
         if (method === 'PUT') result = await routes.putFile(caller, sectionId, file, raw(), headers['content-type'], {
@@ -555,7 +559,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (result?.raw) {
         return {
           statusCode: 200,
-          headers: { 'content-type': result.contentType, etag: `"${result.etag}"`, 'cache-control': 'no-store' },
+          headers: { 'content-type': result.contentType, etag: `"${result.etag}"`, 'cache-control': 'no-store', ...(result.writer ? { 'x-card-writer': result.writer } : {}) },
           body: result.raw.toString('base64'),
           isBase64Encoded: true,
         };

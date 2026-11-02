@@ -7,6 +7,14 @@
 .hub .needs-next { color: var(--ground); }
 .needs-next:hover:not(:disabled) { background: var(--text-bright); }
 
+.away { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.away-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; border-radius: 999px; padding: 0 14px; font-weight: 600; }
+.away-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--t3); flex: none; }
+.away-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.away-btn.on .away-dot { background: var(--accent); }
+.away-sub { margin: 0; color: var(--t2); font-size: 0.85rem; max-width: 34ch; }
+.away .hub-error { margin: 0; }
+
 .needs .hub-chips-wrap { margin-bottom: 14px; }
 .needs .hub-chips.one-row { padding-bottom: 2px; }
 .needs .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
@@ -85,6 +93,7 @@
   .ni .hub-actions { justify-content: stretch; }
   .ni .hub-actions .hub-btn { flex: 1 1 auto; }
   .needs .hub-chip { min-height: 44px; }
+  .away-btn { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ni { transition: none; }
