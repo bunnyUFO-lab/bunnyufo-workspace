@@ -41,7 +41,7 @@ function BlockedBody({ item, onSettled }: { item: Item; onSettled: () => void })
       <div className="ni-a" data-blocked>
         {link && <a className="hub-btn pri" href={link} target="_blank" rel="noopener noreferrer" data-link="session">Open the session</a>}
         {desk && <a className="hub-btn hub-desk" href={desk} data-link="app">Open in the desktop app</a>}
-        {!link && <span className="hub-muted" data-blocked-hint>{item.host ? `Open the Claude app on ${item.host}` : 'Open the Claude app'}</span>}
+        {!link && <span className="hub-muted" data-blocked-hint>{item.host ? `No phone link came with this session. Open the Claude app on ${item.host}.` : 'No phone link came with this session. Open the Claude app on the computer it runs on.'}</span>}
         {item.file && <span className="sp" />}
         {item.file && button}
       </div>

@@ -128,7 +128,7 @@ try {
   assert.equal(await reviewLink.getAttribute('target'), '_blank');
   assert.equal(await review.locator('button', { hasText: 'Mark done' }).count(), 1);
   const fixtureBlocked = page.locator('.ni', { hasText: 'Permission needed' });
-  assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^Open the Claude app on pc\.example\.test$/);
+  assert.match(await fixtureBlocked.locator('[data-blocked-hint]').innerText(), /^No phone link came with this session\. Open the Claude app on pc\.example\.test\.$/);
   assert.equal(await fixtureBlocked.locator('a:not(.ni-project)').count(), 0, 'No link: it is words, not a button.');
   assert.equal(await page.locator('a[href="https://claude.ai/code"]').count(), 0, 'Nothing links to a new chat.');
   // One shared source: the sidebar's Needs you entry and the phone bar's badge say the same.

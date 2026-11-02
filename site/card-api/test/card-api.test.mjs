@@ -295,6 +295,39 @@ test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an
   }
 });
 
+test('inbox: presence.json (the Away switch) is owned by the Hub; no limited token puts, uploads or removes it, and a read names the writer mark', async () => {
+  const { fake, call } = await setup();
+  try {
+    const away = Buffer.from(JSON.stringify({ v: 1, away: true, until: '2099-01-01T00:00:00Z', by: 'x' }));
+    const put = (token, headers = {}) => call('PUT', '/sections/inbox/files/presence.json', { token, body: away, base64: true, headers });
+    // An agent, the PC runner, Hermes, a cloud routine and the config exporter: all 403, with or without If-None-Match.
+    for (const token of ['tok-agent', 'tok-agentish', 'tok-pc-runner', 'tok-hermes-main', 'tok-hermes', 'tok-cloud', 'tok-cloud-ml', 'tok-hermes-config', 'tok-deleter']) {
+      for (const headers of [{}, { 'If-None-Match': '*' }]) {
+        const refused = await put(token, headers);
+        assert.equal(refused.status, 403, `${token} ${JSON.stringify(headers)}`);
+        assert.equal(refused.data.error, 'Only the Hub writes answers.');
+      }
+      // An upload URL is for card files; the root file has none (and a URL would write it with no mark).
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token, body: { files: [{ path: 'presence.json' }] } })).status, 400, `${token} by upload URL`);
+    }
+    assert.equal(fake.objects.get('sections/inbox/presence.json'), undefined, 'nothing was written');
+    // The Hub writes it itself (no mark). A limited deleter cannot remove it.
+    fake.seed('sections/inbox/presence.json', away, 'application/json');
+    assert.equal((await call('DELETE', '/sections/inbox/files/presence.json', { token: 'tok-deleter' })).status, 403);
+    assert.ok(fake.objects.get('sections/inbox/presence.json'));
+    // A read names the stored writer mark: `none` for the Hub's file.
+    assert.equal((await call('GET', '/sections/inbox/files/presence.json', { token: 'tok-agent' })).headers['x-card-writer'], 'none');
+    // The passphrase may write it through this API, and what it writes carries a mark, which hub-hooks reads as "not the owner's".
+    assert.equal((await put('tok-all')).status, 200);
+    assert.equal(fake.objects.get('sections/inbox/presence.json').metadata.writer, 'card-api');
+    assert.equal((await call('GET', '/sections/inbox/files/presence.json', { token: 'tok-agent' })).headers['x-card-writer'], 'card-api');
+    // Only the root file: a look-alike in a folder is not it.
+    assert.equal((await call('PUT', '/sections/inbox/files/notes/presence.json', { token: 'tok-agent', body: away, base64: true })).status, 200);
+  } finally {
+    await fake.close();
+  }
+});
+
 test('inbox: an avatar choice is written by the Hub, so a limited writer cannot put or remove one', async () => {
   const { fake, call } = await setup();
   try {

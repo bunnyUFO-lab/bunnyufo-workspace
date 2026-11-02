@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import type { Ask, AskAnswer } from '../lib/hub'
+import { sessionUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import type { AskVerb } from './askAnswer'
 import AvatarNote from './AvatarNote'
@@ -145,6 +146,9 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
       {notice && <p className="hub-muted" role="status" data-avatar-notice>{notice}</p>}
       {writable && answer.needsOption && !choice && <p className="hub-muted" data-pick-hint>Pick one of the options to send.</p>}
       {writable && attachHelp.element}
+      {live && ask.from?.tool === 'claude-code' && sessionUrl(ask.from.url) && (
+        <p className="hub-ask-session" data-ask-session><a className="hub-btn" href={sessionUrl(ask.from.url)} target="_blank" rel="noopener noreferrer" data-link="session">Open the session</a></p>
+      )}
       {writable && (
         <div className="hub-actions">
           {confirming ? (
