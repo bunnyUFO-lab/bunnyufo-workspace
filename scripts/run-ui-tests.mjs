@@ -1,20 +1,22 @@
 // Runs every browser test in server/test (ui.mjs and *-ui.mjs), one after another, and fails at
 // the end if any failed: one broken test no longer hides the ones after it.
 //   node scripts/run-ui-tests.mjs [name-fragment ...]   only the tests whose file name contains a fragment
+//   node scripts/run-ui-tests.mjs --shard 2/4           the 2nd of 4 time-balanced shards (CI runs them in parallel)
 // Run after npm run build.
 import { spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseShard, pickShard, readTimings } from './ui-shard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const testDir = path.join(root, 'server', 'test');
-const filters = process.argv.slice(2);
+const { rest: filters, shard } = parseShard(process.argv.slice(2));
 
-const files = (await readdir(testDir))
+const files = pickShard((await readdir(testDir))
   .filter(name => name === 'ui.mjs' || name.endsWith('-ui.mjs'))
   .filter(name => !filters.length || filters.some(fragment => name.includes(fragment)))
-  .sort();
+  .sort(), shard, readTimings(path.join(root, 'scripts', 'ui-timings.json')));
 if (!files.length) {
   console.error('No UI tests match.');
   process.exit(1);

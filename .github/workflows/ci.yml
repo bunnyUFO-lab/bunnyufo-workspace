@@ -7,12 +7,16 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 3 * * *' # nightly full run of every job on main, 03:17 UTC
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   check:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +34,43 @@ jobs:
 
       - name: No workflow may run on a self-hosted runner
         run: '! grep -rnE "runs-on:.*self-host[e]d" .github/workflows'
+
+  # The browser tests (server/test/ui.mjs and *-ui.mjs) against the built app, split into parallel
+  # shards: shard i of n runs every n-th test file. They use stand-in data and a local server, so no
+  # secrets. The nightly schedule runs the same shards, which together are the full suite.
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      BUW_TEST_BROWSER: chromium
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run -s build
+
+      # hub-map-ui.mjs compares a hash of the map's svg with one recorded on Windows (Edge). Text widths
+      # differ on Linux, so the hash never matches here. It still runs on the PC (npm run test:service:ui).
+      - name: Leave out the one test that needs Windows fonts
+        run: rm server/test/hub-map-ui.mjs
+
+      - name: UI tests, shard ${{ matrix.shard }} of 4
+        run: node scripts/run-ui-tests.mjs --shard ${{ matrix.shard }}/4 2>&1 | tee ui-shard-${{ matrix.shard }}.log; exit "${PIPESTATUS[0]}"
+
+      - name: Keep the log when a shard fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-shard-${{ matrix.shard }}-log
+          path: ui-shard-${{ matrix.shard }}.log
+          retention-days: 7
