@@ -56,6 +56,8 @@ try {
     assert.equal(await tile.getAttribute('data-pc'), 'on');
     assert.equal(await tile.locator('[data-pc-headline]').innerText(), 'On · in use');
     assert.match(await tile.locator('[data-pc-line="gpu"]').innerText(), /7 %\s*·\s*3\.9 \/ 24 GB/);
+    assert.match(await tile.locator('[data-pc-line="ram"]').innerText(), /RAM\s*14\.4 \/ 24 GB\s*·\s*60 %/);
+    assert.equal(await tile.locator('[data-pc-warn]').count(), 0, 'Plenty of memory: no warning.');
     assert.match(await tile.locator('[data-pc-line="comfy"]').innerText(), /idle/);
     assert.match(await tile.locator('[data-pc-line="unity"]').innerText(), /probe open/);
     assert.match(await tile.locator('[data-pc-line="sessions"]').innerText(), /1 busy, 1 idle/);
@@ -67,6 +69,26 @@ try {
     assert.equal((await kpi.locator('.hub-kpi-v').innerText()).trim(), '2');
     assert.equal((await kpi.locator('.kpi-sub').innerText()).trim(), 'on the PC and in the cloud');
     await noSideways(page, `Today at ${label} width`);
+  }
+
+  step('low memory (2.5 of 24 GB available) shows the RAM row in the warning style with the watchdog text; an old status shows no RAM row');
+  const low = await startHubFixture({ pc: 'low-memory' });
+  fixtures.push(low);
+  const oldReporter = await startHubFixture({ pc: 'no-memory' });
+  fixtures.push(oldReporter);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  for (const [label, viewport] of [['desktop', { width: 1920, height: 1080 }], ['phone', { width: 390, height: 844 }]]) {
+    const lowPage = await open(viewport, low);
+    const row = lowPage.locator('[aria-label="Gaming PC"] [data-pc-line="ram"]');
+    assert.match(await row.innerText(), /RAM\s*21\.5 \/ 24 GB\s*·\s*90 %/);
+    assert.match(await row.innerText(), /Low memory: the PC's watchdog frees cache below 4 GB/);
+    assert.equal(await row.getAttribute('data-pc-warn'), '', `${label}: the row carries the warning marker.`);
+    await noSideways(lowPage, `the low-memory tile at ${label} width`);
+    const oldPage = await open(viewport, oldReporter);
+    const tile = oldPage.locator('[aria-label="Gaming PC"]');
+    assert.equal(await tile.locator('[data-pc-line="ram"]').count(), 0, `${label}: no RAM row without memory.`);
+    assert.equal(await tile.locator('[data-pc-line="gpu"]').count(), 1);
+    assert.doesNotMatch(await tile.innerText(), /undefined|NaN/);
   }
 
   step('a blocked PC session reads Needs you and links to its item');

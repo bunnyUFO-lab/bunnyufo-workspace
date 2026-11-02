@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { duration, pcHeadline, pcLines, seen } from '../../../src/hub/working.ts';
+import { duration, pcHeadline, pcLines, ramLine, seen } from '../../../src/hub/working.ts';
 
 const NOW = Date.parse('2026-10-29T12:00:00Z');
 const ago = minutes => new Date(NOW - minutes * 60000).toISOString();
@@ -47,4 +47,27 @@ test('a stale PC says when it was last seen and shows no numbers', () => {
   const old = pc({ state: 'asleep-or-off', ageSeconds: 7200 });
   assert.equal(pcHeadline(old), 'Asleep or off · last seen 2 h ago');
   assert.deepEqual(pcLines(old), []);
+});
+
+test('the RAM row shows used / total and a percentage, next to GPU', () => {
+  const keys = pcLines(pc({ memory: { totalGB: 24, availableGB: 9.6 } })).map(line => line.key);
+  assert.deepEqual(keys, ['gpu', 'ram', 'comfy', 'unity', 'sessions']);
+  const ram = pcLines(pc({ memory: { totalGB: 24, availableGB: 9.6 } })).find(line => line.key === 'ram');
+  assert.equal(ram.label, 'RAM');
+  assert.equal(ram.value, '14.4 / 24 GB · 60 %');
+  assert.equal(ram.warn, undefined);
+});
+
+test('below 4 GB available the RAM row warns, and exactly 4 GB does not', () => {
+  assert.equal(ramLine({ totalGB: 24, availableGB: 3.9 }).warn, "Low memory: the PC's watchdog frees cache below 4 GB");
+  assert.equal(ramLine({ totalGB: 24, availableGB: 0 }).value, '24.0 / 24 GB · 100 %');
+  assert.equal(ramLine({ totalGB: 24, availableGB: 4 }).warn, undefined);
+});
+
+test('a status with no usable memory shows no RAM row, never undefined or NaN', () => {
+  for (const memory of [undefined, null, {}, { totalGB: 0, availableGB: 1 }, { totalGB: 24, availableGB: -1 }, { totalGB: NaN, availableGB: 1 }, { totalGB: 24, availableGB: '3' }]) {
+    const lines = pcLines(pc({ memory }));
+    assert.equal(lines.some(line => line.key === 'ram'), false);
+    assert.doesNotMatch(JSON.stringify(lines), /undefined|NaN/);
+  }
 });

@@ -23,6 +23,8 @@ export interface PcStatus {
   inUse: boolean
   keepAwake: boolean
   gpu: { util: number; memMB: number; memTotalMB: number; band: 'idle' | 'busy' | 'heavy' } | null
+  /** Absent or null: an old reporter that does not send memory. */
+  memory?: { totalGB: number; availableGB: number } | null
   comfy: { up: boolean; running: number; pending: number } | null
   unity: { open: boolean; projects: string[] } | null
   /** null: the PC could not list its sessions. */
@@ -38,6 +40,7 @@ export interface PcSummary {
   inUse: boolean
   keepAwake: boolean
   gpu: PcStatus['gpu']
+  memory?: PcStatus['memory']
   comfy: PcStatus['comfy']
   unity: PcStatus['unity']
   sessions: { busy: number; idle: number }

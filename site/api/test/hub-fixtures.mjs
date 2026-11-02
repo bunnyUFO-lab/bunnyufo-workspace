@@ -164,6 +164,7 @@ export function pcStatusJson({ now = new Date(), minutesOld = 0, host = 'test-pc
   return {
     v: 1, host, at: at.toISOString(), reason: 'change', inUse, keepAwake: true,
     gpu: { util: 7, memMB: 3971, memTotalMB: 24564, band: 'idle' },
+    memory: { totalGB: 24, availableGB: 9.6 },
     comfy: { up: true, running: 0, pending: 0 },
     unity: { open: true, projects: ['probe'] },
     sessions: sessions ?? [
