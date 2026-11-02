@@ -49,6 +49,8 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
 
   step('every item shows its project first, with the display name; the bead stays after it');
+  // The display names come from a second fetch (the project list); until it lands each chip shows the project's id.
+  await page.waitForFunction(() => { const list = [...document.querySelectorAll('.ni [data-project-chip]')]; return list.length === 7 && list.every(item => /^[A-Z]/.test(item.textContent ?? '')); });
   const chips = await page.locator('.ni [data-project-chip]').evaluateAll(list => list.map(item => item.textContent));
   assert.deepEqual([...chips].sort(), ['Bunnylink', 'Bunnylink', 'Magic Loops', 'Magic Loops', 'Magic Loops', 'Sprite Studio', 'Sprite Studio']);
   const jump = page.locator(`[data-need="ask-${id('magic-loops', 'jump', 'a111')}"] .ni-meta`);
@@ -121,6 +123,7 @@ try {
   step('a shared link opens straight on the kind in the project');
   await page.goto(`${fixture.url}#/~hub/needs/question/magic-loops`);
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 2);
+  await page.waitForFunction(() => [...document.querySelectorAll('.ni [data-project-chip]')].every(item => /^[A-Z]/.test(item.textContent ?? '')));
   assert.deepEqual(await page.locator('.ni [data-project-chip]').evaluateAll(list => list.map(item => item.textContent)), ['Magic Loops', 'Magic Loops']);
 
   step('the empty state names the project and offers Show all projects');
