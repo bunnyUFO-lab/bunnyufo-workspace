@@ -19,7 +19,10 @@ const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 let counter = 0;
 export const newId = slug => `${day}-probe-${slug}-${String.fromCharCode(97 + (counter % 26))}${String(++counter).padStart(3, '0')}`;
 export const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-export async function until(check, what, ms = 8000) {
+// A wait is generous (8 s idle, 40 s by default): a PC running other suites is many times slower, and a wait that
+// is really stuck still ends with its name.
+const WAIT_SCALE = Number(process.env.BUW_TEST_WAIT_SCALE) || 5;
+export async function until(check, what, ms = 8000 * WAIT_SCALE) {
   const end = Date.now() + ms;
   for (;;) {
     const value = await check();

@@ -565,6 +565,8 @@ try {
   assert.doesNotMatch(endText, /Nothing else waits/);
   assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs');
   await endPage.locator('.needs-empty', { hasText: 'No design review waits on you.' }).waitFor();
+  // The chip counts come from the list the page fetched; wait for them rather than reading them the moment the empty note shows.
+  await endPage.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '1', null, { timeout: ms(5000) }).catch(() => {});
   assert.equal(await endPage.locator('.hub-chip[data-filter="all"] .n').textContent(), '1', 'The All chip counts what All lists next.');
   await noSideways(endPage, 'the end-of-chip note at 375 px');
   await endNote.locator('[data-next-all]').tap();
