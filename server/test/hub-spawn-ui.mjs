@@ -90,7 +90,8 @@ try {
   assert.equal(await page.locator('[data-spawn-go]').isDisabled(), true);
   assert.equal(await page.locator('[data-spawn-note]').innerText(), 'The repo is owner/name.');
   await page.locator('input[data-spawn-repo]').fill('Some-Org/other.repo');
-  assert.equal(await page.locator('[data-spawn-go]').isDisabled(), false, 'A well-formed repo is accepted.');
+  // The button also waits for the route to be worked out, so it enables a moment after the repo is valid.
+  await page.locator('[data-spawn-go]:enabled').waitFor();
   await pickOption(pick, '');
   assert.equal(await page.locator('input[data-spawn-repo]').count(), 0);
   await page.locator('[data-spawn-machine]', { hasText: 'The PC' }).waitFor();
@@ -164,20 +165,20 @@ try {
   assert.equal(await signed.locator('[data-spawn-policy]').innerText(), 'Research and docs may be signed by policy.');
   await signed.keyboard.press('Escape');
   assert.equal(await page.locator('[data-spawn-policy]').count(), 0, 'Without a policy the line is absent.');
-  const approve = async (preset, text, toast, target) => {
+  const approve = async (preset, text, toast, target, machine = 'Hermes') => {
     await signed.locator('[data-spawn-open]').click();
     await pickOption(signed.locator('[data-spawn-project]'), 'magic-loops');
     await signed.locator(`[data-preset="${preset}"]`).click();
-    await signed.locator('[data-spawn-machine]').waitFor();
     await signed.locator('[data-spawn-text]').fill(text);
+    // The machine on screen can still be the previous preset's until the new route arrives: Approve only once it is the expected one.
     if (target) await signed.locator('[data-spawn-target]').selectOption(target);
-    await signed.locator('[data-spawn-why]').waitFor();
+    await signed.locator('[data-spawn-machine]', { hasText: machine }).waitFor();
     assert.equal(await signed.locator('[data-spawn-go]').innerText(), 'Approve');
     await signed.locator('[data-spawn-go]').click();
     await signed.locator('[data-spawn-toast]', { hasText: toast }).waitFor();
   };
   await approve('research', 'Why do runs end early', 'Approved. Hermes starts it now.');
-  await approve('code-task', 'Fix the tab order', 'Approved. It starts on the PC within a few minutes.', 'pc');
+  await approve('code-task', 'Fix the tab order', 'Approved. It starts on the PC within a few minutes.', 'pc', 'The PC');
   await approve('research', 'One more look', 'Approved. It waits: 3 Hermes runs are going.');
   assert.deepEqual(approvals.map(body => body.target), ['hermes', 'pc', 'hermes']);
   // A failed approve keeps the saved request and says so.
@@ -191,18 +192,18 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const real = await open({ width: 1280, height: 900 });
   await real.goto(`${keyed.url}#/~hub/today`);
-  const spawnReal = async (preset, text, toast) => {
+  const spawnReal = async (preset, text, toast, machine) => {
     await real.locator('[data-spawn-open]').click();
     await pickOption(real.locator('[data-spawn-project]'), 'magic-loops');
     await real.locator(`[data-preset="${preset}"]`).click();
     await real.locator('[data-spawn-text]').fill(text);
-    await real.locator('[data-spawn-why]').waitFor();
+    await real.locator('[data-spawn-machine]', { hasText: machine }).waitFor();
     assert.equal(await real.locator('[data-spawn-go]').innerText(), 'Approve');
     await real.locator('[data-spawn-go]').click();
     await real.locator('[data-spawn-toast]', { hasText: toast }).waitFor();
   };
-  await spawnReal('research', 'Why do runs end early', 'Approved. Hermes starts it now.');
-  await spawnReal('code-task', 'Fix the tab order', 'Approved. It starts on the PC within a few minutes.');
+  await spawnReal('research', 'Why do runs end early', 'Approved. Hermes starts it now.', 'Hermes');
+  await spawnReal('code-task', 'Fix the tab order', 'Approved. It starts on the PC within a few minutes.', 'The PC');
   const signed2 = requestsIn(keyed).map(key => key.replace('request.json', 'approved.json')).filter(key => keyed.fake.objects.has(key)).map(key => keyed.fake.json(key));
   assert.equal(signed2.length, 2, 'Both requests are approved.');
   assert.deepEqual(signed2.map(item => item.target).sort(), ['hermes', 'pc']);
