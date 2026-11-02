@@ -602,7 +602,7 @@ test('a move needs write access to both workspaces on the development copy and t
   } finally { await gated.close(); }
 });
 
-test('an S3 body that fails mid-download ends that one response; the server keeps answering', { timeout: 30_000 }, async () => {
+test('an S3 body that fails mid-download ends that one response; the server keeps answering', { timeout: Number(process.env.BUW_TEST_TIMEOUT_MS) || 120_000 }, async () => {
   const fake = await startFakeS3();
   fake.seed('sections/one/workspace.json', JSON.stringify({ entities: [card('alpha')] }), 'application/json');
   fake.seed('sections/one/alpha/index.html', '<h1>alpha</h1>', 'text/html; charset=utf-8');

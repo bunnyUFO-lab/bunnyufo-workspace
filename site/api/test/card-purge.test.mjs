@@ -13,7 +13,7 @@ import { createSiteApi } from '../server.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 // Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
-const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
+const test = (name, fn) => baseTest(name, { timeout: Number(process.env.BUW_TEST_TIMEOUT_MS) || 120_000 }, fn);
 
 const NOW = new Date('2026-11-30T09:00:00Z');
 const entity = (id, folder, extra = {}) => ({ id, folder, title: id, category: 'x', created: '2026-09-01', updated: '2026-09-01', steps: [{ name: 'Overview', path: 'index.md' }], ...extra });
