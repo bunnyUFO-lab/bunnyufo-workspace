@@ -28,7 +28,7 @@ export async function goNext(settled: { kind: Item['kind']; id: string; title?: 
   const word = NOTE_VERB[verb]
   try {
     const answer = await hubGet<{ items: Item[] }>('/inbox?filter=all')
-    const next = pickNext(Array.isArray(answer.items) ? answer.items : [], itemKey(settled), previous)
+    const next = pickNext(Array.isArray(answer?.items) ? answer.items : [], itemKey(settled), previous)
     if (!next) {
       setHandoff({ verb: word, ...(detail ? { detail } : {}), title: settled.title, nothingLeft: true, backHash })
       window.location.assign(hubHash('needs'))

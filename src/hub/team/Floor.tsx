@@ -100,7 +100,7 @@ function Ticker({ agents }: { agents: TeamAgent[] }) {
       if (document.visibilityState !== 'visible') return
       const since = nextSince(held)
       hubGet<{ events: HubEvent[] }>(`/events${since ? `?since=${encodeURIComponent(since)}` : ''}`, controller.signal).then(
-        body => { held = mergeEvents(held, body.events ?? []).slice(-KEEP_EVENTS); setEvents(held) },
+        body => { held = mergeEvents(held, body?.events ?? []).slice(-KEEP_EVENTS); setEvents(held) },
         () => { /* the ticker is a nicety: a miss is tried again at the next poll */ },
       )
     }

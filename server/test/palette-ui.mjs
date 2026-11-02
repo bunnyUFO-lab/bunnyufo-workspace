@@ -131,6 +131,23 @@ try {
   await page.locator('dialog.shortcuts', { hasText: 'Open the palette' }).waitFor();
   await page.keyboard.press('Escape');
 
+  step('an answer that is not JSON for the roadmaps leaves the palette working and raises no page error');
+  const odd = await open({ width: 1280, height: 900 });
+  const errors = [];
+  odd.on('pageerror', error => errors.push(error.message));
+  await odd.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Not the API</title>' }));
+  await odd.goto(`${fixture.url}#/~hub/today`);
+  await odd.locator('.hub[data-screen="today"]').waitFor();
+  const answered = odd.waitForResponse(response => response.url().includes('/api/hub/projects'));
+  await odd.keyboard.press('Control+k');
+  await odd.locator('dialog.pal').waitFor();
+  await odd.locator('dialog.pal [role="option"]', { hasText: 'Needs you' }).first().waitFor();
+  // Give the handler of the answer the turn it needs, then look.
+  await answered;
+  await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  assert.deepEqual(errors, [], 'No page error from a roadmap list that is not JSON.');
+  await odd.keyboard.press('Escape');
+
   step('reduced motion: no transition');
   const calm = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await calm.goto(`${fixture.url}#/~hub/today`);
