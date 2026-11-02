@@ -229,3 +229,17 @@ test('a stale or a bad status gives no live PC; the dev inbox is its own folder'
     assert.throws(() => inboxKey('pc'), /not in the inbox/);
   } finally { await close(); }
 });
+
+test('validStatus passes memory through, rounded, and drops a missing, null, negative or non-numeric one', () => {
+  const memory = value => validStatus({ ...pcStatusJson({ now: NOW }), memory: value }).memory;
+  assert.deepEqual(memory({ totalGB: 24.04, availableGB: 9.66, host: 'leak', extra: 1 }), { totalGB: 24, availableGB: 9.7 });
+  assert.deepEqual(memory({ totalGB: 8, availableGB: 99 }), { totalGB: 8, availableGB: 8 }, 'Available never exceeds total.');
+  for (const bad of [undefined, null, 'x', [], {}, { totalGB: 24 }, { totalGB: 24, availableGB: -0.1 }, { totalGB: 0, availableGB: 0 }, { totalGB: '24', availableGB: 1 }, { totalGB: NaN, availableGB: 1 }, { totalGB: Infinity, availableGB: 1 }]) {
+    assert.equal(memory(bad), null);
+  }
+  const old = pcStatusJson({ now: NOW });
+  delete old.memory;
+  assert.equal(validStatus(old).memory, null);
+  assert.deepEqual(pcSummary(validStatus(pcStatusJson({ now: NOW })), NOW).memory, { totalGB: 24, availableGB: 9.6 });
+  assert.equal(pcSummary(validStatus(old), NOW).memory, null);
+});

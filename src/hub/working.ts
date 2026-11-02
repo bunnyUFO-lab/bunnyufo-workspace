@@ -45,7 +45,22 @@ export function seen(seconds: number): string {
 
 const gb = (mb: number) => (mb / 1024).toFixed(1)
 
-export interface PcLine { key: string; label: string; value: string }
+/** The PC memory watchdog frees cache below this much available memory. */
+export const LOW_MEMORY_GB = 4
+export const LOW_MEMORY_TEXT = "Low memory: the PC's watchdog frees cache below 4 GB"
+
+export interface PcLine { key: string; label: string; value: string; /** Shown in the warning style, with this text under the row. */ warn?: string }
+
+/** The RAM row, or null for a status with no usable memory (an old reporter). Used and the percentage are worked out here and nowhere else. */
+export function ramLine(memory: PcSummary['memory']): PcLine | null {
+  if (!memory) return null
+  const { totalGB, availableGB } = memory
+  if (![totalGB, availableGB].every(n => typeof n === 'number' && Number.isFinite(n)) || totalGB <= 0 || availableGB < 0) return null
+  const used = Math.max(0, totalGB - Math.min(availableGB, totalGB))
+  const line: PcLine = { key: 'ram', label: 'RAM', value: `${used.toFixed(1)} / ${Number(totalGB.toFixed(1))} GB · ${Math.round((used / totalGB) * 100)} %` }
+  if (availableGB < LOW_MEMORY_GB) line.warn = LOW_MEMORY_TEXT
+  return line
+}
 
 /** The tile's headline: "On · in use", "On · idle" or "Asleep or off · last seen 2 h ago". */
 export function pcHeadline(pc: PcSummary): string {
@@ -58,6 +73,8 @@ export function pcLines(pc: PcSummary): PcLine[] {
   if (pc.state === 'asleep-or-off') return []
   const lines: PcLine[] = []
   if (pc.gpu) lines.push({ key: 'gpu', label: 'GPU', value: `${Math.round(pc.gpu.util)} % · ${gb(pc.gpu.memMB)} / ${Math.round(pc.gpu.memTotalMB / 1024)} GB` })
+  const ram = ramLine(pc.memory)
+  if (ram) lines.push(ram)
   if (pc.comfy) {
     const { up, running, pending } = pc.comfy
     lines.push({ key: 'comfy', label: 'ComfyUI', value: !up ? 'down' : running || pending ? `${running} running, ${pending} queued` : 'idle' })

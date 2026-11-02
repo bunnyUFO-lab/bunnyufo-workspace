@@ -12,7 +12,10 @@ export default function PcTile({ pc, wake }: { pc: PcSummary | null; wake?: PcWa
       <h3><span className={`dot ${asleep ? 'st-idle' : 'st-working'}`} aria-hidden="true" />Gaming PC</h3>
       <p className="pc-head" data-pc-headline>{pc ? pcHeadline(pc) : 'Asleep or off · no report yet'}</p>
       {pc && pcLines(pc).map(line => (
-        <div key={line.key} className="pc-line" data-pc-line={line.key}><span>{line.label}</span><b>{line.value}</b></div>
+        <div key={line.key} className={`pc-line${line.warn ? ' warn' : ''}`} data-pc-line={line.key} {...(line.warn ? { 'data-pc-warn': '' } : {})}>
+          <span>{line.label}</span><b>{line.value}</b>
+          {line.warn && <p className="pc-warn" role="note">{line.warn}</p>}
+        </div>
       ))}
       {pc && !asleep && pc.keepAwake && <span className="pc-chip" data-pc-awake>Kept awake</span>}
       {pc && !asleep && <small className="pc-updated">Updated {seen(pc.ageSeconds)}</small>}

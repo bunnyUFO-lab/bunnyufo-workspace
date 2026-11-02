@@ -119,7 +119,11 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
 
   if (pc) {
     // Off by default. 'fresh': the PC reported a minute ago, with a busy and an idle session. 'stale': 40 minutes ago, so the PC counts as asleep or off.
-    seedPcStatus(fake, pcStatusJson({ now, minutesOld: pc === 'stale' ? 40 : 1 }));
+    // 'low-memory': 2.5 of 24 GB available. 'no-memory': a status from an old reporter, with no memory field.
+    seedPcStatus(fake, pcStatusJson({
+      now, minutesOld: pc === 'stale' ? 40 : 1,
+      extra: pc === 'low-memory' ? { memory: { totalGB: 24, availableGB: 2.5 } } : pc === 'no-memory' ? { memory: undefined } : {},
+    }));
   }
 
   if (agentConfig) {

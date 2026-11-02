@@ -27,6 +27,19 @@ function isoOf(value) {
   return date && !Number.isNaN(date.getTime()) ? date.toISOString() : '';
 }
 
+/**
+ * `{ totalGB, availableGB }` to 0.1, or null when either is not a finite number, the total is not above 0 or the available
+ * figure is negative: an old reporter, a bad one and a hand-edited file all show no RAM row. Available never exceeds total.
+ */
+function cleanMemory(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const { totalGB, availableGB } = raw;
+  if (![totalGB, availableGB].every(value => typeof value === 'number' && Number.isFinite(value))) return null;
+  if (totalGB <= 0 || totalGB > 1e5 || availableGB < 0) return null;
+  const round = value => Math.round(value * 10) / 10;
+  return { totalGB: round(totalGB), availableGB: round(Math.min(availableGB, totalGB)) };
+}
+
 const bandOf = util => (util >= 50 ? 'heavy' : util >= 10 ? 'busy' : 'idle');
 
 function cleanSession(raw) {
@@ -84,6 +97,7 @@ export function validStatus(raw) {
       memTotalMB: num(raw.gpu.memTotalMB, 0, 1e7) ?? 0,
       band: BANDS.includes(raw.gpu.band) ? raw.gpu.band : bandOf(gpuUtil),
     },
+    memory: cleanMemory(raw.memory),
     comfy: comfy ? { up: comfy.up === true, running: num(comfy.running, 0, 1000) ?? 0, pending: num(comfy.pending, 0, 1000) ?? 0 } : null,
     unity: unity ? {
       open: unity.open === true,
@@ -108,6 +122,7 @@ export function pcSummary(status, at) {
     inUse: status.inUse,
     keepAwake: status.keepAwake,
     gpu: status.gpu,
+    memory: status.memory ?? null,
     comfy: status.comfy,
     unity: status.unity,
     sessions: { busy: sessions.filter(row => row.status === 'busy').length, idle: sessions.filter(row => row.status === 'idle').length },
