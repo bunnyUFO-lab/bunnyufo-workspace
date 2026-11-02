@@ -37,6 +37,20 @@ test('every type badge pair and sub-type colour has 4.5:1 text contrast, in the 
   }
 });
 
+test('the Approval sub-type has a hue of its own, not the amber of the Approval request type', () => {
+  const hue = hex => {
+    const [r, g, b] = [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16) / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  const apart = (a, b) => { const gap = Math.abs(hue(a) - hue(b)); return Math.min(gap, 360 - gap); };
+  for (const [theme, set] of [['dark', dark], ['light', light]]) {
+    assert.ok(apart(set['nb-sub-approval'], set['nb-approval-request-bg']) >= 60, `${theme}: Approval sub-type vs Approval request`);
+    for (const sub of SUBS.filter(name => name !== 'approval')) assert.ok(apart(set['nb-sub-approval'], set[`nb-sub-${sub}`]) >= 25, `${theme}: Approval vs ${sub}`);
+  }
+});
+
 test('the types are told apart: no two share a fill in a theme', () => {
   for (const set of [dark, light]) assert.equal(new Set(TYPES.map(type => set[`nb-${type}-bg`])).size, TYPES.length);
 });

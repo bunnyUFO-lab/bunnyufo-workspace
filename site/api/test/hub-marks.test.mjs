@@ -129,11 +129,13 @@ async function fixture({ requireRemoteUser = true } = {}) {
     beadsIssue({ id: 'mk-label', title: 'Register the domain', parent: 'mk-f', labels: ['needs-owner'], created: '2026-10-01T12:00:00Z' }),
     beadsIssue({ id: 'mk-ask', title: 'Pick the arc', parent: 'mk-f', labels: ['needs-owner'], created: '2026-10-01T13:00:00Z' }),
     beadsIssue({ id: 'mk-inbox', title: 'Review it', parent: 'mk-f', labels: ['needs-owner'], created: '2026-10-01T14:00:00Z' }),
+    beadsIssue({ id: 'mk-askonly', title: 'Choose the name', parent: 'mk-f', created: '2026-10-01T14:30:00Z' }),
     beadsIssue({ id: 'mk-plain', title: 'Just work', parent: 'mk-f', created: '2026-10-01T15:00:00Z' }),
     beadsIssue({ id: 'mk-shut', title: 'Done already', parent: 'mk-f', labels: ['needs-owner'], status: 'closed', closed: '2026-10-02T10:00:00Z', created: '2026-10-01T16:00:00Z' }),
   ];
   seed.beads('mk', issues, { pushedAt: minutesAgo(NOW, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/mk' });
   seed.ask(askJson({ id: `${day}-mk-pick-the-arc-a1b2`, project: 'mk', bead: 'mk-ask', now: minutesAgo(NOW, 10), options: threeOptions() }));
+  seed.ask(askJson({ id: `${day}-mk-choose-the-name-c3d4`, project: 'mk', bead: 'mk-askonly', now: minutesAgo(NOW, 9), options: threeOptions() }));
   seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), project: 'mk', bead: 'mk-inbox', title: 'PR ready for review: review it', url: 'https://example.test/pr/9' }));
   const marks = () => [...fake.objects.keys()].filter(key => key.startsWith('sections/inbox/bead-marks/')).sort();
   const taskOf = async id => (await get('/hub/map/mk')).body.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).find(task => task.id === id);
@@ -293,6 +295,19 @@ test('the route: a mark is allowed while an Ask or another Needs you item names 
     assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-inbox', verdict: 'done' })).status, 201, 'The newest wins (done after unblock).');
     assert.equal((await taskOf('mk-inbox')).mark.verdict, 'done');
     assert.equal(marks().length, 3);
+  } finally { await close(); }
+});
+
+test('the route: Unblock on a task that waits only through an Ask is refused and writes nothing; Mark done still works', async () => {
+  const { post, marks, taskOf, close } = await fixture();
+  try {
+    assert.equal((await taskOf('mk-askonly')).state, 'you');
+    const refused = await post('/hub/map/mk/marks', { bead: 'mk-askonly', verdict: 'unblock' });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /Unblock changes nothing here/);
+    assert.match(refused.body.error, /Answer or cancel that Ask, or use Mark done or Not needed\./);
+    assert.equal(marks().length, 0, 'No file was written.');
+    assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-askonly', verdict: 'done' })).status, 201);
   } finally { await close(); }
 });
 

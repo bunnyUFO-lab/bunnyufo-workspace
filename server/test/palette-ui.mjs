@@ -149,6 +149,29 @@ try {
   assert.deepEqual(errors, [], 'No page error from a roadmap list that is not JSON.');
   await odd.keyboard.press('Escape');
 
+  step('a roadmap list that could not be read is not kept: the next open asks again and lists the roadmaps');
+  let unreadable = true;
+  await odd.unroute('**/api/hub/projects');
+  await odd.route('**/api/hub/projects', route => (unreadable
+    ? route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Not the API</title>' })
+    : route.continue()));
+  await odd.reload();
+  await odd.locator('.hub[data-screen="today"]').waitFor();
+  await odd.keyboard.press('Control+k');
+  await odd.locator('dialog.pal').waitFor();
+  await odd.keyboard.type('magic');
+  await odd.locator('dialog.pal [role="option"]', { hasText: /spawn/i }).first().waitFor();
+  await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
+  assert.equal(await odd.locator('dialog.pal .pal-g', { hasText: /^roadmaps$/i }).count(), 0, 'The unreadable list shows no roadmaps.');
+  await odd.keyboard.press('Escape');
+  unreadable = false;
+  await odd.keyboard.press('Control+k');
+  await odd.locator('dialog.pal').waitFor();
+  await odd.keyboard.type('magic');
+  await odd.locator('dialog.pal [role="group"]', { has: odd.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
+  assert.deepEqual(errors, []);
+  await odd.keyboard.press('Escape');
+
   step('reduced motion: no transition');
   const calm = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await calm.goto(`${fixture.url}#/~hub/today`);

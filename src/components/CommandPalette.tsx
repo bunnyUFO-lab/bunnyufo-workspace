@@ -82,10 +82,11 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
     const controller = new AbortController()
     hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
       answer => {
-        // An answer that is not JSON reads as null: no roadmaps, never a thrown error.
-        const list = Array.isArray(answer?.projects) ? answer.projects : []
-        projectsCache = { at: Date.now(), projects: list }
-        setProjects(list)
+        // An answer that is not JSON reads as null: no roadmaps, never a thrown error, and never kept:
+        // the next open asks again instead of showing the empty list for the TTL.
+        if (!Array.isArray(answer?.projects)) return
+        projectsCache = { at: Date.now(), projects: answer.projects }
+        setProjects(answer.projects)
       },
       () => { /* no roadmaps listed; the rest still works */ },
     )

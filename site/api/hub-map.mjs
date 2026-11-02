@@ -247,7 +247,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       sprints: (issue.labels ?? []).filter(label => label.startsWith('sprint:')).map(label => label.slice(7)),
       deps: blockers(issue).filter(id => byId.has(id)),
       ...(asksByBead.has(issue.id) ? { ask: asksByBead.get(issue.id) } : {}),
-      ...(checklistsByBead.has(issue.id) ? { checklist: checklistsByBead.get(issue.id) } : {}),
+      ...(state === 'you' && checklistsByBead.has(issue.id) ? { checklist: checklistsByBead.get(issue.id) } : {}),
       ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : checklistsByBead.has(issue.id) ? 'checklist' : 'label' } : {}),
       ...(summary ? { summary } : {}),
       ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),

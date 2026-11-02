@@ -721,6 +721,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     } else {
       if (state?.active && state.verdict === verdict) return answer(200, { state: 'marked', verdict, at: state.at });
       if (closed) throw fail('Already closed in Beads.', 409);
+      // Unblock removes `needs-owner` or `blocked`; a task that waits only through an Ask or a checklist has neither, so it would change nothing.
+      if (verdict === 'unblock' && !isWaiting(issue)) throw fail('Unblock changes nothing here: this task has no needs-owner label and is not blocked, it waits only through an Ask or a checklist. Answer or cancel that Ask, or use Mark done or Not needed.', 409);
       const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
       const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at });
       const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
