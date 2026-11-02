@@ -1,5 +1,6 @@
 // Run after npm run build. A Chat reply keeps streaming while the page re-renders around it.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -10,7 +11,7 @@ const browser = await chromium.launch({ headless: true, channel });
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   const failed = [];
   page.on('requestfailed', request => failed.push(request.url()));
@@ -68,7 +69,7 @@ try {
   const slow = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { runScript: ['Working. ', { hold: true }] } });
   try {
     const other = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-    other.setDefaultTimeout(15000);
+    other.setDefaultTimeout(ms(15000));
     await other.route('**/api/hub/chat', async route => {
       if (route.request().method() !== 'POST') return route.continue();
       await new Promise(resolve => setTimeout(resolve, 2600));

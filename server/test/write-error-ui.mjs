@@ -6,6 +6,7 @@
 // And a card's source link must point inside the repository it is actually in. Sections share one
 // repository now, each in its own folder, so the card folder alone named a path that is not there.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -45,7 +46,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
 try {
   const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   await page.goto(`${origin}/agent-plans`);
   await page.locator('.entity-card .card-pin').waitFor();
   await page.locator('.entity-card .card-pin').click();
@@ -69,7 +70,7 @@ try {
 
   // A host that refuses the probe is present but not signed in: say so, do not show an empty board.
   const refused = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
-  refused.setDefaultTimeout(15000);
+  refused.setDefaultTimeout(ms(15000));
   await refused.route('**/api/capabilities', route => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'Sign in to continue' }) }));
   await refused.goto(`${origin}/agent-plans`);
   await refused.getByText('Sign in to continue', { exact: true }).waitFor();

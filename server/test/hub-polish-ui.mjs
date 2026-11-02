@@ -4,6 +4,7 @@
 // Steps, the "Written by" warning only while a request can still be approved; and, over a stand-in for the signed-out
 // site, chats with one title told apart by their time and a note where Chat would be for a visitor who may only read.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -24,7 +25,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'en-US', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

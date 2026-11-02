@@ -3,6 +3,7 @@
 // the new request's drawer (started in the cloud, nothing sent), the old request ends Stopped and its tile is gone, and the tile
 // fits a phone. With BUW_SHOTS=<dir> it saves screenshots (for a pull request).
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,7 +22,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(ms(20000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

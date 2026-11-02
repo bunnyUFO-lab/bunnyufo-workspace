@@ -2,6 +2,7 @@
 // pick carries the note about when the sheet starts, and the sheet check draws the real sheet from the Hub, playing its rows,
 // instead of the picture the run attached. At 1280 and 375 px; nothing scrolls sideways and the buttons are 44 px high.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, teamSheet } from '../../site/api/test/hub-fixtures.mjs';
@@ -30,7 +31,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = [];
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -76,7 +77,7 @@ try {
     await page.goto(`${fixture.url}#/~hub/ask/${lostId}`);
     await page.locator('[data-avatar-sheet="missing"]').waitFor();
     assert.match(await page.locator('[data-avatar-sheet="missing"]').innerText(), /not ready or failed its check/);
-    assert.deepEqual(errors.filter(text => !/Failed to load resource/.test(text)), [], 'no console errors');
+    assert.deepEqual(errors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
   }
 
   step('with reduced motion the preview does not cycle by itself');

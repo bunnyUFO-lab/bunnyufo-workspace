@@ -3,6 +3,7 @@
 // Back, a project chip that filters, the empty state with "Show all projects", a one-item link that still focuses its
 // item, and no sideways scroll at 390 px. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { askJson, checklistJson, eventJson, minutesAgo, plainOptions } from '../../site/api/test/hub-fixtures.mjs';
@@ -19,7 +20,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

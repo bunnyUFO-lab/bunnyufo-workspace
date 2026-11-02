@@ -4,6 +4,7 @@
 // A card's tab bar stays one row at every width. Tabs hidden past an edge show a fade there
 // (and an arrow on a mouse), and the active tab is always scrolled into view.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -113,7 +114,7 @@ try {
   const errors = [];
   const open = async (context, hash) => {
     const page = await context.newPage();
-    page.setDefaultTimeout(10000);
+    page.setDefaultTimeout(ms(10000));
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(service.urls.workspace + hash);
     await page.locator('.step-tab').first().waitFor();
@@ -198,7 +199,7 @@ try {
   // direction, and the page growing under it must not read as a scroll up (it would flip forever).
   const reader = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   page = await reader.newPage();
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(ms(10000));
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace + '#/long-card');
   await page.locator('.markdown-reader').waitFor();

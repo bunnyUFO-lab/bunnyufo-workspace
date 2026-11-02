@@ -1,5 +1,6 @@
 // Run after npm run build. The agent details page (#/~hub/agent/<id>) through a real browser, over the hub fixture.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -11,7 +12,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

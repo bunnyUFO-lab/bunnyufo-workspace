@@ -5,6 +5,7 @@
 // card's category; delete a card, find it in the Trash and restore it; move a card to the other
 // workspace and open it from its old link; every menu as a bottom sheet on a phone.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -54,7 +55,7 @@ try {
   const errors = [];
   const open = async (context, hash, project = 'alpha') => {
     const page = await context.newPage();
-    page.setDefaultTimeout(10000);
+    page.setDefaultTimeout(ms(10000));
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(value => { localStorage.setItem('buw.project', value); localStorage.setItem('buw.menuCollapsed', '0'); }, project);
     await page.goto(service.urls.workspace + hash);
@@ -335,7 +336,7 @@ try {
     for (const size of [{ width: 1280, height: 800 }, { width: 390, height: 800 }]) {
       siteData.one.name = 'Section One'; siteData.two.archived = undefined; siteData.old.archived = true; siteCalls.length = 0;
       const sitePage = await (await browser.newContext({ viewport: size })).newPage();
-      sitePage.setDefaultTimeout(10000);
+      sitePage.setDefaultTimeout(ms(10000));
       sitePage.on('pageerror', error => errors.push(error.message));
       await sitePage.goto(`${siteOrigin}/one`);
       const opener = name => sitePage.getByRole('button', { name: new RegExp(`^Workspace: ${name}`) }).first();

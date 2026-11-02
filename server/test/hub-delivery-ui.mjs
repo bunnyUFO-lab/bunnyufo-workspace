@@ -3,6 +3,7 @@
 // watching), "Open the session" only with a safe link, nothing for an Ask nobody answered or a picked-up one. At 1280 and
 // 375 px; nothing scrolls sideways. With BUW_SHOT_DIR set it also saves a screenshot of each state there.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -40,7 +41,7 @@ try {
   for (const [name, viewport] of [['1280', { width: 1280, height: 900 }], ['375', { width: 375, height: 800 }]]) {
     const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
     const page = await context.newPage();
-    page.setDefaultTimeout(15000);
+    page.setDefaultTimeout(ms(15000));
     page.on('pageerror', error => { throw error; });
     const open = async id => { await page.goto(`${fixture.url}#/~hub/ask/${id}`); await page.locator('.hub-steps').waitFor(); };
     const line = () => page.locator('[data-delivery]');

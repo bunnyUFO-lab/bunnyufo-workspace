@@ -3,6 +3,8 @@
 // or a tap picks, Escape puts the chosen project back, nothing scrolls sideways, and an open list closes when the field scrolls
 // away. The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
 import { chromium, expect } from '@playwright/test';
+import { ms, SCALE } from './ui-timeouts.mjs';
+expect.configure({ timeout: 5000 * SCALE });
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -20,7 +22,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

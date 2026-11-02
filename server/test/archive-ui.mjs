@@ -1,6 +1,7 @@
 // Run after npm run build. Isolated repository and browser profile. Nothing writes the fixture
 // workspace.json any more: archiving is card state (.buw/card-state.json), not a card's content.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -59,7 +60,7 @@ let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
   await page.locator('.entity-card').first().waitFor();

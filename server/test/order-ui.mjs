@@ -5,6 +5,7 @@
 // section headings dragged into an order that is remembered, and J/K/↑/↓/Alt+↑↓ through the list
 // without opening the search box.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -79,7 +80,7 @@ let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 950 } })).newPage();
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
   await page.locator('.sidebar-item').first().waitFor();

@@ -7,6 +7,7 @@
 // save for it (the card bridge, by postMessage): its own card's responses and Markdown answer, in the app's
 // frame only, with no credential of its own and nothing from a window that is not that frame.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
@@ -168,7 +169,7 @@ const settle = ms => new Promise(resolve => setTimeout(resolve, ms));
 try {
   const context = await browser.newContext({ viewport: { width: 1200, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   await page.goto(`${appOrigin}/one`);
   await page.locator('.entity-card').first().waitFor();
@@ -200,7 +201,7 @@ try {
   assert.equal(await frame.locator('html').getAttribute('data-buw-theme'), 'light', 'The theme from ?buw-theme= is set on load.');
   assert.equal(await background(), 'rgb(255, 255, 255)');
   await page.evaluate(() => { localStorage.setItem('buw.workspaceTheme', 'dark'); window.dispatchEvent(new Event('bunnyufo-workspace-theme')); });
-  await frame.locator('html[data-buw-theme=dark]').waitFor({ timeout: 5000 });
+  await frame.locator('html[data-buw-theme=dark]').waitFor({ timeout: ms(5000) });
   assert.notEqual(await background(), 'rgb(255, 255, 255)');
 
   step('the POST the card sent to the app was refused, and changed nothing');
@@ -216,7 +217,7 @@ try {
 
   step('opened in its own tab: the app host sends it to the content host, with the same results');
   const tab = await context.newPage();
-  tab.setDefaultTimeout(15000);
+  tab.setDefaultTimeout(ms(15000));
   const opened = await tab.goto(`${appOrigin}/w/one/alpha/index.html`);
   assert.equal(tab.url(), `${contentOrigin}/w/one/alpha/index.html`);
   assert.equal(opened.headers()['content-security-policy'], CSP);
@@ -302,7 +303,7 @@ try {
 
   step('hostile: a card frames the app to script another card\'s frame: the app refuses to be framed');
   const framer = await context.newPage();
-  framer.setDefaultTimeout(30000);
+  framer.setDefaultTimeout(ms(30000));
   await framer.goto(`${contentOrigin}/w/one/alpha/helper.html`);
   assert.notEqual(await framer.evaluate(() => window.__attack('frame')), 'injected');
   betaUntouched();
@@ -310,7 +311,7 @@ try {
 
   step('hostile: a card opens the app in a popup and scripts another card\'s frame: no handle to the app');
   const opener = await context.newPage();
-  opener.setDefaultTimeout(30000);
+  opener.setDefaultTimeout(ms(30000));
   await opener.goto(`${contentOrigin}/w/one/alpha/helper.html`);
   assert.notEqual(await opener.evaluate(() => window.__attack('popup')), 'injected');
   betaUntouched();
@@ -325,7 +326,7 @@ try {
   await page.goto(`${appOrigin}/one#/beta/0`);
   await page.reload();
   await page.locator('iframe.report-frame').waitFor();
-  popup.setDefaultTimeout(30000);
+  popup.setDefaultTimeout(ms(30000));
   assert.notEqual(await popup.evaluate(() => window.__attack('held')), 'injected');
   betaUntouched();
   await popup.close();

@@ -1,5 +1,6 @@
 // Isolated local documents. No production session is touched.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -19,7 +20,7 @@ try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const context = await browser.newContext({ viewport: { width: 650, height: 740 } });
   await context.route('https://browser-check.example/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>External destination</h1>' }));
-  const page = await context.newPage(); page.setDefaultTimeout(10000);
+  const page = await context.newPage(); page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   async function popup(click, expected) {
     const next = context.waitForEvent('page');

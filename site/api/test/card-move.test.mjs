@@ -12,7 +12,17 @@ import { MAX_BYTES, MAX_FILES, memoryMoveLog, moveCard, moveProgress } from '../
 import { createBucketCardStore, createCardStore } from '../card-state.mjs';
 
 // Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
-const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
+// The limit is generous (a PC running other suites is 20 times slower than an idle one) and the
+// run is cut short when a test that timed out left a server or timer open, which would otherwise
+// keep the process alive for ever.
+const TEST_MS = Number(process.env.BUW_TEST_TIMEOUT_MS) || 120_000;
+const test = (name, fn) => baseTest(name, { timeout: TEST_MS }, fn);
+baseTest.after(() => {
+  setTimeout(() => {
+    console.error('card-move tests: a server or timer was left open after the last test; stopping.');
+    process.exit(process.exitCode || 1);
+  }, 10_000).unref();
+});
 
 const now = () => new Date('2026-10-30T10:00:00Z');
 const entity = (id, extra = {}) => ({ id, folder: `2026-10-29_${id}`, title: id, category: 'ideas', created: '2026-10-29', updated: '2026-10-29', steps: [{ name: 'Overview', path: 'index.md' }, { name: 'Page', path: 'page.html' }], ...extra });

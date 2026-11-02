@@ -2,6 +2,7 @@
 // service with a PC status seeded: fresh (one busy and one idle session), with a blocked session, and 40
 // minutes old (asleep or off, falls back to event rows). At 1920 x 1080 and 390 x 844.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { eventJson, minutesAgo, requestJson } from '../../site/api/test/hub-fixtures.mjs';
@@ -16,7 +17,7 @@ const open = async (viewport, fixture) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   await page.goto(`${fixture.url}#/~hub/today`);
   await page.locator('.today-head').waitFor();

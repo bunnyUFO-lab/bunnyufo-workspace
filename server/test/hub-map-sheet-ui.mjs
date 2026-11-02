@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, checklistJson, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
@@ -50,7 +51,7 @@ const open = async (viewport, options = {}) => {
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = [];
   page.on('pageerror', error => errors.push(error));
   page.errors = errors;
@@ -85,6 +86,8 @@ try {
     assert.deepEqual(await cards.allInnerTexts(), ['Mission control'], 'The card that resolves is linked, the one that does not is dropped.');
     assert.equal(await cards.first().getAttribute('href'), '/sheetlib#/mission');
     assert.equal(await cards.first().getAttribute('target'), null, 'It opens in the same tab.');
+    // The panel's colours settle after its opening transition, which a busy PC stretches; read them once they have.
+    await cards.first().evaluate(link => new Promise(resolve => { const end = Date.now() + 5000; const check = () => { const same = getComputedStyle(link).color === getComputedStyle(link.closest('.hub-map-panel')).color; if (!same || Date.now() > end) resolve(); else setTimeout(check, 50); }; check(); }));
     const look = await cards.first().evaluate(link => { const style = getComputedStyle(link); return { color: style.color, line: style.textDecorationLine, text: getComputedStyle(link.closest('.hub-map-panel')).color }; });
     assert.notEqual(look.color, look.text, 'A Library link is coloured, not the text colour.');
     assert.match(look.line, /underline/, 'And underlined.');

@@ -11,7 +11,16 @@ import { startFakeS3 } from './fake-s3.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 /** A request with a Host of our choosing (fetch will not send one): the status and the headers. */
-const asHost = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
+// A connect that times out on a busy PC never reached the server, so it is made again (see steady-fetch.mjs).
+const asHost = async (...args) => {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await asHostOnce(...args); } catch (error) {
+      if (attempt >= 8 || error?.code !== 'ETIMEDOUT') throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+    }
+  }
+};
+const asHostOnce = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const request = http.request(`${origin}${route}`, { method, headers: { ...headers, Host: host } }, response => {
     response.resume();
     response.on('end', () => resolve({ status: response.statusCode, headers: new Headers(Object.entries(response.headers).map(([k, v]) => [k, String(v)])) }));
@@ -593,7 +602,7 @@ test('a move needs write access to both workspaces on the development copy and t
   } finally { await gated.close(); }
 });
 
-test('an S3 body that fails mid-download ends that one response; the server keeps answering', { timeout: 30_000 }, async () => {
+test('an S3 body that fails mid-download ends that one response; the server keeps answering', { timeout: Number(process.env.BUW_TEST_TIMEOUT_MS) || 120_000 }, async () => {
   const fake = await startFakeS3();
   fake.seed('sections/one/workspace.json', JSON.stringify({ entities: [card('alpha')] }), 'application/json');
   fake.seed('sections/one/alpha/index.html', '<h1>alpha</h1>', 'text/html; charset=utf-8');

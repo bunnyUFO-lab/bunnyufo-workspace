@@ -2,6 +2,7 @@
 // it shows for a Hermes job only, defaults to Auto, sends an id with the request, and a signed approval carries it into the
 // run block and the Hermes run. A PC, cloud or at-the-PC job shows no menu. Phone width has no sideways scroll.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -16,7 +17,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

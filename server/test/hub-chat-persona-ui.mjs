@@ -3,6 +3,7 @@
 // the replies show the agent; the chat reopens on it with no picker and a tag in the drawer; a new chat is Hermes again; Get help
 // has no picker; "Start a job instead..." opens Spawn on the persona's preset; at 390 px nothing scrolls sideways.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -13,7 +14,7 @@ const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

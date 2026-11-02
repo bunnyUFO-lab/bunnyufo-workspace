@@ -2,6 +2,7 @@
 // code (not with its backticks), a reply keeps its line breaks and its paragraphs apart, and a reply's code block has a
 // Copy button that copies a plain PowerShell block as one line.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -13,7 +14,7 @@ const browser = await chromium.launch({ headless: true, channel });
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   await page.goto(fixture.url);
   await page.locator('[data-hub-link="chat"]').click();

@@ -1,3 +1,5 @@
+// The runs below stay open for seconds, not tenths: the test replies while the run is going, and a PC running other suites can be a few
+// seconds late with that reply. A run that is meant to end does so when the test lets it, or after its wait.
 // Replying to a Hermes job while it runs: the reply goes in through Hermes's steer route, is kept as a signed file, and what Hermes
 // did not read goes out as the next run when a completed run ends. Fake Hermes and the stand-in S3; nothing real is reached.
 import test from 'node:test';
@@ -27,7 +29,7 @@ const sse = async (api, id) => {
 };
 
 test('a reply while it works is steered in, signed, recorded as sent, replayed on the stream, and read after the next tool', async () => {
-  const s = await stack({ hermesOptions: { runScript: ['Reading. ', { wait: 400 }, { tool: 'web_search', preview: 'tugs' }, { wait: 50 }, 'Done.'], endWith: CARD } });
+  const s = await stack({ hermesOptions: { runScript: ['Reading. ', { wait: 4000 }, { tool: 'web_search', preview: 'tugs' }, { wait: 50 }, 'Done.'], endWith: CARD } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -58,7 +60,7 @@ test('a reply while it works is steered in, signed, recorded as sent, replayed o
 });
 
 test('a forged or foreign reply file is ignored, and a reply file written by the card API path is owner-only', async () => {
-  const s = await stack({ hermesOptions: { runScript: ['Reading. ', { wait: 300 }, 'Done.'], endWith: CARD } });
+  const s = await stack({ hermesOptions: { runScript: ['Reading. ', { wait: 3000 }, 'Done.'], endWith: CARD } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -72,7 +74,7 @@ test('a forged or foreign reply file is ignored, and a reply file written by the
 });
 
 test('Hermes refusing the steer queues the reply, and a run that completes sends it as the next run, signed as the owner', async () => {
-  const s = await stack({ hermesOptions: { refuseSteer: true, runScript: ['Reading. ', { wait: 300 }, 'Done.'], endWith: CARD } });
+  const s = await stack({ hermesOptions: { refuseSteer: true, runScript: ['Reading. ', { wait: 3000 }, 'Done.'], endWith: CARD } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -100,7 +102,7 @@ test('Hermes refusing the steer queues the reply, and a run that completes sends
 
 test('the Codex path: a steer Hermes accepts and never reads, a missing route and a broken route all end as the next run, never a lost reply', async () => {
   for (const [name, options] of [['accepted and ignored', { ignoreSteer: true }], ['route missing', { steerMissing: true }], ['route broken', { steerBroken: true }]]) {
-    const s = await stack({ hermesOptions: { ...options, runScript: ['Reading. ', { wait: 200 }, { tool: 'web_search' }, 'Done.'], endWith: CARD } });
+    const s = await stack({ hermesOptions: { ...options, runScript: ['Reading. ', { wait: 3000 }, { tool: 'web_search' }, 'Done.'], endWith: CARD } });
     try {
       const api = await s.addHub();
       const id = await going(s, api);
@@ -155,7 +157,7 @@ test('after Stop the reply is not sent on its own: no continuation, and the deta
 
 test('a run that timed out or failed sends nothing on its own', async () => {
   const s = await stack({ hermesOptions: { runScript: ['start ', { hold: true }] } });
-  const failed = await stack({ hermesOptions: { refuseSteer: true, runScript: ['start ', { wait: 250 }, { fail: 'boom' }] } });
+  const failed = await stack({ hermesOptions: { refuseSteer: true, runScript: ['start ', { wait: 2500 }, { fail: 'boom' }] } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -178,7 +180,7 @@ test('a run that timed out or failed sends nothing on its own', async () => {
 });
 
 test('a run that ended asking takes a queued reply as the answer', async () => {
-  const s = await stack({ hermesOptions: { refuseSteer: true, runScript: ['Looking. ', { wait: 250 }, 'Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' } });
+  const s = await stack({ hermesOptions: { refuseSteer: true, runScript: ['Looking. ', { wait: 2500 }, 'Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -266,7 +268,7 @@ test('Hermes sends pending_steer as one newline-joined string; two long replies 
 });
 
 test('replies the quota-failed run took show as not sent once the retry run is stopped', async () => {
-  const s = await stack({ hermesOptions: { runScripts: [['a ', { wait: 500 }, { fail: '429 usage limit reached' }], ['b ', { hold: true }]] } });
+  const s = await stack({ hermesOptions: { runScripts: [['a ', { wait: 5000 }, { fail: '429 usage limit reached' }], ['b ', { hold: true }]] } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);
@@ -282,7 +284,7 @@ test('replies the quota-failed run took show as not sent once the retry run is s
 });
 
 test('a validly signed reply file copied from another request is neither listed nor sent', async () => {
-  const s = await stack({ hermesOptions: { runScript: ['Working. ', { wait: 300 }, 'Done.'], endWith: CARD } });
+  const s = await stack({ hermesOptions: { runScript: ['Working. ', { wait: 3000 }, 'Done.'], endWith: CARD } });
   try {
     const api = await s.addHub();
     const id = await going(s, api);

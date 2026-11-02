@@ -3,6 +3,7 @@
 // which says "Continues <- id"; the original says "Continued as -> id" and its box is off with the reason; a PC job, a job Hermes has
 // not started and a job still going show the box off with their reasons; a phone shows the box without sideways scroll.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -16,7 +17,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -58,7 +59,7 @@ try {
   await page.locator(`[data-need="approval-${ids.done}"] [data-approval-approve]`).click();
   await page.locator('[data-next-note]').waitFor();
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.done)}`);
-  await page.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: 30000 });
+  await page.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: ms(30000) });
   const box = page.locator(GATE);
   await box.waitFor();
   assert.equal(await box.getAttribute('data-reply-off'), null, 'A done Hermes job takes a reply.');
@@ -182,10 +183,10 @@ try {
   assert.equal(await you.getAttribute('data-run-you'), 'sent');
   assert.equal(await steerBox.locator('[data-reply-input]').inputValue(), '', 'The textarea cleared.');
   assert.equal(await steerer.evaluate(() => window.location.hash.includes('/request/')), true, 'The page stays on this run.');
-  await readView.locator('[data-run-you="read"]').waitFor({ timeout: 20000 });
+  await readView.locator('[data-run-you="read"]').waitFor({ timeout: ms(20000) });
   assert.equal((await readView.locator('[data-run-you-state]').innerText()).trim(), 'read');
   assert.equal(slow.hermes.steers[0].input, 'Message from the owner while you work: Look at the wooden one too');
-  await readView.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: 30000 });
+  await readView.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: ms(30000) });
   assert.match(await readView.locator('[data-step="reply"]').innerText(), /^You: Look at the wooden one too · sent$/);
   assert.equal(await readView.locator('[data-step="continued"]').count(), 0, 'It was read, so no second run.');
 
@@ -209,7 +210,7 @@ try {
   await refusedView.locator('[data-run-you="queued"]').waitFor();
   assert.match(await refusedView.locator('[data-reply-note]').innerText(), /goes out as the next run when this one ends/);
   const nextLink = refusedView.locator('[data-run-reply-to]');
-  await nextLink.waitFor({ timeout: 30000 });
+  await nextLink.waitFor({ timeout: ms(30000) });
   assert.match(await refusedView.locator('[data-step="reply"]').innerText(), /^You: Also compare prices · sent as the next run → /);
   const nextRun = (await nextLink.innerText()).trim();
   assert.equal(refuse.fake.json(`sections/inbox/requests/${nextRun}/request.json`).continues.replies[0], 'Also compare prices');
@@ -259,7 +260,7 @@ try {
   await askView.locator('[data-reply-input]').fill('The wooden one');
   await askView.locator('[data-reply-send]').click();
   await askView.locator('[data-run-you="queued"]').waitFor();
-  await askView.locator('[data-run-reply-to]').waitFor({ timeout: 30000 });
+  await askView.locator('[data-run-reply-to]').waitFor({ timeout: ms(30000) });
   assert.match(await askView.locator('[data-step="reply"]').innerText(), /^You: The wooden one · sent as the next run → /);
   assert.equal(await askView.locator('[data-run-send-now]').count(), 0, 'It was carried; there is nothing to send again.');
   const answerId = (await askView.locator('[data-run-reply-to]').innerText()).trim();

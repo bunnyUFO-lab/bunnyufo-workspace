@@ -4,6 +4,7 @@
 // an at-PC request copies its prompt and Mark done writes a manual result; an expired approval is approved again; a link
 // opens the item; "Signed by policy"; and the item at 375 px.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -17,7 +18,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'], ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

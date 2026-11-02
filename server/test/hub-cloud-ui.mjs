@@ -4,6 +4,7 @@
 // Today counts the day's cloud runs, the dry run says nothing was sent, and no routine address, token or repo key reaches the
 // page. With BUW_SHOTS=<dir> it also saves a screenshot per state (for a pull request).
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -23,7 +24,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(ms(20000));
   page.on('pageerror', error => { throw error; });
   watch(page);
   return page;

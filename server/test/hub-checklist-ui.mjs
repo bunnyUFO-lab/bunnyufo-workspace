@@ -3,6 +3,7 @@
 // targets, Copy (a plain PowerShell block as one line), ticks that show at once and survive a reload, an untick, a failed tick, Submit with its one warning,
 // the submitted list, and the read-only host. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -22,7 +23,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -107,14 +108,14 @@ try {
   await page.locator('.hub-copy', { hasText: /^Copied$/ }).waitFor();
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(clipboard.split(/\r?\n/).join('\n'), 'ssh root@host.example.test\nbunnylink-secret set discord-bot-token');
-  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: 4000 });
+  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: ms(4000) });
 
   step('a plain multi-line PowerShell block is copied as one line, and the button says so');
   await copyPowerShell.tap();
   await page.locator('.hub-copy', { hasText: 'Copied as one line' }).waitFor();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'cd C:\\Users\\owner\\discord-bot; npm run check');
   assert.match(await page.locator('[data-item="02"] pre').nth(1).innerText(), /discord-bot\nnpm run check/, 'The block still shows its two lines.');
-  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: 6000 });
+  await page.locator('.hub-copy', { hasText: /^Copy$/ }).nth(1).waitFor({ timeout: ms(6000) });
 
   step('with a mouse, the first click on Copy copies (the step it is in becomes the target on pointerdown and re-renders)');
   const desk = await open({ width: 1100, height: 900 }, { permissions: ['clipboard-read', 'clipboard-write'] });
@@ -122,7 +123,7 @@ try {
   await desk.locator('[data-item="02"] pre').nth(1).waitFor();
   assert.equal(await desk.locator('.hub-cl-item.target').count(), 0, 'No step is the target yet, so the click below makes one.');
   await desk.locator('[data-item="02"] .hub-copy').nth(1).click();
-  await desk.locator('.hub-copy', { hasText: 'Copied as one line' }).waitFor({ timeout: 3000 });
+  await desk.locator('.hub-copy', { hasText: 'Copied as one line' }).waitFor({ timeout: ms(3000) });
   assert.equal(await desk.evaluate(() => navigator.clipboard.readText()), 'cd C:\\Users\\owner\\discord-bot; npm run check');
   assert.equal(await desk.locator('[data-item="02"].target').count(), 1);
 

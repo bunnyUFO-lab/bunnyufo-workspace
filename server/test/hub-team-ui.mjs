@@ -1,5 +1,6 @@
 // Run after npm run build. The Team screen and its Sprite sheet through a real browser, over the hub fixture.
 import { chromium } from '@playwright/test';
+import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { BUILTIN, genSprite } from '../../src/hub/team/sprites.ts';
@@ -32,7 +33,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -171,11 +172,11 @@ try {
   const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   contexts.push(guestContext);
   await guestContext.route('**/api/capabilities', async route => {
-    const response = await route.fetch();
+    const response = await steadyFetch(route);
     await route.fulfill({ response, json: { ...(await response.json()), write: false } });
   });
   const guest = await guestContext.newPage();
-  guest.setDefaultTimeout(15000);
+  guest.setDefaultTimeout(ms(15000));
   await guest.goto(`${fixture.url}#/~hub/team`);
   await guest.locator('.team-card').first().waitFor();
   assert.equal(await guest.locator('[data-sprite-open]').count(), 0, 'No Sprite button without write.');

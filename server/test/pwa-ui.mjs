@@ -4,6 +4,7 @@
 // A card read once opens again with no network; /api/* is never kept; the manifest names its three
 // icons; and a redirect to the sign-in page reaches the browser, not a cached copy of the app.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -45,7 +46,7 @@ const browser = await chromium.launch({ headless: true, channel: process.env.BUW
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
 
   // 1. The worker installs. The first load is not under it, so load again to let it see the app.

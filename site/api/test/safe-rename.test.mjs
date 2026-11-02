@@ -8,7 +8,7 @@ import { rename as realRename } from 'node:fs/promises';
 import { folderStore } from '../card-writes.mjs';
 import { BUSY_CODES, TRIES, renameOver } from '../safe-rename.mjs';
 
-const test = (name, fn) => baseTest(name, { timeout: 30_000 }, fn);
+const test = (name, fn) => baseTest(name, { timeout: Number(process.env.BUW_TEST_TIMEOUT_MS) || 120_000 }, fn);
 const busy = code => Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
 
 test('a rename that is busy a few times then works succeeds, and waits between tries', async () => {

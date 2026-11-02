@@ -3,6 +3,7 @@
 // Stop on a held run ends in "Stopped"; the drawer is a bottom sheet at 375 px; a request signed by policy, a retried one and
 // one that ended in a question read right on the request's page.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -16,7 +17,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(ms(20000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -135,14 +136,14 @@ try {
   await board.goto(`${held.url}#/~hub/work/magic-loops`);
   const card = board.locator(`[data-card="request:${ids.work}"]`);
   await board.locator('.wk-lane').first().waitFor();
-  await board.locator('.wk-lane[data-lane="running"] [data-card="request:' + ids.work + '"]').waitFor({ state: 'attached', timeout: 30000 });
+  await board.locator('.wk-lane[data-lane="running"] [data-card="request:' + ids.work + '"]').waitFor({ state: 'attached', timeout: ms(30000) });
   await card.evaluate(node => node.click());
   const boardDrawer = board.locator('[data-run-drawer]');
   await boardDrawer.locator('[data-run-text]', { hasText: 'Working on it.' }).waitFor();
   await boardDrawer.locator('[data-run-stop]').click();
   await boardDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   const stoppedAt = Date.now();
-  await board.locator(`[data-card="request:${ids.work}"]`).waitFor({ state: 'detached', timeout: 3000 });
+  await board.locator(`[data-card="request:${ids.work}"]`).waitFor({ state: 'detached', timeout: ms(3000) });
   assert.ok(Date.now() - stoppedAt <= 3200, 'Work heard of the stop within 3 s.');
   const wrote = await board.evaluate(() => window.__wrote);
   await board.waitForTimeout(2500);

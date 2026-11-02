@@ -69,6 +69,8 @@ async function setup() {
   const spool = path.join(dir, 'spool.jsonl');
   const base = {
     ...process.env, HOME: dir, USERPROFILE: dir, BUW_REGISTRY: path.join(dir, 'none.json'), BUW_SPOOL: spool,
+    // The CLI is a child process: give its fetch the same steadiness as ours (a connect to 127.0.0.1 can time out on a busy PC).
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(path.join(repo, 'site/api/test/steady-fetch.mjs')).href}`.trim(),
     BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: '', BUW_CARDS_RETRY_MS: '5', CLAUDE_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: '', BUW_DISCORD_OWNER_ID: '',
   };
   delete base.AWS_ACCESS_KEY_ID;

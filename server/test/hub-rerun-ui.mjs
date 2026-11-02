@@ -3,6 +3,7 @@
 // approved it), a second Ask for the same run says it was already approved again, "Keep it denied" shows no notice, and an
 // Ask whose run cannot be run again says why. At 1280 and 375 px; nothing scrolls sideways.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson } from '../../site/api/test/hub-fixtures.mjs';
@@ -47,7 +48,7 @@ try {
   for (const [name, viewport] of [['1280', { width: 1280, height: 900 }], ['375', { width: 375, height: 800 }]]) {
     const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
     const page = await context.newPage();
-    page.setDefaultTimeout(15000);
+    page.setDefaultTimeout(ms(15000));
     page.on('pageerror', error => { throw error; });
     const noSideways = async what => {
       const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
