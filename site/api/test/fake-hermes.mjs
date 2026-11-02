@@ -8,10 +8,12 @@
 //   hermes.runs         one record per run: { id, body, key, status, output, error, servedBy, events, approvals, stopped }
 //   hermes.approvals    every body posted to /approval; hermes.stops: the run ids stopped
 //   hermes.release(id, output?)  ends a run held by a `{ hold: true }` step as completed
+//   hermes.go(name)     opens the gate `{ until: name }` for every run, now or later (it stays open)
 //   hermes.forget(id)   drops one run, as a Hermes restart would (status and events answer 404)
 // Options for runs:
 //   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms? } (ms: how long the step runs before it completes) | { approval: { command?, description? } }
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
+//                  | { until: 'name' } (waits for `hermes.go('name')`: a step the test releases, not a delay a slow PC can overrun)
 //                  | { end: 'output' } | { fail: 'error text' }. Default: the `chunks` as deltas.
 //   refuseSteer    POST /v1/runs/:id/steer always answers 409 steer_not_accepted
 //   steerMissing   the steer route answers 404 not_found (an older Hermes without it)
@@ -62,6 +64,7 @@ export async function startFakeHermes({
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const runs = [];
   const approvals = [];
+  const gates = new Set();
   const stops = [];
   const steers = [];
   const byId = new Map();
@@ -81,7 +84,8 @@ export async function startFakeHermes({
     const timer = ms === Infinity ? null : setTimeout(done, ms);
     function done() { clearTimeout(timer); run.wakers.delete(done); resolve(run.stopped); }
     run.wakers.add(done);
-    if (run.stopped) done();
+    // A release that came before the run reached its hold still counts, so the order of the two does not matter.
+    if (run.stopped || (ms === Infinity && run.released)) done();
   });
   const wakeAll = run => { for (const wake of [...run.wakers]) wake(); };
   // S4: provider and model read "" on every completed run. `reportServed: true` fills in the served pair for the fallback tests.
@@ -143,6 +147,7 @@ export async function startFakeHermes({
       if (run.stopped) break;
       if (typeof step === 'string') { text += step; emit(run, 'message.delta', { delta: step }); continue; }
       if (step.wait !== undefined) { await pause(run, step.wait); continue; }
+      if (step.until !== undefined) { while (!gates.has(step.until) && !run.stopped) await pause(run, 20); continue; }
       if (step.hold) {
         await pause(run, Infinity);
         if (run.released) { if (run.released.output !== undefined) text = run.released.output; ended = true; }
@@ -322,6 +327,7 @@ export async function startFakeHermes({
   await listenOnGoodPort(server, '127.0.0.1');
   return {
     url: `http://127.0.0.1:${server.address().port}`, requests, state, runs, approvals, stops, steers,
+    go: name => { gates.add(name); },
     release: (id, output) => { const run = byId.get(id); run.released = { output }; wakeAll(run); },
     forget: id => { byId.delete(id); },
     // A gateway shutdown: a live run ends `interrupted` (event run.interrupted), as Hermes does.

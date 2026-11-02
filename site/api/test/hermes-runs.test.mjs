@@ -83,15 +83,19 @@ test('a pinned run is not retried on Anthropic after a quota failure', async () 
 });
 
 test('the events route streams the run and ends with state done; a finished run answers state at once', async () => {
-  const s = await stack({ hermesOptions: { runScript: ['one ', { wait: 120 }, 'two', { end: 'All set.\nCARD: assistant/x' }] } });
+  const s = await stack({ hermesOptions: { runScript: ['one ', 'two', { hold: true }] } });
   try {
     const api = await s.addHub();
     const id = s.propose();
     await approve(api, id);
-    const text = await (await fetch(`${api.origin}/api/hub/requests/${id}/events`)).text();
+    // The run is held until the stream is open, so a slow PC cannot finish it first (a finished run answers only its state).
+    await until(() => s.hermes.runs[0]?.events.some(event => event.event === 'message.delta'), 'the run to stream');
+    const streaming = await fetch(`${api.origin}/api/hub/requests/${id}/events`);
+    s.hermes.release(s.hermes.runs[0].id, 'All set.\nCARD: assistant/x');
+    const text = await streaming.text();
     const events = [...text.matchAll(/event: ([\w.]+)\ndata: (.*)\n/g)].map(match => [match[1], JSON.parse(match[2])]);
     const names = events.map(([name]) => name);
-    assert.ok(names.includes('message.delta') && names.includes('run.completed'));
+    assert.ok(names.includes('message.delta') && names.includes('run.completed'), `The stream: ${text}`);
     assert.deepEqual(events.at(-1), ['state', { state: 'done' }]);
     assert.deepEqual(events.filter(([name]) => name === 'message.delta').map(([, data]) => data.delta), ['one ', 'two']);
     assert.ok(names.indexOf('run.completed') < names.indexOf('state'));
@@ -488,13 +492,16 @@ test('a Hermes approval is copied once, pings once, is a Needs you row, and the 
 });
 
 test('answering after the run ended, or after the 5 minutes, writes forwarded false and answers 409', async () => {
-  const s = await stack({ hermesOptions: { askApproval: true, approvalTimeoutMs: 120, endWith: 'Denied.\nCARD: assistant/denied' } });
+  const s = await stack({ hermesOptions: { askApproval: true, endWith: 'Denied.\nCARD: assistant/denied' } });
   const t = await stack({ hermesOptions: { askApproval: true } });
   try {
     const api = await s.addHub();
     const id = s.propose();
     await approve(api, id);
     const folder = await until(() => [...s.fake.objects.keys()].find(name => name.endsWith('/approval.json')), 'approval.json');
+    // Hermes gives up on the question when the test says so, not after a real-time delay a slow PC can overrun.
+    await until(() => s.hermes.runs[0].answer, 'Hermes to wait for the answer');
+    s.hermes.runs[0].answer('timeout');
     await until(() => s.resultOf(id), 'the run to end after Hermes denied it');
     const approvalId = folder.split('/').at(-2);
     assert.equal((await api.get('/hub/inbox?filter=needs-you')).body.items.some(item => item.kind === 'hermes-approval'), false, 'An item whose run ended leaves Needs you.');
@@ -848,7 +855,7 @@ test('steer: 200 is accepted; 409, 400, 404 and a 500 are "not accepted" with th
   const old = await startFakeHermes({ key: 'k', steerMissing: true, runScript: [{ hold: true }] });
   const broken = await startFakeHermes({ key: 'k', steerBroken: true, runScript: [{ hold: true }] });
   try {
-    const client = url => createHermesRuns({ env: { HERMES_URL: url, HERMES_API_KEY: 'k' }, timeoutMs: 500 });
+    const client = url => createHermesRuns({ env: { HERMES_URL: url, HERMES_API_KEY: 'k' }, timeoutMs: 20_000 });
     const runs = client(fake.url);
     const { runId } = await runs.start({ input: 'go' });
     await until(() => fake.runs[0].events.length > 0, 'the run to start');

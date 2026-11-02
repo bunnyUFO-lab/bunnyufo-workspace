@@ -16,7 +16,8 @@ import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
 const MIN = 60000;
-const NOW = new Date();
+// A fixed clock, not the real one: a run near midnight or a month end must read the same as any other.
+const NOW = new Date('2026-10-30T12:00:00Z');
 const keyPair = generateKeyPairSync('ed25519');
 const SIGNING = { HUB_SIGNING_KEY: keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') };
 const SECRET_PATH = '/hooks/SECRETWAKE789';

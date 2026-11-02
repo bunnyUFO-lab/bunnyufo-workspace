@@ -81,7 +81,12 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
     if (projectsCache && Date.now() - projectsCache.at < PROJECTS_TTL) return undefined
     const controller = new AbortController()
     hubGet<{ projects: HubProject[] }>('/projects', controller.signal).then(
-      answer => { projectsCache = { at: Date.now(), projects: answer.projects }; setProjects(answer.projects) },
+      answer => {
+        // An answer that is not JSON reads as null: no roadmaps, never a thrown error.
+        const list = Array.isArray(answer?.projects) ? answer.projects : []
+        projectsCache = { at: Date.now(), projects: list }
+        setProjects(list)
+      },
       () => { /* no roadmaps listed; the rest still works */ },
     )
     return () => controller.abort()

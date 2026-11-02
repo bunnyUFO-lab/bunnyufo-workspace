@@ -8,7 +8,7 @@ export function usePcWake(enabled = true): PcWake | null {
   useEffect(() => {
     if (!enabled) return undefined
     const controller = new AbortController()
-    const load = () => { hubGet<{ wake?: PcWake }>('/pc', controller.signal).then(answer => setWake(answer.wake ?? null), () => { /* no wake line */ }) }
+    const load = () => { hubGet<{ wake?: PcWake }>('/pc', controller.signal).then(answer => setWake(answer?.wake ?? null), () => { /* no wake line */ }) }
     load()
     window.addEventListener(HUB_WROTE, load)
     const timer = window.setInterval(load, 30000)

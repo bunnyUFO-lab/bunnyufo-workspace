@@ -8,18 +8,12 @@ import http from 'node:http';
 import { createSiteApi, slugify } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
+import { repeatConnect } from './steady-fetch.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 /** A request with a Host of our choosing (fetch will not send one): the status and the headers. */
 // A connect that times out on a busy PC never reached the server, so it is made again (see steady-fetch.mjs).
-const asHost = async (...args) => {
-  for (let attempt = 1; ; attempt += 1) {
-    try { return await asHostOnce(...args); } catch (error) {
-      if (attempt >= 8 || error?.code !== 'ETIMEDOUT') throw error;
-      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-    }
-  }
-};
+const asHost = (...args) => repeatConnect(() => asHostOnce(...args), error => error?.code);
 const asHostOnce = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const request = http.request(`${origin}${route}`, { method, headers: { ...headers, Host: host } }, response => {
     response.resume();

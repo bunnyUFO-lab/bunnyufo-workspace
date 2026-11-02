@@ -7,21 +7,34 @@
 // repeats it with a short pause. Any other error, and any answer from a server, passes
 // through untouched. Imported by the fake S3, the fake Hermes and the UI tests' helpers;
 // importing it twice does nothing.
+//
+// What is repeated, and for how long (ws-80u): a connect that TIMED OUT (ETIMEDOUT, undici's connect
+// timeout), for up to 30 s, since on a loaded PC one repeat is not always enough. A refused connect
+// (ECONNREFUSED) is repeated only in the first second after the test process started, while a fixture
+// may still be coming up; after that it means the server is gone, so a crashed fixture fails at once.
+// A reset (ECONNRESET) is never repeated: the request may have reached the server.
 const real = globalThis.fetch;
-const CONNECT_FAILURES = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
-const TRIES = 8;
+export const STARTED_AT = Date.now();
+export const REFUSED_WINDOW_MS = 1000;
+const BUDGET_MS = 30_000;
+export const isConnectFailure = code => code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT'
+  || (code === 'ECONNREFUSED' && Date.now() - STARTED_AT < REFUSED_WINDOW_MS);
+
+/** Runs `attempt()` again while it fails with a connect failure (by `codeOf(error)`) inside the budget. */
+export async function repeatConnect(attempt, codeOf, { budgetMs = BUDGET_MS, aborted = () => false } = {}) {
+  const end = Date.now() + budgetMs;
+  for (let tries = 1; ; tries += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (Date.now() > end || !isConnectFailure(codeOf(error)) || aborted()) throw error;
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000, 100 * tries)));
+    }
+  }
+}
 
 if (!real.steady) {
-  const steady = async (input, init) => {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        return await real(input, init);
-      } catch (error) {
-        if (attempt >= TRIES || !CONNECT_FAILURES.has(error?.cause?.code) || init?.signal?.aborted) throw error;
-        await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-      }
-    }
-  };
+  const steady = (input, init) => repeatConnect(() => real(input, init), error => error?.cause?.code, { aborted: () => !!init?.signal?.aborted });
   steady.steady = true;
   globalThis.fetch = steady;
 }
