@@ -53,6 +53,7 @@
 .ni-chip.fail { color: var(--st-failed); border-color: color-mix(in srgb, var(--st-failed) 30%, transparent); background: color-mix(in srgb, var(--st-failed) 10%, transparent); }
 .ni-chip.noted { color: var(--st-needs); border-color: color-mix(in srgb, var(--st-needs) 30%, transparent); background: color-mix(in srgb, var(--st-needs) 10%, transparent); }
 .ni-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ni-prs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 
 .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--t1) 2%, transparent); }
 .four > div { padding: 10px 18px; border-left: 1px solid var(--line); min-width: 0; }

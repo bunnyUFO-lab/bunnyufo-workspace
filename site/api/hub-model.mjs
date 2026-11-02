@@ -536,17 +536,50 @@ const eventItem = (kind, event, extra = {}) => ({
   ...(event.summary ? { summary: event.summary } : {}), ...extra,
 });
 
+/** A pull request link: https://github.com/<owner>/<repo>/pull/<n> and nothing else. */
+const PR_LINK_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+const prKey = url => String(url).toLowerCase();
+const prRepoOf = url => /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//.exec(url)?.[1].toLowerCase();
+
+/** The pull requests a review stands for: its checked `prs` (at most 10), else its one `url` when that is a pull request, else none. */
+export function reviewPrs(event) {
+  const listed = (Array.isArray(event.prs) ? event.prs : []).filter(value => typeof value === 'string' && PR_LINK_RE.test(value)).slice(0, 10);
+  if (listed.length) return listed;
+  return typeof event.url === 'string' && PR_LINK_RE.test(event.url) ? [event.url] : [];
+}
+
+/** The Hub project whose repository holds all of these pull requests: only when they sit in one repository and `repoProjects` (`{ 'owner/repo': project }`, lower case) names it. */
+export function projectOfPrs(prs, repoProjects = {}) {
+  const repos = new Set(prs.map(prRepoOf));
+  if (repos.size !== 1) return undefined;
+  const project = repoProjects[[...repos][0]];
+  return typeof project === 'string' && project ? project : undefined;
+}
+
+/** How many of a review's pull requests have a `pr-merged` event, and how many a `pr-merged` or `pr-closed` (closed without merging), anywhere in the window. */
+function prProgress(prs, events) {
+  const merged = new Set(events.filter(event => event.kind === 'pr-merged' && typeof event.url === 'string').map(event => prKey(event.url)));
+  const closed = new Set(events.filter(event => event.kind === 'pr-closed' && typeof event.url === 'string').map(event => prKey(event.url)));
+  return {
+    merged: prs.filter(url => merged.has(prKey(url))).length,
+    settled: prs.filter(url => merged.has(prKey(url)) || closed.has(prKey(url))).length,
+  };
+}
+
 /**
  * Reviews, blocked sessions and running sessions from a window of events (any order).
- * - review: `ready-for-review` with no later `pr-merged` for the same bead (the same url when
- *   there is no bead), and that no `review-done` event names (its `review` is the review's file name);
+ * - review: `ready-for-review` that no `review-done` event names (its `review` is the review's file name), and
+ *   - with pull requests (`prs`, or a `url` that is one): not every one of them has a `pr-merged` (or `pr-closed`)
+ *     event anywhere in the window, before or after the review, since a sprint merges before it closes the item;
+ *   - without: no later `pr-merged` for the same bead (the same url when there is no bead).
+ *   Its project is the one whose repository holds all its pull requests (`repoProjects`), else the event's;
  * - blocked: `blocked` with no later event of any kind from the same session (a `resumed`, a
  *   `session-ended`, a newer `blocked`, anything that carries the session, except a `session-items` event: a timer can post one after the prompt). A `blocked` with no
  *   session stays until the window drops it. Only a real session link (`url`, not the bare
  *   https://claude.ai/code) and a desktop link (`appUrl`) are kept;
  * - running: `session-started` with no later `session-ended` or newer `session-started` for the same session.
  */
-export function deriveEventItems(events) {
+export function deriveEventItems(events, repoProjects = {}) {
   const ordered = chronological(events);
   const after = (event, test) => ordered.some(other => byTime(event, other) < 0 && test(other));
   const done = new Set(ordered.filter(event => event.kind === 'review-done' && typeof event.review === 'string').map(event => event.review));
@@ -555,8 +588,19 @@ export function deriveEventItems(events) {
   const running = [];
   for (const event of ordered) {
     if (event.kind === 'ready-for-review') {
-      const merged = after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
-      if (!merged && !done.has(event.file)) reviews.push(eventItem('review', event, reviewExtras(event)));
+      const prs = reviewPrs(event);
+      const progress = prProgress(prs, ordered);
+      const merged = prs.length
+        ? progress.settled === prs.length
+        : after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
+      if (merged || done.has(event.file)) continue;
+      const project = projectOfPrs(prs, repoProjects);
+      reviews.push(eventItem('review', event, {
+        ...reviewExtras(event),
+        ...(Array.isArray(event.prs) && prs.length ? { prs } : {}),
+        ...(progress.merged > 0 ? { prsMerged: progress.merged } : {}),
+        ...(project ? { project } : {}),
+      }));
     } else if (event.kind === 'blocked') {
       const resolved = !!event.session && after(event, other => other.session === event.session && other.kind !== 'session-items');
       if (resolved || done.has(event.file)) continue;
@@ -594,8 +638,8 @@ export function dismissedAlerts(events) {
 }
 
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
-export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null, dismissed = new Set() }) {
-  const { reviews, blocked, running } = deriveEventItems(events);
+export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null, dismissed = new Set(), repoProjects = {} }) {
+  const { reviews, blocked, running } = deriveEventItems(events, repoProjects);
   const openAsks = asks.filter(item => item.state === 'open').sort(newest);
   // A list with every item ticked still waits for Submit, so it stays until it is submitted or withdrawn.
   const openChecklists = checklists.filter(item => item.state === 'open').sort(newest);
@@ -681,14 +725,14 @@ export function inboxFilter(raw) {
 }
 
 /** The Needs you list for one filter. `all` keeps the order Today uses: open Asks, open checklists, reviews, blocked sessions. */
-export function buildInbox({ filter: raw, asks, checklists = [], requests, hermesApprovals = [], events, now }) {
+export function buildInbox({ filter: raw, asks, checklists = [], requests, hermesApprovals = [], events, now, repoProjects = {} }) {
   const [filter, sub] = inboxFilter(raw).split(':');
   if (filter === 'requests') return [...requests].sort(newest);
   if (filter === 'answered') {
     // Answered is what the owner has answered and an agent has not taken yet; picked-up work is the agent's now, and has left the list.
     return [...asks.filter(item => item.state === 'answered'), ...checklists.filter(item => item.state === 'submitted')].sort(newest);
   }
-  const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now }).needsYou;
+  const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now, repoProjects }).needsYou;
   if (filter === 'approvals') return needs.filter(item => item.kind === 'approval');
   if (filter === 'all') return needs;
   const ofKind = needs.filter(item => needsKindOf(item) === filter);
@@ -942,13 +986,15 @@ export function screenshotPairs(urls) {
 }
 
 /** The detail of one `ready-for-review` event, or null when no such event is in `events` (any order). */
-export function reviewDetail(events, id) {
+export function reviewDetail(events, id, repoProjects = {}) {
   const event = events.find(candidate => candidate.kind === 'ready-for-review' && candidate.file === id);
   if (!event) return null;
   const text = (value, length) => (typeof value === 'string' && value.trim() ? clip(value, length) : undefined);
   const url = httpUrl(event.url);
   const card = httpUrl(event.card);
   const prs = (Array.isArray(event.prs) ? event.prs : []).filter(value => typeof value === 'string' && PR_RE.test(value)).slice(0, 10);
+  const progress = prProgress(reviewPrs(event), events);
+  const prProject = projectOfPrs(reviewPrs(event), repoProjects) ?? text(event.project, 80);
   const cardDir = typeof event.cardDir === 'string' && CARD_DIR_RE.test(event.cardDir) && !event.cardDir.includes('..') ? event.cardDir : undefined;
   const cardFiles = cardDir
     ? (Array.isArray(event.cardFiles) ? event.cardFiles : [])
@@ -965,11 +1011,12 @@ export function reviewDetail(events, id) {
   return {
     id, title: text(event.title, 200) ?? 'Review', at: event.ts,
     ...(summary ? { summary } : {}),
-    ...(text(event.project, 80) ? { project: text(event.project, 80) } : {}),
+    ...(prProject ? { project: prProject } : {}),
     ...(text(event.host, 80) ? { host: text(event.host, 80) } : {}),
     ...(text(event.source, 80) ? { source: text(event.source, 80) } : {}),
     ...(url ? { url } : {}), ...(card ? { card } : {}),
     ...(prs.length ? { prs } : {}),
+    ...(progress.merged > 0 ? { prsMerged: progress.merged } : {}),
     ...(cardDir ? { cardDir } : {}), ...(cardFiles.length ? { cardFiles } : {}),
     ...(shots.length ? { screenshots: screenshotPairs(shots) } : {}),
     ...(deployUrl ? { deployUrl } : {}),

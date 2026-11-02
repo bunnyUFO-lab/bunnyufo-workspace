@@ -45,6 +45,9 @@ export interface Item {
   /** A review row: each leg's result, and the screenshots that came with it. */
   verdicts?: { leg: Verdict['leg']; result: Verdict['result'] }[]
   shots?: number
+  /** A review row: its pull requests (https://github.com links) and how many of them have merged. */
+  prs?: string[]
+  prsMerged?: number
   /** A checklist row that is a playtest, and the platform of its build. */
   playtest?: boolean
   platform?: string
@@ -68,7 +71,7 @@ export interface Item {
 /** `describeItem` on the server: what a Needs you card says in its four cells. `age` is in minutes. */
 export interface Described { kind: NeedsKind; who: string; age: number; what: string; state: string; next: string; blocker: string }
 
-export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged'
+export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged' | 'pr-closed'
   | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'run-started' | 'run-finished' | 'session-items'
 export interface HubEvent {
   ts: string
@@ -127,6 +130,7 @@ export interface ReviewDetail {
   url?: string
   card?: string
   prs?: string[]
+  prsMerged?: number
   cardDir?: string
   cardFiles?: ReviewFile[]
   screenshots?: ShotPair[]

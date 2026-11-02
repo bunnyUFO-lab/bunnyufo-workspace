@@ -50,15 +50,38 @@ function BlockedBody({ item, onSettled }: { item: Item; onSettled: () => void })
   )
 }
 
+const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/
+
+/** A review's pull requests: its `prs`, else its one `url` when that is a pull request. */
+const reviewPrLinks = (item: Item): string[] => (item.prs?.length ? item.prs : item.url && PR_URL_RE.test(item.url) ? [item.url] : [])
+
+/** "PR #181" when every link is in one repository, "workspace-skills #64" when they span several. */
+function prLinkLabel(url: string, all: string[]): string {
+  const match = PR_URL_RE.exec(url)
+  if (!match) return 'Open link'
+  const repos = new Set(all.map(link => PR_URL_RE.exec(link)?.[1].toLowerCase()))
+  return repos.size > 1 ? `${match[1].split('/')[1]} #${match[2]}` : `PR #${match[2]}`
+}
+
 function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) {
   const verdicts = item.verdicts ?? []
+  const prs = reviewPrLinks(item)
+  const merged = item.prsMerged ?? 0
+  const allMerged = prs.length > 0 && merged >= prs.length
   return (
     <>
       <div className="ni-b">
+        {prs.length > 0 && (
+          <p className="ni-prs" data-review-prs>
+            {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer" data-review-pr>{prLinkLabel(url, prs)}</a>)}
+          </p>
+        )}
         <div className="ni-chips">
+          {allMerged && <span className="ni-chip pass" data-merged="all">Merged</span>}
+          {!allMerged && merged > 0 && <span className="ni-chip" data-merged="part">{merged} of {prs.length} merged</span>}
           {verdicts.map(verdict => <span key={verdict.leg} className={`ni-chip ${verdict.result}`} data-verdict={verdict.leg}>{VERDICT_LEG[verdict.leg]} {verdict.result}</span>)}
           {!!item.shots && <span className="ni-chip">{item.shots} {item.shots === 1 ? 'screenshot' : 'screenshots'}</span>}
-          {!verdicts.length && !item.shots && <span className="hub-muted">No test results came with this review.</span>}
+          {!verdicts.length && !item.shots && !allMerged && <span className="hub-muted">No results were attached. CI and the review are on the PR.</span>}
         </div>
       </div>
       <div className="ni-a">

@@ -253,6 +253,18 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /** The repo a project's section tracks (`workspace.json` `tracked.repo`), if any. */
   const projectRepo = async project => trackedRepo((await bucket.getJson(`${prefix}/${project}/workspace.json`).catch(() => null))?.value?.tracked?.repo);
+  /** `{ 'owner/repo': project }` (repo lower case) from the project list's tracked repos, kept for a minute: a review's project follows its pull requests' repository. */
+  let repoProjectsMemo = { at: 0, map: {} };
+  const repoProjects = async () => {
+    if (now().getTime() - repoProjectsMemo.at <= 60000) return repoProjectsMemo.map;
+    const map = {};
+    for (const row of PROJECT_DEFAULTS) {
+      const repo = await projectRepo(row.id);
+      if (repo && !(repo.toLowerCase() in map)) map[repo.toLowerCase()] = row.id;
+    }
+    repoProjectsMemo = { at: now().getTime(), map };
+    return map;
+  };
   // Approvals are signed with HUB_SIGNING_KEY. A key that does not parse turns Approve off (and says so) instead of stopping the API.
   let signingKey = null;
   let approveReason = 'Approvals are signed on the server; open mission control on the site.';
@@ -688,7 +700,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const [loaded, requests, window, asks, checklists, hermesOpen, status, marks] = await Promise.all([
       pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadChecklists(at), hermesApprovals.loadOpen(at), loadPcStatus(at), loadMarks(only),
     ]);
-    const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
+    const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at, repoProjects: await repoProjects() });
     return {
       issues: applyMarks(loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))), marks),
       requests: only ? requests.filter(item => item.project === only) : requests,
@@ -963,7 +975,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const missing = () => fail('This review is not in the last 7 days.', 404);
     if (!REVIEW_FILE_RE.test(id)) throw missing();
     const { events } = await loadEvents(at);
-    const detail = reviewDetail(events, id);
+    const detail = reviewDetail(events, id, await repoProjects());
     if (!detail) throw missing();
     if (!detail.card) {
       const inferred = await inferCard(detail).catch(() => null);
@@ -1290,7 +1302,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const status = await loadPcStatus(at);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
             const cloud = cloudOn ? await routines.capacity(at, { memo: true }).catch(() => null) : null;
-            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events) });
+            const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events), repoProjects: await repoProjects() });
             const working = await linkedWorking(workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS }), window.events);
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             reply({ ...today, counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
@@ -1305,10 +1317,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const askItems = asks.map(row => row.item);
             const listItems = checklists.map(row => row.item);
             const project = (query.get('project') ?? '').slice(0, 80);
-            const listed = fillProjects(buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at }), requests);
+            const repoMap = await repoProjects();
+            const listed = fillProjects(buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, repoProjects: repoMap }), requests);
             const items = inProject(listed, project);
             // The chips count what waits in the chosen project; `projects` counts the list on screen per project, whichever is chosen.
-            const waiting = inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou, requests), project);
+            const waiting = inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts(), repoProjects: repoMap }).needsYou, requests), project);
             const counts = inboxCounts(waiting);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.

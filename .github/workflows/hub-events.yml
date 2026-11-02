@@ -35,7 +35,7 @@ jobs:
               case "$ACTION" in
                 opened|reopened) KIND=pr-opened; WORD=opened ;;
                 closed)
-                  if [ "$MERGED" = "true" ]; then KIND=pr-merged; WORD=merged; else exit 0; fi ;;
+                  if [ "$MERGED" = "true" ]; then KIND=pr-merged; WORD=merged; else KIND=pr-closed; WORD=closed; fi ;;
                 *) exit 0 ;;
               esac
               TITLE="$PROJECT: PR $WORD: $PR_TITLE"; URL="$PR_URL"; REF="$PR_BRANCH"; ALT="$PR_TITLE" ;;

@@ -198,6 +198,9 @@ export default function ReviewView({ route }: { route: string }) {
             <h3>Pull requests</h3>
             {prs.length === 0 && <p className="hub-muted">No pull request link came with this item.</p>}
             {foundPrs && <p className="hub-muted" data-found>Found in the summary.</p>}
+            {prs.length > 0 && (detail.prsMerged ?? 0) > 0 && (
+              <p><span className={`ni-chip${detail.prsMerged! >= prs.length ? ' pass' : ''}`} data-merged={detail.prsMerged! >= prs.length ? 'all' : 'part'}>{detail.prsMerged! >= prs.length ? 'Merged' : `${detail.prsMerged} of ${prs.length} merged`}</span></p>
+            )}
             <div className="hub-review-links">
               {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer">{prLabel(url)}</a>)}
             </div>
