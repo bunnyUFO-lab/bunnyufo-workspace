@@ -1,4 +1,13 @@
-// Splits the sorted list of UI test files across parallel CI jobs: shard i of n takes every n-th file.
+// Splits the sorted list of UI test files across parallel CI jobs. With a timings map (file name to
+// seconds, scripts/ui-timings.json, measured on a CI runner) the files go greedily, slowest first, to the
+// lightest shard; a file not in the map counts as the median. Without timings, shard i of n takes every
+// n-th file. Every shard computes the same split, so each file runs in exactly one shard.
+import { readFileSync } from 'node:fs';
+
+/** The timings map next to this script, or null when it is missing or unreadable. */
+export function readTimings(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+}
 
 /** Reads `--shard i/n` (or `--shard=i/n`) out of an argument list. Returns the rest and the shard, or null. */
 export function parseShard(args) {
@@ -19,8 +28,19 @@ export function parseShard(args) {
   return { rest, shard };
 }
 
-/** Every n-th file of the (already sorted) list, starting at the i-th. */
-export function pickShard(files, shard) {
+/** The files of one shard, in their original (sorted) order. */
+export function pickShard(files, shard, timings = null) {
   if (!shard) return files;
-  return files.filter((_, at) => at % shard.count === shard.index - 1);
+  const known = Object.values(timings ?? {}).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!known.length) return files.filter((_, at) => at % shard.count === shard.index - 1);
+  const median = known[Math.floor(known.length / 2)];
+  const seconds = file => (Number.isFinite(timings[file]) ? timings[file] : median);
+  const load = Array(shard.count).fill(0);
+  const mine = new Set();
+  for (const file of [...files].sort((a, b) => seconds(b) - seconds(a) || (a < b ? -1 : 1))) {
+    const lightest = load.indexOf(Math.min(...load));
+    load[lightest] += seconds(file);
+    if (lightest === shard.index - 1) mine.add(file);
+  }
+  return files.filter(file => mine.has(file));
 }
