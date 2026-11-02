@@ -36,7 +36,7 @@
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
 //   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
-//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey]
+//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision]
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
@@ -55,6 +55,9 @@
 //        every claim in it, makes one approved copy of the run and signs it; only an Ask with --require-passkey can do that.
 //        A `denied` rerun may also carry `allow`: 1 to 5 rules (`Bash(<command>)` or `mcp__<server>__<tool>`) that the "allow" option adds to the
 //        project's PC allow list; the Hub signs them in a grant and the PC applies them only when they are the ones it suggested itself.
+//        --kind (or "kind" in ask.json) says what the Ask is, so the Hub badges and filters it: approval (a merge, a deploy, spending,
+//        a new secret, anything behind the passkey), verify (did it work: a live check), design (pick a look or a layout), decision
+//        (everything else). Anything else is refused. Left out, the Hub guesses from the Ask and says so.
 //        --question makes an Ask without a file; --option repeats (an option's picture must be among the --image files).
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
@@ -67,7 +70,10 @@
 //        exit 0 once answered (prints what get prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or when the
 //        Ask expired; a snoozed Ask keeps waiting
 //   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>]
-//        [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
+//        [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
+//        --kind (or "kind" in checklist.json) says what the steps are for, so the Hub badges and filters them: verify (a live check, a
+//        test), setup (install, paste a key, sign in), investigate (find out, look into), develop (build, fix). Anything else is refused;
+//        a playtest is --playtest and takes no --kind. Left out, the Hub guesses from the title and says so.
 //        put a checklist for the owner to tick off in the Hub (a list of steps, each with an optional guide) and post a
 //        checklist-created event; prints its id, then pings #needs-you like an Ask. The Hub writes ticks and the submission
 //        (owner-only files); nothing is ever overwritten. --file takes the checklist.json shape without id, project,
@@ -129,8 +135,8 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
-  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...\n'
-  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
+  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
+  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** The cards bucket this machine knows of: BUW_S3_BUCKET, else the first one the registry names. */
@@ -736,6 +742,10 @@ async function mapLimit(items, limit, work) {
   return results;
 }
 
+/** The kinds an Ask or a list of steps can name, so the Hub can badge them (and filter on them). Keep equal to ASK_SUBTYPES and STEPS_SUBTYPES in site/api/hub-model.mjs. */
+const ASK_KINDS = ['approval', 'verify', 'design', 'decision'];
+const STEPS_KINDS = ['verify', 'setup', 'investigate', 'develop'];
+
 function askFromFile(raw, flags, id) {
   const now = new Date();
   const from = { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}), ...(raw.from ?? {}) };
@@ -752,6 +762,7 @@ function askFromFile(raw, flags, id) {
     ...(raw.image ? { image: raw.image } : {}),
     ...(raw.avatar !== undefined ? { avatar: raw.avatar } : {}),
     ...(raw.rerun !== undefined ? { rerun: raw.rerun } : {}),
+    ...(flags.kind !== undefined ? { kind: flags.kind } : raw.kind !== undefined ? { kind: raw.kind } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
     ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
@@ -817,7 +828,7 @@ function optionFromFlag(value) {
 
 /** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
 async function askInput(flags) {
-  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey]';
+  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision]';
   if (!flags.project || (!flags.file && !flags.question)) throw new Error(usage);
   if (flags.file && flags.question) throw new Error(`Give --file, or --question, not both. ${usage}`);
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { question: flags.question };
@@ -915,6 +926,7 @@ function validateAsk(ask, imageNames) {
     }
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
+  if (ask.kind !== undefined && !ASK_KINDS.includes(ask.kind)) problems.push(`--kind is one of: ${ASK_KINDS.join(', ')}`);
   if (typeof ask.allowNote !== 'boolean' || typeof ask.allowDrawing !== 'boolean') problems.push('allowNote and allowDrawing are true or false');
   if (problems.length) throw new Error(`ask.json is not valid: ${problems.join('; ')}.`);
 }
@@ -1161,7 +1173,7 @@ function validateChecklist(raw) {
   if (!text(raw.title, L.title)) problems.push(`title is 1 to ${L.title} characters`);
   if (!optional(raw.context, L.context)) problems.push(`context is at most ${L.context} characters`);
   if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
-  if (raw.kind !== undefined && raw.kind !== 'playtest') problems.push('kind is "playtest", or left out for steps');
+  if (raw.kind !== undefined && raw.kind !== 'playtest' && !STEPS_KINDS.includes(raw.kind)) problems.push(`--kind is one of: ${STEPS_KINDS.join(', ')} (or --playtest for a playtest)`);
   if (raw.kind === 'playtest') {
     if (typeof raw.build !== 'string' || !raw.build) problems.push('a playtest needs --build, the https link of the build');
     else if (raw.build.length > L.build || !isHttps(raw.build)) problems.push(`--build is an https:// link of at most ${L.build} characters`);
@@ -1195,6 +1207,7 @@ function checklistFromInput(raw, flags, id) {
     title: raw.title.trim(),
     ...(raw.context ? { context: raw.context } : {}),
     ...(card ? { card } : {}),
+    ...(STEPS_KINDS.includes(raw.kind) ? { kind: raw.kind } : {}),
     ...(raw.kind === 'playtest' ? { kind: 'playtest', build: raw.build, platform: raw.platform ?? 'web', ...(raw.lookFor ? { lookFor: raw.lookFor } : {}) } : {}),
     items: raw.items.map((item, index) => ({
       id: String(index + 1).padStart(2, '0'), text: item.text.trim(),
@@ -1273,11 +1286,15 @@ function printChecklist(view, asJson) {
 }
 
 async function checklistCreate(flags) {
-  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
+  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
   if (!flags.project || (!flags.file && !flags.title)) throw new Error(usage);
   if (flags.file && (flags.title || flags.item)) throw new Error(`Give --file, or --title with --item, not both. ${usage}`);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is lower-case letters, digits and dashes');
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { title: flags.title, items: (flags.item ?? []).map(text => ({ text })) };
+  if (flags.kind !== undefined) {
+    if (flags.playtest) throw new Error(`--kind names what the steps are for; a playtest is --playtest, not both. ${usage}`);
+    raw.kind = flags.kind;
+  }
   for (const name of ['build', 'platform', 'look-for']) if (flags[name] !== undefined && !flags.playtest) throw new Error(`--${name} belongs to a playtest: add --playtest. ${usage}`);
   if (flags.playtest) {
     if (raw.kind !== undefined && raw.kind !== 'playtest') throw new Error(`The file is not a playtest (kind ${JSON.stringify(raw.kind)}), so --playtest does not fit. ${usage}`);

@@ -8,7 +8,7 @@ export const iso = date => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 export const minutesAgo = (now, minutes) => new Date(now.getTime() - minutes * 60000);
 export const INBOX = 'sections/inbox';
 
-export function askJson({ id, project = 'probe', bead, now = new Date(), expiresInDays = 7, question = 'Which jump arc feels right?', options, allowNote = true, allowDrawing = true, context = 'Pick the arc that reads best.', tool = 'claude-code' } = {}) {
+export function askJson({ id, project = 'probe', bead, now = new Date(), expiresInDays = 7, question = 'Which jump arc feels right?', options, allowNote = true, allowDrawing = true, context = 'Pick the arc that reads best.', tool = 'claude-code', kind, requirePasskey } = {}) {
   return {
     id, project, ...(bead ? { bead } : {}),
     createdAt: iso(now), expiresAt: iso(new Date(now.getTime() + expiresInDays * 86400000)),
@@ -16,6 +16,7 @@ export function askJson({ id, project = 'probe', bead, now = new Date(), expires
     question, context,
     ...(options ? { options } : {}),
     allowNote, allowDrawing,
+    ...(kind ? { kind } : {}), ...(requirePasskey !== undefined ? { requirePasskey } : {}),
   };
 }
 
@@ -32,10 +33,10 @@ export const checklistItems = () => [
 ];
 
 /** A checklist.json as `cards checklist create` writes it. */
-export function checklistJson({ id, project = 'probe', bead, now = new Date(), title = 'Finish the Discord bot setup', context = 'The bot needs **four** steps that only you can do.', card, items = checklistItems(), tool = 'claude-code' } = {}) {
+export function checklistJson({ id, project = 'probe', bead, now = new Date(), title = 'Finish the Discord bot setup', context = 'The bot needs **four** steps that only you can do.', card, items = checklistItems(), tool = 'claude-code', kind } = {}) {
   return {
     id, project, createdAt: now.toISOString(), from: { host: 'pc.example.test', tool, session: 'sess-checklist' },
-    ...(bead ? { bead } : {}), title, ...(context ? { context } : {}), ...(card ? { card } : {}),
+    ...(bead ? { bead } : {}), title, ...(context ? { context } : {}), ...(card ? { card } : {}), ...(kind ? { kind } : {}),
     items: items.map((item, index) => ({ id: String(index + 1).padStart(2, '0'), ...item })),
   };
 }

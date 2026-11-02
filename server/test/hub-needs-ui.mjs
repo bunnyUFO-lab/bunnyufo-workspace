@@ -95,7 +95,7 @@ try {
   assert.deepEqual(await steps.locator('.four dd').allInnerTexts(), ['Steps only you can do', '1 of 4 done', 'Tick each step, then Submit', 'Your hands']);
   assert.deepEqual(await page.locator('.ni[data-kind="pr"] .four dd').allInnerTexts(), ['A pull request ready for you', 'Ready for review', 'Open it or mark it done', 'Merging stays yours']);
   assert.deepEqual(await page.locator('.ni[data-kind="unstick"] .four dd').allInnerTexts(), ['A session waiting on you', 'Paused at a prompt', 'Open the session', 'Your answer in the session']);
-  assert.match(await ask.locator('.ni-meta').innerText(), /^Question\s*Probe\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/);
+  assert.match(await ask.locator('.ni-meta').innerText(), /^Question\s*(?:Decision\s*)?Probe\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/);
   assert.equal(await ask.locator('.hub-option').count(), 3, 'The options are in the card.');
   assert.equal(await steps.locator('[data-item]').count(), 4, 'The steps are in the card.');
 

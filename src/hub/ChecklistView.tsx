@@ -1,3 +1,4 @@
+import NeedBadges from './NeedBadges'
 import type { Checklist } from '../lib/hub'
 import { ago, safeUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
@@ -40,7 +41,7 @@ export default function ChecklistView({ id }: { id: string }) {
       <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">
         <h2>{text(detail.title)}</h2>
-        <span><PageProjectChip id={text(detail.project)} />{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>}</span>
+        <span><PageProjectChip id={text(detail.project)} />{text(detail.bead) && <> <span className="hub-pill">{text(detail.bead)}</span></>} <span className="nb-inline" data-page-badges><NeedBadges item={{ kind: 'checklist', id: detail.id, title: detail.title, at: detail.createdAt, playtest: detail.kind === 'playtest' || undefined, subtype: detail.subtype, kindInferred: detail.kindInferred }} /></span></span>
         <GetHelp className="hub-top-help" target={{ kind: 'checklist', id: detail.id, label: detail.kind === 'playtest' ? 'playtest' : 'checklist', title: text(detail.title) }} />
       </div>
       <p className="hub-muted">Posted {ago(detail.createdAt)}{text(detail.from?.host) ? ` from ${text(detail.from?.host)}` : ''}.</p>

@@ -3,7 +3,7 @@ import type { Item } from '../lib/hub'
 import { host } from '../lib/host'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import type { NeedsKind } from '../lib/needsKinds'
-import { KIND_LABEL, KIND_PLURAL, canonicalFilter, isKnownFilter } from '../lib/needsKinds'
+import { FILTER_SUBTYPES, KIND_LABEL, KIND_PLURAL, SUBTYPE_LABEL, canonicalFilter, isKnownFilter, splitFilter } from '../lib/needsKinds'
 import { filterSlug, needsHref, parseNeedsRoute, projectOptions } from '../lib/needsView.mjs'
 import type { Handoff } from './flash'
 import { takeHandoff } from './flash'
@@ -21,7 +21,7 @@ import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import './needs.css'
 
-interface Inbox { items: Item[]; counts?: Record<string, number>; projects?: Record<string, number> }
+interface Inbox { items: Item[]; counts?: Record<string, number>; subCounts?: Record<string, number>; projects?: Record<string, number> }
 
 const CHIPS: [string, string][] = [
   ['all', 'All'], ['approvals', 'Approvals'], ['question', KIND_LABEL.question], ['steps', KIND_LABEL.steps], ['design', KIND_LABEL.design],
@@ -52,8 +52,10 @@ export default function Needs({ filter: address }: { filter?: string }) {
   const filter = route.filter
   const project = route.project
   const active = canonicalFilter(filter)
-  const isHistory = active === 'answered' || active === 'requests'
-  const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${active}${project ? `&project=${encodeURIComponent(project)}` : ''}${isHistory ? '' : '&detail=1'}`)
+  // `question:verify` is the Question chip with its Verify sub-chip: `kind` is the chip, `sub` the second row's.
+  const [kind, sub] = splitFilter(active)
+  const isHistory = kind === 'answered' || kind === 'requests'
+  const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${encodeURIComponent(active)}${project ? `&project=${encodeURIComponent(project)}` : ''}${isHistory ? '' : '&detail=1'}`)
   const names = useProjectNames()
   // The note after the last action: from this list, or handed over by the page the owner settled an item on.
   const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
@@ -113,7 +115,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
     setLeaving(previous => [...previous, { item, index }])
     // The last item of a chip is not the last item of the queue: the counts from before this action say how many wait in other kinds.
     const elsewhere = !next && active !== 'all' && !isHistory ? Math.max(0, (data?.counts?.all ?? 0) - (data?.counts?.[active] ?? 0)) : 0
-    const plural = KIND_PLURAL[active as NeedsKind] as string | undefined
+    const plural = sub ? undefined : KIND_PLURAL[kind as NeedsKind] as string | undefined
     setNote({
       handoff: { verb: NOTE_VERB[verb], ...(extra?.detail ? { detail: extra.detail } : {}), ...(extra?.link ? { link: extra.link } : {}), title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? needsHref('unstick') },
       index, nextKey: next ? itemKey(next) : null,
@@ -138,15 +140,15 @@ export default function Needs({ filter: address }: { filter?: string }) {
   const noteSlot = note ? Math.min(note.index + leaving.filter(ghost => ghost.index <= note.index).length, shown.length) : -1
   const counts = data?.counts
   const waiting = counts?.all ?? 0
-  const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === active || (counts?.[key] ?? 0) > 0)
-  if (active === 'requests') visible.push(['requests', 'Requests'])
+  const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === kind || (counts?.[key] ?? 0) > 0)
+  if (kind === 'requests') visible.push(['requests', 'Requests'])
   const options = projectOptions(data?.projects, names, project)
   const total = Object.values(data?.projects ?? {}).reduce((sum, n) => sum + n, 0)
   const chosenName = names?.[project] || project
   // With a project chosen the empty list says so and offers the way out; the link keeps the kind chip.
   const empty = (className: string) => project
     ? <p className={className} data-project-empty>Nothing for {chosenName} waits on you. <a href={needsHref(active, '')} data-show-all-projects>Show all projects</a></p>
-    : <p className={className}>{EMPTY[active]}</p>
+    : <p className={className}>{sub ? `No ${SUBTYPE_LABEL[kind]?.[sub]?.toLowerCase()} ${kind === 'steps' ? 'steps wait' : 'question waits'} on you.` : EMPTY[kind]}</p>
   const chipRow = useRef<HTMLDivElement>(null)
   const overflow = useOverflowEdges(chipRow, [visible.length, active])
   // Only the row scrolls, never the page: a scrollIntoView would undo the jump to a linked card.
@@ -185,7 +187,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
         {visible.map(([key, label]) => {
           const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
           return (
-            <a key={key} className={`hub-chip${key === active ? ' on' : ''}`} href={needsHref(key, project)} aria-current={key === active ? 'true' : undefined} data-filter={key}>
+            <a key={key} className={`hub-chip${key === kind ? ' on' : ''}`} href={needsHref(key, project)} aria-current={key === kind ? 'true' : undefined} data-filter={key}>
               {label}{count !== undefined && <span className="n">{count}</span>}
             </a>
           )
@@ -193,6 +195,19 @@ export default function Needs({ filter: address }: { filter?: string }) {
       </div>
       </div>
       </div>
+      {FILTER_SUBTYPES[kind] && (
+        <div className="hub-chips needs-subs" role="group" aria-label={`${KIND_LABEL[kind as NeedsKind]} kinds`} data-subs={kind}>
+          {[['', kind === 'steps' ? 'All steps' : 'All questions'] as const, ...FILTER_SUBTYPES[kind].map(name => [name, SUBTYPE_LABEL[kind][name]] as const)].map(([name, label]) => {
+            const key = name ? `${kind}:${name}` : kind
+            const count = data?.subCounts?.[key] ?? (name ? undefined : counts?.[kind])
+            return (
+              <a key={key} className={`hub-chip${name === sub ? ' is-on' : ''}`} href={needsHref(key, project)} aria-current={name === sub ? 'true' : undefined} data-sub-filter={name || 'all'}>
+                {label}{count !== undefined && <span className="n">{count}</span>}
+              </a>
+            )
+          })}
+        </div>
+      )}
       {error && <p className="hub-error" role="alert">{error}</p>}
       {data ? (
         isHistory ? (

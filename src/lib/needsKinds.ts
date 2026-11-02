@@ -46,13 +46,62 @@ export const NEEDS_FILTERS = ['all', 'approvals', 'question', 'design', 'steps',
 /** Old filter names, kept so links in Discord history and bookmarks land on the right chip. */
 const FILTER_ALIAS: Record<string, string> = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick', sessions: 'unstick' }
 
-/** The filter a URL names, old names mapped to the new ones; an unknown or missing name is `all`. */
-/** Whether `raw` is a filter key or an old alias of one (anything else in the address is an item id). */
-export const isKnownFilter = (raw: string): boolean => Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) || (NEEDS_FILTERS as readonly string[]).includes(raw)
+/** The sub-types a chip can narrow to, in order: a Question by its Ask's kind, Steps by the list's. Keep equal to FILTER_SUBTYPES in site/api/hub-model.mjs. */
+export const ASK_SUBTYPES = ['approval', 'verify', 'design', 'decision'] as const
+export const STEPS_SUBTYPES = ['verify', 'setup', 'investigate', 'develop'] as const
+export const FILTER_SUBTYPES: Record<string, readonly string[]> = { question: ASK_SUBTYPES, steps: STEPS_SUBTYPES }
 
+/** The words on a sub-type badge and chip. */
+export const SUBTYPE_LABEL: Record<string, Record<string, string>> = {
+  question: { approval: 'Approval', verify: 'Verify', design: 'Design choice', decision: 'Decision' },
+  steps: { verify: 'Verify', setup: 'Set up', investigate: 'Investigate', develop: 'Develop' },
+}
+
+/** `question:verify` as `['question', 'verify']`; a filter without a sub-type has an empty second part. */
+export const splitFilter = (filter: string): [string, string] => { const at = filter.indexOf(':'); return at < 0 ? [filter, ''] : [filter.slice(0, at), filter.slice(at + 1)] }
+
+const isSubFilter = (raw: string): boolean => { const [base, sub] = splitFilter(raw); return !!sub && !!FILTER_SUBTYPES[base]?.includes(sub) }
+
+/** Whether `raw` is a filter key or an old alias of one (anything else in the address is an item id). */
+export const isKnownFilter = (raw: string): boolean => Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) || (NEEDS_FILTERS as readonly string[]).includes(raw) || isSubFilter(raw)
+
+/** The filter a URL names, old names mapped to the new ones; an unknown or missing name is `all`. `question:verify` keeps its sub-type. */
 export function canonicalFilter(raw: string | undefined): string {
+  if (raw && isSubFilter(raw)) return raw
   const mapped = raw && Object.prototype.hasOwnProperty.call(FILTER_ALIAS, raw) ? FILTER_ALIAS[raw] : raw
   return mapped && (NEEDS_FILTERS as readonly string[]).includes(mapped) ? mapped : 'all'
+}
+
+// --- Badges: the type of an item, and its sub-type, each with a word, an icon and a colour ---
+
+/** One colour per type. Request approvals, Hermes approvals and Hermes questions are their own types, apart from a Question (an Ask). */
+export type BadgeType = 'approval-request' | 'hermes-approval' | 'hermes-asks' | 'question' | 'design' | 'steps' | 'playtest' | 'pr' | 'unstick'
+
+export interface Badge { type: BadgeType; label: string; icon: string }
+
+/** The type badge of an item. A session keeps its tool label ("Claude permission"). */
+export function typeBadge(item: Item): Badge {
+  const kind = needsKind(item)
+  let type: BadgeType
+  let label: string
+  switch (item.kind) {
+    case 'hermes-approval': type = 'hermes-approval'; label = 'Hermes approval'; break
+    case 'run-question': type = 'hermes-asks'; label = 'Hermes asks'; break
+    case 'approval': case 'request': type = 'approval-request'; label = 'Approval request'; break
+    default: type = kind as BadgeType; label = itemLabel(item)
+  }
+  const icon = item.kind === 'hermes-approval' || item.kind === 'approval' || item.kind === 'request' ? KIND_ICON.approval : KIND_ICON[kind]
+  return { type, label, icon }
+}
+
+/** The sub-type badge of a Question or a list of Steps, from the `subtype` the Hub sends; none for anything else. A design review says "Design review" already. */
+export function subBadge(item: Item): { group: 'question' | 'steps'; sub: string; label: string; inferred: boolean } | null {
+  const sub = item.subtype
+  if (!sub) return null
+  const kind = needsKind(item)
+  const group = kind === 'question' && item.kind === 'ask' ? 'question' : kind === 'steps' ? 'steps' : kind === 'design' && sub !== 'design' ? 'question' : null
+  const label = group ? SUBTYPE_LABEL[group][sub] : undefined
+  return group && label ? { group, sub, label, inferred: item.kindInferred === true } : null
 }
 
 /** The label on an item's type chip: a blocked session names its tool and what it waits on ("Claude permission"). */
