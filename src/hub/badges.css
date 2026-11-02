@@ -1,0 +1,61 @@
+/* Type and sub-type badges of Needs you. A type is a filled badge, a sub-type an outline in its own colour; both always
+   carry a word. Every pair is checked for 4.5:1 in both themes by server/test/need-badges.test.mjs: change a value, run it. */
+:root {
+  --nb-approval-request-bg: #5b4920; --nb-approval-request-fg: #ffeab8;
+  --nb-hermes-approval-bg: #5b202f; --nb-hermes-approval-fg: #ffb8c9;
+  --nb-hermes-asks-bg: #20535b; --nb-hermes-asks-fg: #b8f5ff;
+  --nb-question-bg: #20395b; --nb-question-fg: #b8d7ff;
+  --nb-design-bg: #3b205b; --nb-design-fg: #d9b8ff;
+  --nb-steps-bg: #205b38; --nb-steps-fg: #b8ffd5;
+  --nb-playtest-bg: #5b3520; --nb-playtest-fg: #ffd2b8;
+  --nb-pr-bg: #5b2056; --nb-pr-fg: #ffb8f9;
+  --nb-unstick-bg: #5b2220; --nb-unstick-fg: #ffbab8;
+  --nb-sub-approval: #cc9719;
+  --nb-sub-verify: #19cc64;
+  --nb-sub-design: #b480ef;
+  --nb-sub-decision: #609aeb;
+  --nb-sub-setup: #19b4cc;
+  --nb-sub-investigate: #e77b3c;
+  --nb-sub-develop: #8e8ef1;
+}
+html[data-workspace-theme=light] {
+  --nb-approval-request-bg: #84661f; --nb-approval-request-fg: #ffffff;
+  --nb-hermes-approval-bg: #c62f54; --nb-hermes-approval-fg: #ffffff;
+  --nb-hermes-asks-bg: #1f7784; --nb-hermes-asks-fg: #ffffff;
+  --nb-question-bg: #2d6cbe; --nb-question-fg: #ffffff;
+  --nb-design-bg: #8a49d4; --nb-design-fg: #ffffff;
+  --nb-steps-bg: #1d7c45; --nb-steps-fg: #ffffff;
+  --nb-playtest-bg: #a55527; --nb-playtest-fg: #ffffff;
+  --nb-pr-bg: #b62baa; --nb-pr-fg: #ffffff;
+  --nb-unstick-bg: #c6342f; --nb-unstick-fg: #ffffff;
+  --nb-sub-approval: #866518;
+  --nb-sub-verify: #15793f;
+  --nb-sub-design: #8c45de;
+  --nb-sub-decision: #246acc;
+  --nb-sub-setup: #177482;
+  --nb-sub-investigate: #ad531f;
+  --nb-sub-develop: #5252e0;
+}
+
+.nb { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.nb svg { width: 13px; height: 13px; flex: none; }
+.nb.nb-type { border: 1px solid transparent; background: var(--nb-bg); color: var(--nb-fg); }
+.nb.nb-sub { padding: 0 9px; border: 1.5px solid var(--nb-c); color: var(--nb-c); background: transparent; }
+.nb-sub[data-inferred] { border-style: dashed; }
+.nb-type[data-type="approval-request"] { --nb-bg: var(--nb-approval-request-bg); --nb-fg: var(--nb-approval-request-fg); }
+.nb-type[data-type="hermes-approval"] { --nb-bg: var(--nb-hermes-approval-bg); --nb-fg: var(--nb-hermes-approval-fg); }
+.nb-type[data-type="hermes-asks"] { --nb-bg: var(--nb-hermes-asks-bg); --nb-fg: var(--nb-hermes-asks-fg); }
+.nb-type[data-type="question"] { --nb-bg: var(--nb-question-bg); --nb-fg: var(--nb-question-fg); }
+.nb-type[data-type="design"] { --nb-bg: var(--nb-design-bg); --nb-fg: var(--nb-design-fg); }
+.nb-type[data-type="steps"] { --nb-bg: var(--nb-steps-bg); --nb-fg: var(--nb-steps-fg); }
+.nb-type[data-type="playtest"] { --nb-bg: var(--nb-playtest-bg); --nb-fg: var(--nb-playtest-fg); }
+.nb-type[data-type="pr"] { --nb-bg: var(--nb-pr-bg); --nb-fg: var(--nb-pr-fg); }
+.nb-type[data-type="unstick"] { --nb-bg: var(--nb-unstick-bg); --nb-fg: var(--nb-unstick-fg); }
+.nb-sub[data-sub="approval"] { --nb-c: var(--nb-sub-approval); }
+.nb-sub[data-sub="verify"] { --nb-c: var(--nb-sub-verify); }
+.nb-sub[data-sub="design"] { --nb-c: var(--nb-sub-design); }
+.nb-sub[data-sub="decision"] { --nb-c: var(--nb-sub-decision); }
+.nb-sub[data-sub="setup"] { --nb-c: var(--nb-sub-setup); }
+.nb-sub[data-sub="investigate"] { --nb-c: var(--nb-sub-investigate); }
+.nb-sub[data-sub="develop"] { --nb-c: var(--nb-sub-develop); }
+.nb-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; vertical-align: middle; }

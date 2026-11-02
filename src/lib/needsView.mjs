@@ -9,7 +9,7 @@
 export function parseNeedsRoute(raw, isFilter) {
   if (!raw) return { filter: undefined, project: '', linked: '' }
   const slash = raw.indexOf('/')
-  const first = slash < 0 ? raw : raw.slice(0, slash)
+  const first = (slash < 0 ? raw : raw.slice(0, slash)).replace(/%3A/gi, ':')
   if (!isFilter(first)) return { filter: undefined, project: '', linked: raw }
   const rest = slash < 0 ? '' : raw.slice(slash + 1)
   return { filter: first, project: rest === 'all' ? '' : rest, linked: '' }
@@ -23,7 +23,7 @@ export const filterSlug = filter => SLUG[filter] ?? (filter || 'all')
 
 /** The address of the list: `#/~hub/needs/<filter>` with `/<project>` when one is chosen. */
 export function needsHref(filter, project) {
-  const word = encodeURIComponent(filterSlug(filter))
+  const word = encodeURIComponent(filterSlug(filter)).replace(/%3A/gi, ':') // `question:verify` keeps its colon
   return project ? `#/~hub/needs/${word}/${encodeURIComponent(project)}` : `#/~hub/needs/${word}`
 }
 

@@ -185,3 +185,9 @@
   .needs-project { flex: none; }
   .ni-meta a.ni-project { min-height: 28px; }
 }
+
+/* The second chip row of Questions and Steps: one chip per sub-type, under the kinds. */
+.needs-subs { margin: -4px 0 12px; }
+.needs-subs .hub-chip { font-size: 0.76rem; padding: 4px 10px; }
+/* `is-on`, not `on`: the kind chip is the one `.hub-chip.on` of the page. */
+.needs-subs .hub-chip.is-on { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }

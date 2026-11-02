@@ -14,7 +14,7 @@ import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
@@ -516,8 +516,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
+    const sub = askSubtype(ask);
     return {
       ...ask, ...state,
+      subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
@@ -544,8 +546,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
     const pictures = checklistEvidence(names);
     const delivery = await deliveryFor(`checklists/${id}`, names, submit, at);
+    const sub = stepsSubtype(checklist);
     return {
       ...checklist, state, done, total,
+      ...(sub ? { subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}) } : {}),
       evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
       shots: pictures.shots,
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
@@ -1272,7 +1276,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const listed = fillProjects(buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at }), requests);
             const items = inProject(listed, project);
             // The chips count what waits in the chosen project; `projects` counts the list on screen per project, whichever is chosen.
-            const counts = inboxCounts(inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou, requests), project));
+            const waiting = inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou, requests), project);
+            const counts = inboxCounts(waiting);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.
             const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);
@@ -1281,7 +1286,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
               if (!withDetail.has(item)) return row;
               try { return { ...row, detail: item.kind === 'ask' ? await askDetail(item.id, at) : await checklistDetail(item.id, at) }; } catch { return row; }
             });
-            reply({ items: rows, counts, projects: projectCounts(listed) });
+            reply({ items: rows, counts, subCounts: subCounts(waiting), projects: projectCounts(listed) });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/checklists\/([^/]+)$/.exec(route))) {

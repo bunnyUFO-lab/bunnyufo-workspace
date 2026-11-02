@@ -1055,6 +1055,60 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`ask create (${via}): --kind is written, checked against the four kinds, and a file's kind is checked too`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const idOf = made => made.stdout.trim().split('\n').at(-1);
+      for (const kind of ['approval', 'verify', 'design', 'decision']) {
+        const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', `A ${kind} Ask?`, '--option', 'a=A', '--option', 'b=B', '--kind', kind);
+        assert.equal(made.code, 0, made.stderr);
+        assert.equal(fake.json(`sections/inbox/asks/${idOf(made)}/ask.json`).kind, kind);
+      }
+      const plain = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'No kind?');
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(plain)}/ask.json`).kind, undefined, 'Left out stays out: the Hub guesses.');
+      const before = [...fake.objects.keys()].length;
+      const refused = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Bad?', '--kind', 'urgent');
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /--kind is one of: approval, verify, design, decision/);
+      assert.equal([...fake.objects.keys()].length, before, 'Nothing was written.');
+      const file = path.join(dir, 'ask.json');
+      await writeFile(file, JSON.stringify({ question: 'From a file?', kind: 'verify' }));
+      const fromFile = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file);
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(fromFile)}/ask.json`).kind, 'verify');
+      const overridden = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file, '--kind', 'design');
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(overridden)}/ask.json`).kind, 'design', 'The flag wins over the file.');
+      await writeFile(file, JSON.stringify({ question: 'Bad file?', kind: 'nope' }));
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe', '--file', file)).code, 1);
+    } finally { await close(); }
+  });
+
+  test(`checklist create (${via}): --kind is written, checked against the four kinds, and does not mix with --playtest`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      for (const kind of ['verify', 'setup', 'investigate', 'develop']) {
+        const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', `A ${kind} list`, '--item', 'One', '--kind', kind);
+        assert.equal(made.code, 0, made.stderr);
+        assert.equal(fake.json(`sections/inbox/checklists/${made.stdout.trim()}/checklist.json`).kind, kind);
+      }
+      const plain = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'No kind', '--item', 'One');
+      assert.equal(fake.json(`sections/inbox/checklists/${plain.stdout.trim()}/checklist.json`).kind, undefined);
+      const before = [...fake.objects.keys()].length;
+      const refused = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Bad', '--item', 'One', '--kind', 'design');
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /--kind is one of: verify, setup, investigate, develop/);
+      const both = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Both', '--item', 'One', '--kind', 'verify', '--playtest', '--build', 'https://example.test/b');
+      assert.equal(both.code, 1);
+      assert.match(both.stderr, /not both/);
+      assert.equal([...fake.objects.keys()].length, before, 'Nothing was written.');
+      const file = path.join(dir, 'list.json');
+      await writeFile(file, JSON.stringify({ title: 'From a file', kind: 'investigate', items: [{ text: 'Look' }] }));
+      const fromFile = await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file);
+      assert.equal(fake.json(`sections/inbox/checklists/${fromFile.stdout.trim()}/checklist.json`).kind, 'investigate');
+      await writeFile(file, JSON.stringify({ title: 'Bad file', kind: 'urgent', items: [{ text: 'Look' }] }));
+      assert.equal((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file)).code, 1);
+    } finally { await close(); }
+  });
+
   test(`checklist get (${via}): a playtest prints its build, rating, verdict and issues`, async () => {
     const { fake, cli, close } = await setup();
     try {

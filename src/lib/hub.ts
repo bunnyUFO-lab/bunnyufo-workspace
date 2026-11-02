@@ -52,6 +52,9 @@ export interface Item {
   design?: boolean
   decisions?: number
   takes?: number
+  /** An Ask or a steps list: its sub-type (the file's `kind`, or the Hub's guess when `kindInferred`). */
+  subtype?: string
+  kindInferred?: boolean
   /** A request row: its preset, where it is proposed to run, and who wrote it (`origin.kind` is owner, agent or run). */
   preset?: string
   target?: string
@@ -172,6 +175,10 @@ export interface Ask {
   options?: AskOption[]
   allowNote: boolean
   requirePasskey?: boolean
+  /** The Ask's sub-type as written; `subtype` is what the Hub reads from it (or guesses, when `kindInferred`). */
+  kind?: 'approval' | 'verify' | 'design' | 'decision'
+  subtype?: string
+  kindInferred?: boolean
   allowDrawing: boolean
   /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
   image?: string
@@ -236,7 +243,10 @@ export interface Checklist {
   total: number
   items: ChecklistItem[]
   /** A playtest: the build to open, its platform and what to look for. */
-  kind?: 'steps' | 'playtest'
+  kind?: 'steps' | 'playtest' | 'verify' | 'setup' | 'investigate' | 'develop'
+  /** The Hub's reading of `kind` for a steps list: the file's value, or a guess (`kindInferred`). */
+  subtype?: string
+  kindInferred?: boolean
   build?: string
   platform?: string
   lookFor?: string
