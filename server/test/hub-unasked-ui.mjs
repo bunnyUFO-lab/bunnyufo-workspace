@@ -54,13 +54,19 @@ try {
     await panel.waitFor();
     assert.equal(await panel.locator('h3').innerText(), '⚠ 2 items say they need you but ask nothing');
     assert.deepEqual(await panel.locator('[data-unasked-row] a').allInnerTexts(), ['Pay the invoice', 'Register the domain']);
-    assert.equal(await panel.locator('[data-unasked-row="ua-one"] a').getAttribute('href'), `#/~hub/work/${PROJECT}/ua-one`);
-    assert.match(await panel.locator('[data-unasked-row="ua-one"] small').innerText(), /unaskdev · ua-one/);
+    assert.equal(await panel.locator('[data-unasked-row="ua-one"] a').getAttribute('href'), `#/~hub/map/${PROJECT}/ua-one`, "The row uses the item's own href.");
+    await page.waitForFunction(() => document.querySelector('[data-unasked-row="ua-one"] small')?.textContent === 'Unaskdev · ua-one');
+    assert.equal(await panel.locator('[data-unasked-row="ua-one"] small').innerText(), 'Unaskdev · ua-one', 'The row names the project, not its id.');
     for (const row of ['ua-one', 'ua-two']) {
       for (const name of ['done', 'not-needed', 'unblock']) assert.equal(await panel.locator(`[data-unasked-row="${row}"] [data-mark-${name}]`).count(), 1, `${row} ${name}`);
     }
     assert.equal(await panel.getByText("Unblock: it doesn't wait on you").count(), 0, 'The rows have buttons only.');
     await noSideways(page, `${label} Today`);
+    await panel.locator('[data-unasked-row="ua-one"] a').click();
+    await page.locator('.hub-map-panel').waitFor();
+    assert.match(page.url(), new RegExp(`#/~hub/map/${PROJECT}/ua-one$`), 'The link opens the item.');
+    await page.goto(`${fixture.url}#/~hub/today`);
+    await panel.waitFor();
 
     step(`${label}: Work shows the warning glyph on a card that asks nothing, and a link under a card that has an Ask`);
     await page.goto(`${fixture.url}#/~hub/work/${PROJECT}`);

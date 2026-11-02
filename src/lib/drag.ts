@@ -66,15 +66,19 @@ export function useCardDrag(onDrop: (item: DragItem, target: DropTarget) => void
   // Set between the end of a drag and the click the browser fires after it, so letting go over
   // a card does not also open it.
   const dragged = useRef(false)
+  // What is in the air, set the moment the drag starts. The state above only shows it a render later, and a release
+  // that comes before that render (a fast hand, a busy machine) would find nothing in the air and drop nothing.
+  const dragging = useRef<DragItem | null>(null)
   // The window listeners are bound once; this keeps them looking at the current values.
-  const latest = useRef({ item, onDrop })
-  useEffect(() => { latest.current = { item, onDrop } }, [item, onDrop])
+  const latest = useRef({ onDrop })
+  useEffect(() => { latest.current = { onDrop } }, [onDrop])
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
       const start = pending.current
-      if (start && !latest.current.item) {
+      if (start && !dragging.current) {
         if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < THRESHOLD) return
+        dragging.current = start.item
         setItem(start.item)
       }
       if (!pending.current) return
@@ -82,9 +86,10 @@ export function useCardDrag(onDrop: (item: DragItem, target: DropTarget) => void
       setOver(targetAt(event.clientX, event.clientY))
     }
     const up = (event: PointerEvent) => {
-      const dragging = latest.current.item
+      const dropped = dragging.current
       pending.current = null
-      if (!dragging) return
+      dragging.current = null
+      if (!dropped) return
       dragged.current = true
       // The click that follows a release over the pressed element comes before the next task; one
       // that never comes (released elsewhere) must not swallow a later keyboard Enter or Space.
@@ -92,11 +97,12 @@ export function useCardDrag(onDrop: (item: DragItem, target: DropTarget) => void
       const target = targetAt(event.clientX, event.clientY)
       setItem(null)
       setOver(null)
-      if (target) latest.current.onDrop(dragging, target)
+      if (target) latest.current.onDrop(dropped, target)
     }
     const cancel = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       pending.current = null
+      dragging.current = null
       setItem(null)
       setOver(null)
     }

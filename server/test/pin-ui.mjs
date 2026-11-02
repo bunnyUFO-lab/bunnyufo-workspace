@@ -75,17 +75,21 @@ const published = [[one, await readFile(path.join(one, 'workspace.json'), 'utf8'
 // Dragging is a pointer gesture, not HTML5 drag-and-drop (see src/lib/drag.ts), so it is
 // driven here the way a hand drives it: press, move, release. `edge` aims at the top or
 // bottom of the target instead of its middle, which is how a place in the list is chosen.
-const dragCard = async (page, source, target, edge) => {
-  // The sidebar slides in and out; measure once it has stopped moving. Before the slide starts it
-  // sits still off the left edge, which is not "settled" (that read made a drag start off screen).
+// The sidebar slides in and out; measure once it has stopped moving. Before the slide starts it
+// sits still off the left edge, which is not "settled" (that read made a drag start off screen).
+const settled = async source => {
   await source.waitFor();
-  let settled = null;
+  let last = null;
   for (let tries = 0; tries < 100; tries++) {
     const box = await source.boundingBox();
-    if (settled && box.x >= 0 && box.x === settled.x && box.y === settled.y) break;
-    settled = box;
+    if (last && box.x >= 0 && box.x === last.x && box.y === last.y) break;
+    last = box;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
+};
+
+const dragCard = async (page, source, target, edge) => {
+  await settled(source);
   const from = await source.boundingBox();
   const to = await target.boundingBox();
   const y = edge === 'top' ? to.y + 3 : edge === 'bottom' ? to.y + to.height - 3 : to.y + to.height / 2;
@@ -94,6 +98,25 @@ const dragCard = async (page, source, target, edge) => {
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2 + 12, { steps: 4 });
   await page.mouse.move(to.x + to.width / 2, y, { steps: 10 });
   await page.mouse.up();
+};
+
+// A drop that comes before the page has drawn the drag. A person is never that quick, but a loaded machine is that
+// slow: the press, the move past the threshold and the release then reach the page in one go, before React has
+// rendered anything in between. The page must not lose the drop. (This is what made the drags above time out
+// now and then, ws-plv.) The events are sent in one task, so no render can come between them, however fast the machine is.
+const flick = async (page, source, target) => {
+  await settled(source);
+  await target.waitFor();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  await page.evaluate(({ a, b }) => {
+    const press = document.elementFromPoint(a.x, a.y);
+    const fire = (element, type, point) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: point.x, clientY: point.y, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+    fire(press, 'pointerdown', a);
+    fire(document.body, 'pointermove', { x: a.x + 12, y: a.y + 12 });
+    fire(document.body, 'pointermove', b);
+    fire(document.body, 'pointerup', b);
+  }, { a: { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }, b: { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 } });
 };
 
 const service = await createService({ repo, uiDir: path.join(root, 'dist'), registryFile });
@@ -152,6 +175,15 @@ try {
   assert.equal(await pinnedInFile(one, 'alpha'), false, 'Unpinning is remembered, so a card published pinned can be taken off the list.');
 
   await page.getByRole('button', { name: 'Show menu' }).click();
+
+  // A flick: the whole gesture lands before the page renders. Pinned and unpinned again, so the steps below start as they did.
+  await flick(page, page.locator('.sidebar-groups .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-pins'));
+  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 2);
+  assert.equal(await pinnedInFile(one, 'alpha'), true, 'A card flicked into the pinned list is pinned.');
+  await flick(page, page.locator('.sidebar-pins .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-groups'));
+  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 1);
+  assert.equal(await pinnedInFile(one, 'alpha'), false, 'A pin flicked out of the list is unpinned.');
+  await listsUntouched();
 
   // Dragging is the mouse's way in: a card dropped on the pinned list is pinned, and a pinned
   // item dragged back out of it is unpinned. The sidebar overlays the grid, so the card has to

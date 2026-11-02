@@ -10,7 +10,7 @@
   --nb-playtest-bg: #5b3520; --nb-playtest-fg: #ffd2b8;
   --nb-pr-bg: #5b2056; --nb-pr-fg: #ffb8f9;
   --nb-unstick-bg: #5b2220; --nb-unstick-fg: #ffbab8;
-  --nb-sub-approval: #cc9719;
+  --nb-sub-approval: #e66bc9;
   --nb-sub-verify: #19cc64;
   --nb-sub-design: #b480ef;
   --nb-sub-decision: #609aeb;
@@ -28,7 +28,7 @@ html[data-workspace-theme=light] {
   --nb-playtest-bg: #a55527; --nb-playtest-fg: #ffffff;
   --nb-pr-bg: #b62baa; --nb-pr-fg: #ffffff;
   --nb-unstick-bg: #c6342f; --nb-unstick-fg: #ffffff;
-  --nb-sub-approval: #866518;
+  --nb-sub-approval: #a8288f;
   --nb-sub-verify: #15793f;
   --nb-sub-design: #8c45de;
   --nb-sub-decision: #246acc;

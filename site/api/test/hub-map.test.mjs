@@ -303,3 +303,12 @@ test('notes: cards resolve through the Library, own before events, unresolved dr
   assert.equal(task(crowded, 'many').cards.length, 5);
   assert.equal('cards' in task(build(issues), 't'), false, 'Without a resolver nothing is linked.');
 });
+
+test('`checklist` is set only on a task that waits on the owner, not on a closed one with a stale open checklist', () => {
+  const map = build([
+    issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }),
+    issue({ id: 'waits', parent: 'f' }), issue({ id: 'shut', parent: 'f', status: 'closed', closed: '2026-10-25T10:00:00Z' }),
+  ], { checklists: [{ id: 'c1', bead: 'waits', state: 'open' }, { id: 'c2', bead: 'shut', state: 'open' }] });
+  assert.deepEqual([task(map, 'waits').state, task(map, 'waits').checklist, task(map, 'waits').you], ['you', 'c1', 'checklist']);
+  assert.deepEqual([task(map, 'shut').state, 'checklist' in task(map, 'shut')], ['done', false]);
+});

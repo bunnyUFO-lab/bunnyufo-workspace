@@ -278,7 +278,7 @@ export function checklistProgress(checklist, names) {
 export const ASK_SUBTYPES = ['approval', 'verify', 'design', 'decision'];
 export const STEPS_SUBTYPES = ['verify', 'setup', 'investigate', 'develop'];
 
-const ASK_VERIFY_RE = /^\s*(did|does|is\b.*\bworking|live check)/i;
+const ASK_VERIFY_RE = /^\s*(did\b|does\b|is\b.*\bworking|live check)/i;
 const STEPS_RULES = [
   ['verify', /^\s*(live check|test|try|play-?test|check|verify)\b/i],
   ['setup', /^\s*(set up|setup|install|paste|run the .*\binstaller|sign)\b/i],

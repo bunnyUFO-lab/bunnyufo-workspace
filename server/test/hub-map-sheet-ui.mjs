@@ -153,6 +153,15 @@ try {
     assert.equal(await listLink.getAttribute('href'), `#/~hub/checklist/${CHECKLIST}`);
     await three('checklist');
 
+    step(`${label}: Unblock on a task that waits only through a checklist is refused with what to do instead, and writes nothing`);
+    await panel.locator('[data-mark-unblock]').click();
+    const refusal = panel.locator('[role="alert"].hub-error');
+    await refusal.waitFor();
+    assert.match(await refusal.innerText(), /^Unblock changes nothing here: this task has no needs-owner label and is not blocked, it waits only through an Ask or a checklist\. Answer or cancel that Ask, or use Mark done or Not needed\.$/);
+    assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Nothing is pending.');
+    await three('checklist after the refusal');
+    await noSideways(page, `${label} refusal`);
+
     step(`${label}: the feature's task list follows the same rule`);
     panel = await sheet(page, 'sd-f-open');
     const rows = panel.locator('.hub-map-panel-list li[data-state="you"]');
