@@ -225,6 +225,10 @@ export interface ChecklistItem {
   group?: string
   guide?: string
   link?: string
+  /** Exactly the text the owner runs; shown under the item as a code block with a Copy button. */
+  command?: string
+  /** The command's language (the code block's), which decides how Copy treats it. */
+  shell?: 'bash' | 'powershell' | 'cmd'
   done: boolean
   /** When the winning tick or untick was written. */
   at?: string

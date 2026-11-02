@@ -9,7 +9,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FIXTURE_CHECKLIST, SUBMITTED_CHECKLIST, startHubFixture } from './hub-fixture.mjs';
+import { COMMAND_CHECKLIST, COMMAND_LONG, COMMAND_MARKUP, COMMAND_ONE_LINE, FIXTURE_CHECKLIST, SUBMITTED_CHECKLIST, startHubFixture } from './hub-fixture.mjs';
 import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -17,6 +17,8 @@ const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
 const fixture = await startHubFixture({ checklists: true });
+// A second service for the items that carry a `command`: its own list, so the counts above hold.
+const commands = await startHubFixture({ seedData: false, commandChecklist: true });
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -278,9 +280,63 @@ try {
     await noSideways(guest, 'the read-only list at 390 px');
   } finally { stub.close(); }
 
+  step('an item with a command shows it under the text as a block with Copy; an item without one is unchanged (390 px)');
+  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'] });
+  await phone.goto(`${commands.url}#/~hub/checklist/${COMMAND_CHECKLIST}`);
+  await phone.locator('[data-item="01"] [data-command] pre').waitFor();
+  assert.equal(await phone.locator('[data-command]').count(), 4, 'Four items carry a command.');
+  assert.equal(await phone.locator('[data-item="04"] [data-command]').count(), 0, 'The item without a command has no block.');
+  assert.equal(await phone.locator('[data-item="04"] .hub-copy').count(), 0, 'and no Copy button.');
+  assert.equal(await phone.locator('[data-item="04"] .hub-cl-title').innerText(), 'Tick this when it worked');
+  assert.equal(await phone.locator('[data-item="01"] [data-command] pre').innerText(), COMMAND_ONE_LINE, 'The block holds the command and nothing else.');
+  assert.equal(await phone.locator('[data-item="01"] [data-command] code').getAttribute('class'), 'language-bash');
+  const order = await phone.locator('[data-item="01"]').evaluate(row => [row.querySelector('.hub-cl-line').getBoundingClientRect().bottom, row.querySelector('[data-command]').getBoundingClientRect().top]);
+  assert.ok(order[1] >= order[0] - 1, 'The command sits under the item text.');
+  await noSideways(phone, 'the command list');
+
+  step('inline `code` in the item text is code, without a Copy button');
+  assert.equal(await phone.locator('[data-item="01"] .hub-cl-title code').innerText(), 'gh');
+  assert.equal(await phone.locator('[data-item="01"] .hub-cl-title .hub-copy').count(), 0);
+  assert.ok(!(await phone.locator('[data-item="01"] .hub-cl-title').innerText()).includes('`'), 'The backticks are gone.');
+
+  step('Copy puts exactly the command on the clipboard, and is at least 44 px square beside the text');
+  await tall(phone.locator('[data-command] .hub-copy'), 'the Copy of a command');
+  for (const button of await phone.locator('[data-command] .hub-copy').all()) assert.ok((await button.boundingBox()).width >= 44, 'and 44 px wide');
+  const place = await phone.locator('[data-item="02"] [data-command]').evaluate(block => {
+    const pre = block.querySelector('pre').getBoundingClientRect();
+    const button = block.querySelector('.hub-copy').getBoundingClientRect();
+    return { preRight: pre.right, buttonLeft: button.left, buttonTop: button.top, preTop: pre.top, buttonRight: button.right, view: innerWidth };
+  });
+  assert.ok(place.buttonLeft >= place.preRight - 1, 'The button does not overlap the text.');
+  assert.ok(place.buttonTop <= place.preTop + 8, 'The button is at the top of the block.');
+  assert.ok(place.buttonRight <= place.view, 'and on the screen.');
+  await phone.locator('[data-item="01"] .hub-copy').tap();
+  await phone.locator('[data-item="01"] .hub-copy', { hasText: /^Copied$/ }).waitFor();
+  assert.equal(await phone.evaluate(() => navigator.clipboard.readText()), COMMAND_ONE_LINE, 'No prompt, no newline, no prose.');
+  await phone.locator('[data-item="02"] .hub-copy').tap();
+  await phone.locator('[data-item="02"] .hub-copy', { hasText: /^Copied$/ }).waitFor();
+  assert.equal(await phone.evaluate(() => navigator.clipboard.readText()), COMMAND_LONG);
+  await phone.locator('[data-item="03"] .hub-copy').tap();
+  await phone.locator('[data-item="03"] .hub-copy', { hasText: 'Copied as one line' }).waitFor();
+  assert.equal(await phone.evaluate(() => navigator.clipboard.readText()), 'cd C:\\Users\\owner\\app; npm run check', 'A PowerShell command follows the PowerShell rule of Copy.');
+
+  step('a long command scrolls sideways inside its block instead of wrapping, and the text stays selectable');
+  const scroll = await phone.locator('[data-item="02"] [data-command] pre').evaluate(pre => ({ scroll: pre.scrollWidth, client: pre.clientWidth, white: getComputedStyle(pre).whiteSpace, overflow: getComputedStyle(pre).overflowX, select: getComputedStyle(pre).userSelect, lines: Math.round(pre.getBoundingClientRect().height / parseFloat(getComputedStyle(pre).lineHeight || '16')) }));
+  assert.ok(scroll.scroll > scroll.client, 'The command is wider than the block.');
+  assert.equal(scroll.white, 'pre');
+  assert.equal(scroll.overflow, 'auto');
+  assert.notEqual(scroll.select, 'none');
+  assert.ok(scroll.lines <= 3, `One line of text, not wrapped (${scroll.lines} lines tall).`);
+  await noSideways(phone, 'the long command');
+
+  step('a command is text: markup in it is shown, not rendered');
+  assert.equal(await phone.locator('[data-item="05"] [data-command] pre').innerText(), COMMAND_MARKUP);
+  assert.equal(await phone.locator('[data-item="05"] [data-command] :is(b, img, em)').count(), 0, 'No element was made from the command.');
+
   console.log('hub-checklist-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   await fixture.close();
+  await commands.close();
 }

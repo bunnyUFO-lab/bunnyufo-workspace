@@ -1111,6 +1111,48 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`checklist create (${via}): --command and --shell attach to the --item before them, get prints the command, and bad uses write nothing`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Add the secret',
+        '--item', 'Over SSH or in Git Bash', '--command', '\n\n  gh secret set X --repo a/b\n\n', '--shell', 'bash', '--item', 'Plain step', '--item', 'In PowerShell', '--command', 'cd C:\\x\nnpm run check', '--shell', 'powershell');
+      assert.equal(made.code, 0, made.stderr);
+      const id = made.stdout.trim();
+      const items = fake.json(`sections/inbox/checklists/${id}/checklist.json`).items;
+      assert.deepEqual(items.map(item => [item.text, item.command, item.shell]), [
+        ['Over SSH or in Git Bash', '  gh secret set X --repo a/b', 'bash'], ['Plain step', undefined, undefined], ['In PowerShell', 'cd C:\\x\nnpm run check', 'powershell'],
+      ], 'Blank lines around a command go; its indentation and lines stay.');
+      assert.ok(!('command' in items[1]) && !('shell' in items[1]), 'An item without a command gains no fields.');
+      const got = await cli(via, 'checklist', 'get', id);
+      assert.match(got.stdout, /\[ \] 01 Over SSH or in Git Bash\n {5}\$ {3}gh secret set X --repo a\/b\n\[ \] 02 Plain step\n\[ \] 03 In PowerShell\n {5}\$ cd C:\\x\n {5}\$ npm run check\n/);
+      assert.equal(JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout).items[0].command, '  gh secret set X --repo a/b');
+
+      const before = [...fake.objects.keys()].length;
+      for (const [args, problem] of [
+        [['--command', 'ls', '--title', 'T', '--item', 'One'], /--command goes after the --item/],
+        [['--title', 'T', '--item', 'One', '--command', 'ls', '--command', 'pwd'], /One --command per --item/],
+        [['--title', 'T', '--item', 'One', '--command', ' \n '], /command is 1 to 2000 characters/],
+        [['--title', 'T', '--item', 'One', '--command', 'x'.repeat(2001)], /command is 1 to 2000 characters/],
+        [['--title', 'T', '--item', 'One', '--command', 'ls', '--shell', 'zsh'], /shell is one of: bash, powershell, cmd/],
+        [['--title', 'T', '--item', 'One', '--shell', 'bash'], /shell goes with a command/],
+      ]) {
+        const refused = await cli(via, 'checklist', 'create', '--project', 'probe', ...args);
+        assert.equal(refused.code, 1, args.join(' '));
+        assert.match(refused.stderr, problem);
+      }
+      assert.equal([...fake.objects.keys()].length, before, 'Nothing was written.');
+
+      const file = path.join(dir, 'cmd.json');
+      await writeFile(file, JSON.stringify({ title: 'From a file', items: [{ text: 'Run it', command: 'echo "<b>hi</b>"', shell: 'cmd' }, { text: 'Old style', guide: 'Open it.' }] }));
+      const fromFile = await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file);
+      assert.equal(fromFile.code, 0, fromFile.stderr);
+      const written = fake.json(`sections/inbox/checklists/${fromFile.stdout.trim()}/checklist.json`).items;
+      assert.equal(written[0].command, 'echo "<b>hi</b>"');
+      assert.equal(written[0].shell, 'cmd');
+      assert.deepEqual(written[1], { id: '02', text: 'Old style', guide: 'Open it.' }, 'An item without a command is written as before.');
+    } finally { await close(); }
+  });
+
   test(`checklist get (${via}): a playtest prints its build, rating, verdict and issues`, async () => {
     const { fake, cli, close } = await setup();
     try {

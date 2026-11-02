@@ -24,10 +24,17 @@ export const PASSKEY_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g
 export const FIXTURE_CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-finish-the-discord-bot-setup-c1c1`;
 export const SUBMITTED_CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-update-the-router-settings-d2d2`;
 
+/** The one checklist `commandChecklist: true` seeds: items with and without a `command`, and an inline `code` span in an item's text. */
+export const COMMAND_CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-add-the-deploy-secret-e3e3`;
+export const COMMAND_ONE_LINE = 'gh secret set BUW_CARD_DEPLOY_TOKEN --repo example/workspace-skills';
+export const COMMAND_LONG = 'ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/example_key admin@host.example.test "sudo systemctl restart bunnylink-example-service-with-a-long-name.service && journalctl -u bunnylink-example-service-with-a-long-name.service -n 50 --no-pager"';
+export const COMMAND_MARKUP = 'echo "<b>bold</b> <img src=x onerror=alert(1)> *star* [link](https://example.test)"';
+export const COMMAND_POWERSHELL = 'cd C:\\Users\\owner\\app\nnpm run check';
+
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -115,6 +122,19 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     });
     seed.checklist(submitted, [{ item: '01', at: minutesAgo(now, 150) }, { item: '02', at: minutesAgo(now, 140) }]);
     seed.submit(submitted.id, { at: minutesAgo(now, 5).toISOString(), note: 'Left the reboot for tonight.', done: ['01', '02'], open: ['03'] });
+  }
+
+  if (commandChecklist) {
+    seed.checklist(checklistJson({
+      id: COMMAND_CHECKLIST, now: minutesAgo(now, 20), title: 'Add the deploy secret', context: 'One secret, then a restart.',
+      items: [
+        { text: 'In Git Bash, with `gh` signed in, run this', command: COMMAND_ONE_LINE, shell: 'bash' },
+        { text: 'Over SSH, restart the service (a long line)', command: COMMAND_LONG, shell: 'bash' },
+        { text: 'In PowerShell, run the check (two lines)', command: COMMAND_POWERSHELL, shell: 'powershell' },
+        { text: 'Tick this when it worked', guide: 'Nothing to run.' },
+        { text: 'Markup in a command is only text', command: COMMAND_MARKUP, shell: 'bash' },
+      ],
+    }), []);
   }
 
   if (pc) {
