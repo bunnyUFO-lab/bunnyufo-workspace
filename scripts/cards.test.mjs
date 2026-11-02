@@ -1057,6 +1057,60 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`ask create (${via}): --kind is written, checked against the four kinds, and a file's kind is checked too`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const idOf = made => made.stdout.trim().split('\n').at(-1);
+      for (const kind of ['approval', 'verify', 'design', 'decision']) {
+        const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', `A ${kind} Ask?`, '--option', 'a=A', '--option', 'b=B', '--kind', kind);
+        assert.equal(made.code, 0, made.stderr);
+        assert.equal(fake.json(`sections/inbox/asks/${idOf(made)}/ask.json`).kind, kind);
+      }
+      const plain = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'No kind?');
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(plain)}/ask.json`).kind, undefined, 'Left out stays out: the Hub guesses.');
+      const before = [...fake.objects.keys()].length;
+      const refused = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Bad?', '--kind', 'urgent');
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /--kind is one of: approval, verify, design, decision/);
+      assert.equal([...fake.objects.keys()].length, before, 'Nothing was written.');
+      const file = path.join(dir, 'ask.json');
+      await writeFile(file, JSON.stringify({ question: 'From a file?', kind: 'verify' }));
+      const fromFile = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file);
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(fromFile)}/ask.json`).kind, 'verify');
+      const overridden = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file, '--kind', 'design');
+      assert.equal(fake.json(`sections/inbox/asks/${idOf(overridden)}/ask.json`).kind, 'design', 'The flag wins over the file.');
+      await writeFile(file, JSON.stringify({ question: 'Bad file?', kind: 'nope' }));
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe', '--file', file)).code, 1);
+    } finally { await close(); }
+  });
+
+  test(`checklist create (${via}): --kind is written, checked against the four kinds, and does not mix with --playtest`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      for (const kind of ['verify', 'setup', 'investigate', 'develop']) {
+        const made = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', `A ${kind} list`, '--item', 'One', '--kind', kind);
+        assert.equal(made.code, 0, made.stderr);
+        assert.equal(fake.json(`sections/inbox/checklists/${made.stdout.trim()}/checklist.json`).kind, kind);
+      }
+      const plain = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'No kind', '--item', 'One');
+      assert.equal(fake.json(`sections/inbox/checklists/${plain.stdout.trim()}/checklist.json`).kind, undefined);
+      const before = [...fake.objects.keys()].length;
+      const refused = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Bad', '--item', 'One', '--kind', 'design');
+      assert.equal(refused.code, 1);
+      assert.match(refused.stderr, /--kind is one of: verify, setup, investigate, develop/);
+      const both = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'Both', '--item', 'One', '--kind', 'verify', '--playtest', '--build', 'https://example.test/b');
+      assert.equal(both.code, 1);
+      assert.match(both.stderr, /not both/);
+      assert.equal([...fake.objects.keys()].length, before, 'Nothing was written.');
+      const file = path.join(dir, 'list.json');
+      await writeFile(file, JSON.stringify({ title: 'From a file', kind: 'investigate', items: [{ text: 'Look' }] }));
+      const fromFile = await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file);
+      assert.equal(fake.json(`sections/inbox/checklists/${fromFile.stdout.trim()}/checklist.json`).kind, 'investigate');
+      await writeFile(file, JSON.stringify({ title: 'Bad file', kind: 'urgent', items: [{ text: 'Look' }] }));
+      assert.equal((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file)).code, 1);
+    } finally { await close(); }
+  });
+
   test(`checklist get (${via}): a playtest prints its build, rating, verdict and issues`, async () => {
     const { fake, cli, close } = await setup();
     try {
@@ -1483,13 +1537,14 @@ for (const via of ['api', 's3']) {
       const shut = mark('dr-d', '20261030T080000000Z', 'done', '2026-10-30T08:00:00.000Z');
       fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-d/20261030T081000000Z-applied-cd34.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-d', verdict: 'applied', at: '2026-10-30T08:10:00.000Z', by: 'pc', mark: shut }), 'application/json');
       mark('dr-e', '20261030T120000000Z', 'done', '2026-10-30T12:00:00.000Z');
+      const unblock = mark('dr-f', '20261030T130000000Z', 'unblock', '2026-10-30T13:00:00.000Z');
       fake.seed('sections/inbox-dev/bead-marks/another/an-1/20261030T120000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'another', bead: 'an-1', verdict: 'done', at: '2026-10-30T12:00:00.000Z', by: 'owner' }), 'application/json');
 
       const listed = await cli(via, 'mark', 'list', '--project', 'dev-roadmap');
       assert.equal(listed.code, 0, listed.stderr);
-      assert.deepEqual(listed.stdout.trim().split('\n'), ['dr-a\tdone\t2026-10-30T10:00:00.000Z', 'dr-c\tnot-needed\t2026-10-30T11:00:00.000Z\tSuperseded', 'dr-e\tdone\t2026-10-30T12:00:00.000Z'], 'Oldest first; undone and applied marks are not listed.');
+      assert.deepEqual(listed.stdout.trim().split('\n'), ['dr-a\tdone\t2026-10-30T10:00:00.000Z', 'dr-c\tnot-needed\t2026-10-30T11:00:00.000Z\tSuperseded', 'dr-e\tdone\t2026-10-30T12:00:00.000Z', 'dr-f\tunblock\t2026-10-30T13:00:00.000Z'], 'Oldest first; undone and applied marks are not listed.');
       const json = JSON.parse((await cli(via, 'mark', 'list', '--project', 'dev-roadmap', '--json')).stdout);
-      assert.deepEqual(json.map(item => [item.bead, item.verdict, item.reason]), [['dr-a', 'done', undefined], ['dr-c', 'not-needed', 'Superseded'], ['dr-e', 'done', undefined]]);
+      assert.deepEqual(json.map(item => [item.bead, item.verdict, item.reason]), [['dr-a', 'done', undefined], ['dr-c', 'not-needed', 'Superseded'], ['dr-e', 'done', undefined], ['dr-f', 'unblock', undefined]]);
 
       const applied = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', 'dr-a');
       assert.equal(applied.code, 0, applied.stderr);
@@ -1497,7 +1552,10 @@ for (const via of ['api', 's3']) {
       const note = fake.json(`sections/inbox-dev/${applied.stdout.trim()}`);
       assert.deepEqual([note.v, note.verdict, note.bead, note.mark], [1, 'applied', 'dr-a', '20261030T100000000Z-done-ab12.json']);
       assert.match(note.by, /^[a-z0-9-]+$/);
-      assert.deepEqual((await cli(via, 'mark', 'list', '--project', 'dev-roadmap')).stdout.trim().split('\n').map(line => line.split('\t')[0]), ['dr-c', 'dr-e']);
+      assert.deepEqual((await cli(via, 'mark', 'list', '--project', 'dev-roadmap')).stdout.trim().split('\n').map(line => line.split('\t')[0]), ['dr-c', 'dr-e', 'dr-f']);
+      const unblocked = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', 'dr-f');
+      assert.equal(unblocked.code, 0, unblocked.stderr);
+      assert.equal(fake.json(`sections/inbox-dev/${unblocked.stdout.trim()}`).mark, unblock, 'The note names the unblock file.');
       for (const bead of ['dr-a', 'dr-b', 'dr-d']) {
         const none = await cli(via, 'mark', 'applied', '--project', 'dev-roadmap', '--bead', bead);
         assert.equal(none.code, 0, none.stderr);

@@ -14,12 +14,12 @@ import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, inboxFilter, needsKindOf, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { buildMap } from './hub-map.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
-import { applyMarks, checkMarkRequest, markEntry, markKey, markState } from './hub-marks.mjs';
+import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
@@ -34,7 +34,7 @@ import { defaultsOf } from './project-defaults.mjs';
 import { createBeadsReader } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
-import { buildWork } from './hub-work.mjs';
+import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
@@ -516,8 +516,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
+    const sub = askSubtype(ask);
     return {
       ...ask, ...state,
+      subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
@@ -544,8 +546,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
     const pictures = checklistEvidence(names);
     const delivery = await deliveryFor(`checklists/${id}`, names, submit, at);
+    const sub = stepsSubtype(checklist);
     return {
       ...checklist, state, done, total,
+      ...(sub ? { subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}) } : {}),
       evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
       shots: pictures.shots,
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
@@ -665,9 +669,34 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     }
   }
 
+  const askRow = row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state });
+  const checklistRow = row => ({ id: row.checklist.id, bead: row.item.bead, state: row.item.state });
+
   /**
-   * The owner marks a task that waits on them, with nothing in Needs you, done or no longer needed (or takes it back).
-   * Only the Hub writes the verdict; an agent closes the issue in Beads later and writes `applied`.
+   * What the Work board and /hub/unasked are built from, for one project or (null) every project with Beads:
+   * issues with the owner's marks applied, requests, events, Asks, checklists and every other Needs you item
+   * that names a bead. One loader so the two routes never drift.
+   */
+  async function loadWorkInputs(only, at) {
+    if (only && !validProject(only)) throw fail('No such project.', 404);
+    const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
+    const [loaded, requests, window, asks, checklists, hermesOpen, status, marks] = await Promise.all([
+      pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadChecklists(at), hermesApprovals.loadOpen(at), loadPcStatus(at), loadMarks(only),
+    ]);
+    const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
+    return {
+      issues: applyMarks(loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))), marks),
+      requests: only ? requests.filter(item => item.project === only) : requests,
+      events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow),
+      needs: waiting.filter(item => item.bead).map(item => ({ bead: item.bead, kind: item.kind, id: item.id })),
+      status, now: at,
+    };
+  }
+
+  /**
+   * The owner marks a task that waits on them done, no longer needed or unblocked (or takes it back), even when
+   * an Ask or a Needs you item names it: the session that applies the mark cancels those.
+   * Only the Hub writes the verdict; an agent closes the issue in Beads (or drops the label) later and writes `applied`.
    */
   async function markBead(project, raw, user, at) {
     if (!validProject(project)) throw fail('No such project.', 404);
@@ -678,19 +707,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const issue = issues.find(item => item.id === bead);
     if (!issue) throw fail('No such task in this project.', 404);
     const closed = issue.status === 'closed';
-    const state = markState((await loadMarks(project)).get(markKey(project, bead)) ?? [], { closed });
+    const state = markState((await loadMarks(project)).get(markKey(project, bead)) ?? [], { closed, waiting: isWaiting(issue) });
     const answer = (status, body) => ({ status, body });
     if (verdict === 'undo') {
-      if (state && state.verdict !== 'undo' && (state.applied || closed)) throw fail('Already closed in Beads; reopen it there with bd reopen.', 409);
+      if (state?.verdict === 'unblock' && state.applied) throw fail(`Already applied in Beads; add the label back with bd label add ${bead} needs-owner.`, 409);
+      if (state && state.verdict !== 'undo' && state.verdict !== 'unblock' && (state.applied || closed)) throw fail('Already closed in Beads; reopen it there with bd reopen.', 409);
       if (!state?.active) return answer(200, { state: 'unmarked' });
     } else {
       if (state?.active && state.verdict === verdict) return answer(200, { state: 'marked', verdict, at: state.at });
       if (closed) throw fail('Already closed in Beads.', 409);
-      const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
-      if (asks.some(row => row.ask.bead === bead && (row.state.state === 'open' || row.state.state === 'snoozed'))) throw fail('This has an Ask; answer it in Needs you.', 409);
-      const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at });
-      if (waiting.some(item => item.bead === bead)) throw fail('This has an item in Needs you; finish it there.', 409);
-      const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), now: at });
+      const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
+      const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at });
       const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
       if (task?.state !== 'you') throw fail('This is not waiting on you.', 409);
     }
@@ -1272,7 +1299,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const listed = fillProjects(buildInbox({ filter, asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at }), requests);
             const items = inProject(listed, project);
             // The chips count what waits in the chosen project; `projects` counts the list on screen per project, whichever is chosen.
-            const counts = inboxCounts(inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou, requests), project));
+            const waiting = inProject(fillProjects(buildToday({ asks: askItems, checklists: listItems, requests, hermesApprovals: hermesOpen, events: window.events, now: at, alerts: routines.alerts() }).needsYou, requests), project);
+            const counts = inboxCounts(waiting);
             // With detail=1, the first rows that are Asks or lists carry the same object their own route answers, so the
             // screen can show the options and the steps without a second request each. The rest come without.
             const withDetail = new Set(query.get('detail') === '1' ? items.filter(item => item.kind === 'ask' || item.kind === 'checklist').slice(0, INBOX_DETAIL_CAP) : []);
@@ -1281,7 +1309,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
               if (!withDetail.has(item)) return row;
               try { return { ...row, detail: item.kind === 'ask' ? await askDetail(item.id, at) : await checklistDetail(item.id, at) }; } catch { return row; }
             });
-            reply({ items: rows, counts, projects: projectCounts(listed) });
+            reply({ items: rows, counts, subCounts: subCounts(waiting), projects: projectCounts(listed) });
           } else if ((match = /^\/hub\/asks\/([^/]+)$/.exec(route))) {
             reply(await askDetail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/checklists\/([^/]+)$/.exec(route))) {
@@ -1312,28 +1340,21 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if (route === '/hub/projects') {
             reply({ projects: await projects(at) });
           } else if (route === '/hub/work') {
-            const only = query.get('project');
-            if (only && !validProject(only)) throw fail('No such project.', 404);
-            const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
-            const [loaded, requests, window, asks, status, marks] = await Promise.all([
-              pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadPcStatus(at), loadMarks(only),
-            ]);
-            reply(buildWork({
-              issues: applyMarks(loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))), marks),
-              requests: only ? requests.filter(item => item.project === only) : requests,
-              events: window.events, asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), status, now: at,
-            }));
+            reply(buildWork(await loadWorkInputs(query.get('project'), at)));
+          } else if (route === '/hub/unasked') {
+            const work = buildWork(await loadWorkInputs(null, at));
+            reply({ items: unaskedOf(work.lanes.blocked).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href })) });
           } else if ((match = /^\/hub\/beads\/([^/]+)$/.exec(route))) {
             if (!validProject(match[1])) throw fail('No such project.', 404);
             reply(await loadBeads(match[1]));
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
-            const [{ meta, issues }, window, asks, cards, marks] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), cardResolver(), loadMarks(project)]);
+            const [{ meta, issues }, window, asks, checklists, cards, marks] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project)]);
             const repo = meta?.repo || await projectRepo(project);
             reply(buildMap({
               project, meta, issues: applyMarks(issues, marks, project), events: window.events, repo, cards,
-              asks: asks.map(row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state })), now: at,
+              asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at,
             }));
           } else if (route === '/hub/file') {
             await serveFile(response, query.get('path'));

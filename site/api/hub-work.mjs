@@ -33,7 +33,7 @@ function liveByBead(status, issues, now) {
   return live;
 }
 
-function beadCards({ issues, events, asks, status, now }) {
+function beadCards({ issues, events, asks, checklists, needs, status, now }) {
   const byId = new Map(issues.map(issue => [issue.id, issue]));
   const hasChildren = new Set();
   const parentOf = new Map();
@@ -48,8 +48,12 @@ function beadCards({ issues, events, asks, status, now }) {
       }
     }
   }
-  const askOf = new Map();
-  for (const ask of asks) if (ask.bead && (ask.state === 'open' || ask.state === 'snoozed')) askOf.set(ask.bead, ask.id);
+  // What is asked of the owner about a bead: an open or snoozed Ask first, then an open checklist, then any other Needs you item.
+  const askedOf = new Map();
+  const note = (bead, kind, id, href) => { if (bead && !askedOf.has(bead)) askedOf.set(bead, { kind, id, href }); };
+  for (const ask of asks) if (ask.state === 'open' || ask.state === 'snoozed') note(ask.bead, 'ask', ask.id, `#/~hub/ask/${encodeURIComponent(ask.id)}`);
+  for (const list of checklists) if (list.state === 'open') note(list.bead, 'checklist', list.id, `#/~hub/checklist/${encodeURIComponent(list.id)}`);
+  for (const need of needs) note(need.bead, need.kind, need.id, '#/~hub/needs');
   const ctx = { eventsByBead: eventsByBeadOf(events) };
   const live = liveByBead(status, issues, now);
 
@@ -62,8 +66,14 @@ function beadCards({ issues, events, asks, status, now }) {
     const openBlocker = (blockersOf.get(issue.id) ?? []).map(id => byId.get(id)).find(blocker => blocker && blocker.status !== 'closed');
     let lane;
     let why;
+    let nothingAsked = false;
+    const asked = askedOf.get(issue.id);
     if (closed) lane = 'done';
-    else if (askOf.has(issue.id) || (issue.labels ?? []).includes('needs-owner')) { lane = 'blocked'; why = 'needs you'; }
+    else if (asked || (issue.labels ?? []).includes('needs-owner')) {
+      lane = 'blocked';
+      nothingAsked = !asked;
+      why = nothingAsked ? 'needs you · nothing asked yet' : 'needs you';
+    }
     else if (signs.includes('pr') || signs.includes('review')) lane = 'review';
     else if (issue.status === 'in_progress') lane = 'running';
     else if (issue.status === 'deferred') lane = 'backlog';
@@ -74,6 +84,7 @@ function beadCards({ issues, events, asks, status, now }) {
     cards.push({
       key: `bead:${issue.id}`, source: 'beads', id: issue.id, project, title: issue.title ?? issue.id,
       lane, state: issue.status ?? 'open', ...(why ? { why } : {}), signs,
+      ...(!closed && asked ? { asked } : {}), ...(nothingAsked ? { nothingAsked: true } : {}),
       ...(live.has(issue.id) && !closed ? { live: live.get(issue.id) } : {}),
       updatedAt: (closed ? issue.closed_at : null) ?? issue.updated_at ?? issue.created_at ?? '',
       href: `#/~hub/map/${encodeURIComponent(project)}/${encodeURIComponent(issue.id)}`,
@@ -135,16 +146,21 @@ function runCards(hermesRuns) {
   return cards;
 }
 
+/** The cards that say they need the owner but ask nothing: Today and the board count the same list. */
+export const unaskedOf = cards => cards.filter(card => card.nothingAsked);
+
 /**
  * @param issues      Beads issues, each carrying its `project`
  * @param requests    request items (`requestItem`): { id, project, title, at, state, bead? }
  * @param hermesRuns  [{ id, project?, title?, state: 'running' | 'waiting' | 'completed', updatedAt }]
  * @param events      the event window
  * @param asks        [{ id, bead, state }] with the Ask's derived state
+ * @param checklists  [{ id, bead, state }] with the checklist's derived state
+ * @param needs       [{ bead, kind, id }]: every other Needs you item that names a bead
  * @param status      the PC status or null
  */
-export function buildWork({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], status = null, now = new Date() }) {
-  const all = [...beadCards({ issues, events, asks, status, now }), ...requestCards({ requests, events }), ...runCards(hermesRuns)];
+export function buildWork({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], checklists = [], needs = [], status = null, now = new Date() }) {
+  const all = [...beadCards({ issues, events, asks, checklists, needs, status, now }), ...requestCards({ requests, events }), ...runCards(hermesRuns)];
   const lanes = Object.fromEntries(LANES.map(lane => [lane, []]));
   const counts = Object.fromEntries(LANES.map(lane => [lane, 0]));
   const floor = now.getTime() - DONE_DAYS * DAY;

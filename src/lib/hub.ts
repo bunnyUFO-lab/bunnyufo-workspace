@@ -52,6 +52,9 @@ export interface Item {
   design?: boolean
   decisions?: number
   takes?: number
+  /** An Ask or a steps list: its sub-type (the file's `kind`, or the Hub's guess when `kindInferred`). */
+  subtype?: string
+  kindInferred?: boolean
   /** A request row: its preset, where it is proposed to run, and who wrote it (`origin.kind` is owner, agent or run). */
   preset?: string
   target?: string
@@ -172,6 +175,10 @@ export interface Ask {
   options?: AskOption[]
   allowNote: boolean
   requirePasskey?: boolean
+  /** The Ask's sub-type as written; `subtype` is what the Hub reads from it (or guesses, when `kindInferred`). */
+  kind?: 'approval' | 'verify' | 'design' | 'decision'
+  subtype?: string
+  kindInferred?: boolean
   allowDrawing: boolean
   /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
   image?: string
@@ -236,7 +243,10 @@ export interface Checklist {
   total: number
   items: ChecklistItem[]
   /** A playtest: the build to open, its platform and what to look for. */
-  kind?: 'steps' | 'playtest'
+  kind?: 'steps' | 'playtest' | 'verify' | 'setup' | 'investigate' | 'develop'
+  /** The Hub's reading of `kind` for a steps list: the file's value, or a guess (`kindInferred`). */
+  subtype?: string
+  kindInferred?: boolean
   build?: string
   platform?: string
   lookFor?: string
@@ -269,16 +279,20 @@ export interface MapTask {
   deps: string[]; ask?: string; prUrl?: string; prs?: MapPr[]; closedAt?: string
   /** When the issue last changed in Beads; the Roadmap's date filter reads it. */
   updatedAt?: string
-  /** Why the task is yellow: an open Ask, or only the `needs-owner` label. */
-  you?: 'ask' | 'label'
+  /** Why the task is yellow: an open Ask, an open checklist, or only the `needs-owner` label. */
+  you?: 'ask' | 'checklist' | 'label'
+  /** The open checklist that names the task. */
+  checklist?: string
   /** One or two plain sentences saying what the work is, from the description. */
   summary?: string
   closeReason?: string
   cards?: MapCard[]
   commits?: { sha: string; url?: string }[]
   /** The owner marked it on the Roadmap and no agent has closed it in Beads yet: it shows closed. */
-  mark?: { verdict: 'done' | 'not-needed'; at: string; pending: boolean }
+  mark?: { verdict: 'done' | 'not-needed' | 'unblock'; at: string; pending: boolean }
 }
+/** A bead that says it needs the owner but has no Ask, checklist or Needs you item (GET /hub/unasked). */
+export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string }
 export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
 export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }
 export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[] }

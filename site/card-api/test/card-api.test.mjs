@@ -266,7 +266,7 @@ test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an
   try {
     const base = 'bead-marks/probe/pb-1';
     const put = (token, file, headers = { 'If-None-Match': '*' }) => call('PUT', `/sections/inbox/files/${base}/${file}`, { token, body: Buffer.from('{}'), base64: true, headers });
-    for (const verdict of ['done', 'not-needed', 'undo']) {
+    for (const verdict of ['done', 'not-needed', 'unblock', 'undo']) {
       const refused = await put('tok-cloud', `20261030T100000000Z-${verdict}-ab12.json`);
       assert.equal(refused.status, 403, verdict);
       assert.equal(refused.data.error, 'Only the Hub writes answers.');

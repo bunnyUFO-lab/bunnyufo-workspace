@@ -11,6 +11,10 @@ export interface WorkCard {
   lane: WorkLane
   state: string
   why?: string
+  /** What is asked of the owner about this bead: an Ask, a checklist, or another Needs you item. */
+  asked?: { kind: string; id: string; href: string }
+  /** The bead has the needs-owner label and nothing is asked. */
+  nothingAsked?: boolean
   signs: string[]
   live?: { host: string; session: string; state: 'working' | 'idle' }
   updatedAt: string

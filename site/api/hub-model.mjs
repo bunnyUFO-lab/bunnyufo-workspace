@@ -272,12 +272,58 @@ export function checklistProgress(checklist, names) {
   return { done: ids.filter(id => marks.get(id)?.done).length, total: ids.length, marks };
 }
 
+// --- Sub-types: the optional `kind` of an Ask or a checklist, or a guess from its words ---
+
+/** The sub-types of a Question (an Ask's `kind`), and of Steps (a checklist's `kind`, beside "steps" and "playtest"). Keep equal to the lists in site/card-api/cards.mjs and src/lib/needsKinds.ts. */
+export const ASK_SUBTYPES = ['approval', 'verify', 'design', 'decision'];
+export const STEPS_SUBTYPES = ['verify', 'setup', 'investigate', 'develop'];
+
+const ASK_VERIFY_RE = /^\s*(did|does|is\b.*\bworking|live check)/i;
+const STEPS_RULES = [
+  ['verify', /^\s*(live check|test|try|play-?test|check|verify)\b/i],
+  ['setup', /^\s*(set up|setup|install|paste|run the .*\binstaller|sign)\b/i],
+  ['investigate', /^\s*(investigate|find out|look into)\b/i],
+  ['develop', /^\s*(build|make|add|fix)\b/i],
+];
+
+/** What an Ask without a `kind` most likely is, from the file alone: a passkey or rerun pointer is an approval, pictures a design choice, "Did it work?" a check, else a decision. */
+export function inferAskSubtype(ask) {
+  if (!ask || typeof ask !== 'object') return 'decision';
+  if (ask.requirePasskey === true || (ask.rerun && typeof ask.rerun === 'object')) return 'approval';
+  if (isDesignReview(ask)) return 'design';
+  if (ASK_VERIFY_RE.test(String(ask.question ?? ''))) return 'verify';
+  return 'decision';
+}
+
+/** What a steps checklist without a `kind` most likely is, from the first words of its title; "setup" when none fit. */
+export function inferStepsSubtype(title) {
+  const text = String(title ?? '');
+  for (const [name, re] of STEPS_RULES) if (re.test(text)) return name;
+  return 'setup';
+}
+
+/** An Ask's sub-type: its own `kind` when valid, else the guess (`inferred`). */
+export function askSubtype(ask) {
+  if (ASK_SUBTYPES.includes(ask?.kind)) return { subtype: ask.kind, inferred: false };
+  return { subtype: inferAskSubtype(ask), inferred: true };
+}
+
+/** A checklist's sub-type, or null for a playtest (its type says it all). */
+export function stepsSubtype(checklist) {
+  if (checklist?.kind === 'playtest') return null;
+  if (STEPS_SUBTYPES.includes(checklist?.kind)) return { subtype: checklist.kind, inferred: false };
+  return { subtype: inferStepsSubtype(checklist?.title), inferred: true };
+}
+
+const subtypeFields = found => (found ? { subtype: found.subtype, ...(found.inferred ? { kindInferred: true } : {}) } : {});
+
 export function checklistItem(checklist, names) {
   const state = checklistState(names);
   const { done, total } = checklistProgress(checklist, names);
   return {
     kind: 'checklist', id: checklist.id, project: checklist.project, title: clip(checklist.title), at: checklist.createdAt, state, done, total,
     ...(checklist.kind === 'playtest' ? { playtest: true, platform: PLATFORMS.includes(checklist.platform) ? checklist.platform : 'web' } : {}),
+    ...subtypeFields(stepsSubtype(checklist)),
     ...(checklist.bead ? { bead: checklist.bead } : {}),
     ...(checklist.from?.host ? { host: checklist.from.host } : {}),
     ...(checklist.from?.tool ? { tool: clip(checklist.from.tool, 40) } : {}),
@@ -296,7 +342,7 @@ export function checkChecklist(raw) {
   if (raw.context !== undefined && !text(raw.context, 0, L.context)) problems.push(`context is at most ${L.context} characters`);
   if (raw.card !== undefined && !link(raw.card)) problems.push('card is an http:// or https:// link of at most 2000 characters');
   const playtest = raw.kind === 'playtest';
-  if (raw.kind !== undefined && raw.kind !== 'steps' && !playtest) problems.push('kind is "steps" or "playtest"');
+  if (raw.kind !== undefined && raw.kind !== 'steps' && !playtest && !STEPS_SUBTYPES.includes(raw.kind)) problems.push(`kind is "playtest", "steps" or one of ${STEPS_SUBTYPES.join(', ')}`);
   if (playtest) {
     if (typeof raw.build !== 'string' || !/^https:\/\//i.test(raw.build) || raw.build.length > L.link) problems.push('build is an https:// link of at most 2000 characters');
     if (raw.platform !== undefined && !PLATFORMS.includes(raw.platform)) problems.push(`platform is one of ${PLATFORMS.join(', ')}`);
@@ -355,6 +401,7 @@ export function cleanAsk(ask) {
   let out = ask;
   if (ask.decisions !== undefined && !validDecisions(ask)) { const { decisions: _drop, ...rest } = out; out = rest; bad.push('decisions'); }
   if (ask.image !== undefined && !(typeof ask.image === 'string' && ASK_IMAGE_RE.test(ask.image))) { const { image: _drop, ...rest } = out; out = rest; bad.push('image'); }
+  if (ask.kind !== undefined && !ASK_SUBTYPES.includes(ask.kind)) { const { kind: _drop, ...rest } = out; out = rest; bad.push('kind'); }
   return { ask: out, bad };
 }
 
@@ -365,6 +412,7 @@ export function askItem(ask, state) {
   return {
     kind: 'ask', id: ask.id, project: ask.project, title: clip(ask.question), at: ask.createdAt, state: state.state,
     ...(design ? { design: true } : {}),
+    ...subtypeFields(askSubtype(ask)),
     ...(decisions ? { decisions: decisions.length } : {}),
     ...(takes ? { takes } : {}),
     ...(ask.bead ? { bead: ask.bead } : {}),
@@ -618,15 +666,20 @@ export const INBOX_FILTERS = ['all', ...NEEDS_KINDS, 'approvals', 'answered', 'r
 /** Old filter names, kept so links in Discord history and bookmarks still land on the right chip. */
 export const INBOX_FILTER_ALIASES = { 'needs-you': 'all', asks: 'question', todo: 'steps', reviews: 'pr', blocked: 'unstick', sessions: 'unstick' };
 
-/** The filter a request names, old names mapped to new ones; anything unknown is `all`. */
+/** The sub-types a chip can narrow to: Questions by the Ask's kind, Steps by the checklist's. */
+export const FILTER_SUBTYPES = { question: ASK_SUBTYPES, steps: STEPS_SUBTYPES };
+
+/** The filter a request names, old names mapped to new ones; anything unknown is `all`. `question:verify` and `steps:setup` keep their sub-type. */
 export function inboxFilter(raw) {
-  const mapped = Object.prototype.hasOwnProperty.call(INBOX_FILTER_ALIASES, raw) ? INBOX_FILTER_ALIASES[raw] : raw;
-  return INBOX_FILTERS.includes(mapped) ? mapped : 'all';
+  const [word, sub] = String(raw ?? '').split(':');
+  const mapped = Object.prototype.hasOwnProperty.call(INBOX_FILTER_ALIASES, word) ? INBOX_FILTER_ALIASES[word] : word;
+  if (!INBOX_FILTERS.includes(mapped)) return 'all';
+  return sub !== undefined && FILTER_SUBTYPES[mapped]?.includes(sub) ? `${mapped}:${sub}` : mapped;
 }
 
 /** The Needs you list for one filter. `all` keeps the order Today uses: open Asks, open checklists, reviews, blocked sessions. */
 export function buildInbox({ filter: raw, asks, checklists = [], requests, hermesApprovals = [], events, now }) {
-  const filter = inboxFilter(raw);
+  const [filter, sub] = inboxFilter(raw).split(':');
   if (filter === 'requests') return [...requests].sort(newest);
   if (filter === 'answered') {
     // Answered is what the owner has answered and an agent has not taken yet; picked-up work is the agent's now, and has left the list.
@@ -634,7 +687,9 @@ export function buildInbox({ filter: raw, asks, checklists = [], requests, herme
   }
   const needs = buildToday({ asks, checklists, requests, hermesApprovals, events, now }).needsYou;
   if (filter === 'approvals') return needs.filter(item => item.kind === 'approval');
-  return filter === 'all' ? needs : needs.filter(item => needsKindOf(item) === filter);
+  if (filter === 'all') return needs;
+  const ofKind = needs.filter(item => needsKindOf(item) === filter);
+  return sub ? ofKind.filter(item => item.subtype === sub) : ofKind;
 }
 
 /**
@@ -666,6 +721,14 @@ export function inboxCounts(needsYou) {
   for (const kind of NEEDS_KINDS) counts[kind] = 0;
   counts.approvals = 0;
   for (const item of needsYou) { const kind = needsKindOf(item); if (kind in counts) counts[kind] += 1; if (item.kind === 'approval') counts.approvals += 1; }
+  return counts;
+}
+
+/** How many Questions and Steps wait per sub-type, as `{ 'question:verify': 2, ... }`: the numbers on the second row of chips. */
+export function subCounts(needsYou) {
+  const counts = {};
+  for (const [kind, subs] of Object.entries(FILTER_SUBTYPES)) for (const sub of subs) counts[`${kind}:${sub}`] = 0;
+  for (const item of needsYou) { const key = `${needsKindOf(item)}:${item.subtype}`; if (key in counts) counts[key] += 1; }
   return counts;
 }
 

@@ -1,6 +1,7 @@
 // Runs every browser test in server/test (ui.mjs and *-ui.mjs), one after another, and fails at
 // the end if any failed: one broken test no longer hides the ones after it.
 //   node scripts/run-ui-tests.mjs [name-fragment ...]   only the tests whose file name contains a fragment
+//   node scripts/run-ui-tests.mjs --shard 2/4           the 2nd of 4 time-balanced shards (CI runs them in parallel)
 // Each file has a time limit (5 minutes; BUW_UI_FILE_TIMEOUT_MS or --timeout-ms=N changes it). A file that
 // goes over is killed with its whole process tree and fails by name, so a hang never hangs the run.
 // Run after npm run build.
@@ -8,18 +9,19 @@ import { spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseShard, pickShard, readTimings } from './ui-shard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const testDir = path.join(root, 'server', 'test');
-const args = process.argv.slice(2);
-const limitArg = args.find(arg => arg.startsWith('--timeout-ms='));
+const { rest, shard } = parseShard(process.argv.slice(2));
+const limitArg = rest.find(arg => arg.startsWith('--timeout-ms='));
 const limitMs = Number(limitArg?.slice('--timeout-ms='.length) || process.env.BUW_UI_FILE_TIMEOUT_MS) || 5 * 60_000;
-const filters = args.filter(arg => !arg.startsWith('--'));
+const filters = rest.filter(arg => !arg.startsWith('--'));
 
-const files = (await readdir(testDir))
+const files = pickShard((await readdir(testDir))
   .filter(name => name === 'ui.mjs' || name.endsWith('-ui.mjs'))
   .filter(name => !filters.length || filters.some(fragment => name.includes(fragment)))
-  .sort();
+  .sort(), shard, readTimings(path.join(root, 'scripts', 'ui-timings.json')));
 if (!files.length) {
   console.error('No UI tests match.');
   process.exit(1);

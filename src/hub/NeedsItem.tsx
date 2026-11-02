@@ -1,6 +1,7 @@
 import type { Ask, Checklist, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
-import { KIND_ICON, KIND_LABEL, itemLabel, needsKind } from '../lib/needsKinds'
+import { KIND_ICON, KIND_LABEL, needsKind } from '../lib/needsKinds'
+import NeedBadges from './NeedBadges'
 import { metaParts } from '../lib/needsView.mjs'
 import type { SettledVerb } from '../lib/nextItem.mjs'
 import { reviewHash } from '../lib/route'
@@ -106,7 +107,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
           <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
           <div className="ni-hm">
             <h3 className="ni-t" id={`ni-${key}`} tabIndex={-1}>{page ? <a href={page}>{item.title}</a> : item.title}</h3>
-            <div className="ni-meta"><span className="ni-chip">{item.kind === 'hermes-approval' ? 'Hermes approval' : item.kind === 'run-question' ? 'Hermes asks' : itemLabel(item)}</span>{meta.map(part => part.kind === 'project' ? <ProjectChip key="project" id={part.id} names={names} filter={filter} /> : <span key={part.text}>{part.text}</span>)}</div>
+            <div className="ni-meta"><NeedBadges item={item} />{meta.map(part => part.kind === 'project' ? <ProjectChip key="project" id={part.id} names={names} filter={filter} /> : <span key={part.text}>{part.text}</span>)}</div>
           </div>
           {help && <GetHelp target={help} />}
         </header>
