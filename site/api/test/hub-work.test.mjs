@@ -7,7 +7,8 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { buildWork } from '../hub-work.mjs';
+import { buildWork, unaskedOf } from '../hub-work.mjs';
+import { applyMarks, markEntry } from '../hub-marks.mjs';
 import { validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { beadsIssue, eventJson, iso, jsonl, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, workFixture } from './hub-fixtures.mjs';
@@ -29,11 +30,43 @@ test('each Beads cell lands in its lane; groups and milestones are left out', ()
   assert.equal(laneOf(work, 'bead:ws-old'), undefined, 'Done keeps the last 14 days.');
   assert.equal(card(work, 'bead:ws-wait').why, 'blocked by ws-doing In progress');
   assert.equal(card(work, 'bead:ws-ask').why, 'needs you');
-  assert.equal(card(work, 'bead:ws-owner').why, 'needs you');
+  assert.equal(card(work, 'bead:ws-owner').why, 'needs you · nothing asked yet');
+  assert.equal(card(work, 'bead:ws-owner').nothingAsked, true);
   assert.deepEqual(card(work, 'bead:ws-pr').signs, ['pr']);
   assert.equal(card(work, 'bead:ws-pr').href, '#/~hub/map/ws/ws-pr');
   assert.equal(work.counts.blocked, 4);
   assert.equal(work.lanes.blocked.length, 4);
+});
+
+test('a checklist, a snoozed Ask or another Needs you item counts as asked; the label alone is nothing asked yet', () => {
+  const issues = ['a-chk', 'a-snz', 'a-rev', 'a-lab', 'a-both'].map(id => ({ ...beadsIssue({ id, labels: id === 'a-chk' || id === 'a-snz' ? [] : ['needs-owner'] }), project: 'a' }));
+  const asks = [{ id: 'ask1', bead: 'a-snz', state: 'snoozed' }, { id: 'ask2', bead: 'a-both', state: 'open' }, { id: 'ask3', bead: 'a-lab', state: 'answered' }];
+  const checklists = [{ id: 'chk1', bead: 'a-chk', state: 'open' }, { id: 'chk2', bead: 'a-both', state: 'open' }, { id: 'chk3', bead: 'a-lab', state: 'submitted' }];
+  const needs = [{ bead: 'a-rev', kind: 'review', id: 'rev1' }];
+  const work = buildWork({ issues, asks, checklists, needs, now: NOW });
+  for (const id of issues.map(issue => issue.id)) assert.equal(laneOf(work, `bead:${id}`), 'blocked', id);
+  assert.deepEqual(card(work, 'bead:a-chk').asked, { kind: 'checklist', id: 'chk1', href: '#/~hub/checklist/chk1' });
+  assert.equal(card(work, 'bead:a-chk').why, 'needs you');
+  assert.equal(card(work, 'bead:a-snz').asked.kind, 'ask');
+  assert.deepEqual(card(work, 'bead:a-rev').asked, { kind: 'review', id: 'rev1', href: '#/~hub/needs' });
+  assert.equal(card(work, 'bead:a-both').asked.kind, 'ask', 'An Ask comes before a checklist.');
+  assert.deepEqual([card(work, 'bead:a-lab').nothingAsked, card(work, 'bead:a-lab').why, 'asked' in card(work, 'bead:a-lab')], [true, 'needs you · nothing asked yet', false]);
+  assert.deepEqual(unaskedOf(work.lanes.blocked).map(item => item.id), ['a-lab']);
+});
+
+test('an active unblock moves a label-only card to ready, and a real blocker still shows', () => {
+  const mark = id => markEntry(`a/${id}/20261030T100000000Z-unblock-ab12.json`, { v: 1, project: 'a', bead: id, verdict: 'unblock', at: '2026-10-30T10:00:00.000Z', by: 'owner' });
+  const issues = [
+    { ...beadsIssue({ id: 'a-lab', labels: ['needs-owner'] }), project: 'a' },
+    { ...beadsIssue({ id: 'a-blk', status: 'blocked', labels: ['needs-owner'], blocks: ['a-doing'] }), project: 'a' },
+    { ...beadsIssue({ id: 'a-doing', status: 'in_progress' }), project: 'a' },
+  ];
+  const marks = new Map([['a/a-lab', [mark('a-lab')]], ['a/a-blk', [mark('a-blk')]]]);
+  const work = buildWork({ issues: applyMarks(issues, marks), now: NOW });
+  assert.equal(laneOf(work, 'bead:a-lab'), 'ready');
+  assert.equal(laneOf(work, 'bead:a-blk'), 'blocked');
+  assert.match(card(work, 'bead:a-blk').why, /^blocked by a-doing/);
+  assert.equal(card(work, 'bead:a-blk').nothingAsked, undefined);
 });
 
 test('a blocker that is closed leaves the issue ready', () => {

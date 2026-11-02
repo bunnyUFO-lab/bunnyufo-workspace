@@ -164,10 +164,11 @@ function mergePrs(eventRows, beadsRows, closed, at) {
 /**
  * @param events chronological or not; only those naming a task's bead matter
  * @param asks   [{ id, bead?, state }] with the Ask's derived state
+ * @param checklists [{ id, bead?, state }]: an open checklist naming a bead counts like an Ask for `you`
  * @param repo   the project's repository (a GitHub remote or `owner/name`), to link PRs and commits
  * @param cards  `ref → { title, href } | null` for `section/folder` or `section#id`; unresolved refs are dropped
  */
-export function buildMap({ project, meta = null, issues = [], events = [], asks = [], repo = '', cards = () => null, now = new Date() }) {
+export function buildMap({ project, meta = null, issues = [], events = [], asks = [], checklists = [], repo = '', cards = () => null, now = new Date() }) {
   const byId = new Map(issues.map(issue => [issue.id, issue]));
   const parentOf = new Map();
   const childrenOf = new Map();
@@ -194,6 +195,10 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
   const asksByBead = new Map();
   for (const ask of asks) {
     if (ask.bead && (ask.state === 'open' || ask.state === 'snoozed')) asksByBead.set(ask.bead, ask.id);
+  }
+  const checklistsByBead = new Map();
+  for (const list of checklists) {
+    if (list.bead && list.state === 'open' && !checklistsByBead.has(list.bead)) checklistsByBead.set(list.bead, list.id);
   }
   const eventsByBead = eventsByBeadOf(events);
 
@@ -224,7 +229,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
 
   const taskState = issue => {
     if (issue.status === 'closed') return 'done';
-    if (asksByBead.has(issue.id) || (issue.labels ?? []).includes('needs-owner')) return 'you';
+    if (asksByBead.has(issue.id) || checklistsByBead.has(issue.id) || (issue.labels ?? []).includes('needs-owner')) return 'you';
     if (issue.status === 'in_progress') return 'doing';
     if (issue.status === 'open' && blockers(issue).every(id => !byId.has(id) || byId.get(id).status === 'closed')) return 'next';
     return 'later';
@@ -242,7 +247,8 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       sprints: (issue.labels ?? []).filter(label => label.startsWith('sprint:')).map(label => label.slice(7)),
       deps: blockers(issue).filter(id => byId.has(id)),
       ...(asksByBead.has(issue.id) ? { ask: asksByBead.get(issue.id) } : {}),
-      ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : 'label' } : {}),
+      ...(checklistsByBead.has(issue.id) ? { checklist: checklistsByBead.get(issue.id) } : {}),
+      ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : checklistsByBead.has(issue.id) ? 'checklist' : 'label' } : {}),
       ...(summary ? { summary } : {}),
       ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
       ...(issue._mark ? { mark: { verdict: issue._mark.verdict, at: issue._mark.at, pending: true } } : {}),
