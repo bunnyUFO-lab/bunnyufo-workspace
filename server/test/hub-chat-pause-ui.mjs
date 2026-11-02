@@ -3,6 +3,7 @@
 // agent's chat starts on Sonnet and the menu says why; a model picked by hand stays picked, with the note beside it; with no reset
 // time the note says when the limit was seen. The note shows at 1280 px and at 390 px, where nothing scrolls sideways.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -14,7 +15,7 @@ const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

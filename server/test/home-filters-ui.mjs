@@ -5,6 +5,7 @@
 // list shows, "All" turns the archive filter off, the project chips carry their number keys,
 // Recent lists every card in one newest-first run, and a card whose page is gone says so.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -47,7 +48,7 @@ let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const logs = []; page.on('console', message => logs.push(message.text()));
   await page.goto(service.urls.workspace);

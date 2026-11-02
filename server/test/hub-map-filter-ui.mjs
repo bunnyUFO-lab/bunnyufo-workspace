@@ -2,6 +2,7 @@
 // chips, the date choices, the choice kept across a reload, the reset, Fit on the filtered view, and the panel as a
 // popover on a desktop and a sheet on a phone.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -33,7 +34,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

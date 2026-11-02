@@ -6,6 +6,7 @@
 // additions (base, theme, outlines) never reach disk. Single-letter shortcuts stay quiet while
 // you type, and Q/E walk the card's tabs.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -32,7 +33,7 @@ let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 800 } })).newPage()
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const logs = []; page.on('console', message => logs.push(message.text()));
   await page.goto(service.urls.workspace + '#/edit/0');

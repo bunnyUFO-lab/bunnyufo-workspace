@@ -2,6 +2,7 @@
 // when the PC's status is stale and a wake is set up (a stand-in controller on 127.0.0.1 counts the POST), an approved PC request
 // says it starts within a few minutes and offers the same button, and with no wake set up neither shows it. Tests use fake S3 only.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -18,7 +19,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(ms(20000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

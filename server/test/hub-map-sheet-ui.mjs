@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
@@ -46,7 +47,7 @@ const open = async (viewport, options = {}) => {
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = [];
   page.on('pageerror', error => errors.push(error));
   page.errors = errors;

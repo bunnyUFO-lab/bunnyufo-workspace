@@ -2,6 +2,7 @@
 // The team, the sheets and the avatar choice are the real routes; the team response is patched in the page to add agents
 // in other rooms and states, and /hub/events is answered by the page so the ticker has known lines to show.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { teamSheet } from '../../site/api/test/hub-fixtures.mjs';
@@ -32,7 +33,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = [];
   const eventRequests = [];
   page.on('pageerror', error => { throw error; });

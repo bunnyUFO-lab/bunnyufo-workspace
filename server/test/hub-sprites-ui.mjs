@@ -1,6 +1,7 @@
 // Run after npm run build. Sprites by state on the Team screen, and the Custom tab, through a real browser over the hub fixture.
 // The sheets, the sheet PNGs and the avatar choice are the real routes over seeded sheets; only the team response is patched in the page, to add agents in every state.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo, teamSheet } from '../../site/api/test/hub-fixtures.mjs';
@@ -30,7 +31,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   const errors = [];
   page.on('pageerror', error => { throw error; });
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });

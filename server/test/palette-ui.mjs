@@ -1,5 +1,6 @@
 // Run after npm run build. The Ctrl+K palette through a real browser, over the Hub fixture service.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -13,7 +14,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

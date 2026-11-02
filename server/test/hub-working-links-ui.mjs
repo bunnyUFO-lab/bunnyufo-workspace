@@ -4,6 +4,7 @@
 // card, and a session from before the field rendering with no chips. At 1280 x 800 and 390 x 844.
 // BUW_SHOTS=<prefix> also writes the panel and board screenshots.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -17,7 +18,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

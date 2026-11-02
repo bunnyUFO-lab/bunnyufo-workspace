@@ -8,6 +8,7 @@
 // (answer an Ask, seen as Answered, then Picked up); the 409 path;
 // and the read-only banner against a stand-in for the signed-out site.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -32,7 +33,7 @@ const open = async (viewport, options = {}) => {
   // The map checks here draw every task; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   page.on('response', response => { if (response.url().includes('/api/hub/') || response.status() >= 500) requestsSeen.push(`${response.status()} ${response.url().replace(/^https?:[/][/][^/]+/, '').slice(0, 90)}`); });
   return page;
@@ -230,7 +231,7 @@ try {
   await tabs.locator('.hub-option-pick').first().tap();
   await tabs.locator('button:has-text("Send answer")').tap();
   await answeredThenBack(tabs);
-  await tabs.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3', null, { timeout: 5000 });
+  await tabs.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3', null, { timeout: ms(5000) });
   assert.equal(await tabs.locator('[data-hub-badge]').count() ? await tabs.locator('[data-hub-badge]').innerText() : '3', '3', 'The sidebar count follows too.');
   // Later steps need an open Ask again.
   fixture.seed.ask(askJson({ id: askId('phone', 'f6a7'), now: new Date(), options: plainOptions() }));
@@ -1115,7 +1116,7 @@ try {
   assert.equal(Number(await page.locator('[data-hub-tab-badge]').textContent()), badgeBefore, 'Both badges agree before.');
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
   await bareRow.waitFor({ state: 'detached' });
-  await page.waitForFunction(n => document.querySelector('[data-hub-inbox-badge]')?.textContent === String(n) && document.querySelector('[data-hub-tab-badge]')?.textContent === String(n) && document.querySelector('[data-hub-badge]')?.textContent === String(n), badgeBefore - 1, { timeout: 5000 });
+  await page.waitForFunction(n => document.querySelector('[data-hub-inbox-badge]')?.textContent === String(n) && document.querySelector('[data-hub-tab-badge]')?.textContent === String(n) && document.querySelector('[data-hub-badge]')?.textContent === String(n), badgeBefore - 1, { timeout: ms(5000) });
   assert.equal(doneEvents().length, 1);
   assert.equal(doneEvents()[0].review, bareFile);
   await page.reload();
@@ -1174,7 +1175,7 @@ try {
   try {
     const context = await chatBrowser.newContext({ viewport: { width: 1280, height: 900 } });
     const talk = await context.newPage();
-    talk.setDefaultTimeout(15000);
+    talk.setDefaultTimeout(ms(15000));
     talk.on('pageerror', error => { throw error; });
     await talk.goto(chatFixture.url);
     await talk.locator('[data-hub-link="chat"]').waitFor();
@@ -1239,7 +1240,7 @@ try {
     const refusing = await startHubFixture({ hermes: true, hermesOptions: { refuseImages: true } });
     try {
       const refused = await context.newPage();
-      refused.setDefaultTimeout(15000);
+      refused.setDefaultTimeout(ms(15000));
       refused.on('pageerror', error => { throw error; });
       await refused.goto(refusing.url);
       await refused.locator('[data-hub-link="chat"]').click();
@@ -1261,7 +1262,7 @@ try {
     try {
       const runCtx = await chatBrowser.newContext({ viewport: { width: 1280, height: 900 } });
       const ran = await runCtx.newPage();
-      ran.setDefaultTimeout(15000);
+      ran.setDefaultTimeout(ms(15000));
       ran.on('pageerror', error => { throw error; });
       await ran.goto(running.url);
       await ran.locator('[data-hub-link="chat"]').click();
@@ -1284,7 +1285,7 @@ try {
     step('chat at phone width: the drawer opens and the message box fits');
     const small = await chatBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const phoneChat = await small.newPage();
-    phoneChat.setDefaultTimeout(15000);
+    phoneChat.setDefaultTimeout(ms(15000));
     phoneChat.on('pageerror', error => { throw error; });
     await phoneChat.goto(chatFixture.url);
     await phoneChat.locator('.sidebar-list').waitFor();

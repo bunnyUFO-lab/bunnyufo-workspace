@@ -1,6 +1,7 @@
 // The development copy says so: a banner naming the branch above the app and a [dev] title, and
 // nothing of the kind on a host that reports no `dev`. Against a stand-in for the site.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -34,7 +35,7 @@ const browser = await chromium.launch({ headless: true, channel: process.env.BUW
 try {
   const open = async () => {
     const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
-    page.setDefaultTimeout(15000);
+    page.setDefaultTimeout(ms(15000));
     await page.goto(`${origin}/agent-plans`);
     await page.locator('.entity-card').waitFor();
     return page;
@@ -53,7 +54,7 @@ try {
 
   // Light theme at phone width: the bar keeps its colour and the menu button sits below it.
   const phone = await (await browser.newContext({ viewport: { width: 375, height: 700 } })).newPage();
-  phone.setDefaultTimeout(15000);
+  phone.setDefaultTimeout(ms(15000));
   await phone.addInitScript(() => { try { localStorage.setItem('buw.workspaceTheme', 'light'); } catch {} });
   await phone.goto(`${origin}/agent-plans`);
   await phone.locator('[data-dev-banner]').waitFor();

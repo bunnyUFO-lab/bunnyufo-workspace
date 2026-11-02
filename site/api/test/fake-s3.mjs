@@ -3,6 +3,7 @@
 // DELETE, CopyObject and ListObjectsV2 with prefix, delimiter and continuation. Signatures are not checked.
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import './steady-fetch.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const escapeXml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

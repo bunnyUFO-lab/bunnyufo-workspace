@@ -1,5 +1,7 @@
 // Isolated application state and browser profiles; no real preferences.
 import { chromium, expect } from '@playwright/test';
+import { ms, SCALE } from './ui-timeouts.mjs';
+expect.configure({ timeout: 5000 * SCALE });
 import { mkdtemp, mkdir, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +25,7 @@ try {
   browser = await chromium.launch({ channel: process.env.BUW_TEST_BROWSER || 'msedge', headless: true });
   const context = await browser.newContext({ viewport: { width: 1300, height: 920 }, colorScheme: 'dark' });
   const page = await context.newPage(), second = await context.newPage();
-  const errors = []; for (const view of [page, second]) { view.setDefaultTimeout(12000); view.on('pageerror', error => errors.push(error.message)); }
+  const errors = []; for (const view of [page, second]) { view.setDefaultTimeout(ms(12000)); view.on('pageerror', error => errors.push(error.message)); }
   await page.goto(service.urls.workspace + '#/test/0');
   await second.goto(service.urls.workspace);
   await page.locator('.report-document[aria-busy=false]').waitFor();

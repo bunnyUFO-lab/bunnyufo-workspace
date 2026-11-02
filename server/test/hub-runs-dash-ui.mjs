@@ -3,6 +3,7 @@
 // Activity with links to the card or the run; the finished run's card link reaches the card in the assistant section;
 // Spawn's toast after Approve links to the run. Desktop and phone. Data is the fixture's own fake S3.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -18,7 +19,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

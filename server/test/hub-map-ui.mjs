@@ -3,6 +3,7 @@
 // the desktop drawing unchanged from before the vertical layout existed. Where a project's work runs (the Runs on
 // chip), which project the Roadmap opens on, and the Wayfinder row.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -24,7 +25,7 @@ const open = async (viewport, options = {}) => {
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -58,7 +59,7 @@ const showMap = async (page, hash = '#/~hub/map/magic-loops') => {
 };
 /** Waits until the box has the axis (the observer, the relayout and the view all take a frame or two). */
 const axisIs = async (page, axis, what) => {
-  await page.waitForFunction(wanted => document.querySelector('.hub-map-box')?.dataset.axis === wanted, axis, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(wanted => document.querySelector('.hub-map-box')?.dataset.axis === wanted, axis, { timeout: ms(5000) }).catch(() => {});
   assert.equal(await axisOf(page), axis, what);
   await page.waitForTimeout(300);
 };

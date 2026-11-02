@@ -2,6 +2,7 @@
 // card from every cell of the table, the Backlog fold, a live card, the phone's one-lane view, the
 // Activity tab with Work lit in the nav, and the Spawn button from the default fixture.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -15,7 +16,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

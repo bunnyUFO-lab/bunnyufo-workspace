@@ -3,6 +3,7 @@
 // Codex and switching the agent moves the default; an explicit pick stays when the agent changes; the run names the openai-codex
 // provider. At 390 px nothing scrolls sideways.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -13,7 +14,7 @@ const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

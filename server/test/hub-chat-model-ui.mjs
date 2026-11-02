@@ -3,6 +3,7 @@
 // footer under the reply and the tag in the drawer; Get help shows the menu on Auto; "Start a job instead..." opens the Spawn
 // sheet with the draft and sends nothing; at 390 px the menu line does not wrap and the page does not scroll sideways.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 
@@ -13,7 +14,7 @@ const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

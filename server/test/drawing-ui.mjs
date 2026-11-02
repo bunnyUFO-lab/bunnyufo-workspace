@@ -4,6 +4,7 @@
 // Drawing sections: ＋ → Drawing opens the Excalidraw editor, strokes are saved with their PNG
 // beside the scene, the section shows the picture after a reload, and the picture can be copied.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -112,7 +113,7 @@ try {
   // —— Desktop ——————————————————————————————————————————————————————————
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(ms(20000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const fetched = []; page.on('request', request => fetched.push(request.url()));
   await page.goto(service.urls.workspace);
@@ -125,7 +126,7 @@ try {
   await page.locator('.drawing-state', { hasText: 'Unsaved changes' }).waitFor();
   await save(page);
   await checkFiles('sketches');
-  await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /\/assets\/excalidraw\/fonts\/.+\.woff2/.test(entry.name)), null, { timeout: 5000 });
+  await page.waitForFunction(() => performance.getEntriesByType('resource').some(entry => /\/assets\/excalidraw\/fonts\/.+\.woff2/.test(entry.name)), null, { timeout: ms(5000) });
 
   // Done closes the editor; the section then shows the picture.
   await page.locator('.drawing-bar button', { hasText: /^Done$/ }).click();
@@ -173,7 +174,7 @@ try {
   // —— ✎ Annotate ——————————————————————————————————————————————————————————
   const annotating = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const take = await annotating.newPage();
-  take.setDefaultTimeout(20000);
+  take.setDefaultTimeout(ms(20000));
   take.on('pageerror', error => errors.push(error.message));
   await take.goto(`${service.urls.workspace}#/takes/0`);
   const stroke = async () => {
@@ -225,7 +226,7 @@ try {
   // —— A phone ——————————————————————————————————————————————————————————
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const small = await phone.newPage();
-  small.setDefaultTimeout(20000);
+  small.setDefaultTimeout(ms(20000));
   small.on('pageerror', error => errors.push(error.message));
   // The app reopens the card last viewed; a route in the address says which one this phone opens.
   await small.goto(`${service.urls.workspace}#/phone/0`);

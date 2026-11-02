@@ -1,6 +1,7 @@
 // Run after npm run build. Isolated browser and repository; no agent login,
 // live conversation, Windows shortcut or production setting is touched.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, cp } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,7 +28,7 @@ let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
   const context = await browser.newContext({ viewport: { width: 900, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
-  const page = await context.newPage(); page.setDefaultTimeout(10000);
+  const page = await context.newPage(); page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace + '#/test/0');
   for (let index = 0; index < 12; index++) { await page.getByRole('tab').nth(index).click(); await page.frameLocator('iframe.report-frame').getByRole('heading', { name: `Document ${index + 1}`, exact: true }).waitFor(); }
@@ -106,7 +107,7 @@ try {
   await page.getByRole('button', { name: 'Close MCP', exact: true }).click();
   assert.deepEqual(errors, []);
   // Signed out is not absent: a page with no token meets the service and says so.
-  const stranger = await (await browser.newContext({ viewport: { width: 900, height: 800 } })).newPage(); stranger.setDefaultTimeout(10000);
+  const stranger = await (await browser.newContext({ viewport: { width: 900, height: 800 } })).newPage(); stranger.setDefaultTimeout(ms(10000));
   await stranger.goto(service.origin + '/');
   await stranger.getByText('Open bunnyUFO Workspace from the address its service printed', { exact: true }).waitFor();
   await stranger.getByRole('button', { name: 'Reload', exact: true }).waitFor();

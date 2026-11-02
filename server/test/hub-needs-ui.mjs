@@ -4,6 +4,7 @@
 // and a blocked session, the Today row that opens on its item, 44 px targets and no sideways scroll at 375 px, and no
 // collapse animation with reduced motion. Nothing is ever overwritten: the bucket only gains files.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
 import { askJson, checklistJson, designAskJson, eventJson, playtestJson, plainOptions, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
@@ -25,7 +26,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
@@ -128,7 +129,7 @@ try {
     return card.top - hub.top;
   }, FIXTURE_CHECKLIST);
   assert.ok(top >= 0 && top < 120, `The item is scrolled to the top of the list (${top} px).`);
-  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor({ state: 'detached', timeout: 4000 });
+  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor({ state: 'detached', timeout: ms(4000) });
 
   assert.equal(await page.locator('.ni').first().evaluate(node => getComputedStyle(node).transitionDuration), '0s', 'No collapse animation with reduced motion.');
 
@@ -302,7 +303,7 @@ try {
   await motion.route('**/api/hub/inbox*', async route => { await new Promise(resolve => setTimeout(resolve, 700)); await route.continue().catch(() => {}); });
   await slow.locator('textarea').fill('ok');
   await slow.getByRole('button', { name: 'Send answer' }).click();
-  await motion.locator('.ni.leaving', { hasText: 'Leave slowly?' }).waitFor({ timeout: 2000 });
+  await motion.locator('.ni.leaving', { hasText: 'Leave slowly?' }).waitFor({ timeout: ms(2000) });
   assert.notEqual(await slow.evaluate(node => getComputedStyle(node).transitionDuration), '0s', 'The collapse is animated when motion is allowed.');
   await slow.waitFor({ state: 'detached' });
   await motion.unroute('**/api/hub/inbox*');

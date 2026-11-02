@@ -3,6 +3,7 @@
 // place (stubbed at /w/, which the local service does not serve), the deep link, an old event with
 // only a title, Mark done, the phone layout, and the read-only host.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -25,7 +26,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

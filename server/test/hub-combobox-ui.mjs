@@ -2,6 +2,7 @@
 // service: typing filters, Enter picks, Escape closes and then restores, a blur with junk keeps the value, the chevron opens the
 // list without focusing the input, the text focuses it, and phone width has no sideways scroll.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -15,7 +16,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

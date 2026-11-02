@@ -3,6 +3,7 @@
 // the Approve button and its toasts (the capability is faked here; the approve route has its own test with Approve),
 // and the bottom sheet at phone width. The default fixture has no signing key, so Spawn can only save a proposal.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { pickOption } from './combobox.mjs';
 import { startHubFixture } from './hub-fixture.mjs';
@@ -17,7 +18,7 @@ const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };

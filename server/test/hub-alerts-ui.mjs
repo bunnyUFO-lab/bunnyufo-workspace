@@ -1,6 +1,7 @@
 // Run after npm run build. Dismiss, Clear all and Undo on Today's Alerts panel (ws-9xg), desktop and phone; a dismissal
 // holds on a second browser (it is kept on the server). Data is the fixture's own fake S3.
 import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { eventJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
@@ -14,7 +15,7 @@ const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.push(context);
   const page = await context.newPage();
-  page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   return page;
 };
