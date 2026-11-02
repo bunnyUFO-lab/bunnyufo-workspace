@@ -20,15 +20,16 @@ const LANES: [WorkLane, string][] = [
   ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'In progress'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
 ]
 const COLLAPSE = 10
+const ASKED_LINK: Record<string, string> = { ask: 'Open Ask →', checklist: 'Open checklist →' }
 const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'Beads task'], request: ['✉', 'Request'], hermes: ['☁', 'Hermes run'] }
 
 function Card({ card, href, showProject, projectName, focused, onSheet }: { card: WorkCard; href: string; showProject: boolean; projectName: string; focused?: boolean; /** A plain click on a Beads card, which opens its sheet; it may take over the navigation. */ onSheet: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
   const [glyph, source] = SOURCE[card.source]
   const beads = card.source === 'beads'
-  return (
+  const cardLink = (
     <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
       <span className="wk-title">{card.title}</span>
-      {card.why && <span className="wk-why">{card.why}</span>}
+      {card.why && <span className="wk-why">{card.nothingAsked && <><span className="wk-warn" role="img" aria-label="Nothing asked yet">⚠</span>{' '}</>}{card.why}</span>}
       <span className="wk-meta">
         {card.live && <span className={`wk-dot ${card.live.state === 'working' ? 'working' : 'idle'}`} role="img" aria-label={card.live.state === 'working' ? 'A session is working on it' : 'A session is idle on it'} />}
         <span className="wk-src" title={source} aria-label={source}>{glyph}</span>
@@ -37,6 +38,14 @@ function Card({ card, href, showProject, projectName, focused, onSheet }: { card
         {card.signs.map(sign => <span key={sign} className="hub-sign" title={SIGN_LABEL[sign as Sign]} aria-label={SIGN_LABEL[sign as Sign]}>{SIGN_GLYPH[sign as Sign]}</span>)}
       </span>
     </a>
+  )
+  // The link is a sibling of the card, never inside it: the card is itself an anchor.
+  if (!card.asked) return cardLink
+  return (
+    <div className="wk-card-group">
+      {cardLink}
+      <a className="wk-asked" href={card.asked.href} data-asked-link={card.asked.kind}>{ASKED_LINK[card.asked.kind] ?? 'Open in Needs you →'}</a>
+    </div>
   )
 }
 

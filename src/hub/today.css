@@ -76,3 +76,11 @@
 @media (max-width: 767px) {
   .today h3 .alert-clear, .alert-row .alert-dismiss, .alert-undo .hub-btn { min-height: 44px; }
 }
+
+/* Beads that say they need you but ask nothing (UnaskedPanel). */
+.unasked-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.unasked-row:first-of-type { border-top: 0; padding-top: 0; }
+.unasked-text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.unasked-text a { color: var(--t1); font-size: 13.5px; font-weight: 500; text-decoration: none; overflow-wrap: anywhere; }
+.unasked-text a:hover { text-decoration: underline; }
+.unasked-row .hub-map-panel-mark { flex: 1 1 100%; }

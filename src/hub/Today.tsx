@@ -8,6 +8,7 @@ import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import ItemRow, { openFromClick } from './ItemRow'
 import PcTile from './PcTile'
+import UnaskedPanel from './UnaskedPanel'
 import WorkingNow from './WorkingNow'
 import { itemKey, setFocus } from './needsFocus'
 import { openRun } from './runStore'
@@ -158,6 +159,7 @@ export default function Today() {
     ['recent', counts.recent, 'Since yesterday', 'events in 24 h', hubHash('activity'), 'idle'],
     ['alerts', counts.alerts, 'Alerts', counts.alerts ? 'need a look' : 'all quiet', hubHash('activity', 'alerts'), 'failed'],
   ]
+  const unaskedPanel = <UnaskedPanel />
   const needsPanel = (
     <section className="hub-panel rise" style={stagger(2)} aria-label="Needs you">
       <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={hubHash('needs')}>All {counts.needsYou} →</a></h3>
@@ -220,11 +222,11 @@ export default function Today() {
       {narrow ? (
         // On a phone, what runs now comes right after what waits on the owner, before the day's history.
         <div className="today-cols" data-today-layout="phone">
-          <div className="today-stack">{needsPanel}{workingPanel}{recentPanel}{offersPanel}{alertsPanel}{pcPanel}</div>
+          <div className="today-stack">{needsPanel}{unaskedPanel}{workingPanel}{recentPanel}{offersPanel}{alertsPanel}{pcPanel}</div>
         </div>
       ) : (
         <div className="today-cols" data-today-layout="wide">
-          <div className="today-stack">{needsPanel}{recentPanel}</div>
+          <div className="today-stack">{needsPanel}{unaskedPanel}{recentPanel}</div>
           <div className="today-stack">{offersPanel}{alertsPanel}{workingPanel}{pcPanel}</div>
         </div>
       )}
