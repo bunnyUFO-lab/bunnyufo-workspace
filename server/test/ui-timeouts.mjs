@@ -28,7 +28,7 @@ process.on('exit', () => { try { rmSync(home, { recursive: true, force: true });
 /**
  * `route.fetch()` for a test that rewrites a response. Playwright makes that request itself, and on a
  * loaded PC the connection to the test server now and then fails with ETIMEDOUT before anything is sent
- * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one only in the first second; a reset never).
+ * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one for 5 s at most; a reset never).
  */
 export async function steadyFetch(route, options) {
   const codeOf = error => /ETIMEDOUT/.test(String(error?.message)) ? 'ETIMEDOUT' : /ECONNREFUSED/.test(String(error?.message)) ? 'ECONNREFUSED' : '';
