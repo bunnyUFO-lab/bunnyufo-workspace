@@ -412,8 +412,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       }
       const got = await bucket.get(key);
       const body = Buffer.from(await new Response(got.body).arrayBuffer());
-      // The stored writer mark, or `none` for an object with no mark (the Hub's own writes): hub-hooks reads it to tell the owner's presence.json from one put through this API.
-      return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag, writer: got.metadata?.writer || 'none' };
+      // The stored writer mark, or `none` for an object with no mark (the Hub's own writes): hub-hooks reads it to tell the owner's presence.json from one put through this API. Only the inbox sections send it: no other section holds a presence file, so a mark-less object there must not look like the Hub's.
+      return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag, ...(INBOXES.has(sectionId) ? { writer: got.metadata?.writer || 'none' } : {}) };
     },
 
     async putFile(caller, sectionId, file, body, contentType, { ifNoneMatch, ifMatch } = {}) {
