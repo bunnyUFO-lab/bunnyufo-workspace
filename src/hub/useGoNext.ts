@@ -28,7 +28,9 @@ export async function goNext(settled: { kind: Item['kind']; id: string; title?: 
   const word = NOTE_VERB[verb]
   try {
     const answer = await hubGet<{ items: Item[] }>('/inbox?filter=all')
-    const next = pickNext(Array.isArray(answer?.items) ? answer.items : [], itemKey(settled), previous)
+    // An answer that is not JSON reads as null: the queue could not be read, which is not "nothing left".
+    if (!answer) throw new Error('The queue could not be read.')
+    const next = pickNext(Array.isArray(answer.items) ? answer.items : [], itemKey(settled), previous)
     if (!next) {
       setHandoff({ verb: word, ...(detail ? { detail } : {}), title: settled.title, nothingLeft: true, backHash })
       window.location.assign(hubHash('needs'))
