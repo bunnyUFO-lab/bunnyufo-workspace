@@ -8,7 +8,7 @@
 // (answer an Ask, seen as Answered, then Picked up); the 409 path;
 // and the read-only banner against a stand-in for the signed-out site.
 import { chromium } from '@playwright/test';
-import { ms, steadyFetch } from './ui-timeouts.mjs';
+import { ms, steadyFetch, editorReady } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -1013,8 +1013,8 @@ try {
   const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   /** A freehand stroke on the open editor's canvas, picked by its title as drawing-ui.mjs does. */
   const stroke = async (target, from = 0.4, to = 0.55) => {
+    await editorReady(target);
     const canvas = target.locator('.drawing-editor canvas.interactive');
-    await canvas.waitFor();
     await target.waitForTimeout(700);
     const box = await canvas.boundingBox();
     await target.locator('.drawing-editor label[title^="Draw"]').click();
@@ -1069,7 +1069,7 @@ try {
   await page.reload();
   await page.locator('.hub-sketch-big img').waitFor();
   await page.locator('button:has-text("Edit")').click();
-  await page.locator('.drawing-editor canvas.interactive').waitFor();
+  await editorReady(page);
   await page.waitForTimeout(900);
   const inked = await page.evaluate(() => {
     const canvas = document.querySelector('.drawing-editor canvas.static') ?? document.querySelector('.drawing-editor canvas');

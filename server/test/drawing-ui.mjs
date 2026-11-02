@@ -4,7 +4,7 @@
 // Drawing sections: ＋ → Drawing opens the Excalidraw editor, strokes are saved with their PNG
 // beside the scene, the section shows the picture after a reload, and the picture can be copied.
 import { chromium } from '@playwright/test';
-import { ms } from './ui-timeouts.mjs';
+import { ms, editorReady } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -70,8 +70,8 @@ try {
 
   /** Rectangle, freehand, then a text label: all picked by their labels, dragged on the canvas. */
   const draw = async page => {
+    await editorReady(page);
     const canvas = page.locator('.drawing-editor canvas.interactive');
-    await canvas.waitFor();
     const box = await canvas.boundingBox();
     const at = (x, y) => [box.x + box.width * x, box.y + box.height * y];
     await page.locator('.drawing-editor label[title^="Rectangle"]').click();
@@ -137,7 +137,7 @@ try {
 
   // Edit shows the strokes again: saving without touching anything keeps both elements.
   await page.getByRole('button', { name: '✎ Edit' }).click();
-  await page.locator('.drawing-editor canvas.interactive').waitFor();
+  await editorReady(page);
   await page.waitForTimeout(500);
   await save(page);
   assert.equal((await scene('sketches', 'drawing.excalidraw')).elements.length, 3, 'The editor opened with the saved strokes.');
@@ -178,8 +178,8 @@ try {
   take.on('pageerror', error => errors.push(error.message));
   await take.goto(`${service.urls.workspace}#/takes/0`);
   const stroke = async () => {
+    await editorReady(take);
     const canvas = take.locator('.drawing-editor canvas.interactive');
-    await canvas.waitFor();
     await take.waitForTimeout(600);
     const box = await canvas.boundingBox();
     await take.locator('.drawing-editor label[title^="Draw"]').click();
