@@ -3,7 +3,7 @@
 // filter names, the four cells, an Ask answered where it stands, a step ticked in place, Snooze, Mark done on a review
 // and a blocked session, the Today row that opens on its item, 44 px targets and no sideways scroll at 375 px, and no
 // collapse animation with reduced motion. Nothing is ever overwritten: the bucket only gains files.
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { FIXTURE_ASK, FIXTURE_CHECKLIST, askId, startHubFixture } from './hub-fixture.mjs';
@@ -73,6 +73,17 @@ const dropOn = (page, selector, { image = true } = {}) => page.evaluate(async ({
   return { overPrevented: over.defaultPrevented, dropPrevented: drop.defaultPrevented, outlined };
 }, { selector, base64: solidPng(40, 30).toString('base64'), image });
 const files = prefix => [...fixture.fake.objects.keys()].filter(key => key.startsWith(prefix));
+// The page shows a write before the stand-in bucket has it, so a check on the bucket is made until it holds or the
+// deadline passes (then the last failure is thrown). Only for a check that must become true; "nothing was stored" is read at once.
+const eventually = async (check, limit = ms(15000)) => {
+  const end = Date.now() + limit;
+  for (;;) {
+    try { return check(); } catch (error) {
+      if (Date.now() > end) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+};
 
 try {
   const page = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
@@ -96,7 +107,8 @@ try {
   assert.deepEqual(await steps.locator('.four dd').allInnerTexts(), ['Steps only you can do', '1 of 4 done', 'Tick each step, then Submit', 'Your hands']);
   assert.deepEqual(await page.locator('.ni[data-kind="pr"] .four dd').allInnerTexts(), ['A pull request ready for you', 'Ready for review', 'Open it or mark it done', 'Merging stays yours']);
   assert.deepEqual(await page.locator('.ni[data-kind="unstick"] .four dd').allInnerTexts(), ['A session waiting on you', 'Paused at a prompt', 'Open the session', 'Your answer in the session']);
-  assert.match(await ask.locator('.ni-meta').innerText(), /^Question\s*(?:Decision\s*)?Probe\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/);
+  // The project's name comes from a second fetch (the project list): until it lands the chip shows the id, "probe".
+  await expect(ask.locator('.ni-meta')).toHaveText(/^Question\s*(?:Decision\s*)?Probe\s*claude-code · [^\n]+\s*asked \d+ min ago\s*bd-7f3c/, { useInnerText: true, timeout: ms(15000) });
   assert.equal(await ask.locator('.hub-option').count(), 3, 'The options are in the card.');
   assert.equal(await steps.locator('[data-item]').count(), 4, 'The steps are in the card.');
 
@@ -154,7 +166,7 @@ try {
   await list.locator('[data-item="02"] [data-box]').click();
   await list.locator('[data-item="02"] [data-box][aria-checked="true"]').waitFor();
   await list.locator('[data-progress]', { hasText: '2 of 4 done' }).waitFor();
-  assert.equal(files(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/tick-`).length, before + 1);
+  await eventually(() => assert.equal(files(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/tick-`).length, before + 1));
   await list.locator('[data-four]').getByText('2 of 4 done').waitFor();
 
   step('a link with an event file in the filter place opens the list on that blocked item, flashed, and the address becomes needs/all');
@@ -170,8 +182,10 @@ try {
   assert.equal(files(`${folder}evidence-`).length, 0);
   await list.locator('[data-item="02"] [data-attach-input]').setInputFiles({ name: 'photo.png', mimeType: 'image/png', buffer: solidPng(64, 48) });
   await list.locator('[data-item="02"] [data-evidence] img').waitFor();
-  assert.equal(files(`${folder}evidence-`).length, 1);
-  assert.match(files(`${folder}evidence-`)[0], /\/evidence-02-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  await eventually(() => {
+    assert.equal(files(`${folder}evidence-`).length, 1);
+    assert.match(files(`${folder}evidence-`)[0], /\/evidence-02-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  });
   assert.equal(await list.locator('[data-item="01"] [data-evidence]').count(), 0, 'Only the step with a picture has a thumbnail.');
   const thumb = await list.locator('[data-item="02"] [data-evidence]').boundingBox();
   assert.ok(thumb && thumb.width === 48 && thumb.height === 48, 'The thumbnail is 48 px.');
@@ -202,8 +216,10 @@ try {
   await pasteImage(page);
   await list.locator('[data-item="03"] [data-attached-note]', { hasText: 'Pasted to step 3' }).waitFor();
   await list.locator('[data-item="03"] [data-evidence] img').waitFor();
-  assert.equal(storedCount(), storedBefore + 1);
-  assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-03-')), /evidence-03-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  await eventually(() => {
+    assert.equal(storedCount(), storedBefore + 1);
+    assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-03-')), /evidence-03-\d{8}T\d{9}Z-[a-z0-9]{4}\.png$/);
+  });
   assert.equal(await list.locator('[data-item="03"] [data-item-error]').count(), 0, 'The earlier error is gone.');
 
   step('paste: text with a picture into the note stays the browser paste, and nothing is uploaded');
@@ -222,7 +238,7 @@ try {
   assert.equal(dropped.overPrevented, true);
   assert.equal(dropped.outlined, true, 'The row shows the drop outline.');
   await list.locator('[data-item="04"] [data-attached-note]', { hasText: 'Dropped on step 4' }).waitFor();
-  assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-04-')), /evidence-04-/);
+  await eventually(() => assert.match(files(`${folder}evidence-`).find(key => key.includes('evidence-04-')), /evidence-04-/));
 
   step('drop: a file on the panel header does not open in the tab, and the list says where to drop');
   const header = await dropOn(page, `.ni[data-need="checklist-${FIXTURE_CHECKLIST}"] [data-progress]`);
@@ -238,7 +254,7 @@ try {
   await list.locator('[data-item="03"] [data-box]').focus();
   for (let have = files(`${folder}evidence-03-`).length; have < 5; have += 1) {
     await pasteImage(page, { width: 10 + have });
-    for (let wait = 0; wait < 100 && files(`${folder}evidence-03-`).length <= have; wait += 1) await page.waitForTimeout(100);
+    await eventually(() => assert.ok(files(`${folder}evidence-03-`).length > have, `Picture ${have + 1} is stored.`));
   }
   assert.equal(files(`${folder}evidence-03-`).length, 5);
   await pasteImage(page, { width: 40 });
@@ -276,8 +292,10 @@ try {
   await page.locator('.ni[data-kind="pr"]').waitFor({ state: 'detached' });
   await page.locator('.ni[data-kind="unstick"]').getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.ni[data-kind="unstick"]').waitFor({ state: 'detached' });
-  const done = [...fixture.fake.objects.keys()].filter(key => key.includes('/events/')).map(key => fixture.fake.json(key)).filter(event => event.kind === 'review-done');
-  assert.equal(done.length, 2);
+  await eventually(() => {
+    const done = [...fixture.fake.objects.keys()].filter(key => key.includes('/events/')).map(key => fixture.fake.json(key)).filter(event => event.kind === 'review-done');
+    assert.equal(done.length, 2);
+  });
   await page.locator('[data-next-note]', { hasText: 'Marked done' }).waitFor();
 
   step('Snooze a day takes an Ask off the list and writes snooze.json for a day');
@@ -288,7 +306,7 @@ try {
   await sn.waitFor();
   await sn.getByRole('button', { name: 'Snooze a day' }).click();
   await sn.waitFor({ state: 'detached' });
-  const snooze = fixture.fake.json(`sections/inbox/asks/${snoozed.id}/snooze.json`);
+  const snooze = await eventually(() => fixture.fake.json(`sections/inbox/asks/${snoozed.id}/snooze.json`) ?? assert.fail('The snooze file is not stored yet.'));
   const hours = (new Date(snooze.until ?? snooze.snoozedUntil).getTime() - Date.now()) / 3600000;
   assert.ok(hours > 23 && hours <= 24.1, `Snoozed for a day (${hours} h).`);
   await page.locator('[data-next-note]', { hasText: 'Snoozed' }).waitFor();
@@ -361,7 +379,7 @@ try {
   assert.equal(await reduced.evaluate(() => document.activeElement?.closest('.ni')?.getAttribute('data-need')), `ask-${q1.id}`, 'Focus is on the next card.');
   assert.equal(await reduced.evaluate(() => document.activeElement?.classList.contains('ni-t')), true, 'On its title.');
   assert.equal(await reduced.locator('.nq > *').first().evaluate(node => node.matches('[data-next-note]')), true, 'The note sits in the slot the card left.');
-  assert.equal(second.fake.json(`sections/inbox/asks/${q2.id}/answer.json`).note, 'two is fine');
+  await eventually(() => assert.equal(second.fake.json(`sections/inbox/asks/${q2.id}/answer.json`).note, 'two is fine'));
 
   step('Back opens the answered item and shows its answer');
   assert.equal(await note.locator('[data-next-back]').getAttribute('href'), `#/~hub/ask/${q2.id}`);
@@ -490,11 +508,11 @@ try {
   step('design review: sending stores the three verdicts, the change note, the summary and the drawing; the note says "Review sent"');
   await send.click();
   await card1.waitFor({ state: 'detached' });
-  const stored = third.fake.json(`sections/inbox/asks/${review.id}/answer.json`);
+  const stored = await eventually(() => third.fake.json(`sections/inbox/asks/${review.id}/answer.json`) ?? assert.fail('The answer is not stored yet.'));
   assert.deepEqual(stored.decisions, { d1: { verdict: 'approve' }, d2: { verdict: 'change', note: 'Bottom-left' }, d3: { verdict: 'skip' } });
   assert.equal(stored.note, 'Close. Fix the corner.');
   assert.deepEqual(stored.drawing, { excalidraw: 'answer.excalidraw', png: 'answer.png' });
-  const scene = third.fake.json(`sections/inbox/asks/${review.id}/answer.excalidraw`);
+  const scene = await eventually(() => third.fake.json(`sections/inbox/asks/${review.id}/answer.excalidraw`) ?? assert.fail('The drawing is not stored yet.'));
   assert.ok(scene.elements.some(element => element.type === 'image') && scene.elements.some(element => element.type === 'freedraw'), 'The picture is the background of the drawing.');
   await designPage.locator('[data-next-note]', { hasText: 'Review sent · next: Which card back?' }).waitFor();
   await designPage.locator('[data-next-back]').click();
@@ -516,7 +534,7 @@ try {
   assert.equal(await card2.locator('[data-option="C"] .dr-use').innerText(), 'Chosen');
   await pickSend.click();
   await card2.waitFor({ state: 'detached' });
-  assert.equal(third.fake.json(`sections/inbox/asks/${pick.id}/answer.json`).choice, 'C');
+  await eventually(() => assert.equal(third.fake.json(`sections/inbox/asks/${pick.id}/answer.json`).choice, 'C'));
   assert.equal(third.fake.json(`sections/inbox/asks/${pick.id}/answer.json`).decisions, undefined);
 
   step('design review at 375 px: one column, targets of 44 px, no sideways scroll, both variants');
@@ -566,7 +584,7 @@ try {
   assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs');
   await endPage.locator('.needs-empty', { hasText: 'No design review waits on you.' }).waitFor();
   // The chip counts come from the list the page fetched; wait for them rather than reading them the moment the empty note shows.
-  await endPage.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '1', null, { timeout: ms(5000) }).catch(() => {});
+  await expect(endPage.locator('.hub-chip[data-filter="all"] .n')).toHaveText('1', { timeout: ms(15000) });
   assert.equal(await endPage.locator('.hub-chip[data-filter="all"] .n').textContent(), '1', 'The All chip counts what All lists next.');
   await noSideways(endPage, 'the end-of-chip note at 375 px');
   await endNote.locator('[data-next-all]').tap();
@@ -593,7 +611,7 @@ try {
   assert.equal(await bothCard.locator('[data-pick-hint]').count(), 0, 'The hint goes with it.');
   await bothCard.locator('[data-send]').tap();
   await endPage.locator('[data-next-note]').waitFor();
-  const bothAnswer = fifth.fake.json(`sections/inbox/asks/${both.id}/answer.json`);
+  const bothAnswer = await eventually(() => fifth.fake.json(`sections/inbox/asks/${both.id}/answer.json`) ?? assert.fail('The answer is not stored yet.'));
   assert.equal(bothAnswer.choice, 'B');
   assert.equal(bothAnswer.decisions.d1.verdict, 'approve');
 
@@ -630,7 +648,7 @@ try {
   await pcard.locator('[data-issue-input]').fill('Goop builds up off-screen');
   await pcard.locator('[data-shot-input]').setInputFiles({ name: 'goop.png', mimeType: 'image/png', buffer: solidPng(64, 48) });
   await pcard.locator('[data-pending-shot]').waitFor();
-  assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 1, 'One screenshot is stored.');
+  await eventually(() => assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 1, 'One screenshot is stored.'));
   await pcard.locator('[data-add-issue]').click();
   await pcard.locator('[data-issue] [data-issue-shot] img').waitFor();
   step('playtest: pasting while a step has focus only says what to do; with the issue box focused it becomes the next screenshot');
@@ -642,14 +660,14 @@ try {
   await pcard.locator('[data-issue-input]').focus();
   await pasteImage(playPage);
   await pcard.locator('[data-pending-shot]').waitFor();
-  assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 2, 'The pasted screenshot is stored.');
+  await eventually(() => assert.equal([...fourth.fake.objects.keys()].filter(key => key.startsWith(`sections/inbox/checklists/${play.id}/shot-`)).length, 2, 'The pasted screenshot is stored.'));
   await pcard.locator('[data-add-issue]').click();
   assert.equal(await pcard.locator('[data-issue]').count(), 2);
   await pcard.locator('[data-verdict-btn="fix-first"]').click();
   assert.equal(await report.isDisabled(), false);
   await report.click();
   await pcard.waitFor({ state: 'detached' });
-  const sentReport = fourth.fake.json(`sections/inbox/checklists/${play.id}/submit.json`);
+  const sentReport = await eventually(() => fourth.fake.json(`sections/inbox/checklists/${play.id}/submit.json`) ?? assert.fail('The report is not stored yet.'));
   assert.equal(sentReport.rating, 4);
   assert.equal(sentReport.verdict, 'fix-first');
   assert.equal(sentReport.issues.length, 2);
@@ -745,7 +763,7 @@ try {
   await helpPage.locator('[data-submit]').click();
   await helpPage.locator('[data-submit]', { hasText: 'Submit with' }).click();
   await helpPage.locator('[data-next-note], [data-submitted]').first().waitFor();
-  const sentHelp = helpFx.fake.json(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/submit.json`).help;
+  const sentHelp = (await eventually(() => helpFx.fake.json(`sections/inbox/checklists/${FIXTURE_CHECKLIST}/submit.json`) ?? assert.fail('The submission is not stored yet.'))).help;
   assert.equal(sentHelp.lines, 2);
   assert.match(sentHelp.excerpt, /^Owner: Step 02 failed/);
   assert.match(sentHelp.excerpt, /Hermes: Hello there/);

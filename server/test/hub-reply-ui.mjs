@@ -161,7 +161,7 @@ try {
   const steerIds = { read: id('steer-read-b1b1'), refused: id('steer-refused-b2b2'), stopped: id('steer-stopped-b3b3') };
   const slow = await startHubFixture({
     signing: true, hermes: true,
-    hermesOptions: { runScript: ['Reading sources. ', { wait: 2500 }, { tool: 'web_search', preview: 'wooden tug games' }, { wait: 6000 }, 'Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
+    hermesOptions: { runScript: ['Reading sources. ', { until: 'tool' }, { tool: 'web_search', preview: 'wooden tug games' }, { until: 'end' }, 'Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
   });
   fixtures.push(slow);
   slow.seed.request(proposal(slow.now, 'failed', 'Research that can be steered', { id: steerIds.read }));
@@ -183,9 +183,12 @@ try {
   assert.equal(await you.getAttribute('data-run-you'), 'sent');
   assert.equal(await steerBox.locator('[data-reply-input]').inputValue(), '', 'The textarea cleared.');
   assert.equal(await steerer.evaluate(() => window.location.hash.includes('/request/')), true, 'The page stays on this run.');
+  // Hermes reads the line at its next tool result; the run is held until here, so a slow PC cannot finish it first.
+  slow.hermes.go('tool');
   await readView.locator('[data-run-you="read"]').waitFor({ timeout: ms(20000) });
   assert.equal((await readView.locator('[data-run-you-state]').innerText()).trim(), 'read');
   assert.equal(slow.hermes.steers[0].input, 'Message from the owner while you work: Look at the wooden one too');
+  slow.hermes.go('end');
   await readView.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: ms(30000) });
   assert.match(await readView.locator('[data-step="reply"]').innerText(), /^You: Look at the wooden one too · sent$/);
   assert.equal(await readView.locator('[data-step="continued"]').count(), 0, 'It was read, so no second run.');
@@ -193,7 +196,7 @@ try {
   step('Hermes cannot take it: the line says queued, and when the run completes it goes out as the next run, linked in the Timeline');
   const refuse = await startHubFixture({
     signing: true, hermes: true,
-    hermesOptions: { refuseSteer: true, runScript: ['Reading sources. ', { wait: 3000 }, 'Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
+    hermesOptions: { refuseSteer: true, runScripts: [['Reading sources. ', { until: 'end' }, 'Done.']], runScript: ['Done.'], endWith: 'Done.\nCARD: assistant/tug-games' },
   });
   fixtures.push(refuse);
   refuse.seed.request(proposal(refuse.now, 'failed', 'Research that Hermes refuses to steer', { id: steerIds.refused }));
@@ -209,6 +212,7 @@ try {
   await refusedView.locator('[data-reply-send]').click();
   await refusedView.locator('[data-run-you="queued"]').waitFor();
   assert.match(await refusedView.locator('[data-reply-note]').innerText(), /goes out as the next run when this one ends/);
+  refuse.hermes.go('end');
   const nextLink = refusedView.locator('[data-run-reply-to]');
   await nextLink.waitFor({ timeout: ms(30000) });
   assert.match(await refusedView.locator('[data-step="reply"]').innerText(), /^You: Also compare prices · sent as the next run → /);
@@ -230,6 +234,9 @@ try {
   await held.locator('[data-reply-input]').fill('Only the cheap ones');
   await held.locator('[data-reply-send]').click();
   await held.locator('[data-run-you="sent"]').waitFor();
+  // Stop only once the page knows the run is taken: a stop that lands before taken.json reads as "stopped" with no result yet,
+  // the page then stops following the run and shows the reply as sent until its next minute poll.
+  await stopper.locator(`[data-run-view="${steerIds.stopped}"][data-run-state="running"]`).waitFor();
   await held.locator('[data-run-stop]').click();
   await held.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   const queuedRow = held.locator('[data-step="reply"]');
@@ -245,7 +252,7 @@ try {
   const askId = id('steer-asking-b4b4');
   const asking = await startHubFixture({
     signing: true, hermes: true,
-    hermesOptions: { refuseSteer: true, runScript: ['Looking. ', { wait: 3000 }, 'Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' },
+    hermesOptions: { refuseSteer: true, runScripts: [['Looking. ', { until: 'end' }, 'Two games match.']], runScript: ['Two games match.'], endWith: 'Two games match.\n\nWhich of the two games do you mean?' },
   });
   fixtures.push(asking);
   asking.seed.request(proposal(asking.now, 'failed', 'Research that ends with a question', { id: askId }));
@@ -260,6 +267,7 @@ try {
   await askView.locator('[data-reply-input]').fill('The wooden one');
   await askView.locator('[data-reply-send]').click();
   await askView.locator('[data-run-you="queued"]').waitFor();
+  asking.hermes.go('end');
   await askView.locator('[data-run-reply-to]').waitFor({ timeout: ms(30000) });
   assert.match(await askView.locator('[data-step="reply"]').innerText(), /^You: The wooden one · sent as the next run → /);
   assert.equal(await askView.locator('[data-run-send-now]').count(), 0, 'It was carried; there is nothing to send again.');

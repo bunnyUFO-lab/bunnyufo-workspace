@@ -9,7 +9,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import '../../site/api/test/steady-fetch.mjs';
+import { repeatConnect } from '../../site/api/test/steady-fetch.mjs';
 
 const scale = Number(process.env.BUW_UI_TIMEOUT_SCALE);
 export const SCALE = Number.isFinite(scale) && scale > 0 ? scale : 4;
@@ -28,17 +28,10 @@ process.on('exit', () => { try { rmSync(home, { recursive: true, force: true });
 /**
  * `route.fetch()` for a test that rewrites a response. Playwright makes that request itself, and on a
  * loaded PC the connection to the test server now and then fails with ETIMEDOUT before anything is sent
- * (see steady-fetch.mjs), so a failed connect is repeated.
+ * (see steady-fetch.mjs), so a timed-out connect is repeated (a refused one only in the first second; a reset never).
  */
-export async function steadyFetch(route, options) {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      return await route.fetch(options);
-    } catch (error) {
-      if (attempt >= 8 || !/ETIMEDOUT|ECONNRESET|ECONNREFUSED/.test(String(error?.message))) throw error;
-      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
-    }
-  }
+export function steadyFetch(route, options) {
+  return repeatConnect(() => route.fetch(options), error => /ETIMEDOUT/.test(String(error?.message)) ? 'ETIMEDOUT' : /ECONNREFUSED/.test(String(error?.message)) ? 'ECONNREFUSED' : '');
 }
 
 // Navigation on a busy PC: the browser's connect to the test server can time out
@@ -46,7 +39,8 @@ export async function steadyFetch(route, options) {
 // `chromium.launch`, so wrap it once: pages it makes repeat a navigation that failed that way.
 import { chromium } from '@playwright/test';
 
-const CONNECT_ERROR = /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ERR_CONNECTION_RESET/;
+// Only a timed-out connect is repeated. A reset or a refused connect means the server is gone or broke: the test fails at once.
+const CONNECT_ERROR = /ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT/;
 const patched = new WeakSet();
 const repeatOnConnectError = (proto, name) => {
   const original = proto[name];
