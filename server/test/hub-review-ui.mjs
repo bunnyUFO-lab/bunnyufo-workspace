@@ -64,6 +64,15 @@ try {
   const oldFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 4 * 60000), title: 'Old probe', summary: 'Only a title and a summary.' }));
   const partFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Part probe', extra: { verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green.' }] } }));
   const cardLinkFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Card link probe', url: 'https://example.test/one#/sprint-card' }));
+  // Pull request links on the row: one repository, two repositories (one the Sprite Studio project's own), partly merged, merged before the review, no result.
+  seedSection('sprite-studio', [], { repo: 'example/linked' });
+  const pr = (repo, number) => `https://github.com/${repo}/pull/${number}`;
+  const linkedFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 90 * 1000), title: 'Linked probe', project: 'bunnylink', extra: { prs: [pr('example/linked', 5), pr('example/linked', 6)] } }));
+  const spanFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 80 * 1000), title: 'Span probe', project: 'bunnylink', extra: { prs: [pr('example/linked', 5), pr('example/other', 64)] } }));
+  const halfFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 70 * 1000), title: 'Half probe', extra: { prs: [pr('example/half', 10), pr('example/half', 11)] } }));
+  fixture.seed.event(eventJson({ kind: 'pr-merged', ts: new Date(Date.now() - 100 * 1000), url: pr('example/half', 10) }));
+  fixture.seed.event(eventJson({ kind: 'pr-merged', ts: new Date(Date.now() - 100 * 1000), url: pr('example/gone', 1) }));
+  fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 60 * 1000), title: 'Gone probe', extra: { prs: [pr('example/gone', 1)] } }));
   const doneEvents = () => [...fixture.fake.objects.keys()].filter(key => key.includes('/events/') && fixture.fake.json(key)?.kind === 'review-done').map(key => fixture.fake.json(key));
 
   const page = await open({ width: 1280, height: 800 });
@@ -76,6 +85,25 @@ try {
   const entry = row.locator('[data-review-open]');
   assert.equal(await entry.getAttribute('href'), `#/~hub/review/${file}`);
   assert.equal(await row.locator('button', { hasText: 'Mark done' }).count(), 1);
+  step('a review row links its pull requests (one repository: PR #n; two: repo #n), shows the project of their repository and "1 of 2 merged"; a fully merged review is gone');
+  const linked = page.locator('.ni', { hasText: 'Linked probe' });
+  assert.deepEqual(await linked.locator('[data-review-pr]').allInnerTexts(), ['PR #5', 'PR #6']);
+  assert.deepEqual(await linked.locator('[data-review-pr]').evaluateAll(links => links.map(link => [link.href, link.target, link.rel])), [[pr('example/linked', 5), '_blank', 'noopener noreferrer'], [pr('example/linked', 6), '_blank', 'noopener noreferrer']]);
+  assert.match(await linked.locator('.ni-meta').innerText(), /sprite-studio/, 'the project is the one that tracks the pull requests repository');
+  assert.doesNotMatch(await linked.locator('.ni-meta').innerText(), /Bunnylink/);
+  assert.deepEqual(await page.locator('.ni', { hasText: 'Span probe' }).locator('[data-review-pr]').allInnerTexts(), ['linked #5', 'other #64']);
+  assert.match(await page.locator('.ni', { hasText: 'Span probe' }).locator('.ni-meta').innerText(), /Bunnylink/, 'two repositories: the event project stays');
+  const half = page.locator('.ni', { hasText: 'Half probe' });
+  assert.equal((await half.locator('[data-merged="part"]').innerText()).trim(), '1 of 2 merged');
+  assert.equal(await page.locator('.ni', { hasText: 'Gone probe' }).count(), 0);
+  assert.equal(await linked.locator('[data-merged]').count(), 0);
+  assert.match(await linked.locator('.ni-chips').innerText(), /No results were attached\. CI and the review are on the PR\./);
+  assert.doesNotMatch(await page.locator('body').innerText(), /No test results came/);
+  await go(page, `#/~hub/review/${halfFile}`);
+  await page.locator('[data-section="prs"] [data-merged="part"]', { hasText: '1 of 2 merged' }).waitFor();
+  await go(page, `#/~hub/needs/pr`);
+  await row.waitFor();
+
   await entry.click();
   await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
   assert.equal(await page.evaluate(() => location.hash), `#/~hub/review/${file}`);
