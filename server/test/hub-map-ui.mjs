@@ -169,8 +169,14 @@ try {
   await turn.waitForTimeout(400);
   assert.equal(await turn.locator('.hub-map-panel').count(), 1, 'The panel is still open.');
   assert.equal(await turn.locator('[data-node="ml-m2"].selected').count(), 1, 'Milestone 2 is still selected.');
-  const free = await freeCentre(turn);
-  const landed = await centreOf(turn.locator('[data-node="ml-m2"] > circle').first());
+  // The map pans to the node with an animation; give a busy PC time to finish it before judging where it landed.
+  let free = await freeCentre(turn);
+  let landed = await centreOf(turn.locator('[data-node="ml-m2"] > circle').first());
+  for (const end = Date.now() + ms(4000); Math.hypot(landed.x - free.x, landed.y - free.y) > 12 && Date.now() < end;) {
+    await turn.waitForTimeout(150);
+    free = await freeCentre(turn);
+    landed = await centreOf(turn.locator('[data-node="ml-m2"] > circle').first());
+  }
   assert.ok(Math.hypot(landed.x - free.x, landed.y - free.y) <= 12, `Milestone 2 is centred (${landed.x},${landed.y} vs ${free.x},${free.y}).`);
   await turn.setViewportSize({ width: 390, height: 844 });
   await axisIs(turn, 'y', 'Back upright it is vertical again.');
