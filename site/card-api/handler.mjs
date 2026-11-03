@@ -271,6 +271,21 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       throw new HttpError(403, 'ask.json, checklist.json, request.json, delivered.json and watch-*.json are create-only.');
     }
   };
+  /**
+   * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json, or deeper) needs a pull request
+   * link (`url`, or `prs`) or an `ask` (the owner's action, one line). Every other event kind and every other file passes. A file that is
+   * not JSON passes too: the Hub reads only what parses.
+   */
+  const reviewNeedsAction = (sectionId, file, body) => {
+    // The Hub lists events/<day>/ without a delimiter, so a file in a subfolder is read as an event too.
+    if (!INBOXES.has(sectionId) || !/^events\/[^/]+\/.+\.json$/i.test(file)) return;
+    let parsed;
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { return; }
+    if (parsed?.kind !== 'ready-for-review') return;
+    const pr = value => typeof value === 'string' && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(value);
+    if (pr(parsed.url) || (Array.isArray(parsed.prs) && parsed.prs.some(pr)) || (typeof parsed.ask === 'string' && parsed.ask.trim())) return;
+    throw new HttpError(422, 'A ready-for-review event needs a pull request link (url or prs) or an ask: the one line saying what the owner should decide or do. Add the PR or the decision.');
+  };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
     if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file) || /^agent-config\//i.test(file))) {
@@ -426,6 +441,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
+      reviewNeedsAction(sectionId, file, body);
       let put;
       try {
         put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch, metadata: writerMetadata(caller, sectionId, file) });

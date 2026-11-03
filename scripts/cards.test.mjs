@@ -121,6 +121,26 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`event (${via}): a ready-for-review needs a pull request link or an ask; nothing else changes`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      const bare = await cli(via, 'event', 'ready-for-review', '--title', 'Closed: x', '--summary', 'no PR');
+      assert.equal(bare.code, 2);
+      assert.match(bare.stderr, /pull request link/);
+      assert.match(bare.stderr, /--ask/);
+      const notPr = await cli(via, 'event', 'ready-for-review', '--title', 'Closed: x', '--url', 'https://example.test/card');
+      assert.equal(notPr.code, 2, 'a link that is no pull request is not enough');
+      assert.equal(keys(`events/${today()}/`).length, 0, 'nothing was written');
+      assert.equal((await cli(via, 'event', 'ready-for-review', '--title', 'PR ready', '--url', 'https://github.com/example/app/pull/7')).code, 0);
+      const asked = await cli(via, 'event', 'ready-for-review', '--title', 'Decide', '--ask', 'Nothing to do: Mark done');
+      assert.equal(asked.code, 0, asked.stderr);
+      assert.equal((await cli(via, 'event', 'deployed', '--title', 'Other kinds pass')).code, 0);
+      const events = keys(`events/${today()}/`).map(key => fake.json(key));
+      assert.equal(events.length, 3);
+      assert.equal(events.find(event => event.title === 'Decide').ask, 'Nothing to do: Mark done');
+    } finally { await close(); }
+  });
+
   test(`event (${via}): resumed is a kind`, async () => {
     const { fake, cli, keys, close } = await setup();
     try {

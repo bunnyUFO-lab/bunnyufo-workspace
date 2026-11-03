@@ -700,6 +700,10 @@ function buildEvent(flags) {
   const kind = flags.kind;
   if (!EVENT_KINDS.includes(kind)) throw new Error(`Event kind is one of: ${EVENT_KINDS.join(', ')}.`);
   if (!flags.title) throw new Error('An event needs --title.');
+  if (kind === 'ready-for-review' && !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(String(flags.url ?? '')) && !(typeof flags.ask === 'string' && flags.ask.trim())) {
+    console.error('A ready-for-review event needs a pull request link (--url <PR link>) or an ask (--ask "<what the owner should decide or do>"). Add the PR or the decision.');
+    throw new Exit(2);
+  }
   const closed = flags['pr-closed-at'] === undefined ? null : prEventFile({ kind, url: flags.url, closedAt: flags['pr-closed-at'] });
   const now = new Date();
   const host = hostName();
