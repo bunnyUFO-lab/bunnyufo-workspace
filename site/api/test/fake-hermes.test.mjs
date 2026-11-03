@@ -113,6 +113,16 @@ test('a held run stays running until released (the 120-minute cap is the caller\
   assert.equal(events.at(-1).output, 'done late');
 }));
 
+test('a tool step with until stays running until the test opens its gate', () => fake({ runScript: [{ tool: 'cards', preview: 'x', until: 'finish' }] }, async hermes => {
+  const { body } = await start(hermes);
+  await until(async () => hermes.runs[0].events.some(event => event.event === 'tool.started'));
+  await new Promise(r => setTimeout(r, 80));
+  assert.ok(!hermes.runs[0].events.some(event => event.event === 'tool.completed'), 'Still running.');
+  hermes.go('finish');
+  const { events } = await readEvents(hermes, body.run_id);
+  assert.deepEqual(events.map(event => event.event).filter(name => name.startsWith('tool.')), ['tool.started', 'tool.completed']);
+}));
+
 test('a run that ends in a question completes with that output', () => fake({ endWith: 'Which repo should I use?' }, async hermes => {
   const { body } = await start(hermes);
   const { events } = await readEvents(hermes, body.run_id);

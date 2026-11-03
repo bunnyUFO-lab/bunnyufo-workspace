@@ -11,7 +11,7 @@
 //   hermes.go(name)     opens the gate `{ until: name }` for every run, now or later (it stays open)
 //   hermes.forget(id)   drops one run, as a Hermes restart would (status and events answer 404)
 // Options for runs:
-//   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms? } (ms: how long the step runs before it completes) | { approval: { command?, description? } }
+//   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms?, until? } (ms: how long the step runs before it completes; until: 'name' keeps it running until `hermes.go('name')`, for a test that must see it running however slow the PC) | { approval: { command?, description? } }
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
 //                  | { until: 'name' } (waits for `hermes.go('name')`: a step the test releases, not a delay a slow PC can overrun)
 //                  | { end: 'output' } | { fail: 'error text' }. Default: the `chunks` as deltas.
@@ -147,7 +147,7 @@ export async function startFakeHermes({
       if (run.stopped) break;
       if (typeof step === 'string') { text += step; emit(run, 'message.delta', { delta: step }); continue; }
       if (step.wait !== undefined) { await pause(run, step.wait); continue; }
-      if (step.until !== undefined) { while (!gates.has(step.until) && !run.stopped) await pause(run, 20); continue; }
+      if (step.until !== undefined && !step.tool) { while (!gates.has(step.until) && !run.stopped) await pause(run, 20); continue; }
       if (step.hold) {
         await pause(run, Infinity);
         if (run.released) { if (run.released.output !== undefined) text = run.released.output; ended = true; }
@@ -157,6 +157,7 @@ export async function startFakeHermes({
         const id = `toolu_${randomBytes(8).toString('hex')}`;
         emit(run, 'tool.started', { tool: step.tool, preview: step.preview ?? '', tool_call_id: id });
         if (step.ms) await pause(run, step.ms); // a step that takes a while: Hermes says nothing in between
+        if (step.until !== undefined) while (!gates.has(step.until) && !run.stopped) await pause(run, 20); // held until the test says so
         if (run.stopped) break;
         emit(run, 'tool.completed', { tool: step.tool, duration: 0, error: Boolean(step.error), tool_call_id: id, preview: '' });
         continue;
