@@ -19,6 +19,7 @@ test('checkNotUseful: each preset, a note, both, neither; a long note or an unkn
   assert.throws(() => checkNotUseful({ preset: 'toString' }), /one of/, 'an inherited name is no preset');
   assert.throws(() => checkNotUseful({ note: 5 }), /text/);
   assert.throws(() => checkNotUseful([]), /Send/);
+  assert.deepEqual(checkNotUseful({ note: 'pasted password: hunter2 by mistake' }), { note: 'pasted password: [masked] by mistake' }, 'the note is masked');
 });
 
 test('feedbackKey: 8 hex of the sha256 of project/kind/id, stable', () => {

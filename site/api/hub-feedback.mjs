@@ -39,7 +39,8 @@ export function checkNotUseful(raw) {
     if (typeof body.note !== 'string') throw new Error('The note is text.');
     const folded = body.note.replace(/\s+/g, ' ').trim();
     if (folded.length > REASON_MAX) throw new Error(`The note is at most ${REASON_MAX} characters.`);
-    if (folded) note = folded;
+    // The owner's own line, masked like every other string in the record (it also goes into the event).
+    if (folded) note = maskSecrets(folded).slice(0, REASON_MAX);
   }
   return { ...(preset ? { preset } : {}), ...(note ? { note } : {}) };
 }
