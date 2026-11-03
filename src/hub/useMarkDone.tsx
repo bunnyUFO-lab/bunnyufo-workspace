@@ -4,7 +4,7 @@ import { hubPost } from '../lib/hub'
 import { host } from '../lib/host'
 
 /** Mark done for a review or a blocked row: a create-only write that hides it from Needs you. A read-only copy gets the sign-in note instead. */
-export function useMarkDone(item: Item, onDone: () => void) {
+export function useMarkDone(item: Item, onDone: () => void, primary = true) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [note, setNote] = useState(false)
@@ -22,7 +22,7 @@ export function useMarkDone(item: Item, onDone: () => void) {
     }
   }
   return {
-    button: <button type="button" className="hub-btn pri" title="Hide from Needs you. Does not approve or merge." disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>,
+    button: <button type="button" className={`hub-btn${primary ? ' pri' : ''}`} title="Hide from Needs you. Does not approve or merge." disabled={busy} aria-disabled={host.write ? undefined : 'true'} onClick={done}>Mark done</button>,
     notes: (
       <>
         {error && <p className="hub-error" role="alert">{error}</p>}

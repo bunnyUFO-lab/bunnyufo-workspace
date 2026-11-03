@@ -62,6 +62,9 @@ export function requestJson({ id, project = 'probe', text = 'Add a wall-jump tut
 let counter = 0;
 export function eventJson({ kind, ts = new Date(), project = 'probe', bead, session, host = 'pc.example.test', title, url, appUrl, summary, ask, source = 'test', card, review, extra = {} } = {}) {
   counter += 1;
+  // A review reaches Needs you only with a link or an `ask` (the owner's action). Most tests don't care which, so a bare
+  // one gets a default ask; a test of the rule passes `extra: { ask: null }`.
+  if (kind === 'ready-for-review' && !ask && !url && !extra.prs && !('ask' in extra)) ask = 'Look it over';
   return {
     ts: iso(ts), kind, project, ...(bead ? { bead } : {}), ...(ask ? { ask } : {}), ...(session ? { session } : {}),
     host, source, title: title ?? `${kind} ${counter}`, ...(url ? { url } : {}), ...(appUrl ? { appUrl } : {}), ...(card ? { card } : {}), ...(review ? { review } : {}), ...(summary ? { summary } : {}), ...extra,

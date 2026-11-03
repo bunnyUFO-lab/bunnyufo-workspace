@@ -1,0 +1,23 @@
+{
+  "ts": "2026-11-03T04:16:03.950Z",
+  "kind": "ready-for-review",
+  "host": "pc.example.test",
+  "source": "dev-sprint",
+  "title": "mc-s-m1: Follow-ups batch 2: ws-ysz (app: checklist command help, shell check, phone layout), ws-2i3 + ws-7bj (skills: hub-hooks mod load, reviewer defaults to Sonnet, docs), ws-9pn (homelab: abort-p…",
+  "project": "probe",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "card": "https://example.test/one#/sprint-card",
+  "cardDir": "one/sprint-card",
+  "cardFiles": [
+    "sprint/briefs/followups-2.md"
+  ],
+  "deployUrl": "https://dev.example.test",
+  "verdicts": [
+    {
+      "leg": "review",
+      "result": "pass",
+      "text": "All three verified and merged: app #191 (5d4bb46, site API and UI published), skills #72 (1b6038c, reviewer pushed 8be7fe9 removing an upper time bound; example 1.12.24, dev-sprint 0.4.8), homelab #80 (16f556f). Beads ws-ysz, ws-2i3, ws-7bj, ws-9pn closed; follow-ups ws-t3a, ws-8w0."
+    }
+  ],
+  "summary": "All three verified and merged: app #191 (5d4bb46, site API and UI published), skills #72 (1b6038c, reviewer pushed 8be7fe9 removing an upper time bound; example 1.12.24, dev-sprint 0.4.8), homelab #80 (16f556f). Beads ws-ysz, ws-2i3, ws-7bj, ws-9pn closed; follow-ups ws-t3a, ws…"
+}

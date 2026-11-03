@@ -6,6 +6,7 @@ import { hubHash, reviewHash } from '../lib/route'
 import { openRun } from './runStore'
 import { requestStateWord } from './working'
 import { useMarkDone } from './useMarkDone'
+import { nothingToDo } from './reviewText'
 
 const EVENT_DOT: Record<string, string> = {
   'session-started': 'g', 'session-ended': 'g', blocked: 'y', 'ready-for-review': 'p', 'pr-opened': 'b', 'pr-merged': 'g', 'pr-closed': 'y',
@@ -30,10 +31,10 @@ const linkLabel = (url: string) => {
 }
 
 /** The buttons of a review row: a link to the pull request, a link to the report, and Mark done. Each shows only when it can work. */
-export function ReviewActions({ item, onDone, links = true }: { item: Item; onDone: () => void; links?: boolean }) {
+export function ReviewActions({ item, onDone, links = true, primary = true }: { item: Item; onDone: () => void; links?: boolean; primary?: boolean }) {
   const url = safeUrl(item.url)
   const card = safeUrl(item.card)
-  const { button, notes } = useMarkDone(item, onDone)
+  const { button, notes } = useMarkDone(item, onDone, primary)
   return (
     <>
       <span className="hub-row-actions">
@@ -54,9 +55,11 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
       <span className="hub-dot p" aria-hidden="true" />
       <a className="hub-row-text" href={reviewHash(item.id)} data-review-open>
         <span className="hub-row-title">{item.title}</span>
+        {item.ownerSummary && <span className="hub-row-summary" data-owner-summary>{item.ownerSummary}</span>}
+        {item.ask && <b className="hub-row-ask" data-ask>{item.ask}</b>}
         <span className="hub-row-meta">{meta} <span className="hub-row-cue" aria-hidden="true">›</span></span>
       </a>
-      <ReviewActions item={item} onDone={() => setHidden(true)} />
+      <ReviewActions item={item} onDone={() => setHidden(true)} primary={nothingToDo(item.ask) || !item.url} />
     </div>
   )
 }

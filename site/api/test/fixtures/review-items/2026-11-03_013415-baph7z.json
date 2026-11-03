@@ -1,0 +1,27 @@
+{
+  "ts": "2026-11-03T01:34:15.588Z",
+  "kind": "ready-for-review",
+  "host": "pc.example.test",
+  "source": "dev-sprint",
+  "title": "mc-s-m1: Cleanup batch (owner 2026-11-02): ws-7t3+ws-h5u app tests, ws-bbq+ws-aql homelab CI, ws-c3v skills hub events. Briefs: sprint/briefs/cleanup-app-tests.md, cleanup-homelab-ci.md, ws-c3v-skill…",
+  "project": "probe",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "card": "https://example.test/one#/sprint-card",
+  "prs": [
+    "https://github.com/example/app/pull/190",
+    "https://github.com/example/homelab/pull/77",
+    "https://github.com/example/homelab/pull/78",
+    "https://github.com/example/skills/pull/68",
+    "https://github.com/example/skills/pull/70"
+  ],
+  "cardDir": "one/sprint-card",
+  "deployUrl": "https://dev.example.test",
+  "verdicts": [
+    {
+      "leg": "review",
+      "result": "pass",
+      "text": "Cleanup batch done. Merged: https://github.com/example/app/pull/190 (CI green, Sonnet VERIFIED), https://github.com/example/homelab/pull/77 and https://github.com/example/homelab/pull/78 (CI green, Sonnet VERIFIED), https://github.com/example-lab/workspace…"
+    }
+  ],
+  "summary": "Cleanup batch done. Merged: https://github.com/example/app/pull/190 (CI green, Sonnet VERIFIED), https://github.com/example/homelab/pull/77 and https://github.com/example/homelab/pull/78 (CI green, Sonnet VERIFIED), https://github.com/bu…"
+}

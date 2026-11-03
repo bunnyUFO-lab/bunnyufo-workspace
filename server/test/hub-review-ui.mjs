@@ -35,6 +35,8 @@ const noSideways = async (page, what) => {
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
   assert.ok(widths.hub <= widths.hubInner, `${what}: the Hub scrolls sideways (${widths.hub} > ${widths.hubInner}).`);
 };
+/** The Details section of a review is closed until opened; open it (a file route opens it by itself). */
+const expand = async page => { const details = page.locator('[data-details]'); await details.waitFor(); if ((await details.getAttribute('open')) === null) await details.locator('summary').click(); };
 const go = async (page, hash) => { await page.evaluate(value => { location.hash = value; }, hash); };
 /** Stubs for the card files and the screenshots, as the published site and GitHub would answer. */
 const stubWorld = async page => {
@@ -58,11 +60,14 @@ try {
       cardFiles: ['briefs/x-1.md', 'reviews/x-1-qa.md', 'qa/missing.md'],
       screenshots: [shot('board-before.png'), shot('board-after.png'), shot('extra.png')],
       verdicts: [{ leg: 'smoke', result: 'pass', text: 'Smoke tests passed.' }, { leg: 'review', result: 'pass', text: 'Verified.' }],
-      deployUrl: 'https://build.example.test/',
+      deployUrl: 'https://build.example.test/', tryIt: 'Open the board and drag a card.',
     },
   }));
   const oldFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 4 * 60000), title: 'Old probe', summary: 'Only a title and a summary.' }));
   const partFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 3 * 60000), title: 'Part probe', extra: { verdicts: [{ leg: 'smoke', result: 'pass', text: 'Green.' }] } }));
+  const ownerFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 100 * 1000), title: 'mc-s-m1: ws-t3a: raw title. Brief: sprint/briefs/x.md', summary: 'Raw summary with ws-t3a and sprint/briefs/x.md.', extra: { ownerTitle: 'A test flake: cause found', ownerSummary: 'The test only failed on a busy PC. The code is fine. Nothing was changed.', ask: 'Nothing to do: Mark done', doneMeans: 'Closes the flake task on your list.', deployUrl: 'https://build.example.test/' } }));
+  const rawFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 95 * 1000), title: 'mc-s-m1: ws-9zz: Raw old title. Brief: sprint/briefs/y.md', summary: 'Old summary.', extra: { ask: null } }));
+  const quietFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 94 * 1000), title: 'Closed without anything to do', extra: { ask: null } }));
   const cardLinkFile = fixture.seed.event(eventJson({ kind: 'ready-for-review', ts: new Date(Date.now() - 2 * 60000), title: 'Card link probe', url: 'https://example.test/one#/sprint-card' }));
   // Pull request links on the row: one repository, two repositories (one the Sprite Studio project's own), partly merged, merged before the review, no result.
   seedSection('sprite-studio', [], { repo: 'example/linked' });
@@ -110,6 +115,9 @@ try {
 
   step('the view shows the summary, status, pull requests, screenshots, files and the build');
   const view = page.locator('.hub-review');
+  assert.equal(await view.locator('[data-details]').getAttribute('open'), null, 'Details starts closed.');
+  assert.equal(await view.locator('[data-section="status"]').isVisible(), false, 'Status sits inside the closed Details.');
+  await expand(page);
   assert.match(await view.innerText(), /Two pull requests, both green\./);
   assert.equal(await view.locator('.hub-pill', { hasText: 'probe' }).count(), 1);
   for (const [leg, label] of [['smoke', 'Smoke tests'], ['review', 'Review']]) {
@@ -132,7 +140,10 @@ try {
   assert.equal(await third.locator('figcaption').innerText(), 'extra');
   assert.deepEqual(await view.locator('[data-file]').evaluateAll(nodes => nodes.map(node => node.firstChild.textContent)), ['Brief', 'QA triage', 'QA report']);
   assert.equal(await view.locator('[data-section="files"] a', { hasText: 'Open the card' }).getAttribute('href'), 'https://example.test/one#/sprint-card');
+  assert.equal(await view.locator('[data-section="try"] [data-try-it]').innerText(), 'Open the board and drag a card.');
   assert.equal(await view.locator('[data-section="try"] a', { hasText: 'Open the build' }).getAttribute('target'), '_blank');
+  assert.match(await view.locator('[data-done-hint]').innerText(), /doesn't merge or approve anything/, 'The default Mark done line.');
+  assert.ok(await view.getByRole('button', { name: 'Mark done' }).evaluate(node => !node.classList.contains('pri')), 'With a PR and a decision to make, Mark done is not the main button.');
   await noSideways(page, 'review view at 1280 px');
 
   step('a review has a top link to Needs you, a hint on Mark done, and the row button says what it does');
@@ -143,13 +154,16 @@ try {
   assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
   assert.equal(await page.locator('[data-hub-link="needs"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Needs you current.');
   await go(page, `#/~hub/review/${partFile}`);
+  await expand(page);
   await page.locator('[data-section="status"]').waitFor();
+  assert.equal(await page.locator('[data-section="try"]').count(), 0, 'No tryIt: no Try it panel.');
   assert.equal(await page.locator('[data-legacy]').count(), 0, 'Verdicts only: not old.');
   await page.getByText('No screenshots came with this item.').waitFor();
   await go(page, '#/~hub/needs/pr');
   assert.equal(await page.locator('.ni', { hasText: 'Detail probe' }).locator('button', { hasText: 'Mark done' }).getAttribute('title'), 'Hide from Needs you. Does not approve or merge.');
   await go(page, `#/~hub/review/${file}`);
   await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
+  await expand(page);
   for (const [w, h] of [[800, 600], [1280, 800]]) {
     await page.setViewportSize({ width: w, height: h });
     const top = await page.locator('[data-back-top]').boundingBox();
@@ -190,6 +204,29 @@ try {
   await page.getByText('This review is not in the last 7 days.').waitFor();
   assert.equal(await page.locator('a', { hasText: 'Back to Needs you' }).getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
 
+  step('owner fields lead: plain title, summary and the ask; Details holds the raw title; Mark done is the main button and says what it means; no Try it without tryIt');
+  await go(page, '#/~hub/needs/pr');
+  const ownerRow = page.locator('.ni', { hasText: 'A test flake: cause found' });
+  await ownerRow.waitFor();
+  assert.match(await ownerRow.locator('[data-owner-summary]').innerText(), /^The test only failed on a busy PC\./);
+  assert.equal(await ownerRow.locator('[data-ask]').innerText(), 'Nothing to do: Mark done');
+  assert.deepEqual(await ownerRow.locator('.four dd').allInnerTexts(), ['A finished item for you', 'Ready for review', 'Nothing to do: Mark done', 'Your decision'], 'No pull request: the cells name none.');
+  assert.equal(await ownerRow.getByText(/CI and the review are on the PR/).count(), 0);
+  assert.equal(await page.locator('.ni', { hasText: 'Closed without anything to do' }).count(), 0, 'No pull request and no ask: not in Needs you.');
+  await go(page, `#/~hub/review/${ownerFile}`);
+  await page.locator('.hub-review h2', { hasText: 'A test flake: cause found' }).waitFor();
+  assert.equal(await page.locator('.hub-review [data-ask]').innerText(), 'Nothing to do: Mark done');
+  assert.equal(await page.locator('.hub-review [data-owner-summary]').count(), 1);
+  assert.equal(await page.locator('[data-section="try"]').count(), 0, 'A deploy link without tryIt: no Try it.');
+  assert.equal(await page.locator('.hub-review [data-done-hint]').innerText(), 'Closes the flake task on your list.');
+  assert.ok(await page.getByRole('button', { name: 'Mark done' }).evaluate(node => node.classList.contains('pri')), 'Nothing else to do: Mark done is the main button.');
+  await expand(page);
+  assert.match(await page.locator('[data-full-title]').innerText(), /^mc-s-m1: ws-t3a: raw title\. Brief:/, 'The title as posted sits in Details.');
+  await go(page, `#/~hub/review/${rawFile}`);
+  await page.locator('.hub-review h2', { hasText: 'Raw old title' }).waitFor();
+  assert.equal(await page.locator('.hub-review h2').innerText(), 'Raw old title', 'The sprint label, the bead id and the brief are stripped.');
+  assert.equal(await page.locator('.hub-review [data-ask]').count(), 0);
+  void quietFile;
   step('an old event with only a title opens with honest empty states and a working Mark done');
   await go(page, '#/~hub/needs/pr');
   await page.locator('.ni', { hasText: 'Old probe' }).locator('[data-review-open]').click();
@@ -201,7 +238,7 @@ try {
   await page.getByText('No pull request link came with this item.').waitFor();
   assert.equal(await page.locator('[data-legacy]').count(), 1);
   assert.equal(await page.locator('[data-done-hint]').isVisible(), true, 'Says what Mark done means.');
-  assert.match(await page.locator('[data-done-hint]').innerText(), /does not approve or merge/);
+  assert.match(await page.locator('[data-done-hint]').innerText(), /doesn't merge or approve anything/);
   const before = await page.evaluate(() => history.length);
   await page.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('[data-next-note]', { hasText: 'Marked done · next:' }).waitFor();
@@ -226,6 +263,7 @@ try {
   await page.route('**/w/two/sprint-card/reviews/x-1-qa.md', route => route.fulfill({ status: 200, contentType: 'text/markdown', body: '# Old QA triage heading' }));
   await go(page, `#/~hub/review/${linksFile}`);
   await page.locator('.hub-review h2', { hasText: 'hubdemo: first item' }).waitFor();
+  await expand(page);
   const prLinks = page.locator('[data-section="prs"] a');
   assert.deepEqual(await prLinks.evaluateAll(nodes => nodes.map(node => node.getAttribute('href'))), ['https://github.com/example/probe-app/pull/2', 'https://github.com/example/workspace-skills/pull/26']);
   assert.equal(await page.locator('[data-found]').count(), 1, 'Says they were found in the summary.');
@@ -265,6 +303,7 @@ try {
   await stubWorld(phone);
   await phone.goto(`${fixture.url}#/~hub/review/${file}`);
   await phone.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
+  await expand(phone);
   await phone.waitForFunction(() => [...document.querySelectorAll('[data-pair] img')].every(image => image.complete));
   assert.equal(await phone.locator('[data-hub-tab="needs"]').getAttribute('aria-current'), 'page', 'Needs you is the current tab on a review.');
   assert.equal(await phone.locator('[data-hub-tab="more"].active').count(), 0, 'More is not active.');
@@ -305,6 +344,7 @@ try {
   assert.equal(await page.locator('[data-link-head]').count(), 0, 'No url, no button.');
   await go(page, `#/~hub/review/${file}`);
   await page.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
+  await expand(page);
   assert.equal(await page.locator('.hub-review-head [data-link-head]').innerText(), 'Open link', 'A page that is not a card is "Open link".');
 
   step('read-only: Mark done shows the sign-in note and sends nothing');

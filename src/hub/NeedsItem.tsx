@@ -11,6 +11,7 @@ import ChecklistBody from './ChecklistBody'
 import HermesApprovalView from './HermesApprovalView'
 import RunQuestionView from './RunQuestionView'
 import { ReviewActions } from './ItemRow'
+import { nothingToDo } from './reviewText'
 import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
@@ -71,6 +72,8 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
   return (
     <>
       <div className="ni-b">
+        {item.ownerSummary && <p className="ni-owner" data-owner-summary>{item.ownerSummary}</p>}
+        {item.ask && <p className="ni-ask" data-ask><b>{item.ask}</b></p>}
         {prs.length > 0 && (
           <p className="ni-prs" data-review-prs>
             {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer" data-review-pr>{prLinkLabel(url, prs)}</a>)}
@@ -81,11 +84,11 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
           {!allMerged && merged > 0 && <span className="ni-chip" data-merged="part">{merged} of {prs.length} merged</span>}
           {verdicts.map(verdict => <span key={verdict.leg} className={`ni-chip ${verdict.result}`} data-verdict={verdict.leg}>{VERDICT_LEG[verdict.leg]} {verdict.result}</span>)}
           {!!item.shots && <span className="ni-chip">{item.shots} {item.shots === 1 ? 'screenshot' : 'screenshots'}</span>}
-          {!verdicts.length && !item.shots && !allMerged && <span className="hub-muted">No results were attached. CI and the review are on the PR.</span>}
+          {!verdicts.length && !item.shots && !allMerged && (prs.length > 0 || !!item.url) && <span className="hub-muted">No results were attached. CI and the review are on the PR.</span>}
         </div>
       </div>
       <div className="ni-a">
-        <ReviewActions item={item} onDone={onSettled} />
+        <ReviewActions item={item} onDone={onSettled} primary={nothingToDo(item.ask) || prs.length === 0} />
         <a className="hub-btn" href={reviewHash(item.id)} data-review-open>Details</a>
       </div>
     </>

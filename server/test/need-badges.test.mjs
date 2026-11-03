@@ -66,7 +66,7 @@ test('each item gets its own type badge; a request approval is not a Question', 
   assert.deepEqual(badge({ kind: 'ask', design: true }), ['design', 'Design review']);
   assert.deepEqual(badge({ kind: 'checklist' }), ['steps', 'Steps']);
   assert.deepEqual(badge({ kind: 'checklist', playtest: true }), ['playtest', 'Playtest']);
-  assert.deepEqual(badge({ kind: 'review' }), ['pr', 'PR review']);
+  assert.deepEqual(badge({ kind: 'review' }), ['pr', 'Review']);
   assert.deepEqual(badge({ kind: 'blocked', tool: 'claude-code', reason: 'permission' }), ['unstick', 'Claude permission']);
 });
 

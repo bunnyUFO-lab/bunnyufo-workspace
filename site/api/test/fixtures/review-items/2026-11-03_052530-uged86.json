@@ -1,0 +1,17 @@
+{
+  "ts": "2026-11-03T05:25:30.471Z",
+  "kind": "ready-for-review",
+  "host": "pc.example.test",
+  "source": "dev-sprint",
+  "title": "mc-s-m1: ws-t3a: refresh-cards.test.mjs 'fetch failed' to its 127.0.0.1 fake under load; find the cause and drop the connect retry. Brief: sprint/briefs/ws-t3a-refresh-cards-flake.md",
+  "project": "probe",
+  "bead": "ws-t3a",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "card": "https://example.test/one#/sprint-card",
+  "cardDir": "one/sprint-card",
+  "cardFiles": [
+    "sprint/briefs/ws-t3a-refresh-cards-flake.md"
+  ],
+  "deployUrl": "https://dev.example.test",
+  "summary": "ws-t3a closed without a PR: connect ETIMEDOUT to 127.0.0.1 at ~300 ms, on a raw net.connect too, only under 24 busy loops on the PC, never on CI (3 runs, up to 400 per job). The retry-connect fake stays as a documented workaround (it can't hide code-under-test failures). A real …"
+}

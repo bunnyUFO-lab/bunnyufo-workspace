@@ -31,6 +31,9 @@ export interface Item {
   host?: string
   session?: string
   summary?: string
+  /** A review row: the owner's 2 or 3 sentences and the one line to decide or do. */
+  ownerSummary?: string
+  ask?: string
   by?: string
   /** A blocked row's event file, which Mark done names. */
   file?: string
@@ -124,6 +127,12 @@ export interface ReviewDetail {
   title: string
   at: string
   summary?: string
+  /** The title as posted, when the shown `title` is the owner's title or the old one stripped of its label. */
+  fullTitle?: string
+  ownerSummary?: string
+  ask?: string
+  tryIt?: string
+  doneMeans?: string
   project?: string
   host?: string
   source?: string

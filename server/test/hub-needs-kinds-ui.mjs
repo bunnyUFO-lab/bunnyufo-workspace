@@ -47,7 +47,7 @@ try {
     [TITLES.designReview, 'design', 'Design review'],
     [TITLES.stepsVerify, 'steps', 'Steps'],
     [TITLES.playtest, 'playtest', 'Playtest'],
-    [TITLES.review, 'pr', 'PR review'],
+    [TITLES.review, 'pr', 'Review'],
     [TITLES.blocked, 'unstick', 'Claude permission'],
   ];
   for (const [title, type, label] of types) {

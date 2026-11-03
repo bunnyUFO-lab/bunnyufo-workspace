@@ -1,0 +1,16 @@
+{
+  "ts": "2026-11-02T10:51:10.224Z",
+  "kind": "ready-for-review",
+  "host": "pc.example.test",
+  "source": "dev-sprint",
+  "title": "mc-s-m1: ws-qg1.10 PR B: the Away switch in the app, an owner-only presence.json card API rule, the hub-hooks owner-writer check replacing the presenceWrittenByOwner stub, and the missing-link wording",
+  "project": "probe",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "card": "https://example.test/one#/sprint-card",
+  "cardDir": "one/sprint-card",
+  "cardFiles": [
+    "sprint/briefs/ws-qg1-session-answer.md"
+  ],
+  "deployUrl": "https://dev.example.test",
+  "summary": "ws-qg1.10 done: app #181 (437761e) and skills #66 (59d7ba1, hub-hooks 0.1.26), Opus VERIFIED. **Pre-approved card API deploy #3**: presence.json owner-only, API writes marked, x-card-writer read header, one inbox root path; tests 36/36 before deploy; backup card-api-2026-11-02-p…"
+}
