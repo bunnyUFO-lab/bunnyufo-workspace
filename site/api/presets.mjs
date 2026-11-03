@@ -46,6 +46,18 @@ Rules for both modes:
 - If you cannot finish without the owner, end your final message with one question on its own line, ending in \`?\`.
 - End the final message with one line: \`ASKS: <the Ask ids, comma separated>\` in grilling mode, or \`CARD: assistant/<folder>\` and then the \`ASKS:\` line in research mode.`;
 
+/**
+ * The mockup run (ws-qdh.4): Hermes sketches an idea as one HTML page plus up to three pictures made through Codex, on a card in `assistant`.
+ * It is a Hermes run like research (Codex first, DeepSeek as the cheap fallback); it files no Ask and no request.
+ */
+export const MOCKUP = `Make a mockup of what the job above describes: a rough, honest sketch that the owner can look at and react to, not a finished design. The project named above is context only; do not pull its cards unless the job names them.
+1. Look at 2 or 3 real references with web search (screens, games or tools that solve the same problem). Cite each one with a link on the card.
+2. Write exactly one card to the \`assistant\` section with the cards tool. Its page is one self-contained HTML file: inline CSS and a little inline JS at most, no external scripts, fonts or images, no network calls, no forms that send anything. It must read on a phone (390 px wide) and on a desktop (1280 px wide).
+3. Make at most 3 pictures through Codex image generation when a picture says more than the page can (a mood, a character, a scene). Save them next to the page on the card, say which prompt made each one, and say which one you would keep and why.
+4. Start the card with 3 plain sentences: what this mockup shows, what it leaves out, and what the owner should decide next.
+If you cannot finish without the owner, end your final message with one question on its own line, ending in \`?\`, and no \`CARD:\` line. Never create requests or Asks.
+End the final message with one line: \`CARD: assistant/<folder>\`.`;
+
 export const MARKET_EXTRA = 'Cover: who makes these games, their prices, review scores, what players praise and what they hate. Close with three takeaways.';
 export const TEARDOWN_EXTRA = 'Use public sources only: store pages, videos, reviews, talks and articles. Never download, decompile, disassemble or memory-inspect another studio\'s game. Our own builds may be inspected.';
 
@@ -107,28 +119,35 @@ Open a pull request on branch \`claude/run-{{requestId}}\`. Never merge it.
 When the pull request is open, finish the request as your run's rules say.`),
   },
   {
-    id: 'research', label: 'Research', icon: 'search', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card',
+    id: 'research', label: 'Research', icon: 'search', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card', modelDefault: 'codex',
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
     example: 'Research how other roguelikes show a run summary', produces: 'an assistant card',
     estimate: { cost: 'Codex plan · 0.7–1.1 M tokens', time: 'about 15 min' },
     template: wrap(RESEARCH),
   },
   {
-    id: 'market-research', label: 'Market research', icon: 'chart', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card',
+    id: 'market-research', label: 'Market research', icon: 'chart', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card', modelDefault: 'codex',
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
     example: 'Market research on tug-of-war card games', produces: 'an assistant card with sources',
     estimate: { cost: 'Codex plan · 0.7–1.1 M tokens', time: 'about 15 min' },
     template: wrap(RESEARCH, MARKET_EXTRA),
   },
   {
-    id: 'game-teardown', label: 'Game teardown (public sources)', icon: 'search', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card',
+    id: 'game-teardown', label: 'Game teardown (public sources)', icon: 'search', agent: 'Researcher', kind: 'research', needs: [], targets: ['hermes'], sideEffect: 'card', modelDefault: 'codex',
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
     example: 'Teardown of how Balatro teaches its rules', produces: 'an assistant card',
     estimate: { cost: 'Codex plan · 0.7–1.1 M tokens', time: 'about 15 min' },
     template: wrap(RESEARCH, TEARDOWN_EXTRA),
   },
   {
-    id: 'question', label: 'Resolve a question', icon: 'chat', agent: 'Researcher', kind: 'question', needs: [], targets: ['hermes'], sideEffect: 'asks',
+    id: 'mockup', label: 'Mockup', icon: 'image', agent: 'Researcher', kind: 'mockup', needs: [], targets: ['hermes'], sideEffect: 'card', modelDefault: 'codex',
+    model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text', 'doneWhen'],
+    example: 'A mockup of a run summary screen for the roguelike', produces: 'an assistant card with an HTML mockup and up to 3 pictures',
+    estimate: { cost: 'Codex plan · about 0.5 M tokens', time: 'about 15 min' },
+    template: wrap(MOCKUP),
+  },
+  {
+    id: 'question', label: 'Resolve a question', icon: 'chat', agent: 'Researcher', kind: 'question', needs: [], targets: ['hermes'], sideEffect: 'asks', modelDefault: 'codex',
     model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 30, fields: ['text'],
     example: 'Prepare a decision on an open question from the Roadmap', produces: 'one Ask per question in Needs you',
     estimate: { cost: 'Codex plan · about 0.3 M tokens', time: 'about 10 min' },
@@ -198,6 +217,7 @@ export function route({ preset: given, project, needs = [], repo, cloudRepos = [
   else if (allNeeds.length) found = { target: 'pc', rule: 2, why: `it needs ${inWords(allNeeds)}` };
   else if (preset.kind === 'research') found = { target: 'hermes', rule: 3, why: 'it is research' };
   else if (preset.kind === 'question') found = { target: 'hermes', rule: 3, why: 'it prepares a decision' };
+  else if (preset.kind === 'mockup') found = { target: 'hermes', rule: 3, why: 'it is a Hermes job' };
   else if (defaults?.runsOn === 'pc') found = { target: 'pc', rule: 4, why: `${name} defaults to the PC` };
   else if (repo) found = { target: 'cloud', rule: 5, why: 'it only needs the repo on GitHub' };
   else found = { target: 'pc', rule: 5, why: `no GitHub repo is known for ${name}` };

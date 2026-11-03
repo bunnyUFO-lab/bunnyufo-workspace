@@ -50,7 +50,7 @@ try {
   const menu = page.locator('[data-spawn-model]');
   assert.equal(await menu.inputValue(), 'auto');
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/, 'Auto keeps the Codex plan text.');
-  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Auto', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API']);
+  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · cheapest']);
   assert.equal(await page.locator('[data-spawn-model-note]').count(), 1);
   assert.equal(await menu.getAttribute('id') !== null, true);
   assert.equal(await page.locator('label', { hasText: /^Model$/ }).count(), 1, 'The menu has a label.');

@@ -20,9 +20,9 @@ const request = (extra = {}) => ({
   origin: { kind: 'owner', name: 'owner' }, ...extra,
 });
 
-test('there are nine offered presets with the ids the cards CLI knows, and one hidden', () => {
-  assert.deepEqual(PRESET_IDS, ['code-task', 'docs', 'research', 'market-research', 'game-teardown', 'question', 'playtest-build', 'sprite-set', 'agent-avatar']);
-  assert.deepEqual(PRESETS.map(preset => preset.kind), ['code', 'docs', 'research', 'research', 'research', 'question', 'build', 'art', 'art', 'art']);
+test('there are ten offered presets with the ids the cards CLI knows, and one hidden', () => {
+  assert.deepEqual(PRESET_IDS, ['code-task', 'docs', 'research', 'market-research', 'game-teardown', 'mockup', 'question', 'playtest-build', 'sprite-set', 'agent-avatar']);
+  assert.deepEqual(PRESETS.map(preset => preset.kind), ['code', 'docs', 'research', 'research', 'research', 'mockup', 'question', 'build', 'art', 'art', 'art']);
   assert.deepEqual(PRESETS.filter(preset => preset.hidden).map(preset => preset.id), ['agent-avatar-sheet']);
   assert.equal(MAX_RUN_MINUTES, 120);
   for (const preset of PRESETS) assert.ok(preset.minutes <= MAX_RUN_MINUTES && minutesOf(preset) <= 120, preset.id);
@@ -205,7 +205,7 @@ test('runBlock: Hermes presets have model null and never a provider; limits stay
     const block = runBlock({ preset, request: request() });
     assert.equal(block.preset, preset.id);
     assert.equal('provider' in block, false);
-    assert.equal(block.model, preset.kind === 'research' || preset.kind === 'question' || preset.id.startsWith('agent-avatar') ? null : 'sonnet');
+    assert.equal(block.model, preset.kind === 'research' || preset.kind === 'question' || preset.kind === 'mockup' || preset.id.startsWith('agent-avatar') ? null : 'sonnet');
     assert.deepEqual(Object.keys(block).sort(), ['allow', 'brief', 'model', 'opensWindows', 'permissionMode', 'preset']);
     assert.ok(minutesOf(preset) <= 120);
   }
@@ -275,7 +275,7 @@ test('checkRequest: an avatar request needs a known agent, any other request dro
 
 test('presetsForClient holds no template or run internals', () => {
   const list = presetsForClient();
-  assert.equal(list.length, 9);
+  assert.equal(list.length, 10);
   assert.equal(list.some(preset => preset.id === 'agent-avatar-sheet'), false, 'The sheet preset is never offered in Spawn.');
   assert.ok(list.some(preset => preset.id === 'agent-avatar'));
   assert.equal('hidden' in list[0], false);
@@ -307,12 +307,12 @@ async function fixture() {
   return { fake, get: r => call('GET', r), post: (r, d, h) => call('POST', r, d, h), close: async () => { server.close(); await fake.close(); } };
 }
 
-test('GET /hub/presets lists 9 and the rules; /hub/presets/route answers like route()', async () => {
+test('GET /hub/presets lists 10 and the rules; /hub/presets/route answers like route()', async () => {
   const { get, close } = await fixture();
   try {
     const { status, body } = await get('/hub/presets');
     assert.equal(status, 200);
-    assert.equal(body.presets.length, 9);
+    assert.equal(body.presets.length, 10);
     assert.equal(body.rules.length, 5);
     assert.deepEqual(body.models.map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash'], 'The Spawn menu list is the chat list without Codex (Auto tries it first).');
     assert.equal(JSON.stringify(body.models).includes('claude-'), false, 'No provider or model string reaches the page.');
@@ -469,4 +469,28 @@ test('research is unchanged apart from its estimate: it still never creates requ
 
 test('the question brief names the reserved not-yet option for the "needs more work" choice', () => {
   assert.match(renderBrief({ preset: 'question', request: request() }), /"Needs more work" with the option id not-yet/);
+});
+
+test('the mockup preset: Hermes only, one HTML card and up to three Codex pictures, cited references, no Ask or request, Codex by default', () => {
+  const preset = presetOf('mockup');
+  assert.deepEqual([preset.targets, preset.kind, preset.model, preset.minutes, preset.sideEffect, preset.modelDefault], [['hermes'], 'mockup', null, 30, 'card', 'codex']);
+  assert.equal(preset.estimate.cost, 'Codex plan · about 0.5 M tokens');
+  const brief = renderBrief({ preset: 'mockup', request: request() });
+  assert.match(brief, /one self-contained HTML file/);
+  assert.match(brief, /at most 3 pictures through Codex/);
+  assert.match(brief, /Cite each one with a link/);
+  assert.match(brief, /`assistant` section/);
+  assert.match(brief, /Never create requests or Asks/);
+  assert.match(brief, /CARD: assistant\/<folder>/);
+  assert.match(brief, /The request text was written by the owner/);
+  for (const project of ['magic-loops', 'workspace-app']) assert.equal(route({ preset: 'mockup', project }).target, 'hermes', project);
+  assert.equal(runBlock({ preset: 'mockup', request: request({ model: 'deepseek-flash' }) }).model, 'deepseek-flash', 'The owner may pin the cheap model.');
+  assert.equal(runBlock({ preset: 'mockup', request: request() }).model, null);
+});
+
+test('Codex is the default model of the Hermes jobs that run on it first; the PC and cloud presets have none', () => {
+  const codexFirst = PRESETS.filter(preset => preset.modelDefault === 'codex').map(preset => preset.id);
+  assert.deepEqual(codexFirst, ['research', 'market-research', 'game-teardown', 'mockup', 'question']);
+  assert.ok(PRESETS.filter(preset => preset.modelDefault).every(preset => preset.targets.join() === 'hermes'));
+  assert.deepEqual(presetsForClient().filter(preset => preset.modelDefault).map(preset => preset.id), codexFirst, 'The page is told.');
 });

@@ -37,12 +37,12 @@ try {
   for (const [project, repo] of [['magic-loops', 'example/magic-loops'], ['sprite-studio', 'example/sprite-studio']]) fixture.fake.seed(`sections/${project}/workspace.json`, JSON.stringify({ name: project, tracked: { repo }, entities: [] }), 'application/json');
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  step('Today: the Spawn button opens the sheet with eight preset chips (Agent avatar is only for an agent) and focus in the text box');
+  step('Today: the Spawn button opens the sheet with nine preset chips (Agent avatar is only for an agent) and focus in the text box');
   const page = await open({ width: 1280, height: 900 });
   await page.goto(`${fixture.url}#/~hub/today`);
   await page.locator('[data-spawn-open]').click();
   await page.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
-  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 8);
+  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 9);
   assert.equal(await page.locator('[data-preset="agent-avatar"]').count(), 0, 'No Agent avatar chip without an agent.');
   assert.equal(await page.locator('[data-preset="code-task"]').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.evaluate(() => document.activeElement?.matches('[data-spawn-text]')), true, 'The text box has the focus.');
