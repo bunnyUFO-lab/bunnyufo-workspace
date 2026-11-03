@@ -16,7 +16,7 @@ export const AGENTS = [
   { id: 'briefs', profile: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests' },
   { id: 'claude', profile: null, name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC' },
   // The three research agents are Hermes runs. `presets` are the Spawn presets each one takes (Give work opens Spawn on the first).
-  { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research'] },
+  { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research', 'mockup'] },
   { id: 'market-researcher', profile: 'main', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'] },
   { id: 'teardown', profile: 'main', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'] },
 ];

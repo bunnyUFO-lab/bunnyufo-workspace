@@ -61,7 +61,7 @@ test('the agent list is Hermes, Briefs, Claude Code and the three research agent
     assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown']);
     assert.deepEqual(agent(body, 'market-researcher').presets, ['market-research']);
     assert.deepEqual(agent(body, 'teardown').presets, ['game-teardown']);
-    assert.deepEqual(agent(body, 'researcher').presets, ['research']);
+    assert.deepEqual(agent(body, 'researcher').presets, ['research', 'mockup'], 'The Researcher also takes mockups; Give work opens Spawn on the first.');
     assert.equal(agent(body, 'hermes').presets, undefined, 'Only the research agents take presets.');
     assert.deepEqual(agent(body, 'hermes').sprite, { kind: 'builtin', key: 'hermes' }, 'No choice gives the default.');
     assert.equal(agent(body, 'claude').sprite.kind, 'random', 'Claude Code has no built-in of its own.');

@@ -17,7 +17,16 @@ export interface SpawnPreset {
   example: string
   produces: string
   estimate: { cost: string; time: string }
+  /** The model the job starts on when the owner pins none: `codex` for the Hermes jobs that run on Codex first. */
+  modelDefault?: string
 }
+
+/** What the model menu calls an entry: the default of a Codex-first job reads "Codex", the DeepSeek entry says it is the cheapest, the paid ones say API. */
+export const modelOptionLabel = (entry: { id: string; label: string }, preset: Pick<SpawnPreset, 'modelDefault'>): string =>
+  entry.id === 'auto' ? (preset.modelDefault === 'codex' ? 'Codex' : entry.label) : entry.id === 'deepseek-flash' ? `${entry.label} · cheapest` : `${entry.label} · API`
+
+/** Code task and Docs run on Claude only until the OpenCode check says Codex or DeepSeek can be held to the PC's allow list. */
+export const claudeOnly = (preset: Pick<SpawnPreset, 'kind'>): boolean => preset.kind === 'code' || preset.kind === 'docs'
 
 export interface SpawnRule { rule: number; text: string }
 export interface SpawnRoute { target: SpawnTarget; rule: number; why: string }
@@ -43,6 +52,7 @@ export function guessPreset(text: string): string {
   if (/avatar/.test(q)) return 'agent-avatar'
   if (/market|competitor|pricing/.test(q)) return 'market-research'
   if (/teardown|tear down/.test(q)) return 'game-teardown'
+  if (/mock-?up|wireframe/.test(q)) return 'mockup'
   if (/sprite/.test(q)) return 'sprite-set'
   if (/playtest/.test(q)) return 'playtest-build'
   if (/research/.test(q)) return 'research'

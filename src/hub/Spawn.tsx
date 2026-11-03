@@ -3,7 +3,7 @@ import { host } from '../lib/host'
 import type { ChatPersona, HubProject } from '../lib/hub'
 import { HubError, hubGet, hubPost, remember } from '../lib/hub'
 import type { ApproveAnswer, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
-import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, estimateCost, guessPreset } from '../lib/hubSpawn'
+import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, claudeOnly, estimateCost, guessPreset, modelOptionLabel } from '../lib/hubSpawn'
 import type { PresetList } from './spawnData'
 import { cachedPresets, loadPresets } from './spawnData'
 import { hubHash } from '../lib/route'
@@ -323,10 +323,16 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
                 <label className="sp-label" htmlFor={ids.model}>Model</label>
                 <div className="sp-model">
                   <select id={ids.model} className="sp-pick" value={picked.id} onChange={event => setModel(event.target.value)} data-spawn-model>
-                    {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{entry.id === AUTO ? entry.label : `${entry.label} · API`}</option>)}
+                    {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{modelOptionLabel(entry, preset)}</option>)}
                   </select>
                   <span className="sp-faint" data-spawn-model-note>{picked.note}</span>
                 </div>
+              </div>
+            )}
+            {!chatting && target !== 'hermes' && claudeOnly(preset) && (
+              <div className="sp-model-row" data-spawn-model-claude>
+                <span className="sp-label">Model</span>
+                <div className="sp-model"><b>Claude</b><span className="sp-faint">Codex and DeepSeek for code come after the OpenCode check.</span></div>
               </div>
             )}
             {!chatting && <div className="sp-est" data-spawn-estimate>
