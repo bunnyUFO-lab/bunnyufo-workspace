@@ -63,9 +63,10 @@ try {
   assert.deepEqual(await tasks(page), ['wa-mid', 'wa-new', 'wa-old']);
   const openWidth = await width(page);
   const thin = page.locator('[data-node="wa-m2"]');
-  assert.match(await thin.textContent(), /1 hidden/, 'a milestone with nothing left is a thin "n hidden" line');
+  assert.match(await thin.textContent(), /1 of 1 done/, 'a milestone with nothing left keeps its ring and says what it counts');
+  assert.doesNotMatch(await thin.textContent(), /hidden/, 'and never reads hidden');
   assert.equal(await page.locator('[data-toggle="wa-m2"]').count(), 0, 'and has nothing to open');
-  assert.match(await page.locator('[data-node="wa-m1"]').textContent(), /3\/4/, 'the milestone counts shown/total');
+  assert.match(await page.locator('[data-node="wa-m1"]').textContent(), /1 of 4 done/, 'the milestone counts what it holds, not what is shown');
   assert.equal(await stored(page), null, 'the default stores nothing');
 
   step('the panel: presets, status chips, a count, at most 600 px wide, Escape closes it');

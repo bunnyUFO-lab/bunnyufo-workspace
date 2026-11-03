@@ -5,20 +5,20 @@
    {
     "id": "m1",
     "from": "-Infinity",
-    "to": 618.8
+    "to": 646
    },
    {
     "id": "m2",
-    "from": 618.8,
-    "to": 1467.8000000000002
+    "from": 646,
+    "to": 1522.1999999999998
    },
    {
     "id": "m3",
-    "from": 1467.8000000000002,
+    "from": 1522.1999999999998,
     "to": "Infinity"
    }
   ],
-  "width": 2049.2000000000003,
+  "width": 2130.7999999999997,
   "height": 470,
   "spine": {
    "from": [
@@ -26,12 +26,12 @@
     230
    ],
    "to": [
-    2035.2000000000003,
+    2116.7999999999997,
     230
    ]
   },
   "now": {
-   "x": 870.4749999999999,
+   "x": 927.715,
    "y": 230
   },
   "nodes": [
@@ -45,8 +45,14 @@
     "col": "var(--red)",
     "index": 0,
     "open": true,
+    "radius": 15,
+    "bare": false,
     "done": 2,
+    "later": 0,
     "total": 2,
+    "words": "2 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -63,7 +69,8 @@
     "label": {
      "x": 120,
      "y": 264,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "2 of 2 done"
     },
     "countAt": {
      "x": 120,
@@ -79,7 +86,7 @@
     "id": "m1-a",
     "milestone": "m1",
     "title": "Project setup",
-    "x": 478.4,
+    "x": 505.6,
     "y": 152,
     "side": -1,
     "state": "done",
@@ -87,6 +94,10 @@
     "open": true,
     "done": 2,
     "total": 2,
+    "later": 0,
+    "words": "2 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -97,15 +108,15 @@
      "deployed": false
     },
     "center": {
-     "x": 500.4,
+     "x": 527.6,
      "y": 152
     },
     "elbow": {
-     "x": 220.4,
+     "x": 247.6,
      "y": 152
     },
     "label": {
-     "x": 530.4,
+     "x": 557.6,
      "y": 156,
      "anchor": "start",
      "lines": [
@@ -114,11 +125,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 500.4,
+     "x": 527.6,
      "y": 156
     },
     "chevronAt": {
-     "x": 220.4,
+     "x": 247.6,
      "y": 152
     }
    },
@@ -128,7 +139,7 @@
     "milestone": "m1",
     "feature": "m1-a",
     "title": "Create the repository",
-    "x": 256.4,
+    "x": 283.6,
     "y": 152,
     "side": -1,
     "slot": 0,
@@ -141,6 +152,7 @@
     "up": true,
     "done": 1,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -151,11 +163,11 @@
      "deployed": false
     },
     "center": {
-     "x": 256.4,
+     "x": 283.6,
      "y": 152
     },
     "label": {
-     "x": 256.4,
+     "x": 283.6,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -170,7 +182,7 @@
     "milestone": "m1",
     "feature": "m1-a",
     "title": "Wire the build and the tests together",
-    "x": 348.4,
+    "x": 375.6,
     "y": 152,
     "side": -1,
     "slot": 1,
@@ -183,6 +195,7 @@
     "up": false,
     "done": 1,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -193,11 +206,11 @@
      "deployed": false
     },
     "center": {
-     "x": 348.4,
+     "x": 375.6,
      "y": 152
     },
     "label": {
-     "x": 348.4,
+     "x": 375.6,
      "y": 184,
      "anchor": "middle",
      "lines": [
@@ -210,14 +223,20 @@
     "kind": "m",
     "id": "m2",
     "title": "The long milestone title that needs wrapping",
-    "x": 658.8,
+    "x": 686,
     "y": 230,
     "state": "doing",
     "col": "var(--amber)",
     "index": 1,
     "open": true,
+    "radius": 15,
+    "bare": false,
     "done": 1,
+    "later": 0,
     "total": 8,
+    "words": "1 of 8 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": true,
@@ -228,20 +247,21 @@
      "deployed": true
     },
     "center": {
-     "x": 658.8,
+     "x": 686,
      "y": 230
     },
     "label": {
-     "x": 658.8,
+     "x": 686,
      "y": 264,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "1 of 8 done"
     },
     "countAt": {
-     "x": 658.8,
+     "x": 686,
      "y": 234
     },
     "chevronAt": {
-     "x": 616.8,
+     "x": 644,
      "y": 230
     }
    },
@@ -250,7 +270,7 @@
     "id": "m2-a",
     "milestone": "m2",
     "title": "Combat",
-    "x": 1317.4,
+    "x": 1371.8,
     "y": 152,
     "side": -1,
     "state": "doing",
@@ -258,6 +278,10 @@
     "open": true,
     "done": 1,
     "total": 3,
+    "later": 0,
+    "words": "1 of 3 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": false,
@@ -268,15 +292,15 @@
      "deployed": true
     },
     "center": {
-     "x": 1339.4,
+     "x": 1393.8,
      "y": 152
     },
     "elbow": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": 152
     },
     "label": {
-     "x": 1369.4,
+     "x": 1423.8,
      "y": 156,
      "anchor": "start",
      "lines": [
@@ -285,11 +309,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 1339.4,
+     "x": 1393.8,
      "y": 156
     },
     "chevronAt": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": 152
     }
    },
@@ -299,7 +323,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Hit boxes",
-    "x": 1003.4,
+    "x": 1057.8,
     "y": 152,
     "side": -1,
     "slot": 0,
@@ -314,6 +338,7 @@
     "up": true,
     "done": 1,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -324,11 +349,11 @@
      "deployed": true
     },
     "center": {
-     "x": 1003.4,
+     "x": 1057.8,
      "y": 152
     },
     "label": {
-     "x": 1003.4,
+     "x": 1057.8,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -343,7 +368,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Damage numbers that float up and fade out slowly",
-    "x": 1095.4,
+    "x": 1149.8,
     "y": 152,
     "side": -1,
     "slot": 1,
@@ -359,6 +384,7 @@
     "up": false,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": false,
@@ -369,11 +395,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1095.4,
+     "x": 1149.8,
      "y": 152
     },
     "label": {
-     "x": 1095.4,
+     "x": 1149.8,
      "y": 184,
      "anchor": "middle",
      "lines": [
@@ -388,7 +414,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Knockback",
-    "x": 1187.4,
+    "x": 1241.8,
     "y": 152,
     "side": -1,
     "slot": 2,
@@ -401,6 +427,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -411,11 +438,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1187.4,
+     "x": 1241.8,
      "y": 152
     },
     "label": {
-     "x": 1187.4,
+     "x": 1241.8,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -429,7 +456,7 @@
     "id": "m2-b",
     "milestone": "m2",
     "title": "A feature with a rather long title indeed",
-    "x": 1225.4,
+    "x": 1279.8,
     "y": 308,
     "side": 1,
     "state": "next",
@@ -437,6 +464,10 @@
     "open": true,
     "done": 0,
     "total": 2,
+    "later": 0,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -447,15 +478,15 @@
      "deployed": false
     },
     "center": {
-     "x": 1247.4,
+     "x": 1301.8,
      "y": 308
     },
     "elbow": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": 308
     },
     "label": {
-     "x": 1277.4,
+     "x": 1331.8,
      "y": 312,
      "anchor": "start",
      "lines": [
@@ -464,11 +495,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 1247.4,
+     "x": 1301.8,
      "y": 312
     },
     "chevronAt": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": 308
     }
    },
@@ -478,7 +509,7 @@
     "milestone": "m2",
     "feature": "m2-b",
     "title": "Spawn tables",
-    "x": 1003.4,
+    "x": 1057.8,
     "y": 308,
     "side": 1,
     "slot": 0,
@@ -493,6 +524,7 @@
     "up": false,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -503,11 +535,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1003.4,
+     "x": 1057.8,
      "y": 308
     },
     "label": {
-     "x": 1003.4,
+     "x": 1057.8,
      "y": 340,
      "anchor": "middle",
      "lines": [
@@ -522,7 +554,7 @@
     "milestone": "m2",
     "feature": "m2-b",
     "title": "Waves",
-    "x": 1095.4,
+    "x": 1149.8,
     "y": 308,
     "side": 1,
     "slot": 1,
@@ -535,6 +567,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -545,11 +578,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1095.4,
+     "x": 1149.8,
      "y": 308
     },
     "label": {
-     "x": 1095.4,
+     "x": 1149.8,
      "y": 286,
      "anchor": "middle",
      "lines": [
@@ -563,7 +596,7 @@
     "id": "m2-c",
     "milestone": "m2",
     "title": "Loot",
-    "x": 1085.4,
+    "x": 1139.8,
     "y": 74,
     "side": -1,
     "state": "later",
@@ -571,6 +604,10 @@
     "open": true,
     "done": 0,
     "total": 1,
+    "later": 0,
+    "words": "0 of 1 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -581,15 +618,15 @@
      "deployed": false
     },
     "center": {
-     "x": 1107.4,
+     "x": 1161.8,
      "y": 74
     },
     "elbow": {
-     "x": 919.4,
+     "x": 973.8,
      "y": 74
     },
     "label": {
-     "x": 1137.4,
+     "x": 1191.8,
      "y": 78,
      "anchor": "start",
      "lines": [
@@ -598,11 +635,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 1107.4,
+     "x": 1161.8,
      "y": 78
     },
     "chevronAt": {
-     "x": 919.4,
+     "x": 973.8,
      "y": 74
     }
    },
@@ -612,7 +649,7 @@
     "milestone": "m2",
     "feature": "m2-c",
     "title": "Drop rates",
-    "x": 955.4,
+    "x": 1009.8,
     "y": 74,
     "side": -1,
     "slot": 0,
@@ -625,6 +662,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -635,11 +673,11 @@
      "deployed": false
     },
     "center": {
-     "x": 955.4,
+     "x": 1009.8,
      "y": 74
     },
     "label": {
-     "x": 955.4,
+     "x": 1009.8,
      "y": 52,
      "anchor": "middle",
      "lines": [
@@ -653,7 +691,7 @@
     "id": "m2-d",
     "milestone": "m2",
     "title": "Audio",
-    "x": 1177.4,
+    "x": 1231.8,
     "y": 386,
     "side": 1,
     "state": "you",
@@ -661,6 +699,10 @@
     "open": true,
     "done": 0,
     "total": 2,
+    "later": 0,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": true,
@@ -671,15 +713,15 @@
      "deployed": false
     },
     "center": {
-     "x": 1199.4,
+     "x": 1253.8,
      "y": 386
     },
     "elbow": {
-     "x": 919.4,
+     "x": 973.8,
      "y": 386
     },
     "label": {
-     "x": 1229.4,
+     "x": 1283.8,
      "y": 390,
      "anchor": "start",
      "lines": [
@@ -688,11 +730,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 1199.4,
+     "x": 1253.8,
      "y": 390
     },
     "chevronAt": {
-     "x": 919.4,
+     "x": 973.8,
      "y": 386
     }
    },
@@ -702,7 +744,7 @@
     "milestone": "m2",
     "feature": "m2-d",
     "title": "Mix the sound effects",
-    "x": 955.4,
+    "x": 1009.8,
     "y": 386,
     "side": 1,
     "slot": 0,
@@ -717,6 +759,7 @@
     "up": false,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -727,11 +770,11 @@
      "deployed": false
     },
     "center": {
-     "x": 955.4,
+     "x": 1009.8,
      "y": 386
     },
     "label": {
-     "x": 955.4,
+     "x": 1009.8,
      "y": 418,
      "anchor": "middle",
      "lines": [
@@ -746,7 +789,7 @@
     "milestone": "m2",
     "feature": "m2-d",
     "title": "Music loops",
-    "x": 1047.4,
+    "x": 1101.8,
     "y": 386,
     "side": 1,
     "slot": 1,
@@ -762,6 +805,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": true,
@@ -772,11 +816,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1047.4,
+     "x": 1101.8,
      "y": 386
     },
     "label": {
-     "x": 1047.4,
+     "x": 1101.8,
      "y": 364,
      "anchor": "middle",
      "lines": [
@@ -790,7 +834,7 @@
     "id": "m2-e",
     "milestone": "m2",
     "title": "Polish",
-    "x": 945.4,
+    "x": 999.8,
     "y": -4,
     "side": -1,
     "state": "later",
@@ -798,6 +842,10 @@
     "open": true,
     "done": 0,
     "total": 0,
+    "later": 0,
+    "words": "no tasks yet",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -808,15 +856,15 @@
      "deployed": false
     },
     "center": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": -4
     },
     "elbow": {
-     "x": 871.4,
+     "x": 925.8,
      "y": -4
     },
     "label": {
-     "x": 997.4,
+     "x": 1051.8,
      "y": 0,
      "anchor": "start",
      "lines": [
@@ -825,11 +873,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 967.4,
+     "x": 1021.8,
      "y": 0
     },
     "chevronAt": {
-     "x": 871.4,
+     "x": 925.8,
      "y": -4
     }
    },
@@ -837,14 +885,20 @@
     "kind": "m",
     "id": "m3",
     "title": "Launch",
-    "x": 1507.8000000000002,
+    "x": 1562.1999999999998,
     "y": 230,
     "state": "later",
     "col": "var(--blue)",
     "index": 2,
     "open": true,
+    "radius": 15,
+    "bare": false,
     "done": 0,
+    "later": 0,
     "total": 2,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -855,20 +909,21 @@
      "deployed": false
     },
     "center": {
-     "x": 1507.8000000000002,
+     "x": 1562.1999999999998,
      "y": 230
     },
     "label": {
-     "x": 1507.8000000000002,
+     "x": 1562.1999999999998,
      "y": 264,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "0 of 2 done"
     },
     "countAt": {
-     "x": 1507.8000000000002,
+     "x": 1562.1999999999998,
      "y": 234
     },
     "chevronAt": {
-     "x": 1465.8000000000002,
+     "x": 1520.1999999999998,
      "y": 230
     }
    },
@@ -877,7 +932,7 @@
     "id": "m3-a",
     "milestone": "m3",
     "title": "Store page",
-    "x": 1849.2000000000003,
+    "x": 1930.7999999999997,
     "y": 152,
     "side": -1,
     "state": "later",
@@ -885,6 +940,10 @@
     "open": true,
     "done": 0,
     "total": 2,
+    "later": 0,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -895,15 +954,15 @@
      "deployed": false
     },
     "center": {
-     "x": 1871.2000000000003,
+     "x": 1952.7999999999997,
      "y": 152
     },
     "elbow": {
-     "x": 1591.2000000000003,
+     "x": 1672.7999999999997,
      "y": 152
     },
     "label": {
-     "x": 1901.2000000000003,
+     "x": 1982.7999999999997,
      "y": 156,
      "anchor": "start",
      "lines": [
@@ -912,11 +971,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 1871.2000000000003,
+     "x": 1952.7999999999997,
      "y": 156
     },
     "chevronAt": {
-     "x": 1591.2000000000003,
+     "x": 1672.7999999999997,
      "y": 152
     }
    },
@@ -926,7 +985,7 @@
     "milestone": "m3",
     "feature": "m3-a",
     "title": "Trailer",
-    "x": 1627.2000000000003,
+    "x": 1708.7999999999997,
     "y": 152,
     "side": -1,
     "slot": 0,
@@ -939,6 +998,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -949,11 +1009,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1627.2000000000003,
+     "x": 1708.7999999999997,
      "y": 152
     },
     "label": {
-     "x": 1627.2000000000003,
+     "x": 1708.7999999999997,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -968,7 +1028,7 @@
     "milestone": "m3",
     "feature": "m3-a",
     "title": "Screenshots",
-    "x": 1719.2000000000003,
+    "x": 1800.7999999999997,
     "y": 152,
     "side": -1,
     "slot": 1,
@@ -981,6 +1041,7 @@
     "up": false,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -991,11 +1052,11 @@
      "deployed": false
     },
     "center": {
-     "x": 1719.2000000000003,
+     "x": 1800.7999999999997,
      "y": 152
     },
     "label": {
-     "x": 1719.2000000000003,
+     "x": 1800.7999999999997,
      "y": 184,
      "anchor": "middle",
      "lines": [
@@ -1011,15 +1072,15 @@
     "milestone": "m1",
     "points": [
      [
-      180.4,
+      207.6,
       230
      ],
      [
-      220.4,
+      247.6,
       152
      ],
      [
-      478.4,
+      505.6,
       152
      ]
     ],
@@ -1031,15 +1092,15 @@
     "milestone": "m2",
     "points": [
      [
-      927.4,
+      981.8,
       230
      ],
      [
-      967.4,
+      1021.8,
       152
      ],
      [
-      1317.4,
+      1371.8,
       152
      ]
     ],
@@ -1051,15 +1112,15 @@
     "milestone": "m2",
     "points": [
      [
-      927.4,
+      981.8,
       230
      ],
      [
-      967.4,
+      1021.8,
       308
      ],
      [
-      1225.4,
+      1279.8,
       308
      ]
     ],
@@ -1071,15 +1132,15 @@
     "milestone": "m2",
     "points": [
      [
-      879.4,
+      933.8,
       230
      ],
      [
-      919.4,
+      973.8,
       74
      ],
      [
-      1085.4,
+      1139.8,
       74
      ]
     ],
@@ -1091,15 +1152,15 @@
     "milestone": "m2",
     "points": [
      [
-      879.4,
+      933.8,
       230
      ],
      [
-      919.4,
+      973.8,
       386
      ],
      [
-      1177.4,
+      1231.8,
       386
      ]
     ],
@@ -1111,15 +1172,15 @@
     "milestone": "m2",
     "points": [
      [
-      831.4,
+      885.8,
       230
      ],
      [
-      871.4,
+      925.8,
       -4
      ],
      [
-      945.4,
+      999.8,
       -4
      ]
     ],
@@ -1131,15 +1192,15 @@
     "milestone": "m3",
     "points": [
      [
-      1551.2000000000003,
+      1632.7999999999997,
       230
      ],
      [
-      1591.2000000000003,
+      1672.7999999999997,
       152
      ],
      [
-      1849.2000000000003,
+      1930.7999999999997,
       152
      ]
     ],
@@ -1153,7 +1214,7 @@
     "rect": {
      "x": 90,
      "y": 300,
-     "w": 598.8,
+     "w": 626,
      "h": 22
     },
     "labelAt": {
@@ -1171,18 +1232,18 @@
    {
     "name": "Sprint 2",
     "rect": {
-     "x": 628.8,
+     "x": 656,
      "y": 330,
-     "w": 909.0000000000002,
+     "w": 936.1999999999998,
      "h": 22
     },
     "labelAt": {
-     "x": 638.8,
+     "x": 666,
      "y": 345,
      "anchor": "start"
     },
     "partsAt": {
-     "x": 702,
+     "x": 729.2,
      "y": 345
     },
     "col": "var(--blue)",
@@ -1196,20 +1257,20 @@
    {
     "id": "m1",
     "from": "-Infinity",
-    "to": 250
+    "to": 278
    },
    {
     "id": "m2",
-    "from": 250,
-    "to": 588
+    "from": 278,
+    "to": 707
    },
    {
     "id": "m3",
-    "from": 588,
+    "from": 707,
     "to": "Infinity"
    }
   ],
-  "width": 838,
+  "width": 957,
   "height": 470,
   "spine": {
    "from": [
@@ -1217,12 +1278,12 @@
     230
    ],
    "to": [
-    824,
+    943,
     230
    ]
   },
   "now": {
-   "x": 344,
+   "x": 372,
    "y": 230
   },
   "nodes": [
@@ -1236,8 +1297,14 @@
     "col": "var(--red)",
     "index": 0,
     "open": false,
+    "radius": 26,
+    "bare": false,
     "done": 2,
+    "later": 0,
     "total": 2,
+    "words": "2 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1254,7 +1321,8 @@
     "label": {
      "x": 120,
      "y": 192,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "2 of 2 done"
     },
     "countAt": {
      "x": 120,
@@ -1269,14 +1337,20 @@
     "kind": "m",
     "id": "m2",
     "title": "The long milestone title that needs wrapping",
-    "x": 290,
+    "x": 318,
     "y": 230,
     "state": "doing",
     "col": "var(--amber)",
     "index": 1,
     "open": false,
+    "radius": 26,
+    "bare": false,
     "done": 1,
+    "later": 0,
     "total": 8,
+    "words": "1 of 8 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": true,
@@ -1287,20 +1361,21 @@
      "deployed": true
     },
     "center": {
-     "x": 290,
+     "x": 318,
      "y": 230
     },
     "label": {
-     "x": 290,
+     "x": 318,
      "y": 278,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "1 of 8 done"
     },
     "countAt": {
-     "x": 290,
+     "x": 318,
      "y": 234
     },
     "chevronAt": {
-     "x": 248,
+     "x": 276,
      "y": 230
     }
    },
@@ -1308,14 +1383,20 @@
     "kind": "m",
     "id": "m3",
     "title": "Launch",
-    "x": 628,
+    "x": 747,
     "y": 230,
     "state": "later",
     "col": "var(--blue)",
     "index": 2,
     "open": false,
+    "radius": 26,
+    "bare": false,
     "done": 0,
+    "later": 0,
     "total": 2,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1326,20 +1407,21 @@
      "deployed": false
     },
     "center": {
-     "x": 628,
+     "x": 747,
      "y": 230
     },
     "label": {
-     "x": 628,
+     "x": 747,
      "y": 192,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "0 of 2 done"
     },
     "countAt": {
-     "x": 628,
+     "x": 747,
      "y": 234
     },
     "chevronAt": {
-     "x": 586,
+     "x": 705,
      "y": 230
     }
    }
@@ -1353,20 +1435,20 @@
    {
     "id": "m1",
     "from": "-Infinity",
-    "to": 250
+    "to": 278
    },
    {
     "id": "m2",
-    "from": 250,
-    "to": 1041.4
+    "from": 278,
+    "to": 1096.6
    },
    {
     "id": "m3",
-    "from": 1041.4,
+    "from": 1096.6,
     "to": "Infinity"
    }
   ],
-  "width": 1291.4,
+  "width": 1346.6,
   "height": 470,
   "spine": {
    "from": [
@@ -1374,12 +1456,12 @@
     230
    ],
    "to": [
-    1277.4,
+    1332.6,
     230
    ]
   },
   "now": {
-   "x": 501.355,
+   "x": 563.395,
    "y": 230
   },
   "nodes": [
@@ -1393,8 +1475,14 @@
     "col": "var(--red)",
     "index": 0,
     "open": false,
+    "radius": 26,
+    "bare": false,
     "done": 2,
+    "later": 0,
     "total": 2,
+    "words": "2 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1411,7 +1499,8 @@
     "label": {
      "x": 120,
      "y": 192,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "2 of 2 done"
     },
     "countAt": {
      "x": 120,
@@ -1426,14 +1515,20 @@
     "kind": "m",
     "id": "m2",
     "title": "The long milestone title that needs wrapping",
-    "x": 290,
+    "x": 318,
     "y": 230,
     "state": "doing",
     "col": "var(--amber)",
     "index": 1,
     "open": true,
+    "radius": 15,
+    "bare": false,
     "done": 1,
+    "later": 0,
     "total": 8,
+    "words": "1 of 8 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": true,
@@ -1444,20 +1539,21 @@
      "deployed": true
     },
     "center": {
-     "x": 290,
+     "x": 318,
      "y": 230
     },
     "label": {
-     "x": 290,
+     "x": 318,
      "y": 264,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "1 of 8 done"
     },
     "countAt": {
-     "x": 290,
+     "x": 318,
      "y": 234
     },
     "chevronAt": {
-     "x": 248,
+     "x": 276,
      "y": 230
     }
    },
@@ -1466,7 +1562,7 @@
     "id": "m2-a",
     "milestone": "m2",
     "title": "Combat",
-    "x": 948.6,
+    "x": 1003.8,
     "y": 152,
     "side": -1,
     "state": "doing",
@@ -1474,6 +1570,10 @@
     "open": true,
     "done": 1,
     "total": 3,
+    "later": 0,
+    "words": "1 of 3 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": false,
@@ -1484,15 +1584,15 @@
      "deployed": true
     },
     "center": {
-     "x": 970.6,
+     "x": 1025.8,
      "y": 152
     },
     "elbow": {
-     "x": 598.6,
+     "x": 653.8,
      "y": 152
     },
     "label": {
-     "x": 1000.6,
+     "x": 1055.8,
      "y": 156,
      "anchor": "start",
      "lines": [
@@ -1501,11 +1601,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 970.6,
+     "x": 1025.8,
      "y": 156
     },
     "chevronAt": {
-     "x": 598.6,
+     "x": 653.8,
      "y": 152
     }
    },
@@ -1515,7 +1615,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Hit boxes",
-    "x": 634.6,
+    "x": 689.8,
     "y": 152,
     "side": -1,
     "slot": 0,
@@ -1530,6 +1630,7 @@
     "up": true,
     "done": 1,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1540,11 +1641,11 @@
      "deployed": true
     },
     "center": {
-     "x": 634.6,
+     "x": 689.8,
      "y": 152
     },
     "label": {
-     "x": 634.6,
+     "x": 689.8,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -1559,7 +1660,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Damage numbers that float up and fade out slowly",
-    "x": 726.6,
+    "x": 781.8,
     "y": 152,
     "side": -1,
     "slot": 1,
@@ -1575,6 +1676,7 @@
     "up": false,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": true,
      "idle": false,
@@ -1585,11 +1687,11 @@
      "deployed": false
     },
     "center": {
-     "x": 726.6,
+     "x": 781.8,
      "y": 152
     },
     "label": {
-     "x": 726.6,
+     "x": 781.8,
      "y": 184,
      "anchor": "middle",
      "lines": [
@@ -1604,7 +1706,7 @@
     "milestone": "m2",
     "feature": "m2-a",
     "title": "Knockback",
-    "x": 818.6,
+    "x": 873.8,
     "y": 152,
     "side": -1,
     "slot": 2,
@@ -1617,6 +1719,7 @@
     "up": true,
     "done": 0,
     "total": 1,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1627,11 +1730,11 @@
      "deployed": false
     },
     "center": {
-     "x": 818.6,
+     "x": 873.8,
      "y": 152
     },
     "label": {
-     "x": 818.6,
+     "x": 873.8,
      "y": 130,
      "anchor": "middle",
      "lines": [
@@ -1645,7 +1748,7 @@
     "id": "m2-b",
     "milestone": "m2",
     "title": "A feature with a rather long title indeed",
-    "x": 813,
+    "x": 868.1999999999999,
     "y": 308,
     "side": 1,
     "state": "next",
@@ -1653,6 +1756,10 @@
     "open": false,
     "done": 0,
     "total": 2,
+    "later": 0,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1663,15 +1770,15 @@
      "deployed": false
     },
     "center": {
-     "x": 835,
+     "x": 890.1999999999999,
      "y": 308
     },
     "elbow": {
-     "x": 598.6,
+     "x": 653.8,
      "y": 308
     },
     "label": {
-     "x": 614.6,
+     "x": 669.8,
      "y": 326,
      "anchor": "start",
      "lines": [
@@ -1680,11 +1787,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 835,
+     "x": 890.1999999999999,
      "y": 312
     },
     "chevronAt": {
-     "x": 598.6,
+     "x": 653.8,
      "y": 308
     }
    },
@@ -1693,7 +1800,7 @@
     "id": "m2-c",
     "milestone": "m2",
     "title": "Loot",
-    "x": 670.6,
+    "x": 725.8,
     "y": 74,
     "side": -1,
     "state": "later",
@@ -1701,6 +1808,10 @@
     "open": false,
     "done": 0,
     "total": 1,
+    "later": 0,
+    "words": "0 of 1 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1711,15 +1822,15 @@
      "deployed": false
     },
     "center": {
-     "x": 692.6,
+     "x": 747.8,
      "y": 74
     },
     "elbow": {
-     "x": 550.6,
+     "x": 605.8,
      "y": 74
     },
     "label": {
-     "x": 566.6,
+     "x": 621.8,
      "y": 64,
      "anchor": "start",
      "lines": [
@@ -1728,11 +1839,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 692.6,
+     "x": 747.8,
      "y": 78
     },
     "chevronAt": {
-     "x": 550.6,
+     "x": 605.8,
      "y": 74
     }
    },
@@ -1741,7 +1852,7 @@
     "id": "m2-d",
     "milestone": "m2",
     "title": "Audio",
-    "x": 670.6,
+    "x": 725.8,
     "y": 386,
     "side": 1,
     "state": "you",
@@ -1749,6 +1860,10 @@
     "open": false,
     "done": 0,
     "total": 2,
+    "later": 0,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": true,
@@ -1759,15 +1874,15 @@
      "deployed": false
     },
     "center": {
-     "x": 692.6,
+     "x": 747.8,
      "y": 386
     },
     "elbow": {
-     "x": 550.6,
+     "x": 605.8,
      "y": 386
     },
     "label": {
-     "x": 566.6,
+     "x": 621.8,
      "y": 404,
      "anchor": "start",
      "lines": [
@@ -1776,11 +1891,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 692.6,
+     "x": 747.8,
      "y": 390
     },
     "chevronAt": {
-     "x": 550.6,
+     "x": 605.8,
      "y": 386
     }
    },
@@ -1789,7 +1904,7 @@
     "id": "m2-e",
     "milestone": "m2",
     "title": "Polish",
-    "x": 622.6,
+    "x": 677.8,
     "y": -4,
     "side": -1,
     "state": "later",
@@ -1797,6 +1912,10 @@
     "open": false,
     "done": 0,
     "total": 0,
+    "later": 0,
+    "words": "no tasks yet",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1807,15 +1926,15 @@
      "deployed": false
     },
     "center": {
-     "x": 644.6,
+     "x": 699.8,
      "y": -4
     },
     "elbow": {
-     "x": 502.6,
+     "x": 557.8,
      "y": -4
     },
     "label": {
-     "x": 518.6,
+     "x": 573.8,
      "y": -14,
      "anchor": "start",
      "lines": [
@@ -1824,11 +1943,11 @@
      "step": 14
     },
     "countAt": {
-     "x": 644.6,
+     "x": 699.8,
      "y": 0
     },
     "chevronAt": {
-     "x": 502.6,
+     "x": 557.8,
      "y": -4
     }
    },
@@ -1836,14 +1955,20 @@
     "kind": "m",
     "id": "m3",
     "title": "Launch",
-    "x": 1081.4,
+    "x": 1136.6,
     "y": 230,
     "state": "later",
     "col": "var(--blue)",
     "index": 2,
     "open": false,
+    "radius": 26,
+    "bare": false,
     "done": 0,
+    "later": 0,
     "total": 2,
+    "words": "0 of 2 done",
+    "muted": false,
+    "hidden": 0,
     "marks": {
      "working": false,
      "idle": false,
@@ -1854,20 +1979,21 @@
      "deployed": false
     },
     "center": {
-     "x": 1081.4,
+     "x": 1136.6,
      "y": 230
     },
     "label": {
-     "x": 1081.4,
+     "x": 1136.6,
      "y": 192,
-     "anchor": "middle"
+     "anchor": "middle",
+     "count": "0 of 2 done"
     },
     "countAt": {
-     "x": 1081.4,
+     "x": 1136.6,
      "y": 234
     },
     "chevronAt": {
-     "x": 1039.4,
+     "x": 1094.6,
      "y": 230
     }
    }
@@ -1878,15 +2004,15 @@
     "milestone": "m2",
     "points": [
      [
-      558.6,
+      613.8,
       230
      ],
      [
-      598.6,
+      653.8,
       152
      ],
      [
-      948.6,
+      1003.8,
       152
      ]
     ],
@@ -1898,15 +2024,15 @@
     "milestone": "m2",
     "points": [
      [
-      558.6,
+      613.8,
       230
      ],
      [
-      598.6,
+      653.8,
       308
      ],
      [
-      813,
+      868.1999999999999,
       308
      ]
     ],
@@ -1918,15 +2044,15 @@
     "milestone": "m2",
     "points": [
      [
-      510.6,
+      565.8,
       230
      ],
      [
-      550.6,
+      605.8,
       74
      ],
      [
-      670.6,
+      725.8,
       74
      ]
     ],
@@ -1938,15 +2064,15 @@
     "milestone": "m2",
     "points": [
      [
-      510.6,
+      565.8,
       230
      ],
      [
-      550.6,
+      605.8,
       386
      ],
      [
-      670.6,
+      725.8,
       386
      ]
     ],
@@ -1958,15 +2084,15 @@
     "milestone": "m2",
     "points": [
      [
-      462.6,
+      517.8,
       230
      ],
      [
-      502.6,
+      557.8,
       -4
      ],
      [
-      622.6,
+      677.8,
       -4
      ]
     ],
@@ -1998,18 +2124,18 @@
    {
     "name": "Sprint 2",
     "rect": {
-     "x": 260,
+     "x": 288,
      "y": 330,
-     "w": 851.4000000000001,
+     "w": 878.5999999999999,
      "h": 22
     },
     "labelAt": {
-     "x": 270,
+     "x": 298,
      "y": 345,
      "anchor": "start"
     },
     "partsAt": {
-     "x": 333.2,
+     "x": 361.2,
      "y": 345
     },
     "col": "var(--blue)",

@@ -1,5 +1,6 @@
 // The Roadmap's filter: which tasks the map shows. A pure function over the roadmap data, applied before the layout.
 import type { MapMilestone, ProgressMap, TaskState } from '../lib/hub'
+import { isLater } from './mapCount.ts'
 
 export interface MapFilter {
   /** The task states shown. */
@@ -55,8 +56,8 @@ function dateOf(task: { updatedAt?: string; closedAt?: string; createdAt?: strin
   return null
 }
 
-/** How many tasks a milestone or feature lost to the filter, and how many of those were done. */
-export interface Hidden { n: number; done: number }
+/** How many tasks a milestone or feature lost to the filter, and how many of those were done or deferred. */
+export interface Hidden { n: number; done: number; later: number }
 
 /** The model with only the tasks the filter lets through, plus what each milestone and feature lost. A feature with no match is dropped (its tasks count as its milestone's hidden); a milestone with no match stays, empty, so the spine stays readable. The same model comes back when the filter shows everything. */
 export function filterMap(model: ProgressMap, filter: MapFilter, now: number = Date.now()): { model: ProgressMap; hidden: Map<string, Hidden> } {
@@ -74,14 +75,15 @@ export function filterMap(model: ProgressMap, filter: MapFilter, now: number = D
     return (since === null || time >= since) && (from === null || time >= from) && (to === null || time < to)
   }
   const milestones = model.milestones.map((milestone): MapMilestone => {
-    const total = { n: 0, done: 0 }
+    const total: Hidden = { n: 0, done: 0, later: 0 }
     const features = milestone.features.flatMap(feature => {
       const tasks = feature.tasks.filter(keep)
       const lost = feature.tasks.filter(task => !keep(task))
       total.n += lost.length
       total.done += lost.filter(task => task.state === 'done').length
+      total.later += lost.filter(isLater).length
       if (!tasks.length) return feature.tasks.length ? [] : [feature]
-      if (lost.length) hidden.set(feature.id, { n: lost.length, done: lost.filter(task => task.state === 'done').length })
+      if (lost.length) hidden.set(feature.id, { n: lost.length, done: lost.filter(task => task.state === 'done').length, later: lost.filter(isLater).length })
       return [{ ...feature, tasks }]
     })
     if (total.n) hidden.set(milestone.id, total)

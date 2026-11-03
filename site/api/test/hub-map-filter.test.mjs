@@ -73,32 +73,36 @@ test('a milestone stays while a child matches; features without a match go; coun
   assert.deepEqual(shown.milestones.map(m => m.id), ['m1', 'm2', 'm3'], 'every milestone stays');
   assert.deepEqual(shown.milestones[1].features.map(f => f.id), ['f2', 'f3']);
   assert.deepEqual(shown.milestones[0].features, [], 'm1 has nothing left');
-  assert.deepEqual(hidden.get('m1'), { n: 2, done: 2 });
-  assert.deepEqual(hidden.get('m2'), { n: 1, done: 1 });
-  assert.deepEqual(hidden.get('f2'), { n: 1, done: 1 });
+  assert.deepEqual(hidden.get('m1'), { n: 2, done: 2, later: 0 });
+  assert.deepEqual(hidden.get('m2'), { n: 1, done: 1, later: 0 });
+  assert.deepEqual(hidden.get('f2'), { n: 1, done: 1, later: 0 });
   assert.equal(hidden.has('f3'), false, 'a feature that lost nothing');
   assert.equal(hidden.has('m3'), false);
   const doing = filterMap(sample(), DOING_FILTER, NOW);
   assert.deepEqual(doing.model.milestones[1].features.map(f => f.id), ['f2'], 'f3 had no match');
-  assert.deepEqual(doing.hidden.get('m2'), { n: 4, done: 1 });
-  assert.deepEqual(doing.hidden.get('m3'), { n: 1, done: 0 });
+  assert.deepEqual(doing.hidden.get('m2'), { n: 4, done: 1, later: 0 });
+  assert.deepEqual(doing.hidden.get('m3'), { n: 1, done: 0, later: 0 });
 });
 
-test('the layout: a milestone with no match is a thin "n hidden" dot, the others count matching/total', () => {
+test('the layout: a milestone the filter leaves no task keeps its ring and its count; nothing reads "hidden"', () => {
   const { model: shown, hidden } = filterMap(sample(), OPEN_FILTER, NOW);
   const layout = layoutMap(shown, new Set(['m1', 'm2']), false, 'x', hidden);
   const m1 = layout.nodes.find(n => n.id === 'm1');
-  assert.equal(m1.thin, true);
-  assert.equal(m1.open, false, 'a thin milestone does not open');
-  assert.equal(m1.radius, 11);
-  assert.deepEqual(m1.label.lines, ['m1 · 2 hidden']);
+  assert.equal(m1.bare, true);
+  assert.equal(m1.open, false, 'a milestone with nothing shown does not open');
+  assert.equal(m1.radius, 26, 'it keeps its ring');
+  assert.equal(m1.label.count, '2 of 2 done');
+  assert.deepEqual([m1.done, m1.total], [2, 2], 'the ring counts what the milestone holds, not what the filter shows');
   const m2 = layout.nodes.find(n => n.id === 'm2');
-  assert.equal(m2.thin, false);
+  assert.equal(m2.bare, false);
   assert.equal(m2.hidden, 1);
-  assert.equal(m2.label.count, '4/5', 'four tasks shown of five');
-  assert.equal(layout.nodes.find(n => n.id === 'f2').hidden, 1);
+  assert.equal(m2.label.count, '1 of 5 done');
+  const f2 = layout.nodes.find(n => n.id === 'f2');
+  assert.equal(f2.hidden, 1);
+  assert.equal(f2.words, '1 of 3 done');
   const vertical = layoutMap(shown, new Set(['m2']), false, 'y', hidden);
-  assert.deepEqual(vertical.nodes.find(n => n.id === 'm1').label.lines, ['m1 · 2 hidden']);
+  assert.equal(vertical.nodes.find(n => n.id === 'm1').label.sub, '2 of 2 done');
+  for (const node of [...layout.nodes, ...vertical.nodes]) assert.ok(!JSON.stringify(node.label).includes('hidden'), `${node.id} says nothing is hidden`);
 });
 
 test('"now" counts what the filter hid: done work behind it still moves it along', () => {
