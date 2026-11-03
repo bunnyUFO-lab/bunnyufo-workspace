@@ -1,4 +1,6 @@
 // The Hub on the local service: the same routes over the bucket a registered workspace publishes to.
+// A connect to the test server that times out on a busy PC is repeated; see steady-fetch.mjs.
+import '../../site/api/test/steady-fetch.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
