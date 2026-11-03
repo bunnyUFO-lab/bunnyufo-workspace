@@ -16,6 +16,7 @@ import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
+import { useNotUseful } from './NotUseful'
 import type { ProjectNames } from './ProjectChip'
 import ProjectChip from './ProjectChip'
 import type { HelpTarget } from './helpDraft'
@@ -122,6 +123,7 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
   // An approval is a signed request: chat does not sit between the owner and a signature. Unstick is a blocked event.
   const helpKind = item.kind === 'ask' || item.kind === 'checklist' || item.kind === 'review' || item.kind === 'blocked' ? item.kind : null
   const help: HelpTarget | null = helpKind && kind !== 'approval' ? { kind: helpKind, id: item.id, label: KIND_LABEL[kind].toLowerCase(), title: item.title } : null
+  const notUseful = useNotUseful(item, () => onSettled(item, 'not-useful', { detail: 'Filed for the sprint' }))
   const who = info?.who || item.host || ''
   const meta = metaParts({ project: item.project, who, asked: `asked ${ago(item.at)}`, bead: item.bead, names })
   const cells: [string, string | undefined][] = [['What', info?.what], ['State', info?.state], ['Next action', info?.next], ['Blocker', info?.blocker]]
@@ -135,8 +137,9 @@ export default function NeedsItem({ item, at, reload, onSettled, leaving = false
             <h3 className="ni-t" id={`ni-${key}`} tabIndex={-1}>{page ? <a href={page}>{item.title}</a> : item.title}</h3>
             <div className="ni-meta"><NeedBadges item={item} />{meta.map(part => part.kind === 'project' ? <ProjectChip key="project" id={part.id} names={names} filter={filter} /> : <span key={part.text}>{part.text}</span>)}</div>
           </div>
-          {help && <GetHelp target={help} />}
+          {(help || notUseful.button) && <div className="ni-ha">{help && <GetHelp target={help} />}{notUseful.button}</div>}
         </header>
+        {notUseful.panel}
         {info && (
           <dl className="four" data-four>
             {cells.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}

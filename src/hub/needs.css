@@ -204,3 +204,20 @@
 
 .ni-owner { margin: 0 0 8px; }
 .ni-ask { margin: 0 0 10px; }
+
+/* Not useful: a quiet button beside Get help, and a panel under the header with four reasons and a line. */
+.ni-ha { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; flex: none; }
+.ni-h .ni-ha .ni-help { margin-left: 0; }
+.ni .ni-nu { min-height: 40px; background: transparent; color: var(--t2); white-space: nowrap; }
+.ni-nu-panel { padding: 0 18px 12px; }
+.ni-nu-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ni-nu-line { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ni-nu-panel .hub-btn, .ni-nu-panel .ni-nu-input { min-height: 40px; box-sizing: border-box; }
+.ni-nu-input { flex: 1 1 220px; min-width: 0; padding: 6px 10px; font: inherit; font-size: 0.9rem; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline-strong); border-radius: var(--radius); }
+.ni-nu-input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (max-width: 480px) {
+  .ni-h { flex-wrap: wrap; }
+  .ni-ha { flex: 1 1 100%; justify-content: flex-end; }
+  .ni-nu-panel { padding: 0 14px 12px; }
+  .ni-nu-chip { flex: 1 1 calc(50% - 8px); }
+}

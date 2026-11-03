@@ -17,6 +17,7 @@ import {
   askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
+import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
 import { buildMap } from './hub-map.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
 import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState } from './hub-marks.mjs';
@@ -48,7 +49,7 @@ import { createPresence } from './hub-presence.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config', 'feedback'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -689,6 +690,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const askRow = row => ({ id: row.ask.id, bead: row.ask.bead, state: row.state.state });
   const checklistRow = row => ({ id: row.checklist.id, bead: row.item.bead, state: row.item.state });
 
+  /** What Needs you is built from, loaded once: the Asks, lists, requests and events, and the rows themselves (`waiting`, with their projects filled). */
+  async function loadNeeds(at) {
+    const [requests, window, asks, checklists, hermesOpen] = await Promise.all([loadRequests(at), loadEvents(at), loadAsks(at), loadChecklists(at), hermesApprovals.loadOpen(at)]);
+    const waiting = fillProjects(buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at, repoProjects: await repoProjects() }), requests);
+    return { requests, window, asks, checklists, hermesOpen, waiting };
+  }
+
   /**
    * What the Work board and /hub/unasked are built from, for one project or (null) every project with Beads:
    * issues with the owner's marks applied, requests, events, Asks, checklists and every other Needs you item
@@ -697,10 +705,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   async function loadWorkInputs(only, at) {
     if (only && !validProject(only)) throw fail('No such project.', 404);
     const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
-    const [loaded, requests, window, asks, checklists, hermesOpen, status, marks] = await Promise.all([
-      pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadRequests(at), loadEvents(at), loadAsks(at), loadChecklists(at), hermesApprovals.loadOpen(at), loadPcStatus(at), loadMarks(only),
+    const [loaded, { requests, window, asks, checklists, waiting }, status, marks] = await Promise.all([
+      pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadNeeds(at), loadPcStatus(at), loadMarks(only),
     ]);
-    const waiting = buildInbox({ filter: inboxFilter('needs-you'), asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: window.events, now: at, repoProjects: await repoProjects() });
     return {
       issues: applyMarks(loaded.flatMap(row => row.issues.map(issue => ({ ...issue, project: row.id }))), marks),
       requests: only ? requests.filter(item => item.project === only) : requests,
@@ -950,6 +957,95 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     if (events.some(event => event.kind === 'review-done' && event.review === id)) return { status: 200, body: { state: 'done' } };
     await putHubEvent(reviewDone({ review: id, event: review, user, at }), at);
     return { status: 201, body: { state: 'done' } };
+  }
+
+  /** The project folders under `feedback/`, as far as records go. */
+  async function feedbackProjects() {
+    const { prefixes } = await bucket.list(`${key('feedback/x').slice(0, -1)}`, { delimiter: '/' });
+    return prefixes.map(item => item.split('/').filter(Boolean).pop()).filter(validProject);
+  }
+
+  /** The record already filed for this item, in whichever project it went to; null when there is none. */
+  async function findNotUseful(kind, id) {
+    for (const project of await feedbackProjects()) {
+      const rel = recordPath(project, kind, id);
+      const got = await fresh(rel);
+      if (!got) continue;
+      // Only the Hub writes this record with no writer mark; one put through the card API is not the owner's.
+      const head = await bucket.head(key(rel));
+      if (head.metadata?.writer) throw fail('A record from another writer is in the way.', 409);
+      return got.value;
+    }
+    return null;
+  }
+
+  /** Take an item off Needs you the way its own close does; safe to repeat. */
+  async function closeNeed(kind, id, { event, user, at }) {
+    if (kind === 'ask') {
+      try { await cancelAsk(id, user, at); } catch (error) { if (error.status !== 409 && error.status !== 404) throw error; }
+    } else if (kind === 'checklist') {
+      try {
+        await putCreateOnly(`checklists/${id}/cancel.json`, `${JSON.stringify({ at: at.toISOString(), by: user || 'local', notUseful: true }, null, 2)}
+`, 'application/json', fail('This list is already cancelled.', 409));
+      } catch (error) { if (error.status !== 409) throw error; }
+    } else if (event) {
+      const { events } = await loadEvents(at);
+      if (!events.some(other => other.kind === 'review-done' && other.review === id)) await putHubEvent(reviewDone({ review: id, event, user, at }), at);
+    }
+  }
+
+  /**
+   * The owner says a Needs you item is not useful. The Hub finds the item itself, writes one create-only record under
+   * `feedback/<project>/<kind>/<id>/` for a session to file as a bug, closes the item the way its own close does, and
+   * posts a pointer event. A second press writes nothing new.
+   */
+  async function notUseful(kind, id, raw, user, at) {
+    if (!user) throw fail('Sign in to mark this.', 401);
+    if (!FEEDBACK_KINDS.includes(kind)) throw fail('Not found', 404);
+    if (!FEEDBACK_ID_RE.test(id)) throw fail('No such item.', 404);
+    let reason;
+    try { reason = checkNotUseful(raw); } catch (error) { throw fail(error.message, 400); }
+    const eventKind = kind === 'blocked' ? 'blocked' : 'ready-for-review';
+    const before = await findNotUseful(kind, id);
+    if (before) {
+      const { events } = kind === 'review' || kind === 'blocked' ? await loadEvents(at) : { events: [] };
+      await closeNeed(kind, id, { event: events.find(event => event.kind === eventKind && event.file === id) ?? { title: before.title, project: before.project, bead: before.bead }, user, at });
+      return { status: 200, body: { state: 'filed-before', key: before.key, project: before.project } };
+    }
+    const needs = await loadNeeds(at);
+    const row = needs.waiting.find(item => item.kind === kind && feedbackIdOf(item) === id);
+    if (!row) throw fail('This is no longer in Needs you.', 404);
+    const project = validProject(row.project) ? row.project : FEEDBACK_HOME;
+    let source;
+    let writer = null;
+    if (kind === 'ask') {
+      source = needs.asks.find(entry => entry.ask.id === id)?.ask;
+      writer = (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null;
+    } else if (kind === 'checklist') {
+      source = needs.checklists.find(entry => entry.checklist.id === id)?.checklist;
+    } else {
+      source = needs.window.events.find(event => event.kind === eventKind && event.file === id);
+    }
+    const record = notUsefulRecord({ row, raw: source, writer, project, ...reason, user, at });
+    const path = recordPath(project, kind, id);
+    try {
+      await putCreateOnly(path, `${JSON.stringify(record, null, 2)}
+`, 'application/json', fail('Already filed.', 409));
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      await closeNeed(kind, id, { event: source, user, at });
+      return { status: 200, body: { state: 'filed-before', key: record.key, project } };
+    }
+    await closeNeed(kind, id, { event: source, user, at });
+    try {
+      await putHubEvent({
+        ts: at.toISOString(), kind: 'not-useful', title: `Not useful: ${clip(row.title, 80)}`, project, item: { kind, id }, key: record.key, reason: reasonTextOf(reason),
+        ...(row.bead ? { bead: row.bead } : {}), record: path, host: 'hub', source: 'hub', by: user,
+      }, at);
+    } catch (error) {
+      log(`[hub] ${kind} ${id} was marked not useful but its event was not written: ${error.message}`);
+    }
+    return { status: 201, body: { state: 'filed', key: record.key, project } };
   }
 
   /**
@@ -1428,6 +1524,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await markReviewDone(decodeURIComponent(match[1]), user, at));
         } else if ((match = /^\/hub\/blocked\/([^/]+)\/done$/.exec(route))) {
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
+        } else if ((match = /^\/hub\/needs\/([a-z]+)\/([^/]+)\/not-useful$/.exec(route))) {
+          send(await notUseful(match[1], decodeURIComponent(match[2]), raw, user, at));
         } else if ((match = /^\/hub\/map\/([^/]+)\/marks$/.exec(route))) {
           if (!user) throw fail('Sign in to mark this.', 401);
           send(await markBead(decodeURIComponent(match[1]), raw, user, at));

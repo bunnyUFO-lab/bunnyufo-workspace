@@ -132,6 +132,10 @@
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 //   cards mark list --project <p> [--json]                            the owner's marks on the Roadmap that no agent has applied yet (bead, verdict, time, reason), oldest first
 //   cards mark applied --project <p> --bead <id>                      after `bd close` (done, not-needed) or `bd label remove <id> needs-owner` (unblock): writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
+//   cards feedback list [--project <p>] [--unfiled] [--json]          the owner's Not useful records (key, kind, id, project, reason, time, bead or -); --unfiled keeps those no session has filed as a bug. Only records the Hub wrote count; others end in an "ignored (not written by the Hub): n" line
+//   cards feedback show --project <p> --key <key> [--json]            one record with its copy (what a fix's regression fixture is made from)
+//   cards feedback body --project <p> --key <key>                     the bead description to file it with: reason, item, source, title, the bead it named and the show command; never the copy
+//   cards feedback filed --project <p> --key <key> --bead <id>        after `bd create`: writes the filed note (create-only); prints "already filed as <X>: close yours ..." when an earlier note names another bead
 import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
 import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -150,7 +154,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p> | feedback list|show|body|filed --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -2010,9 +2014,134 @@ async function markApplied(flags) {
   }
 }
 
+// --- The owner's "Not useful" records: feedback/<project>/<kind>/<id>/not-useful.json, filed-<stamp>-<rand4>.json ---
+// The Hub writes not-useful.json with no writer mark; anything put through the card API carries `writer: card-api`, which the
+// API sends back as x-card-writer. A record counts only when it is served with `none`. A session files the item as a bug in
+// Beads and writes a filed note (create-only); a note counts when its bead id is valid and its `at` is not before the record's.
+
+const FEEDBACK_FILE = /^feedback\/([a-z0-9][a-z0-9-]*)\/(ask|checklist|review|blocked)\/([A-Za-z0-9][A-Za-z0-9._-]{0,119})\/(not-useful\.json|filed-\d{8}T\d{9}Z-[a-z0-9]{4}\.json)$/;
+const feedbackProject = flags => {
+  if (flags.project && !/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is a project id.');
+  return flags.project;
+};
+const feedbackUsage = 'Usage: feedback list [--project <p>] [--unfiled] [--json] | show --project <p> --key <key> [--json] | body --project <p> --key <key> | filed --project <p> --key <key> --bead <id>';
+
+/** The text of an inbox file and the card API's writer mark for it (`none` for the Hub's own write); null when it is not there. */
+async function readInboxWithWriter(file) {
+  const route = fileRoute(file);
+  const response = await send('GET', route, { headers: {} });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await failure('GET', route, response);
+  return { text: Buffer.from(await response.arrayBuffer()).toString('utf8'), writer: response.headers.get('x-card-writer') };
+}
+
+/**
+ * The records under `feedback/<project>/` (every project when none): `{ records, ignored }`. A record is valid when the Hub wrote it
+ * (writer `none`) and its body agrees with its folder. Each carries its valid filed notes, earliest first.
+ */
+async function feedbackRecords(project) {
+  const groups = new Map();
+  for (const file of await listInbox(`feedback/${project ? `${project}/` : ''}`)) {
+    const match = FEEDBACK_FILE.exec(file);
+    if (!match) continue;
+    const [, owner, kind, id, name] = match;
+    const folder = `${owner}/${kind}/${id}`;
+    if (!groups.has(folder)) groups.set(folder, { project: owner, kind, id, filed: [], hasRecord: false });
+    if (name === 'not-useful.json') groups.get(folder).hasRecord = true;
+    else groups.get(folder).filed.push(name);
+  }
+  let ignored = 0;
+  const rows = await mapLimit([...groups.values()].filter(group => group.hasRecord), 6, async group => {
+    const got = await readInboxWithWriter(`feedback/${group.project}/${group.kind}/${group.id}/not-useful.json`);
+    if (!got) return null;
+    if (got.writer !== 'none') { ignored += 1; return null; }
+    let body;
+    try { body = JSON.parse(got.text); } catch { return null; }
+    const fits = body?.v === 1 && body.project === group.project && body.item?.kind === group.kind && body.item?.id === group.id
+      && /^[0-9a-f]{8}$/.test(body.key ?? '') && Number.isFinite(Date.parse(body.at));
+    if (!fits) return null;
+    const notes = [];
+    for (const name of group.filed.sort()) {
+      const note = await readJson(inboxPath('feedback', group.project, group.kind, group.id, name));
+      if (note?.v === 1 && BEAD_ID.test(note.bead ?? '') && Date.parse(note.at) >= Date.parse(body.at)) notes.push({ bead: note.bead, at: note.at, name });
+    }
+    notes.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.name < b.name ? -1 : 1));
+    return { record: body, filed: notes };
+  });
+  return { records: rows.filter(Boolean).sort((a, b) => (a.record.at < b.record.at ? -1 : a.record.at > b.record.at ? 1 : a.record.key < b.record.key ? -1 : 1)), ignored };
+}
+
+async function feedbackFind(flags) {
+  const project = feedbackProject(flags);
+  if (!project || !/^[0-9a-f]{8}$/.test(flags.key ?? '')) throw new Error(feedbackUsage);
+  const found = (await feedbackRecords(project)).records.find(row => row.record.key === flags.key);
+  if (!found) throw new Error(`No Not useful record ${flags.key} written by the Hub in ${project}.`);
+  return found;
+}
+
+async function feedbackList(flags) {
+  const { records, ignored } = await feedbackRecords(feedbackProject(flags));
+  const shown = records.filter(row => !flags.unfiled || row.filed.length === 0);
+  if (flags.json) {
+    console.log(JSON.stringify(shown.map(({ record, filed }) => ({ key: record.key, kind: record.item.kind, id: record.item.id, project: record.project, reasonText: record.reasonText ?? '', at: record.at, bead: filed[0]?.bead ?? null })), null, 2));
+    if (ignored) console.error(`ignored (not written by the Hub): ${ignored}`);
+    return;
+  }
+  for (const { record, filed } of shown) console.log([record.key, record.item.kind, record.item.id, record.project, clip(record.reasonText, 200) || '-', record.at, filed[0]?.bead ?? '-'].join('\t'));
+  if (ignored) console.log(`ignored (not written by the Hub): ${ignored}`);
+}
+
+async function feedbackShow(flags) {
+  const { record } = await feedbackFind(flags);
+  if (flags.json) return console.log(JSON.stringify(record, null, 2));
+  console.log(`${record.key}  ${record.item.kind} ${record.item.id}  ${record.project}  ${record.at}`);
+  console.log(`Reason: ${record.reasonText || '(none given)'}`);
+  console.log(`Title: ${clip(record.title, 200)}`);
+  console.log(JSON.stringify({ source: record.source, copy: record.copy }, null, 2));
+}
+
+/** The bead description: a pointer and a short summary, never the copy (Beads files are committed, and some repos are public). */
+async function feedbackBody(flags) {
+  const { record } = await feedbackFind(flags);
+  const source = record.source ?? {};
+  const where = [source.by, source.host && `on ${clip(source.host, 80)}`, source.tool && `via ${clip(source.tool, 40)}`].filter(Boolean).join(' ');
+  console.log([
+    `The owner marked this inbox item Not useful: ${clip(record.reasonText, 200) || 'no reason given'}.`,
+    '',
+    `Item: ${record.item.kind} ${record.item.id}`,
+    `Source: ${where || 'unknown'}`,
+    `Title: ${clip(record.title, 120)}`,
+    ...(typeof record.bead === 'string' && BEAD_ID.test(record.bead) ? [`Bead it named: ${record.bead}`] : []),
+    `Marked: ${record.at}`,
+    '',
+    `Fix it at the source, and add a regression fixture made from the copy. Full copy: cards feedback show --project ${record.project} --key ${record.key}`,
+  ].join('\n'));
+}
+
+async function feedbackFiled(flags) {
+  if (!BEAD_ID.test(flags.bead ?? '')) throw new Error(feedbackUsage);
+  const { record } = await feedbackFind(flags);
+  // A clock behind the Hub's must not make the note predate the record, or it would never count.
+  const at = new Date(Math.max(Date.now(), Date.parse(record.at))).toISOString();
+  const body = { v: 1, bead: flags.bead, at, by: hostName(), ...(sessionEnv() ? { session: sessionEnv() } : {}) };
+  let written = null;
+  for (let attempt = 0; !written; attempt += 1) {
+    const name = `filed-${at.replace(/[-:.]/g, '')}-${rand(2)}.json`;
+    const file = inboxPath('feedback', record.project, record.item.kind, record.item.id, name);
+    if (await mustPut(file, `${JSON.stringify(body, null, 2)}\n`, { createOnly: true }) === 'ok') written = file;
+    else if (attempt >= 2) throw new Error('Could not find a free name for the filed note; run it again.');
+  }
+  const [first] = (await feedbackFind(flags)).filed;
+  if (first && first.bead !== flags.bead) {
+    console.log(`already filed as ${first.bead}: close yours with bd close ${flags.bead} --reason "duplicate of ${first.bead}"`);
+  } else {
+    console.log(written);
+  }
+}
+
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok', 'unfiled']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -2079,6 +2208,10 @@ async function inbox(command, args) {
   if (command === 'beads' && sub === 'push') return beadsPush(flags);
   if (command === 'mark' && sub === 'list') return markList(flags);
   if (command === 'mark' && sub === 'applied') return markApplied(flags);
+  if (command === 'feedback' && sub === 'list') return feedbackList(flags);
+  if (command === 'feedback' && sub === 'show') return feedbackShow(flags);
+  if (command === 'feedback' && sub === 'body') return feedbackBody(flags);
+  if (command === 'feedback' && sub === 'filed') return feedbackFiled(flags);
   console.error(USAGE);
   throw new Exit(1);
 }
@@ -2086,7 +2219,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark'].includes(first)) {
+  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark', 'feedback'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;
