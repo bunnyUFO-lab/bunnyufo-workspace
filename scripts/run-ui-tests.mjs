@@ -2,6 +2,7 @@
 // the end if any failed: one broken test no longer hides the ones after it.
 //   node scripts/run-ui-tests.mjs [name-fragment ...]   only the tests whose file name contains a fragment
 //   node scripts/run-ui-tests.mjs --shard 2/4           the 2nd of 4 time-balanced shards (CI runs them in parallel)
+//   a fragment ending in .mjs is a whole file name (hub-ui.mjs does not pick hub-work-ui.mjs); --allow-empty exits 0 when nothing is left to run
 // Each file has a time limit (5 minutes; BUW_UI_FILE_TIMEOUT_MS or --timeout-ms=N changes it). A file that
 // goes over is killed with its whole process tree and fails by name, so a hang never hangs the run.
 // Runs one file at a time on purpose; do not start several runners (the owner's PC is shared: one heavy job at a time).
@@ -23,11 +24,11 @@ const filters = rest.filter(arg => !arg.startsWith('--'));
 
 const files = pickShard((await readdir(testDir))
   .filter(name => name === 'ui.mjs' || name.endsWith('-ui.mjs'))
-  .filter(name => !filters.length || filters.some(fragment => name.includes(fragment)))
+  .filter(name => !filters.length || filters.some(fragment => (fragment.endsWith('.mjs') ? name === fragment : name.includes(fragment))))
   .sort(), shard, readTimings(path.join(root, 'scripts', 'ui-timings.json')));
 if (!files.length) {
   console.error('No UI tests match.');
-  process.exit(1);
+  process.exit(process.argv.includes('--allow-empty') ? 0 : 1);
 }
 
 const killTree = child => new Promise(resolve => {
