@@ -12,15 +12,16 @@ export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'arc
 
 /** Checked against the Hermes profile docs (services/assistant.md in the homelab repo) on 2026-10-29. */
 export const AGENTS = [
-  { id: 'hermes', profile: 'main', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'chats, plans and dispatches' },
-  { id: 'briefs', profile: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests' },
-  { id: 'claude', profile: null, name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC' },
-  // The three research agents are Hermes runs. `presets` are the Spawn presets each one takes (Give work opens Spawn on the first).
-  { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research', 'mockup'] },
-  { id: 'market-researcher', profile: 'main', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'] },
-  { id: 'teardown', profile: 'main', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'] },
+  { id: 'hermes', profile: 'main', name: 'Hermes', room: 'Command', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'chats, plans and dispatches', action: { label: 'Chat', chat: 'hermes' } },
+  { id: 'briefs', profile: 'briefs', name: 'Briefs', room: 'Ops', runtime: 'Hermes profile briefs', model: 'Haiku 5.5 · DeepSeek fallback', role: 'daily brief and weekly digests', presets: ['projects-brief'], action: { label: 'Run now', preset: 'projects-brief', project: 'workspace-app', text: 'Write the daily projects brief now.' } },
+  { id: 'claude', profile: null, name: 'Claude Code', room: 'Build', runtime: 'Claude Code on the Gaming PC', model: 'Max plan', role: 'your sessions on the PC', action: { label: 'Start a run', preset: 'code-task' } },
+  // The three research agents are Hermes runs. `presets` are the Spawn presets each one takes (Details shows the first one's template).
+// `action` is the one main button of the card: `{ label, chat }` opens Chat on that persona, `{ label, preset, project?, text? }` opens Spawn.
+  { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research', 'mockup'], action: { label: 'Give work', preset: 'research' } },
+  { id: 'market-researcher', profile: 'main', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'], action: { label: 'Give work', preset: 'market-research' } },
+  { id: 'teardown', profile: 'main', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'], action: { label: 'Give work', preset: 'game-teardown' } },
   // The Planner is a chat agent with no job preset: it talks a plan through, then files one change-list Ask (ws-qdh.3).
-  { id: 'planner', profile: 'main', name: 'Planner', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'talks a plan through and files it as a change list for you to approve' },
+  { id: 'planner', profile: 'main', name: 'Planner', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'talks a plan through and files it as a change list for you to approve', action: { label: 'Chat', chat: 'planner' } },
 ];
 
 export const AVATAR_FILE_RE = /^avatar-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}\.json$/;

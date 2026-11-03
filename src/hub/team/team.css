@@ -44,8 +44,11 @@ a.team-session:hover { background: var(--s2); }
 .team-session-text { flex: 1; min-width: 0; }
 .team-session-text b { display: block; font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .team-session-text small { display: block; font-size: 11.5px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.team-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; font-size: 11.5px; }
-.team-card-foot > span { min-width: 0; }
+.team-role { margin: 0; font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.team-main { margin-top: auto; display: flex; }
+.team-main .hub-btn { flex: 1; }
+.team-links { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.team-links > span { min-width: 0; }
 .team .hub-btn, .sprite-sheet .hub-btn { min-height: 44px; min-width: 44px; }
 .team-sprite-btn { margin-left: auto; }
 

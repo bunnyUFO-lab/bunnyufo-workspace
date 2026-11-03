@@ -8,6 +8,8 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
+import { presetOf } from '../presets.mjs';
+import { CHAT_PERSONAS } from '../chat-personas.mjs';
 import { AGENTS, agentStatuses, BUILTIN_KEYS, checkAvatar } from '../hub-team.mjs';
 import { BUILTIN_KEYS as CLIENT_KEYS } from '../../../src/hub/team/sprites.ts';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -62,11 +64,30 @@ test('the agent list is Hermes, Briefs, Claude Code, the three research agents a
     assert.deepEqual(agent(body, 'market-researcher').presets, ['market-research']);
     assert.deepEqual(agent(body, 'teardown').presets, ['game-teardown']);
     assert.deepEqual(agent(body, 'researcher').presets, ['research', 'mockup'], 'The Researcher also takes mockups; Give work opens Spawn on the first.');
-    assert.equal(agent(body, 'hermes').presets, undefined, 'Only the research agents take presets.');
+    assert.deepEqual(agent(body, 'briefs').presets, ['projects-brief'], 'Briefs takes the projects brief; Details shows its template.');
+    assert.equal(agent(body, 'hermes').presets, undefined, 'Only the Briefs and the research agents take presets.');
     assert.deepEqual(agent(body, 'hermes').sprite, { kind: 'builtin', key: 'hermes' }, 'No choice gives the default.');
     assert.equal(agent(body, 'claude').sprite.kind, 'random', 'Claude Code has no built-in of its own.');
     assert.equal(agent(body, 'hermes').model, 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback');
     assert.equal(agent(body, 'briefs').model, 'Haiku 5.5 · DeepSeek fallback');
+  } finally { await f.close(); }
+});
+
+test('every agent has one main action, and the preset or persona it names exists', async () => {
+  const f = await fixture();
+  try {
+    const { body } = await f.get('/hub/team');
+    assert.deepEqual(body.agents.map(row => [row.id, row.action.label]), [['hermes', 'Chat'], ['briefs', 'Run now'], ['claude', 'Start a run'], ['researcher', 'Give work'], ['market-researcher', 'Give work'], ['teardown', 'Give work'], ['planner', 'Chat']]);
+    for (const { id, action } of body.agents) {
+      assert.equal(typeof action.label, 'string', id);
+      assert.equal(Boolean(action.chat) !== Boolean(action.preset), true, `${id}: Chat or Spawn, not both.`);
+      if (action.preset) {
+        assert.ok(presetOf(action.preset), `${id}: preset ${action.preset} exists.`);
+        if (id !== 'claude') assert.equal(action.preset, AGENTS.find(row => row.id === id).presets[0], `${id}: Give work opens the first preset.`);
+      }
+      if (action.chat) assert.ok(action.chat === 'hermes' || CHAT_PERSONAS.some(item => item.id === action.chat), `${id}: persona ${action.chat} exists.`);
+    }
+    assert.deepEqual(agent(body, 'briefs').action, { label: 'Run now', preset: 'projects-brief', project: 'workspace-app', text: 'Write the daily projects brief now.' });
   } finally { await f.close(); }
 });
 

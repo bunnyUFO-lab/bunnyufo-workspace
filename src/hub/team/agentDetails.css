@@ -38,6 +38,5 @@
 .ad-job-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 6px; }
 .ad-job-head code { font: 500 12px var(--mono); color: var(--t2); overflow-wrap: anywhere; }
 
-.team-details-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; color: var(--t2); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.team-details-link { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 4px; color: var(--t2); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
 .team-details-link:hover { color: var(--t1); }
-.team-card-foot { flex-wrap: wrap; }

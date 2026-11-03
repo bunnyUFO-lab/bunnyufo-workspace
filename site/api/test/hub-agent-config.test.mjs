@@ -179,7 +179,8 @@ test('Hermes gets its soul only; Briefs gets its soul and jobs; the research age
   assert.ok(!('soul' in hermes.settings) && !('cron' in hermes.settings));
   const briefs = detailsOf('briefs', exported);
   assert.equal(briefs.agent.profile, 'briefs');
-  assert.equal(briefs.prompts.length, 1);
+  assert.deepEqual(briefs.prompts.map(prompt => [prompt.id, prompt.source]), [['soul', 'hermes-host'], ['job', 'app']], 'Briefs also shows the template of its Run now job.');
+  assert.equal(briefs.prompts[1].title, 'Job template (Projects brief)');
   assert.deepEqual(briefs.jobs, [{ name: 'Daily brief', schedule: '0 8 * * *', enabled: true, prompt: 'Write the daily projects brief.' }]);
   for (const id of ['researcher', 'market-researcher', 'teardown']) {
     const details = detailsOf(id, exported);
