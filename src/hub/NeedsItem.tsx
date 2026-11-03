@@ -84,7 +84,7 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
           {!allMerged && merged > 0 && <span className="ni-chip" data-merged="part">{merged} of {prs.length} merged</span>}
           {verdicts.map(verdict => <span key={verdict.leg} className={`ni-chip ${verdict.result}`} data-verdict={verdict.leg}>{VERDICT_LEG[verdict.leg]} {verdict.result}</span>)}
           {!!item.shots && <span className="ni-chip">{item.shots} {item.shots === 1 ? 'screenshot' : 'screenshots'}</span>}
-          {!verdicts.length && !item.shots && !allMerged && <span className="hub-muted">No results were attached. CI and the review are on the PR.</span>}
+          {!verdicts.length && !item.shots && !allMerged && (prs.length > 0 || !!item.url) && <span className="hub-muted">No results were attached. CI and the review are on the PR.</span>}
         </div>
       </div>
       <div className="ni-a">

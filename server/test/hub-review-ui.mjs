@@ -210,6 +210,8 @@ try {
   await ownerRow.waitFor();
   assert.match(await ownerRow.locator('[data-owner-summary]').innerText(), /^The test only failed on a busy PC\./);
   assert.equal(await ownerRow.locator('[data-ask]').innerText(), 'Nothing to do: Mark done');
+  assert.deepEqual(await ownerRow.locator('.four dd').allInnerTexts(), ['A finished item for you', 'Ready for review', 'Nothing to do: Mark done', 'Your decision'], 'No pull request: the cells name none.');
+  assert.equal(await ownerRow.getByText(/CI and the review are on the PR/).count(), 0);
   assert.equal(await page.locator('.ni', { hasText: 'Closed without anything to do' }).count(), 0, 'No pull request and no ask: not in Needs you.');
   await go(page, `#/~hub/review/${ownerFile}`);
   await page.locator('.hub-review h2', { hasText: 'A test flake: cause found' }).waitFor();

@@ -1545,8 +1545,10 @@ test('describeItem: four plain sentences for each kind', () => {
   assert.equal(describeItem({ kind: 'ask', id: 'x', title: 'q', at, state: 'snoozed', summary: 'Snoozed until 2026-10-30T09:00:00Z' }, now).state, 'Snoozed until 2026-10-30T09:00:00Z');
   const steps = describeItem({ kind: 'checklist', id: 'y', title: 't', at, state: 'open', done: 1, total: 4, tool: 'claude-code', host: 'pc' }, now);
   assert.deepEqual([steps.what, steps.state, steps.next, steps.blocker], ['Steps only you can do', '1 of 4 done', 'Tick each step, then Submit', 'Your hands']);
-  const pr = describeItem({ kind: 'review', id: 'z.json', title: 'p', at, host: 'pc', verdicts: [{ leg: 'smoke', result: 'pass' }, { leg: 'qa', result: 'fail' }] }, now);
+  const pr = describeItem({ kind: 'review', id: 'z.json', title: 'p', at, host: 'pc', prs: ['https://github.com/example/app/pull/1'], verdicts: [{ leg: 'smoke', result: 'pass' }, { leg: 'qa', result: 'fail' }] }, now);
   assert.deepEqual([pr.what, pr.state, pr.next, pr.blocker, pr.who], ['A pull request ready for you', 'Smoke pass · QA fail', 'Open it or mark it done', 'Merging stays yours', 'pc']);
+  const noPr = describeItem({ kind: 'review', id: 'z2.json', title: 'p', at, host: 'pc', ask: 'Nothing to do: Mark done' }, now);
+  assert.deepEqual([noPr.what, noPr.next, noPr.blocker], ['A finished item for you', 'Nothing to do: Mark done', 'Your decision']);
   assert.equal(describeItem({ kind: 'review', id: 'z.json', title: 'p', at }, now).state, 'Ready for review');
   const stuck = describeItem({ kind: 'blocked', id: 's', title: 'b', at, summary: 'Which one should I use?' }, now);
   assert.deepEqual([stuck.what, stuck.state, stuck.next, stuck.blocker], ['A session waiting on you', 'Asked a question', 'Open the session', 'Your answer in the session']);

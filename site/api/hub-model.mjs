@@ -844,6 +844,9 @@ export function describeItem(item, now) {
       };
     case 'pr': {
       const legs = Array.isArray(item.verdicts) ? item.verdicts.map(verdict => `${LEG_NAME[verdict.leg]} ${verdict.result}`).join(' · ') : '';
+      // A review with no pull request (an item closed with a decision for the owner) names no pull request and no merge.
+      const hasPr = reviewPrs(item).length > 0 || (Array.isArray(item.prs) && item.prs.length > 0) || (typeof item.url === 'string' && item.url !== '');
+      if (!hasPr) return { ...base, what: 'A finished item for you', state: legs || 'Ready for review', next: item.ask || 'Look it over or mark it done', blocker: 'Your decision' };
       return { ...base, what: 'A pull request ready for you', state: legs || 'Ready for review', next: 'Open it or mark it done', blocker: 'Merging stays yours' };
     }
     case 'unstick':
