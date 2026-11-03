@@ -11,6 +11,7 @@ import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createHash, createPublicKey, randomBytes } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
+import { BEAD_ID } from './hub-marks.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, staleSince, validId, validProject } from './hub-model.mjs';
 
@@ -27,6 +28,8 @@ const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/(?!\.{1,2}$
 export const validRepo = value => typeof value === 'string' && REPO_RE.test(value);
 /** The presets that are for one agent. */
 const AVATAR_PRESETS = ['agent-avatar', 'agent-avatar-sheet'];
+/** Who wrote the text and the "done when" of a request made from a bead. */
+const BEADS_AUTHOR = Object.freeze({ kind: 'agent', name: 'Beads' });
 const PRESET_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** How many run and fire files the detail lists. */
 const LIST_CAP = 20;
@@ -133,6 +136,12 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     if (!fromOwner) throw fail('Only the site can record a subject.');
     if (typeof data.subject !== 'string' || !SUBJECT_RE.test(data.subject)) throw fail('The subject is a path of up to 200 letters, digits, spaces and . _ / : -.');
     out.subject = data.subject;
+  }
+  // The bead a request was made from (Roadmap's Do it block). The origins that say an agent wrote its text are the server's to add.
+  if (data.bead !== undefined && data.bead !== null) {
+    if (!fromOwner) throw fail('Only the site can say which bead a request came from.');
+    if (typeof data.bead !== 'string' || !BEAD_ID.test(data.bead)) throw fail('The bead is a Beads issue id.');
+    out.bead = data.bead;
   }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
@@ -403,7 +412,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const { why, ...stored } = proposal;
-    const made = await writeNew(clean.project, clean.text, at, id => ({ id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }) }), checked);
+    // A bead's text was written by an agent, whoever tapped: the server says so, the body cannot (it was stripped above).
+    const fromBead = clean.bead ? { bead: clean.bead, textOrigin: BEADS_AUTHOR, ...(stored.doneWhen ? { doneWhenOrigin: BEADS_AUTHOR } : {}) } : {};
+    const made = await writeNew(clean.project, clean.text, at, id => ({ id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }), ...fromBead }), checked);
     return { status: 201, body: { id: made.id, ...(preset ? { target: made.request.target, why } : {}) } };
   }
 

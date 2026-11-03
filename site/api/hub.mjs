@@ -32,7 +32,7 @@ import { createHermesApprovals } from './hub-hermes-approvals.mjs';
 import { createNotify } from './notify.mjs';
 import { createPolicy } from './policy.mjs';
 import { defaultsOf } from './project-defaults.mjs';
-import { createBeadsReader, searchRows } from './hub-beads.mjs';
+import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork, unaskedOf } from './hub-work.mjs';
@@ -1512,14 +1512,26 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/beads\/([^/]+)$/.exec(route))) {
             if (!validProject(match[1])) throw fail('No such project.', 404);
             reply(await loadBeads(match[1]));
+          } else if ((match = /^\/hub\/map\/([^/]+)\/beads\/([^/]+)\/seed$/.exec(route))) {
+            // What Spawn starts from for one bead (the Roadmap's Do it block): read at the tap, so the map payload does not carry descriptions.
+            if (requireRemoteUser && !user) throw fail('Sign in to start work from a bead.', 401);
+            const project = match[1];
+            if (!validProject(project)) throw fail('No such project.', 404);
+            const kind = query.get('kind') ?? '';
+            if (!SEED_KINDS.includes(kind)) throw fail('The kind is build, mockup or research.', 400);
+            const [{ issues }, marks] = await Promise.all([loadBeads(project), loadMarks(project)]);
+            const issue = applyMarks(issues, marks, project).find(item => item.id === decodeURIComponent(match[2]));
+            if (!issue) throw fail('No such task in this project.', 404);
+            if (issue.status === 'closed') throw fail('That task is closed.', 400);
+            reply(beadSeed(issue, kind));
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
-            const [{ meta, issues }, window, asks, checklists, cards, marks] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project)]);
+            const [{ meta, issues }, window, asks, checklists, cards, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project), loadRequests(at)]);
             const repo = meta?.repo || await projectRepo(project);
             reply(buildMap({
               project, meta, issues: applyMarks(issues, marks, project), events: window.events, repo, cards,
-              asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at,
+              asks: asks.map(askRow), checklists: checklists.map(checklistRow), requests: requests.filter(item => item.project === project), now: at,
             }));
           } else if (route === '/hub/file') {
             await serveFile(response, query.get('path'));

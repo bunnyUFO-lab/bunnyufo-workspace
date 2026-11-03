@@ -1,7 +1,7 @@
 // Beads copies: the pure merge, the copy id, and the reader over the stand-in bucket.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyIdOf, LEGACY_COPY, MAX_COPIES, mergeCopies, normalizeRoot, parseJsonl } from '../hub-beads.mjs';
+import { beadSeed, copyIdOf, LEGACY_COPY, MAX_COPIES, mergeCopies, normalizeRoot, parseJsonl } from '../hub-beads.mjs';
 import { beadsIssue } from './hub-fixtures.mjs';
 
 const issue = (id, updated, title = id) => ({ ...beadsIssue({ id, title }), updated_at: updated });
@@ -58,4 +58,40 @@ test('mergeCopies: the legacy copy merges with new ones; at most 30 copies are r
 
 test('mergeCopies: nothing in, nothing out', () => {
   assert.deepEqual(mergeCopies([]), { meta: null, issues: [] });
+});
+
+// --- beadSeed: what Spawn starts from for one bead (ws-im1.2.1) ---
+
+test('beadSeed: the preset by kind, the title, the text and the Done when', () => {
+  const bead = { ...issue('ws-1', '2026-10-01T10:00:00Z', 'Add the wall-jump'), description: 'Let the player jump off walls.\n\nSecond paragraph.', acceptance_criteria: '- **Jumps** off a [wall](http://x)\n- Test passes', notes: 'commit abc1234', comments: [{ text: 'a comment' }], design: 'a design' };
+  const build = beadSeed(bead, 'build');
+  assert.deepEqual([build.preset, build.title], ['code-task', 'ws-1 Add the wall-jump']);
+  assert.equal(build.text, 'Do the work this bead describes, and open one pull request for it.\n\nBead ws-1: Add the wall-jump\n\nLet the player jump off walls.\n\nSecond paragraph.');
+  assert.equal(build.doneWhen, '- Jumps off a wall - Test passes');
+  assert.doesNotMatch(build.text, /abc1234|a comment|a design/, 'Notes, comments and design stay out.');
+  assert.equal(beadSeed(bead, 'research').preset, 'research');
+  assert.equal(beadSeed(bead, 'research').doneWhen, build.doneWhen);
+  const mockup = beadSeed(bead, 'mockup');
+  assert.equal(mockup.preset, 'mockup');
+  assert.equal('doneWhen' in mockup, false, 'A mockup has no Done when.');
+  assert.equal('doneWhen' in beadSeed({ ...bead, acceptance_criteria: undefined }, 'build'), false);
+});
+
+test('beadSeed: a title is cut to 120, Done when to 400, and a long description is cut on a line end and says so', () => {
+  const long = { ...issue('ws-2', '2026-10-01T10:00:00Z', 'T'.repeat(200)), acceptance_criteria: 'y'.repeat(900) };
+  const seed = beadSeed(long, 'build');
+  assert.ok(seed.title.length <= 120 && seed.title.startsWith('ws-2 TTT'));
+  assert.ok(seed.doneWhen.length <= 400);
+  const lines = Array.from({ length: 300 }, (_, k) => `Line number ${k} of the description.`);
+  const cut = beadSeed({ ...issue('ws-3', '2026-10-01T10:00:00Z', 'Big'), description: lines.join('\n') }, 'build');
+  assert.ok(cut.text.length <= 4000, String(cut.text.length));
+  assert.match(cut.text, /\n\(cut; the full text is on bead ws-3\)$/);
+  const body = cut.text.replace(/\n\(cut; the full text is on bead ws-3\)$/, '');
+  assert.match(body.split('\n').at(-1), /^Line number \d+ of the description\.$/, 'It ends on a whole line.');
+  // One huge line is cut where it stands, still within 4000.
+  const one = beadSeed({ ...issue('ws-4', '2026-10-01T10:00:00Z', 'One'), description: 'z'.repeat(9000) }, 'research');
+  assert.ok(one.text.length <= 4000);
+  assert.match(one.text, /\(cut; the full text is on bead ws-4\)$/);
+  // A description that fits is not touched.
+  assert.doesNotMatch(beadSeed({ ...issue('ws-5', '2026-10-01T10:00:00Z', 'Short'), description: 'ok' }, 'build').text, /cut;/);
 });

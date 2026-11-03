@@ -323,10 +323,13 @@ export function renderBrief({ preset: given, request, earlier }) {
     fromAsk: request.fromAsk ?? '',
     followUp: follow ? followUpBlock(follow) : '',
   };
+  // A request made from a bead tells the run to name the bead in its pull request, so the Roadmap links the two. Other briefs keep their bytes.
+  const beadLine = request.bead ? `Bead: ${request.bead}. Put this id in the pull request's title, so the Roadmap links the PR to it.` : '';
+  if (beadLine) values.followUp = `${beadLine}${values.followUp}`;
   const fill = () => preset.template.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name] ?? '');
   if (request.continues) {
     for (const quote of REPORT_QUOTES) {
-      values.followUp = continueBlock(request.continues, earlier, quote);
+      values.followUp = `${beadLine}${continueBlock(request.continues, earlier, quote)}`;
       const brief = fill();
       if (Buffer.byteLength(brief) <= MAX_BRIEF_BYTES) return brief;
     }

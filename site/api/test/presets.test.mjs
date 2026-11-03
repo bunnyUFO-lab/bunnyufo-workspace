@@ -511,3 +511,19 @@ test('Codex is the default model of the Hermes jobs that run on it first; the PC
   assert.ok(PRESETS.filter(preset => preset.modelDefault).every(preset => preset.targets.join() === 'hermes'));
   assert.deepEqual(presetsForClient().filter(preset => preset.modelDefault).map(preset => preset.id), codexFirst, 'The page is told.');
 });
+
+test('a request made from a bead gets one Bead line before the follow-up; without a bead the brief keeps its bytes', () => {
+  const plain = renderBrief({ preset: 'code-task', request: request() });
+  assert.doesNotMatch(plain, /Bead:/);
+  const withBead = renderBrief({ preset: 'code-task', request: request({ bead: 'ws-im1.2.1' }) });
+  const line = 'Bead: ws-im1.2.1. Put this id in the pull request\'s title, so the Roadmap links the PR to it.';
+  assert.equal(withBead.replace(line, ''), plain, 'Only the line is added, right after "Done when".');
+  assert.match(withBead, /Done when: [^\n]*\nBead: ws-im1\.2\.1\./);
+  // With a follow-up the line comes first; with a continuation too.
+  const follow = { from: '20261029-magic-loops-y-b2c3', question: 'Which?', answer: 'The first', summary: '' };
+  const both = renderBrief({ preset: 'research', request: request({ bead: 'ws-9', followUp: follow }) });
+  assert.match(both, /Done when: [^\n]*\nBead: ws-9\. Put this id[^\n]*\nAn earlier run asked this/);
+  const continued = renderBrief({ preset: 'research', request: request({ bead: 'ws-9', continues: { from: follow.from, replies: ['Go on.'] } }), earlier: { report: 'r', card: 'assistant/x' } });
+  assert.match(continued, /\nBead: ws-9\. Put this id[^\n]*\nThis continues request/);
+  assert.equal(renderBrief({ preset: 'research', request: request({ bead: 'ws-9' }) }).match(/^Bead: /gm).length, 1);
+});

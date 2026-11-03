@@ -205,14 +205,18 @@ function mergePrs(eventRows, beadsRows, closed, at) {
   return [...extra, ...rows];
 }
 
+/** The request states that mean a run is under way or waiting: no second run is offered for the bead. */
+const LIVE_RUN = new Set(['proposed', 'approved', 'taken', 'running', 'stopping', 'asking', 'lost']);
+
 /**
  * @param events chronological or not; only those naming a task's bead matter
  * @param asks   [{ id, bead?, state }] with the Ask's derived state
  * @param checklists [{ id, bead?, state }]: an open checklist naming a bead counts like an Ask for `you`
  * @param repo   the project's repository (a GitHub remote or `owner/name`), to link PRs and commits
  * @param cards  `ref → { title, href } | null` for `section/folder` or `section#id`; unresolved refs are dropped
+ * @param requests [{ id, bead?, state, at }]: a task with a live one from the Hub gets `run: { id, state }` (the newest)
  */
-export function buildMap({ project, meta = null, issues = [], events = [], asks = [], checklists = [], repo = '', cards = () => null, now = new Date() }) {
+export function buildMap({ project, meta = null, issues = [], events = [], asks = [], checklists = [], repo = '', cards = () => null, requests = [], now = new Date() }) {
   const byId = new Map(issues.map(issue => [issue.id, issue]));
   const parentOf = new Map();
   const childrenOf = new Map();
@@ -245,6 +249,13 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     if (list.bead && list.state === 'open' && !checklistsByBead.has(list.bead)) checklistsByBead.set(list.bead, list.id);
   }
   const eventsByBead = eventsByBeadOf(events);
+  // The newest request made from each bead that has not ended: the sheet shows it instead of offering a second run.
+  const runsByBead = new Map();
+  for (const request of requests) {
+    if (!request.bead || !LIVE_RUN.has(request.state)) continue;
+    const have = runsByBead.get(request.bead);
+    if (!have || String(request.at ?? '') > String(have.at ?? '')) runsByBead.set(request.bead, request);
+  }
 
   // The Library cards an issue names itself, then the ones its events came from, resolved and at most five.
   const cardsOf = issue => {
@@ -293,6 +304,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       ...(asksByBead.has(issue.id) ? { ask: asksByBead.get(issue.id) } : {}),
       ...(state === 'you' && checklistsByBead.has(issue.id) ? { checklist: checklistsByBead.get(issue.id) } : {}),
       ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : checklistsByBead.has(issue.id) ? 'checklist' : 'label' } : {}),
+      ...(runsByBead.has(issue.id) ? { run: { id: runsByBead.get(issue.id).id, state: runsByBead.get(issue.id).state } } : {}),
       ...(summary ? { summary } : {}),
       ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
       ...(issue._mark ? { mark: { verdict: issue._mark.verdict, at: issue._mark.at, pending: true, ...(issue._mark.reason ? { reason: issue._mark.reason } : {}) } } : {}),
