@@ -37,11 +37,11 @@ try {
   const page = await open({ width: 1280, height: 900 });
   watch(page);
 
-  step('Today: the Spawn sheet offers "Chat with Hermes" after the seven templates; the template chips are still seven');
+  step('Today: the Spawn sheet offers "Chat with Hermes" after the eight templates; the template chips are still eight');
   await page.goto(`${fx.url}#/~hub/today`);
   await page.locator('[data-spawn-open]').click();
   await page.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
-  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 7);
+  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 8);
   const tile = page.locator('[data-spawn-chat]');
   await tile.waitFor();
   assert.equal((await tile.innerText()).trim(), 'Chat with Hermes');

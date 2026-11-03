@@ -1,0 +1,78 @@
+/* Ways to resolve a Wayfinder question (ws-qdh.1): the Destination row's list and the side sheet's Resolve block. */
+
+/* One open question in the Destination row: the title, then its actions. A card on a phone, one line on a wide box. */
+.hub-q-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-top: 1px solid var(--hairline); }
+.hub-q-row:first-child { border-top: 0; }
+.hub-q-row > .hub-q-title { flex: 1 1 auto; min-width: 0; padding-top: 4px; }
+.hub-q-row > .hub-q-title a { display: block; color: inherit; text-decoration: none; }
+.hub-q-row > .hub-q-title a:hover { text-decoration: underline; }
+.hub-q-row > .hub-q { flex: none; }
+
+.hub-q { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.hub-q-main { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.hub-q-btn { white-space: nowrap; }
+.hub-q-cost { font-size: 0.72rem; color: var(--text-dim); }
+.hub-q-note { margin: 0; flex: 1 1 100%; font-size: 0.72rem; color: var(--text-dim); }
+.hub-q-after { margin: 0; font-size: 0.75rem; color: var(--text-dim); }
+.hub-q-more { position: relative; flex: none; }
+.hub-q-menu-btn { min-width: 32px; padding-inline: 8px; font-size: 1rem; line-height: 1; }
+
+/* The ⋯ menu: a popover under its button on a wide box, a bottom sheet on a phone. */
+.hub-q-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; display: flex; flex-direction: column; min-width: 250px; max-width: min(340px, calc(100vw - 32px));
+  padding: 4px; border: 1px solid var(--hairline-strong); border-radius: var(--radius-md, 10px); background: var(--surface-solid); box-shadow: var(--shadow-2);
+}
+.hub-q-item-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.hub-q-menu .hub-q-item-btn:hover, .hub-q-menu .hub-q-item-btn:focus-visible { background: var(--surface-3); outline: none; }
+.hub-q-menu .hub-q-item-btn:focus-visible { box-shadow: var(--focus-ring); }
+
+.hub-q-list { list-style: none; margin: 4px 0 0; padding: 0; flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
+.hub-q-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.hub-q-sheet .hub-q-item-btn { flex-direction: row; }
+
+.hub-q-answer { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.hub-q-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--text-dim); }
+.hub-q-field textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; color: var(--text); }
+.hub-q-count { align-self: flex-end; font-size: 0.7rem; color: var(--text-dim); }
+
+.hub-ask-decides { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--pink); background: var(--pink-dim); border-radius: 0 8px 8px 0; font-size: 0.85rem; }
+
+/* "Prepare all" beside "Open questions". */
+.hub-wayfinder-all { display: inline-flex; align-items: center; gap: 8px; }
+.hub-wayfinder-all .hub-q-cost { white-space: nowrap; }
+
+/* The Resolve block in the side sheet. */
+.hub-map-panel-resolve { margin-top: 12px; }
+.hub-map-panel-resolve h4 { margin: 0 0 6px; }
+.hub-map-panel-resolve .hub-q { align-items: flex-start; }
+
+/* A tall list scrolls inside the Destination box, so the map keeps its height. */
+.hub-wayfinder-list:has(.hub-q-row) { max-height: 40vh; overflow-y: auto; gap: 0; }
+
+@media (max-width: 600px) {
+  .hub-q-row { flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 0; }
+  .hub-q-row > .hub-q-title { padding-top: 0; }
+  .hub-q-row > .hub-q-title a { display: flex; align-items: center; min-height: 44px; }
+  /* The main button fills the line next to the 44 px menu button; its cost sits under it. */
+  .hub-q-row > .hub-q { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: start; gap: 4px 8px; width: 100%; }
+  .hub-q-row .hub-q-main { grid-column: 1; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px; }
+  .hub-q-row .hub-q-main .hub-q-btn { width: 100%; }
+  .hub-q-row .hub-q-after { grid-column: 1; align-self: center; }
+  .hub-q-row .hub-q-more { grid-column: 2; grid-row: 1; }
+  .hub-q-row .hub-q-note, .hub-q-row .hub-q-answer, .hub-q-row > .hub-q > .hub-error { grid-column: 1 / -1; }
+  .hub-q .hub-btn, .hub-q-menu-btn, .hub-q-field textarea, .hub-q-item-btn { min-height: 44px; }
+  .hub-q-menu-btn { min-width: 44px; width: 44px; }
+  .hub-q-menu {
+    position: fixed; top: auto; right: 0; bottom: 0; left: 0; max-width: none; min-width: 0; z-index: 1001; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    border-radius: 16px 16px 0 0; box-shadow: var(--shadow-2);
+  }
+  .hub-wayfinder-all { flex: 1 1 100%; flex-wrap: wrap; }
+  .hub-wayfinder-all .hub-btn { flex: 1 1 100%; min-height: 44px; }
+  /* On a phone the open list floats over the map instead of pushing it down: four question blocks would leave the map no room. */
+  .hub-wayfinder { position: relative; }
+  .hub-wayfinder-list:has(.hub-q-row) {
+    position: absolute; z-index: 25; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 4px 10px 8px; max-height: min(60vh, calc(100dvh - 220px)); overflow-y: auto;
+    border: 1px solid var(--hairline-strong); border-radius: var(--radius-md, 10px); background: var(--surface-solid); box-shadow: var(--shadow-2);
+  }
+  .hub-map-panel-resolve .hub-q-list li { flex-direction: column; align-items: stretch; }
+}

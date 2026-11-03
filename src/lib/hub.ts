@@ -190,6 +190,8 @@ export interface Ask {
   requirePasskey?: boolean
   /** The Ask's sub-type as written; `subtype` is what the Hub reads from it (or guesses, when `kindInferred`). */
   kind?: 'approval' | 'verify' | 'design' | 'decision'
+  /** Set by the Hub on a decision Ask whose bead is an open Wayfinder question: the title Beads has for it (the answer decides that question). */
+  beadTitle?: string
   subtype?: string
   kindInferred?: boolean
   allowDrawing: boolean
@@ -306,7 +308,7 @@ export interface MapTask {
   cards?: MapCard[]
   commits?: { sha: string; url?: string }[]
   /** The owner marked it on the Roadmap and no agent has closed it in Beads yet: it shows closed. */
-  mark?: { verdict: 'done' | 'not-needed' | 'unblock'; at: string; pending: boolean }
+  mark?: { verdict: 'done' | 'not-needed' | 'unblock'; at: string; pending: boolean; /** The owner's decision, for a Wayfinder question. */ reason?: string }
 }
 /** A bead that says it needs the owner but has no Ask, checklist or Needs you item (GET /hub/unasked). */
 export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string; reason?: string; mark?: { verdict: 'done' | 'not-needed'; at: string } }
@@ -322,7 +324,9 @@ export interface ProgressMap {
   /** The Wayfinder destination, when the project has an open `wayfinder:map` issue. */
   wayfinder: MapWayfinder | null
 }
-export interface MapWayfinder { destination: string | null; decisions: number; open: { id: string; title: string; type: string }[] }
+/** One open Wayfinder question: what a run or a session needs to work on it. `blockedBy` lists the titles of open tickets it waits for, `unlocks` the ones it releases. */
+export interface WayfinderQuestion { id: string; title: string; type: string; question?: string; blockedBy: string[]; unlocks: string[]; cards?: string[] }
+export interface MapWayfinder { mapId: string; mapTitle: string; destination: string | null; notes: string | null; decisions: number; open: WayfinderQuestion[] }
 
 export class HubError extends Error {
   status: number

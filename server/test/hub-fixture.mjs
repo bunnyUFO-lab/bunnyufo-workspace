@@ -107,12 +107,14 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
       beadsIssue({ id: 'ns-t1', title: 'First task', parent: 'ns-m1', created: '2026-10-01T11:00:00Z' }),
       beadsIssue({ id: 'ns-t2', title: 'Second task', parent: 'ns-m1', created: '2026-10-01T12:00:00Z' }),
     ];
-    // A project with a Wayfinder map issue: a destination, three decisions made and two questions open. Its own project, so magic-loops' counts hold.
+    // A project with a Wayfinder map issue: a destination, three decisions made and four questions open, shaped like a live map (a grilling and a research question that wait on nobody, two grilling questions that wait on them). Its own project, so magic-loops' counts hold.
     const wayfind = [
       beadsIssue({ id: 'wf-map', title: 'Wayfinder map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z', updated: '2026-10-20T10:00:00Z', description: '## Destination\n\nA **tidy** Roadmap that tells the owner where to go next, and why, in one line.\n\n## Notes\n\nLater.' }),
       ...['one', 'two', 'three'].map((name, index) => beadsIssue({ id: `wf-d${index + 1}`, title: `Decision ${name}`, parent: 'wf-map', status: 'closed', closed: '2026-10-10T10:00:00Z', labels: ['wayfinder:decision'], created: `2026-10-02T1${index}:00:00Z` })),
-      beadsIssue({ id: 'wf-q1', title: 'Which project comes first?', parent: 'wf-map', labels: ['wayfinder:question'], created: '2026-10-03T10:00:00Z' }),
-      beadsIssue({ id: 'wf-q2', title: 'Where does the chip go?', parent: 'wf-map', labels: ['wayfinder:question'], created: '2026-10-03T11:00:00Z' }),
+      beadsIssue({ id: 'wf-q1', title: 'Which project comes first?', parent: 'wf-map', labels: ['wayfinder:grilling'], created: '2026-10-03T10:00:00Z', description: '## Question\n\nWhich project should the next sprint start with, and why?' }),
+      beadsIssue({ id: 'wf-q2', title: 'Where does the chip go?', parent: 'wf-map', labels: ['wayfinder:research'], created: '2026-10-03T11:00:00Z', description: '## Question\n\nCheck where the other screens put their project chip.' }),
+      beadsIssue({ id: 'wf-q3', title: 'Is the card text in or out?', parent: 'wf-map', labels: ['wayfinder:grilling'], blocks: ['wf-q1'], created: '2026-10-03T12:00:00Z' }),
+      beadsIssue({ id: 'wf-q4', title: 'Which tuning items ship?', parent: 'wf-map', labels: ['wayfinder:grilling'], blocks: ['wf-q1', 'wf-q2'], created: '2026-10-03T13:00:00Z' }),
     ];
     seed.beads('wayfind', wayfind, { pushedAt: minutesAgo(now, 8).toISOString(), host: 'pc.example.test', count: wayfind.length, repo: 'example/wayfind' });
     seed.beads('nosprint', bare, { pushedAt: minutesAgo(now, 10).toISOString(), host: 'pc.example.test', count: bare.length, repo: 'example/nosprint' });
