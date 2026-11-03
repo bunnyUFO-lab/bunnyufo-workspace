@@ -809,9 +809,9 @@ try {
   await page.locator('button:has-text("Now")').click();
   const now = await centreOf(page.locator('.hub-map-now'));
   const frameNow = await page.locator('.hub-map-box').boundingBox();
-  // The middle of what the control bar and the hint (top) leave free.
-  const room = await page.evaluate(() => ({ top: Math.max(document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, document.querySelector('.hub-map-controls').getBoundingClientRect().bottom), bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
-  const roomMid = (room.top + 8 + room.bottom) / 2;
+  // The middle of what the hint (top) leaves free.
+  const room = await page.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
+  const roomMid = ((room.top ? room.top + 8 : frameNow.y) + room.bottom) / 2;
   assert.ok(Math.abs(now.x - (frameNow.x + frameNow.width / 2)) < 3 && Math.abs(now.y - roomMid) < 3, `Now is in the middle of the room the map has (${now.x},${now.y} vs ${roomMid}).`);
   await page.locator('button:has-text("Collapse")').click();
   await page.waitForFunction(() => document.querySelectorAll('[data-kind="f"]').length === 0);
@@ -859,15 +859,16 @@ try {
   }));
   assert.ok(tops.chips.length > 1 && new Set(tops.chips).size === 1, `The project chips share one row (${tops.chips}).`);
   assert.ok(tops.bar.length >= 6 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
-  assert.equal(await phone.locator('.hub-map-wrap > .hub-map-controls').count(), 1, 'The toolbar sits at the top of the map, under the project chips.');
+  assert.equal(await phone.locator('.hub-map-wrap .hub-map-controls').count(), 0, 'The toolbar is a row of its own, not an overlay inside the map.');
   const place = await phone.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const bar = rect('.hub-map-controls');
     const sizes = [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().height));
-    return { chipsBottom: rect('.hub-map-chips').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, width: innerWidth, sizes };
+    return { chipsBottom: rect('.hub-map-chips').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, wayTop: document.querySelector('.hub-wayfinder')?.getBoundingClientRect().top ?? null, width: innerWidth, sizes };
   });
-  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 160, `The control bar is just under the project chips (${place.chipsBottom} to ${place.barTop}).`);
-  assert.ok(place.barTop - place.boxTop <= 12, `at the top edge of the map, not at its bottom (${place.barTop} vs ${place.boxTop}).`);
+  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 20, `The control bar is directly under the project chips (${place.chipsBottom} to ${place.barTop}).`);
+  assert.ok(place.barBottom <= place.boxTop + 1, `and above the map, which it does not cover (${place.barBottom} vs ${place.boxTop}).`);
+  if (place.wayTop !== null) assert.ok(place.barBottom <= place.wayTop + 1, `and above the Destination row (${place.barBottom} vs ${place.wayTop}).`);
   assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar scrolls within itself.');
   assert.ok(place.sizes.length >= 6 && place.sizes.every(size => size >= 43.5), `Every control is at least 44 px tall (${place.sizes}).`);
   assert.ok(await phone.locator('.hub-hint-touch').isVisible() && !(await phone.locator('.hub-hint-mouse').isVisible()), 'The phone shows the touch hint.');
@@ -936,8 +937,7 @@ try {
   await noSideways(phone, 'Progress map with the sheet');
   await phone.touchscreen.tap(195, 40);
   await sheet.waitFor({ state: 'detached' });
-  // The map may sit with this node under the control bar at the top; a click on the node itself does not depend on where it is.
-  await phone.locator('[data-node="ml-m2"] > circle').dispatchEvent('click');
+  await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await sheet.waitFor();
   await phone.goBack();
   await sheet.waitFor({ state: 'detached' });
@@ -953,7 +953,7 @@ try {
     const hub = document.querySelector('.hub');
     const rect = element => element.getBoundingClientRect();
     const box = rect(document.querySelector('.hub-map-box'));
-    const chips = rect(document.querySelector('.hub-map-chips'));
+    const chips = rect(document.querySelector('.hub-map-controls'));
     const inner = rect(hub);
     const above = [...hub.children].filter(child => child.getBoundingClientRect().bottom <= box.top + 1 && getComputedStyle(child).position !== 'absolute').map(child => child.className);
     return {
@@ -964,8 +964,8 @@ try {
   assert.ok(bigLayout.scroll <= 1, `The Hub does not scroll (${bigLayout.scroll}).`);
   assert.ok(Math.abs(bigLayout.boxBottom - (bigLayout.hubBottom - 8)) <= 10, `The box reaches the bottom (${bigLayout.boxBottom} vs ${bigLayout.hubBottom}).`);
   assert.ok(bigLayout.boxWidth >= bigLayout.hubWidth - 20, `The box is as wide as the screen (${bigLayout.boxWidth} of ${bigLayout.hubWidth}).`);
-  assert.deepEqual(bigLayout.above, ['hub-map-chips'], 'Only the project chips row sits above the box.');
-  assert.ok(bigLayout.chipsGap <= 12, `The box follows the chips (${bigLayout.chipsGap}).`);
+  assert.deepEqual(bigLayout.above, ['hub-map-chips', 'hub-map-controls'], 'Only the project chips row and the control bar sit above the box.');
+  assert.ok(bigLayout.chipsGap <= 12, `The box follows the control bar (${bigLayout.chipsGap}).`);
   assert.ok(bigLayout.k > 1, `The first view enlarges the map (${bigLayout.k}).`);
   await noSideways(big, 'Progress map at 1920');
   const bigTap = await big.locator('[data-node="ml-m2"] > circle').first().boundingBox();
@@ -993,7 +993,7 @@ try {
   assert.ok(legendBox.x >= 0 && legendBox.x + legendBox.width <= 390 && legendBox.y >= 0 && legendBox.y + legendBox.height <= 844, 'The Key fits on the screen.');
   await phone.locator('.hub-map-controls button:has-text("Key")').tap();
   await phone.locator('.hub-legend').waitFor({ state: 'detached' });
-  await phone.locator('[data-node="ml-m2"] > circle').dispatchEvent('click');
+  await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await phone.locator('.hub-map-panel').waitFor();
   await phone.goBack();
   await phone.locator('.hub-map-panel').waitFor({ state: 'detached' });

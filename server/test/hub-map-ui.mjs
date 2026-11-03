@@ -68,9 +68,13 @@ const freeCentre = page => page.evaluate(() => {
   const box = document.querySelector('.hub-map-box').getBoundingClientRect();
   const panel = document.getElementById('hub-map-panel')?.getBoundingClientRect();
   if (!panel || !panel.width) return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-  if (panel.width < innerWidth * 0.8) { const w = Math.min(Math.max(panel.left - box.left, 0), box.width); return { x: box.left + w / 2, y: box.top + box.height / 2 }; }
+  // Like the app: a part narrower or lower than 60 px is no room at all, and the node is centred in the box below the hint (a tall sheet under the control bar can leave less).
+  const hint = document.querySelector('.hub-map-top')?.getBoundingClientRect();
+  const lift = hint && hint.height ? Math.max(0, hint.bottom - box.top + 8) : 0;
+  const whole = { x: box.left + box.width / 2, y: box.top + lift + (box.height - lift) / 2 };
+  if (panel.width < innerWidth * 0.8) { const w = Math.min(Math.max(panel.left - box.left, 0), box.width); return w < 60 ? whole : { x: box.left + w / 2, y: box.top + box.height / 2 }; }
   const h = Math.min(Math.max(panel.top - box.top, 0), box.height);
-  return { x: box.left + box.width / 2, y: box.top + h / 2 };
+  return h < 60 ? whole : { x: box.left + box.width / 2, y: box.top + h / 2 };
 });
 
 /** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-1kw (every ring says what it counts in words, with a done arc; an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
@@ -114,6 +118,9 @@ const wayfinder = async (page, what) => {
   const rows = page.locator('.hub-wayfinder');
   await rows.first().waitFor();
   assert.equal(await rows.count(), 1, `${what}: the Wayfinder row is mounted once.`);
+  // The owner's order: project chips, then the controls, then the Destination row, then the map.
+  const order = await page.evaluate(() => ['.hub-map-chips', '.hub-map-controls', '.hub-wayfinder', '.hub-map-wrap'].map(selector => Math.round(document.querySelector(selector).getBoundingClientRect().top)));
+  assert.ok(order.every((top, k) => k === 0 || top >= order[k - 1]) && new Set(order).size === 4, `${what}: chips, controls, Destination row, map in that order (${order}).`);
   return rows;
 };
 
@@ -223,9 +230,9 @@ try {
   await axisIs(bare, 'x', 'Landscape is horizontal.');
   const box = await bare.locator('.hub-map-box').boundingBox();
   const nowAt = await centreOf(bare.locator('.hub-map-now'));
-  // The middle of what the control bar and the hint (top) leave.
-  const room = await bare.evaluate(() => ({ top: Math.max(document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, document.querySelector('.hub-map-controls').getBoundingClientRect().bottom), bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
-  const roomMid = (room.top + 8 + room.bottom) / 2;
+  // The middle of what the hint (top) leaves.
+  const room = await bare.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
+  const roomMid = ((room.top ? room.top + 8 : box.y) + room.bottom) / 2;
   assert.ok(Math.hypot(nowAt.x - (box.x + box.width / 2), nowAt.y - roomMid) <= 12, `"Now" is centred (${nowAt.x},${nowAt.y} vs ${roomMid}).`);
 
   step('a window between the thresholds keeps the axis it had');

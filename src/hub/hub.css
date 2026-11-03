@@ -198,14 +198,13 @@
 }
 .hub[data-screen="map"] > .hub-wayfinder { flex: none; }
 .hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty { flex: none; }
-/* The map takes everything the chips leave; the toolbar, hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
-/* --bar: where the control bar ends at the top of the map (8 px gap, 44 px buttons, 6 px padding); the hint and the popovers start below it. */
-.hub-map-wrap { --bar: 64px; position: relative; flex: 1; min-height: 0; }
-.hub-map-controls, .hub-map-top, .hub-legend {
+/* The control bar is a row of its own just under the project chips (above the Wayfinder row). The map takes everything below; the hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
+.hub-map-wrap { position: relative; flex: 1; min-height: 0; }
+.hub-map-top, .hub-legend {
   position: absolute; z-index: 2; background: var(--surface-solid); box-shadow: var(--shadow-2); touch-action: manipulation;
 }
 .hub-map-controls {
-  left: 50%; top: 8px; transform: translateX(-50%); max-width: calc(100% - 16px);
+  flex: none; align-self: center; box-sizing: border-box; max-width: 100%; margin: 0 0 8px; background: var(--surface-solid); box-shadow: var(--shadow-2); touch-action: manipulation;
   display: flex; flex-wrap: nowrap; gap: 6px; padding: 6px; border-radius: var(--radius-pill);
   overflow-x: auto; scrollbar-width: none;
 }
@@ -213,7 +212,7 @@
 .hub-map-controls .hub-filter-chip button { min-height: 44px; }
 .hub-map-zoom { display: none; }
 @media (hover: hover) and (pointer: fine) { .hub-map-zoom { display: inline-flex; } }
-.hub-map-top { top: calc(var(--bar) + 8px); left: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; background: none; box-shadow: none; pointer-events: none; }
+.hub-map-top { top: 8px; left: 8px; right: 8px; display: flex; flex-direction: column; gap: 6px; background: none; box-shadow: none; pointer-events: none; }
 .hub-map-top > * { pointer-events: auto; }
 .hub-map-hint, .hub-map-note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 0 0 10px; border-radius: var(--radius-pill); background: var(--surface-solid); box-shadow: var(--shadow-2); font-size: 0.75rem; cursor: default; }
 .hub-map-note { padding: 6px 12px; border-radius: var(--radius); display: block; }
@@ -318,8 +317,8 @@
 }
 .hub-actions.start { justify-content: flex-start; }
 .hub-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.72rem; color: var(--text-dim); }
-/* The Key popover floats under the toolbar, at the right. */
-.hub-map-wrap > .hub-legend { right: 8px; top: calc(var(--bar) + 8px); width: max-content; max-width: calc(100% - 16px); max-height: 60%; overflow-y: auto; padding: 10px 12px; border-radius: var(--radius); }
+/* The Key popover floats at the top right of the map, under the toolbar. */
+.hub-map-wrap > .hub-legend { right: 8px; top: 8px; width: max-content; max-width: calc(100% - 16px); max-height: 60%; overflow-y: auto; padding: 10px 12px; border-radius: var(--radius); }
 .hub-legend-age { flex: 1 0 100%; margin: 0; font-size: 0.72rem; }
 .hub-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .hub-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
@@ -521,7 +520,7 @@ button.hub-cl-text { cursor: pointer; }
 .hub-filter-chip-x { padding: 6px 10px 6px 2px; font-size: 1rem; line-height: 1; }
 .hub-filter-chip button:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-pill); }
 .hub-map-wrap > .hub-filter {
-  position: absolute; z-index: 3; right: 8px; top: calc(var(--bar) + 8px); width: min(600px, calc(100% - 16px)); max-height: 70%; overflow-y: auto;
+  position: absolute; z-index: 3; right: 8px; top: 8px; width: min(600px, calc(100% - 16px)); max-height: 70%; overflow-y: auto;
   box-sizing: border-box; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-solid); box-shadow: var(--shadow-2); touch-action: manipulation;
 }
 .hub-filter-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

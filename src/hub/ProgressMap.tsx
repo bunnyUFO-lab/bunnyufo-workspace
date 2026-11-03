@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, KeyboardEvent } from 'react'
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
@@ -63,8 +63,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && (
         <Fragment key={project}>
-          {model.wayfinder && <WayfinderHeader project={project} wayfinder={model.wayfinder} />}
-          <MapView model={model} project={project} nodeId={nodeId} />
+          <MapView model={model} project={project} nodeId={nodeId} header={model.wayfinder ? <WayfinderHeader project={project} wayfinder={model.wayfinder} /> : null} />
         </Fragment>
       )}
     </>
@@ -135,7 +134,7 @@ function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
   )
 }
 
-function MapView({ model: fullModel, project, nodeId }: { model: MapModel; project: string; nodeId?: string }) {
+function MapView({ model: fullModel, project, nodeId, header }: { model: MapModel; project: string; nodeId?: string; header?: ReactNode }) {
   const [filter, setFilter] = useState<MapFilter>(savedFilter)
   const [filterOpen, setFilterOpen] = useState(false)
   const { model, hidden } = useMemo(() => filterMap(fullModel, filter), [fullModel, filter])
@@ -167,15 +166,12 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     setHint(false)
     try { localStorage.setItem(HINT_KEY, '1') } catch { /* private mode: it shows again next time */ }
   }, [])
-  /** The control bar and the hint float over the top of the box: Fit, Now and the first view keep the map clear of them. */
-  const controls = useRef<HTMLDivElement>(null)
+  /** The hint floats over the top of the box: Fit, Now and the first view keep the map clear of it. The control bar sits above the box, under the project chips. */
   const hintBar = useRef<HTMLDivElement>(null)
   const insets = useCallback(() => {
     const frame = box.current?.getBoundingClientRect()
-    const bar = controls.current?.getBoundingClientRect()
     const hint = hintBar.current?.getBoundingClientRect()
-    const lowest = Math.max(bar && bar.height ? bar.bottom : 0, hint && hint.height ? hint.bottom : 0)
-    return { top: frame && lowest ? Math.max(0, lowest - frame.top + 8) : 0, bottom: 0 }
+    return { top: frame && hint && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0, bottom: 0 }
   }, [])
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
@@ -194,7 +190,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     const element = box.current
     const size = pz.box()
     const { top, bottom } = insets()
-    // With no panel open, the map's room is what the control bar and the hint leave.
+    // With no panel open, the map's room is what the hint leaves.
     const clear = { x: 0, y: top, w: size.w, h: Math.max(size.h - top - bottom, 60) }
     const whole = { x: 0, y: 0, w: size.w, h: size.h }
     const panel = document.getElementById('hub-map-panel')
@@ -403,13 +399,15 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     </g>
   ))
 
+  /** Escape closes the Key or the filter, from the bar or from the map; focus goes back to their button. */
+  const onEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() }
+    if (event.key === 'Escape' && filterOpen) { event.stopPropagation(); setFilterOpen(false); filterButton.current?.focus() }
+  }
+
   return (
     <>
-      <div className="hub-map-wrap" ref={wrap} onKeyDown={event => {
-        if (event.key === 'Escape' && keyOpen) { event.stopPropagation(); setKeyOpen(false); keyButton.current?.focus() }
-        if (event.key === 'Escape' && filterOpen) { event.stopPropagation(); setFilterOpen(false); filterButton.current?.focus() }
-      }}>
-        <div className="hub-map-controls" ref={controls}>
+      <div className="hub-map-controls" onKeyDown={onEscape}>
           <button type="button" className="hub-btn" onClick={() => pz.fit(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
           <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
@@ -424,6 +422,8 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
+      {header}
+      <div className="hub-map-wrap" ref={wrap} onKeyDown={onEscape}>
         <div className="hub-map-box" ref={box} data-axis={axis} tabIndex={0} role="group" aria-label="Roadmap. Arrow keys move it, plus and minus zoom.">
         <div className="hub-map-stage" ref={stage}>
           <svg ref={svg} role="presentation">
