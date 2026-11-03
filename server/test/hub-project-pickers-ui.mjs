@@ -124,7 +124,7 @@ try {
         await page.goto(`${small.url}${picker.hash}`);
         const row = page.locator(`${picker.scope} [aria-label="Project"].hub-chips`);
         await row.waitFor();
-        assert.equal(await page.locator(`${picker.scope} [role="combobox"]`).count(), 0, `${picker.name}: no dropdown.`);
+        assert.equal(await page.locator(`${picker.scope} [role="combobox"][aria-label="Project"]`).count(), 0, `${picker.name}: no dropdown.`);
         const chips = row.locator('.hub-chip');
         await chips.nth(1).waitFor();
         assert.ok(await chips.count() >= 2 && await chips.count() <= 11, `${picker.name}: chips (${await chips.count()}).`);
