@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { buildWork, unaskedOf } from '../hub-work.mjs';
+import { buildWork, reasonOf, unaskedOf } from '../hub-work.mjs';
 import { applyMarks, markEntry } from '../hub-marks.mjs';
 import { validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -52,6 +52,46 @@ test('a checklist, a snoozed Ask or another Needs you item counts as asked; the 
   assert.equal(card(work, 'bead:a-both').asked.kind, 'ask', 'An Ask comes before a checklist.');
   assert.deepEqual([card(work, 'bead:a-lab').nothingAsked, card(work, 'bead:a-lab').why, 'asked' in card(work, 'bead:a-lab')], [true, 'needs you · nothing asked yet', false]);
   assert.deepEqual(unaskedOf(work.lanes.blocked).map(item => item.id), ['a-lab']);
+});
+
+test('unaskedOf keeps a needs-owner item only when every blocker is closed (ten blocked shapes: none listed)', () => {
+  const blocked = Array.from({ length: 10 }, (_, n) => ({ ...beadsIssue({ id: `a-b${n}`, labels: ['needs-owner'], blocks: [`a-later${n}`] }), project: 'a' }));
+  const later = Array.from({ length: 10 }, (_, n) => ({ ...beadsIssue({ id: `a-later${n}`, status: n % 2 ? 'in_progress' : 'open' }), project: 'a' }));
+  const ready = { ...beadsIssue({ id: 'a-ready', labels: ['needs-owner'], blocks: ['a-done'] }), project: 'a' };
+  const done = { ...beadsIssue({ id: 'a-done', status: 'closed', closed: iso(NOW) }), project: 'a' };
+  const work = buildWork({ issues: [...blocked, ...later, ready, done], now: NOW });
+  assert.deepEqual(unaskedOf(Object.values(work.lanes).flat()).map(item => item.id), ['a-ready'], 'Only the one whose blocker is closed.');
+  for (let n = 0; n < 10; n += 1) {
+    const item = card(work, `bead:a-b${n}`);
+    assert.equal(laneOf(work, `bead:a-b${n}`), 'blocked', 'A blocked one stays on the board.');
+    assert.equal(item.nothingAsked, undefined, 'No warning on it.');
+    assert.match(item.why, new RegExp(`^blocked by a-later${n}`));
+  }
+});
+
+test('the reason line: the needs-owner note, else the first sentence of the description, clipped to 120 characters', () => {
+  assert.equal(reasonOf({ notes: 'Checked 2026-10-30.\nneeds-owner: Pay the invoice before the launch.', description: 'Ignored text here.' }), 'Pay the invoice before the launch.');
+  assert.equal(reasonOf({ description: 'Register the example domain at the registrar. Then point it at the site.' }), 'Register the example domain at the registrar.');
+  const long = `Write the terms and privacy page for the launch, ${'covering every detail '.repeat(10)}end.`;
+  const clipped = reasonOf({ description: long });
+  assert.ok(clipped.length <= 120 && clipped.endsWith('…'), clipped);
+  assert.equal(reasonOf({}), '');
+  const work = buildWork({ issues: [{ ...beadsIssue({ id: 'a-r', labels: ['needs-owner'], description: 'Sign the example agreement. It has two pages.' }), project: 'a' }], now: NOW });
+  assert.equal(card(work, 'bead:a-r').reason, 'Sign the example agreement.');
+});
+
+test('a done or not-needed mark keeps the unasked row, marked, until it is applied; an Ask or a blocker never does', () => {
+  const mark = (id, verdict) => markEntry(`a/${id}/20261030T100000000Z-${verdict}-ab12.json`, { v: 1, project: 'a', bead: id, verdict, at: '2026-10-30T10:00:00.000Z', by: 'owner' });
+  const issues = [
+    { ...beadsIssue({ id: 'a-one', labels: ['needs-owner'] }), project: 'a' },
+    { ...beadsIssue({ id: 'a-two', labels: ['needs-owner'] }), project: 'a' },
+    { ...beadsIssue({ id: 'a-blk', labels: ['needs-owner'], blocks: ['a-doing'] }), project: 'a' },
+    { ...beadsIssue({ id: 'a-doing', status: 'in_progress' }), project: 'a' },
+  ];
+  const marks = new Map([['a/a-one', [mark('a-one', 'done')]], ['a/a-two', [mark('a-two', 'not-needed')]], ['a/a-blk', [mark('a-blk', 'done')]]]);
+  const work = buildWork({ issues: applyMarks(issues, marks), now: NOW });
+  const rows = unaskedOf(Object.values(work.lanes).flat());
+  assert.deepEqual(rows.map(item => [item.id, item.mark.verdict]).sort(), [['a-one', 'done'], ['a-two', 'not-needed']]);
 });
 
 test('an active unblock moves a label-only card to ready, and a real blocker still shows', () => {

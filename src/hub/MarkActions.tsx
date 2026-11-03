@@ -6,6 +6,16 @@ import { shortDate } from './mapSheet'
 
 const REASON_MAX = 200
 
+const CONFIRMED_KEY = 'buw.markConfirmed'
+
+/** Whether this device has confirmed a closing mark before. Without usable storage the answer is no, so it always asks. */
+function wasConfirmed(): boolean {
+  try { return localStorage.getItem(CONFIRMED_KEY) === '1' } catch { return false }
+}
+function rememberConfirmed() {
+  try { localStorage.setItem(CONFIRMED_KEY, '1') } catch { /* no storage: ask every time */ }
+}
+
 const PENDING_WORD = { done: 'done', 'not-needed': 'not needed', unblock: 'unblocked' }
 
 /**
@@ -15,18 +25,27 @@ const PENDING_WORD = { done: 'done', 'not-needed': 'not needed', unblock: 'unblo
  * hubPost refreshes every Hub read after a write, so the map comes back marked and the sheet stays open.
  * `compact` is the buttons alone, for a row on Today.
  */
-export default function MarkActions({ task, project, projectName, eligible, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark'>; project: string; projectName: string; eligible: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
+export default function MarkActions({ task, title, project, projectName, eligible, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark'>; title?: string; project: string; projectName: string; eligible: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
   const [asking, setAsking] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  // A closing mark (done, not needed) waits here for the first-time confirmation on this device.
+  const [confirming, setConfirming] = useState<'done' | 'not-needed' | null>(null)
+
+  function close(verdict: 'done' | 'not-needed') {
+    if (wasConfirmed()) void send(verdict)
+    else setConfirming(verdict)
+  }
 
   async function send(verdict: 'done' | 'not-needed' | 'unblock' | 'undo') {
     setBusy(true)
     onError('')
     try {
+      if (verdict === 'done' || verdict === 'not-needed') rememberConfirmed()
       await hubPost(`/map/${encodeURIComponent(project)}/marks`, { bead: task.id, verdict, ...(verdict === 'not-needed' && reason.trim() ? { reason: reason.trim() } : {}) })
       setAsking(false)
       setReason('')
+      setConfirming(null)
     } catch (failure) {
       onError(failure instanceof Error ? failure.message : 'Could not save that.')
     } finally {
@@ -37,8 +56,18 @@ export default function MarkActions({ task, project, projectName, eligible, erro
   const failed = error && <p className="hub-error" role="alert">{error}</p>
   // A refusal can change what the sheet knows (an Ask appeared): the message stays, the buttons go.
   if (!task.mark && !eligible) return failed || null
-  if (compact && (task.mark || !host.write)) return failed || null
+  if (compact && !task.mark && !host.write) return failed || null
 
+  if (task.mark && compact) {
+    // Today's row: the item stays, muted, until a session applies the mark; Undo is a button in the row.
+    return (
+      <div className="hub-map-panel-mark compact marked" data-mark-pending data-mark-verdict={task.mark.verdict}>
+        <span className="hub-muted">Marked {PENDING_WORD[task.mark.verdict]}</span>
+        {host.write && <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button>}
+        {failed}
+      </div>
+    )
+  }
   if (task.mark) {
     const date = shortDate(task.mark.at)
     return (
@@ -55,16 +84,25 @@ export default function MarkActions({ task, project, projectName, eligible, erro
   return (
     <div className={`hub-map-panel-mark${compact ? ' compact' : ''}`} data-mark-actions>
       <div className="hub-actions start">
-        <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void send('done')} data-mark-done>Mark done</button>
+        <button type="button" className="hub-btn pri" disabled={busy} onClick={() => close('done')} data-mark-done>Mark done</button>
         <button type="button" className="hub-btn" disabled={busy} aria-expanded={asking} onClick={() => setAsking(value => !value)} data-mark-not-needed>No longer needed</button>
         <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('unblock')} data-mark-unblock>Unblock</button>
       </div>
       {asking && (
-        <form className="hub-map-panel-reason" onSubmit={event => { event.preventDefault(); void send('not-needed') }}>
+        <form className="hub-map-panel-reason" onSubmit={event => { event.preventDefault(); close('not-needed') }}>
           <input type="text" value={reason} maxLength={REASON_MAX} placeholder="Why (optional)" aria-label="Why it is no longer needed (optional)" onChange={event => setReason(event.target.value)} />
           <button type="submit" className="hub-btn pri" disabled={busy} data-mark-confirm>Close it</button>
           <button type="button" className="hub-btn" disabled={busy} onClick={() => { setAsking(false); onError('') }}>Cancel</button>
         </form>
+      )}
+      {confirming && (
+        <div className="hub-map-panel-confirm" role="alertdialog" aria-label="Confirm" data-mark-confirm-first>
+          <p>This closes {title ? <strong>{title}</strong> : 'this item'} in Beads. Undo stays here until a session applies it.</p>
+          <div className="hub-actions start">
+            <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void send(confirming)} data-mark-confirm-yes>Confirm</button>
+            <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirming(null)} data-mark-confirm-cancel>Cancel</button>
+          </div>
+        </div>
       )}
       {failed}
       {!compact && <p className="hub-muted">Unblock: it doesn&apos;t wait on you; agents may pick it up.</p>}
