@@ -10,6 +10,10 @@ export interface WorkCard {
   title: string
   lane: WorkLane
   state: string
+  /** A Beads card's issue type (`task`, `bug`, `feature`, `epic`...); requests and Hermes runs have none. */
+  type?: string
+  /** A Beads card's labels. */
+  labels?: string[]
   why?: string
   /** What is asked of the owner about this bead: an Ask, a checklist, or another Needs you item. */
   asked?: { kind: string; id: string; href: string }

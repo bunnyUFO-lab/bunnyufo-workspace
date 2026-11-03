@@ -897,7 +897,9 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 
 ### Work
 
-`GET /api/hub/work[?project=<id>]` returns `{ lanes, counts, at }`: six lanes (`backlog`, `ready`, `running`, `blocked`, `review`, `done`) of cards `{ key, source, id, project, title, lane, state, why?, signs, live?, updatedAt, href }`. `source` is `beads`, `request` or `hermes`; `key` is `bead:<id>`, `request:<id>` or `run:<id>`. Without `project` it covers every project with a Beads copy plus all requests; with one, that project's issues and requests. `counts` are real totals: Backlog keeps the newest 50 cards and Done the newest 30 of the last 14 days.
+`GET /api/hub/work[?project=<id>]` returns `{ lanes, counts, at }`: six lanes (`backlog`, `ready`, `running`, `blocked`, `review`, `done`) of cards `{ key, source, id, project, title, lane, state, why?, signs, live?, updatedAt, href }` (a Beads card also has `type`, the issue type, and `labels`). `source` is `beads`, `request` or `hermes`; `key` is `bead:<id>`, `request:<id>` or `run:<id>`. Without `project` it covers every project with a Beads copy plus all requests; with one, that project's issues and requests. `counts` are real totals: Backlog keeps the newest 50 cards and Done the newest 30 of the last 14 days.
+
+`GET /api/hub/search-text[?project=<id>]` is what the Work search reads, and the board fetches it only while a search is on. It returns `{ rows, at }`, one row `{ id, project, title, status, text }` per Beads issue (groups and old closed ones too) of the project, or of every project with a Beads copy. `text` is the plain words of the description and the acceptance criteria, cut at 4000 characters; notes are left out. It is read like the roadmap and cached by the Beads etag. Matching happens in the browser (`src/hub/beadSearch.ts`).
 
 | Source | Backlog | Ready | In progress (`running`) | Blocked | Review | Done |
 |---|---|---|---|---|---|---|

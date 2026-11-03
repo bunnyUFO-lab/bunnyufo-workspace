@@ -74,3 +74,37 @@
 .wk-asked:hover { border-color: var(--line2); text-decoration: underline; }
 .wk-asked:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .wk-warn { font-weight: 600; }
+
+/* Search and filters under the project chips. */
+.wk-search { margin: 0 0 8px; max-width: 420px; }
+.wk-search .sf { width: 100%; }
+.sf .sf-input { padding-left: 36px; padding-right: 44px; }
+.sf .sf-input::-webkit-search-cancel-button { display: none; }
+.sf .sf-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--t3); pointer-events: none; }
+.sf .sf-clear { position: absolute; top: 0; right: 0; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--t2); font-size: 20px; line-height: 1; cursor: pointer; border-radius: 0 10px 10px 0; }
+.sf .sf-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.wk-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.wk-filters .hub-seg button { min-height: 32px; }
+.wk-filters .cb.wk-label { flex: 0 1 200px; width: 200px; }
+.wk-filters .cb.wk-label .cb-input { min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+.wk-count { margin: 0 0 12px; font-size: 12.5px; color: var(--t2); }
+.wk-clear { min-height: 32px; padding: 0 6px; background: none; border: 0; color: var(--pink); text-decoration: underline; text-underline-offset: 2px; font: inherit; cursor: pointer; border-radius: 6px; }
+.wk-clear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.work mark { background: color-mix(in srgb, var(--amber) 30%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+.wk-snip { font-size: 12px; color: var(--t2); overflow-wrap: anywhere; }
+.wk-also { margin-top: 16px; }
+.wk-also > h3 { display: flex; gap: 8px; margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); }
+.wk-also > h3 span { font: 600 11px var(--mono); }
+.wk-also-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; padding: 10px 12px; max-width: 520px; background: var(--s2); border: 1px solid var(--line); border-radius: 10px; color: var(--t1); text-decoration: none; min-height: 44px; box-sizing: border-box; }
+.wk-also-row:hover { border-color: var(--line2); }
+.wk-also-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (pointer: coarse), (max-width: 639px) {
+  .wk-filters .hub-chip { min-height: 44px; display: inline-flex; align-items: center; }
+  .wk-filters .hub-seg button { min-height: 44px; }
+  .wk-filters .cb.wk-label .cb-input { min-height: 44px; }
+  .wk-clear { min-height: 44px; }
+}
+@media (max-width: 639px) {
+  .wk-search { max-width: none; }
+  .wk-filters .cb.wk-label { flex: 1 1 100%; width: auto; }
+}

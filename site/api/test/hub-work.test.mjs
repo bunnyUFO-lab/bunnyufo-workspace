@@ -9,6 +9,9 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { buildWork, reasonOf, unaskedOf } from '../hub-work.mjs';
 import { applyMarks, markEntry } from '../hub-marks.mjs';
+import { searchRows } from '../hub-beads.mjs';
+import { rowMatches, snippetOf, words } from '../../../src/hub/beadSearch.ts';
+import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter } from '../../../src/hub/workFilter.ts';
 import { validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { beadsIssue, eventJson, iso, jsonl, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, workFixture } from './hub-fixtures.mjs';
@@ -239,4 +242,118 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
     assert.equal((await get('/hub/work?project=Bad_Id')).status, 404);
     assert.equal((await get('/hub/work?project=probe')).body.counts.ready, 0);
   } finally { server.close(); await fake.close(); }
+});
+
+test('searchRows gives the plain text of the description and acceptance criteria, cut at 4000; notes are left out', () => {
+  const rows = searchRows([
+    { ...beadsIssue({ id: 'ws-a', title: 'Alpha', description: 'A **bold** [link](http://x.test) here.' }), acceptance_criteria: '- the `quokka` waves', notes: 'commits abc1234', project: 'ws' },
+    { ...beadsIssue({ id: 'ws-b', description: 'x'.repeat(5000) }), project: 'ws' },
+    { ...beadsIssue({ id: 'ws-c' }), project: 'ws' },
+  ]);
+  assert.deepEqual(rows[0], { id: 'ws-a', project: 'ws', title: 'Alpha', status: 'open', text: 'A bold link here. - the quokka waves' });
+  assert.equal(rows[1].text.length, 4000);
+  assert.equal(rows[2].text, '');
+  assert.equal(rows[2].title, 'ws-c');
+});
+
+test('Beads cards carry type and labels; requests do not', () => {
+  const work = buildWork({ issues: [{ ...beadsIssue({ id: 'ws-f', type: 'feature', labels: ['x', 'y'] }), project: 'ws' }, { ...beadsIssue({ id: 'ws-g' }), project: 'ws' }], now: NOW });
+  assert.equal(card(work, 'bead:ws-f').type, 'feature');
+  assert.deepEqual(card(work, 'bead:ws-f').labels, ['x', 'y']);
+  assert.equal(card(work, 'bead:ws-g').type, 'task');
+  assert.deepEqual(card(work, 'bead:ws-g').labels, []);
+});
+
+test('GET /hub/search-text gives one row per issue for a project or every project, and refuses a bad id', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-search-'));
+  const fake = await startFakeS3();
+  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
+  fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
+  const hub = createHub({ bucket, enabled: true });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
+  await listenOnGoodPort(server, '127.0.0.1');
+  const get = async route => { const answer = await fetch(`http://127.0.0.1:${server.address().port}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  try {
+    const seed = seeder(fake);
+    seed.put('beads/magic-loops.jsonl', jsonl([beadsIssue({ id: 'ml-abcd', description: 'Rare quokka word.' })]), 'application/x-ndjson');
+    seed.put('beads/magic-loops.meta.json', { pushedAt: iso(NOW) });
+    seed.put('beads/bunnylink.jsonl', jsonl([beadsIssue({ id: 'bl-abcd', status: 'closed', closed: iso(minutesAgo(NOW, 60 * 24 * 40)) })]), 'application/x-ndjson');
+    seed.put('beads/bunnylink.meta.json', { pushedAt: iso(NOW) });
+    const all = (await get('/hub/search-text')).body;
+    assert.deepEqual(all.rows.map(row => [row.project, row.id]).sort(), [['bunnylink', 'bl-abcd'], ['magic-loops', 'ml-abcd']]);
+    assert.equal(all.rows.find(row => row.id === 'ml-abcd').text, 'Rare quokka word.');
+    assert.equal(all.rows.find(row => row.id === 'bl-abcd').status, 'closed', 'Old closed beads are in the text read although Work drops their cards.');
+    const one = (await get('/hub/search-text?project=bunnylink')).body;
+    assert.deepEqual(one.rows.map(row => row.id), ['bl-abcd']);
+    assert.equal((await get('/hub/search-text?project=Bad_Id')).status, 404);
+  } finally { server.close(); await fake.close(); }
+});
+
+test('beadSearch: all words must match the id, title or text, in any case; the snippet frames the first hit', () => {
+  const row = { id: 'ws-Ab12', title: 'Wall slide', text: 'The quokka handshake needs retuning before the release of the long build.' };
+  assert.deepEqual(words('  Wall  QUOKKA '), ['wall', 'quokka']);
+  assert.equal(rowMatches(row, 'QUOKKA'), true);
+  assert.equal(rowMatches(row, 'ab1'), true, 'A partial id.');
+  assert.equal(rowMatches(row, 'WS-AB12'), true);
+  assert.equal(rowMatches(row, 'wall quokka'), true);
+  assert.equal(rowMatches(row, 'wall zebra'), false);
+  assert.equal(rowMatches(row, '   '), true, 'An empty query matches everything.');
+  assert.equal(snippetOf(row.text, 'zebra'), null);
+  assert.equal(snippetOf(row.text, 'HANDSHAKE'), 'The quokka handshake needs retuning before the rel…', 'About thirty characters each side, none cut on the left at the start of the text.');
+  assert.equal(snippetOf('short quokka', 'quokka'), 'short quokka', 'No dots when nothing was cut.');
+  assert.match(snippetOf(`${'a '.repeat(50)}quokka${' b'.repeat(50)}`, 'quokka'), /^….*quokka.*…$/);
+});
+
+test('parseWorkFilter: a bad value is the default; good fields stay; the default is recognised', () => {
+  for (const bad of [null, undefined, 'x', 7, [], { type: 'epic', within: 90, needsYou: 'yes', q: 5 }]) assert.deepEqual(parseWorkFilter(bad), DEFAULT_WORK_FILTER);
+  assert.equal(isDefaultWork(DEFAULT_WORK_FILTER), true);
+  assert.equal(isDefaultWork({ ...DEFAULT_WORK_FILTER, q: '   ' }), true);
+  const good = { q: 'quokka', needsYou: true, blocked: false, type: 'question', label: 'wayfinder:grilling', within: 7 };
+  assert.deepEqual(parseWorkFilter(good), good);
+  assert.deepEqual(parseWorkFilter({ ...good, type: 'epic', within: 90 }), { ...good, type: null, within: null }, 'Each bad field falls back alone.');
+});
+
+test('cardPasses: the search, Needs you, Blocked, Type, Label and Updated', () => {
+  const now = Date.parse('2026-11-03T12:00:00Z');
+  const ago = days => new Date(now - days * 86400000).toISOString();
+  const bead = (id, extra = {}) => ({ key: `bead:${id}`, source: 'beads', id, project: 'ws', title: id, lane: 'ready', state: 'open', type: 'task', labels: [], signs: [], updatedAt: ago(1), href: '#', ...extra });
+  const none = () => undefined;
+  const f = extra => ({ ...DEFAULT_WORK_FILTER, ...extra });
+  const asked = bead('ws-ask', { lane: 'blocked', why: 'needs you', asked: { kind: 'ask', id: 'a', href: '#' } });
+  const nothing = bead('ws-nothing', { lane: 'blocked', nothingAsked: true, why: 'needs you · nothing asked yet' });
+  const waits = bead('ws-wait', { lane: 'blocked', why: 'blocked by ws-x X' });
+  const ready = bead('ws-ready');
+  assert.equal(cardPasses(ready, DEFAULT_WORK_FILTER, none, now), true);
+  // The search reads the text when it is there, and the id and title when it is not.
+  const text = item => (item.id === 'ws-ready' ? { id: 'ws-ready', project: 'ws', title: 'ws-ready', status: 'open', text: 'about a rare quokka' } : undefined);
+  assert.equal(cardPasses(ready, f({ q: 'quokka' }), text, now), true);
+  assert.equal(cardPasses(ready, f({ q: 'quokka' }), none, now), false);
+  assert.equal(cardPasses(ready, f({ q: 'WS-REA quokka' }), text, now), true);
+  assert.equal(cardPasses(ready, f({ q: 'ws-rea' }), none, now), true);
+  // Needs you: an Ask, nothing asked, or the reason; Blocked: the lane without those; both: either.
+  const four = [asked, nothing, waits, ready];
+  assert.deepEqual(four.map(item => cardPasses(item, f({ needsYou: true }), none, now)), [true, true, false, false]);
+  assert.deepEqual(four.map(item => cardPasses(item, f({ blocked: true }), none, now)), [false, false, true, false]);
+  assert.deepEqual(four.map(item => cardPasses(item, f({ needsYou: true, blocked: true }), none, now)), [true, true, true, false]);
+  // Type: task is task or bug, feature is feature, question is a wayfinder label other than the map's, whatever the type.
+  const bug = bead('ws-bug', { type: 'bug' });
+  const feature = bead('ws-feat', { type: 'feature' });
+  const question = bead('ws-q', { type: 'epic', labels: ['wayfinder:grilling'] });
+  const map = bead('ws-map', { type: 'epic', labels: ['wayfinder:map'] });
+  const items = [ready, bug, feature, question, map];
+  assert.deepEqual(items.map(item => cardPasses(item, f({ type: 'task' }), none, now)), [true, true, false, false, false]);
+  assert.deepEqual(items.map(item => cardPasses(item, f({ type: 'feature' }), none, now)), [false, false, true, false, false]);
+  assert.deepEqual(items.map(item => cardPasses(item, f({ type: 'question' }), none, now)), [false, false, false, true, false]);
+  // A request or a Hermes run has no type and no labels: a Type or Label choice hides it.
+  const request = { key: 'request:r', source: 'request', id: 'r', project: 'ws', title: 'r', lane: 'backlog', state: 'proposed', signs: [], updatedAt: ago(1), href: '#' };
+  assert.equal(cardPasses(request, f({ type: 'task' }), none, now), false);
+  assert.equal(cardPasses(request, f({ label: 'x' }), none, now), false);
+  assert.equal(cardPasses(request, f({ q: 'r' }), none, now), true);
+  assert.equal(cardPasses(bead('ws-l', { labels: ['x'] }), f({ label: 'x' }), none, now), true);
+  assert.equal(cardPasses(ready, f({ label: 'x' }), none, now), false);
+  // Updated within 7 or 30 days.
+  const old = bead('ws-old', { updatedAt: ago(10) });
+  assert.deepEqual([ready, old].map(item => cardPasses(item, f({ within: 7 }), none, now)), [true, false]);
+  assert.deepEqual([ready, old].map(item => cardPasses(item, f({ within: 30 }), none, now)), [true, true]);
+  assert.equal(cardPasses(bead('ws-nodate', { updatedAt: '' }), f({ within: 30 }), none, now), false);
 });

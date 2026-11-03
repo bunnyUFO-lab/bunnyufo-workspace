@@ -39,7 +39,7 @@ const HOGS = [
   { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
 ];
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -184,6 +184,15 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     const wf = workFixture({ now });
     const later = Array.from({ length: 12 }, (_, index) => beadsIssue({ id: `ws-later-${index + 1}`, title: `Backlog idea ${index + 1}`, status: 'deferred', created: `2026-10-02T10:${String(index).padStart(2, '0')}:00Z` }));
     const issues = [...wf.issues.map(({ project: _project, ...issue }) => issue), ...later];
+    if (workSearch) {
+      // Off by default; needs `work`. Text for the Work search: a rare word only in a description, a feature, a Wayfinder question with a label, and a bead closed long ago (no card on the board).
+      issues.push(
+        beadsIssue({ id: 'ws-rare', title: 'Tune the slide', description: 'The quokka handshake must settle before the next build.', updated: minutesAgo(now, 60).toISOString() }),
+        beadsIssue({ id: 'ws-feat', title: 'Feel pass', type: 'feature', labels: ['area:feel'], updated: minutesAgo(now, 90).toISOString() }),
+        beadsIssue({ id: 'ws-ques', title: 'Which feel wins?', type: 'task', labels: ['wayfinder:grilling'] }),
+        beadsIssue({ id: 'ws-ancient', title: 'Ancient wall bug', status: 'closed', closed: minutesAgo(now, 60 * 24 * 40).toISOString(), description: 'Fixed the quokka drift on the wall.' }),
+      );
+    }
     seed.beads('lanes', issues, { pushedAt: minutesAgo(now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/lanes' });
     for (const event of wf.events) seed.event({ ...event, project: 'lanes' });
     seed.ask(askJson({ id: `${day}-lanes-owner-call-e5e5`, bead: 'ws-ask', now: minutesAgo(now, 15), options: threeOptions() }));
@@ -196,6 +205,7 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   if (workSide) {
     // Off by default; needs `work`. A second project with one open task, so the All board holds a card from a project that is not the default one.
     const side = [beadsIssue({ id: 'sd-one', title: 'Side quest', created: '2026-10-02T10:00:00Z' })];
+    if (workSearch) side.push(beadsIssue({ id: 'sd-ancient', title: 'Side ancient', status: 'closed', closed: minutesAgo(now, 60 * 24 * 40).toISOString(), description: 'An old quokka story.' }));
     seed.beads('side', side, { pushedAt: minutesAgo(now, 6).toISOString(), host: 'pc.example.test', count: side.length, repo: 'example/side' });
   }
 

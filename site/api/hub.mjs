@@ -32,7 +32,7 @@ import { createHermesApprovals } from './hub-hermes-approvals.mjs';
 import { createNotify } from './notify.mjs';
 import { createPolicy } from './policy.mjs';
 import { defaultsOf } from './project-defaults.mjs';
-import { createBeadsReader } from './hub-beads.mjs';
+import { createBeadsReader, searchRows } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork, unaskedOf } from './hub-work.mjs';
@@ -1498,6 +1498,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ projects: await projects(at) });
           } else if (route === '/hub/work') {
             reply(buildWork(await loadWorkInputs(query.get('project'), at)));
+          } else if (route === '/hub/search-text') {
+            // The text the Work search reads: one project, or every project with Beads. Loaded only while a search is on.
+            const only = query.get('project');
+            if (only && !validProject(only)) throw fail('No such project.', 404);
+            const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
+            const loaded = await pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) }));
+            reply({ rows: loaded.flatMap(row => searchRows(row.issues.map(issue => ({ ...issue, project: row.id })))), at: at.toISOString() });
           } else if (route === '/hub/unasked') {
             const work = buildWork(await loadWorkInputs(null, at));
             reply({ items: unaskedOf(Object.values(work.lanes).flat()).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href, ...(card.reason ? { reason: card.reason } : {}), ...(card.mark ? { mark: card.mark } : {}) })) });

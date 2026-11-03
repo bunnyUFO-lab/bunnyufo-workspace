@@ -3,6 +3,8 @@
 // the address is #/~hub/work/<board>/<id>, Escape and Back close it, a shared link opens it and closes onto the board,
 // "Show on roadmap" goes to the Roadmap, a Working now chip opens it, the All board opens a card from another project,
 // an unknown id shows the note and no sheet, and request cards still open what they did.
+// Search and filters: a word only in a description finds its card, ids and two words match, old closed beads show under Also found and open,
+// the chips narrow and Clear resets, the choice survives a reload (a bad stored value is the default), a linked card is never hidden, and a phone keeps 44 px targets.
 // BUW_SHOTS=<prefix> also writes screenshots.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
@@ -46,7 +48,7 @@ const goBoard = async (page, url, phoneLane) => {
 };
 
 try {
-  fixture = await startHubFixture({ work: true, workSide: true, links: true });
+  fixture = await startHubFixture({ work: true, workSide: true, workSearch: true, links: true });
   await new Promise(resolve => setTimeout(resolve, 100));
   const board = `${fixture.url}#/~hub/work/lanes`;
 
@@ -214,6 +216,151 @@ try {
     await page.waitForFunction(() => location.hash.startsWith('#/~hub/request/'));
     assert.equal(await panelOf(page).count(), 0);
     await page.close();
+
+    // ---- Search and filters. A page of its own, so the storage starts empty.
+    const sp = await open(viewport);
+    const keys = () => sp.evaluate(() => [...document.querySelectorAll('[data-card]')].map(element => element.getAttribute('data-card')));
+    const count = () => sp.locator('[data-work-count]').innerText();
+    const search = async value => { await sp.locator('[data-work-search]').fill(value); };
+    const stored = () => sp.evaluate(() => localStorage.getItem('hub-work-filter'));
+    const clear = async () => { await sp.locator('[data-work-count] .wk-clear').click(); await sp.locator('[data-work-count]').waitFor({ state: 'detached' }); };
+
+    step(`${label}: a word only in a description finds its card, with the text line and the hit marked`);
+    await goBoard(sp, board, lane('ready'));
+    assert.equal(await sp.locator('[data-work-count]').count(), 0, 'No count line while nothing is on.');
+    await search('quokka');
+    await sp.locator('.wk-snip').waitFor();
+    assert.deepEqual(await keys(), ['bead:ws-rare']);
+    assert.match(await sp.locator('.wk-snip').innerText(), /^text: .*quokka/);
+    assert.equal(await sp.locator('.wk-snip mark').innerText(), 'quokka');
+    assert.match(await count(), /^1 of \d+ shown · Clear$/);
+    assert.equal(await sp.locator('[data-work-count]').getAttribute('role'), 'status');
+    if (phone) assert.equal(await sp.locator('[data-lane-chip="ready"]').getAttribute('aria-pressed'), 'true', 'The phone moves to the first lane with a match.');
+    if (phone) assert.equal(await sp.locator('[data-lane-chip="backlog"] .n').innerText(), '0', 'Lane chips count the matches.');
+    assert.ok(JSON.parse(await stored()).q === 'quokka');
+
+    step(`${label}: an id, full or partial, in either case, finds it; two words must both match`);
+    await search('WS-DOIN');
+    await sp.locator('[data-card="bead:ws-doing"]').waitFor();
+    assert.deepEqual(await keys(), ['bead:ws-doing']);
+    await search('ws-doing');
+    assert.deepEqual(await keys(), ['bead:ws-doing']);
+    await search('slide quokka');
+    await sp.locator('.wk-snip').waitFor();
+    assert.deepEqual(await keys(), ['bead:ws-rare']);
+    await search('slide zebra');
+    await sp.waitForFunction(() => !document.querySelector('[data-card]'));
+    assert.match(await count(), /^0 of \d+ shown/);
+    assert.match(await sp.locator('.wk-lane .hub-empty').first().innerText(), /No match/);
+    assert.equal(await sp.locator('.wk-more').count(), 0, 'No fold while searching.');
+
+    step(`${label}: a closed bead with no card shows under Also found and opens its sheet`);
+    await search('quokka');
+    const ancient = sp.locator('[data-also="ws-ancient"]');
+    await ancient.waitFor();
+    assert.match(await ancient.innerText(), /closed/);
+    assert.equal(await ancient.getAttribute('href'), '#/~hub/work/lanes/ws-ancient');
+    await ancient.click();
+    await titled(sp, 'Ancient wall bug').waitFor();
+    assert.equal(await hashOf(sp), '#/~hub/work/lanes/ws-ancient');
+    await sp.keyboard.press('Escape');
+    await atBoard(sp, '#/~hub/work/lanes');
+    await goBoard(sp, `${fixture.url}#/~hub/work/all`, lane('ready'));
+    const sideOld = sp.locator('[data-also="sd-ancient"]');
+    await sideOld.waitFor();
+    await sideOld.click();
+    await titled(sp, 'Side ancient').waitFor();
+    assert.equal(await hashOf(sp), '#/~hub/work/all/sd-ancient');
+    await sp.keyboard.press('Escape');
+    await atBoard(sp, '#/~hub/work/all');
+
+    step(`${label}: the chips narrow, the count reads N of M shown, and Clear returns the board and the storage key`);
+    await goBoard(sp, board, lane('ready'));
+    await clear();
+    for (const more of await sp.locator('.wk-more').all()) await more.evaluate(element => element.click());
+    const full = (await keys()).length;
+    assert.ok(full >= 15, `The full board (${full}).`);
+    assert.equal(await stored(), null, 'Clear removes the key.');
+    const only = async (selector, expected, what) => {
+      await sp.locator(selector).click();
+      await sp.locator('[data-work-count]').waitFor();
+      assert.deepEqual((await keys()).sort(), expected.map(id => `bead:${id}`).sort(), what);
+      assert.match(await count(), new RegExp(`^${expected.length} of ${full} shown`));
+      await clear();
+    };
+    await only('[data-filter="needs-you"]', ['ws-ask', 'ws-owner'], 'Needs you');
+    await only('[data-filter="blocked"]', ['ws-stuck', 'ws-wait'], 'Blocked leaves out what needs the owner');
+    await sp.locator('[data-filter="needs-you"]').click();
+    await sp.locator('[data-filter="blocked"]').click();
+    assert.equal((await keys()).length, 4, 'Both on is either.');
+    await clear();
+    await only('[data-filter-type="feature"]', ['ws-feat'], 'Type feature');
+    await only('[data-filter-type="question"]', ['ws-ques'], 'Type question');
+    await sp.locator('[data-filter-label]').click();
+    await sp.getByRole('option', { name: 'area:feel' }).click();
+    await sp.locator('[data-work-count]').waitFor();
+    assert.deepEqual(await keys(), ['bead:ws-feat'], 'Label');
+    await clear();
+    await sp.locator('[data-filter-within="7d"]').click();
+    await sp.locator('[data-work-count]').waitFor();
+    const recent = await keys();
+    assert.ok(recent.includes('bead:ws-rare') && recent.includes('bead:ws-fresh'), 'Updated in the last 7 days keeps the fresh ones.');
+    assert.ok(!recent.includes('bead:ws-ready') && !recent.includes('bead:ws-ask'), 'And leaves out the old ones.');
+    await clear();
+    assert.equal((await keys()).length, full);
+
+    step(`${label}: the choice survives a reload, and a bad stored value is the default with no error`);
+    await search('quokka');
+    await sp.locator('[data-filter-type="task"]').click();
+    await sp.locator('.wk-snip').waitFor();
+    await sp.reload();
+    await sp.locator('.wk-snip').waitFor();
+    assert.equal(await sp.locator('[data-work-search]').inputValue(), 'quokka');
+    assert.equal(await sp.locator('[data-filter-type="task"]').getAttribute('aria-pressed'), 'true');
+    assert.match(await count(), /^1 of \d+ shown/);
+    for (const bad of ['{not json', '{"type":"epic","within":99,"q":5}', '[]', '"x"']) {
+      await sp.evaluate(value => localStorage.setItem('hub-work-filter', value), bad);
+      await sp.reload();
+      await sp.locator('[data-card="bead:ws-ready"]').waitFor({ state: 'attached' });
+      assert.equal(await sp.locator('[data-work-search]').inputValue(), '', bad);
+      assert.equal(await sp.locator('[data-work-count]').count(), 0, bad);
+    }
+
+    step(`${label}: a link to a card the filter hides still shows the card and its sheet`);
+    await goBoard(sp, board, lane('ready'));
+    await search('zebra');
+    await sp.waitForFunction(() => !document.querySelector('[data-card]'));
+    await sp.goto(`${fixture.url}#/~hub/work/lanes/ws-ready`);
+    await titled(sp, 'Ready to start').waitFor();
+    assert.equal(await sp.locator('[data-card="bead:ws-ready"][data-focused="true"]').count(), 1);
+    assert.deepEqual(await keys(), ['bead:ws-ready']);
+    await sp.getByRole('button', { name: 'Close details' }).click();
+    await atBoard(sp, '#/~hub/work/lanes');
+
+    if (phone) {
+      step('phone: no sideways scroll, every control at least 44 px, the lane chip goes to the first lane with a match');
+      await search('');
+      await sp.locator('[data-filter="needs-you"]').click();
+      await sp.locator('[data-filter-type="task"]').click();
+      await search('ws');
+      await noSideways(sp, 'Work filters at phone width');
+      const small = await sp.evaluate(() => [...document.querySelectorAll('.wk-search input, .wk-search button, .wk-filters button, .wk-filters input, [data-work-count] button, [data-lane-chip]')]
+        .filter(element => element.getClientRects().length).map(element => ({ what: element.getAttribute('aria-label') ?? element.textContent, h: element.getBoundingClientRect().height })).filter(item => item.h < 43.5));
+      assert.deepEqual(small, [], 'Every control is at least 44 px tall.');
+      assert.equal(await sp.locator('[data-lane-chip="blocked"]').getAttribute('aria-pressed'), 'true', 'Needs you starts in Blocked.');
+      await clear();
+      await sp.locator('[data-filter-type="feature"]').click();
+      assert.equal(await sp.locator('[data-lane-chip="ready"]').getAttribute('aria-pressed'), 'true');
+      await sp.locator('[data-lane-chip="done"]').click();
+      assert.equal(await sp.locator('[data-lane-chip="done"]').getAttribute('aria-pressed'), 'true', 'A lane the person taps stays, even at 0.');
+      if (process.env.BUW_SHOTS) await sp.screenshot({ path: `${process.env.BUW_SHOTS}-search-${label}.png` });
+    } else if (process.env.BUW_SHOTS) {
+      await clear();
+      await search('quokka');
+      await sp.locator('.wk-snip').waitFor();
+      await sp.screenshot({ path: `${process.env.BUW_SHOTS}-search-${label}.png` });
+    }
+    await sp.close();
   }
 
   console.log('hub-work-sheet-ui: passed');
