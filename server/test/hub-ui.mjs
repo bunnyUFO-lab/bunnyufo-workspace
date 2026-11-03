@@ -104,7 +104,7 @@ try {
   assert.match(await busyPage.locator('.today-all').innerText(), /^All 5/);
   const kindRows = await busyPage.locator('.hub-panel[aria-label="Needs you"] .nrow small').allInnerTexts();
   assert.equal(kindRows.length, 3, 'Today shows only the top three of five.');
-  for (const row of kindRows) assert.match(row, /^(Question|Steps|PR review|(?:Claude|Codex|Session) \w+|Approval) · /, `Row "${row}" starts with its kind.`);
+  for (const row of kindRows) assert.match(row, /^(Question|Steps|Review|(?:Claude|Codex|Session) \w+|Approval) · /, `Row "${row}" starts with its kind.`);
   assert.equal((await busyPage.locator('.hub-kpi[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '1');
   assert.match(await busyPage.locator('[data-alert]').innerText(), /Nightly brief failed[\s\S]*529/);
   await busyPage.setViewportSize({ width: 375, height: 812 });

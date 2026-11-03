@@ -217,7 +217,6 @@ export default function ReviewView({ route }: { route: string }) {
             ))}
             {verdicts.length > 0 && !verdicts.some(verdict => verdict.leg === 'qa') && <p className="hub-muted">QA did not run for this item.</p>}
           </section>}
-          
           {!legacy && <section className="hub-panel" data-section="shots" aria-label="Screenshots">
             <h3>Screenshots</h3>
             {detail.screenshots?.length ? <Shots pairs={detail.screenshots} /> : <p className="hub-muted">No screenshots came with this item.</p>}

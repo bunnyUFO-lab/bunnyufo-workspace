@@ -21,12 +21,12 @@ export function needsKind(item: Item): NeedsKind {
 }
 
 export const KIND_LABEL: Record<NeedsKind, string> = {
-  question: 'Question', design: 'Design review', steps: 'Steps', playtest: 'Playtest', unstick: 'Sessions', pr: 'PR review', approval: 'Approval',
+  question: 'Question', design: 'Design review', steps: 'Steps', playtest: 'Playtest', unstick: 'Sessions', pr: 'Review', approval: 'Approval',
 }
 
 /** The kind in the plural, lower case, for a sentence: "No more design reviews." */
 export const KIND_PLURAL: Record<NeedsKind, string> = {
-  question: 'questions', design: 'design reviews', steps: 'steps', playtest: 'playtests', unstick: 'sessions', pr: 'PR reviews', approval: 'approvals',
+  question: 'questions', design: 'design reviews', steps: 'steps', playtest: 'playtests', unstick: 'sessions', pr: 'reviews', approval: 'approvals',
 }
 
 /** Inner markup of a 24 px stroke icon, one per kind. */
