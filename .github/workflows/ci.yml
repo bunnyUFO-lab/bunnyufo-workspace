@@ -73,8 +73,8 @@ jobs:
         run: npx playwright install-deps chromium
       - run: npm run -s build
 
-      # hub-map-ui.mjs checks the map's svg by structure everywhere and by exact hash only on Windows, where it was
-      # recorded (text widths differ on Linux), so it runs here too.
+      # hub-map-ui.mjs checks the map's svg by structure everywhere (the state colours are in it) and by exact hash only on
+      # Windows, where it was recorded (text widths differ on Linux), so it runs here too.
 
       - name: UI tests, shard ${{ matrix.shard }} of 4
         run: node scripts/run-ui-tests.mjs --shard ${{ matrix.shard }}/4 2>&1 | tee ui-shard-${{ matrix.shard }}.log; exit "${PIPESTATUS[0]}"

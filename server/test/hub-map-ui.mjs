@@ -80,16 +80,18 @@ const sha = text => createHash('sha256').update(text).digest('hex');
 
 // The exact hashes above hold only on the machine that recorded them: the map is laid out from measured text widths, and a
 // Linux runner's fonts measure differently, so every coordinate moves (ws-aql). So the test checks two things. The structure
-// hash (STRUCTURE_*) is the same everywhere: it covers the tags, classes, data-* attributes, colours and label texts in order, and
-// leaves out every number that comes from geometry. The exact hash is checked only where it was recorded (EXACT_ON).
+// hash (STRUCTURE_*) is the same everywhere: it covers the tags, classes, data-* attributes, the style (the state colours) and label texts in order, and
+// leaves out every number that comes from geometry (and the style's transform-origin, which is one). The exact hash is checked only where it was recorded (EXACT_ON).
 const EXACT_ON = 'win32';
-const GEOMETRY = new Set(['x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'd', 'points', 'transform', 'viewBox', 'style', 'dx', 'dy', 'textLength', 'font-size']);
+const GEOMETRY = new Set(['x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'd', 'points', 'transform', 'viewBox', 'dx', 'dy', 'textLength', 'font-size']);
 /** The svg both ways: its raw markup, and as lines of tag, non-geometry attributes and own text, indented by depth. */
 const svgForms = page => page.evaluate(geometry => {
   const skip = new Set(geometry);
   const lines = [];
   const walk = (element, depth) => {
-    const attributes = [...element.attributes].filter(attribute => !skip.has(attribute.name)).map(attribute => `${attribute.name}=${attribute.value}`).sort();
+    // `style` stays (it carries the state colours), minus the declarations that are positions: transform-origin is in px of the measured text.
+    const value = attribute => (attribute.name === 'style' ? attribute.value.split(';').map(part => part.trim()).filter(part => part && !/^transform-origin\s*:/i.test(part)).join('; ') : attribute.value);
+    const attributes = [...element.attributes].filter(attribute => !skip.has(attribute.name)).map(attribute => `${attribute.name}=${value(attribute)}`).sort();
     const own = [...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent.trim()).filter(Boolean).join(' ');
     lines.push(`${' '.repeat(depth)}${element.tagName.toLowerCase()} ${attributes.join(' ')}${own ? ` "${own}"` : ''}`);
     for (const child of element.children) walk(child, depth + 1);
@@ -98,8 +100,8 @@ const svgForms = page => page.evaluate(geometry => {
   walk(svg, 0);
   return { raw: svg.outerHTML, structure: lines.join(String.fromCharCode(10)) };
 }, [...GEOMETRY]);
-const STRUCTURE_EXPANDED = 'b3e5a56091f7ec82d2c6b29242374683f79be8cbcad9b4cfc69c0e19b4a36faf';
-const STRUCTURE_EXPANDED_NO_SPRINTS = 'fa44f585ff5d46021255e73e7e019d81b1cb0cde4b2191490b2d5ede6f65340b';
+const STRUCTURE_EXPANDED = 'dc966477c65de670e1b11495f390b9c775f5162f6a17736d13b285e38ba67567';
+const STRUCTURE_EXPANDED_NO_SPRINTS = '1e3d7fb5f529c69ca040b6b926bd4093de118a89e7b6f35168394f6ca000fe0a';
 /** Checks a drawing against its recorded hashes; a mismatch says the actual hash, so a recording is one copy away. */
 const sameDrawing = (forms, structureHash, exactHash, what) => {
   assert.equal(sha(forms.structure), structureHash, `${what}: the structure of the svg changed (structure hash ${sha(forms.structure)}).`);
