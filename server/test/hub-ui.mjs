@@ -935,6 +935,8 @@ try {
   const sheetBox = await sheet.boundingBox();
   assert.ok(sheetBox.y >= 844 * 0.25 - 1 && sheetBox.y + sheetBox.height >= 843, `The sheet sits at the bottom (${sheetBox.y}, ${sheetBox.height}).`);
   await noSideways(phone, 'Progress map with the sheet');
+  const boxTop = (await phone.locator('.hub-map-box').boundingBox()).y;
+  assert.ok(sheetBox.y - boxTop >= 100, `An open sheet leaves the map at least 100 px above it (${sheetBox.y - boxTop}).`);
   await phone.touchscreen.tap(195, 40);
   await sheet.waitFor({ state: 'detached' });
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
