@@ -305,11 +305,13 @@ try {
   const place = await phone.locator('[data-item="02"] [data-command]').evaluate(block => {
     const pre = block.querySelector('pre').getBoundingClientRect();
     const button = block.querySelector('.hub-copy').getBoundingClientRect();
-    return { preRight: pre.right, buttonLeft: button.left, buttonTop: button.top, preTop: pre.top, buttonRight: button.right, view: innerWidth };
+    return { preHeight: pre.height, preWidth: pre.width, buttonWidth: button.width, buttonBottom: button.bottom, preTop: pre.top, buttonLeftEdge: button.left, buttonRight: button.right, view: innerWidth };
   });
-  assert.ok(place.buttonLeft >= place.preRight - 1, 'The button does not overlap the text.');
-  assert.ok(place.buttonTop <= place.preTop + 8, 'The button is at the top of the block.');
-  assert.ok(place.buttonRight <= place.view, 'and on the screen.');
+  assert.ok(place.buttonBottom <= place.preTop + 1, 'On a narrow screen Copy sits above the command, not beside it.');
+  assert.ok(Math.abs(place.buttonWidth - place.preWidth) <= 1, 'Copy is as wide as the command block.');
+  assert.ok(place.preHeight >= 24, `The command block keeps its height (${Math.round(place.preHeight)} px).`);
+  assert.ok(place.preWidth > 300, `The command gets the row (${Math.round(place.preWidth)} px).`);
+  assert.ok(place.buttonRight <= place.view && place.buttonLeftEdge >= 0, 'and on the screen.');
   await phone.locator('[data-item="01"] .hub-copy').tap();
   await phone.locator('[data-item="01"] .hub-copy', { hasText: /^Copied$/ }).waitFor();
   assert.equal(await phone.evaluate(() => navigator.clipboard.readText()), COMMAND_ONE_LINE, 'No prompt, no newline, no prose.');
@@ -332,6 +334,21 @@ try {
   step('a command is text: markup in it is shown, not rendered');
   assert.equal(await phone.locator('[data-item="05"] [data-command] pre').innerText(), COMMAND_MARKUP);
   assert.equal(await phone.locator('[data-item="05"] [data-command] :is(b, img, em)').count(), 0, 'No element was made from the command.');
+
+  step('on a wide screen Copy stays beside the command, at the top, as before');
+  const wide = await open({ width: 1280, height: 900 }, { permissions: ['clipboard-read', 'clipboard-write'] });
+  await wide.goto(`${commands.url}#/~hub/checklist/${COMMAND_CHECKLIST}`);
+  await wide.locator('[data-item="02"] [data-command] pre').waitFor();
+  const side = await wide.locator('[data-item="02"] [data-command]').evaluate(block => {
+    const pre = block.querySelector('pre').getBoundingClientRect();
+    const button = block.querySelector('.hub-copy').getBoundingClientRect();
+    return { preRight: pre.right, buttonLeft: button.left, buttonTop: button.top, preTop: pre.top };
+  });
+  assert.ok(side.buttonLeft >= side.preRight - 1, 'The button does not overlap the text.');
+  assert.ok(side.buttonTop <= side.preTop + 8, 'The button is at the top of the block.');
+  await wide.locator('[data-item="02"] .hub-copy').click();
+  await wide.locator('[data-item="02"] .hub-copy', { hasText: /^Copied$/ }).waitFor();
+  assert.equal(await wide.evaluate(() => navigator.clipboard.readText()), COMMAND_LONG, 'Copy still copies exactly the command.');
 
   console.log('hub-checklist-ui: passed');
 } finally {

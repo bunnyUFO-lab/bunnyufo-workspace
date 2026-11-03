@@ -1070,7 +1070,9 @@ test('checkChecklist: the contract limits', () => {
   assert.ok(bad({ ...ok, items: [{ text: '' }] }) && bad({ ...ok, items: [{ text: 'x'.repeat(201) }] }));
   assert.ok(bad({ ...ok, items: [{ text: 'a', group: 'g'.repeat(81) }] }) && bad({ ...ok, items: [{ text: 'a', guide: 'g'.repeat(4001) }] }));
   assert.ok(bad({ ...ok, context: 'c'.repeat(4001) }));
-  assert.deepEqual(checkChecklist({ ...ok, items: [{ text: 'a', command: 'ls -la', shell: 'bash' }, { text: 'b', command: 'x'.repeat(2000) }] }), [], 'An item may carry a command and a shell.');
+  assert.deepEqual(checkChecklist({ ...ok, items: [{ text: 'a', command: 'ls -la', shell: 'bash' }, { text: 'b', command: 'x'.repeat(2000), shell: 'cmd' }] }), [], 'An item may carry a command and a shell.');
+  assert.deepEqual(checkChecklist({ ...ok, items: [{ text: 'a', command: 'ls' }] }), ['item 1: a command needs a shell (bash, powershell or cmd)'], 'A command without a shell is flagged, as the CLI does.');
+  assert.deepEqual(checkChecklist({ ...ok, items: [{ text: 'a', shell: 'bash' }] }), [], 'A shell alone is not flagged.');
   assert.ok(bad({ ...ok, items: [{ text: 'a', command: '' }] }) && bad({ ...ok, items: [{ text: 'a', command: 'x'.repeat(2001) }] }) && bad({ ...ok, items: [{ text: 'a', command: 5 }] }));
   assert.ok(bad({ ...ok, items: [{ text: 'a', command: 'ls', shell: 'zsh' }] }));
   assert.ok(bad({ ...ok, card: 'ftp://example.test/x' }) && bad({ ...ok, items: [{ text: 'a', link: 'javascript:alert(1)' }] }));

@@ -11,7 +11,7 @@ import { ASK_IMAGE_RE, EVIDENCE_RE, SHOT_RE, validDecisions } from './hub-model.
 
 export const HELP_KINDS = ['ask', 'checklist', 'review', 'blocked'];
 export const HELP_LIMITS = {
-  text: 6000, title: 120, step: 200, guide: 600, focusGuide: 2000, steps: 30, question: 2000, blocked: 2000, verdict: 300,
+  text: 6000, title: 120, step: 200, guide: 600, focusGuide: 2000, command: 400, focusCommand: 2000, steps: 30, question: 2000, blocked: 2000, verdict: 300,
   pictures: 3, pictureBytes: 4.5 * 1024 * 1024, line: 400, excerpt: 2000,
 };
 
@@ -94,7 +94,9 @@ async function loadPictures(candidates, readFile, fail) {
 const stepLine = (item, stage, focused) => {
   const head = `${item.id} [${item.done ? 'done' : 'open'}] ${oneLine(item.text, HELP_LIMITS.step)}`;
   const guide = stage === 0 ? block(item.guide, focused ? HELP_LIMITS.focusGuide : HELP_LIMITS.guide) : '';
-  return guide ? `${head}\n   guide: ${guide.replace(/\n/g, '\n   ')}` : head;
+  const command = stage === 0 && typeof item.command === 'string' ? block(item.command, focused ? HELP_LIMITS.focusCommand : HELP_LIMITS.command) : '';
+  const shell = typeof item.shell === 'string' && item.shell ? ` (${oneLine(item.shell, 12)})` : '';
+  return `${head}${guide ? `\n   guide: ${guide.replace(/\n/g, '\n   ')}` : ''}${command ? `\n   command${shell}: ${command.replace(/\n/g, '\n   ')}` : ''}`;
 };
 
 /** The agent-written lines of an item. `stage` 0 keeps every guide, 1 drops the unfocused ones, 2 also shortens each step. */

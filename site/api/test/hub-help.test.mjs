@@ -229,3 +229,20 @@ test('secret-shaped text in a chat is masked before it goes into the excerpt', (
   const long = helpExcerpt([{ role: 'user', text: `${'x'.repeat(395)} ${secrets.github}` }]);
   assert.ok(!long.excerpt.includes('ghp_'), 'A secret at the cut is masked before the cut.');
 });
+
+test('a step with a command shows it, with its shell, capped like a guide', async () => {
+  const long = 'c'.repeat(5000);
+  const items = [
+    { id: '01', text: 'Run the check', command: 'npm run check', shell: 'bash', done: false },
+    { id: '02', text: 'Restart', command: long, shell: 'powershell', done: false },
+    { id: '03', text: 'Plain step', done: false },
+  ];
+  const built = await buildHelpContext('checklist', checklist({ items }), { id: 'c1', step: '02', ...files() });
+  const inside = built.text.slice(built.text.indexOf(NL_OPEN), built.text.indexOf(NL_CLOSE));
+  assert.match(inside, /01 \[open\] Run the check\n {5}command \(bash\): npm run check/);
+  assert.match(inside, new RegExp(String.raw`Focused step 02 \[open\] Restart\n {3}command \(powershell\): c{${HELP_LIMITS.focusCommand}}(?!c)`), 'The focused command is cut at its cap.');
+  const unfocused = await buildHelpContext('checklist', checklist({ items }), { id: 'c1', ...files() });
+  assert.ok(!unfocused.text.includes('c'.repeat(HELP_LIMITS.command + 1)), 'An unfocused command is cut at 400.');
+  assert.match(unfocused.text, /03 \[open\] Plain step\n/);
+  assert.doesNotMatch(unfocused.text, /03 \[open\] Plain step\n\s+command/);
+});

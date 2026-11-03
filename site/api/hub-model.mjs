@@ -361,6 +361,7 @@ export function checkChecklist(raw) {
       if (item.link !== undefined && !link(item.link)) problems.push(`${at}: link is an http:// or https:// link of at most 2000 characters`);
       if (item.command !== undefined && !(typeof item.command === 'string' && item.command.trim().length >= 1 && item.command.length <= L.command)) problems.push(`${at}: command is 1 to ${L.command} characters`);
       if (item.shell !== undefined && !['bash', 'powershell', 'cmd'].includes(item.shell)) problems.push(`${at}: shell is one of bash, powershell, cmd`);
+      if (item.command !== undefined && item.shell === undefined) problems.push(`${at}: a command needs a shell (bash, powershell or cmd)`);
       if (item.id !== undefined && item.id !== String(index + 1).padStart(2, '0')) problems.push(`${at}: id is its position (${String(index + 1).padStart(2, '0')})`);
     });
   }

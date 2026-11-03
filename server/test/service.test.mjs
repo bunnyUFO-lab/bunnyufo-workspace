@@ -97,7 +97,7 @@ test('websocket rejects report origins and unauthenticated messages', async () =
       attempt.once('open', () => resolve(attempt));
       attempt.once('error', reject);
     }), error => error.code);
-    await assert.rejects(connect({ origin: service.contentOrigin }), 'A report origin is refused.');
+    await assert.rejects(connect({ origin: service.contentOrigin }).then(opened => { opened.close(); }), 'A report origin is refused.');
     const socket = await connect({ origin: service.origin });
     const closed = new Promise(resolve => socket.on('close', code => resolve(code)));
     socket.send(JSON.stringify({ type: 'input', id: 'anything', data: 'whoami\r' }));
