@@ -11,6 +11,7 @@ import ChecklistBody from './ChecklistBody'
 import HermesApprovalView from './HermesApprovalView'
 import RunQuestionView from './RunQuestionView'
 import { ReviewActions } from './ItemRow'
+import { nothingToDo } from './reviewText'
 import { useMarkDone } from './useMarkDone'
 import { itemKey, itemPage } from './needsFocus'
 import { useHubData } from './useHub'
@@ -71,6 +72,8 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
   return (
     <>
       <div className="ni-b">
+        {item.ownerSummary && <p className="ni-owner" data-owner-summary>{item.ownerSummary}</p>}
+        {item.ask && <p className="ni-ask" data-ask><b>{item.ask}</b></p>}
         {prs.length > 0 && (
           <p className="ni-prs" data-review-prs>
             {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer" data-review-pr>{prLinkLabel(url, prs)}</a>)}
@@ -85,7 +88,7 @@ function ReviewBody({ item, onSettled }: { item: Item; onSettled: () => void }) 
         </div>
       </div>
       <div className="ni-a">
-        <ReviewActions item={item} onDone={onSettled} />
+        <ReviewActions item={item} onDone={onSettled} primary={nothingToDo(item.ask) || prs.length === 0} />
         <a className="hub-btn" href={reviewHash(item.id)} data-review-open>Details</a>
       </div>
     </>

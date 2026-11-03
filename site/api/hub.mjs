@@ -1063,7 +1063,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /** The sprint card an old review belongs to, found from its title; its files are the ones the summary names that exist. */
   async function inferCard(detail) {
-    const card = findSprintCard(detail.title, await allCards());
+    const card = findSprintCard(detail.fullTitle ?? detail.title, await allCards());
     if (!card) return null;
     const cardDir = `${card.section}/${card.folder}`;
     if (!CARD_DIR_RE.test(cardDir) || cardDir.includes('..')) return null;

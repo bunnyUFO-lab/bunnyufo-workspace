@@ -1,0 +1,33 @@
+{
+  "ts": "2026-11-03T03:33:12.258Z",
+  "kind": "ready-for-review",
+  "host": "pc.example.test",
+  "source": "dev-sprint",
+  "title": "mc-s-m1: Flakes batch 2: ws-33i + ws-fio (skills), ws-5mo + ws-lev (homelab). Brief: sprint/briefs/flakes-2.md",
+  "project": "probe",
+  "session": "00000000-0000-0000-0000-000000000000",
+  "url": "https://github.com/example/homelab/pull/79",
+  "card": "https://example.test/one#/sprint-card",
+  "prs": [
+    "https://github.com/example/homelab/pull/79"
+  ],
+  "cardDir": "one/sprint-card",
+  "cardFiles": [
+    "sprint/briefs/flakes-2.md",
+    "sprint/reviews/flakes-2-B.md"
+  ],
+  "deployUrl": "https://dev.example.test",
+  "verdicts": [
+    {
+      "leg": "smoke",
+      "result": "pass",
+      "text": "#79 round 2 at ef4b8cd, CI green: read-then-stat with an interleaving test, stale guard cleared by rename and check, mask test is a 1x/4x ratio, 8 s abort has a test. Extra: fakes/retry-connect.mjs drops the abort signal on loopback (load run showed CLI children aborting). Proof 638/638 twice at on…"
+    },
+    {
+      "leg": "review",
+      "result": "pass",
+      "text": "Round 2 verified (sprint/reviews/flakes-2-B.md): one holder in the reviewer's reproduction, 638/638 twice at once with 8 busy loops. Merged homelab #79 (5740db0) and skills #71 (913f880). Beads ws-33i, ws-fio, ws-5mo, ws-lev closed; two P3 follow-ups filed."
+    }
+  ],
+  "summary": "Round 2 verified (sprint/reviews/flakes-2-B.md): one holder in the reviewer's reproduction, 638/638 twice at once with 8 busy loops. Merged homelab #79 (5740db0) and skills #71 (913f880). Beads ws-33i, ws-fio, ws-5mo, ws-lev closed; two P3 follow-ups filed."
+}

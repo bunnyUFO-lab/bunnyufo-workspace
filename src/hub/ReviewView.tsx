@@ -13,6 +13,7 @@ import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
 import { needsHash } from './needsFocus'
 import { PageProjectChip } from './ProjectChip'
+import { DONE_HINT, nothingToDo } from './reviewText'
 
 const LEG_LABEL: Record<Verdict['leg'], string> = { smoke: 'Smoke tests', review: 'Review', qa: 'QA' }
 const DOT: Record<Verdict['result'], string> = { pass: 'g', fail: 'r', noted: 'y' }
@@ -108,6 +109,7 @@ export default function ReviewView({ route }: { route: string }) {
   const listed = files.find(entry => entry.path === file)
   const content = useCardFile(listed ? cardDir : undefined, listed?.path)
   const loadedDetail = !!detail
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   useEffect(() => {
     if (!loadedDetail) return
@@ -170,7 +172,9 @@ export default function ReviewView({ route }: { route: string }) {
           <GetHelp className="hub-top-help" target={{ kind: 'review', id, label: 'review', title: detail.title }} />
         </div>
         <p className="hub-muted">Posted {ago(detail.at)}{detail.host ? ` from ${detail.host}` : ''}.</p>
-        {detail.summary && <Md text={linked.text} />}
+        {detail.ownerSummary && <p className="hub-review-owner" data-owner-summary>{detail.ownerSummary}</p>}
+        {detail.ask && <p className="hub-review-ask" data-ask><b>{detail.ask}</b></p>}
+        {detail.summary && !detail.ownerSummary && <Md text={linked.text} />}
         {otherUrl && <p><a className="hub-btn" href={otherUrl} target="_blank" rel="noopener noreferrer" data-link-head>{otherLinkLabel(otherUrl)}</a></p>}
       </div>
       <div className="hub-review-grid" data-solo={files.length || file ? undefined : 'true'}>
@@ -183,17 +187,6 @@ export default function ReviewView({ route }: { route: string }) {
               {!showFiles && (cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
             </section>
           )}
-          {!legacy && <section className="hub-panel" data-section="status" aria-label="Status">
-            <h3>Status</h3>
-            {verdicts.length === 0 && <p className="hub-muted">No test or review results came with this item.</p>}
-            {verdicts.map(verdict => (
-              <p className="hub-review-line" key={verdict.leg} data-verdict={verdict.leg}>
-                <span className={`hub-dot ${DOT[verdict.result]}`} aria-hidden="true" />
-                <span><b>{LEG_LABEL[verdict.leg]}</b> {verdict.text}</span>
-              </p>
-            ))}
-            {verdicts.length > 0 && !verdicts.some(verdict => verdict.leg === 'qa') && <p className="hub-muted">QA did not run for this item.</p>}
-          </section>}
           <section className="hub-panel" data-section="prs" aria-label="Pull requests">
             <h3>Pull requests</h3>
             {prs.length === 0 && <p className="hub-muted">No pull request link came with this item.</p>}
@@ -205,6 +198,26 @@ export default function ReviewView({ route }: { route: string }) {
               {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer">{prLabel(url)}</a>)}
             </div>
           </section>
+          <details className="hub-review-details" data-details open={detailsOpen || !!file} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
+            <summary>Details</summary>
+            {(detail.fullTitle || detail.ownerSummary) && (
+              <div className="hub-panel" data-section="posted" aria-label="As posted">
+                {detail.fullTitle && <p data-full-title>{detail.fullTitle}</p>}
+                {detail.ownerSummary && detail.summary && <Md text={linked.text} />}
+              </div>
+            )}
+          {!legacy && <section className="hub-panel" data-section="status" aria-label="Status">
+            <h3>Status</h3>
+            {verdicts.length === 0 && <p className="hub-muted">No test or review results came with this item.</p>}
+            {verdicts.map(verdict => (
+              <p className="hub-review-line" key={verdict.leg} data-verdict={verdict.leg}>
+                <span className={`hub-dot ${DOT[verdict.result]}`} aria-hidden="true" />
+                <span><b>{LEG_LABEL[verdict.leg]}</b> {verdict.text}</span>
+              </p>
+            ))}
+            {verdicts.length > 0 && !verdicts.some(verdict => verdict.leg === 'qa') && <p className="hub-muted">QA did not run for this item.</p>}
+          </section>}
+          
           {!legacy && <section className="hub-panel" data-section="shots" aria-label="Screenshots">
             <h3>Screenshots</h3>
             {detail.screenshots?.length ? <Shots pairs={detail.screenshots} /> : <p className="hub-muted">No screenshots came with this item.</p>}
@@ -221,19 +234,19 @@ export default function ReviewView({ route }: { route: string }) {
             </div>
             {(cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
           </section>}
-          {!legacy && <section className="hub-panel" data-section="try" aria-label="Try it">
+          </details>
+          {detail.tryIt && detail.deployUrl && <section className="hub-panel" data-section="try" aria-label="Try it">
             <h3>Try it</h3>
-            {detail.deployUrl
-              ? <p><a className="hub-btn" href={detail.deployUrl} target="_blank" rel="noopener noreferrer">Open the build</a></p>
-              : <p className="hub-muted">No deployed build yet. The stack deploys after it merges.</p>}
+            <p data-try-it>{detail.tryIt}</p>
+            <p><a className="hub-btn" href={detail.deployUrl} target="_blank" rel="noopener noreferrer">Open the build</a></p>
           </section>}
           <section className="hub-panel" aria-label="Mark done">
             {detail.done
                 ? <p data-done>Marked done {ago(detail.doneAt ?? detail.at)}{detail.doneBy ? ` by ${detail.doneBy}` : ''}</p>
                 : (
                   <>
-                    <p className="hub-muted" data-done-hint>Mark done hides this review from Needs you. It does not approve or merge anything.</p>
-                    <ReviewActions item={item} links={false} onDone={() => void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id))} />
+                    <ReviewActions item={item} links={false} primary={nothingToDo(detail.ask) || prs.length === 0} onDone={() => void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id))} />
+                    <p className="hub-muted hub-done-means" data-done-hint>{detail.doneMeans ?? DONE_HINT}</p>
                   </>
                 )}
           </section>

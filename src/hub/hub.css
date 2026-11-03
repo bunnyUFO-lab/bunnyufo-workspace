@@ -539,3 +539,10 @@ button.hub-cl-text { cursor: pointer; }
 }
 .hub-link-btn { padding: 0; border: 0; background: none; color: var(--pink-bright); font: inherit; text-decoration: underline; cursor: pointer; }
 .hub-map-panel-hidden { margin: 8px 0 0; font-size: 0.8rem; }
+
+.hub-row-summary { display: block; font-size: 0.85rem; margin-top: 2px; }
+.hub-row-ask { display: block; font-size: 0.85rem; margin-top: 2px; }
+.hub-review-owner, .hub-review-ask { margin: 8px 0; }
+.hub-review-details { margin: 12px 0; }
+.hub-review-details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; min-height: 32px; }
+.hub-done-means { margin: 6px 0 0; }

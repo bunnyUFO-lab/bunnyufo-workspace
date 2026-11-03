@@ -764,7 +764,7 @@ test("a review's detail carries its checked links", async () => {
       },
     }));
     const badDir = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), title: 'Bad dir', extra: { cardDir: '../x', cardFiles: ['briefs/x.md'] } }));
-    const old = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 10), title: 'Old one', url: '', card: '' }));
+    const old = seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 10), title: 'Old one', url: '', card: '', extra: { ask: null } }));
 
     const answer = await get(`/hub/reviews/${file}`);
     assert.equal(answer.status, 200);

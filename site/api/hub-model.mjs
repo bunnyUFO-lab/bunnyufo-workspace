@@ -531,6 +531,33 @@ const reviewExtras = event => {
   return { ...(verdicts.length ? { verdicts } : {}), ...(Array.isArray(event.screenshots) && event.screenshots.length ? { shots: event.screenshots.length } : {}) };
 };
 
+const ownerText = (value, length) => (typeof value === 'string' && value.trim() ? clip(value.trim(), length) : undefined);
+
+/**
+ * The title an owner reads for an old `ready-for-review` event: no leading `<sprint label>: ` and no trailing
+ * `Brief: …` (or `Briefs: …`), with a clipped tail's ellipsis dropped. An event with an `ownerTitle` shows that instead.
+ */
+export function plainReviewTitle(title) {
+  let text = String(title ?? '').trim();
+  for (let pass = 0; pass < 2; pass += 1) text = text.replace(/^[a-z][a-z0-9]*(?:-[a-z0-9.]+)+:\s+/i, '');
+  text = text.replace(/\s*(?<![\w-])Briefs?:\s.*$/is, '').replace(/[\s.…]+$/, '');
+  return text || String(title ?? '').trim();
+}
+
+/** What a review shows first: the owner's title, summary and the one line to decide or do (new events), else the plain old title. */
+export const reviewOwnerFields = event => {
+  const ownerTitle = ownerText(event.ownerTitle, 120);
+  const ownerSummary = ownerText(event.ownerSummary, 600);
+  const ask = ownerText(event.ask, 200);
+  return { title: ownerTitle ?? plainReviewTitle(event.title), ...(ownerSummary ? { ownerSummary } : {}), ...(ask ? { ask } : {}) };
+};
+
+/** A review is worth the owner's attention only with something to look at (a pull request or another link) or something to decide or do (`ask`). */
+export const reviewHasAction = event => !!ownerText(event.ask, 200)
+  || reviewPrs(event).length > 0
+  || (Array.isArray(event.prs) && event.prs.some(value => typeof value === 'string' && /^https?:\/\//i.test(value)))
+  || (typeof event.url === 'string' && /^https?:\/\//i.test(event.url));
+
 const eventItem = (kind, event, extra = {}) => ({
   kind, id: event.file, project: event.project, title: event.title, at: event.ts,
   ...(event.bead ? { bead: event.bead } : {}), ...(event.url ? { url: event.url } : {}),
@@ -597,9 +624,10 @@ export function deriveEventItems(events, repoProjects = {}) {
       const merged = prs.length
         ? progress.settled === prs.length
         : after(event, other => other.kind === 'pr-merged' && (event.bead ? other.bead === event.bead : !!event.url && other.url === event.url));
-      if (merged || done.has(event.file)) continue;
+      if (merged || done.has(event.file) || !reviewHasAction(event)) continue;
       const project = projectOfPrs(prs, repoProjects);
       reviews.push(eventItem('review', event, {
+        ...reviewOwnerFields(event),
         ...reviewExtras(event),
         ...(Array.isArray(event.prs) && prs.length ? { prs } : {}),
         ...(progress.merged > 0 ? { prsMerged: progress.merged } : {}),
@@ -1021,8 +1049,16 @@ export function reviewDetail(events, id, repoProjects = {}) {
     .slice(0, 3).map(verdict => ({ leg: verdict.leg, result: verdict.result, text: String(verdict.text).slice(0, 300) }));
   const done = events.find(candidate => candidate.kind === 'review-done' && candidate.review === id);
   const summary = typeof event.summary === 'string' && event.summary.trim() ? event.summary.slice(0, 4000) : undefined;
+  const owner = reviewOwnerFields(event);
+  const fullTitle = text(event.title, 200);
+  const tryIt = ownerText(event.tryIt, 200);
+  const doneMeans = ownerText(event.doneMeans, 200);
   return {
-    id, title: text(event.title, 200) ?? 'Review', at: event.ts,
+    id, title: owner.title || fullTitle || 'Review', at: event.ts,
+    ...(fullTitle && fullTitle !== owner.title ? { fullTitle } : {}),
+    ...(owner.ownerSummary ? { ownerSummary: owner.ownerSummary } : {}),
+    ...(owner.ask ? { ask: owner.ask } : {}),
+    ...(tryIt ? { tryIt } : {}), ...(doneMeans ? { doneMeans } : {}),
     ...(summary ? { summary } : {}),
     ...(prProject ? { project: prProject } : {}),
     ...(text(event.host, 80) ? { host: text(event.host, 80) } : {}),
