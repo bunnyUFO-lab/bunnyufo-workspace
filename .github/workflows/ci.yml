@@ -1,6 +1,14 @@
 # Checks every pull request and every push to main, on GitHub-hosted runners with no secrets.
 # Deploys are not here: they run from a private repository on the owner's own runner
 # (site/deploy/*.sh), so no code from a pull request ever runs on the home server.
+#
+# Runtime (ws-qdh.11): a PR runs only what its files can affect (scripts/ci-affected.mjs, the `changes` job).
+# `check` and `ui (1)` to `ui (4)` are Required checks, so none of them is left out by a workflow-level `paths:` filter:
+# GitHub keeps the checks of a workflow skipped that way "Pending" and blocks the merge, while a job skipped by an `if:`
+# reports Success (docs: "Troubleshooting required status checks"). `check` is skipped at job level. The `ui` matrix is
+# never skipped at job level (a skipped matrix job is not expanded, so its checks would be named
+# `ui (${{ matrix.shard }})` and the required `ui (1)` would stay pending); its steps are skipped instead, and the job
+# ends in seconds. The nightly run does everything, and only when main changed since the last successful nightly run.
 name: CI
 
 on:
@@ -8,16 +16,66 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '17 3 * * *' # nightly full run of every job on main, 03:17 UTC
+    - cron: '17 3 * * *' # nightly full run of every job on main, 03:17 UTC, only if main changed since the last one
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a PR cancels the run still going for it. Pushes to main, the nightly and manual runs are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  check:
-    if: github.event_name != 'schedule'
+  # What does this change need? check: none | docs | all. ui: none | some | all, with the UI test files for `some`.
+  # Unsure (the API fails, the script fails) means everything.
+  changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      check: ${{ steps.what.outputs.check }}
+      ui: ${{ steps.what.outputs.ui }}
+      fragments: ${{ steps.what.outputs.fragments }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Which tests does this change affect?
+        id: what
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          everything() { printf 'check=all\nui=all\nfragments=\n' >> "$GITHUB_OUTPUT"; echo "everything: $1"; }
+          files=""
+          case "$EVENT" in
+            workflow_dispatch) everything "manual run"; exit 0 ;;
+            schedule)
+              last=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // ""') || last=""
+              if [ -n "$last" ] && [ "$last" = "$SHA" ]; then
+                printf 'check=none\nui=none\nfragments=\n' >> "$GITHUB_OUTPUT"; echo "main has not changed since the last nightly run"
+              else everything "nightly, main changed"; fi
+              exit 0 ;;
+            pull_request) files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename') || files="" ;;
+            push) case "$BEFORE" in 0000000*) files="" ;; *) files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[].filename') || files="" ;; esac ;;
+          esac
+          if [ -z "$files" ]; then everything "no file list"; exit 0; fi
+          echo "$files"
+          if out=$(echo "$files" | node scripts/ci-affected.mjs --github-output); then echo "$out" | tee -a "$GITHUB_OUTPUT"; else everything "ci-affected failed"; fi
+
+  check:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.check != 'none' && github.event_name != 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -25,12 +83,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
 
       - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run test:template
-      - run: npm run build
+      # docs only: the docs tests and the template check; anything else, an empty output included, runs the lot
+      - if: needs.changes.outputs.check == 'docs'
+        run: npm run docs:test && npm run test:template
+      - if: needs.changes.outputs.check != 'docs'
+        run: npm run lint
+      - if: needs.changes.outputs.check != 'docs'
+        run: npm test
+      - if: needs.changes.outputs.check != 'docs'
+        run: npm run test:template
+      - if: needs.changes.outputs.check != 'docs'
+        run: npm run build
 
       - name: No workflow may run on a self-hosted runner
         run: '! grep -rnE "runs-on:.*self-host[e]d" .github/workflows'
@@ -38,46 +106,68 @@ jobs:
   # The browser tests (server/test/ui.mjs and *-ui.mjs) against the built app, split into parallel
   # shards: shard i of n runs every n-th test file. They use stand-in data and a local server, so no
   # secrets. The nightly schedule runs the same shards, which together are the full suite.
+  # On a PR only the UI test files the change affects run (`ui` = some), spread over the same four shards;
+  # a shard with nothing to run ends green.
   ui:
+    needs: changes
+    # !cancelled(): a failed `changes` job must not skip the Required ui checks (a job skipped for a failed need counts as passing);
+    # its empty outputs then mean everything runs.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     env:
       BUW_TEST_BROWSER: chromium
+      RUN_UI: ${{ needs.changes.outputs.ui != 'none' }}
+      UI_MODE: ${{ needs.changes.outputs.ui }}
+      UI_FILES: ${{ needs.changes.outputs.fragments }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - if: env.RUN_UI == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - if: env.RUN_UI == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
 
-      - run: npm ci
+      - if: env.RUN_UI == 'true'
+        run: npm ci
       # The browser download is cached by the Playwright version in the lockfile. On a hit only the system
       # libraries are installed (they are not part of the cache); on a miss the browser comes with them.
       - name: Playwright version
+        if: env.RUN_UI == 'true'
         id: playwright
         run: echo "version=$(node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
       - name: Cache the Playwright browsers
+        if: env.RUN_UI == 'true'
         id: browsers
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ steps.playwright.outputs.version }}
-      - if: steps.browsers.outputs.cache-hit != 'true'
+      - if: env.RUN_UI == 'true' && steps.browsers.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
-      - if: steps.browsers.outputs.cache-hit == 'true'
+      - if: env.RUN_UI == 'true' && steps.browsers.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
-      - run: npm run -s build
+      - if: env.RUN_UI == 'true'
+        run: npm run -s build
 
       # hub-map-ui.mjs checks the map's svg by structure everywhere (the state colours are in it) and by exact hash only on
       # Windows, where it was recorded (text widths differ on Linux), so it runs here too.
 
       - name: UI tests, shard ${{ matrix.shard }} of 4
-        run: node scripts/run-ui-tests.mjs --shard ${{ matrix.shard }}/4 2>&1 | tee ui-shard-${{ matrix.shard }}.log; exit "${PIPESTATUS[0]}"
+        if: env.RUN_UI == 'true'
+        run: |
+          files=""
+          if [ "$UI_MODE" = some ]; then files="--allow-empty $UI_FILES"; fi
+          node scripts/run-ui-tests.mjs --shard ${{ matrix.shard }}/4 $files 2>&1 | tee ui-shard-${{ matrix.shard }}.log; exit "${PIPESTATUS[0]}"
 
       - name: Keep the log when a shard fails
         if: failure()

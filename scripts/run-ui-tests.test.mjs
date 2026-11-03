@@ -51,3 +51,21 @@ test('a normal run of a quick file passes and leaves nothing running', async () 
     clearTimeout(bound);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('a fragment ending in .mjs is a whole file name, and --allow-empty ends 0 when nothing matches', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'buw-ui-runner-'));
+  try {
+    for (const name of ['hub-ui.mjs', 'hub-work-ui.mjs']) await writeFile(path.join(dir, name), 'console.log("ran");');
+    const run = args => new Promise(resolve => {
+      let out = '';
+      const child = spawn(process.execPath, [runner, ...args], { env: { ...process.env, BUW_UI_TEST_DIR: dir }, windowsHide: true });
+      child.stdout.on('data', chunk => { out += chunk; });
+      child.on('close', code => resolve({ code, out }));
+    });
+    const exact = await run(['hub-ui.mjs']);
+    assert.equal(exact.code, 0);
+    assert.match(exact.out, /1 passed, 0 failed, 1 run/);
+    assert.equal((await run(['nope-ui.mjs'])).code, 1);
+    assert.equal((await run(['nope-ui.mjs', '--allow-empty'])).code, 0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

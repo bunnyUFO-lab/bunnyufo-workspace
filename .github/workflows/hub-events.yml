@@ -11,6 +11,11 @@ on:
         type: string
         default: '7'
 permissions: {}
+# One group per PR and action: the opened and closed posts of a PR must both run, so only a repeat of the same action
+# cancels the one before it. Scheduled and manual runs get a group of their own (ws-qdh.11).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   post:
     if: github.event_name == 'pull_request'
