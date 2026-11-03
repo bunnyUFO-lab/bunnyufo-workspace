@@ -19,6 +19,8 @@ export const AGENTS = [
   { id: 'researcher', profile: 'main', name: 'Researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'research cards with sources', presets: ['research', 'mockup'] },
   { id: 'market-researcher', profile: 'main', name: 'Market researcher', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'who makes it, what it costs, what players say', presets: ['market-research'] },
   { id: 'teardown', profile: 'main', name: 'Teardown', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'how a public game works, from public sources', presets: ['game-teardown'] },
+  // The Planner is a chat agent with no job preset: it talks a plan through, then files one change-list Ask (ws-qdh.3).
+  { id: 'planner', profile: 'main', name: 'Planner', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'talks a plan through and files it as a change list for you to approve' },
 ];
 
 export const AVATAR_FILE_RE = /^avatar-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}\.json$/;
@@ -80,7 +82,7 @@ export function agentStatuses({ working = [], pc = null, hermes = null, lastChat
     { id: 'hermes', status: hermesStatus, task: hermesTask },
     { id: 'briefs', status: 'idle', task: 'Daily projects brief and weekly digests' },
     { id: 'claude', status: claude, task: claudeTask, sessions },
-    ...['researcher', 'market-researcher', 'teardown'].map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
+    ...['researcher', 'market-researcher', 'teardown', 'planner'].map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
   ];
 }
 

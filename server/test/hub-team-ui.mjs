@@ -44,12 +44,12 @@ const noSideways = async (page, what) => {
 const cardSprite = (page, agent) => page.locator(`[data-agent="${agent}"] .team-tile svg`);
 
 try {
-  step('six cards (the three research agents among them), the header counts, the labels, and Team in the sidebar');
+  step('seven cards (the three research agents and the Planner among them), the header counts, the labels, and Team in the sidebar');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
   await desk.goto(`${fixture.url}#/~hub/team`);
   await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('.team-card').count(), 6);
-  assert.deepEqual(await desk.locator('.team-card h3').allInnerTexts(), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown']);
+  assert.equal(await desk.locator('.team-card').count(), 7);
+  assert.deepEqual(await desk.locator('.team-card h3').allInnerTexts(), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
   assert.equal(await desk.locator('[data-give-work]').count(), 3, 'Only the research agents take work from here.');
   await desk.locator('[data-give-work="teardown"]').click();
   await desk.locator('[data-spawn-sheet]').waitFor();
@@ -58,7 +58,7 @@ try {
   await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
   assert.equal(await desk.locator('[data-hub-group="operate"] [data-hub-link="team"]').count(), 1, 'Team is in Operate.');
   assert.equal(await desk.locator('[data-hub-link="team"]').getAttribute('aria-current'), 'page', 'Team is the current row in the sidebar.');
-  assert.match(await desk.locator('[data-team-online]').innerText(), /^\d\/6$/);
+  assert.match(await desk.locator('[data-team-online]').innerText(), /^\d\/7$/);
   assert.equal(await desk.locator('[data-agent="hermes"] .team-facts').innerText().then(t => t.replace(/\s+/g, ' ')), 'Model Codex gpt-6-sol · Sonnet, then DeepSeek fallback Runs as Hermes profile main');
   assert.match(await desk.locator('[data-agent="briefs"] .team-facts').innerText(), /Haiku 5\.5 · DeepSeek fallback/);
   assert.equal(await desk.locator('[data-agent="claude"]').getAttribute('data-status'), 'working', 'The fixture PC has a busy session.');
@@ -180,7 +180,7 @@ try {
   await guest.goto(`${fixture.url}#/~hub/team`);
   await guest.locator('.team-card').first().waitFor();
   assert.equal(await guest.locator('[data-sprite-open]').count(), 0, 'No Sprite button without write.');
-  assert.equal(await guest.locator('[data-sprite-signin]').count(), 6, 'Each card says why.');
+  assert.equal(await guest.locator('[data-sprite-signin]').count(), 7, 'Each card says why.');
   assert.equal(await guest.locator('[data-sprite-signin]').first().innerText(), 'Sign in to change sprites');
   assert.equal(await guest.locator('[data-sprite-signin]').first().isVisible(), true);
 

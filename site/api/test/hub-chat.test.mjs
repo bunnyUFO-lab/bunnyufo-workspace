@@ -849,7 +849,7 @@ test('persona: a listed id pins its server-built text first, stores the id on ev
     assert.deepEqual(lines(fake, done.data.conversation).map(line => line.persona), Array(4).fill('market-researcher'));
     const listed = await (await call('GET', '/hub/chat')).json();
     assert.equal(listed.conversations[0].persona, 'market-researcher');
-    assert.deepEqual(listed.personas.map(entry => entry.id), ['researcher', 'market-researcher', 'teardown']);
+    assert.deepEqual(listed.personas.map(entry => entry.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
     assert.ok(listed.personas.every(entry => !('text' in entry) && !('prompt' in entry)));
   } finally { await close(); }
 });

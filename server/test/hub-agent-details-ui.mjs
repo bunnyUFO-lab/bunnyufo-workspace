@@ -36,7 +36,7 @@ try {
   const desk = await open({ width: 1280, height: 800 });
   await desk.goto(`${fresh.url}#/~hub/team`);
   await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('[data-details-open]').count(), 6);
+  assert.equal(await desk.locator('[data-details-open]').count(), 7);
   assert.equal(await desk.locator('[data-details-open="claude"]').getAttribute('href'), '#/~hub/agent/claude');
   await desk.locator('[data-details-open="hermes"]').click();
   await details(desk, 'hermes').locator('.ad-facts').waitFor();

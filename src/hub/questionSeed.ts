@@ -129,6 +129,17 @@ export function chatDraft(wayfinder: MapWayfinder, item: WayfinderQuestion): str
   return lines.join('\n')
 }
 
+/**
+ * The first message of "Plan in Hermes": it names the project and the node the owner is looking at, and asks the Planner to read the roadmap first.
+ * A draft only: the owner presses send. The node's title comes from Beads, so it is shortened and put on one line.
+ */
+export function planDraft(project: string, projectName: string, selected?: { id: string; title: string } | null): string {
+  return [
+    `I want to plan work on the ${oneLine(projectName, 80)} Roadmap (project ${project}).${selected ? ` I am looking at "${oneLine(selected.title, 120)}" (${selected.id}).` : ''}`,
+    `Read the roadmap with cards beads show --project ${project} --open and the cards it names, then ask me what I want to change. Do not file anything until I say the plan is ready.`,
+  ].join('\n')
+}
+
 /** What to paste into a Claude Code or Codex session in the project's repo: the Wayfinder skill records the resolution in Beads itself. */
 export function sessionPrompt(repoName: string, wayfinder: MapWayfinder, item: WayfinderQuestion): string {
   const lines = [
