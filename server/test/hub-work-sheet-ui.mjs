@@ -348,12 +348,12 @@ try {
         .filter(element => element.getClientRects().length).map(element => ({ what: element.getAttribute('aria-label') ?? element.textContent, h: element.getBoundingClientRect().height })).filter(item => item.h < 43.5));
       assert.deepEqual(small, [], 'Every control is at least 44 px tall.');
       assert.equal(await sp.locator('[data-lane-chip="blocked"]').getAttribute('aria-pressed'), 'true', 'Needs you starts in Blocked.');
+      if (process.env.BUW_SHOTS) await sp.screenshot({ path: `${process.env.BUW_SHOTS}-search-${label}.png` });
       await clear();
       await sp.locator('[data-filter-type="feature"]').click();
       assert.equal(await sp.locator('[data-lane-chip="ready"]').getAttribute('aria-pressed'), 'true');
       await sp.locator('[data-lane-chip="done"]').click();
       assert.equal(await sp.locator('[data-lane-chip="done"]').getAttribute('aria-pressed'), 'true', 'A lane the person taps stays, even at 0.');
-      if (process.env.BUW_SHOTS) await sp.screenshot({ path: `${process.env.BUW_SHOTS}-search-${label}.png` });
     } else if (process.env.BUW_SHOTS) {
       await clear();
       await search('quokka');
