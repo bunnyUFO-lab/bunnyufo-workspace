@@ -34,6 +34,11 @@ export const COMMAND_POWERSHELL = 'cd C:\\Users\\owner\\app\nnpm run check';
 /** An Ask id for a test to seed: today's date, the probe project and a four-character tail. */
 export const askId = (slug, tail) => `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-${slug}-${tail}`;
 
+const HOGS = [
+  { name: 'node.exe', cmd: 'node scripts/probe-load.mjs --rounds 40', cores: 1.0, minutes: 22, orphan: true, ramMB: 310, action: 'reported' },
+  { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
+];
+
 export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
@@ -140,9 +145,10 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   if (pc) {
     // Off by default. 'fresh': the PC reported a minute ago, with a busy and an idle session. 'stale': 40 minutes ago, so the PC counts as asleep or off.
     // 'low-memory': 2.5 of 24 GB available. 'no-memory': a status from an old reporter, with no memory field.
+    // 'hogs': two busy processes, one reported and one stopped (made-up names and paths).
     seedPcStatus(fake, pcStatusJson({
       now, minutesOld: pc === 'stale' ? 40 : 1,
-      extra: pc === 'low-memory' ? { memory: { totalGB: 24, availableGB: 2.5 } } : pc === 'no-memory' ? { memory: undefined } : {},
+      extra: pc === 'low-memory' ? { memory: { totalGB: 24, availableGB: 2.5 } } : pc === 'no-memory' ? { memory: undefined } : pc === 'hogs' ? { hogs: HOGS } : {},
     }));
   }
 

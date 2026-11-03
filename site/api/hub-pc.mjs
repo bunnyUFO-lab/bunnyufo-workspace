@@ -40,6 +40,32 @@ function cleanMemory(raw) {
   return { totalGB: round(totalGB), availableGB: round(Math.min(availableGB, totalGB)) };
 }
 
+const MAX_HOGS = 5;
+const clipLine = (value, max) => clip(String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' '), max);
+
+/**
+ * The reporter's busy or stopped processes: at most 5 items of `{ name, cmd, cores, minutes, orphan, ramMB?, action }`.
+ * Every other field is dropped; an item with a bad type is dropped alone; anything that is not an array gives `[]`.
+ * Text only: the page shows it as text, never as a link.
+ */
+export function cleanHogs(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (out.length >= MAX_HOGS) break;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const name = clipLine(item.name, 40);
+    const cmd = typeof item.cmd === 'string' ? clipLine(item.cmd, 160) : '';
+    const { cores, minutes, ramMB, orphan, action } = item;
+    if (!name || typeof cores !== 'number' || !Number.isFinite(cores) || cores < 0 || cores > 64) continue;
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 100000) continue;
+    if (typeof orphan !== 'boolean' || !['reported', 'stopped'].includes(action)) continue;
+    if (ramMB !== undefined && !(Number.isInteger(ramMB) && ramMB >= 0 && ramMB <= 1e6)) continue;
+    out.push({ name, cmd, cores: Math.round(cores * 10) / 10, minutes, orphan, ...(ramMB !== undefined ? { ramMB } : {}), action });
+  }
+  return out;
+}
+
 const bandOf = util => (util >= 50 ? 'heavy' : util >= 10 ? 'busy' : 'idle');
 
 function cleanSession(raw) {
@@ -98,6 +124,7 @@ export function validStatus(raw) {
       band: BANDS.includes(raw.gpu.band) ? raw.gpu.band : bandOf(gpuUtil),
     },
     memory: cleanMemory(raw.memory),
+    hogs: cleanHogs(raw.hogs),
     comfy: comfy ? { up: comfy.up === true, running: num(comfy.running, 0, 1000) ?? 0, pending: num(comfy.pending, 0, 1000) ?? 0 } : null,
     unity: unity ? {
       open: unity.open === true,
@@ -123,6 +150,7 @@ export function pcSummary(status, at) {
     keepAwake: status.keepAwake,
     gpu: status.gpu,
     memory: status.memory ?? null,
+    hogs: status.hogs ?? [],
     comfy: status.comfy,
     unity: status.unity,
     sessions: { busy: sessions.filter(row => row.status === 'busy').length, idle: sessions.filter(row => row.status === 'idle').length },

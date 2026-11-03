@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { duration, pcHeadline, pcLines, ramLine, seen } from '../../../src/hub/working.ts';
+import { duration, hogsLine, pcHeadline, pcLines, ramLine, seen } from '../../../src/hub/working.ts';
 
 const NOW = Date.parse('2026-10-29T12:00:00Z');
 const ago = minutes => new Date(NOW - minutes * 60000).toISOString();
@@ -70,4 +70,32 @@ test('a status with no usable memory shows no RAM row, never undefined or NaN', 
     assert.equal(lines.some(line => line.key === 'ram'), false);
     assert.doesNotMatch(JSON.stringify(lines), /undefined|NaN/);
   }
+});
+
+const hog = (extra = {}) => ({ name: 'node.exe', cmd: 'node probe.mjs', cores: 1, minutes: 22, orphan: false, action: 'reported', ...extra });
+
+test('the Busy processes row is absent for none, an empty list or an old reporter', () => {
+  for (const hogs of [undefined, null, [], 'x']) {
+    assert.equal(hogsLine(hogs), null);
+    assert.equal(pcLines(pc({ hogs })).some(line => line.key === 'hogs'), false);
+  }
+});
+
+test('the Busy processes row counts what needs a look, or says all stopped, with one note per process', () => {
+  const reported = hogsLine([hog(), hog({ orphan: true, minutes: 31, cores: 1.5 })]);
+  assert.equal(reported.label, 'Busy processes');
+  assert.equal(reported.value, '2 need a look');
+  assert.deepEqual(reported.warn, ['node.exe · 1.0 core · 22 min · running: node probe.mjs', 'node.exe · 1.5 cores · 31 min · orphaned · running: node probe.mjs']);
+
+  const stopped = hogsLine([hog({ action: 'stopped', orphan: true, cmd: '' })]);
+  assert.equal(stopped.value, '1 stopped');
+  assert.deepEqual(stopped.warn, ['node.exe · 1.0 core · 22 min · orphaned · stopped']);
+
+  assert.equal(hogsLine([hog(), hog({ action: 'stopped' })]).value, '1 need a look', 'A mix counts only what is still running.');
+  assert.doesNotMatch(JSON.stringify(hogsLine([hog({ cores: NaN }), hog({ name: 5 })])), /NaN|undefined/);
+});
+
+test('the Busy processes row comes after Sessions, and a stale PC shows none', () => {
+  assert.deepEqual(pcLines(pc({ hogs: [hog()] })).map(line => line.key), ['gpu', 'comfy', 'unity', 'sessions', 'hogs']);
+  assert.deepEqual(pcLines(pc({ state: 'asleep-or-off', hogs: [hog()] })), []);
 });
