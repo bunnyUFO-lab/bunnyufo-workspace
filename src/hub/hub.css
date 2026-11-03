@@ -432,7 +432,7 @@ a.hub-row-text .hub-row-cue { color: var(--text-bright); font-weight: 700; }
 a.hub-row-text:focus-visible .hub-row-title, a.hub-row-text:active .hub-row-title { text-decoration: underline; }
 
 /* Checklists: a list of steps ticked one at a time. Each item has two tap targets, a 48 px box and the text. */
-.hub-cl { max-width: 46rem; }
+.hub-cl { --cl-box: 48px; --cl-gap: 4px; --cl-indent: calc(var(--cl-box) + var(--cl-gap)); max-width: 46rem; }
 .hub-cl > .hub-md { margin: 0 0 10px; }
 .hub-cl-count { margin: 0 0 6px; font-size: 0.9rem; color: var(--text-bright); }
 .hub-cl-bar { height: 8px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; margin-bottom: 8px; }
@@ -440,10 +440,10 @@ a.hub-row-text:focus-visible .hub-row-title, a.hub-row-text:active .hub-row-titl
 .hub-cl-group { margin: 14px 0 2px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
 .hub-cl-item { border-top: 1px solid var(--hairline); min-width: 0; }
 .hub-cl-group + .hub-cl-line { border-top: 0; }
-.hub-cl-line { display: flex; align-items: stretch; gap: 4px; min-height: 52px; }
+.hub-cl-line { display: flex; align-items: stretch; gap: var(--cl-gap); min-height: 52px; }
 .hub-cl-box {
   flex: none; display: inline-flex; align-items: center; justify-content: center; align-self: center;
-  width: 48px; height: 48px; padding: 0; background: none; border: 0; color: var(--text-bright); cursor: pointer; border-radius: var(--radius);
+  width: var(--cl-box); height: var(--cl-box); padding: 0; background: none; border: 0; color: var(--text-bright); cursor: pointer; border-radius: var(--radius);
 }
 .hub-cl-box > span { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 2px solid var(--hairline-strong); border-radius: 7px; background: var(--surface-solid); font-size: 1rem; line-height: 1; }
 .hub-cl-box[aria-checked="true"] > span { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }
@@ -468,9 +468,9 @@ button.hub-cl-text { cursor: pointer; }
 .hub-cl-thumb a, .hub-cl-thumb img, .hub-cl-thumb > span { display: block; width: 48px; height: 48px; }
 .hub-cl-thumb a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .hub-cl-thumb img { object-fit: cover; }
-.hub-cl-more { margin: 0 0 10px 52px; padding: 2px 0 4px; min-width: 0; }
+.hub-cl-more { margin: 0 0 10px var(--cl-indent); padding: 2px 0 4px; min-width: 0; }
 .hub-cl-more .hub-btn { min-height: 44px; }
-.hub-cl-item > .hub-error, .hub-cl-item > [data-attached-note] { margin: 0 0 8px 52px; }
+.hub-cl-item > .hub-error, .hub-cl-item > [data-attached-note] { margin: 0 0 8px var(--cl-indent); }
 .hub-cl-tip { display: none; margin: 0 0 6px; font-size: 0.8rem; }
 .hub-cl-drop { outline: 2px dashed var(--pink); outline-offset: -2px; border-radius: var(--radius-sm); background: var(--pink-dim); }
 @media (hover: hover) and (pointer: fine) {
@@ -486,8 +486,15 @@ button.hub-cl-text { cursor: pointer; }
 .hub-code { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0; min-width: 0; }
 .hub-code pre { flex: 1 1 0; min-width: 0; margin: 0; overflow-x: auto; white-space: pre; background: var(--surface-solid); padding: 8px 10px; border-radius: var(--radius-sm); font-size: 0.82rem; }
 .hub-copy { flex: none; order: 2; min-height: 44px; min-width: 44px; max-width: 6.5rem; font-size: 0.8rem; }
-.hub-cl-cmd { margin: 0 0 8px 52px; min-width: 0; }
+.hub-cl-cmd { margin: 0 0 8px var(--cl-indent); min-width: 0; }
 .hub-cl-cmd .hub-code { margin: 0; }
+/* Narrow screens: Copy sits above the command, full width of the step, so the command gets the whole row. */
+@media (max-width: 600px) {
+  .hub-cl-cmd { margin-left: 0; }
+  .hub-cl-cmd .hub-code { flex-direction: column; align-items: stretch; }
+  .hub-cl-cmd .hub-code pre { flex: none; }
+  .hub-cl-cmd .hub-copy { order: -1; max-width: none; width: 100%; }
+}
 .hub-cl-title code { font-family: var(--mono, monospace); font-size: 0.86em; padding: 1px 4px; border-radius: 4px; background: var(--surface-solid); }
 
 /* Chat in help mode: the banner under the top bar and what Hermes sees. */
