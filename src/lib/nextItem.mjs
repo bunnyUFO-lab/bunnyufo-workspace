@@ -12,6 +12,7 @@ export const NOTE_VERB = {
   reported: 'Report sent',
   approved: 'Approved',
   declined: 'Declined',
+  'not-useful': 'Marked not useful',
 };
 
 /** The key of an item in the queue: the kind and the id. */

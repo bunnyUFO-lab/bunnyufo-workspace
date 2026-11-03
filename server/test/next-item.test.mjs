@@ -62,8 +62,9 @@ test('itemLink: each kind opens on its own page; a session goes to Sessions with
 });
 
 test('NOTE_VERB: one word per action', () => {
-  assert.deepEqual(Object.keys(NOTE_VERB), ['answered', 'snoozed', 'submitted', 'done', 'cancelled', 'reviewed', 'reported', 'approved', 'declined']);
+  assert.deepEqual(Object.keys(NOTE_VERB), ['answered', 'snoozed', 'submitted', 'done', 'cancelled', 'reviewed', 'reported', 'approved', 'declined', 'not-useful']);
   assert.equal(NOTE_VERB.done, 'Marked done');
   assert.equal(NOTE_VERB.reviewed, 'Review sent');
   assert.equal(NOTE_VERB.reported, 'Report sent');
+  assert.equal(NOTE_VERB['not-useful'], 'Marked not useful');
 });
