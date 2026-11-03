@@ -18,7 +18,7 @@ const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 const PROJECT = 'sheetdev';
 const BACKFILL = 'Backfilled 2026-10-26 from git, PRs and cards.';
 
-const fixture = await startHubFixture();
+const fixture = await startHubFixture({ signing: true });
 const extra = (issue, more) => ({ ...issue, ...more });
 const issues = [
   beadsIssue({ id: 'sd-m1', title: 'Sheet milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
@@ -34,6 +34,8 @@ const issues = [
   beadsIssue({ id: 'sd-f-race', title: 'Race feature', type: 'epic', parent: 'sd-m1', created: '2026-10-03T11:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-desktop', title: 'Race one', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T12:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-phone', title: 'Race two', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T13:00:00Z' }),
+  beadsIssue({ id: 'sd-f-do', title: 'Do-it feature', type: 'epic', parent: 'sd-m1', created: '2026-10-04T11:00:00Z' }),
+  ...['desktop', 'phone'].map(label => extra(beadsIssue({ id: `sd-t-do-${label}`, title: `Wire the exit door ${label}`, parent: 'sd-f-do', created: '2026-10-04T12:00:00Z', description: 'Players need a door at the end of the level.\n\nIt opens when the key is held.' }), { acceptance_criteria: '- The door opens with the key\n- A test covers it' })),
 ];
 fixture.seed.beads(PROJECT, issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sheetdev' });
 fixture.fake.seed('sections/sheetlib/workspace.json', JSON.stringify({ name: 'Sheet library', entities: [{ id: 'mission', title: 'Mission control', folder: '2026-10-27_plan' }] }), 'application/json');
@@ -257,6 +259,71 @@ try {
     await panel.locator('[data-mark-done]').waitFor({ state: 'detached' });
     assert.equal(await alert.count(), 1, 'The message stays when the sheet learns it is closed.');
 
+    // ws-im1.2.1: the "Do it" block on an open task's sheet, and Spawn filled from the bead.
+    step(`${label}: an open task has Build it, Mock it up and Research it; a done task and a read-only host have none`);
+    const doId = `sd-t-do-${label}`;
+    panel = await sheet(page, doId);
+    const doBlock = panel.locator('[data-bead-work]');
+    await doBlock.waitFor();
+    assert.deepEqual(await doBlock.locator('[data-bead-do]').evaluateAll(buttons => buttons.map(button => button.getAttribute('data-bead-do'))), ['build', 'mockup', 'research']);
+    assert.equal(await doBlock.locator('[data-bead-do="build"] small').innerText(), 'Claude · opens a PR');
+    const boxes = await doBlock.locator('[data-bead-do]').evaluateAll(buttons => buttons.map(button => { const box = button.getBoundingClientRect(); return { h: box.height, left: Math.round(box.left), right: box.right }; }));
+    for (const box of boxes) assert.ok(box.h >= 44, `${label}: a Do it button is ${box.h}px tall.`);
+    assert.equal(new Set(boxes.map(box => box.left)).size, 1, 'The buttons are stacked.');
+    await noSideways(page, `${label} Do it block`);
+    panel = await sheet(page, 'sd-t-done');
+    assert.equal(await panel.locator('[data-bead-work]').count(), 0, 'A done task has no Do it block.');
+
+    step(`${label}: Mock it up opens Spawn on the Mockup preset, filled from the bead, with no Done when`);
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="mockup"]').click();
+    const spawn = page.locator('[data-spawn-sheet]');
+    await spawn.locator('[data-spawn-bead]').waitFor();
+    assert.equal(await spawn.locator('[data-spawn-bead]').innerText(), `From bead ${doId}`);
+    assert.equal(await spawn.locator('[data-preset="mockup"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(await spawn.locator('[data-spawn-done]').inputValue(), '');
+    await spawn.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
+    await page.keyboard.press('Escape');
+    await spawn.waitFor({ state: 'detached' });
+
+    step(`${label}: Build it fills Spawn from the bead and one Approve makes and signs one request`);
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="build"]').click();
+    await spawn.locator('[data-spawn-bead]').waitFor();
+    assert.equal(await spawn.locator('[data-preset="code-task"]').getAttribute('aria-pressed'), 'true');
+    const filled = await spawn.locator('[data-spawn-text]').inputValue();
+    assert.match(filled, new RegExp(`Bead ${doId}: Wire the exit door ${label}`));
+    assert.match(filled, /It opens when the key is held\./);
+    assert.equal(await spawn.locator('[data-spawn-done]').inputValue(), '- The door opens with the key - A test covers it');
+    await spawn.locator('[data-spawn-machine]').waitFor();
+    const goButton = spawn.locator('[data-spawn-go]');
+    await page.waitForFunction(() => !document.querySelector('[data-spawn-go]').disabled);
+    await goButton.click();
+    await page.locator('[data-spawn-toast]').waitFor();
+    const mine = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key) && fixture.fake.json(key).bead === doId);
+    assert.equal(mine.length, 1, 'One request was made from the bead.');
+    const stored = fixture.fake.json(mine[0]);
+    assert.deepEqual([stored.preset, stored.project, stored.origin.kind, stored.textOrigin, stored.title], ['code-task', PROJECT, 'owner', { kind: 'agent', name: 'Beads' }, `${doId} Wire the exit door ${label}`]);
+    const approvedKey = mine[0].replace('request.json', 'approved.json');
+    assert.ok(fixture.fake.objects.has(approvedKey), 'It was signed by the Approve tap.');
+    assert.match(fixture.fake.json(approvedKey).run.brief, new RegExp(`Bead: ${doId}\. Put this id in the pull request`));
+
+    step(`${label}: while the run is on the bead the sheet says so and links to it; once it fails the buttons return`);
+    panel = await sheet(page, doId);
+    const live = panel.locator('[data-bead-run]');
+    await live.waitFor();
+    assert.equal(await panel.locator('[data-bead-do]').count(), 0, 'No second run is offered.');
+    assert.match(await live.innerText(), /· Open the run$/);
+    const requestId = mine[0].split('/').at(-2);
+    assert.equal(await live.locator('a').getAttribute('href'), `#/~hub/request/${encodeURIComponent(requestId)}`);
+    await noSideways(page, `${label} run line`);
+    const folder = mine[0].replace('request.json', '');
+    fixture.fake.seed(`${folder}taken.json`, JSON.stringify({ v: 1, at: new Date().toISOString() }), 'application/json');
+    fixture.fake.seed(`${folder}result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: new Date().toISOString() }), 'application/json');
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="build"]').waitFor();
+    assert.equal(await panel.locator('[data-bead-run]').count(), 0);
+
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
   }
 
@@ -300,6 +367,7 @@ try {
       await panel.waitFor();
       await panel.locator('[data-readonly-note]', { hasText: 'Sign in to mark this.' }).waitFor();
       assert.equal(await panel.locator('[data-mark-done]').count(), 0);
+      assert.equal(await panel.locator('[data-bead-work]').count(), 0, 'A read-only host has no Do it block.');
       await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-marked`);
       await panel.locator('[data-mark-pending]').waitFor();
       assert.equal(await panel.locator('button').filter({ hasText: /Undo|Mark done|No longer needed/ }).count(), 0, 'A marked task has no buttons on a read-only copy.');

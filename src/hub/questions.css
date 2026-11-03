@@ -85,3 +85,12 @@
   .hub-wayfinder[data-open="true"] .hub-wayfinder-row > .hub-plan-btn { flex: 1 1 100%; margin-left: 0; }
   .hub-plan-row .hub-plan-btn { flex: 1 1 100%; }
 }
+
+/* The "Do it" block in the side sheet (ws-im1.2.1): three stacked buttons, each with a small line under its label. */
+.hub-map-panel-dostuff { margin-top: 12px; }
+.hub-map-panel-dostuff h4 { margin: 0 0 6px; }
+.hub-bead-btns { display: flex; flex-direction: column; gap: 6px; }
+.hub-bead-btn { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; width: 100%; min-height: 44px; text-align: left; }
+.hub-bead-btn small { font-size: 0.72rem; font-weight: 400; color: var(--text-dim); }
+.hub-bead-run { margin: 0; font-size: 0.85rem; overflow-wrap: anywhere; }
+.hub-bead-run a { display: inline-flex; align-items: center; min-height: 44px; }

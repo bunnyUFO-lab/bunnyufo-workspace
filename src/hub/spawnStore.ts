@@ -7,6 +7,10 @@ export interface SpawnOptions {
   project?: string
   /** The agent a job is for (the avatar preset): sent with the request, never picked in the sheet. */
   agent?: string
+  /** A bead's seed (the Roadmap's Do it block): the request's title and Done when, and the bead it comes from. The text and preset are the ones above. */
+  title?: string
+  doneWhen?: string
+  bead?: string
   /** Edit a request: the sheet starts from it, locks the project, preset and repo; the text, Done when and the machine stay editable, and replaces the request. */
   edit?: { id: string; project: string; preset: string; text: string; target: string; repo?: string; doneWhen?: string; agent?: string; model?: string }
 }

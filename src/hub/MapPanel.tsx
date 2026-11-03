@@ -8,6 +8,9 @@ import { useHubData } from './useHub'
 import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, sprintLines, tasksOf, type Found } from './mapState'
 import MarkActions from './MarkActions'
 import QuestionActions from './QuestionActions'
+import BeadWork from './BeadWork'
+import { visible as beadWorkVisible } from './beadActions'
+import { host } from '../lib/host'
 import { cardHref, closedLine, finishedLine, hasNeedsItem, noPrs, prLabel, sheetPrs, type SheetPr } from './mapSheet'
 
 /** The signs in the legend's order, with the short word the panel counts them under. */
@@ -144,6 +147,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
             <QuestionActions project={model.project} repoName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project} wayfinder={model.wayfinder} item={resolving} layout="sheet" />
           </div>
         )}
+        {beadWorkVisible(task, resolving, host.write) && <BeadWork key={task.id} task={task} project={model.project} />}
         {words.length > 0 && <p className="hub-muted">{words.join(' · ')}</p>}
         {task.deps.length > 0 && <p className="hub-muted">Needs first: {task.deps.map(nameOf).join(', ')}</p>}
         {unlocks.length > 0 && <p className="hub-muted">Unlocks: {unlocks.join(', ')}</p>}

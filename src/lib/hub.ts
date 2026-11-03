@@ -302,6 +302,8 @@ export interface MapTask {
   you?: 'ask' | 'checklist' | 'label'
   /** The open checklist that names the task. */
   checklist?: string
+  /** The newest request made from this bead that has not ended (the Roadmap's Do it block shows it instead of the buttons). */
+  run?: { id: string; state: string }
   /** One or two plain sentences saying what the work is, from the description. */
   summary?: string
   closeReason?: string
