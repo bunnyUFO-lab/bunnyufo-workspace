@@ -85,7 +85,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   await page.locator('[data-spawn-model]').selectOption('haiku');
   assert.match(await page.locator('[data-spawn-model-note]').innerText(), /Anthropic API/);
-  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Haiku · API key · about 40k tokens/);
+  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Haiku · API key · 0.7–1.1 M tokens/);
   assert.doesNotMatch(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/);
   await page.locator('[data-spawn-text]').fill('A look at how card games teach their rules');
   const [created] = await Promise.all([

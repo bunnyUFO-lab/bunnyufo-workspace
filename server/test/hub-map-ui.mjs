@@ -353,7 +353,7 @@ try {
   assert.equal(await desk.locator('.hub-wayfinder-count').innerText(), '3 decisions');
   assert.equal(await desk.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true', 'The list starts open on a wide box.');
   const links = desk.locator('.hub-wayfinder-list a');
-  assert.equal(await links.count(), 2);
+  assert.equal(await links.count(), 4);
   assert.equal(await desk.locator('.hub-runs').count(), 0, 'The Runs on chip is not repeated in this row, and wayfind is not in the table.');
   await links.first().click();
   await desk.locator('.hub-map-panel').waitFor();
@@ -377,7 +377,7 @@ try {
   await fits('collapsed');
   await noSideways(phone, 'Wayfinder row at 390 collapsed');
   await phone.locator('.hub-wayfinder-toggle').click();
-  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 2);
+  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 4);
   await fits('expanded');
   await noSideways(phone, 'Wayfinder row at 390 expanded');
   const axis = await phone.locator('.hub-map-box').getAttribute('data-axis');
@@ -398,7 +398,7 @@ try {
   const after = await clipped();
   assert.equal(await text.getAttribute('aria-expanded'), 'true');
   assert.ok(!after.clipped && after.height > before.height, 'It wraps in full.');
-  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 2, 'The questions show with it.');
+  assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 4, 'The questions show with it.');
   await fits('destination expanded');
   await noSideways(phone, 'destination expanded at 390');
   await text.tap();

@@ -72,7 +72,9 @@ export default function MarkActions({ task, title, project, projectName, eligibl
     const date = shortDate(task.mark.at)
     return (
       <div className="hub-map-panel-mark" data-mark-pending data-mark-verdict={task.mark.verdict}>
-        <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. A session in {projectName} applies it when it starts there.</p>
+        {task.mark.verdict === 'done' && task.mark.reason
+          ? <p className="hub-muted" data-decided>Decided: {task.mark.reason} · applies at the next session in {projectName}{date ? ` (${date})` : ''}.</p>
+          : <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. A session in {projectName} applies it when it starts there.</p>}
         {failed}
         {host.write
           ? <div className="hub-actions start"><button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button></div>

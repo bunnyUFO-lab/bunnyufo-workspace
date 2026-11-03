@@ -7,10 +7,13 @@
 
 export const MARK_FILE = /^(\d{8}T\d{9}Z)-(done|not-needed|unblock|undo|applied)-([a-z0-9]{4})\.json$/;
 export const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
-export const REASON_MAX = 200;
+export const REASON_MAX = 500;
+/** The option id that means "not decided yet" on a decision Ask: picking it records the answer and writes no mark, so the question stays open. */
+export const NOT_YET = 'not-yet';
 const OWNER_VERDICTS = new Set(['done', 'not-needed', 'unblock', 'undo']);
 
-export const markReason = verdict => (verdict === 'not-needed' ? 'Not needed (you, on the Roadmap)' : 'Done (you, on the Roadmap)');
+/** The close reason the overlay shows. A done mark with a reason is an answer to a Wayfinder question: "Decided: <answer>". */
+export const markReason = (verdict, reason = '') => (verdict === 'not-needed' ? 'Not needed (you, on the Roadmap)' : reason ? `Decided: ${reason}` : 'Done (you, on the Roadmap)');
 
 /**
  * One mark file as an entry, or null when its name or body is not one. `rel` is the path under
@@ -76,7 +79,10 @@ export function applyMarks(issues, marksByBead, project) {
         _mark: { verdict: 'unblock', at: state.at, file: state.file },
       };
     }
-    return { ...issue, status: 'closed', closed_at: state.at, close_reason: markReason(state.verdict), _mark: { verdict: state.verdict, at: state.at, file: state.file } };
+    return {
+      ...issue, status: 'closed', closed_at: state.at, close_reason: markReason(state.verdict, state.reason),
+      _mark: { verdict: state.verdict, at: state.at, file: state.file, ...(state.reason ? { reason: state.reason } : {}) },
+    };
   });
 }
 
@@ -91,5 +97,5 @@ export function checkMarkRequest(raw) {
     reason = raw.reason.replace(/\s+/g, ' ').trim();
     if (reason.length > REASON_MAX) throw new Error(`reason is at most ${REASON_MAX} characters.`);
   }
-  return { bead, verdict: raw.verdict, reason: raw.verdict === 'not-needed' ? reason : '' };
+  return { bead, verdict: raw.verdict, reason: raw.verdict === 'not-needed' || raw.verdict === 'done' ? reason : '' };
 }

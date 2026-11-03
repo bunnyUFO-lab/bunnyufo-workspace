@@ -98,11 +98,13 @@ test('applyMarks closes only issues with an active mark, and leaves the rest as 
   assert.equal(issues[0].status, 'open', 'The input is not changed.');
 });
 
-test('checkMarkRequest: a bead id, a verdict, and a reason of at most 200 characters for not-needed only', () => {
+test('checkMarkRequest: a bead id, a verdict, and a reason of at most 500 characters for done and not-needed only', () => {
   assert.deepEqual(checkMarkRequest({ bead: 'ws-7nz.2.2', verdict: 'not-needed', reason: ' Not   any more ' }), { bead: 'ws-7nz.2.2', verdict: 'not-needed', reason: 'Not any more' });
-  assert.equal(checkMarkRequest({ bead: 'p-1', verdict: 'done', reason: 'ignored' }).reason, '');
+  assert.equal(checkMarkRequest({ bead: 'p-1', verdict: 'done', reason: ' Ship  it ' }).reason, 'Ship it', 'A done mark keeps its reason: it is the owner\'s decision.');
+  assert.equal(checkMarkRequest({ bead: 'p-1', verdict: 'done', reason: 'x'.repeat(500) }).reason.length, 500);
+  assert.equal(checkMarkRequest({ bead: 'p-1', verdict: 'undo', reason: 'ignored' }).reason, '');
   assert.deepEqual(checkMarkRequest({ bead: 'p-1', verdict: 'unblock', reason: 'ignored' }), { bead: 'p-1', verdict: 'unblock', reason: '' });
-  for (const bad of [{}, { bead: 'P-1', verdict: 'done' }, { bead: '../x', verdict: 'done' }, { bead: 'p-1', verdict: 'maybe' }, { bead: 'p-1', verdict: 'not-needed', reason: 'x'.repeat(201) }, { bead: 'p-1', verdict: 'not-needed', reason: 5 }]) {
+  for (const bad of [{}, { bead: 'P-1', verdict: 'done' }, { bead: '../x', verdict: 'done' }, { bead: 'p-1', verdict: 'maybe' }, { bead: 'p-1', verdict: 'not-needed', reason: 'x'.repeat(501) }, { bead: 'p-1', verdict: 'done', reason: 'x'.repeat(501) }, { bead: 'p-1', verdict: 'not-needed', reason: 5 }]) {
     assert.throws(() => checkMarkRequest(bad), undefined, JSON.stringify(bad));
   }
 });
@@ -113,7 +115,8 @@ async function fixture({ requireRemoteUser = true } = {}) {
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true });
+  const logs = [];
+  const hub = createHub({ bucket, enabled: true, log: line => logs.push(line) });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser, hub, allowedOrigins: [SITE] });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -134,12 +137,24 @@ async function fixture({ requireRemoteUser = true } = {}) {
     beadsIssue({ id: 'mk-shut', title: 'Done already', parent: 'mk-f', labels: ['needs-owner'], status: 'closed', closed: '2026-10-02T10:00:00Z', created: '2026-10-01T16:00:00Z' }),
   ];
   seed.beads('mk', issues, { pushedAt: minutesAgo(NOW, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/mk' });
+  // A project with a Wayfinder map: two questions that wait on nobody, one that waits on the first, an ordinary task and a closed question.
+  const wayfinder = [
+    beadsIssue({ id: 'wk-map', title: 'Wayfinder map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z', description: '## Destination\n\nA calm, fast Roadmap.' }),
+    beadsIssue({ id: 'wk-q1', title: 'What is the goal?', parent: 'wk-map', labels: ['wayfinder:grilling'], created: '2026-10-02T10:00:00Z' }),
+    beadsIssue({ id: 'wk-q2', title: 'Which items are open?', parent: 'wk-map', labels: ['wayfinder:research'], created: '2026-10-02T11:00:00Z' }),
+    beadsIssue({ id: 'wk-q3', title: 'Is the text in or out?', parent: 'wk-map', labels: ['wayfinder:grilling'], blocks: ['wk-q1'], created: '2026-10-02T12:00:00Z' }),
+    beadsIssue({ id: 'wk-task', title: 'Plain task', parent: 'wk-map', created: '2026-10-02T13:00:00Z' }),
+    beadsIssue({ id: 'wk-q9', title: 'Old question', parent: 'wk-map', labels: ['wayfinder:grilling'], status: 'closed', closed: '2026-10-03T10:00:00Z', created: '2026-10-02T14:00:00Z' }),
+  ];
+  seed.beads('wk', wayfinder, { pushedAt: minutesAgo(NOW, 5).toISOString(), host: 'pc.example.test', count: wayfinder.length, repo: 'example/wk' });
   seed.ask(askJson({ id: `${day}-mk-pick-the-arc-a1b2`, project: 'mk', bead: 'mk-ask', now: minutesAgo(NOW, 10), options: threeOptions() }));
   seed.ask(askJson({ id: `${day}-mk-choose-the-name-c3d4`, project: 'mk', bead: 'mk-askonly', now: minutesAgo(NOW, 9), options: threeOptions() }));
   seed.event(eventJson({ kind: 'ready-for-review', ts: minutesAgo(NOW, 20), project: 'mk', bead: 'mk-inbox', title: 'PR ready for review: review it', url: 'https://example.test/pr/9' }));
   const marks = () => [...fake.objects.keys()].filter(key => key.startsWith('sections/inbox/bead-marks/')).sort();
   const taskOf = async id => (await get('/hub/map/mk')).body.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).find(task => task.id === id);
-  return { fake, seed, get, post, marks, taskOf, close: async () => { server.close(); await fake.close(); } };
+  const answer = (id, body) => post(`/hub/asks/${id}/answer`, body);
+  const wayMarks = () => marks().filter(key => key.includes('/bead-marks/wk/'));
+  return { fake, seed, get, post, answer, marks, wayMarks, logs, taskOf, close: async () => { server.close(); await fake.close(); } };
 }
 
 test('the route: who may mark, what is refused and why', async () => {
@@ -346,5 +361,112 @@ test('GET /hub/map/:project gives a task with an open checklist you: checklist',
     seed.checklist(checklistJson({ id: `${day}-mk-steps-c1d2`, project: 'mk', bead: 'mk-plain', now: minutesAgo(NOW, 30) }));
     const task = (await get('/hub/map/mk')).body.milestones.flatMap(m => m.features.flatMap(f => f.tasks)).find(item => item.id === 'mk-plain');
     assert.deepEqual([task.state, task.you, task.checklist], ['you', 'checklist', `${day}-mk-steps-c1d2`]);
+  } finally { await close(); }
+});
+
+// --- Wayfinder questions (ws-qdh.1): "Answer here" and an answered decision Ask both write a done mark with the decision as its reason ---
+
+test('the route: an open Wayfinder question is decided without waiting on you, with its reason shown as "Decided: ..."', async () => {
+  const { post, wayMarks, fake, get, close } = await fixture();
+  try {
+    const done = await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'done', reason: '  Ship the   small version  ' });
+    assert.deepEqual([done.status, done.body.verdict], [201, 'done'], JSON.stringify(done.body));
+    assert.equal(fake.json(wayMarks()[0]).reason, 'Ship the small version');
+    const tasks = (await get('/hub/map/wk')).body.milestones.flatMap(m => m.features.flatMap(f => f.tasks));
+    const task = tasks.find(item => item.id === 'wk-q1');
+    assert.deepEqual([task.state, task.closeReason, task.mark.reason], ['done', 'Decided: Ship the small version', 'Ship the small version']);
+    const way = (await get('/hub/map/wk')).body.wayfinder;
+    assert.deepEqual([way.decisions, way.open.map(item => item.id)], [2, ['wk-q2', 'wk-q3']], 'The decided question left the open ones and counts as a decision.');
+    assert.deepEqual(way.open.find(item => item.id === 'wk-q3').blockedBy, [], 'What it blocked is unlocked at once.');
+    const notNeeded = await post('/hub/map/wk/marks', { bead: 'wk-q2', verdict: 'not-needed', reason: 'Out of scope' });
+    assert.equal(notNeeded.status, 201);
+    assert.equal((await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'undo' })).status, 201, 'Undo works until a session applies it.');
+  } finally { await close(); }
+});
+
+test('the route: only an open Wayfinder question skips "waiting on you"; an ordinary task, a closed question and unblock are refused as before', async () => {
+  const { post, wayMarks, close } = await fixture();
+  try {
+    const plain = await post('/hub/map/wk/marks', { bead: 'wk-task', verdict: 'done', reason: 'x' });
+    assert.deepEqual([plain.status, plain.body.error], [409, 'This is not waiting on you.']);
+    const map = await post('/hub/map/wk/marks', { bead: 'wk-map', verdict: 'done' });
+    assert.deepEqual([map.status, map.body.error], [409, 'This is not waiting on you.'], 'The map itself is not a question.');
+    const closed = await post('/hub/map/wk/marks', { bead: 'wk-q9', verdict: 'done', reason: 'x' });
+    assert.deepEqual([closed.status, closed.body.error], [409, 'Already closed in Beads.']);
+    const unblock = await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'unblock' });
+    assert.equal(unblock.status, 409, 'Unblock is for tasks that wait on you.');
+    assert.equal((await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'done', reason: 'x'.repeat(501) })).status, 400);
+    assert.deepEqual(wayMarks(), []);
+  } finally { await close(); }
+});
+
+const decisionAsk = (extra = {}) => askJson({ id: `${day}-wk-decide-a1b2`, project: 'wk', bead: 'wk-q1', kind: 'decision', now: minutesAgo(NOW, 10), options: [{ id: 'a', label: 'Small version (recommended)' }, { id: 'b', label: 'Full version' }], allowDrawing: false, ...extra });
+
+test('answering a decision Ask on an open Wayfinder question of its project writes a done mark with the option and the note', async () => {
+  const { seed, answer, wayMarks, fake, get, close } = await fixture();
+  try {
+    const ask = decisionAsk();
+    seed.ask(ask);
+    const shown = (await get(`/hub/asks/${ask.id}`)).body;
+    assert.equal(shown.beadTitle, 'What is the goal?', 'The title comes from Beads.');
+    const made = await answer(ask.id, { choice: 'a', note: 'But keep the ring.' });
+    assert.equal(made.status, 201);
+    const [file] = wayMarks();
+    assert.match(file, /\/bead-marks\/wk\/wk-q1\/\d{8}T\d{9}Z-done-[a-z0-9]{4}\.json$/);
+    const body = fake.json(file);
+    assert.deepEqual([body.verdict, body.by, body.reason], ['done', 'owner', 'Small version (recommended): But keep the ring.']);
+  } finally { await close(); }
+});
+
+test('answer to mark: not for another kind, not for another project, not for a bead that is no open question, not without a picked option', async () => {
+  const { seed, answer, wayMarks, get, close } = await fixture();
+  try {
+    const cases = [
+      ['verify', { kind: 'verify' }, { choice: 'a' }],
+      ['approval', { kind: 'approval' }, { choice: 'a' }],
+      ['no kind', { kind: undefined }, { choice: 'a' }],
+      ['another project', { project: 'mk' }, { choice: 'a' }],
+      ['an ordinary task', { bead: 'wk-task' }, { choice: 'a' }],
+      ['a closed question', { bead: 'wk-q9' }, { choice: 'a' }],
+      ['the map', { bead: 'wk-map' }, { choice: 'a' }],
+      ['a note only', { options: undefined }, { note: 'Later' }],
+    ];
+    for (const [index, [name, extra, data]] of cases.entries()) {
+      const ask = decisionAsk({ id: `${day}-wk-case${index}-b${index}c${index}`, ...extra });
+      seed.ask(ask);
+      if (extra.kind === undefined && 'kind' in extra) assert.equal((await get(`/hub/asks/${ask.id}`)).body.beadTitle, undefined, `${name}: no title is shown`);
+      assert.equal((await answer(ask.id, data)).status, 201, name);
+    }
+    assert.deepEqual(wayMarks(), [], 'Nothing was marked.');
+  } finally { await close(); }
+});
+
+test('a failing mark write never fails the answer, and says so in the log', async () => {
+  const { seed, answer, wayMarks, fake, logs, close } = await fixture();
+  try {
+    const ask = decisionAsk();
+    seed.ask(ask);
+    fake.fail = (key, method) => method === 'PUT' && key.includes('/bead-marks/');
+    const made = await answer(ask.id, { choice: 'b' });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.answer.choice, 'b', 'The session still gets the answer.');
+    assert.deepEqual(wayMarks(), []);
+    assert.ok(logs.some(line => line.includes(`ask ${ask.id} was answered but its question was not marked decided`)), logs.join('\n'));
+  } finally { await close(); }
+});
+
+test('the reserved option not-yet records the answer and writes no mark; a real choice on the same Ask still decides the question', async () => {
+  const { seed, answer, wayMarks, close } = await fixture();
+  try {
+    const options = [{ id: 'accept', label: 'Accept: the finding' }, { id: 'not-yet', label: 'Needs more work' }];
+    const notYet = decisionAsk({ id: `${day}-wk-notyet-n1n1`, options });
+    seed.ask(notYet);
+    const first = await answer(notYet.id, { choice: 'not-yet', note: 'Look at the other repo too.' });
+    assert.deepEqual([first.status, first.body.answer.choice], [201, 'not-yet']);
+    assert.deepEqual(wayMarks(), [], 'The question stays open.');
+    const accept = decisionAsk({ id: `${day}-wk-accept-n2n2`, options });
+    seed.ask(accept);
+    assert.equal((await answer(accept.id, { choice: 'accept' })).status, 201);
+    assert.equal(wayMarks().length, 1, 'A real choice still decides it.');
   } finally { await close(); }
 });

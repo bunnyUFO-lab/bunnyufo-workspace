@@ -10,6 +10,7 @@ import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer
 import HubImage from './HubImage'
 import Md from './Md'
 import { useAttachHelp } from './useAttachHelp'
+import './questions.css'
 
 const DrawingEditor = lazy(() => import('../components/DrawingEditor'))
 
@@ -90,6 +91,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   return (
     <>
       {typeof ask.context === 'string' && ask.context && <Md text={ask.context} />}
+      {live && text(ask.beadTitle) && <p className="hub-ask-decides" data-ask-decides>Your answer decides <b>{text(ask.beadTitle)}</b> on the Roadmap.</p>}
       <AvatarNote ask={ask} />
       <RerunAllow ask={ask} />
       {(picture || decisionRows) && (

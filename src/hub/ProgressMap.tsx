@@ -18,6 +18,10 @@ import { tallyFraction } from './mapCount.ts'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
+import QuestionActions from './QuestionActions'
+import { COST, preparable, questionSeed } from './questionSeed'
+import { openSpawn } from './spawnStore'
+import { host } from '../lib/host'
 
 const HINT_KEY = 'hub-map-hint-seen'
 const FILTER_KEY = 'hub-map-filter'
@@ -63,7 +67,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && (
         <Fragment key={project}>
-          <MapView model={model} project={project} nodeId={nodeId} header={model.wayfinder ? <WayfinderHeader project={project} wayfinder={model.wayfinder} /> : null} />
+          <MapView model={model} project={project} nodeId={nodeId} header={model.wayfinder ? <WayfinderHeader project={project} repoName={list.find(item => item.id === project)?.name ?? project} wayfinder={model.wayfinder} /> : null} />
         </Fragment>
       )}
     </>
@@ -71,11 +75,12 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
 }
 
 /** The Wayfinder destination above the map: one row, with the open questions as links to their nodes. Starts open on a wide box and closed on a narrow one; the state is not remembered. */
-function WayfinderHeader({ project, wayfinder }: { project: string; wayfinder: MapWayfinder }) {
+function WayfinderHeader({ project, repoName, wayfinder }: { project: string; repoName: string; wayfinder: MapWayfinder }) {
   const root = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 700) }, [])
   const { destination, decisions, open: questions } = wayfinder
+  const ready = preparable(wayfinder)
   if (!destination && !decisions && !questions.length) return null
   return (
     <div className="hub-wayfinder" data-open={open} ref={root}>
@@ -93,10 +98,21 @@ function WayfinderHeader({ project, wayfinder }: { project: string; wayfinder: M
             Open questions · {questions.length}
           </button>
         )}
+        {open && host.write && ready.length > 0 && (
+          <span className="hub-wayfinder-all">
+            <button type="button" className="hub-btn pri" data-q-all onClick={() => openSpawn({ preset: 'question', project, text: questionSeed(project, wayfinder, ready.map(item => item.id), 'grilling') })}>Prepare all · {ready.length}</button>
+            <span className="hub-q-cost" data-q-all-cost>{COST.prepareAll}</span>
+          </span>
+        )}
       </div>
       {open && questions.length > 0 && (
         <ul className="hub-wayfinder-list" id="hub-wayfinder-list">
-          {questions.map(item => <li key={item.id}><a href={mapHash(project, item.id)}><span className="hub-wayfinder-type">{item.type}</span> {item.title}</a></li>)}
+          {questions.map(item => (
+            <li key={item.id} className="hub-q-row" data-q-row={item.id}>
+              <span className="hub-q-title"><a href={mapHash(project, item.id)}><span className="hub-wayfinder-type">{item.type}</span> {item.title}</a></span>
+              <QuestionActions project={project} repoName={repoName} wayfinder={wayfinder} item={item} layout="row" />
+            </li>
+          ))}
         </ul>
       )}
     </div>

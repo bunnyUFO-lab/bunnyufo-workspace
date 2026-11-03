@@ -48,6 +48,7 @@ const sideEffect = (preset: SpawnPreset, repo?: string): string => {
   switch (preset.sideEffect) {
     case 'pr': return `A new branch and a PR in ${repo || 'the repo'}. No merge, no deploy.`
     case 'card': return 'One card in assistant.'
+    case 'asks': return 'One Ask per question in Needs you, and sometimes a card in assistant. It closes nothing.'
     case 'build': return 'A build and a Playtest item. Nothing is deployed.'
     case 'images': return 'Images on a card and a Design review item.'
     default: return preset.produces

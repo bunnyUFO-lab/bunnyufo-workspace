@@ -1609,7 +1609,7 @@ async function requestList(flags) {
 }
 
 /** The preset ids a request may name. A copy of Object.keys(PRESETS) in site/api/presets.mjs; a test keeps them equal. */
-const PRESET_IDS = ['code-task', 'research', 'market-research', 'game-teardown', 'playtest-build', 'sprite-set', 'agent-avatar', 'docs'];
+const PRESET_IDS = ['code-task', 'research', 'market-research', 'game-teardown', 'playtest-build', 'sprite-set', 'agent-avatar', 'docs', 'question'];
 const REQUEST_NEEDS = ['unity', 'gpu', 'comfyui', 'sprite-studio', 'lan', 'local-files'];
 const REQUEST_TARGETS = ['pc', 'cloud', 'hermes', 'at-pc'];
 const REQUEST_USAGE = 'Usage: request create --project <p> --text <t> [--title <t>] [--preset <id>] [--repo owner/name] [--needs a,b] [--target pc|cloud|hermes|at-pc] [--done-when <t>] [--origin-run <id>] [--when next-sprint|nightly|record] [--by <name>]';

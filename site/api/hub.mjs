@@ -18,9 +18,9 @@ import {
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
-import { buildMap } from './hub-map.mjs';
+import { buildMap, isWayfinderQuestion } from './hub-map.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
-import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState } from './hub-marks.mjs';
+import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState, NOT_YET, REASON_MAX } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
@@ -525,6 +525,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return deliveryOf({ answer, delivered, watchers, at });
   }
 
+  /** The title Beads has for the open Wayfinder question a decision Ask would decide, or ''. It comes from Beads, never from the Ask. */
+  async function decidesTitle(ask) {
+    if (ask.kind !== 'decision' || !ask.bead || !validProject(ask.project)) return '';
+    try {
+      const { issues } = await loadBeads(ask.project);
+      return isWayfinderQuestion(issues, ask.bead) ? String(issues.find(item => item.id === ask.bead).title ?? ask.bead) : '';
+    } catch {
+      return '';
+    }
+  }
+
   async function askDetail(id, at) {
     const { ask, names } = await askFolder(id);
     const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
@@ -535,8 +546,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
     const sub = askSubtype(ask);
+    const beadTitle = await decidesTitle(ask);
     return {
       ...ask, ...state,
+      ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
@@ -731,6 +744,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const issue = issues.find(item => item.id === bead);
     if (!issue) throw fail('No such task in this project.', 404);
     const closed = issue.status === 'closed';
+    // An open Wayfinder question may be decided or set aside by the owner although it does not wait on them (the Roadmap's "Answer here").
+    const wayfinder = isWayfinderQuestion(issues, bead);
     const state = markState((await loadMarks(project)).get(markKey(project, bead)) ?? [], { closed, waiting: isWaiting(issue) });
     const answer = (status, body) => ({ status, body });
     if (verdict === 'undo') {
@@ -742,10 +757,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       if (closed) throw fail('Already closed in Beads.', 409);
       // Unblock removes `needs-owner` or `blocked`; a task that waits only through an Ask or a checklist has neither, so it would change nothing.
       if (verdict === 'unblock' && !isWaiting(issue)) throw fail('Unblock changes nothing here: this task has no needs-owner label and is not blocked, it waits only through an Ask or a checklist. Answer or cancel that Ask, or use Mark done or Not needed.', 409);
-      const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
-      const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at });
-      const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
-      if (task?.state !== 'you') throw fail('This is not waiting on you.', 409);
+      if (!(wayfinder && (verdict === 'done' || verdict === 'not-needed'))) {
+        const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
+        const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at });
+        const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
+        if (task?.state !== 'you') throw fail('This is not waiting on you.', 409);
+      }
     }
     const stamp = at.toISOString();
     await putMark({ project, bead, verdict, at, body: { v: 1, project, bead, verdict, at: stamp, by: user, ...(reason ? { reason } : {}) } });
@@ -817,6 +834,26 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return { chat: name, lines, excerpt };
   }
 
+  /**
+   * The owner's answer to a `kind: decision` Ask that names an open Wayfinder question of the Ask's own project decides that question:
+   * a done mark with the picked option (and the note) as its reason, the same mark "Answer here" writes. The reserved option id `not-yet` ("not decided yet") writes none. Skipped answers, other kinds,
+   * other projects and anything that is not an open Wayfinder question write nothing. A failed write is logged and never fails the answer.
+   */
+  async function markFromAnswer({ ask, answer, user, at }) {
+    try {
+      if (ask.kind !== 'decision' || !ask.bead || !validProject(ask.project) || typeof answer.choice !== 'string' || !answer.choice || answer.choice === NOT_YET) return;
+      const option = Array.isArray(ask.options) ? ask.options.find(item => item.id === answer.choice) : null;
+      if (!option) return;
+      if (!isWayfinderQuestion((await loadBeads(ask.project)).issues, ask.bead)) return;
+      const label = String(option.label ?? option.id).replace(/\s+/g, ' ').trim();
+      const note = typeof answer.note === 'string' ? answer.note.replace(/\s+/g, ' ').trim() : '';
+      const text = note ? `${label}: ${note}` : label;
+      await markBead(ask.project, { bead: ask.bead, verdict: 'done', reason: text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1).trimEnd()}…` : text }, user, at);
+    } catch (error) {
+      log(`[hub] ask ${ask.id} was answered but its question was not marked decided: ${scrub(String(error?.message ?? error), 200)}`);
+    }
+  }
+
   async function answerAsk(id, data, user, at, response) {
     if (await exists(`asks/${id}/answer.json`)) throw await alreadyAnswered(id);
     const { ask, names } = await askFolder(id);
@@ -847,6 +884,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
     const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });
+    await markFromAnswer({ ask, answer, user: user || 'local', at });
     return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}) } };
   }
 
@@ -911,6 +949,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     checkAnswer(row.ask, { choice });
     const answer = { at: at.toISOString(), by: 'owner', via: 'discord', choice, rev, discord: { interaction, message } };
     await writeAnswer(id, answer);
+    await markFromAnswer({ ask: row.ask, answer, user: 'owner', at });
     log(`[hub] discord answer ${id} ${choice} interaction=${interaction}`);
     return { status: 201, body: { state: 'answered', answer } };
   }

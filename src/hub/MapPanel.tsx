@@ -7,6 +7,7 @@ import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { useHubData } from './useHub'
 import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, sprintLines, tasksOf, type Found } from './mapState'
 import MarkActions from './MarkActions'
+import QuestionActions from './QuestionActions'
 import { cardHref, closedLine, finishedLine, hasNeedsItem, noPrs, prLabel, sheetPrs, type SheetPr } from './mapSheet'
 
 /** The signs in the legend's order, with the short word the panel counts them under. */
@@ -131,11 +132,18 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
     const all = model.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks))
     const nameOf = (id: string) => all.find(item => item.id === id)?.title ?? id
     const unlocks = all.filter(other => other.deps.includes(task.id)).map(other => other.title)
+    const resolving = model.wayfinder?.open.find(item => item.id === task.id)
     const closed = closedLine(task)
     const words = task.signs.map(sign => (sign in SIGN_WORDS ? SIGN_WORDS[sign as keyof typeof SIGN_WORDS] : SIGN_LABEL[sign].toLowerCase()))
     body = (
       <>
         <Summary text={task.summary} show />
+        {resolving && model.wayfinder && (
+          <div className="hub-map-panel-resolve" data-resolve>
+            <h4>Resolve</h4>
+            <QuestionActions project={model.project} repoName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project} wayfinder={model.wayfinder} item={resolving} layout="sheet" />
+          </div>
+        )}
         {words.length > 0 && <p className="hub-muted">{words.join(' · ')}</p>}
         {task.deps.length > 0 && <p className="hub-muted">Needs first: {task.deps.map(nameOf).join(', ')}</p>}
         {unlocks.length > 0 && <p className="hub-muted">Unlocks: {unlocks.join(', ')}</p>}
