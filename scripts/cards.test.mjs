@@ -1631,6 +1631,66 @@ for (const via of ['api', 's3']) {
 }
 
 for (const via of ['api', 's3']) {
+  test(`feedback (${via}): list ignores a record the card API wrote, --unfiled keeps one whose only note predates it, body holds no copy, filed names an earlier bead (BUW_INBOX_SECTION=inbox-dev)`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+      cli.env = { BUW_INBOX_SECTION: 'inbox-dev' };
+      const record = (project, kind, id, key, at, extra = {}, metadata = {}) => {
+        const body = { v: 1, project, item: { kind, id }, key, at, by: 'owner', reason: { preset: 'too-long' }, reasonText: 'Too long', title: `Title of ${key}`, source: { by: 'hook', host: 'pc.example.test', tool: 'claude-code' }, copy: { row: { title: 'COPY-ROW-TEXT' }, raw: { text: 'COPY-RAW-TEXT' } }, ...extra };
+        fake.seed(`sections/inbox-dev/feedback/${project}/${kind}/${id}/not-useful.json`, JSON.stringify(body), 'application/json', metadata);
+      };
+      const note = (project, kind, id, name, bead, at) => fake.seed(`sections/inbox-dev/feedback/${project}/${kind}/${id}/${name}`, JSON.stringify({ v: 1, bead, at, by: 'pc' }), 'application/json');
+      record('fb-proj', 'review', 'a.json', 'aaaaaaaa', '2026-10-31T10:00:00.000Z', { bead: 'fb-7' });
+      note('fb-proj', 'review', 'a.json', 'filed-20261031T100500000Z-ab12.json', 'fb-1', '2026-10-31T10:05:00.000Z');
+      record('fb-proj', 'ask', '20261031-b-ab12', 'bbbbbbbb', '2026-10-31T10:10:00.000Z');
+      note('fb-proj', 'ask', '20261031-b-ab12', 'filed-20261031T090000000Z-cd34.json', 'fb-2', '2026-10-31T09:00:00.000Z');
+      note('fb-proj', 'ask', '20261031-b-ab12', 'filed-20261031T101500000Z-ef56.json', 'not a bead', '2026-10-31T10:15:00.000Z');
+      record('fb-proj', 'blocked', 'c.json', 'cccccccc', '2026-10-31T10:20:00.000Z', { reasonText: '', reason: {} });
+      record('fb-proj', 'checklist', '20261031-d-ab12', 'dddddddd', '2026-10-31T10:30:00.000Z', {}, { writer: 'card-api' });
+      record('other', 'review', 'e.json', 'eeeeeeee', '2026-10-31T10:40:00.000Z');
+      record('fb-proj', 'review', 'mismatch.json', 'ffffffff', '2026-10-31T10:50:00.000Z', { item: { kind: 'review', id: 'other.json' } });
+
+      const listed = await cli(via, 'feedback', 'list', '--project', 'fb-proj');
+      assert.equal(listed.code, 0, listed.stderr);
+      const lines = listed.stdout.trim().split('\n');
+      assert.deepEqual(lines.slice(0, 3).map(line => [line.split('\t')[0], line.split('\t')[1], line.split('\t')[6]]), [['aaaaaaaa', 'review', 'fb-1'], ['bbbbbbbb', 'ask', '-'], ['cccccccc', 'blocked', '-']]);
+      assert.equal(lines[3], 'ignored (not written by the Hub): 1');
+      assert.equal(lines.length, 4, 'a record whose body disagrees with its folder is not listed');
+      assert.equal(lines[0].split('\t')[4], 'Too long');
+      const unfiled = await cli(via, 'feedback', 'list', '--project', 'fb-proj', '--unfiled', '--json');
+      assert.deepEqual(JSON.parse(unfiled.stdout).map(row => [row.key, row.bead]), [['bbbbbbbb', null], ['cccccccc', null]], 'a note before the record, or with a bad bead, does not end it');
+      const every = (await cli(via, 'feedback', 'list', '--unfiled')).stdout;
+      assert.match(every, /eeeeeeee/, 'no --project lists every project');
+
+      const shown = JSON.parse((await cli(via, 'feedback', 'show', '--project', 'fb-proj', '--key', 'aaaaaaaa', '--json')).stdout);
+      assert.equal(shown.copy.raw.text, 'COPY-RAW-TEXT');
+      const forged = await cli(via, 'feedback', 'show', '--project', 'fb-proj', '--key', 'dddddddd');
+      assert.notEqual(forged.code, 0, 'a record the card API wrote is not shown');
+
+      const body = await cli(via, 'feedback', 'body', '--project', 'fb-proj', '--key', 'aaaaaaaa');
+      assert.equal(body.code, 0, body.stderr);
+      assert.ok(!/COPY-(ROW|RAW)-TEXT/.test(body.stdout), 'the bead body holds no copy');
+      for (const part of ['Too long', 'review a.json', 'Title of aaaaaaaa', 'hook on pc.example.test', 'Bead it named: fb-7', 'cards feedback show --project fb-proj --key aaaaaaaa']) assert.ok(body.stdout.includes(part), part);
+
+      const first = await cli(via, 'feedback', 'filed', '--project', 'fb-proj', '--key', 'cccccccc', '--bead', 'fb-9');
+      assert.equal(first.code, 0, first.stderr);
+      assert.match(first.stdout.trim(), /^feedback\/fb-proj\/blocked\/c\.json\/filed-\d{8}T\d{9}Z-[0-9a-f]{4}\.json$/);
+      const written = fake.json(`sections/inbox-dev/${first.stdout.trim()}`);
+      assert.deepEqual([written.v, written.bead], [1, 'fb-9']);
+      assert.ok(Date.parse(written.at) >= Date.parse('2026-10-31T10:20:00.000Z'));
+      assert.deepEqual(JSON.parse((await cli(via, 'feedback', 'list', '--project', 'fb-proj', '--unfiled', '--json')).stdout).map(row => row.key), ['bbbbbbbb']);
+      const second = await cli(via, 'feedback', 'filed', '--project', 'fb-proj', '--key', 'cccccccc', '--bead', 'fb-10');
+      assert.equal(second.code, 0, second.stderr);
+      assert.equal(second.stdout.trim(), 'already filed as fb-9: close yours with bd close fb-10 --reason "duplicate of fb-9"');
+      assert.equal((await cli(via, 'feedback', 'filed', '--project', 'fb-proj', '--key', 'cccccccc', '--bead', 'Not A Bead')).code, 1);
+      assert.notEqual((await cli(via, 'feedback', 'filed', '--project', 'fb-proj', '--key', '12345678', '--bead', 'fb-3')).code, 0, 'no such record');
+      assert.deepEqual(keys('').filter(key => !key.endsWith('/workspace.json')), [], 'Nothing was written to the real inbox.');
+    } finally { await close(); }
+  });
+}
+
+for (const via of ['api', 's3']) {
   test(`sheet put (${via}): team/<agent>/sheet-<stamp>.png then .json for the agent on the run's own request; nothing else goes through`, async () => {
     const { fake, cli, dir, close } = await setup();
     try {

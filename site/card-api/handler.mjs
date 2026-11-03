@@ -165,8 +165,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|presence\.json)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -175,6 +175,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   const markFiles = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && /^bead-marks\//i.test(file) && (!APPLIED_FILE.test(file) || upload || ifNoneMatch !== '*')) {
       throw new HttpError(403, 'Agents write only applied marks, once.');
+    }
+  };
+  /** An agent's only file under feedback/: the note that it filed the owner's Not useful item as a bug (create-only). */
+  const FEEDBACK_FILED = /^feedback\/[^/]+\/[^/]+\/[^/]+\/filed-\d{8}T\d{9}Z-[a-z0-9]{4}\.json$/i;
+  const feedbackFiles = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
+    if (INBOXES.has(sectionId) && caller.rights.write !== null && /^feedback\//i.test(file) && (!FEEDBACK_FILED.test(file) || upload || ifNoneMatch !== '*')) {
+      throw new HttpError(403, 'Agents write only filed notes under feedback/, once.');
     }
   };
   /** The Hermes host's redacted settings export: create-only, one file per publish. */
@@ -243,6 +250,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    // Same for the Not useful records: only a file with no mark is the Hub's.
+    if (/^feedback\//i.test(file)) return { writer: 'card-api' };
     // The Away switch is the Hub's own file (it writes it with no mark): anything this API writes there carries one, and hub-hooks ignores it.
     if (file === 'presence.json') return { writer: 'card-api' };
     // An export the Hermes host published: the only provenance the Hub accepts for it.
@@ -288,7 +297,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file) || /^agent-config\//i.test(file))) {
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file) || /^feedback\//i.test(file) || /^agent-config\//i.test(file))) {
       throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks, marks and request files.');
     }
   };
@@ -438,6 +447,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       ownerOnly(caller, sectionId, file);
       agentConfigOnly(caller, sectionId, file, { ifNoneMatch });
       markFiles(caller, sectionId, file, { ifNoneMatch });
+      feedbackFiles(caller, sectionId, file, { ifNoneMatch });
       await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
@@ -470,6 +480,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         ownerOnly(caller, sectionId, file);
         agentConfigOnly(caller, sectionId, file, { upload: true });
         markFiles(caller, sectionId, file, { upload: true });
+        feedbackFiles(caller, sectionId, file, { upload: true });
         await runnerOnly(caller, sectionId, file);
         askCreateOnly(caller, sectionId, file, { upload: true });
         return { path: file, method: 'PUT', url: await bucket.presign('PUT', keyOf(sectionId, file), { expires: urlTtl }) };

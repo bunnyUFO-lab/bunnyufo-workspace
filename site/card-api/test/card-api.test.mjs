@@ -319,6 +319,48 @@ test('inbox: the owner\'s Roadmap marks are the Hub\'s; an agent may only add an
   }
 });
 
+test("inbox: the owner's Not useful record is the Hub's; an agent may only add a filed note, once", async () => {
+  const { fake, call } = await setup();
+  try {
+    const base = 'feedback/probe/review/rv-1';
+    const noIf = { 'If-None-Match': '*' };
+    const put = (token, file, headers = noIf) => call('PUT', `/sections/inbox/files/${base}/${file}`, { token, body: Buffer.from('{}'), base64: true, headers });
+    for (const token of ['tok-cloud', 'tok-agent', 'tok-pc-runner', 'tok-hermes-main']) {
+      const refused = await put(token, 'not-useful.json');
+      assert.equal(refused.status, 403, token);
+      assert.equal(refused.data.error, 'Only the Hub writes answers.');
+      assert.equal((await put(token, 'not-useful.json', {})).status, 403, `${token} replacing`);
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token, body: { files: [{ path: `${base}/not-useful.json` }] } })).status, 403, `${token} by upload URL`);
+    }
+    assert.equal(fake.text(`sections/inbox/${base}/not-useful.json`), null, 'nothing was written');
+    // Any other name under feedback/ is refused to a limited writer.
+    assert.equal((await put('tok-cloud', 'notes.json')).status, 403);
+    assert.equal((await put('tok-cloud', 'filed-20261030T110000000Z-ab12.json.bak')).status, 403);
+    assert.equal((await call('PUT', '/sections/inbox/files/feedback/probe/not-useful.json', { token: 'tok-cloud', body: Buffer.from('{}'), base64: true, headers: noIf })).status, 403, 'a shallower path');
+    // The filed note: create-only, once, never by upload URL.
+    const filed = 'filed-20261030T110000000Z-ab12.json';
+    assert.equal((await put('tok-cloud', filed)).status, 200, 'An agent writes the filed note.');
+    assert.equal((await put('tok-cloud', filed)).status, 412, 'It is not overwritten.');
+    assert.equal((await put('tok-cloud', 'filed-20261030T120000000Z-cd34.json', {})).status, 403, 'Without If-None-Match: * it is refused.');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: `${base}/filed-20261030T130000000Z-ef56.json` }] } })).status, 403, 'An upload URL cannot be create-only.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${base}/${filed}`, { token: 'tok-deleter' })).status, 403, 'A limited deleter keeps off it.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${base}/not-useful.json`, { token: 'tok-deleter' })).status, 403);
+    assert.ok(fake.objects.get(`sections/inbox/${base}/${filed}`));
+    // Whatever this API writes there is tagged and served with the tag; the Hub's own write carries none.
+    assert.equal(fake.objects.get(`sections/inbox/${base}/${filed}`).metadata.writer, 'card-api');
+    assert.equal((await put('tok-all', 'not-useful.json')).status, 200, 'The passphrase may put it.');
+    assert.equal(fake.objects.get(`sections/inbox/${base}/not-useful.json`).metadata.writer, 'card-api', 'its copy is tagged');
+    assert.equal((await call('GET', `/sections/inbox/files/${base}/not-useful.json`, { token: 'tok-agent' })).headers['x-card-writer'], 'card-api');
+    fake.seed('sections/inbox/feedback/probe/review/rv-2/not-useful.json', '{}', 'application/json');
+    assert.equal((await call('GET', '/sections/inbox/files/feedback/probe/review/rv-2/not-useful.json', { token: 'tok-agent' })).headers['x-card-writer'], 'none', 'a Hub write has no mark');
+    // The development inbox follows the same rules.
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    assert.equal((await call('PUT', `/sections/inbox-dev/files/${base}/not-useful.json`, { token: 'tok-devbot', body: Buffer.from('{}'), base64: true })).status, 403);
+  } finally {
+    await fake.close();
+  }
+});
+
 test('a section that is not an inbox: presence.json at its root is a 400, and a read sends no x-card-writer', async () => {
   const { fake, call } = await setup();
   try {
