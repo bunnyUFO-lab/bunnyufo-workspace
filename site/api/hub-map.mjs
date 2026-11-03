@@ -65,24 +65,68 @@ export function destinationOf(description) {
   return text.length > DESTINATION_MAX ? `${text.slice(0, DESTINATION_MAX - 1).trimEnd()}…` : text;
 }
 
+const SECTION_MAX = 600;
+const wayfinderType = issue => (issue.labels ?? []).find(label => label.startsWith('wayfinder:') && label !== 'wayfinder:map')?.slice('wayfinder:'.length);
+
+/** The text under a `## <name>` heading up to the next heading, as plain text clipped to `max` characters; null when there is none. */
+export function sectionOf(description, name, max = SECTION_MAX) {
+  const lines = String(description ?? '').split(/\r?\n/);
+  const at = lines.findIndex(line => new RegExp(`^#{2}\\s+${name}\\s*#*\\s*$`, 'i').test(line.trim()));
+  if (at < 0) return null;
+  const body = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^#{1,6}\s/.test(line.trim())) break;
+    body.push(line);
+  }
+  const text = plainText(body.join(' '));
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/**
+ * Whether `bead` is an open Wayfinder question: open, labelled `wayfinder:<type>` (not `:map`), and the child of an open
+ * `wayfinder:map`. The one rule the Roadmap's "Answer here" and the Ask-to-mark step share. `issues` are Beads issues, with or without marks.
+ */
+export function isWayfinderQuestion(issues, bead) {
+  const byId = new Map(issues.map(issue => [issue.id, issue]));
+  const issue = byId.get(bead);
+  if (!issue || issue.status === 'closed' || !wayfinderType(issue)) return false;
+  const parent = (issue.dependencies ?? []).find(dep => dep.issue_id === issue.id && dep.type === 'parent-child');
+  const map = parent && byId.get(parent.depends_on_id);
+  return !!map && map.status !== 'closed' && (map.labels ?? []).includes('wayfinder:map');
+}
+
 /**
  * The Wayfinder header: the open issue labelled `wayfinder:map` with the newest `updated_at`, the
  * destination in its description, its closed children as decisions and its open children with a
- * `wayfinder:<type>` label (not `:map`) as open questions, oldest first, at most 8. Null without a map.
+ * `wayfinder:<type>` label (not `:map`) as open questions, oldest first, at most 8. Each question carries what a
+ * run or a session needs: the `## Question` text, the open issues it waits for and the ones it unlocks (titles), the
+ * Library cards it names. Null without a map.
  */
-function wayfinderOf(issues, childrenOf) {
+function wayfinderOf(issues, childrenOf, blockersOf) {
   const maps = issues.filter(issue => issue.status !== 'closed' && (issue.labels ?? []).includes('wayfinder:map'));
   if (!maps.length) return null;
   const map = maps.reduce((best, issue) => (String(issue.updated_at ?? '') > String(best.updated_at ?? '') ? issue : best));
   const kids = childrenOf.get(map.id) ?? [];
+  const byId = new Map(issues.map(issue => [issue.id, issue]));
+  const titleOf = issue => issue.title ?? issue.id;
   const open = kids
     .filter(issue => issue.status !== 'closed')
-    .map(issue => ({ issue, type: (issue.labels ?? []).find(label => label.startsWith('wayfinder:') && label !== 'wayfinder:map')?.slice('wayfinder:'.length) }))
+    .map(issue => ({ issue, type: wayfinderType(issue) }))
     .filter(row => row.type)
     .sort((a, b) => (created(a.issue) < created(b.issue) ? -1 : created(a.issue) > created(b.issue) ? 1 : a.issue.id < b.issue.id ? -1 : 1))
     .slice(0, 8)
-    .map(({ issue, type }) => ({ id: issue.id, title: issue.title ?? issue.id, type }));
-  return { destination: destinationOf(map.description), decisions: kids.filter(issue => issue.status === 'closed').length, open };
+    .map(({ issue, type }) => {
+      const question = sectionOf(issue.description, 'question');
+      const blockedBy = (blockersOf.get(issue.id) ?? []).map(id => byId.get(id)).filter(blocker => blocker && blocker.status !== 'closed').map(titleOf);
+      const unlocks = issues.filter(other => other.status !== 'closed' && (blockersOf.get(other.id) ?? []).includes(issue.id)).sort((a, b) => (created(a) < created(b) ? -1 : created(a) > created(b) ? 1 : 0)).map(titleOf);
+      const cards = cardRefsOf(issue);
+      return { id: issue.id, title: titleOf(issue), type, ...(question ? { question } : {}), blockedBy, unlocks, ...(cards.length ? { cards } : {}) };
+    });
+  return {
+    mapId: map.id, mapTitle: titleOf(map), destination: destinationOf(map.description), notes: sectionOf(map.description, 'notes'),
+    decisions: kids.filter(issue => issue.status === 'closed').length, open,
+  };
 }
 
 /**
@@ -251,7 +295,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       ...(state === 'you' ? { you: asksByBead.has(issue.id) ? 'ask' : checklistsByBead.has(issue.id) ? 'checklist' : 'label' } : {}),
       ...(summary ? { summary } : {}),
       ...(issue.close_reason ? { closeReason: issue.close_reason } : {}),
-      ...(issue._mark ? { mark: { verdict: issue._mark.verdict, at: issue._mark.at, pending: true } } : {}),
+      ...(issue._mark ? { mark: { verdict: issue._mark.verdict, at: issue._mark.at, pending: true, ...(issue._mark.reason ? { reason: issue._mark.reason } : {}) } } : {}),
       ...(cardRows.length ? { cards: cardRows } : {}),
       ...(commits.length ? { commits } : {}),
       ...(prUrl ? { prUrl } : {}),
@@ -341,6 +385,6 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     project, meta,
     ageMinutes: Number.isNaN(pushed) ? null : Math.max(0, Math.floor((now.getTime() - pushed) / 60000)),
     milestones, sprints,
-    wayfinder: wayfinderOf(issues, childrenOf),
+    wayfinder: wayfinderOf(issues, childrenOf, blockersOf),
   };
 }

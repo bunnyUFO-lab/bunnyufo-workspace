@@ -13,7 +13,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { askRev } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { askJson, eventJson, seeder } from './hub-fixtures.mjs';
+import { askJson, beadsIssue, eventJson, seeder } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const OWNER = '100000000000000001';
@@ -287,5 +287,28 @@ test('9. an Ask that is expired, cancelled or picked up is refused; a snoozed on
     const allowed = await f.answer(f.answerBody(snoozed, f.revOf(snoozed)));
     assert.equal(allowed.status, 201);
     assert.equal(f.fake.json(f.answerKey(snoozed)).via, 'discord');
+  } finally { await f.close(); }
+});
+
+test('8. a click on a decision Ask for an open Wayfinder question decides it, like the web answer; a plain Ask writes no mark', async () => {
+  const f = await fixture();
+  try {
+    f.seed.beads('wd', [
+      beadsIssue({ id: 'wd-map', title: 'Map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z' }),
+      beadsIssue({ id: 'wd-q1', title: 'What is the goal?', parent: 'wd-map', labels: ['wayfinder:grilling'], created: '2026-10-02T10:00:00Z' }),
+    ], { pushedAt: NOW.toISOString(), host: 'pc.example.test', count: 2, repo: 'example/wd' });
+    const marks = () => [...f.fake.objects.keys()].filter(key => key.includes('/bead-marks/'));
+    const plain = f.ask('plain', { project: 'wd', bead: 'wd-q1' }, {}, 'e5e5');
+    const { body: { asks: first } } = await f.list();
+    assert.equal((await f.answer(f.answerBody(plain, first.find(item => item.id === plain.id).rev))).status, 201);
+    assert.deepEqual(marks(), [], 'An Ask without kind decision decides nothing.');
+
+    const decision = f.ask('decide', { project: 'wd', bead: 'wd-q1', kind: 'decision' }, {}, 'f6f6');
+    const { body: { asks } } = await f.list();
+    const made = await f.answer(f.answerBody(decision, asks.find(item => item.id === decision.id).rev, { choice: 'B' }));
+    assert.equal(made.status, 201);
+    const [file] = marks();
+    assert.match(file, /\/bead-marks\/wd\/wd-q1\/\d{8}T\d{9}Z-done-[a-z0-9]{4}\.json$/);
+    assert.deepEqual([f.fake.json(file).verdict, f.fake.json(file).reason, f.fake.json(file).by], ['done', 'No', 'owner']);
   } finally { await f.close(); }
 });

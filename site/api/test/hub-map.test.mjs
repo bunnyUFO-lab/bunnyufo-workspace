@@ -1,7 +1,7 @@
 // The Progress map's model: milestones, features, tasks, states, signs and sprint bands.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMap, orderSiblings, roll } from '../hub-map.mjs';
+import { buildMap, isWayfinderQuestion, orderSiblings, roll, sectionOf } from '../hub-map.mjs';
 import { beadsIssue as issue, cujTwo, eventJson, iso, minutesAgo } from './hub-fixtures.mjs';
 
 const NOW = new Date('2026-10-26T12:00:00Z');
@@ -216,7 +216,7 @@ test('wayfinder: closed children are the decisions; open wayfinder children are 
 
 test('wayfinder: a map without the heading has no destination and still counts', () => {
   const way = build([wayMap({ description: 'Just notes.' }), issue({ id: 'd', parent: 'wf', status: 'closed', closed: '2026-10-05T10:00:00Z' })]).wayfinder;
-  assert.deepEqual(way, { destination: null, decisions: 1, open: [] });
+  assert.deepEqual(way, { mapId: 'wf', mapTitle: 'wf', destination: null, notes: null, decisions: 1, open: [] });
 });
 
 test('wayfinder: the newest updated map wins, a closed map is ignored, and no map gives null', () => {
@@ -226,6 +226,61 @@ test('wayfinder: the newest updated map wins, a closed map is ignored, and no ma
   assert.equal(build([older, newer, closed]).wayfinder.destination, 'New.');
   assert.equal(build([closed]).wayfinder, null);
   assert.equal(build([issue({ id: 'm', type: 'milestone' })]).wayfinder, null);
+});
+
+// The questions' own text for a run or a session: what is asked, what it waits for, what it unlocks (ws-qdh.1). Shaped like a live map.
+const LIVE_MAP = 'Intro.\n\n## Destination\n\nA milestone list the owner accepts.\n\n## Notes\n\nThe list is for the next sprint only. See [the plan](https://example.test/p).\n\n## Decisions so far\n\n- none';
+const liveIssues = () => [
+  wayMap({ description: LIVE_MAP }),
+  issue({ id: 'wf.1', title: 'What is the goal?', parent: 'wf', labels: ['wayfinder:grilling'], created: '2026-10-03T10:00:00Z', description: '## Question\n\nWhat should the **next sprint** deliver?\n\n## Why\n\nOther text.' }),
+  issue({ id: 'wf.2', title: 'Which hand-ons are still open?', parent: 'wf', labels: ['wayfinder:research'], created: '2026-10-03T11:00:00Z', description: '## Question\n\nCheck the list against main. See sections/agent-plans/2026-10-27_plan for context.' }),
+  issue({ id: 'wf.3', title: 'Core text: in or out?', parent: 'wf', labels: ['wayfinder:grilling'], blocks: ['wf.1'], created: '2026-10-03T12:00:00Z' }),
+  issue({ id: 'wf.4', title: 'Which tuning ships?', parent: 'wf', labels: ['wayfinder:grilling'], blocks: ['wf.1', 'wf.2'], created: '2026-10-03T13:00:00Z' }),
+];
+
+test('wayfinder: each open question carries its question text, what it waits for, what it unlocks and its cards; the map carries its id, title and notes', () => {
+  const way = build(liveIssues()).wayfinder;
+  assert.deepEqual([way.mapId, way.mapTitle, way.notes], ['wf', 'wf', 'The list is for the next sprint only. See the plan.']);
+  assert.deepEqual(way.open.map(item => [item.id, item.type, item.blockedBy]), [['wf.1', 'grilling', []], ['wf.2', 'research', []], ['wf.3', 'grilling', ['What is the goal?']], ['wf.4', 'grilling', ['What is the goal?', 'Which hand-ons are still open?']]]);
+  assert.equal(way.open[0].question, 'What should the next sprint deliver?', 'Only the Question section, as plain text.');
+  assert.deepEqual(way.open[0].unlocks, ['Core text: in or out?', 'Which tuning ships?']);
+  assert.deepEqual(way.open[1].unlocks, ['Which tuning ships?']);
+  assert.deepEqual(way.open[1].cards, ['agent-plans/2026-10-27_plan']);
+  assert.ok(!('question' in way.open[2]) && !('cards' in way.open[2]), 'Nothing is sent that the bead does not have.');
+});
+
+test('wayfinder: a closed blocker no longer blocks, and the text sections are clipped to 600 characters', () => {
+  const issues = liveIssues();
+  issues[1] = { ...issues[1], status: 'closed', closed_at: '2026-10-05T10:00:00Z' };
+  issues[2] = { ...issues[2], description: `## Question\n\n${'word '.repeat(300)}` };
+  const way = build(issues).wayfinder;
+  assert.deepEqual(way.open.map(item => item.id), ['wf.2', 'wf.3', 'wf.4']);
+  assert.deepEqual(way.open[1].blockedBy, [], 'wf.1 is closed.');
+  assert.deepEqual(way.open[2].blockedBy, ['Which hand-ons are still open?']);
+  assert.equal(way.open[0].question.length, 600);
+  assert.ok(way.open[0].question.endsWith('…'));
+  assert.equal(way.decisions, 1);
+});
+
+test('sectionOf: the text up to the next heading, case-insensitive, or null', () => {
+  assert.equal(sectionOf('## notes\nOne\ntwo\n\nThree\n## Next\nNo', 'Notes'), 'One two Three');
+  assert.equal(sectionOf('## Notes\n\n## Next\nNo', 'Notes'), null);
+  assert.equal(sectionOf('Nothing', 'Notes'), null);
+  assert.equal(sectionOf(undefined, 'Notes'), null);
+});
+
+test('isWayfinderQuestion: an open wayfinder ticket under an open map, and nothing else', () => {
+  const issues = [
+    ...liveIssues(),
+    issue({ id: 'plain', parent: 'wf' }),
+    issue({ id: 'shut', parent: 'wf', labels: ['wayfinder:grilling'], status: 'closed', closed: '2026-10-05T10:00:00Z' }),
+    wayMap({ id: 'old', status: 'closed', closed: '2026-10-05T10:00:00Z' }),
+    issue({ id: 'old.1', parent: 'old', labels: ['wayfinder:grilling'] }),
+    issue({ id: 'orphan', labels: ['wayfinder:grilling'] }),
+    issue({ id: 'other', labels: ['wayfinder:grilling'], parent: 'plain' }),
+  ];
+  for (const id of ['wf.1', 'wf.2', 'wf.3', 'wf.4']) assert.equal(isWayfinderQuestion(issues, id), true, id);
+  for (const id of ['wf', 'plain', 'shut', 'old', 'old.1', 'orphan', 'other', 'missing']) assert.equal(isWayfinderQuestion(issues, id), false, id);
 });
 
 // The sheet's notes: summary, Beads PRs, the reason a task is yellow, close info and Library cards.
