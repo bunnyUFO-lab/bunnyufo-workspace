@@ -30,7 +30,8 @@ const pointOf = (node: MapNode) => ({ ...node.center })
 /** After a relayout, one node's point goes back where it was on screen: a chevron toggle and zoom both hold the node's stable point (a feature's elbow, a milestone's circle). */
 interface Anchor { id: string; old: { x: number; y: number }; origin: { x: number; y: number }; how: 'stable'; /** A zoom step's: it starts the pause before the next one. */ byZoom: boolean }
 /** After the axis switches: put a node (else "now") in the middle of the free part of the box. */
-interface Centre { how: 'centre'; id: string | null }
+/** `axis` is the one the switch asked for: only the layout drawn on that axis may use it (another relayout, such as a refresh of the data, can land first). */
+interface Centre { how: 'centre'; id: string | null; axis: Axis }
 type Axis = 'x' | 'y'
 /** The box turns vertical when it is at least this much taller than wide, and horizontal when it is no taller than wide; in between it keeps its axis. */
 const TALL = 1.15
@@ -150,6 +151,8 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
   /** The ids that zoom opened (the rest of `open` is the user's); zoom folds only these. */
   const auto = useRef<Set<string>>(new Set())
   const relayoutPending = useRef(false)
+  /** The size of the map's frame the view was last placed for: a resize moves the view by the change from this, so a view placed from the live size must say so (else a resize seen later is counted twice). */
+  const placedFor = useRef<{ w: number; h: number } | null>(null)
   const lastSemantic = useRef(0)
   const wrap = useRef<HTMLDivElement>(null)
   const keyButton = useRef<HTMLButtonElement>(null)
@@ -220,7 +223,10 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     const group = drawn.current
     const picture = svg.current
     const frame = box.current
-    relayoutPending.current = false
+    const waiting = after.current
+    // A relayout of the old axis (a data refresh that landed first) must not use the centring meant for the new one: it would place the node by its old coordinates.
+    const forNewAxis = typeof waiting === 'object' && waiting !== null && waiting.how === 'centre' && waiting.axis !== axis
+    if (!forNewAxis) relayoutPending.current = false
     if (!group || !picture || !frame) return
     const bounds = group.getBBox()
     if (!bounds.width) return // not rendered (a hidden tab): keep the last size and measure at the next layout
@@ -231,8 +237,9 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     picture.setAttribute('height', String(h))
     origin.current = { x: bounds.x - PAD, y: bounds.y - PAD }
     pz.setContent({ w, h })
-    const todo = after.current
-    after.current = null
+    const todo = forNewAxis ? null : after.current
+    if (!forNewAxis) after.current = null
+    if (wrap.current && (todo === 'init' || todo === 'fit' || (todo && todo.how === 'centre'))) placedFor.current = { w: wrap.current.clientWidth, h: wrap.current.clientHeight }
     const size = pz.box()
     if (todo === 'init') {
       // Fitted and centred; a long map on a phone would be too small to read, so it starts at a readable size on "now".
@@ -294,7 +301,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
   useLayoutEffect(() => {
     const element = wrap.current
     if (!element || typeof ResizeObserver === 'undefined') return undefined
-    let last = { w: element.clientWidth, h: element.clientHeight }
+    placedFor.current = { w: element.clientWidth, h: element.clientHeight }
     let first = true
     const observer = new ResizeObserver(() => {
       const next = { w: element.clientWidth, h: element.clientHeight }
@@ -305,16 +312,17 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
       if (wanted && wanted !== axisNow.current && next.w > 0 && next.h > 0) {
         axisNow.current = wanted
         // Hold the selection (else "now") in view across the switch; zoom waits for the new layout like it does for its own.
-        if (after.current !== 'init' || !initial) after.current = { how: 'centre', id: shown.current }
+        if (after.current !== 'init' || !initial) after.current = { how: 'centre', id: shown.current, axis: wanted }
         relayoutPending.current = true
-        last = next
+        placedFor.current = next
         setAxis(wanted)
         return
       }
+      const last = placedFor.current ?? next
       if (next.w === last.w && next.h === last.h) return
       const view = pz.current()
       pz.go({ ...view, x: view.x + (next.w - last.w) / 2, y: view.y + (next.h - last.h) / 2 }, false)
-      last = next
+      placedFor.current = next
     })
     observer.observe(element)
     return () => observer.disconnect()

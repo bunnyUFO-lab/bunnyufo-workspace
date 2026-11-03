@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createBucket } from '../s3.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { bucketStore, cardRoute, cardWriter, folderStore } from '../card-writes.mjs';
-import { MAX_BYTES, MAX_FILES, memoryMoveLog, moveCard, moveProgress } from '../card-move.mjs';
+import { MAX_BYTES, MAX_FILES, memoryMoveLog, moveCard as moveCardWithBudget, moveProgress } from '../card-move.mjs';
 import { createBucketCardStore, createCardStore } from '../card-state.mjs';
 
 // Every test has a time limit: a stuck socket or server fails the test instead of hanging the run.
@@ -25,6 +25,9 @@ baseTest.after(() => {
 });
 
 const now = () => new Date('2026-10-30T10:00:00Z');
+// A move stops after its time budget (15 s by default) and answers pending. A test that is not about the budget must not
+// depend on how fast the PC is: it gets a budget no run reaches. The tests of the budget pass their own `budgetMs` and `clock`.
+const moveCard = args => moveCardWithBudget({ budgetMs: 60 * 60_000, ...args });
 const entity = (id, extra = {}) => ({ id, folder: `2026-10-29_${id}`, title: id, category: 'ideas', created: '2026-10-29', updated: '2026-10-29', steps: [{ name: 'Overview', path: 'index.md' }, { name: 'Page', path: 'page.html' }], ...extra });
 
 /** Two workspaces in the fake bucket, `one` holding card "deck" with files and viewer data. */
@@ -546,8 +549,12 @@ test('the lease is renewed on a timer while a slow copy runs', async () => {
     let seenLease = 0;
     watchCopies(w.two.store, async () => {
       t = 50_000;
-      await new Promise(resolve => setTimeout(resolve, 80));
-      seenLease = Math.max(seenLease, w.fake.json('state-moves/one--deck.json').lease);
+      // Wait for the timer's write to land (the condition), however busy the PC is, instead of a fixed pause.
+      for (const end = Date.now() + 30_000; Date.now() < end;) {
+        seenLease = Math.max(seenLease, w.fake.json('state-moves/one--deck.json').lease);
+        if (seenLease === 50_000) break;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
     });
     await moveCard({ from: w.one, to: w.two, id: 'deck', moves, now, clock: () => t, renewMs: 10 });
     assert.equal(seenLease, 50_000, 'the lease moved forward while the copy was still running');

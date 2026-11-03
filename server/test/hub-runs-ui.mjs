@@ -150,7 +150,7 @@ try {
   assert.equal(await board.evaluate(() => window.__wrote), wrote, 'A drawer left open on a finished run does not keep announcing.');
 
   step('a tool step that takes a while shows its running time, then done with no time');
-  const slow = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Starting. ', { tool: 'cards', preview: 'pull the project', ms: 5000 }, 'Finished.'] } });
+  const slow = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Starting. ', { tool: 'cards', preview: 'pull the project', until: 'finish' }, 'Finished.'] } });
   fixtures.push(slow);
   slow.seed.request(proposal(slow.now, 'slow', 'A slow step'));
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -162,12 +162,14 @@ try {
   await waiter.locator(`[data-request-open="${ids.slow}"]`).click();
   const running = waiter.locator('[data-run-drawer] [data-run-tool="running"]');
   await running.waitFor();
+  // The step runs until the test lets it finish, so a slow PC cannot end it before the page has watched the clock tick.
   const seen = new Set();
-  for (let i = 0; i < 30 && await running.count(); i += 1) {
+  for (const end = Date.now() + ms(30000); [...seen].filter(text => /running · \d+ s/.test(text)).length < 3 && Date.now() < end;) {
     seen.add((await running.innerText().catch(() => '')).trim());
     await waiter.waitForTimeout(300);
   }
   assert.ok([...seen].filter(text => /running · \d+ s/.test(text)).length >= 3, `The time ticks (saw ${[...seen].join(' | ')}).`);
+  slow.hermes.go('finish');
   const finished = waiter.locator('[data-run-drawer] [data-run-tool="done"]');
   await finished.waitFor();
   assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');

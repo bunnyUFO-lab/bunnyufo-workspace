@@ -1,3 +1,4 @@
+import { repeatConnect } from '../../site/api/test/steady-fetch.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -89,10 +90,15 @@ test('local authorization and report isolation protect the local service', async
 test('websocket rejects report origins and unauthenticated messages', async () => {
   const { service } = await fixture();
   try {
-    const wrong = new WebSocket(service.origin.replace('http:', 'ws:') + '/events', { origin: service.contentOrigin });
-    await new Promise(resolve => wrong.on('error', resolve));
-    const socket = new WebSocket(service.origin.replace('http:', 'ws:') + '/events', { origin: service.origin });
-    await new Promise(resolve => socket.on('open', resolve));
+    // On a busy PC a connect to 127.0.0.1 can time out before it reaches the server (ETIMEDOUT); the same connect a moment later works.
+    // Only that is repeated: the refusal of a wrong origin and a closed socket are answers, and pass through.
+    const connect = options => repeatConnect(() => new Promise((resolve, reject) => {
+      const attempt = new WebSocket(service.origin.replace('http:', 'ws:') + '/events', options);
+      attempt.once('open', () => resolve(attempt));
+      attempt.once('error', reject);
+    }), error => error.code);
+    await assert.rejects(connect({ origin: service.contentOrigin }), 'A report origin is refused.');
+    const socket = await connect({ origin: service.origin });
     const closed = new Promise(resolve => socket.on('close', code => resolve(code)));
     socket.send(JSON.stringify({ type: 'input', id: 'anything', data: 'whoami\r' }));
     assert.equal(await closed, 1008);
