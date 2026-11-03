@@ -18,7 +18,8 @@ const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 const PROJECT = 'sheetdev';
 const BACKFILL = 'Backfilled 2026-10-26 from git, PRs and cards.';
 
-const fixture = await startHubFixture({ signing: true });
+// This test writes requests into the bucket by hand, so the map's 30-second request cache is off (HUB_MAP_REQUESTS_MS).
+const fixture = await startHubFixture({ signing: true, env: { HUB_MAP_REQUESTS_MS: '0' } });
 const extra = (issue, more) => ({ ...issue, ...more });
 const issues = [
   beadsIssue({ id: 'sd-m1', title: 'Sheet milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
