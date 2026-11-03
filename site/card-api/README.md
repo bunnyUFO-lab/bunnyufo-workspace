@@ -148,6 +148,8 @@ npm run cards -- request create --project <p> --text <t> [--when next-sprint|nig
 npm run cards -- beads push --project <p> [--from <file.jsonl>]   # default: `bd export`
 ```
 
+**Reviews need something to act on.** A `ready-for-review` event (`events/<day>/<name>.json`) needs a pull request link (`url` or `prs`, a GitHub pull request) or an `ask`, the one line saying what the owner should decide or do. Without them the API answers 422 and `cards event ready-for-review` exits 2 with the same words. Every other event kind and every other file is unchanged.
+
 **Pull request events and the reconcile.** A repository's `hub-events.yml` workflow posts `pr-opened`, `pr-merged` and
 `pr-closed` events when a PR changes. A missed post (the secret was not set yet, the API was down, the workflow did not
 exist) would leave a review item waiting for a merge it never hears about. So the same workflow also runs `pr-sync` every

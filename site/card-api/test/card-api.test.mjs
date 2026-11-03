@@ -181,6 +181,29 @@ test('rights: a token that writes inbox writes there only, and cannot delete', a
   }
 });
 
+test('a ready-for-review event needs a pull request link or an ask; every other event and review passes', async () => {
+  const { fake, call } = await setup();
+  try {
+    const put = (token, file, event) => call('PUT', `/sections/inbox-dev/files/events/2026-11-03/${file}`, { token, body: Buffer.from(typeof event === 'string' ? event : JSON.stringify(event)), base64: true });
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    const review = extra => ({ kind: 'ready-for-review', title: 'x', ...extra });
+    const refused = await put('tok-devbot', 'a.json', review({}));
+    assert.equal(refused.status, 422);
+    assert.match(JSON.stringify(refused.data), /pull request link/);
+    assert.equal(fake.text('sections/inbox-dev/events/2026-11-03/a.json'), null, 'nothing stored');
+    assert.equal((await put('tok-devbot', 'b.json', review({ url: 'https://example.test/card', ask: '   ' }))).status, 422, 'a link that is no pull request, and a blank ask');
+    assert.equal((await put('tok-all', 'b2.json', review({ prs: ['https://example.test/x'] }))).status, 422, 'every caller, the unrestricted one too');
+    assert.equal((await put('tok-devbot', 'c.json', review({ url: 'https://github.com/example/app/pull/7' }))).status, 200);
+    assert.equal((await put('tok-devbot', 'd.json', review({ prs: ['https://github.com/example/app/pull/7'] }))).status, 200);
+    assert.equal((await put('tok-devbot', 'e.json', review({ ask: 'Merge when you are happy with it' }))).status, 200);
+    assert.equal((await put('tok-devbot', 'f.json', { kind: 'deployed', title: 'x' })).status, 200, 'other kinds are unchanged');
+    assert.equal((await put('tok-devbot', 'g.json', '{"n":1')).status, 200, 'a file that does not parse is unchanged');
+    assert.equal((await call('PUT', '/sections/inbox-dev/files/other/h.json', { token: 'tok-devbot', body: Buffer.from(JSON.stringify(review({}))), base64: true })).status, 200, 'only events/<day>/ files');
+  } finally {
+    await fake.close();
+  }
+});
+
 test('rights: the development inbox is guarded like the inbox, and a limited token cannot write the Hub\'s files there', async () => {
   const { fake, call } = await setup();
   try {
