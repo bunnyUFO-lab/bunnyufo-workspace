@@ -226,7 +226,8 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
         {!actionable && !page && <RequestState detail={detail} />}
         {loadError && <p className="hub-error" role="alert">{loadError}</p>}
       </div>
-      {actionable && preset && <div className="ni-b ap-rest"><ApprovalActions detail={detail} preset={preset} onSettled={onSettled} /></div>}
+      {/* A sprint item is signed by its sprint (the Hub does it), never by a tap here. */}
+      {actionable && preset && request.preset !== 'sprint-item' && <div className="ni-b ap-rest"><ApprovalActions detail={detail} preset={preset} onSettled={onSettled} /></div>}
     </>
   )
 }

@@ -9,6 +9,7 @@ import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, sprintLines, tasksOf, type 
 import MarkActions from './MarkActions'
 import QuestionActions from './QuestionActions'
 import BeadWork from './BeadWork'
+import SprintPanel from './SprintPanel'
 import { visible as beadWorkVisible } from './beadActions'
 import { host } from '../lib/host'
 import { cardHref, closedLine, finishedLine, hasNeedsItem, noPrs, prLabel, sheetPrs, type SheetPr } from './mapSheet'
@@ -190,6 +191,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
       <>
         <Summary text={node.summary} show={!synthetic} />
         <Library cards={node.cards} />
+        {found.kind === 'm' && <SprintPanel project={model.project} milestone={found.milestone} />}
         <h4>Sprint</h4>
         {sprints.length ? <ul className="hub-map-panel-list plain">{sprints.map(line => <li key={line}>{line}</li>)}</ul> : <p className="hub-muted">Not in a sprint.</p>}
         <h4>Signs</h4>

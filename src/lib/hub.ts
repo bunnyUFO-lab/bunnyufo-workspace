@@ -316,7 +316,18 @@ export interface MapTask {
 export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string; reason?: string; mark?: { verdict: 'done' | 'not-needed'; at: string } }
 export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
 export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }
-export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[] }
+/** One bead of a sprint: the id of its request, the bead, and its request's state (`waiting` until the request exists) with the PR it opened. */
+export interface MapSprintItem { id: string; bead: string; title: string; state: string; pr?: string }
+/** The newest sprint on a milestone (ws-im1.2.2): `ended` once it stopped, with why and how many PRs it opened. */
+export interface MapSprint { head: string; until: string; items: MapSprintItem[]; ended?: { reason: string; at?: string; prs?: number } }
+export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[]; sprint?: MapSprint }
+/** `GET /hub/map/:project/sprint/:milestone`: the beads a sprint would run, the ones left out and why, and the sprint that is going on the project. */
+export interface SprintPreview {
+  allowed: boolean; why?: string; max: number
+  items: { id: string; title: string }[]
+  left: { id: string; title: string; reason: string; by?: string }[]
+  active: { head: string; milestone: string; until: string } | null
+}
 export interface ProgressMap {
   project: string
   meta: { pushedAt: string; host: string; count: number; repo: string } | null

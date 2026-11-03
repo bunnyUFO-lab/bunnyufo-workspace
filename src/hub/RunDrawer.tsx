@@ -221,7 +221,8 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const target = (approved?.target ?? request.target) as SpawnTarget | undefined
   const by = approved ? (approved.by === 'policy' ? 'Signed by policy' : `Approved by ${approved.by}`) : null
   const stoppable = STOPPABLE.has(state) && host.write && !!approved
-  const again = AGAIN.has(state) && host.write
+  // A sprint item is signed by its sprint only: a copy made here would be a lone run outside the chain, so it has no Approve again.
+  const again = AGAIN.has(state) && host.write && request.preset !== 'sprint-item'
   const cardHref = result?.card ? cardLink(result.card, detail?.cardHref) : undefined
   const prHref = safeUrl(result?.pr)
 
