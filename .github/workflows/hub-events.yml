@@ -2,9 +2,18 @@ name: Hub events
 on:
   pull_request:
     types: [opened, reopened, closed]
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: How many days back the reconcile looks (1 to 30)
+        type: string
+        default: '7'
 permissions: {}
 jobs:
   post:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     continue-on-error: true
@@ -19,6 +28,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           MERGED: ${{ github.event.pull_request.merged }}
+          CLOSED_AT: ${{ github.event.pull_request.closed_at }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -30,12 +40,15 @@ jobs:
             exit 0
           fi
           ALT=""
+          CLOSED_ARGS=()
           case "$EVENT" in
             pull_request)
               case "$ACTION" in
                 opened|reopened) KIND=pr-opened; WORD=opened ;;
                 closed)
-                  if [ "$MERGED" = "true" ]; then KIND=pr-merged; WORD=merged; else KIND=pr-closed; WORD=closed; fi ;;
+                  if [ "$MERGED" = "true" ]; then KIND=pr-merged; WORD=merged; else KIND=pr-closed; WORD=closed; fi
+                  # the reconcile job writes the same file name for the same close, so a missed post is filled in later
+                  if [ -n "$CLOSED_AT" ]; then CLOSED_ARGS=(--pr-closed-at "$CLOSED_AT"); fi ;;
                 *) exit 0 ;;
               esac
               TITLE="$PROJECT: PR $WORD: $PR_TITLE"; URL="$PR_URL"; REF="$PR_BRANCH"; ALT="$PR_TITLE" ;;
@@ -48,4 +61,34 @@ jobs:
             BEAD=$(printf '%s' "$ALT" | grep -oE "$PAT" | head -n 1 | sed -E 's/^[^a-z0-9]+//' || true)
           fi
           curl -fsS --max-time 10 "$BUW_CARD_API/cards.mjs" -o "$RUNNER_TEMP/cards.mjs"
-          timeout 20 node "$RUNNER_TEMP/cards.mjs" event "$KIND" --title "$TITLE" --project "$PROJECT" ${BEAD:+--bead "$BEAD"} --url "$URL" --source hub-events --via api
+          timeout 20 node "$RUNNER_TEMP/cards.mjs" event "$KIND" --title "$TITLE" --project "$PROJECT" ${BEAD:+--bead "$BEAD"} --url "$URL" --source hub-events "${CLOSED_ARGS[@]}" --via api
+  reconcile:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: 22 }
+      - name: Post the close events of the last days that are missing
+        env:
+          BUW_CARDS_PASSWORD: ${{ secrets.BUW_CARD_DEPLOY_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DAYS: ${{ inputs.days || '7' }}
+          PROJECT: workspace-app
+          PREFIX: ws
+          BUW_CARD_API: ${{ vars.CARD_API }}
+        run: |
+          # inputs reach this script only through the env above; never put workflow expressions into it
+          if [ -z "${BUW_CARDS_PASSWORD:-}" ]; then
+            echo "::warning::BUW_CARD_DEPLOY_TOKEN is not set; nothing was reconciled"
+            exit 0
+          fi
+          curl -fsS --max-time 10 "$BUW_CARD_API/cards.mjs" -o "$RUNNER_TEMP/cards.mjs"
+          if ! grep -q "pr-sync" "$RUNNER_TEMP/cards.mjs"; then
+            echo "::warning::the served cards.mjs has no pr-sync yet"
+            exit 0
+          fi
+          timeout 240 node "$RUNNER_TEMP/cards.mjs" pr-sync --repo "$REPO" --project "$PROJECT" --prefix "$PREFIX" --days "$DAYS" --via api
