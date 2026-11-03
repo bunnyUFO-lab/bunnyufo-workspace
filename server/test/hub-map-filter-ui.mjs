@@ -374,6 +374,13 @@ try {
   assert.ok(await inside(searchPhone, stepped), 'the stepped-to match is in view');
   const searchWidths = await searchPhone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(searchWidths.scroll <= searchWidths.inner, 'no sideways scroll');
+  // hub-ui.mjs guards the same clearance; this faster file fails first when the search row grows.
+  await searchPhone.locator('[data-node="wa-m1"] > circle').tap({ force: true });
+  const sheetPanel = searchPhone.locator('.hub-map-panel');
+  await sheetPanel.waitFor();
+  const panelTop = (await sheetPanel.boundingBox()).y;
+  const mapTop = (await searchPhone.locator('.hub-map-box').boundingBox()).y;
+  assert.ok(panelTop - mapTop >= 100, `an open sheet leaves the map at least 100 px above it with a query set (${panelTop - mapTop})`);
 
   console.log('hub-map-filter-ui: passed');
 } finally {

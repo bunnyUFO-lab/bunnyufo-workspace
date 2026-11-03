@@ -262,6 +262,8 @@
 @media (max-width: 640px) {
   .hub-map-search { justify-content: flex-start; }
   .hub-map-search .sf { flex: 1 1 100%; }
+  /* A sheet covers the bottom of the screen: the search row gives its height back to the map until the sheet closes. */
+  .hub-map-search[data-sheet] { display: none; }
   .hub-map-found { flex: 1 1 0; }
 }
 .hub-map-dim { opacity: 0.28; }

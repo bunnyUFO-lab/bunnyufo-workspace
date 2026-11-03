@@ -546,7 +546,7 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
-      <div className="hub-map-search">
+      <div className="hub-map-search" data-sheet={shownId || filterOpen || keyOpen ? '' : undefined}>
         <SearchField label="Search the roadmap" placeholder="Search the roadmap" value={query} onChange={changeQuery} onKeyDown={onSearchKey} data={{ 'data-map-search': '' }} />
         <span className="hub-map-found" role="status" data-map-count>
           {countText}
