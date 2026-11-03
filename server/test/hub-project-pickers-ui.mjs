@@ -7,7 +7,7 @@ import { ms, SCALE } from './ui-timeouts.mjs';
 expect.configure({ timeout: 5000 * SCALE });
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
-import { beadsIssue, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
+import { beadsIssue, eventJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -36,6 +36,8 @@ const PICKERS = [
   { name: 'Roadmap', hash: '#/~hub/map', scope: '.hub-map-chips', after: page => page.waitForFunction(() => location.hash.startsWith('#/~hub/map/maple')) },
   { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work/maple') },
   { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top', after: page => page.waitForFunction(() => document.querySelector('.hub-top [role="combobox"]').dataset.value === 'maple') },
+  // Today does not change the address: the picker says which project it shows.
+  { name: 'Today', hash: '#/~hub/today', scope: '[data-today-project]', after: page => page.waitForFunction(() => document.querySelector('[data-today-project] [role="combobox"]').dataset.value === 'maple') },
   { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]', after: page => page.waitForFunction(() => document.querySelector('[aria-label="Send to agent"] [role="combobox"]').dataset.value === 'maple') },
 ];
 
@@ -57,7 +59,8 @@ try {
       if (touch) await field.tap(); else await field.click();
       const options = page.locator(`${picker.scope} [role="option"]`);
       await options.first().waitFor();
-      assert.ok(await options.count() > 10, `${picker.name}: the list passes ten projects (${await options.count()}).`);
+      // The list opens before /projects has answered on a slow run: wait for the projects, not for the first row.
+      await expect.poll(() => options.count(), { message: `${picker.name}: the list passes ten projects` }).toBeGreaterThan(10);
       await field.fill('MAP');
       assert.deepEqual(await options.evaluateAll(list => list.map(item => item.dataset.value)), ['maple'], `${picker.name}: typing filters.`);
       const box = await page.locator(`${picker.scope} [role="listbox"]`).boundingBox();
@@ -143,6 +146,73 @@ try {
       await page.context().close();
     }
   } finally { await small.close().catch(() => {}); }
+  // Today's project filter (ws-im1.1.4): the panels, tiles and sentence narrow; the sidebar badge, Work and the Roadmap do not.
+  const todaySmall = await startHubFixture({ work: true });
+  try {
+    // Four items wait in `probe`; one more, a blocked session, waits in `lanes`.
+    todaySmall.seed.event(eventJson({ kind: 'blocked', ts: minutesAgo(todaySmall.now, 10), session: 'sess-lanes', project: 'lanes', title: 'Permission needed: run lanes' }));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
+      step(`Today at ${label}: a project narrows the screen, says what waits elsewhere, and is remembered`);
+      const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
+      const press = locator => (touch ? locator.tap() : locator.click());
+      await page.goto(`${todaySmall.url}#/~hub/today`);
+      const row = page.locator('[data-today-project] [aria-label="Project"].hub-chips');
+      await row.waitFor();
+      const kpi = key => page.locator(`.hub-kpi[data-kpi="${key}"] .hub-kpi-v`);
+      const stored = () => page.evaluate(() => { try { return localStorage.getItem('hub-today-project'); } catch { return 'blocked'; } });
+      await expect(kpi('needs-you')).toHaveText('5');
+      assert.equal(await stored(), null, 'At All nothing is stored.');
+      assert.equal(await page.locator('[data-today-elsewhere]').count(), 0, 'At All there is no "elsewhere" line.');
+      const badge = page.locator('[data-hub-badge]');
+      const all = await badge.count() ? (await badge.innerText()).trim() : null;
+      const lanes = row.locator('.hub-chip', { hasText: 'Lanes' });
+      await lanes.waitFor();
+      await press(lanes);
+      await row.locator('.hub-chip.on', { hasText: 'Lanes' }).waitFor();
+      const waiting = 1;
+      assert.equal((await lanes.locator('.n').innerText()).trim(), '1', 'The chip says where the waiting item is.');
+      await expect(kpi('needs-you')).toHaveText(String(waiting));
+      await expect(page.locator('.today-head p').first()).toContainText('1 thing waits on you.');
+      assert.equal(await page.locator('[data-nrow]').count(), Math.min(waiting, 3), 'Needs you lists only that project.');
+      assert.equal(await stored(), 'lanes');
+      assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), null, 'Today does not write the project Work and the Roadmap share.');
+      const elsewhere = page.locator('[data-today-elsewhere]');
+      await expect(elsewhere).toContainText('4 more wait in other projects');
+      if (all !== null) assert.equal((await badge.innerText()).trim(), all, 'The sidebar badge keeps the true count.');
+      await noSideways(page, `Today on a project at ${label}`);
+      if (touch) {
+        const small = await page.locator('[data-today-project] button, [data-today-project] a').evaluateAll(list => list.map(node => node.getBoundingClientRect()).filter(box => box.width > 0 && box.height < 44).length);
+        assert.equal(small, 0, 'Targets are at least 44 px high.');
+      }
+
+      // "Open Needs you" lands on that project's list, with the same count.
+      await press(page.locator('[data-today-open]'));
+      await page.waitForFunction(() => location.hash === '#/~hub/needs/all/lanes');
+      await page.waitForFunction(count => document.querySelectorAll('.ni').length === count, waiting);
+      await page.goBack();
+      await expect(kpi('needs-you')).toHaveText(String(waiting));
+
+      // A reload keeps the choice; the Roadmap and Work keep their own.
+      await page.reload();
+      await row.locator('.hub-chip.on', { hasText: 'Lanes' }).waitFor();
+      await expect(kpi('needs-you')).toHaveText(String(waiting));
+
+      // Show all goes back to All and clears the key.
+      await press(page.locator('[data-today-elsewhere] button'));
+      await row.locator('.hub-chip.on', { hasText: 'All' }).waitFor();
+      await expect(kpi('needs-you')).toHaveText('5');
+      assert.equal(await stored(), null);
+
+      // A saved project that is gone counts as All, and the key is cleared.
+      await page.evaluate(() => localStorage.setItem('hub-today-project', 'vanished'));
+      await page.reload();
+      await row.locator('.hub-chip.on', { hasText: 'All' }).waitFor();
+      await expect(kpi('needs-you')).toHaveText('5');
+      await page.waitForFunction(() => localStorage.getItem('hub-today-project') === null);
+      await page.context().close();
+    }
+  } finally { await todaySmall.close().catch(() => {}); }
   console.log('hub-project-pickers-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { HubProject, UnaskedItem } from '../lib/hub'
+import { hubHash } from '../lib/route'
 import MarkActions from './MarkActions'
 import { useHubData } from './useHub'
 
@@ -20,15 +21,15 @@ function Row({ item, projectName }: { item: UnaskedItem; projectName: string }) 
 }
 
 /**
- * Today's list of beads that say they need the owner (the needs-owner label) while nothing asks anything:
+ * Today's list of beads (of one project when `project` is set) that say they need the owner (the needs-owner label) while nothing asks anything:
  * no Ask, no checklist, no other Needs you item. Each row has the three marks. Renders nothing when there are none.
  */
-export default function UnaskedPanel() {
+export default function UnaskedPanel({ project = '' }: { project?: string }) {
   const { data } = useHubData<{ items: UnaskedItem[] }>('/unasked')
   const projects = useHubData<{ projects: HubProject[] }>('/projects')
   // The display name once the projects are read; the id alone says nothing wrong in the meantime, a raw project id would.
   const nameOf = (id: string) => projects.data?.projects.find(project => project.id === id)?.name ?? ''
-  const items = data?.items ?? []
+  const items = (data?.items ?? []).filter(item => !project || item.project === project)
   if (!items.length) return null
   // A row marked done or not needed is no longer asked of the owner, but stays (with Undo) until a session applies the mark.
   const n = items.filter(item => !item.mark).length
@@ -36,7 +37,7 @@ export default function UnaskedPanel() {
     <section className="hub-panel rise" aria-label="Says it needs you" data-today-unasked>
       {n > 0 && <h3>⚠ {n} {n === 1 ? 'item says it needs' : 'items say they need'} you but {n === 1 ? 'asks' : 'ask'} nothing</h3>}
       {items.slice(0, SHOWN).map(item => <Row key={`${item.project}/${item.id}`} item={item} projectName={nameOf(item.project)} />)}
-      {items.length > SHOWN && <p className="hub-muted"><a href="#/~hub/work/all">+{items.length - SHOWN} more</a></p>}
+      {items.length > SHOWN && <p className="hub-muted"><a href={project ? hubHash('work', project) : '#/~hub/work/all'}>+{items.length - SHOWN} more</a></p>}
     </section>
   )
 }

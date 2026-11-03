@@ -359,6 +359,8 @@ Voice input was removed on 2026-10-29; see git history to bring it back.
 
 `/inbox?filter=<kind>&project=<id>` keeps the rows of one project. `counts` then count that project, and `projects` (`{ <id>: n }`) counts the unfiltered list per project, for the picker. Filters are `all`, the kinds (`question`, `design`, `steps`, `playtest`, `unstick`, `pr`, `approval`), `approvals` (request approvals only: a Hermes approval is under `all` and `approval`), `answered` and `requests`; the Needs you address uses `sessions` for `unstick`. A row with no `project` takes its request's. A blocked row carries `tool`, `source` and `reason` when its event does, and the page labels it "Claude permission", "Codex question" or "Session waiting" from them (the hub-hooks mod counts as Claude; with no `reason` of `permission` or `question` the label ends in "waiting").
 
+Today has its own project picker (default All, kept in this browser as `hub-today-project`; it is not the project Work and the Roadmap share). It narrows the panels, tiles and sentence in the browser (`src/hub/todayFilter.ts`), while `/today` and the sidebar badge keep the full answer, and says how many Needs you rows wait in other projects. `/today` fills a Hermes approval's project from its request, as `/inbox` does.
+
 A blocked session stays in Needs you until any later event from the same session arrives (a
 `resumed`, a `session-ended`, a newer `blocked`, anything that carries the session); the mod posts
 `resumed` when a blocked session moves on. A `blocked` event may carry `url` (a Remote Control link

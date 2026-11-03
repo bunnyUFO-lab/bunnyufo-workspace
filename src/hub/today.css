@@ -11,6 +11,14 @@
 .hub .hub-btn.today-primary { color: var(--ground); }
 .today-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
+.today-project { margin: -8px 0 16px; }
+.today-project .hub-chips-wrap { margin-bottom: 0; }
+.today-project .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
+.today-project .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
+.today-project .hub-chip.on .n { color: inherit; }
+.today-elsewhere { margin: 8px 0 0; }
+.today-linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--pink-bright); cursor: pointer; text-decoration: underline; }
+.today-linkbtn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 3px; }
 .today .hub-kpis { gap: 16px; margin-bottom: 16px; }
 .today .hub-kpi { gap: 0; padding: 18px; background: var(--s1); border-color: var(--line); border-radius: var(--r3); transition: border-color 0.2s, transform 0.2s; }
 .today .hub-kpi:hover { background: var(--s1); border-color: var(--line2); transform: translateY(-2px); }
@@ -62,6 +70,8 @@
 @media (prefers-reduced-motion: reduce) { .today .rise { animation: none; } .today .hub-kpi { transition: none; } }
 
 @media (max-width: 760px) {
+  .today-project .hub-chip, .today-linkbtn { min-height: 44px; }
+  .today-linkbtn { padding: 0 4px; }
   .today-cols { grid-template-columns: minmax(0, 1fr); }
   .today .hub-kpis { gap: 10px; }
   .today .hub-kpi { padding: 14px; }

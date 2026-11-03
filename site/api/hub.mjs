@@ -1440,7 +1440,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events), repoProjects: await repoProjects() });
             const working = await linkedWorking(workingNow({ status, events: window.events, requests, at, defaults: PROJECT_DEFAULTS }), window.events);
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
-            reply({ ...today, counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
+            // A Hermes approval carries no project of its own; its request does, as on /hub/inbox. Without it the Today project filter would drop it.
+            reply({ ...today, needsYou: fillProjects(today.needsYou, requests), counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });

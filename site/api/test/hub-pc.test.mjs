@@ -9,6 +9,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
 import { beadOfBranch, cleanHogs, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
 import { buildToday } from '../hub-model.mjs';
+import { todayFor } from '../../../src/hub/todayFilter.ts';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder } from './hub-fixtures.mjs';
@@ -115,6 +116,32 @@ test('buildToday: a heartbeat is not in Recent, and does not resolve a blocked s
   const today = buildToday({ asks: [], events, now: NOW });
   assert.equal(today.recent.some(event => event.kind === 'session-items'), false);
   assert.equal(today.needsYou.filter(item => item.kind === 'blocked').length, 1);
+});
+
+test('todayFor: no project returns the same object; a project keeps its rows, recounts, and says how many it hid', () => {
+  const row = (id, project) => ({ id, project, at: NOW.toISOString(), title: id });
+  const data = {
+    counts: { needsYou: 3, running: 3, recent: 2, alerts: 1 },
+    needsYou: [row('n1', 'alder'), row('n2', 'birch'), row('n3', undefined)],
+    running: [row('r1', 'alder')],
+    recent: [row('e1', 'alder'), row('e2', 'birch')],
+    alerts: [row('a1', 'birch')],
+    working: [{ ...row('w1', 'alder'), state: 'working' }, { ...row('w2', 'alder'), state: 'idle' }, { ...row('w3', 'birch'), state: 'working' }],
+    offers: [{ request: 'q1', project: 'birch', title: 'q1' }],
+    at: NOW.toISOString(),
+  };
+  assert.equal(todayFor(data, '').data, data, 'At All nothing is copied.');
+  const alder = todayFor(data, 'alder');
+  assert.deepEqual(alder.data.needsYou.map(item => item.id), ['n1']);
+  assert.deepEqual(alder.data.recent.map(item => item.id), ['e1']);
+  assert.deepEqual(alder.data.alerts, []);
+  assert.deepEqual(alder.data.offers, []);
+  assert.deepEqual(alder.data.counts, { needsYou: 1, recent: 1, alerts: 0, running: 1 }, 'Running counts the sessions of the project that are not idle or stale.');
+  assert.equal(alder.elsewhere, 2, 'The row of another project and the row with no project are hidden, and counted.');
+  assert.equal(todayFor(data, 'birch').data.counts.alerts, 1);
+  const old = todayFor({ ...data, working: undefined, offers: undefined }, 'alder');
+  assert.equal(old.data.counts.running, 1, 'An old API with no `working` counts `running`.');
+  assert.equal(old.data.working, undefined);
 });
 
 test('workingNow: a 20-minute-old status falls back to events; a cloud session sits beside PC sessions', () => {
