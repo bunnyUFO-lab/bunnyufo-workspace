@@ -1615,7 +1615,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await notUseful(match[1], decodeURIComponent(match[2]), raw, user, at));
         } else if ((match = /^\/hub\/map\/([^/]+)\/sprint\/([^/]+)$/.exec(route))) {
           if (!user) throw fail('Sign in to start a sprint.', 401);
-          const started = await sprints.start(decodeURIComponent(match[1]), decodeURIComponent(match[2]), Number(raw?.timebox), user, at);
+          const started = await sprints.start(decodeURIComponent(match[1]), decodeURIComponent(match[2]), Number(raw?.timebox), user, at, raw?.digest);
           mapRequests = null;
           send({ status: 201, body: started });
         } else if ((match = /^\/hub\/map\/([^/]+)\/marks$/.exec(route))) {

@@ -69,11 +69,13 @@ export default function SprintPanel({ project, milestone }: { project: string; m
     setBusy(true)
     setProblem('')
     try {
-      await hubPost(`/map/${slug(project)}/sprint/${slug(milestone.id)}`, { timebox })
+      await hubPost(`/map/${slug(project)}/sprint/${slug(milestone.id)}`, { timebox, digest: data?.digest })
       setConfirming(false)
       preview.reload()
     } catch (failure) {
       setProblem(failure instanceof Error ? failure.message : 'The sprint did not start.')
+      setConfirming(false)
+      preview.reload()
     } finally {
       setBusy(false)
     }

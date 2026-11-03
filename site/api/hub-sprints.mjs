@@ -9,7 +9,7 @@
 // from the chain's own files (`afterOf` over `chainOf`) and refuses when an earlier item is missing, foreign or unfinished.
 //
 // This module has the pure parts (eligibility, the signed document, the chain and the step table) and the module that writes.
-import { createPublicKey } from 'node:crypto';
+import { createHash, createPublicKey } from 'node:crypto';
 import { BEAD_ID, applyMarks } from './hub-marks.mjs';
 import { buildMap, isWayfinderQuestion } from './hub-map.mjs';
 import { plainText } from './hub-map-notes.mjs';
@@ -135,6 +135,19 @@ export function eligible(issues, marks, milestone, ctx = {}) {
   return { items: ordered.slice(0, SPRINT_MAX_ITEMS).map(task => ({ id: task.id, title: task.title })), left, found: true };
 }
 
+/** The items a sprint would snapshot, from the issues with marks applied: `[{ seq, bead, title, text, doneWhen? }]`. */
+export function snapshotItems(issues, marks, project, picked) {
+  const byId = new Map(applyMarks(issues, marks ?? new Map(), project).map(issue => [issue.id, issue]));
+  return picked.map((row, index) => {
+    const issue = byId.get(row.id);
+    const doneWhen = typeof issue.acceptance_criteria === 'string' ? oneLine(plainText(issue.acceptance_criteria), DONE_MAX) : '';
+    return { seq: index + 1, bead: row.id, title: oneLine(issue.title ?? row.id, TITLE_MAX), text: fenceSafe(issue.description, DESCRIPTION_MAX), ...(doneWhen ? { doneWhen } : {}) };
+  });
+}
+
+/** What the sheet showed, as a short digest: Start sends it back, and the Hub signs only the list it still gives. */
+export const digestOf = (milestone, timebox, items) => createHash('sha256').update(JSON.stringify([milestone, items])).digest('hex').slice(0, 32);
+
 // --- The signed snapshot ---------------------------------------------------------------------------------------------
 
 const isoDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value));
@@ -173,7 +186,8 @@ export async function chainOf(sprint, deps, at, upTo = sprint.items.length) {
     try { loaded = await deps.loadOne(id, at); } catch (error) { if (error?.status === 404) break; throw error; }
     const { request, parts, state } = loaded;
     const approval = parts.approved;
-    const approvalOk = !approval || (verify(approval, deps.publicKey) && approval.request === id && approval.run?.sprint?.head === sprint.head && approval.run.sprint.seq === seq);
+    // An item past `proposed` (or `declined`) needs an approval that verifies: a taken.json and a result.json written at its id by someone else make it nothing.
+    const approvalOk = approval ? (verify(approval, deps.publicKey) && approval.request === id && approval.run?.sprint?.head === sprint.head && approval.run.sprint.seq === seq) : (state === 'proposed' || state === 'declined');
     const own = request.preset === 'sprint-item' && request.origin?.kind === 'owner' && request.bead === sprint.items[seq - 1].bead
       && request.sprint?.head === sprint.head && request.sprint?.seq === seq && request.project === sprint.project && approvalOk && await deps.siteWrote(id);
     const result = parts.result;
@@ -296,7 +310,7 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
     const inputs = await loadInputs(project, at);
     const result = eligible(inputs.issues, inputs.marks, milestone, { project, ...inputs, now: at });
     if (!result.found) throw fail('No such milestone.', 404);
-    return { allowed: true, items: result.items, left: result.left, active: activeView, max: SPRINT_MAX_ITEMS };
+    return { allowed: true, items: result.items, left: result.left, active: activeView, max: SPRINT_MAX_ITEMS, digest: digestOf(milestone, null, snapshotItems(inputs.issues, inputs.marks, project, result.items)) };
   }
 
   /** The sprints of one project for the map: the newest per milestone, with the beads they run. */
@@ -365,6 +379,10 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
       await endSprint(sprint, chain, 'refused', '', at);
       return { ended: 'refused', why: error.message };
     }
+    // A stop that landed on an earlier item while this one was being signed (the run finished, the owner tapped Stop): stop this one too.
+    if ((await chainOf(sprint, deps, at, seq - 1)).some(entry => entry.state === 'stopped')) {
+      await requests.writeStop(id, 'the sprint was stopped', sprint.by, at, ['approved', 'taken', 'running']).catch(error => log(`[hub] sprint ${head}: could not stop item ${seq}: ${String(error.message).slice(0, 120)}`));
+    }
     return { approved: id };
   }
 
@@ -388,7 +406,7 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
    * `POST /hub/map/:project/sprint/:milestone { timebox }`: snapshot the eligible beads into a signed sprint.json, then sign item 1.
    * One sprint per project at a time (409). → `{ head, items, until }`.
    */
-  function start(project, milestone, timebox, user, at) {
+  function start(project, milestone, timebox, user, at, digest) {
     return queued(async () => {
       if (!signingKey) throw fail('Approvals are not set up on this host, so a sprint cannot start.', 503);
       if (!user) throw fail('Sign in to start a sprint.', 401);
@@ -403,17 +421,11 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
       const picked = eligible(inputs.issues, inputs.marks, milestone, { project, ...inputs, now: at });
       if (!picked.found) throw fail('No such milestone.', 404);
       if (!picked.items.length) throw fail('Nothing to run: every task of this milestone is left out.', 409);
-      const marked = applyMarks(inputs.issues, inputs.marks ?? new Map(), project);
-      const byId = new Map(marked.map(issue => [issue.id, issue]));
-      const milestoneIssue = byId.get(milestone);
-      const items = picked.items.map((row, index) => {
-        const issue = byId.get(row.id);
-        const doneWhen = typeof issue.acceptance_criteria === 'string' ? oneLine(plainText(issue.acceptance_criteria), DONE_MAX) : '';
-        return {
-          seq: index + 1, bead: row.id, title: oneLine(issue.title ?? row.id, TITLE_MAX),
-          text: fenceSafe(issue.description, DESCRIPTION_MAX), ...(doneWhen ? { doneWhen } : {}),
-        };
-      });
+      const items = snapshotItems(inputs.issues, inputs.marks, project, picked.items);
+      // The owner confirmed the list the sheet showed. If the beads changed since, nothing is signed.
+      if (typeof digest !== 'string' || !digest) throw fail('Reload the sheet and look at the list again before you start.', 400);
+      if (digest !== digestOf(milestone, null, items)) throw fail('The beads changed since the sheet showed them. Look at the list again, then start.', 409);
+      const milestoneIssue = applyMarks(inputs.issues, inputs.marks ?? new Map(), project).find(issue => issue.id === milestone);
       for (let attempt = 0; ; attempt += 1) {
         const head = newRequestId(project, `sprint ${milestone}`, at);
         const body = sign({

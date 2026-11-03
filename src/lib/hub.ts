@@ -327,6 +327,8 @@ export interface SprintPreview {
   items: { id: string; title: string }[]
   left: { id: string; title: string; reason: string; by?: string }[]
   active: { head: string; milestone: string; until: string } | null
+  /** What the list was when shown: Start sends it back, and a changed list is a 409. */
+  digest?: string
 }
 export interface ProgressMap {
   project: string

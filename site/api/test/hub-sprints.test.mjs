@@ -67,12 +67,14 @@ async function fixture({ issues = THREE, env = KEY_ENV, project = 'magic-loops',
     seed.put(`requests/${id}/result.json`, { v: 1, outcome, at: now().toISOString(), ...(outcome === 'pr' ? { pr: `https://example.test/pr/${id.slice(-4)}` } : {}), ...extra });
   };
   const take = id => seed.put(`requests/${id}/taken.json`, { v: 1, runner: 'pc', session: 's1', at: now().toISOString() });
-  const start = (timebox = 240, milestoneId = MS) => post(`/hub/map/${project}/sprint/${milestoneId}`, { timebox });
+  const digestOf = async (milestoneId = MS) => (await call('GET', `/hub/map/${project}/sprint/${milestoneId}`)).body?.digest;
+  /** Start as the sheet does: the digest of the list it showed goes back with the timebox. */
+  const start = async (timebox = 240, milestoneId = MS) => post(`/hub/map/${project}/sprint/${milestoneId}`, { timebox, digest: await digestOf(milestoneId) });
   const heads = () => [...fake.objects.keys()].filter(name => /\/sprint\.json$/.test(name)).map(name => name.split('/')[3]);
   const alerts = () => [...fake.objects.keys()].filter(name => name.startsWith('sections/inbox/events/')).map(name => fake.json(name)).filter(event => event.kind === 'alert' && event.sprint);
   const itemsOf = head => [...fake.objects.keys()].filter(name => /\/request\.json$/.test(name) && fake.json(name).sprint?.head === head).map(name => fake.json(name).sprint.seq).sort();
   const approvedOf = id => file(id, 'approved.json');
-  return { clock, fake, hub, post, call, seed, start, file, finish, take, heads, alerts, itemsOf, approvedOf, now, key, close: async () => { hub.close(); server.close(); await fake.close(); } };
+  return { clock, fake, hub, post, call, seed, start, digestOf, file, finish, take, heads, alerts, itemsOf, approvedOf, now, key, close: async () => { hub.close(); server.close(); await fake.close(); } };
 }
 
 // --- eligible: pure ---
@@ -606,4 +608,67 @@ test('the checkSprintDoc shape: a document with a request field, a bad timebox o
   for (const bad of [{ request: 'x' }, { timebox: 100 }, { kind: 'approval' }, { items: [{ seq: 2, bead: 'ml-t1', title: 'T', text: '' }] }, { items: [] }, { until: 'soon' }, { repo: '' }]) {
     assert.equal(checkSprintDoc(sign({ ...body, ...bad }, keyPair.privateKey), PUB), null, JSON.stringify(bad));
   }
+});
+
+test('Start signs only the list the sheet showed: a changed bead, a new bead or no digest is refused and writes nothing', async () => {
+  const f = await fixture();
+  try {
+    const shown = await f.digestOf();
+    assert.match(shown, /^[0-9a-f]{32}$/);
+    const route = `/hub/map/magic-loops/sprint/${MS}`;
+    const missing = await f.post(route, { timebox: 240 });
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /Reload the sheet/);
+    // The bead's text is edited in Beads after the sheet showed it.
+    const edited = THREE.map(issue => (issue.id === 'ml-t1' ? { ...issue, description: 'Changed after you looked.' } : issue));
+    f.seed.beads('magic-loops', edited, { pushedAt: new Date(NOW.getTime() + 1000).toISOString(), host: 'test-pc', count: edited.length, repo: 'example/ml' });
+    const changed = await f.post(route, { timebox: 240, digest: shown });
+    assert.equal(changed.status, 409);
+    assert.match(changed.body.error, /beads changed since the sheet showed them\. Look at the list again/);
+    // A bead the sheet never listed.
+    const more = [...edited, { ...beadsIssue({ id: 'ml-t4', parent: 'ml-ft', title: 'New one', created: '2026-10-02T11:00:00Z' }) }];
+    f.seed.beads('magic-loops', more, { pushedAt: new Date(NOW.getTime() + 2000).toISOString(), host: 'test-pc', count: more.length, repo: 'example/ml' });
+    assert.equal((await f.post(route, { timebox: 240, digest: shown })).status, 409);
+    assert.deepEqual(f.heads(), [], 'Nothing was signed.');
+    // Looking again gives the new digest, and that one starts.
+    const again = await f.digestOf();
+    assert.notEqual(again, shown);
+    assert.equal((await f.post(route, { timebox: 240, digest: again })).status, 201);
+  } finally { await f.close(); }
+});
+
+test('an item with no verifying approval never counts as done: a taken.json and result.json written at its id skip nothing', async () => {
+  const f = await fixture();
+  try {
+    const { head } = (await f.start(480)).body;
+    const two = itemId(head, 2);
+    // The run of item 1 writes the files of item 2 before item 2 exists, then ends with a pr.
+    f.finish(two, 'card');
+    f.finish(head, 'pr');
+    await f.hub.sprints.advance(head);
+    assert.equal(f.approvedOf(two), null, 'Item 2 was never signed.');
+    await f.hub.sprints.advance(head);
+    assert.equal(f.approvedOf(itemId(head, 3)), null, 'And item 3 is not signed on top of it.');
+    assert.equal(f.file(head, 'sprint-end.json').reason, 'foreign');
+  } finally { await f.close(); }
+});
+
+test('a stop that lands on item 1 while item 2 is being signed stops item 2 too', async () => {
+  const f = await fixture();
+  try {
+    const { head } = (await f.start(480)).body;
+    f.finish(head, 'pr');
+    const real = f.hub.requests.approveRequest;
+    f.hub.requests.approveRequest = async (id, options) => {
+      const done = await real(id, options);
+      f.seed.put(`requests/${head}/stop.json`, sign({ v: 1, request: head, reason: 'stopped by the owner', at: f.now().toISOString(), by: 'owner', nonce: 'n'.repeat(22) }, keyPair.privateKey));
+      return done;
+    };
+    await f.hub.sprints.advance(head);
+    f.hub.requests.approveRequest = real;
+    assert.ok(f.file(itemId(head, 2), 'stop.json'), 'Item 2 has its own stop.');
+    await f.hub.sprints.advance(head);
+    assert.equal(f.file(head, 'sprint-end.json').reason, 'stopped');
+    assert.deepEqual(f.itemsOf(head), [1, 2]);
+  } finally { await f.close(); }
 });
