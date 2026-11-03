@@ -2100,3 +2100,246 @@ test('event: --pr-closed-at gives an owner or repo with . or _ a safe file name,
     assert.match(name, /^\d{6}-gh-own-er-1-x+-123456-merged\.json$/);
   } finally { await close(); }
 });
+
+// --- plan Asks (ws-qdh.3): the shared validator, `ask create --changes`, `beads show` and `plan apply` ---
+
+const blockOf = (source, name) => source.match(new RegExp(`// --- ${name}:start[^\\n]*\\n([\\s\\S]*?)// --- ${name}:end ---`))?.[1];
+
+test('the change-list validator in cards.mjs is the one in site/api/ask-changes.mjs, and so is the prose-command block', async () => {
+  const client = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  const shared = await readFile(path.join(repo, 'site/api/ask-changes.mjs'), 'utf8');
+  for (const name of ['ask-changes', 'prose-command']) {
+    assert.ok(blockOf(client, name), `${name} is in cards.mjs`);
+    assert.equal(blockOf(client, name).replace(/\r\n/g, '\n'), blockOf(shared, name).replace(/\r\n/g, '\n'), `${name} is the same code in both files`);
+  }
+});
+
+const GOOD_CHANGES = [
+  { op: 'create', title: 'Sprint 4', type: 'epic', labels: ['milestone'] },
+  { op: 'create', title: 'Wall-jump polish', parent: '#1', description: 'Coyote time and a landing sound.' },
+  { op: 'dep', bead: '#2', blocks: 'wk-9' },
+  { op: 'update', bead: 'wk-3', title: 'Tuning pass', description: 'Old description.' },
+  { op: 'label', bead: 'wk-4', add: ['later'], remove: ['needs-owner'] },
+  { op: 'close', bead: 'wk-5', reason: 'Covered by Sprint 4.' },
+  { op: 'card', card: 'assistant/2026-11-mock' },
+];
+
+test('ask create --changes: the list is stored as written, the Ask is kind decision with no drawing, and bad lists are refused before anything is sent', async () => {
+  const { fake, cli, keys, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'changes.json');
+    await writeFile(file, JSON.stringify(GOOD_CHANGES));
+    const made = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Apply this plan for Sprint 4?', '--changes', file);
+    assert.equal(made.code, 0, made.stderr);
+    const askId = made.stdout.trim().split(/\r?\n/).at(-1);
+    const ask = fake.json(`sections/inbox/asks/${askId}/ask.json`);
+    assert.deepEqual(ask.changes, GOOD_CHANGES);
+    assert.deepEqual([ask.kind, ask.allowDrawing, 'options' in ask, 'decisions' in ask], ['decision', false, false, false]);
+    const got = await cli('api', 'ask', 'get', askId);
+    assert.match(got.stdout, /== changes\nd1  Add epic "Sprint 4"\nd2  Add task "Wall-jump polish" under new item 1\nd3  new item 2 must be done before wk-9/);
+
+    const before = keys('asks/').length;
+    const bad = [
+      ['a command in a title', [{ op: 'create', title: 'Run `git push --force` first' }], /command in its text/],
+      ['an unknown op', [{ op: 'delete', bead: 'wk-1' }], /op is one of/],
+      ['an unknown field', [{ op: 'close', bead: 'wk-1', reason: 'x', force: true }], /has no field force/],
+      ['an unknown label', [{ op: 'label', bead: 'wk-1', add: ['p0'] }], /labels from/],
+      ['a bad bead id', [{ op: 'close', bead: 'WK 1', reason: 'x' }], /Beads id/],
+      ['a ref to a later create', [{ op: 'dep', bead: '#2', blocks: 'wk-1' }, { op: 'create', title: 'x' }], /Beads id, or #n/],
+      ['an oversize description', [{ op: 'update', bead: 'wk-1', description: 'x'.repeat(2001) }], /at most 2000/],
+      ['an empty list', [], /1 to 20/],
+      ['21 changes', Array.from({ length: 21 }, () => ({ op: 'close', bead: 'wk-1', reason: 'x' })), /1 to 20/],
+      ['a bad card', [{ op: 'card', card: 'inbox/secret' }], /assistant\/<folder>/],
+    ];
+    for (const [name, changes, message] of bad) {
+      await writeFile(file, JSON.stringify(changes));
+      const refused = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Apply this?', '--changes', file);
+      assert.notEqual(refused.code, 0, name);
+      assert.match(refused.stderr, message, name);
+    }
+    await writeFile(file, JSON.stringify(GOOD_CHANGES));
+    const mixed = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Apply this?', '--changes', file, '--option', 'a=Yes');
+    assert.notEqual(mixed.code, 0);
+    assert.match(mixed.stderr, /leave out --option, --decision and --image/);
+    assert.equal(keys('asks/').length, before, 'Nothing was written for a refused list.');
+  } finally { await close(); }
+});
+
+test('beads show: the newest version of each issue across copies, compact, open only on request', async () => {
+  const { fake, cli, close } = await setup();
+  try {
+    const issue = (id, extra = {}) => ({ _type: 'issue', id, title: `T ${id}`, status: 'open', issue_type: 'task', labels: [], created_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T10:00:00Z', dependencies: [], ...extra });
+    const lines = list => `${list.map(item => JSON.stringify(item)).join('\n')}\n`;
+    fake.seed('sections/inbox/beads/wk/pc-aaaa.jsonl', lines([issue('wk-1'), issue('wk-2', { status: 'closed', labels: ['milestone'] }), issue('wk-3', { dependencies: [{ issue_id: 'wk-3', depends_on_id: 'wk-1', type: 'blocks' }, { issue_id: 'wk-3', depends_on_id: 'wk-2', type: 'parent-child' }] })]), 'application/x-ndjson');
+    fake.seed('sections/inbox/beads/wk/pc-aaaa.meta.json', JSON.stringify({ pushedAt: '2026-10-02T10:00:00Z' }), 'application/json');
+    fake.seed('sections/inbox/beads/wk/laptop-bbbb.jsonl', lines([issue('wk-1', { title: 'Newer title', updated_at: '2026-10-03T10:00:00Z' }), issue('wk-4')]), 'application/x-ndjson');
+    fake.seed('sections/inbox/beads/wk/laptop-bbbb.meta.json', JSON.stringify({ pushedAt: '2026-10-03T11:00:00Z' }), 'application/json');
+    fake.seed('sections/inbox/beads/other/pc-cccc.jsonl', lines([issue('ot-1')]), 'application/x-ndjson');
+    const all = JSON.parse((await cli('api', 'beads', 'show', '--project', 'wk', '--json')).stdout);
+    assert.deepEqual(all.map(row => row.id), ['wk-1', 'wk-2', 'wk-3', 'wk-4']);
+    assert.equal(all[0].title, 'Newer title');
+    assert.deepEqual(all[2], { id: 'wk-3', title: 'T wk-3', type: 'task', status: 'open', parent: 'wk-2', labels: [], blockers: ['wk-1'] });
+    const open = await cli('api', 'beads', 'show', '--project', 'wk', '--open');
+    assert.equal(open.code, 0, open.stderr);
+    assert.deepEqual(open.stdout.trim().split('\n').map(line => line.split('\t')[0]), ['wk-1', 'wk-3', 'wk-4']);
+    assert.match(open.stdout, /wk-3\topen\ttask\tT wk-3\tparent=wk-2\tblocked-by=wk-1/);
+    assert.equal((await cli('api', 'beads', 'show', '--project', 'Bad Id')).code, 1);
+  } finally { await close(); }
+});
+
+/** A stand-in for bd: logs each call's argument array, prints ids for create, and fails on the call `BUW_BD_FAIL_ON` names. */
+const FAKE_BD = `
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+const log = process.env.BUW_BD_LOG;
+const args = process.argv.slice(2);
+const count = existsSync(log) ? readFileSync(log, 'utf8').split('\\n').filter(Boolean).length : 0;
+appendFileSync(log, JSON.stringify(args) + '\\n');
+if (Number(process.env.BUW_BD_FAIL_ON) === count + 1) { console.error('bd: no such issue'); process.exit(1); }
+if (args[0] === 'create') console.log('wk-new' + (count + 1));
+`;
+
+async function planFixture({ project = 'wk', changes = GOOD_CHANGES, decisions, answered = true, pickedUp = false, extra = {} } = {}) {
+  const s = await setup();
+  const repoDir = path.join(s.dir, 'repo');
+  await mkdir(repoDir, { recursive: true });
+  await writeFile(path.join(repoDir, 'CLAUDE.md'), '# Repo\n\nWorkspace section: `wksec` · Beads project: `wk` · Issue prefix: `wk`\n');
+  await writeFile(path.join(s.dir, 'fake-bd.mjs'), FAKE_BD);
+  const log = path.join(s.dir, 'bd.log');
+  s.cli.cwd = repoDir;
+  s.cli.env = { BUW_BD: path.join(s.dir, 'fake-bd.mjs'), BUW_BD_LOG: log, ...extra };
+  const id = `${today().replace(/-/g, '')}-wk-plan-sprint-4-a1b2`;
+  s.fake.seed(`sections/inbox/asks/${id}/ask.json`, JSON.stringify({ id, project, createdAt: new Date().toISOString(), question: 'Apply this plan?', kind: 'decision', changes, allowNote: true, allowDrawing: false }), 'application/json');
+  if (answered) {
+    const verdicts = decisions ?? Object.fromEntries(changes.map((_, index) => [`d${index + 1}`, { verdict: 'approve' }]));
+    s.fake.seed(`sections/inbox/asks/${id}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', decisions: verdicts }), 'application/json');
+  }
+  if (pickedUp) s.fake.seed(`sections/inbox/asks/${id}/pickup.json`, JSON.stringify({ at: new Date().toISOString(), host: 'pc' }), 'application/json');
+  const calls = async () => (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+  return { ...s, id, calls };
+}
+
+test('plan apply --dry-run: prints each row in order, skips what the owner skipped, uses a changed row\'s text, and runs nothing', async () => {
+  const { cli, id, calls, close } = await planFixture({
+    decisions: { d1: { verdict: 'approve' }, d2: { verdict: 'change', note: 'Coyote time only.' }, d3: { verdict: 'approve' }, d4: { verdict: 'skip' }, d5: { verdict: 'change', note: 'Add later instead' }, d6: { verdict: 'approve' }, d7: { verdict: 'approve' } },
+  });
+  try {
+    const run = await cli('api', 'plan', 'apply', id, '--dry-run');
+    assert.equal(run.code, 0, run.stderr);
+    const lines = run.stdout.trim().split('\n');
+    assert.equal(lines[0], 'd1 create: would run bd create "--title=Sprint 4" --type=epic --labels=milestone --silent');
+    assert.equal(lines[1], 'd2 create: would run bd create --title=Wall-jump polish --type=task "--parent=<new item 1>" "--description=Coyote time only." --silent'.replace('--title=Wall-jump polish', '"--title=Wall-jump polish"'));
+    assert.equal(lines[2], 'd3 dep: would run bd dep add wk-9 "<new item 2>"');
+    assert.equal(lines[3], 'd4 update: skipped (skip)');
+    assert.match(lines[4], /^d5 label: skipped \(changed, but a label takes no text; do it by hand\)$/);
+    assert.equal(lines[5], 'd6 close: would run bd close wk-5 "--reason=Covered by Sprint 4."');
+    assert.match(lines[6], /^d7 card: would copy assistant\/2026-11-mock into wksec$/);
+    assert.match(lines[7], /^Would apply 5 of 7 row\(s\); 2 skipped\.$/);
+    assert.deepEqual(await calls(), [], 'A dry run calls bd never.');
+  } finally { await close(); }
+});
+
+test('plan apply: runs the approved rows in order with argument arrays, maps #n to the ids bd made, and a hostile title stays one argument', async () => {
+  const changes = [
+    { op: 'create', title: 'Sprint 4; rm -rf / $(whoami) "quoted" --force', type: 'epic' },
+    { op: 'create', title: 'Child', parent: '#1', labels: ['later'] },
+    { op: 'dep', bead: '#2', blocks: 'wk-9' },
+    { op: 'label', bead: 'wk-4', add: ['later'], remove: ['needs-owner'] },
+    { op: 'close', bead: 'wk-5', reason: 'Covered.' },
+  ];
+  const { cli, id, calls, close } = await planFixture({ changes, decisions: { d1: { verdict: 'approve' }, d2: { verdict: 'approve' }, d3: { verdict: 'approve' }, d4: { verdict: 'approve' }, d5: { verdict: 'change', note: 'Merged into Sprint 4.' } } });
+  try {
+    const run = await cli('api', 'plan', 'apply', id);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.deepEqual(await calls(), [
+      ['create', '--title=Sprint 4; rm -rf / $(whoami) "quoted" --force', '--type=epic', '--silent'],
+      ['create', '--title=Child', '--type=task', '--parent=wk-new1', '--labels=later', '--silent'],
+      ['dep', 'add', 'wk-9', 'wk-new2'],
+      ['label', 'add', 'wk-4', 'later'],
+      ['label', 'remove', 'wk-4', 'needs-owner'],
+      ['close', 'wk-5', '--reason=Merged into Sprint 4.'],
+    ]);
+    assert.match(run.stdout, /d1 create: made wk-new1/);
+    assert.match(run.stdout, /Applied 5 of 5 row\(s\); 0 skipped\. Next: bd export -o \.beads\/issues\.jsonl, commit it, then cards ask pickup /);
+  } finally { await close(); }
+});
+
+test('plan apply stops at the first failure and names the rows left; a row that needs a skipped create is skipped', async () => {
+  const changes = [
+    { op: 'create', title: 'A' },
+    { op: 'close', bead: 'wk-1', reason: 'x' },
+    { op: 'close', bead: 'wk-2', reason: 'y' },
+    { op: 'close', bead: 'wk-3', reason: 'z' },
+  ];
+  const failing = await planFixture({ changes, extra: { BUW_BD_FAIL_ON: '3' } });
+  try {
+    const run = await failing.cli('api', 'plan', 'apply', failing.id);
+    assert.equal(run.code, 1);
+    assert.match(run.stdout, /d3 close: FAILED bd close wk-2 \.\.\. bd: no such issue/);
+    assert.match(run.stdout, /Stopped at d3\. Not applied: d3, d4\./);
+    assert.equal((await failing.calls()).length, 3, 'd4 never ran.');
+  } finally { await failing.close(); }
+  const skipped = await planFixture({ changes: [{ op: 'create', title: 'A' }, { op: 'create', title: 'B', parent: '#1' }], decisions: { d1: { verdict: 'skip' }, d2: { verdict: 'approve' } } });
+  try {
+    const run = await skipped.cli('api', 'plan', 'apply', skipped.id);
+    assert.equal(run.code, 0, run.stderr);
+    assert.match(run.stdout, /d2 create: skipped \(it needs change 1, which was not applied\)/);
+    assert.deepEqual(await skipped.calls(), []);
+  } finally { await skipped.close(); }
+});
+
+test('plan apply refuses an unanswered Ask, an Ask with no changes, another project\'s Ask, an Ask picked up already, and a repository with no project', async () => {
+  const unanswered = await planFixture({ answered: false });
+  try {
+    const run = await unanswered.cli('api', 'plan', 'apply', unanswered.id);
+    assert.notEqual(run.code, 0);
+    assert.match(run.stderr, /is not answered yet/);
+    assert.deepEqual(await unanswered.calls(), []);
+  } finally { await unanswered.close(); }
+  const plain = await planFixture();
+  try {
+    plain.fake.seed(`sections/inbox/asks/${plain.id}/ask.json`, JSON.stringify({ id: plain.id, project: 'wk', question: 'Which?', options: [{ id: 'a', label: 'A' }] }), 'application/json');
+    assert.match((await plain.cli('api', 'plan', 'apply', plain.id)).stderr, /has no change list/);
+  } finally { await plain.close(); }
+  const other = await planFixture({ project: 'other-project' });
+  try {
+    const run = await other.cli('api', 'plan', 'apply', other.id);
+    assert.notEqual(run.code, 0);
+    assert.match(run.stderr, /is for project other-project, and this repository is wk/);
+    assert.deepEqual(await other.calls(), []);
+  } finally { await other.close(); }
+  const taken = await planFixture({ pickedUp: true });
+  try {
+    assert.match((await taken.cli('api', 'plan', 'apply', taken.id)).stderr, /was picked up already/);
+    assert.equal((await taken.cli('api', 'plan', 'apply', taken.id, '--dry-run', '--again')).code, 0, 'An owner who knows can look again.');
+    assert.deepEqual(await taken.calls(), []);
+  } finally { await taken.close(); }
+  const nowhere = await planFixture();
+  try {
+    await writeFile(path.join(nowhere.dir, 'repo', 'CLAUDE.md'), '# No project here\n');
+    assert.match((await nowhere.cli('api', 'plan', 'apply', nowhere.id)).stderr, /no "Beads project:" line/);
+  } finally { await nowhere.close(); }
+  const invalid = await planFixture({ changes: [{ op: 'close', bead: 'wk-1', reason: 'Run `rm -rf build` now' }], decisions: { d1: { verdict: 'approve' } } });
+  try {
+    assert.match((await invalid.cli('api', 'plan', 'apply', invalid.id)).stderr, /is not valid/);
+    assert.deepEqual(await invalid.calls(), [], 'A list that fails the check again at apply time runs nothing.');
+  } finally { await invalid.close(); }
+});
+
+test('plan apply: a card change copies an assistant card into the project\'s section, and never over a card that is there', async () => {
+  const changes = [{ op: 'card', card: 'assistant/2026-11-mock' }];
+  const { fake, cli, id, keys, close } = await planFixture({ changes });
+  try {
+    fake.seed('sections/assistant/workspace.json', JSON.stringify({ name: 'Assistant', entities: [{ id: '2026-11-mock', folder: '2026-11-mock', title: 'A mockup', description: 'x', category: 'x', created: '2026-11-02', updated: '2026-11-02', status: 'active', steps: [{ name: 'Mockup', path: 'index.html' }] }] }), 'application/json');
+    fake.seed('sections/assistant/2026-11-mock/index.html', '<h1>Mockup</h1>', 'text/html');
+    fake.seed('sections/wksec/workspace.json', JSON.stringify({ name: 'Project', entities: [] }), 'application/json');
+    const run = await cli('api', 'plan', 'apply', id);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /d1 card: copied to wksec\/2026-11-mock/);
+    assert.equal(fake.text('sections/wksec/2026-11-mock/index.html'), '<h1>Mockup</h1>');
+    assert.ok(JSON.parse(fake.text('sections/wksec/workspace.json')).entities.some(entity => entity.id === '2026-11-mock'));
+    const again = await cli('api', 'plan', 'apply', id, '--again');
+    assert.equal(again.code, 1);
+    assert.match(again.stdout, /wksec has a card 2026-11-mock already; it is not overwritten/);
+    assert.equal(keys('').filter(key => key.includes('wksec')).length, 0, 'Nothing of the plan went into the inbox.');
+  } finally { await close(); }
+});

@@ -1162,3 +1162,26 @@ test('inbox: pc-runner writes run-* and result files only for a request taken by
     await fake.close();
   }
 });
+
+test('inbox: an Ask whose change list is not valid is refused for a limited token (422, the problems named); a good one, and an Ask with no changes, pass', async () => {
+  const { fake, call } = await setup();
+  try {
+    const putAsk = (token, id, body) => call('PUT', `/sections/inbox/files/asks/${id}/ask.json`, { token, body: Buffer.from(JSON.stringify(body)), base64: true, headers: { 'If-None-Match': '*' } });
+    const ask = changes => ({ id: 'x-3', project: 'wk', question: 'Apply this?', kind: 'decision', changes });
+    const bad = await putAsk('tok-cloud', 'x-3', ask([{ op: 'create', title: 'Run `git push --force` now' }, { op: 'label', bead: 'wk-1', add: ['p0'] }]));
+    assert.equal(bad.status, 422);
+    assert.match(bad.data.error, /The change list is not valid: change 1: title has a command in its text/);
+    assert.match(bad.data.error, /change 2: add is 1 to 5 different labels/);
+    assert.equal(fake.text('sections/inbox/asks/x-3/ask.json'), null, 'Nothing was written.');
+    assert.equal((await putAsk('tok-cloud', 'x-3', ask([]))).status, 422, 'An empty list.');
+    assert.equal((await putAsk('tok-cloud', 'x-3', ask('close everything'))).status, 422, 'Not a list.');
+    assert.equal((await putAsk('tok-cloud', 'x-3', ask([{ op: 'close', bead: 'wk-1', reason: 'Done.' }, { op: 'create', title: 'Next', parent: '#1' }]))).status, 422, 'A ref to a change that is no create.');
+    assert.equal((await putAsk('tok-hermes', 'x-3', ask([{ op: 'delete', bead: 'wk-1' }]))).status, 422, 'The Hermes token is checked like the others.');
+    const good = await putAsk('tok-hermes', 'x-3', ask([{ op: 'create', title: 'Sprint 4', type: 'epic' }, { op: 'create', title: 'Child', parent: '#1' }, { op: 'close', bead: 'wk-1', reason: 'Covered.' }]));
+    assert.equal(good.status, 200, JSON.stringify(good.data));
+    assert.equal(JSON.parse(fake.text('sections/inbox/asks/x-3/ask.json')).changes.length, 3);
+    assert.equal((await putAsk('tok-cloud', 'x-4', { id: 'x-4', project: 'wk', question: 'Which?' })).status, 200, 'An Ask without changes is as before.');
+    assert.equal((await call('PUT', '/sections/inbox/files/asks/x-5/ask.json', { token: 'tok-cloud', body: Buffer.from('not json'), base64: true, headers: { 'If-None-Match': '*' } })).status, 200, 'What does not parse is the Hub\'s to ignore, as before.');
+    assert.equal((await putAsk('tok-all', 'x-6', ask([{ op: 'delete' }]))).status, 200, 'The passphrase is not limited; the Hub drops a list that fails when it reads the Ask.');
+  } finally { await fake.close(); }
+});

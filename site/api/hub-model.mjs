@@ -3,6 +3,7 @@
 // directly. Everything is a function of its arguments (the clock included).
 import { nothingToDo } from './nothing-to-do.mjs';
 import { MAX_RUN_MINUTES } from './presets.mjs';
+import { changeRows, validateChanges } from './ask-changes.mjs';
 import { createHash } from 'node:crypto';
 
 export const ID_RE = /^\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/;
@@ -374,13 +375,15 @@ const clip = (value, length = 160) => String(value ?? '').replace(/\s+/g, ' ').t
 // --- Design reviews: an Ask with an image and decisions (see docs/workspaces.md, "Asks") ---
 
 export const DECISION_LIMITS = { count: 10, text: 200, detail: 500, note: 1000 };
+/** A change-list Ask (ws-qdh.3) has one decision row per change: up to this many. */
+export const CHANGE_ROWS_MAX = 20;
 export const VERDICTS = ['approve', 'change', 'skip'];
 export const ASK_IMAGE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 
 /** The decisions of an Ask when they are valid (1 to 10, ids d1..dN in order, text and detail within limits); null when absent or malformed. */
 export function validDecisions(ask) {
   const list = ask?.decisions;
-  if (!Array.isArray(list) || list.length < 1 || list.length > DECISION_LIMITS.count) return null;
+  if (!Array.isArray(list) || list.length < 1 || list.length > (Array.isArray(ask?.changes) ? CHANGE_ROWS_MAX : DECISION_LIMITS.count)) return null;
   const ok = list.every((item, index) => item && typeof item === 'object' && !Array.isArray(item) && item.id === `d${index + 1}`
     && typeof item.text === 'string' && item.text.trim().length >= 1 && item.text.length <= DECISION_LIMITS.text
     && (item.detail === undefined || (typeof item.detail === 'string' && item.detail.length <= DECISION_LIMITS.detail)));
@@ -405,6 +408,15 @@ export function cleanAsk(ask) {
   if (ask.decisions !== undefined && !validDecisions(ask)) { const { decisions: _drop, ...rest } = out; out = rest; bad.push('decisions'); }
   if (ask.image !== undefined && !(typeof ask.image === 'string' && ASK_IMAGE_RE.test(ask.image))) { const { image: _drop, ...rest } = out; out = rest; bad.push('image'); }
   if (ask.kind !== undefined && !ASK_SUBTYPES.includes(ask.kind)) { const { kind: _drop, ...rest } = out; out = rest; bad.push('kind'); }
+  if (ask.changes !== undefined) {
+    // A change list is the owner's to approve row by row, so its rows are made here from the ops, never taken from the agent's own `decisions`.
+    const { changes: _drop, ...rest } = out;
+    if (validateChanges(ask.changes).length) { out = rest; bad.push('changes'); }
+    else {
+      const { image: _image, options: _options, ...plain } = out;
+      out = { ...plain, decisions: changeRows(ask.changes), allowDrawing: false };
+    }
+  }
   return { ask: out, bad };
 }
 
@@ -965,6 +977,7 @@ export function discordEligible(ask) {
   if (ask.requirePasskey === true) return no('This Ask requires a passkey.');
   if (ask.allowDrawing === true) return no('This Ask takes a drawing.');
   if (ask.decisions !== undefined && ask.decisions !== null) return no('A design review stays in the Hub.');
+  if (ask.changes !== undefined && ask.changes !== null) return no('A change list stays in the Hub.');
   if (ask.image !== undefined && ask.image !== null) return no('An Ask with a picture stays in the Hub.');
   const options = ask.options;
   if (!Array.isArray(options) || options.length < 2 || options.length > DISCORD_MAX_OPTIONS) return no(`Buttons need 2 to ${DISCORD_MAX_OPTIONS} options.`);
