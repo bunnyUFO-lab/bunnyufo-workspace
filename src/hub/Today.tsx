@@ -158,7 +158,9 @@ export default function Today() {
   // A saved project that is gone counts as All once the list is known, and the key is cleared.
   const gone = !!chosen && !!list && !list.some(item => item.id === chosen)
   useEffect(() => { if (gone) saveProject('') }, [gone])
-  const project = gone ? '' : chosen
+  // If /projects fails there is no picker to undo a remembered project: show All for this view and leave the saved choice alone.
+  const failed = !!projects.error && !list
+  const project = gone || failed ? '' : chosen
   const choose = (id: string) => { const next = id === 'all' ? '' : id; setChosen(next); saveProject(next) }
   const { data: full, error, reload, at, loading } = shared ?? own
   if (!full) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>

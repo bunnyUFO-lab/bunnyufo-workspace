@@ -210,6 +210,15 @@ try {
       await row.locator('.hub-chip.on', { hasText: 'All' }).waitFor();
       await expect(kpi('needs-you')).toHaveText('5');
       await page.waitForFunction(() => localStorage.getItem('hub-today-project') === null);
+
+      // /projects fails: a remembered project is ignored for this view (no picker could undo it) and kept for the next one.
+      await page.evaluate(() => localStorage.setItem('hub-today-project', 'lanes'));
+      await page.route('**/api/hub/projects', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"down"}' }));
+      await page.reload();
+      await expect(kpi('needs-you')).toHaveText('5');
+      assert.equal(await page.locator('[data-today-elsewhere]').count(), 0, 'No "elsewhere" line while /projects fails.');
+      assert.equal(await stored(), 'lanes', 'The remembered project is not erased.');
+      await page.unroute('**/api/hub/projects');
       await page.context().close();
     }
   } finally { await todaySmall.close().catch(() => {}); }
