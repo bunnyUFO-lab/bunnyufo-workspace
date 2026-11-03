@@ -542,6 +542,7 @@ const eventItem = (kind, event, extra = {}) => ({
 /** A pull request link: https://github.com/<owner>/<repo>/pull/<n> and nothing else. */
 const PR_LINK_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
 const prKey = url => String(url).toLowerCase();
+const PR_EVENT_KINDS = ['pr-opened', 'pr-merged', 'pr-closed'];
 const prRepoOf = url => /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\//.exec(url)?.[1].toLowerCase();
 
 /** The pull requests a review stands for: its checked `prs` (at most 10), else its one `url` when that is a pull request, else none. */
@@ -652,7 +653,16 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
   const since = now.getTime() - DAY;
   // The dismiss and restore marks are bookkeeping, not news.
-  const recent = events.filter(event => new Date(event.ts).getTime() >= since && !ALERT_MARKS.includes(event.kind) && event.kind !== 'session-items');
+  // A PR event can be posted twice (the live post and the reconcile, or a hand backfill): one row per kind and PR, the newest.
+  const seenPrEvents = new Set();
+  const recent = events.filter(event => {
+    if (new Date(event.ts).getTime() < since || ALERT_MARKS.includes(event.kind) || event.kind === 'session-items') return false;
+    if (!PR_EVENT_KINDS.includes(event.kind) || typeof event.url !== 'string') return true;
+    const key = `${event.kind} ${prKey(event.url)}`;
+    if (seenPrEvents.has(key)) return false;
+    seenPrEvents.add(key);
+    return true;
+  });
   const nothingIds = new Set(requests.filter(item => item.nothing).map(item => item.id));
   const requestAlerts = requests
     .filter(item => ['failed', 'lost', 'expired'].includes(item.state) && new Date(item.since ?? item.at).getTime() >= since)

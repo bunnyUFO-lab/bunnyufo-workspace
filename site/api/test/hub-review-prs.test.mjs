@@ -78,3 +78,30 @@ test('the review detail takes the same project and reports the merged count', ()
   assert.deepEqual(detail.prs, [PR1, PR2]);
   assert.equal(reviewDetail(events, first.file).project, 'probe');
 });
+
+test('regression: a review of 5 PRs whose last merge exists only as an older backfilled event is settled', () => {
+  const prs = [1, 2, 3, 4, 5].map(number => `https://github.com/example/skills/pull/${number}`);
+  // PR 5 merged before the review was posted and before its sibling PRs; its event was written late, into an older day's folder, with the real merge time.
+  const backfilled = { ...merged(-3000, prs[4]), source: 'hub-reconcile', file: 'events/2026-10-31/090000-gh-example-skills-5-merged.json' };
+  const events = [review(5, { prs }), ...prs.slice(0, 4).map((url, index) => merged(10 + index, url)), backfilled];
+  const items = deriveEventItems(events);
+  assert.equal(items.reviews.length, 0, 'every PR has a merged event, whatever its time or day');
+  assert.equal(deriveEventItems(events.filter(event => event !== backfilled)).reviews[0]?.prsMerged, 4, 'without the backfill it reads 4/5 and stays');
+  // The same PR merged twice (live post and a hand backfill) changes nothing.
+  assert.equal(deriveEventItems([review(5, { prs: [PR1] }), merged(6, PR1), merged(7, PR1)]).reviews.length, 0);
+});
+
+test('Today recent shows one row per PR event kind and PR, the newest', () => {
+  const now = new Date(T0 + 3600000);
+  const first = { ...merged(40, PR1), file: 'a.json', title: 'newest' };
+  const dup = { ...merged(30, PR1), file: 'b.json', title: 'older' };
+  const other = { ...merged(35, OTHER), file: 'c.json' };
+  const opened = { ...ev(20, { kind: 'pr-opened', url: PR1 }), file: 'd.json' };
+  const newestFirst = [first, other, dup, opened];
+  const today = buildToday({ asks: [], events: newestFirst, now });
+  assert.deepEqual(today.recent.map(event => event.file), ['a.json', 'c.json', 'd.json'], 'the duplicate merged row is gone; a pr-opened for the same PR stays');
+  assert.equal(today.counts.recent, 3);
+  // Other kinds are untouched, even with the same url.
+  const deployed = [30, 20].map((minute, index) => ({ ...ev(minute, { kind: 'deployed', url: PR1 }), file: `x${index}.json` }));
+  assert.equal(buildToday({ asks: [], events: deployed, now }).recent.length, 2);
+});
