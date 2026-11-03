@@ -380,8 +380,15 @@ try {
   assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 4);
   await fits('expanded');
   await noSideways(phone, 'Wayfinder row at 390 expanded');
+  // Read the axis once the box has stopped changing size (two animation frames in a row with the same rect), not at a guess.
+  await phone.waitForFunction(() => new Promise(resolve => {
+    const rect = () => { const r = document.querySelector('.hub-map-box').getBoundingClientRect(); return `${r.width}x${r.height}`; };
+    const first = rect();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(rect() === first)));
+  }));
   const axis = await phone.locator('.hub-map-box').getAttribute('data-axis');
   if (axis !== null) assert.equal(axis, 'y', 'The row does not change the axis.');
+  assert.equal(await phone.locator('.hub-map-search').isVisible(), false, 'The search row gives its height to the open Wayfinder list.');
 
   step('the destination itself is the toggle: tap to read it all, tap again to clamp it');
   await showMap(phone, '#/~hub/map/wayfind');
