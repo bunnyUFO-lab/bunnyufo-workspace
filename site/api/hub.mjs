@@ -20,7 +20,7 @@ import {
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
 import { buildMap, isWayfinderQuestion } from './hub-map.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
-import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState, REASON_MAX } from './hub-marks.mjs';
+import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState, NOT_YET, REASON_MAX } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
@@ -836,12 +836,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /**
    * The owner's answer to a `kind: decision` Ask that names an open Wayfinder question of the Ask's own project decides that question:
-   * a done mark with the picked option (and the note) as its reason, the same mark "Answer here" writes. Skipped answers, other kinds,
+   * a done mark with the picked option (and the note) as its reason, the same mark "Answer here" writes. The reserved option id `not-yet` ("not decided yet") writes none. Skipped answers, other kinds,
    * other projects and anything that is not an open Wayfinder question write nothing. A failed write is logged and never fails the answer.
    */
   async function markFromAnswer({ ask, answer, user, at }) {
     try {
-      if (ask.kind !== 'decision' || !ask.bead || !validProject(ask.project) || typeof answer.choice !== 'string' || !answer.choice) return;
+      if (ask.kind !== 'decision' || !ask.bead || !validProject(ask.project) || typeof answer.choice !== 'string' || !answer.choice || answer.choice === NOT_YET) return;
       const option = Array.isArray(ask.options) ? ask.options.find(item => item.id === answer.choice) : null;
       if (!option) return;
       if (!isWayfinderQuestion((await loadBeads(ask.project)).issues, ask.bead)) return;

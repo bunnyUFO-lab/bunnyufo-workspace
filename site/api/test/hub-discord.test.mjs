@@ -312,3 +312,23 @@ test('8. a click on a decision Ask for an open Wayfinder question decides it, li
     assert.deepEqual([f.fake.json(file).verdict, f.fake.json(file).reason, f.fake.json(file).by], ['done', 'No', 'owner']);
   } finally { await f.close(); }
 });
+
+test('9. a click on not-yet writes no mark on a Wayfinder question; another option does', async () => {
+  const f = await fixture();
+  try {
+    f.seed.beads('wd', [
+      beadsIssue({ id: 'wd-map', title: 'Map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z' }),
+      beadsIssue({ id: 'wd-q1', title: 'What is the goal?', parent: 'wd-map', labels: ['wayfinder:research'], created: '2026-10-02T10:00:00Z' }),
+    ], { pushedAt: NOW.toISOString(), host: 'pc.example.test', count: 2, repo: 'example/wd' });
+    const marks = () => [...f.fake.objects.keys()].filter(key => key.includes('/bead-marks/'));
+    const options = [{ id: 'accept', label: 'Accept' }, { id: 'not-yet', label: 'Needs more work' }];
+    const later = f.ask('later', { project: 'wd', bead: 'wd-q1', kind: 'decision', options }, {}, 'g7g7');
+    const { body: { asks } } = await f.list();
+    assert.equal((await f.answer(f.answerBody(later, asks.find(item => item.id === later.id).rev, { choice: 'not-yet' }))).status, 201);
+    assert.deepEqual(marks(), []);
+    const accept = f.ask('accept', { project: 'wd', bead: 'wd-q1', kind: 'decision', options }, {}, 'h8h8');
+    const { body: { asks: next } } = await f.list();
+    assert.equal((await f.answer(f.answerBody(accept, next.find(item => item.id === accept.id).rev, { choice: 'accept' }))).status, 201);
+    assert.equal(marks().length, 1);
+  } finally { await f.close(); }
+});

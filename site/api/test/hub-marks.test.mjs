@@ -454,3 +454,19 @@ test('a failing mark write never fails the answer, and says so in the log', asyn
     assert.ok(logs.some(line => line.includes(`ask ${ask.id} was answered but its question was not marked decided`)), logs.join('\n'));
   } finally { await close(); }
 });
+
+test('the reserved option not-yet records the answer and writes no mark; a real choice on the same Ask still decides the question', async () => {
+  const { seed, answer, wayMarks, close } = await fixture();
+  try {
+    const options = [{ id: 'accept', label: 'Accept: the finding' }, { id: 'not-yet', label: 'Needs more work' }];
+    const notYet = decisionAsk({ id: `${day}-wk-notyet-n1n1`, options });
+    seed.ask(notYet);
+    const first = await answer(notYet.id, { choice: 'not-yet', note: 'Look at the other repo too.' });
+    assert.deepEqual([first.status, first.body.answer.choice], [201, 'not-yet']);
+    assert.deepEqual(wayMarks(), [], 'The question stays open.');
+    const accept = decisionAsk({ id: `${day}-wk-accept-n2n2`, options });
+    seed.ask(accept);
+    assert.equal((await answer(accept.id, { choice: 'accept' })).status, 201);
+    assert.equal(wayMarks().length, 1, 'A real choice still decides it.');
+  } finally { await close(); }
+});

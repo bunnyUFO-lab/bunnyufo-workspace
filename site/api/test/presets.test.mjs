@@ -466,3 +466,7 @@ test('research is unchanged apart from its estimate: it still never creates requ
   }
   assert.ok(PRESETS.every(preset => !/40k/.test(preset.estimate.cost)));
 });
+
+test('the question brief names the reserved not-yet option for the "needs more work" choice', () => {
+  assert.match(renderBrief({ preset: 'question', request: request() }), /"Needs more work" with the option id not-yet/);
+});

@@ -8,6 +8,8 @@
 export const MARK_FILE = /^(\d{8}T\d{9}Z)-(done|not-needed|unblock|undo|applied)-([a-z0-9]{4})\.json$/;
 export const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
 export const REASON_MAX = 500;
+/** The option id that means "not decided yet" on a decision Ask: picking it records the answer and writes no mark, so the question stays open. */
+export const NOT_YET = 'not-yet';
 const OWNER_VERDICTS = new Set(['done', 'not-needed', 'unblock', 'undo']);
 
 /** The close reason the overlay shows. A done mark with a reason is an answer to a Wayfinder question: "Decided: <answer>". */
