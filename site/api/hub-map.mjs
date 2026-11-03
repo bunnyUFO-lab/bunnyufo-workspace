@@ -282,7 +282,8 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     id, title, state: roll(features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), features,
   });
 
-  const milestones = orderSiblings(milestoneIssues, blockers).map(milestone => {
+  /** A milestone from an issue: its child groups are features, its loose children one more. */
+  const milestoneOf = milestone => {
     placed.add(milestone.id);
     const features = [];
     const loose = [];
@@ -294,9 +295,10 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     }
     if (loose.length) features.push(makeFeature(`${milestone.id}~other`, `${milestone.title ?? milestone.id} · other tasks`, loose));
     return makeMilestone(milestone.id, milestone.title ?? milestone.id, features);
-  });
+  };
+  const milestones = orderSiblings(milestoneIssues, blockers).map(milestoneOf);
 
-  // Whatever no milestone reaches: groups with children become features, the rest one pile.
+  // Whatever no milestone reaches: an epic with children is a ring of its own (it is not "not in a milestone"), the loose rest one pile.
   const unplaced = issues.filter(issue => !placed.has(issue.id));
   const features = [];
   const loose = [];
@@ -305,9 +307,8 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     const parent = parentOf.get(issue.id);
     if (parent && !placed.has(parent) && unplaced.some(other => other.id === parent)) continue;   // shown with its parent
     if (isGroupType(issue)) {
-      placed.add(issue.id);
-      const tasks = collect(issue);
-      if (tasks.length) features.push(makeFeature(issue.id, issue.title ?? issue.id, tasks));
+      const kept = milestoneOf(issue);
+      if (kept.features.length) milestones.push(kept);
     } else {
       placed.add(issue.id);
       loose.push(issue, ...collect(issue));

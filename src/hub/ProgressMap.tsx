@@ -14,6 +14,7 @@ import type { ZoomReport } from './usePanZoom'
 import { stableOf, zoomStep } from './semanticZoom'
 import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
+import { tallyFraction } from './mapCount.ts'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
@@ -166,17 +167,15 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     setHint(false)
     try { localStorage.setItem(HINT_KEY, '1') } catch { /* private mode: it shows again next time */ }
   }, [])
-  /** The control bar floats over the bottom of the box and the hint over its top: Fit, Now and the first view keep the map between them. */
+  /** The control bar and the hint float over the top of the box: Fit, Now and the first view keep the map clear of them. */
   const controls = useRef<HTMLDivElement>(null)
   const hintBar = useRef<HTMLDivElement>(null)
   const insets = useCallback(() => {
-    const bar = controls.current?.getBoundingClientRect()
     const frame = box.current?.getBoundingClientRect()
+    const bar = controls.current?.getBoundingClientRect()
     const hint = hintBar.current?.getBoundingClientRect()
-    return {
-      top: hint && frame && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0,
-      bottom: bar && frame && bar.height ? Math.max(0, frame.bottom - bar.top + 8) : 0,
-    }
+    const lowest = Math.max(bar && bar.height ? bar.bottom : 0, hint && hint.height ? hint.bottom : 0)
+    return { top: frame && lowest ? Math.max(0, lowest - frame.top + 8) : 0, bottom: 0 }
   }, [])
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
@@ -195,7 +194,7 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
     const element = box.current
     const size = pz.box()
     const { top, bottom } = insets()
-    // With no panel open, the map's room is what the hint and the control bar leave.
+    // With no panel open, the map's room is what the control bar and the hint leave.
     const clear = { x: 0, y: top, w: size.w, h: Math.max(size.h - top - bottom, 60) }
     const whole = { x: 0, y: 0, w: size.w, h: size.h }
     const panel = document.getElementById('hub-map-panel')
@@ -459,11 +458,12 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
                 return (
                   <Fragment key={feature.id}>
                   <g data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className={`hub-map-node${shownId === feature.id ? ' selected' : ''}`}
-                    aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.done} of ${feature.total} done`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(feature.id)} onKeyDown={event => onKey(event, () => openPanel(feature.id))}>
-                    <title>{nodeTip(feature.title, feature.id)}</title>
+                    aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.words}`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(feature.id)} onKeyDown={event => onKey(event, () => openPanel(feature.id))}>
+                    <title>{`${nodeTip(feature.title, feature.id)} · ${feature.words}`}</title>
                     <circle cx={cx} cy={feature.center.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
+                    <Arc cx={cx} cy={feature.center.y} r={radius} width={4} fraction={tallyFraction(feature)} color={feature.col} />
                     {shownId === feature.id && <circle cx={cx} cy={feature.center.y} r={radius + 5} className="hub-map-ring" />}
-                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.hidden ? `${feature.total}/${feature.total + feature.hidden}` : `${feature.done}/${feature.total}`}</text>
+                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.muted ? feature.later : feature.done}</text>
                     <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.center.y - radius + 2} />
                     <MapTitle label={feature.label} title={feature.title} vertical={vertical} fontWeight="600" className="hub-map-title" />
                   </g>
@@ -476,15 +476,16 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
                 return (
                   <Fragment key={milestone.id}>
                   <g data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className={`hub-map-node${shownId === milestone.id ? ' selected' : ''}`}
-                    aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.done} of ${milestone.total} done`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(milestone.id)} onKeyDown={event => onKey(event, () => openPanel(milestone.id))}>
-                    <title>{nodeTip(milestone.title, milestone.id)}</title>
-                    <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" style={{ stroke: milestone.col, fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
+                    aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.words}`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(milestone.id)} onKeyDown={event => onKey(event, () => openPanel(milestone.id))}>
+                    <title>{`${nodeTip(milestone.title, milestone.id)} · ${milestone.words}`}</title>
+                    <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" className={milestone.muted ? 'hub-map-muted' : undefined} style={{ stroke: milestone.muted ? undefined : 'var(--hairline-strong)', fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
+                    <Arc cx={milestone.x} cy={milestone.y} r={radius} width={4} fraction={tallyFraction(milestone)} color={milestone.col} />
                     {shownId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 6} className="hub-map-ring" />}
-                    {!milestone.open && !milestone.thin && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.hidden ? `${milestone.total}/${milestone.total + milestone.hidden}` : `${milestone.done}/${milestone.total}`}</text>}
+                    {!milestone.open && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.muted ? milestone.later : milestone.done}</text>}
                     <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
                     <MapTitle label={milestone.label} title={milestone.title} vertical={vertical} fontWeight="700" style={{ fill: milestone.col }} />
                   </g>
-                  {!milestone.thin && <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />}
+                  {!milestone.bare && <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />}
                   </Fragment>
                 )
               })}
@@ -528,15 +529,23 @@ function MapView({ model: fullModel, project, nodeId }: { model: MapModel; proje
 /** A milestone's or feature's title at its place in the layout; the vertical layout wraps it into lines. */
 function MapTitle({ label, title, vertical, fontWeight, className, style }: { label: Label; title: string; vertical: boolean; fontWeight: string; className?: string; style?: CSSProperties }) {
   const anchor = vertical || label.anchor === 'middle' ? label.anchor : undefined
-  // An open milestone keeps its done/total after the title, as its circle is too small for it.
+  // A milestone says what its ring counts in words, after the title or (vertical) on a line below it.
   const count = label.count ? <tspan className="hub-map-count" dx="8">{label.count}</tspan> : null
-  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}{count}</text>
+  const sub = label.sub ? <tspan className="hub-map-count" x={label.x} dy={label.step ?? 14} fontWeight="400" fontSize="11">{label.sub}</tspan> : null
+  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}{count}{sub}</text>
   const last = label.lines.length - 1
   return (
     <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>
-      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}{k === last && count}</tspan>)}
+      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}{k === last && count}</tspan>)}{sub}
     </text>
   )
+}
+
+/** The done part of a ring: an arc over the circle, from the top, `fraction` of the way round. Nothing when none is done. */
+function Arc({ cx, cy, r, width, fraction, color }: { cx: number; cy: number; r: number; width: number; fraction: number; color: string }) {
+  if (fraction <= 0) return null
+  // In a group of its own, so the node's own circle stays its only direct circle.
+  return <g className="hub-map-arcg"><circle cx={cx} cy={cy} r={r} pathLength="100" strokeWidth={width} strokeDasharray={`${Math.min(fraction, 1) * 100} 100`} transform={`rotate(-90 ${cx} ${cy})`} className="hub-map-arc" style={{ stroke: color }} /></g>
 }
 
 /** Hover text for a map node: the full title, then the id unless it is a synthetic group (its id has a ~). */

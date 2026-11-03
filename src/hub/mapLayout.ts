@@ -3,6 +3,7 @@
 // ProgressMap.tsx from what this returns, as React elements, so a title can never become markup.
 import type { MapMilestone, ProgressMap, Sign, TaskState } from '../lib/hub'
 import type { Hidden } from './mapFilter'
+import { isLater, isLaterOnly, tallyOf, tallyWords, withHidden } from './mapCount.ts'
 
 export const SPINE_Y = 230
 export const LV = 78
@@ -23,16 +24,19 @@ export interface At { x: number; y: number }
 /** Left, top, right, bottom. */
 type Box = [number, number, number, number]
 /** Where a node's text goes. `y` is the first line's baseline; `lines` (when set) are the wrapped lines, and `step` the distance between them. */
-export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number; /** An open milestone's done/total, drawn after its title: its circle is too small to hold it. */ count?: string }
-/** The lines of a label as drawn, the count (when it has one) after the last. */
+export interface Label { x: number; y: number; anchor: 'start' | 'middle' | 'end'; lines?: string[]; step?: number; /** What the ring counts in words ("24 of 25 done"), drawn after the title on the same line. */ count?: string; /** The same words on a line of their own under the title (the vertical layout, where a long title leaves no room beside them). */ sub?: string }
+/** The lines of a label as drawn, the count (when it has one) after the last, the sub line (when it has one) below. */
 const drawnLines = (label: Label, title: string): string[] => {
   const lines = label.lines ?? [title]
-  return label.count ? [...lines.slice(0, -1), `${lines[lines.length - 1]}  ${label.count}`] : lines
+  const joined = label.count ? [...lines.slice(0, -1), `${lines[lines.length - 1]}  ${label.count}`] : lines
+  return label.sub ? [...joined, label.sub] : joined
 }
-interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; /** Tasks the filter hides under this node: its count reads shown/(shown + hidden). */ hidden: number; label: Label; center: At }
-export interface MilestoneNode extends Base { kind: 'm'; index: number; open: boolean; /** The circle's radius. */ radius: number; /** The filter left it no task: a small dot with an "n hidden" line. */ thin: boolean; countAt: At; chevronAt: At }
+interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; /** Tasks the filter hides under this node. `done` and `total` count them too: a ring says what the node holds, not what the filter shows. */ hidden: number; label: Label; center: At }
+/** What a milestone's or feature's ring counts: `later` are its deferred tasks (in `total`, never open); `words` is the count as the label says it; `muted` when everything in it is deferred. */
+interface Ring { later: number; words: string; muted: boolean }
+export interface MilestoneNode extends Base, Ring { kind: 'm'; index: number; open: boolean; /** The circle's radius. */ radius: number; /** The filter left it no task, so there is nothing to open (the ring and its count stay). */ bare: boolean; countAt: At; chevronAt: At }
 /** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. */
-export interface FeatureNode extends Base { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; elbow: At; countAt: At; chevronAt: At }
+export interface FeatureNode extends Base, Ring { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; elbow: At; countAt: At; chevronAt: At }
 export interface TaskNode extends Base { kind: 't'; milestone: string; feature: string; side: 1 | -1; slot: number; signs: Sign[]; lines: string[]; up: boolean }
 export type MapNode = MilestoneNode | FeatureNode | TaskNode
 
@@ -99,31 +103,31 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   model.milestones.forEach((milestone: MapMilestone, index) => {
     const tasks = milestone.features.flatMap(feature => feature.tasks)
     const lost = hidden?.get(milestone.id)?.n ?? 0
-    const thin = lost > 0 && tasks.length === 0
-    const count = lost ? `${tasks.length}/${tasks.length + lost}` : `${tasks.filter(task => task.state === 'done').length}/${tasks.length}`
+    const bare = lost > 0 && tasks.length === 0
+    const tally = withHidden(tallyOf(tasks), hidden?.get(milestone.id))
+    const count = tallyWords(tally)
     const col = MILESTONE_COLORS[index % MILESTONE_COLORS.length]
-    const isOpen = open.has(milestone.id) && !thin
-    const radius = thin ? 11 : isOpen ? 15 : 26
+    const isOpen = open.has(milestone.id) && !bare
+    const radius = isOpen ? 15 : 26
     milestoneX.set(milestone.id, x)
     const mx = vertical ? 0 : x
     const my = vertical ? x : SPINE_Y
-    // An open milestone's count follows its title on the same line, so the title gives up that room: the drawing stays as narrow as before the count.
-    const hiddenText = `${lost} hidden`
-    const titleLines = vertical ? wrap(thin ? `${milestone.title} · ${hiddenText}` : milestone.title, isOpen ? 40 - count.length - 2 : 40) : [thin ? `${milestone.title} · ${hiddenText}` : milestone.title]
+    // Horizontal: the count follows the title on its line. Vertical: it has a line of its own, so a long title keeps its room.
+    const titleLines = vertical ? wrap(milestone.title, 40) : [milestone.title]
     /** Horizontal: where the first branch leaves the spine, clear of the open milestone's title, which sits centred below the circle and would meet the diagonals. */
     const first = isOpen && !vertical ? Math.max(34, ((milestone.title.length + count.length + 2) * 6.8) / 2 + 6) : 34
     const levels = Math.ceil(milestone.features.length / 2)
     nodes.push({
-      kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen, radius, thin,
-      done: tasks.filter(task => task.state === 'done').length, total: tasks.length, hidden: lost, marks: marksOf(tasks.map(task => task.signs)),
+      kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen, radius, bare,
+      done: tally.done, later: tally.later, total: tally.total, words: count, muted: isLaterOnly(tally), hidden: lost, marks: marksOf(tasks.map(task => task.signs)),
       center: { x: mx, y: my },
       label: vertical
-        ? { x: radius + 10, y: my + 4 - (titleLines.length - 1) * 7, anchor: 'start', lines: titleLines, step: 14, count: isOpen ? count : undefined }
-        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle', count: isOpen ? count : undefined, ...(thin ? { lines: titleLines } : {}) },
+        ? { x: radius + 10, y: my + 4 - titleLines.length * 7, anchor: 'start', lines: titleLines, step: 14, sub: count }
+        : { x: mx, y: my + (isOpen ? 34 : index % 2 ? 48 : -38), anchor: 'middle', count },
       countAt: { x: mx, y: my + 4 },
       chevronAt: { x: mx - 42, y: my },
     })
-    let span = vertical ? 100 : Math.max(thin ? 120 : 170, (titleLines[0].length + (isOpen ? count.length + 2 : 0)) * 7 + 30)
+    let span = vertical ? 100 : Math.max(170, (titleLines[0].length + count.length + 2) * 7 + 30)
     // Vertical: the next feature's band starts here.
     let cursor = x + radius + 20
     if (isOpen) {
@@ -132,7 +136,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const featureOpen = open.has(feature.id)
         const state = feature.state
         const featureMarks = marksOf(feature.tasks.map(task => task.signs))
-        const featureDone = feature.tasks.filter(task => task.state === 'done').length
+        const featureTally = withHidden(tallyOf(feature.tasks), hidden?.get(feature.id))
+        const featureRing = { later: featureTally.later, words: tallyWords(featureTally), muted: isLaterOnly(featureTally) }
         if (vertical) {
           // The branch leaves the spine, steps out BR and runs down; the circle hangs at its end, text goes outside it.
           const y0 = cursor
@@ -144,7 +149,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
           branches.push({ id: feature.id, milestone: milestone.id, points: [[0, y0], [bx, y1], [bx, y2]], col, lit: state !== 'later' })
           nodes.push({
             kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: bx, y: y2, side, state, col, open: featureOpen,
-            done: featureDone, total: feature.tasks.length, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
+            done: featureTally.done, total: featureTally.total, ...featureRing, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
             center: { x: bx, y: cy }, elbow: { x: bx, y: y1 },
             label: { x: bx + side * (FR + 8), y: cy + 4, anchor: side < 0 ? 'end' : 'start', lines, step: 14 },
             countAt: { x: bx, y: cy + 4 }, chevronAt: { x: bx, y: y1 },
@@ -176,7 +181,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const cx = ex + FR
         nodes.push({
           kind: 'f', id: feature.id, milestone: milestone.id, title: feature.title, x: ex, y: by, side, state, col, open: featureOpen,
-          done: featureDone, total: feature.tasks.length, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
+          done: featureTally.done, total: featureTally.total, ...featureRing, hidden: hidden?.get(feature.id)?.n ?? 0, marks: featureMarks,
           center: { x: cx, y: by }, elbow: { x: bx + BR, y: by },
           label: featureOpen ? { x: cx + FR + 8, y: by + 4, anchor: 'start', lines, step: 14 } : { x: bx + BR + 16, y: by + (side < 0 ? -10 : 18), anchor: 'start', lines, step: 14 },
           countAt: { x: cx, y: by + 4 }, chevronAt: { x: bx + BR, y: by },
@@ -206,8 +211,9 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   })
   const end = x + 40
   /** What the filter took out of a milestone: it still counts for where "now" is. */
-  const lostOf = (id: string) => hidden?.get(id) ?? { n: 0, done: 0 }
-  const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done')) || lostOf(milestone.id).n > lostOf(milestone.id).done)
+  const lostOf = (id: string) => hidden?.get(id) ?? { n: 0, done: 0, later: 0 }
+  /** Deferred tasks are later work: they never make a milestone the one in progress. */
+  const firstOpen = model.milestones.findIndex(milestone => milestone.features.some(feature => feature.tasks.some(task => task.state !== 'done' && !isLater(task))) || lostOf(milestone.id).n > lostOf(milestone.id).done + lostOf(milestone.id).later)
   /** The marker is a dot with a ring, and a pill below it (horizontal) or beside it (vertical). Its box, with a margin, when the dot sits `at` along the spine. */
   const markerBox = (at: number): Box => (vertical ? [-15, at - 15, 56, at + 15] : [at - 22, SPINE_Y - 15, at + 22, SPINE_Y + 35])
   /** What "now" must stay clear of: every node's circle, chevron, marks and label. */
@@ -237,8 +243,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   if (firstOpen >= 0) {
     const milestone = model.milestones[firstOpen]
     const tasks = milestone.features.flatMap(feature => feature.tasks)
-    const lost = lostOf(milestone.id)
-    const fraction = tasks.length + lost.n ? (tasks.filter(task => task.state === 'done').length + lost.done) / (tasks.length + lost.n) : 0
+    const { done, total, later } = withHidden(tallyOf(tasks), lostOf(milestone.id))
+    const fraction = total - later ? done / (total - later) : 0
     const here = milestoneX.get(milestone.id) ?? 0
     const next = model.milestones[firstOpen + 1] ? milestoneX.get(model.milestones[firstOpen + 1].id) ?? end - 40 : end - 40
     nowAlong = here + fraction * (next - here) * 0.6
@@ -298,7 +304,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   let right = 0
   for (const node of nodes) {
     const size = node.kind === 't' ? 5.6 : 6.8
-    const reach = node.label.lines || node.label.count ? textWidth(drawnLines(node.label, node.title), size) : 0
+    const reach = node.label.lines || node.label.count || node.label.sub ? textWidth(drawnLines(node.label, node.title), size) : 0
     const from = node.label.anchor === 'end' ? node.label.x - reach : node.label.x
     const to = node.label.anchor === 'end' ? node.label.x : node.label.x + reach
     left = Math.min(left, from, node.kind === 'm' ? node.chevronAt.x - 20 : node.center.x - FR)

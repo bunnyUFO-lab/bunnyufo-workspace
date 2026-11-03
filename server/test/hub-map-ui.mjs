@@ -73,9 +73,9 @@ const freeCentre = page => page.evaluate(() => {
   return { x: box.left + box.width / 2, y: box.top + h / 2 };
 });
 
-/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-744 (an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
-const DESKTOP_EXPANDED = '4f175fb85ab94b242a8cc2459c61934fd3754f87695144e065dddd1b08ff5aaf';
-const DESKTOP_EXPANDED_NO_SPRINTS = '9c2076b6295834641504bc0f876a51d9fa9387a6fc3156526ddd3efb288cc8f6';
+/** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-1kw (every ring says what it counts in words, with a done arc; an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
+const DESKTOP_EXPANDED = 'dc1c1af34dccf7cc67057eecdeae007a072e33928e3ac60dd0fbcfb2e2c27583';
+const DESKTOP_EXPANDED_NO_SPRINTS = '4aa7d66def5b8dd3da5d065649bd5a440d79ec1f948467e6d4cac8c6f5e2bbf0';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
 // The exact hashes above hold only on the machine that recorded them: the map is laid out from measured text widths, and a
@@ -100,8 +100,8 @@ const svgForms = page => page.evaluate(geometry => {
   walk(svg, 0);
   return { raw: svg.outerHTML, structure: lines.join(String.fromCharCode(10)) };
 }, [...GEOMETRY]);
-const STRUCTURE_EXPANDED = 'dc966477c65de670e1b11495f390b9c775f5162f6a17736d13b285e38ba67567';
-const STRUCTURE_EXPANDED_NO_SPRINTS = '1e3d7fb5f529c69ca040b6b926bd4093de118a89e7b6f35168394f6ca000fe0a';
+const STRUCTURE_EXPANDED = 'b1a260dd876b5a73f016fa6820a0ee045efd4fd118ccc614ca4e35db5ca811e6';
+const STRUCTURE_EXPANDED_NO_SPRINTS = '7b45ae19c25525e24f22e6e751f39624a5b80d3d1a998b4638449b9c06ea5ebe';
 /** Checks a drawing against its recorded hashes; a mismatch says the actual hash, so a recording is one copy away. */
 const sameDrawing = (forms, structureHash, exactHash, what) => {
   assert.equal(sha(forms.structure), structureHash, `${what}: the structure of the svg changed (structure hash ${sha(forms.structure)}).`);
@@ -175,12 +175,12 @@ try {
     assert.ok(chevron.w >= 43.5 && chevron.h >= 43.5, `${chevron.id}: the touch target is at least 44 px (${chevron.w} x ${chevron.h}).`);
     assert.match(chevron.label ?? '', /^(Open|Close) \S/, `${chevron.id}: the chevron has a name.`);
   }
-  assert.match(await phone.locator('[data-node="ml-m2"] .hub-map-count').last().textContent(), /^\d+\/\d+$/, 'The open milestone still shows its done/total.');
+  assert.match(await phone.locator('[data-node="ml-m2"] .hub-map-count').last().textContent(), /^\d+ of \d+ done/, 'The open milestone still says what it counts: done of total.');
   const lowest = await phone.evaluate(() => {
-    const bar = document.querySelector('.hub-map-controls').getBoundingClientRect().top;
-    return { bar, bottom: Math.max(...[...document.querySelectorAll('.hub-map-box svg [data-node] text')].map(text => text.getBoundingClientRect().bottom)) };
+    const bar = document.querySelector('.hub-map-controls').getBoundingClientRect().bottom;
+    return { bar, top: Math.min(...[...document.querySelectorAll('.hub-map-box svg [data-node] text')].map(text => text.getBoundingClientRect().top)) };
   });
-  assert.ok(lowest.bottom <= lowest.bar, `After Expand all the last label (${lowest.bottom}) is above the control bar (${lowest.bar}).`);
+  assert.ok(lowest.top >= lowest.bar - 1, `After Expand all the first label (${lowest.top}) is below the control bar (${lowest.bar}).`);
   assert.ok(await phone.locator('[data-kind="t"]').count() >= 9, 'Every task is drawn.');
   await phone.locator('.hub-map-controls button:has-text("Sprints")').tap();
   await phone.waitForTimeout(500);
@@ -223,9 +223,9 @@ try {
   await axisIs(bare, 'x', 'Landscape is horizontal.');
   const box = await bare.locator('.hub-map-box').boundingBox();
   const nowAt = await centreOf(bare.locator('.hub-map-now'));
-  // The middle of what the hint (top) and the control bar (bottom) leave.
-  const room = await bare.evaluate(() => ({ top: document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, bottom: document.querySelector('.hub-map-controls').getBoundingClientRect().top }));
-  const roomMid = ((room.top ? room.top + 8 : box.y) + room.bottom - 8) / 2;
+  // The middle of what the control bar and the hint (top) leave.
+  const room = await bare.evaluate(() => ({ top: Math.max(document.querySelector('.hub-map-top')?.getBoundingClientRect().bottom ?? 0, document.querySelector('.hub-map-controls').getBoundingClientRect().bottom), bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom }));
+  const roomMid = (room.top + 8 + room.bottom) / 2;
   assert.ok(Math.hypot(nowAt.x - (box.x + box.width / 2), nowAt.y - roomMid) <= 12, `"Now" is centred (${nowAt.x},${nowAt.y} vs ${roomMid}).`);
 
   step('a window between the thresholds keeps the axis it had');
