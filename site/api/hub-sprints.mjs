@@ -50,7 +50,6 @@ const LINE_ENDS = new RegExp(`\r\n?|[${String.fromCharCode(0x2028, 0x2029, 0x85)
 export function fenceSafe(text, max) {
   const clean = String(text ?? '')
     .replace(LINE_ENDS, '\n')
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
     .replace(/<{3,}/g, '<<').replace(/>{3,}/g, '>>')
     .split('\n').map(line => line.replace(/[ \t]+$/, '')).join('\n')
@@ -282,8 +281,8 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
   /** Why a project can't run a sprint, or ''. */
   function whyNot(project) {
     const defaults = defaultsOf(project);
-    if (project === 'bunnylink' || defaults?.runsOn === 'at-pc') return 'Sprints run on the PC. Bunnylink work is started by you at the PC.';
-    if (defaults?.runsOn !== 'pc') return `Sprints run on the PC. ${defaults?.name ?? project} has no PC runs.`;
+    // Bunnylink is started by the owner at the PC and never signed; a project that runs in the cloud has no PC runs either.
+    if (project === 'bunnylink' || defaults?.runsOn !== 'pc') return `Sprints run on the PC. ${defaults?.name ?? project} has no PC runs.`;
     return '';
   }
 

@@ -236,7 +236,7 @@ test('start: Bunnylink, a project with no PC runs, a bad timebox, no sign-in, no
     assert.equal((await f.post(`/hub/map/magic-loops/sprint/ml-nope`, { timebox: 90 })).status, 404);
     const bunny = await f.post('/hub/map/bunnylink/sprint/bl-ms', { timebox: 90 });
     assert.equal(bunny.status, 400);
-    assert.match(bunny.body.error, /Sprints run on the PC/);
+    assert.match(bunny.body.error, /^Sprints run on the PC\. Bunnylink has no PC runs\.$/);
     const cloud = await f.post('/hub/map/workspace-app/sprint/ws-ms', { timebox: 90 });
     assert.equal(cloud.status, 400);
     assert.match(cloud.body.error, /Sprints run on the PC\. Workspace app has no PC runs\./);
