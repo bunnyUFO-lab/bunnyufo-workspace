@@ -1189,7 +1189,9 @@ function proseCommand(text) {
   const startsLikeCommand = new RegExp(`^(?:${words})\\s+\\S`);
   const scriptPath = /^\.[\\/]\S*(?:\.(?:ps1|sh|mjs|js|py|cmd|bat)\b|\s+\S)/;
   const flag = /\s--?[A-Za-z][\w-]*/;
-  const proseSecond = /^(?:is|are|was|were|will|would|should|can|could|to|and|or|the|a|an|from|in|on|at|of|you|it|that|this|has|have|not|if|when|as|for|with)$/i;
+  const proseSecond = /^(?:is|are|was|were|will|would|should|can|could|to|and|or|the|a|an|from|in|on|at|of|you|it|that|this|has|have|not|if|when|as|for|with|again|first|now|once|then|next|also|before|after|please|manually)$/i;
+  // A program named by a hyphen, a dot or a path ("pixel-studio-comfy", "install.ps1", "tools/run") followed by an argument.
+  const namedProgram = /^(?:[A-Za-z]\w*-[\w-]*\w|[\w-]+\.[A-Za-z0-9]{1,4}|[\w.~-]*[\\/][\w.\\/~-]*\w)$/;
   const outside = text.replace(/```[\s\S]*?(?:```|$)/g, ' ');
   for (const span of outside.matchAll(/`([^`\n]+)`/g)) {
     const body = span[1].trim();
@@ -1201,6 +1203,7 @@ function proseCommand(text) {
     const [first = '', second = ''] = rest.split(/\s+/);
     if (new RegExp(`^(?:${words})$`).test(first) && second && !proseSecond.test(second)) return rest;
     if (/^(?:[A-Za-z]:\\\S|~\/\S|\/\S+\/\S)/.test(first)) return rest;
+    if (namedProgram.test(first) && second && !proseSecond.test(second)) return `${first} ${second.replace(/[.,;]+$/, '')}`;
   }
   return null;
 }
