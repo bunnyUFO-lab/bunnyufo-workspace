@@ -292,6 +292,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
+  // /hub/map is polled and only needs the list for run state on the sheet: keep it ~30 s. Creating or posting to a request clears it.
+  const MAP_REQUESTS_MS = Number(env.HUB_MAP_REQUESTS_MS ?? 30_000);   // 0 turns it off (tests that write the bucket directly)
+  let mapRequests = null;   // { made, value }
+  const loadMapRequests = async at => {
+    if (mapRequests && Date.now() - mapRequests.made < MAP_REQUESTS_MS) return mapRequests.value;
+    const made = Date.now();
+    const value = await loadRequests(at);
+    mapRequests = { made, value };
+    return value;
+  };
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
   const notify = createNotify({ env, fetchImpl, log: line => log(scrub(line, 400)) });
   /** What an approval needs to know about the request it belongs to: its project, and whether the run has ended. */
@@ -1527,7 +1537,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
-            const [{ meta, issues }, window, asks, checklists, cards, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project), loadRequests(at)]);
+            const [{ meta, issues }, window, asks, checklists, cards, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project), loadMapRequests(at)]);
             const repo = meta?.repo || await projectRepo(project);
             reply(buildMap({
               project, meta, issues: applyMarks(issues, marks, project), events: window.events, repo, cards,
@@ -1594,11 +1604,13 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           if (!user) throw fail('Sign in to wake the PC.', 401);
           send(await wake.send({ by: user, at }));
         } else if (route === '/hub/requests') {
+          mapRequests = null;
           send(await requestFiles.create(raw, user, at));
         } else if ((match = /^\/hub\/hermes-approvals\/([^/]+)\/answer$/.exec(route))) {
           if (!user) throw fail('Sign in to answer.', 401);
           send(await hermesApprovals.answer(decodeURIComponent(match[1]), raw, user, at));
         } else if ((match = /^\/hub\/requests\/([^/]+)\/([a-z-]+)$/.exec(route))) {
+          mapRequests = null;
           send(await requestFiles.post(decodeURIComponent(match[1]), match[2], raw, user, at));
         } else if (route === '/hub/drawings') {
           send(await saveDrawingNew(raw, at));

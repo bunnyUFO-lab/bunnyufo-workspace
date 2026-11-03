@@ -1080,7 +1080,7 @@ test('Approve again and Edit keep the bead and who wrote the text', async () => 
 });
 
 test('the map shows the live run of a bead on its task until the run ends, and Needs you names the bead', async () => {
-  const { fake, post, get, seed, close } = await fixture({ env: KEY_ENV });
+  const { fake, post, get, seed, close } = await fixture({ env: { ...KEY_ENV, HUB_MAP_REQUESTS_MS: '0' } });
   try {
     seedBeads(seed, 'probe', [beadsIssue({ id: 'pr-m', type: 'milestone' }), beadsIssue({ id: 'pr-f', type: 'epic', parent: 'pr-m' }), beadsIssue({ id: 'pr-t', title: 'The task', parent: 'pr-f', description: 'Do the thing.' })]);
     const taskOf = async () => (await get('/hub/map/probe')).body.milestones[0].features[0].tasks[0];
@@ -1114,5 +1114,23 @@ test('GET /hub/map/:project/beads/:bead/seed: the seed for an open bead; 404 unk
     assert.equal((await get('/hub/map/probe/beads/pr-c/seed?kind=build')).status, 400);
     assert.equal((await get('/hub/map/probe/beads/pr-zz/seed?kind=build')).status, 404);
     assert.equal((await get('/hub/map/Bad_Id/beads/pr-t/seed?kind=build')).status, 404);
+  } finally { await close(); }
+});
+
+test('the map keeps the request list for about 30 s, and creating a request clears it', async () => {
+  const { fake, post, get, seed, close } = await fixture({ env: KEY_ENV });
+  try {
+    seedBeads(seed, 'probe', [beadsIssue({ id: 'pr-m', type: 'milestone' }), beadsIssue({ id: 'pr-f', type: 'epic', parent: 'pr-m' }), beadsIssue({ id: 'pr-t', title: 'The task', parent: 'pr-f' }), beadsIssue({ id: 'pr-u', title: 'Another', parent: 'pr-f' })]);
+    const tasks = async () => (await get('/hub/map/probe')).body.milestones[0].features[0].tasks;
+    const runOf = async id => (await tasks()).find(task => task.id === id).run;
+    const made = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'x', bead: 'pr-t' });
+    assert.equal((await runOf('pr-t')).id, made.body.id);
+    // A write that bypasses the API is not seen until the memo ages out.
+    fake.seed(`sections/inbox/requests/${made.body.id}/taken.json`, JSON.stringify({ v: 1, at: NOW.toISOString() }), 'application/json');
+    fake.seed(`sections/inbox/requests/${made.body.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: NOW.toISOString() }), 'application/json');
+    assert.equal((await runOf('pr-t')).id, made.body.id, 'Polling reuses the list.');
+    const other = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'y', bead: 'pr-u' });
+    assert.equal((await runOf('pr-u')).id, other.body.id, 'A new request shows at once.');
+    assert.equal(await runOf('pr-t'), undefined, 'And the cleared memo read the rest fresh.');
   } finally { await close(); }
 });
