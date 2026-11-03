@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { beadOfBranch, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
+import { beadOfBranch, cleanHogs, isActive, pcSummary, validStatus, workingNow } from '../hub-pc.mjs';
 import { buildToday } from '../hub-model.mjs';
 import { PROJECT_DEFAULTS } from '../project-defaults.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
@@ -242,6 +242,32 @@ test('validStatus passes memory through, rounded, and drops a missing, null, neg
   assert.equal(validStatus(old).memory, null);
   assert.deepEqual(pcSummary(validStatus(pcStatusJson({ now: NOW })), NOW).memory, { totalGB: 24, availableGB: 9.6 });
   assert.equal(pcSummary(validStatus(old), NOW).memory, null);
+});
+
+test('cleanHogs keeps the seven fields, caps at 5, and drops bad items, bad arrays and extra fields', () => {
+  const good = { name: 'node.exe', cmd: 'node probe.mjs', cores: 1.04, minutes: 22, orphan: true, ramMB: 310, action: 'reported' };
+  assert.deepEqual(cleanHogs([{ ...good, pid: 4120, user: 'leak', url: 'https://x.example' }]), [{ ...good, cores: 1 }]);
+  const { ramMB: _ram, ...noRam } = good;
+  assert.deepEqual(cleanHogs([noRam]), [{ ...noRam, cores: 1 }], 'ramMB is optional.');
+  assert.equal(cleanHogs(Array.from({ length: 6 }, (_, i) => ({ ...good, minutes: i }))).length, 5);
+  assert.equal(cleanHogs([{ ...good, name: 'a'.repeat(99) }])[0].name.length, 40);
+  assert.ok(cleanHogs([{ ...good, cmd: 'b'.repeat(500) }])[0].cmd.length <= 160);
+  assert.doesNotMatch(cleanHogs([{ ...good, cmd: 'a\nb\tc' }])[0].cmd, /[\n\t]/);
+  for (const bad of [{ ...good, cores: '1' }, { ...good, cores: NaN }, { ...good, cores: 65 }, { ...good, cores: -1 }, { ...good, minutes: 1.5 }, { ...good, minutes: 1e6 },
+    { ...good, orphan: 'yes' }, { ...good, action: 'killed' }, { ...good, ramMB: -1 }, { ...good, ramMB: 1.5 }, { ...good, name: '' }, null, 'x', 7, [], {}]) {
+    assert.deepEqual(cleanHogs([bad]), [], JSON.stringify(bad));
+  }
+  assert.equal(cleanHogs([null, good, 3]).length, 1, 'A bad item is dropped alone.');
+  for (const bad of [undefined, null, 'x', 5, {}, { 0: good }]) assert.deepEqual(cleanHogs(bad), []);
+});
+
+test('validStatus and pcSummary carry hogs, and an old reporter gives an empty list', () => {
+  const hog = { name: 'node.exe', cmd: 'node probe.mjs', cores: 1, minutes: 22, orphan: false, action: 'reported' };
+  assert.deepEqual(validStatus({ ...pcStatusJson({ now: NOW }), hogs: [hog, { bad: true }] }).hogs, [hog]);
+  const old = pcStatusJson({ now: NOW });
+  assert.deepEqual(validStatus(old).hogs, []);
+  assert.deepEqual(pcSummary(validStatus(old), NOW).hogs, []);
+  assert.deepEqual(pcSummary(validStatus({ ...old, hogs: [hog] }), NOW).hogs, [hog]);
 });
 
 test('blockedSessionUrl accepts only the exact session link, like the client', async () => {

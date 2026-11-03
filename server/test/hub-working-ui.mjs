@@ -62,6 +62,7 @@ try {
     assert.match(await tile.locator('[data-pc-line="comfy"]').innerText(), /idle/);
     assert.match(await tile.locator('[data-pc-line="unity"]').innerText(), /probe open/);
     assert.match(await tile.locator('[data-pc-line="sessions"]').innerText(), /1 busy, 1 idle/);
+    assert.equal(await tile.locator('[data-pc-line="hogs"]').count(), 0, 'Nothing busy: no Busy processes row.');
     assert.equal(await tile.locator('[data-pc-awake]').innerText(), 'Kept awake');
     assert.match(await tile.innerText(), /Updated \d+ (s|min) ago/);
 
@@ -90,6 +91,23 @@ try {
     assert.equal(await tile.locator('[data-pc-line="ram"]').count(), 0, `${label}: no RAM row without memory.`);
     assert.equal(await tile.locator('[data-pc-line="gpu"]').count(), 1);
     assert.doesNotMatch(await tile.innerText(), /undefined|NaN/);
+  }
+
+  step('two busy processes (one running, one stopped) show the Busy processes row with a warning line each; the normal status shows no such row');
+  const busy = await startHubFixture({ pc: 'hogs' });
+  fixtures.push(busy);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  for (const [label, viewport] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+    const busyPage = await open(viewport, busy);
+    const row = busyPage.locator('[aria-label="Gaming PC"] [data-pc-line="hogs"]');
+    assert.match(await row.innerText(), /Busy processes\s*1 need a look/);
+    assert.equal(await row.getAttribute('data-pc-warn'), '', `${label}: the row carries the warning marker.`);
+    assert.equal(await row.locator('.pc-warn').count(), 2, `${label}: one note per process.`);
+    assert.match(await row.locator('.pc-warn').nth(0).innerText(), /^node\.exe · 1\.0 core · 22 min · orphaned · running: node scripts\/probe-load\.mjs --rounds 40$/);
+    assert.match(await row.locator('.pc-warn').nth(1).innerText(), /^node\.exe · 1\.0 core · 4 min · stopped: node -e "while \(1\) \{\}"$/);
+    assert.equal(await row.locator('a, button').count(), 0, `${label}: text only, no link or button.`);
+    assert.doesNotMatch(await busyPage.locator('[aria-label="Gaming PC"]').innerText(), /undefined|NaN/);
+    await noSideways(busyPage, `the busy-processes tile at ${label} width`);
   }
 
   step('a blocked PC session reads Needs you and links to its item');

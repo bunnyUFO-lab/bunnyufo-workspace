@@ -49,7 +49,7 @@ const gb = (mb: number) => (mb / 1024).toFixed(1)
 export const LOW_MEMORY_GB = 4
 export const LOW_MEMORY_TEXT = "Low memory: the PC's watchdog frees cache below 4 GB"
 
-export interface PcLine { key: string; label: string; value: string; /** Shown in the warning style, with this text under the row. */ warn?: string }
+export interface PcLine { key: string; label: string; value: string; /** Shown in the warning style, with this text (one note per entry) under the row. */ warn?: string | string[] }
 
 /** The RAM row, or null for a status with no usable memory (an old reporter). Used and the percentage are worked out here and nowhere else. */
 export function ramLine(memory: PcSummary['memory']): PcLine | null {
@@ -60,6 +60,20 @@ export function ramLine(memory: PcSummary['memory']): PcLine | null {
   const line: PcLine = { key: 'ram', label: 'RAM', value: `${used.toFixed(1)} / ${Number(totalGB.toFixed(1))} GB · ${Math.round((used / totalGB) * 100)} %` }
   if (availableGB < LOW_MEMORY_GB) line.warn = LOW_MEMORY_TEXT
   return line
+}
+
+/** The Busy processes row, or null when the reporter lists none (or is an old one). One note per process, shown as text. */
+export function hogsLine(hogs: PcSummary['hogs']): PcLine | null {
+  if (!Array.isArray(hogs)) return null
+  const list = hogs.filter(h => h && typeof h.name === 'string' && typeof h.cores === 'number' && Number.isFinite(h.cores) && Number.isFinite(h.minutes))
+  if (!list.length) return null
+  const stopped = list.filter(h => h.action === 'stopped').length
+  const value = stopped === list.length ? `${stopped} stopped` : `${list.length - stopped} need a look`
+  const warn = list.map(h => {
+    const cores = `${h.cores.toFixed(1)} ${h.cores === 1 ? 'core' : 'cores'}`
+    return [h.name, cores, `${Math.round(h.minutes)} min`, ...(h.orphan ? ['orphaned'] : []), `${h.action === 'stopped' ? 'stopped' : 'running'}${h.cmd ? `: ${h.cmd}` : ''}`].join(' · ')
+  })
+  return { key: 'hogs', label: 'Busy processes', value, warn }
 }
 
 /** The tile's headline: "On · in use", "On · idle" or "Asleep or off · last seen 2 h ago". */
@@ -81,5 +95,7 @@ export function pcLines(pc: PcSummary): PcLine[] {
   }
   if (pc.unity) lines.push({ key: 'unity', label: 'Unity', value: pc.unity.open ? `${pc.unity.projects.join(', ') || 'a project'} open` : 'closed' })
   lines.push({ key: 'sessions', label: 'Sessions', value: `${pc.sessions.busy} busy, ${pc.sessions.idle} idle` })
+  const hogs = hogsLine(pc.hogs)
+  if (hogs) lines.push(hogs)
   return lines
 }

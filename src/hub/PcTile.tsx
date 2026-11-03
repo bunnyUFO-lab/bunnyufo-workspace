@@ -14,7 +14,7 @@ export default function PcTile({ pc, wake }: { pc: PcSummary | null; wake?: PcWa
       {pc && pcLines(pc).map(line => (
         <div key={line.key} className={`pc-line${line.warn ? ' warn' : ''}`} data-pc-line={line.key} {...(line.warn ? { 'data-pc-warn': '' } : {})}>
           <span>{line.label}</span><b>{line.value}</b>
-          {line.warn && <p className="pc-warn" role="note">{line.warn}</p>}
+          {line.warn && [line.warn].flat().map((note, index) => <p key={index} className="pc-warn" role="note">{note}</p>)}
         </div>
       ))}
       {pc && !asleep && pc.keepAwake && <span className="pc-chip" data-pc-awake>Kept awake</span>}

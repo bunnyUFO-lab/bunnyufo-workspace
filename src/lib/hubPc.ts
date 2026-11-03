@@ -15,6 +15,9 @@ export interface PcSession {
   appUrl?: string
 }
 
+/** A process the reporter found busy or orphaned (`reported`) or ended itself (`stopped`). `cmd` is already masked and shortened on the PC. */
+export interface PcHog { name: string; cmd: string; cores: number; minutes: number; orphan: boolean; ramMB?: number; action: 'reported' | 'stopped' }
+
 export interface PcStatus {
   v: 1
   host: string
@@ -25,6 +28,8 @@ export interface PcStatus {
   gpu: { util: number; memMB: number; memTotalMB: number; band: 'idle' | 'busy' | 'heavy' } | null
   /** Absent or null: an old reporter that does not send memory. */
   memory?: { totalGB: number; availableGB: number } | null
+  /** Absent or empty: nothing is busy, or an old reporter. */
+  hogs?: PcHog[]
   comfy: { up: boolean; running: number; pending: number } | null
   unity: { open: boolean; projects: string[] } | null
   /** null: the PC could not list its sessions. */
@@ -41,6 +46,7 @@ export interface PcSummary {
   keepAwake: boolean
   gpu: PcStatus['gpu']
   memory?: PcStatus['memory']
+  hogs?: PcStatus['hogs']
   comfy: PcStatus['comfy']
   unity: PcStatus['unity']
   sessions: { busy: number; idle: number }

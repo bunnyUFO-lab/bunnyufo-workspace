@@ -4,15 +4,18 @@
 //   node scripts/run-ui-tests.mjs --shard 2/4           the 2nd of 4 time-balanced shards (CI runs them in parallel)
 // Each file has a time limit (5 minutes; BUW_UI_FILE_TIMEOUT_MS or --timeout-ms=N changes it). A file that
 // goes over is killed with its whole process tree and fails by name, so a hang never hangs the run.
+// Runs one file at a time on purpose; do not start several runners (the owner's PC is shared: one heavy job at a time).
+// Ctrl+C, SIGTERM, SIGHUP and a normal exit stop the file that is running and its browser (a hard kill of this runner cannot be caught).
 // Run after npm run build.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseShard, pickShard, readTimings } from './ui-shard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const testDir = path.join(root, 'server', 'test');
+// BUW_UI_TEST_DIR is a seam for scripts/run-ui-tests.test.mjs only.
+const testDir = process.env.BUW_UI_TEST_DIR ? path.resolve(process.env.BUW_UI_TEST_DIR) : path.join(root, 'server', 'test');
 const { rest, shard } = parseShard(process.argv.slice(2));
 const limitArg = rest.find(arg => arg.startsWith('--timeout-ms='));
 const limitMs = Number(limitArg?.slice('--timeout-ms='.length) || process.env.BUW_UI_FILE_TIMEOUT_MS) || 5 * 60_000;
@@ -33,9 +36,25 @@ const killTree = child => new Promise(resolve => {
   else { child.kill('SIGKILL'); resolve(); }
 });
 
+// The file that is running now, so a signal or the exit can stop it. Synchronous: an exit handler cannot wait.
+let current = null;
+const killTreeSync = child => {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  else child.kill('SIGKILL');
+};
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+  process.on(signal, () => { killTreeSync(current); process.exit(code); });
+}
+process.on('exit', () => killTreeSync(current));
+
 const run = file => new Promise(resolve => {
   const started = Date.now();
-  const child = spawn(process.execPath, [path.join('server', 'test', file)], { cwd: root, stdio: 'inherit' });
+  const child = spawn(process.execPath, [path.join(path.relative(root, testDir), file)], { cwd: root, stdio: 'inherit', windowsHide: true });
+  current = child;
+  // Test seam: --self-test-signal=SIGTERM raises that signal in this process once the first file has started (no real signal needed).
+  const selfSignal = process.argv.find(arg => arg.startsWith('--self-test-signal='))?.split('=')[1];
+  if (selfSignal) setTimeout(() => process.emit(selfSignal), 300);
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
