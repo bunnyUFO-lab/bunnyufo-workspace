@@ -33,7 +33,7 @@ const drawnLines = (label: Label, title: string): string[] => {
 }
 interface Base { id: string; x: number; y: number; state: TaskState; col: string; marks: Marks; title: string; done: number; total: number; /** Tasks the filter hides under this node. `done` and `total` count them too: a ring says what the node holds, not what the filter shows. */ hidden: number; label: Label; center: At }
 /** What a milestone's or feature's ring counts: `later` are its deferred tasks (in `total`, never open); `words` is the count as the label says it; `muted` when everything in it is deferred. */
-interface Ring { later: number; words: string; muted: boolean }
+interface Ring { later: number; words: string; muted: boolean; /** Closed and holding no tasks: the ring shows a check mark, not a count of nothing. */ closedEmpty: boolean }
 export interface MilestoneNode extends Base, Ring { kind: 'm'; index: number; open: boolean; /** The circle's radius. */ radius: number; /** The filter left it no task, so there is nothing to open (the ring and its count stay). */ bare: boolean; countAt: At; chevronAt: At }
 /** `x`, `y` is the end of the branch; `center` the middle of the circle. `elbow` is the point that does not move when the feature opens or closes. */
 export interface FeatureNode extends Base, Ring { kind: 'f'; milestone: string; side: 1 | -1; open: boolean; elbow: At; countAt: At; chevronAt: At }
@@ -103,9 +103,10 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
   model.milestones.forEach((milestone: MapMilestone, index) => {
     const tasks = milestone.features.flatMap(feature => feature.tasks)
     const lost = hidden?.get(milestone.id)?.n ?? 0
-    const bare = lost > 0 && tasks.length === 0
+    const bare = lost > 0 && milestone.features.length === 0
     const tally = withHidden(tallyOf(tasks), hidden?.get(milestone.id))
-    const count = tallyWords(tally)
+    const closedEmpty = milestone.state === 'done' && tally.total === 0
+    const count = closedEmpty ? 'done' : tallyWords(tally)
     const col = MILESTONE_COLORS[index % MILESTONE_COLORS.length]
     const isOpen = open.has(milestone.id) && !bare
     const radius = isOpen ? 15 : 26
@@ -119,7 +120,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
     const levels = Math.ceil(milestone.features.length / 2)
     nodes.push({
       kind: 'm', id: milestone.id, title: milestone.title, x: mx, y: my, state: milestone.state, col, index, open: isOpen, radius, bare,
-      done: tally.done, later: tally.later, total: tally.total, words: count, muted: isLaterOnly(tally), hidden: lost, marks: marksOf(tasks.map(task => task.signs)),
+      done: tally.done, later: tally.later, total: tally.total, words: count, muted: isLaterOnly(tally), closedEmpty, hidden: lost, marks: marksOf(tasks.map(task => task.signs)),
       center: { x: mx, y: my },
       label: vertical
         ? { x: radius + 10, y: my + 4 - titleLines.length * 7, anchor: 'start', lines: titleLines, step: 14, sub: count }
@@ -137,7 +138,8 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
         const state = feature.state
         const featureMarks = marksOf(feature.tasks.map(task => task.signs))
         const featureTally = withHidden(tallyOf(feature.tasks), hidden?.get(feature.id))
-        const featureRing = { later: featureTally.later, words: tallyWords(featureTally), muted: isLaterOnly(featureTally) }
+        const closedEmpty = state === 'done' && featureTally.total === 0
+        const featureRing = { later: featureTally.later, words: closedEmpty ? 'done' : tallyWords(featureTally), muted: isLaterOnly(featureTally), closedEmpty }
         if (vertical) {
           // The branch leaves the spine, steps out BR and runs down; the circle hangs at its end, text goes outside it.
           const y0 = cursor

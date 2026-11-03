@@ -318,12 +318,14 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     return out;
   };
 
+  // A closed feature or milestone with no tasks is done work, not later work: roll([]) alone would call it `later`.
+  const stateOf = (id, states) => (states.length ? roll(states) : byId.get(id)?.status === 'closed' ? 'done' : roll(states));
   const makeFeature = (id, title, taskIssues) => {
     const tasks = taskIssues.map(toTask);
-    return { id, title, state: roll(tasks.map(task => task.state)), ...notesOf(id), tasks };
+    return { id, title, state: stateOf(id, tasks.map(task => task.state)), ...notesOf(id), tasks };
   };
   const makeMilestone = (id, title, features) => ({
-    id, title, state: roll(features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), features,
+    id, title, state: stateOf(id, features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), features,
   });
 
   /** A milestone from an issue: its child groups are features, its loose children one more. */

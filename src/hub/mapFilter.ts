@@ -59,8 +59,9 @@ function dateOf(task: { updatedAt?: string; closedAt?: string; createdAt?: strin
 /** How many tasks a milestone or feature lost to the filter, and how many of those were done or deferred. */
 export interface Hidden { n: number; done: number; later: number }
 
-/** The model with only the tasks the filter lets through, plus what each milestone and feature lost. A feature with no match is dropped (its tasks count as its milestone's hidden); a milestone with no match stays, empty, so the spine stays readable. The same model comes back when the filter shows everything. */
-export function filterMap(model: ProgressMap, filter: MapFilter, now: number = Date.now()): { model: ProgressMap; hidden: Map<string, Hidden> } {
+/** The model with only the tasks the filter lets through, plus what each milestone and feature lost. A feature with no match is dropped (its tasks count as its milestone's hidden); a milestone with no match stays, empty, so the spine stays readable. The same model comes back when the filter shows everything.
+ * `also` are ids the search found: a task in it passes whatever the filter says, and a feature in it stays even when all its tasks are filtered out (it keeps its `hidden` entry, so its ring still counts them). */
+export function filterMap(model: ProgressMap, filter: MapFilter, now: number = Date.now(), also?: ReadonlySet<string>): { model: ProgressMap; hidden: Map<string, Hidden> } {
   const hidden = new Map<string, Hidden>()
   if (showsAll(filter)) return { model, hidden }
   const since = filter.within ? now - filter.within * DAY : null
@@ -68,6 +69,7 @@ export function filterMap(model: ProgressMap, filter: MapFilter, now: number = D
   const to = filter.to ? dayStart(filter.to) + DAY : null
   const dated = since !== null || from !== null || to !== null
   const keep = (task: MapMilestone['features'][number]['tasks'][number]) => {
+    if (also?.has(task.id)) return true
     if (!filter.states.includes(task.state)) return false
     if (!dated) return true
     const time = dateOf(task)
@@ -82,7 +84,7 @@ export function filterMap(model: ProgressMap, filter: MapFilter, now: number = D
       total.n += lost.length
       total.done += lost.filter(task => task.state === 'done').length
       total.later += lost.filter(isLater).length
-      if (!tasks.length) return feature.tasks.length ? [] : [feature]
+      if (!tasks.length && !also?.has(feature.id)) return feature.tasks.length ? [] : [feature]
       if (lost.length) hidden.set(feature.id, { n: lost.length, done: lost.filter(task => task.state === 'done').length, later: lost.filter(isLater).length })
       return [{ ...feature, tasks }]
     })

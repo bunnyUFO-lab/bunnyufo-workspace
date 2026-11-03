@@ -371,3 +371,22 @@ test('`checklist` is set only on a task that waits on the owner, not on a closed
   assert.deepEqual([task(map, 'waits').state, task(map, 'waits').checklist, task(map, 'waits').you], ['you', 'c1', 'checklist']);
   assert.deepEqual([task(map, 'shut').state, 'checklist' in task(map, 'shut')], ['done', false]);
 });
+
+test('a closed feature or milestone with no tasks is done; an open one is still later work', () => {
+  const map = build([
+    issue({ id: 'm-done', type: 'milestone', status: 'closed' }),
+    issue({ id: 'f-done', type: 'epic', parent: 'm-done', status: 'closed' }),
+    issue({ id: 'm-open', type: 'milestone' }),
+    issue({ id: 'f-open', type: 'epic', parent: 'm-open' }),
+    issue({ id: 'f-shut', type: 'epic', parent: 'm-open', status: 'closed' }),
+    issue({ id: 'f-busy', type: 'epic', parent: 'm-open', status: 'closed' }),
+    issue({ id: 't-busy', parent: 'f-busy', status: 'in_progress' }),
+  ]);
+  const feature = id => map.milestones.flatMap(m => m.features).find(item => item.id === id);
+  assert.equal(feature('f-done').state, 'done');
+  assert.equal(map.milestones.find(m => m.id === 'm-done').state, 'done');
+  assert.equal(feature('f-open').state, 'later');
+  assert.equal(feature('f-shut').state, 'done');
+  assert.equal(feature('f-busy').state, 'doing', 'a closed feature with open tasks still rolls up from them');
+  assert.equal(map.milestones.find(m => m.id === 'm-open').state, 'doing');
+});
