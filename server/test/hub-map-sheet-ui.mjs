@@ -200,6 +200,9 @@ try {
     assert.ok((await panel.locator('[data-mark-unblock]').boundingBox()).height >= 43.5, 'Unblock is tall enough to tap.');
     assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
     await markDone.click();
+    assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /^This closes .+ in Beads. Undo stays here until a session applies it./, 'The first mark on a device says what it closes.');
+    assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Nothing is written before the confirmation.');
+    await panel.locator('[data-mark-confirm-yes]').click();
     await panel.locator('[data-mark-pending]').waitFor();
     assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
     assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'done');

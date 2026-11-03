@@ -1365,7 +1365,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply(buildWork(await loadWorkInputs(query.get('project'), at)));
           } else if (route === '/hub/unasked') {
             const work = buildWork(await loadWorkInputs(null, at));
-            reply({ items: unaskedOf(work.lanes.blocked).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href })) });
+            reply({ items: unaskedOf(Object.values(work.lanes).flat()).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href, ...(card.reason ? { reason: card.reason } : {}), ...(card.mark ? { mark: card.mark } : {}) })) });
           } else if ((match = /^\/hub\/beads\/([^/]+)$/.exec(route))) {
             if (!validProject(match[1])) throw fail('No such project.', 404);
             reply(await loadBeads(match[1]));

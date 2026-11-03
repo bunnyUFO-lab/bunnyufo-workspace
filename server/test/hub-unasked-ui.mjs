@@ -14,9 +14,11 @@ async function seeded() {
   const fixture = await startHubFixture();
   const issues = [
     beadsIssue({ id: 'ua-m1', title: 'Milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
-    beadsIssue({ id: 'ua-one', title: 'Register the domain', parent: 'ua-m1', labels: ['needs-owner'], created: '2026-10-02T14:00:00Z' }),
+    beadsIssue({ id: 'ua-one', title: 'Register the domain', parent: 'ua-m1', labels: ['needs-owner'], description: 'Register the example domain at the registrar. Then point it at the site.', created: '2026-10-02T14:00:00Z' }),
     beadsIssue({ id: 'ua-two', title: 'Pay the invoice', parent: 'ua-m1', labels: ['needs-owner'], created: '2026-10-02T15:00:00Z' }),
     beadsIssue({ id: 'ua-ask', title: 'Pick the arc', parent: 'ua-m1', labels: ['needs-owner'], created: '2026-10-02T16:00:00Z' }),
+    beadsIssue({ id: 'ua-blocked', title: 'Announce the launch', parent: 'ua-m1', labels: ['needs-owner'], blocks: ['ua-later'], created: '2026-10-02T18:00:00Z' }),
+    beadsIssue({ id: 'ua-later', title: 'Build the launch page', parent: 'ua-m1', created: '2026-10-02T19:00:00Z' }),
     beadsIssue({ id: 'ua-plain', title: 'Just work', parent: 'ua-m1', created: '2026-10-02T17:00:00Z' }),
   ];
   fixture.seed.beads(PROJECT, issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/unaskdev' });
@@ -52,7 +54,10 @@ try {
     await page.goto(`${fixture.url}#/~hub/today`);
     const panel = page.locator('[data-today-unasked]');
     await panel.waitFor();
-    assert.equal(await panel.locator('h3').innerText(), '⚠ 2 items say they need you but ask nothing');
+    assert.equal(await panel.locator('h3').innerText(), '⚠ 2 items say they need you but ask nothing', 'The blocked one is not counted.');
+    assert.equal(await panel.locator('[data-unasked-row="ua-blocked"]').count(), 0, 'A needs-owner item behind an open blocker is not yet for the owner.');
+    assert.equal(await panel.locator('[data-unasked-row="ua-one"] [data-unasked-why]').innerText(), 'Register the example domain at the registrar.', 'One line of why.');
+    assert.equal(await panel.locator('[data-unasked-row="ua-two"] [data-unasked-why]').count(), 0, 'No line when the bead says nothing.');
     assert.deepEqual(await panel.locator('[data-unasked-row] a').allInnerTexts(), ['Pay the invoice', 'Register the domain']);
     assert.equal(await panel.locator('[data-unasked-row="ua-one"] a').getAttribute('href'), `#/~hub/map/${PROJECT}/ua-one`, "The row uses the item's own href.");
     await page.waitForFunction(() => document.querySelector('[data-unasked-row="ua-one"] small')?.textContent === 'Unaskdev · ua-one');
@@ -76,6 +81,10 @@ try {
     await unasked.waitFor();
     assert.match(await unasked.innerText(), /needs you · nothing asked yet/);
     assert.equal(await unasked.locator('[role="img"][aria-label="Nothing asked yet"]').innerText(), '⚠');
+    const blockedCard = page.locator('[data-card="bead:ua-blocked"]');
+    await blockedCard.waitFor();
+    assert.match(await blockedCard.innerText(), /blocked by ua-later/);
+    assert.equal(await blockedCard.locator('[aria-label="Nothing asked yet"]').count(), 0, 'A blocked item carries no warning.');
     const asked = page.locator('[data-card="bead:ua-ask"]');
     assert.equal(await asked.locator('[aria-label="Nothing asked yet"]').count(), 0);
     const link = page.locator('.wk-card-group > a.wk-asked');
@@ -97,15 +106,47 @@ try {
     assert.equal(await sheet.locator('[data-nothing-asked]').count(), 1);
     for (const name of ['done', 'not-needed', 'unblock']) assert.equal(await sheet.locator(`[data-mark-${name}]`).count(), 1, name);
 
-    step(`${label}: marking a row done removes it and the heading counts one; the last one hides the panel`);
+    step(`${label}: Mark done confirms the first time, keeps the row marked with a visible Undo, and asks no more on this device`);
     await page.goto(`${fixture.url}#/~hub/today`);
     await panel.waitFor();
-    await panel.locator('[data-unasked-row="ua-one"] [data-mark-done]').click();
-    await page.locator('[data-unasked-row="ua-one"]').waitFor({ state: 'detached' });
+    const one = panel.locator('[data-unasked-row="ua-one"]');
+    await one.locator('[data-mark-done]').click();
+    assert.equal(await one.locator('[data-mark-confirm-first]').innerText().then(text => text.replace(/\s+/g, ' ')), 'This closes Register the domain in Beads. Undo stays here until a session applies it. Confirm Cancel');
+    await one.locator('[data-mark-confirm-cancel]').click();
+    assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Cancel writes nothing.');
+    await one.locator('[data-mark-done]').click();
+    await one.locator('[data-mark-confirm-yes]').click();
+    await one.locator('[data-mark-pending]').waitFor();
+    assert.match(await one.innerText(), /Marked done\s*Undo/, 'The row stays, marked, with Undo.');
+    assert.equal(await one.evaluate(node => node.classList.contains('marked')), true);
+    assert.ok((await one.locator('[data-mark-undo]').boundingBox()).height >= 43.5, 'Undo is a tall button.');
     assert.equal(await panel.locator('h3').innerText(), '⚠ 1 item says it needs you but asks nothing');
-    await panel.locator('[data-unasked-row="ua-two"] [data-mark-unblock]').click();
-    await panel.waitFor({ state: 'detached' });
-    assert.equal(await page.locator('[data-today-unasked]').count(), 0, 'With none, the panel is absent.');
+    await noSideways(page, `${label} marked`);
+    await one.locator('[data-mark-undo]').click();
+    await one.locator('[data-mark-done]').waitFor();
+    assert.equal(await panel.locator('h3').innerText(), '⚠ 2 items say they need you but ask nothing');
+    await page.reload();
+    await panel.waitFor();
+    await panel.locator('[data-unasked-row="ua-two"] [data-mark-done]').click();
+    await panel.locator('[data-unasked-row="ua-two"] [data-mark-pending]').waitFor();
+    assert.equal(await panel.locator('[data-mark-confirm-first]').count(), 0, 'The second time on this device asks nothing.');
+    assert.equal(await panel.locator('[data-mark-undo]').count(), 1);
+
+    step(`${label}: without storage, Mark done always confirms`);
+    await page.addInitScript(() => { const get = Storage.prototype.getItem; Storage.prototype.getItem = function (key) { if (key === 'buw.markConfirmed') throw new Error('no storage'); return get.call(this, key); }; });
+    await page.reload();
+    await panel.waitFor();
+    await panel.locator('[data-unasked-row="ua-one"] [data-mark-done]').click();
+    await panel.locator('[data-mark-confirm-first]').waitFor();
+    await panel.locator('[data-mark-confirm-cancel]').click();
+
+    step(`${label}: unblocking the last asked row leaves only the marked one`);
+    await panel.locator('[data-unasked-row="ua-one"] [data-mark-unblock]').click();
+    await panel.locator('[data-unasked-row="ua-one"]').waitFor({ state: 'detached' });
+    assert.equal(await panel.locator('[data-unasked-row="ua-two"] [data-mark-pending]').count(), 1);
+    assert.equal(await panel.locator('h3').count(), 0, 'With none asking, the heading goes and the marked row stays.');
+    await panel.locator('[data-unasked-row="ua-two"] [data-mark-undo]').click();
+    await panel.locator('[data-unasked-row="ua-two"] [data-mark-done]').waitFor();
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
 
   }

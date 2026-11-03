@@ -309,7 +309,7 @@ export interface MapTask {
   mark?: { verdict: 'done' | 'not-needed' | 'unblock'; at: string; pending: boolean }
 }
 /** A bead that says it needs the owner but has no Ask, checklist or Needs you item (GET /hub/unasked). */
-export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string }
+export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string; reason?: string; mark?: { verdict: 'done' | 'not-needed'; at: string } }
 export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
 export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }
 export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[] }

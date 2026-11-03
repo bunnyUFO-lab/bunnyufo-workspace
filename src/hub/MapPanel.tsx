@@ -163,7 +163,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
                   ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs')} data-needed-link="needs">Open in Needs you</a></div>
                   : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
             <MarkActions
-              task={task} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+              task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
               eligible={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
             />
           </div>

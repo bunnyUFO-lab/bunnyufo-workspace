@@ -8,12 +8,13 @@ const SHOWN = 5
 function Row({ item, projectName }: { item: UnaskedItem; projectName: string }) {
   const [error, setError] = useState('')
   return (
-    <div className="unasked-row" data-unasked-row={item.id}>
+    <div className={`unasked-row${item.mark ? ' marked' : ''}`} data-unasked-row={item.id}>
       <div className="unasked-text">
         <a href={item.href}>{item.title}</a>
+        {item.reason && <span className="unasked-why" data-unasked-why>{item.reason}</span>}
         <small className="hub-muted">{projectName ? `${projectName} · ` : ''}{item.id}</small>
       </div>
-      <MarkActions compact task={{ id: item.id }} project={item.project} projectName={projectName} eligible error={error} onError={setError} />
+      <MarkActions compact task={{ id: item.id, mark: item.mark ? { verdict: item.mark.verdict, at: item.mark.at, pending: true } : undefined }} title={item.title} project={item.project} projectName={projectName} eligible error={error} onError={setError} />
     </div>
   )
 }
@@ -29,12 +30,13 @@ export default function UnaskedPanel() {
   const nameOf = (id: string) => projects.data?.projects.find(project => project.id === id)?.name ?? ''
   const items = data?.items ?? []
   if (!items.length) return null
-  const n = items.length
+  // A row marked done or not needed is no longer asked of the owner, but stays (with Undo) until a session applies the mark.
+  const n = items.filter(item => !item.mark).length
   return (
     <section className="hub-panel rise" aria-label="Says it needs you" data-today-unasked>
-      <h3>⚠ {n} {n === 1 ? 'item says it needs' : 'items say they need'} you but {n === 1 ? 'asks' : 'ask'} nothing</h3>
+      {n > 0 && <h3>⚠ {n} {n === 1 ? 'item says it needs' : 'items say they need'} you but {n === 1 ? 'asks' : 'ask'} nothing</h3>}
       {items.slice(0, SHOWN).map(item => <Row key={`${item.project}/${item.id}`} item={item} projectName={nameOf(item.project)} />)}
-      {n > SHOWN && <p className="hub-muted"><a href="#/~hub/work/all">+{n - SHOWN} more</a></p>}
+      {items.length > SHOWN && <p className="hub-muted"><a href="#/~hub/work/all">+{items.length - SHOWN} more</a></p>}
     </section>
   )
 }

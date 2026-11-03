@@ -1,6 +1,7 @@
 // Work's six lanes, with no I/O: Beads issues, requests and Hermes runs become cards in
 // backlog, ready, running, blocked, review or done. Pure; the route loads the inputs.
 import { eventsByBeadOf, issueSigns, milestoneIssuesOf } from './hub-map.mjs';
+import { plainText, summaryOf } from './hub-map-notes.mjs';
 import { beadOfBranch, pcSummary } from './hub-pc.mjs';
 
 export const LANES = ['backlog', 'ready', 'running', 'blocked', 'review', 'done'];
@@ -31,6 +32,18 @@ function liveByBead(status, issues, now) {
     }
   }
   return live;
+}
+
+export const REASON_MAX = 120;
+
+/**
+ * One line on why a needs-owner item needs the owner: the reason in its notes ("needs-owner: ..."), else the first
+ * sentence of its description, clipped to about 120 characters. Empty when the bead says nothing usable.
+ */
+export function reasonOf(issue) {
+  const fromNotes = /(?:^|\n)\s*(?:[-*]\s*)?needs[- ]owner\s*[:–—-]\s*(.+)/i.exec(String(issue?.notes ?? ''));
+  const text = fromNotes ? plainText(fromNotes[1]) : (summaryOf(issue?.description) ?? '').split(/(?<=[.!?])\s+(?=[A-Z0-9"(])/)[0];
+  return text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1).trimEnd()}…` : text;
 }
 
 function beadCards({ issues, events, asks, checklists, needs, status, now }) {
@@ -68,12 +81,18 @@ function beadCards({ issues, events, asks, checklists, needs, status, now }) {
     let why;
     let nothingAsked = false;
     const asked = askedOf.get(issue.id);
+    const labelled = (issue.labels ?? []).includes('needs-owner');
+    // An item behind an open blocker is not the owner's yet: it waits in Blocked without the nothing-asked warning.
+    const mine = labelled && !openBlocker;
+    // A done or not-needed mark the owner just made on such an item: it stays on Today (muted, with Undo) until a session applies it.
+    const markedUnasked = closed && labelled && !openBlocker && !asked && ['done', 'not-needed'].includes(issue._mark?.verdict);
     if (closed) lane = 'done';
-    else if (asked || (issue.labels ?? []).includes('needs-owner')) {
+    else if (asked || mine) {
       lane = 'blocked';
       nothingAsked = !asked;
       why = nothingAsked ? 'needs you · nothing asked yet' : 'needs you';
     }
+    else if (labelled) { lane = 'blocked'; why = `blocked by ${openBlocker.id} ${openBlocker.title ?? ''}`.trim(); }
     else if (signs.includes('pr') || signs.includes('review')) lane = 'review';
     else if (issue.status === 'in_progress') lane = 'running';
     else if (issue.status === 'deferred') lane = 'backlog';
@@ -85,6 +104,8 @@ function beadCards({ issues, events, asks, checklists, needs, status, now }) {
       key: `bead:${issue.id}`, source: 'beads', id: issue.id, project, title: issue.title ?? issue.id,
       lane, state: issue.status ?? 'open', ...(why ? { why } : {}), signs,
       ...(!closed && asked ? { asked } : {}), ...(nothingAsked ? { nothingAsked: true } : {}),
+      ...(nothingAsked || markedUnasked ? { reason: reasonOf(issue) } : {}),
+      ...(markedUnasked ? { markedUnasked: true, mark: { verdict: issue._mark.verdict, at: issue._mark.at } } : {}),
       ...(live.has(issue.id) && !closed ? { live: live.get(issue.id) } : {}),
       updatedAt: (closed ? issue.closed_at : null) ?? issue.updated_at ?? issue.created_at ?? '',
       href: `#/~hub/map/${encodeURIComponent(project)}/${encodeURIComponent(issue.id)}`,
@@ -147,7 +168,7 @@ function runCards(hermesRuns) {
 }
 
 /** The cards that say they need the owner but ask nothing: Today and the board count the same list. */
-export const unaskedOf = cards => cards.filter(card => card.nothingAsked);
+export const unaskedOf = cards => cards.filter(card => card.nothingAsked || card.markedUnasked);
 
 /**
  * @param issues      Beads issues, each carrying its `project`

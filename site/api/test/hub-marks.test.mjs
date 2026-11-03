@@ -331,7 +331,12 @@ test('GET /hub/unasked lists label-only beads, matches Work, and leaves out aske
     assert.deepEqual([plain.asked.kind, plain.asked.href], ['checklist', `#/~hub/checklist/${day}-mk-steps-c1d2`], 'An open checklist with a bead and no label.');
     assert.equal(work.lanes.blocked.some(item => item.id === 'mk-f' || item.id === 'mk-m' || item.id === 'mk-shut'), false);
     await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'unblock' });
-    assert.deepEqual((await get('/hub/unasked')).body.items, [], 'A marked one drops out.');
+    assert.deepEqual((await get('/hub/unasked')).body.items, [], 'An unblocked one drops out.');
+    await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'undo' });
+    assert.deepEqual((await get('/hub/unasked')).body.items.map(item => item.id), ['mk-label'], 'Undo brings it back.');
+    await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'done' });
+    const marked = (await get('/hub/unasked')).body.items;
+    assert.deepEqual(marked.map(item => [item.id, item.mark?.verdict]), [['mk-label', 'done']], 'A done mark keeps the row, with its mark, until a session applies it.');
   } finally { await close(); }
 });
 
