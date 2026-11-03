@@ -26,7 +26,7 @@ test('every op is accepted in its good shape', () => {
   ok([
     { op: 'create', title: 'Sprint 4', type: 'epic', description: 'Plain words.', labels: ['milestone', 'wayfinder:grilling'] },
     { op: 'create', title: 'Child', parent: '#1' },
-    { op: 'create', title: 'Under an existing one', parent: 'ml-pa0.1' },
+    { op: 'create', title: 'Under an existing one', parent: 'wf-map.1' },
     { op: 'update', bead: 'ml-3', title: 'New title' },
     { op: 'update', bead: '#2', description: 'New words.' },
     { op: 'dep', bead: '#2', blocks: 'ml-9' },
