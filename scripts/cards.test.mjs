@@ -540,7 +540,7 @@ test('replay: only event files (and a run\'s own progress files) are replayed; a
     // The same line, and a line that asks to replace what is there, are only ever replayed as a create-only JSON file.
     await writeFile(spool, [
       ...refused.map(file => line(file)), line('events/2026-10-30/replace.json', { createOnly: false, contentType: 'text/html' }),
-      line('events/2026-10-30/ok.json'), line(runFile),
+      line('events/2026-10-30/ok.json'), line('events/2026-10-30/101600-gh-example-repo-7-merged.json'), line(runFile),
     ].join('\n') + '\n');
     fake.seed('sections/inbox/events/2026-10-30/replace.json', '{"first":true}', 'application/json');
     // The watcher's context: no BUW_RUN_FOLDER, so the run progress file is dropped too.
@@ -552,6 +552,7 @@ test('replay: only event files (and a run\'s own progress files) are replayed; a
     assert.equal(fake.text('sections/inbox/workspace.json'), '{"name":"Inbox","hidden":true,"entities":[]}', 'workspace.json is not replaced');
     assert.match(done.stderr, /dropped a line for asks\/20261030-sprite-studio-planted-a1b2\/ask\.json/);
     assert.equal(fake.text('sections/inbox/events/2026-10-30/ok.json'), '{"x":1}', 'an event replays');
+    assert.equal(fake.text('sections/inbox/events/2026-10-30/101600-gh-example-repo-7-merged.json'), '{"x":1}', 'a PR close event under its fixed name replays too');
     assert.equal(fake.text('sections/inbox/events/2026-10-30/replace.json'), '{"first":true}', 'a line saying createOnly false still cannot replace');
     assert.equal(fake.objects.get('sections/inbox/events/2026-10-30/ok.json').contentType, 'application/json');
     assert.equal((await readFile(spool, 'utf8')).trim(), '', 'refused lines are dropped, not kept');
@@ -1821,3 +1822,201 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 }
+
+// --- PR close events: --pr-closed-at and pr-sync ---
+
+const PR_A = 'https://github.com/Example/Some_Repo/pull/7';
+const hoursAgo = hours => new Date(Date.now() - hours * 3600000).toISOString();
+const daysAgo = days => hoursAgo(days * 24);
+/** The fixed file name of a PR close, built by hand from the time: the test does not use the client's own function. */
+const closeName = (iso, tail) => `events/${iso.slice(0, 10)}/${iso.slice(11, 19).replace(/:/g, '')}-gh-${tail}.json`;
+
+for (const via of ['api', 's3']) {
+  test(`event (${via}): --pr-closed-at writes exactly the fixed path with that time; a second identical call says exists and writes nothing`, async () => {
+    const { fake, cli, keys, close } = await setup();
+    try {
+      const at = hoursAgo(30);
+      const args = ['event', 'pr-merged', '--title', 'p: PR merged: x', '--project', 'p', '--url', PR_A, '--pr-closed-at', at, '--source', 'hub-events'];
+      const first = await cli(via, ...args);
+      assert.equal(first.code, 0, first.stderr);
+      const name = closeName(at, 'example-some-repo-7-merged');
+      assert.deepEqual(keys('events/'), [`sections/inbox/${name}`]);
+      assert.equal(first.stdout.trim(), name);
+      const event = fake.json(`sections/inbox/${name}`);
+      assert.equal(event.ts, at, 'ts is the close time, not now');
+      assert.equal(event.kind, 'pr-merged');
+      assert.equal(event.url, PR_A);
+      const again = await cli(via, ...args);
+      assert.equal(again.code, 0, again.stderr);
+      assert.equal(again.stdout.trim(), `exists ${name}`);
+      assert.equal(keys('events/').length, 1);
+      // pr-closed gets the other word.
+      const closed = await cli(via, 'event', 'pr-closed', '--title', 'p: PR closed: x', '--url', PR_A, '--pr-closed-at', at);
+      assert.equal(closed.code, 0, closed.stderr);
+      assert.ok(keys('events/').includes(`sections/inbox/${name.replace('-merged', '-closed')}`));
+    } finally { await close(); }
+  });
+}
+
+test('event: --pr-closed-at refuses a wrong kind, a non-PR url, a future time, a time 40 days old and a bad date, and writes nothing', async () => {
+  const { cli, keys, close } = await setup();
+  try {
+    const ok = hoursAgo(2);
+    for (const args of [
+      ['deployed', '--title', 'x', '--url', PR_A, '--pr-closed-at', ok],
+      ['pr-merged', '--title', 'x', '--url', 'https://example.test/pr/1', '--pr-closed-at', ok],
+      ['pr-merged', '--title', 'x', '--url', `${PR_A}/files`, '--pr-closed-at', ok],
+      ['pr-merged', '--title', 'x', '--pr-closed-at', ok],
+      ['pr-merged', '--title', 'x', '--url', PR_A, '--pr-closed-at', new Date(Date.now() + 3600000).toISOString()],
+      ['pr-merged', '--title', 'x', '--url', PR_A, '--pr-closed-at', daysAgo(40)],
+      ['pr-merged', '--title', 'x', '--url', PR_A, '--pr-closed-at', 'last tuesday-ish'],
+    ]) {
+      const result = await cli('api', 'event', ...args);
+      assert.equal(result.code, 1, `${args.join(' ')}: ${result.stdout}${result.stderr}`);
+    }
+    assert.equal(keys('events/').length, 0);
+  } finally { await close(); }
+});
+
+test('event: a --pr-closed-at event that cannot be sent is spooled under its fixed name', async () => {
+  const { cli, flaky, spool, close } = await setup();
+  try {
+    flaky.fail = Infinity;
+    const at = hoursAgo(5);
+    const down = await cli('api', 'event', 'pr-closed', '--title', 'x', '--url', PR_A, '--pr-closed-at', at);
+    assert.equal(down.code, 0, down.stderr);
+    assert.match(down.stdout, /spooled/);
+    assert.equal(JSON.parse((await readFile(spool, 'utf8')).trim()).path, closeName(at, 'example-some-repo-7-closed'));
+  } finally { await close(); }
+});
+
+/** A fake GitHub: `pages[n]` is the JSON array for page n+1 (an empty page after them); `status` overrides the answer. */
+async function fakeGithub({ pages, status = 200 }) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push({ url: request.url, auth: request.headers.authorization, accept: request.headers.accept });
+    const page = Number(new URL(request.url, 'http://local').searchParams.get('page') ?? 1);
+    response.writeHead(status, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(status === 200 ? (pages[page - 1] ?? []) : { message: 'nope' }));
+  });
+  await listenOnGoodPort(server, '127.0.0.1');
+  return { requests, url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
+}
+const ghPr = (number, { closed, merged = false, ref = 'sprint/other', title = 'A change', updated = closed } = {}) => ({
+  number, title, html_url: `https://github.com/example/repo/pull/${number}`, head: { ref },
+  closed_at: closed, updated_at: updated, merged_at: merged ? closed : null,
+});
+
+async function syncSetup(options) {
+  const base = await setup();
+  const github = await fakeGithub(options);
+  base.cli.env = { BUW_GITHUB_API: github.url, GITHUB_TOKEN: 'gh-test', GH_TOKEN: '' };
+  const sync = (...extra) => base.cli('api', 'pr-sync', '--repo', 'example/repo', '--project', 'proj', '--prefix', 'ws', ...extra);
+  return { ...base, github, sync, close: async () => { github.close(); await base.close(); } };
+}
+
+test('pr-sync: a merged PR and a closed one are posted, an old one and an open one are not; bead from the branch, else the title', async () => {
+  const merged = daysAgo(1);
+  const closed = daysAgo(2);
+  const { fake, keys, sync, github, close } = await syncSetup({
+    pages: [[
+      ghPr(11, { closed: merged, merged: true, ref: 'sprint/ws-ab1.2-thing', title: 'Mentions ws-zzz9 too' }),
+      ghPr(12, { closed, ref: 'feature/no-bead', title: 'Fix ws-q7x: the thing\nwith "quotes"' }),
+      ghPr(13, { closed: daysAgo(9), merged: true, ref: 'sprint/ws-old1', updated: daysAgo(9) }),
+      { ...ghPr(14, { closed: null, updated: daysAgo(1) }), state: 'open' },
+    ]],
+  });
+  try {
+    const done = await sync();
+    assert.equal(done.code, 0, done.stderr);
+    assert.match(done.stdout, /pr-sync: 2 posted, 0 already there, 0 failed/);
+    const mergedKey = `sections/inbox/${closeName(merged, 'example-repo-11-merged')}`;
+    const closedKey = `sections/inbox/${closeName(closed, 'example-repo-12-closed')}`;
+    assert.deepEqual(keys('events/').sort(), [closedKey, mergedKey].sort());
+    const a = fake.json(mergedKey);
+    assert.deepEqual([a.kind, a.bead, a.project, a.source, a.ts, a.url], ['pr-merged', 'ws-ab1.2', 'proj', 'hub-reconcile', merged, 'https://github.com/example/repo/pull/11']);
+    assert.equal(a.title, 'proj: PR merged: Mentions ws-zzz9 too');
+    const b = fake.json(closedKey);
+    assert.deepEqual([b.kind, b.bead, b.ts], ['pr-closed', 'ws-q7x', closed]);
+    assert.equal(b.title, 'proj: PR closed: Fix ws-q7x: the thing with "quotes"', 'newlines are folded');
+    assert.equal(github.requests[0].auth, 'Bearer gh-test');
+    assert.match(github.requests[0].url, /^\/repos\/example\/repo\/pulls\?state=closed&sort=updated&direction=desc&per_page=100&page=1$/);
+    assert.equal(github.requests[0].accept, 'application/vnd.github+json');
+  } finally { await close(); }
+});
+
+test('pr-sync: a second run posts nothing and leaves two files; a live event for the same PR first counts as already there', async () => {
+  const merged = daysAgo(1);
+  const closed = daysAgo(2);
+  const { cli, keys, sync, close } = await syncSetup({ pages: [[ghPr(21, { closed: merged, merged: true }), ghPr(22, { closed })]] });
+  try {
+    // The live path posts PR 21 first, as the workflow does.
+    const live = await cli('api', 'event', 'pr-merged', '--title', 'live', '--url', 'https://github.com/example/repo/pull/21', '--pr-closed-at', merged);
+    assert.equal(live.code, 0, live.stderr);
+    const first = await sync();
+    assert.match(first.stdout, /pr-sync: 1 posted, 1 already there, 0 failed/);
+    assert.match(first.stdout, /exists events\/.*-gh-example-repo-21-merged\.json/);
+    const second = await sync();
+    assert.equal(second.code, 0, second.stderr);
+    assert.match(second.stdout, /pr-sync: 0 posted, 2 already there, 0 failed/);
+    assert.equal(keys('events/').length, 2);
+  } finally { await close(); }
+});
+
+test('pr-sync: --dry-run lists the files and writes nothing', async () => {
+  const { keys, sync, close } = await syncSetup({ pages: [[ghPr(31, { closed: daysAgo(1), merged: true })]] });
+  try {
+    const done = await sync('--dry-run');
+    assert.equal(done.code, 0, done.stderr);
+    assert.match(done.stdout, /would write events\/.*-gh-example-repo-31-merged\.json/);
+    assert.equal(keys('events/').length, 0);
+  } finally { await close(); }
+});
+
+test('pr-sync: pagination stops at the page whose last update is before the cutoff, and at an empty page', async () => {
+  const recent = page => [1, 2].map(index => ghPr(100 * page + index, { closed: daysAgo(1), merged: true }));
+  const old = [ghPr(301, { closed: daysAgo(1), merged: true }), ghPr(302, { closed: daysAgo(20) })];
+  const { keys, sync, github, close } = await syncSetup({ pages: [recent(1), recent(2), old, recent(4)] });
+  try {
+    const done = await sync();
+    assert.equal(done.code, 0, done.stderr);
+    assert.equal(github.requests.length, 3, 'page 4 is never asked for');
+    assert.equal(keys('events/').length, 5, 'the old PR on page 3 is skipped, the recent ones are posted');
+  } finally { await close(); }
+  const empty = await syncSetup({ pages: [[ghPr(401, { closed: daysAgo(1), merged: true })]] });
+  try {
+    assert.equal((await empty.sync()).code, 0);
+    assert.equal(empty.github.requests.length, 2, 'a list is followed by one more page, which is empty');
+  } finally { await empty.close(); }
+});
+
+test('pr-sync: no token exits 2; a GitHub 500 exits 1; bad flags exit 1', async () => {
+  const { cli, keys, sync, close } = await syncSetup({ pages: [], status: 500 });
+  try {
+    const failed = await sync();
+    assert.equal(failed.code, 1);
+    assert.match(failed.stderr, /HTTP 500/);
+    cli.env = { ...cli.env, GITHUB_TOKEN: '', GH_TOKEN: '' };
+    const none = await sync();
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /set GITHUB_TOKEN/);
+    cli.env = { ...cli.env, GITHUB_TOKEN: 'gh-test' };
+    for (const extra of [['--days', '0'], ['--days', '31'], ['--days', 'x']]) assert.equal((await sync(...extra)).code, 1, extra.join(' '));
+    assert.equal((await cli('api', 'pr-sync', '--repo', 'not a repo', '--project', 'p', '--prefix', 'ws')).code, 1);
+    assert.equal((await cli('api', 'pr-sync', '--repo', 'example/repo', '--project', 'p', '--prefix', 'WS9')).code, 1);
+    assert.equal(keys('events/').length, 0);
+  } finally { await close(); }
+});
+
+test('event: --pr-closed-at gives an owner or repo with . or _ a safe file name, at most 120 characters', async () => {
+  const { keys, cli, close } = await setup();
+  const long = 'x'.repeat(100);
+  try {
+    const live = await cli('api', 'event', 'pr-merged', '--title', 'x', '--url', `https://github.com/Own.er_1/${long}/pull/123456`, '--pr-closed-at', hoursAgo(1));
+    assert.equal(live.code, 0, live.stderr);
+    const [key] = keys('events/');
+    const name = key.split('/').pop();
+    assert.ok(name.length <= 120, String(name.length));
+    assert.match(name, /^\d{6}-gh-own-er-1-x+-123456-merged\.json$/);
+  } finally { await close(); }
+});
