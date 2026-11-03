@@ -16,7 +16,7 @@ const DOCS = /^(docs\/|scripts\/docs[-.][^/]*$)/;
 const UI_FILE = /^server\/test\/(ui|[^/]+-ui)\.mjs$/;
 const UNIT_TEST = /^server\/test\/[^/]+\.test\.mjs$/;
 // Shared by every screen: a change here can break any UI test.
-const SHARED = /^(src\/styles\/|src\/[^/]+$|index\.html$|vite\.config\.|tsconfig|package(-lock)?\.json$|server\/(package(-lock)?\.json|[^/]+\.mjs|integrations\/|project-adapters\/|knowledge\/)|server\/test\/ui-timeouts\.mjs$|public\/|scripts\/(run-ui-tests|ui-shard|ui-timings)|\.github\/)/;
+const SHARED = /^(src\/styles\/|src\/[^/]+$|index\.html$|vite\.config\.|tsconfig|package(-lock)?\.json$|server\/(package(-lock)?\.json|[^/]+\.mjs|integrations\/|project-adapters\/|knowledge\/)|server\/test\/ui-timeouts\.mjs$|public\/|src\/lib\/|scripts\/(run-ui-tests|ui-shard|ui-timings|vite-workspace|workspaces\.mjs|shared\/)|\.github\/)/;
 
 const kebab = stem => stem.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 
@@ -38,6 +38,8 @@ export function classify(files, { uiTests, read }) {
     }
     if (file === 'server/test/hub-fixture.mjs') { hubTests.forEach(name => ui.add(name)); continue; }
     if (UNIT_TEST.test(file)) continue; // a unit test runs in `check` only
+    // any other file in server/test is a helper the UI tests import (combobox.mjs, needs-kinds-seed.mjs): every UI test
+    if (/^server\/test\//.test(file)) { all = true; continue; }
     // site/api is the hub's backend: the service serves it to the UI tests. The hub files affect the hub tests, the
     // rest of it (store, S3, card writes) every test. The other site/ folders run on the home server, not in the UI tests.
     if (/^site\/api\/test\//.test(file)) {
@@ -47,8 +49,8 @@ export function classify(files, { uiTests, read }) {
     if (/^site\/api\/hub[^/]*\.mjs$/.test(file)) { hubTests.forEach(name => ui.add(name)); continue; }
     if (/^site\/api\//.test(file)) { all = true; continue; }
     if (/^(site|tools)\//.test(file)) continue;
-    if (SHARED.test(file) && !/^src\/(lib|hub|components|local)\//.test(file)) { all = true; continue; }
-    if (/^src\/(hub|components|local|lib)\//.test(file)) {
+    if (SHARED.test(file) && !/^src\/(hub|components|local)\//.test(file)) { all = true; continue; }
+    if (/^src\/(hub|components|local)\//.test(file)) {
       const stem = path.posix.basename(file).replace(/\.[^.]+$/, '');
       const words = [lower(stem), kebab(stem)].filter(word => word.length >= 5);
       const hits = uiTests.filter(name => words.some(word => lower(name).includes(word) || lower(read(name)).includes(word)));
@@ -57,7 +59,7 @@ export function classify(files, { uiTests, read }) {
       else all = true;
       continue;
     }
-    if (/^(scripts\/|server\/test\/)/.test(file)) continue; // other scripts have unit tests in `check`
+    if (/^scripts\//.test(file)) continue; // other scripts have unit tests in `check`
     all = true; // unknown
   }
   if (all) return { check, ui: 'all', fragments: [] };

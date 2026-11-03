@@ -24,7 +24,7 @@ permissions:
 
 # A new push to a PR cancels the run still going for it. Pushes to main, the nightly and manual runs are never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -73,7 +73,7 @@ jobs:
 
   check:
     needs: changes
-    if: needs.changes.outputs.check != 'none' && github.event_name != 'schedule'
+    if: ${{ !cancelled() && needs.changes.outputs.check != 'none' && github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -88,16 +88,16 @@ jobs:
             server/package-lock.json
 
       - run: npm ci
-      # docs only: the docs tests and the template check
+      # docs only: the docs tests and the template check; anything else, an empty output included, runs the lot
       - if: needs.changes.outputs.check == 'docs'
         run: npm run docs:test && npm run test:template
-      - if: needs.changes.outputs.check == 'all'
+      - if: needs.changes.outputs.check != 'docs'
         run: npm run lint
-      - if: needs.changes.outputs.check == 'all'
+      - if: needs.changes.outputs.check != 'docs'
         run: npm test
-      - if: needs.changes.outputs.check == 'all'
+      - if: needs.changes.outputs.check != 'docs'
         run: npm run test:template
-      - if: needs.changes.outputs.check == 'all'
+      - if: needs.changes.outputs.check != 'docs'
         run: npm run build
 
       - name: No workflow may run on a self-hosted runner
@@ -110,6 +110,9 @@ jobs:
   # a shard with nothing to run ends green.
   ui:
     needs: changes
+    # !cancelled(): a failed `changes` job must not skip the Required ui checks (a job skipped for a failed need counts as passing);
+    # its empty outputs then mean everything runs.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:

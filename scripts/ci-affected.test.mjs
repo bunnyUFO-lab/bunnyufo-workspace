@@ -24,7 +24,7 @@ test('a component found in a test text runs that test; a hub file without a hit 
   assert.deepEqual(run(['site/api/hub-work.mjs']).fragments, ['hub-ui.mjs', 'hub-work-sheet-ui.mjs', 'hub-work-ui.mjs']);
 });
 test('anything shared or unknown runs every UI test', () => {
-  for (const file of ['package.json', 'src/styles/base.css', 'src/App.tsx', 'src/components/Zzz.tsx', 'server/server.mjs', 'site/api/s3.mjs', 'server/test/ui.mjs', 'server/test/ui-timeouts.mjs', '.github/workflows/ci.yml', 'weird/file.bin']) {
+  for (const file of ['package.json', 'src/styles/base.css', 'src/App.tsx', 'src/components/Zzz.tsx', 'server/server.mjs', 'site/api/s3.mjs', 'server/test/ui.mjs', 'server/test/ui-timeouts.mjs', 'server/test/combobox.mjs', 'src/lib/route.ts', 'scripts/vite-workspace.mjs', '.github/workflows/ci.yml', 'weird/file.bin']) {
     assert.equal(run([file]).ui, 'all', file);
   }
 });
