@@ -131,6 +131,8 @@ times, 500 ms doubling). Only `event` is spooled when the API stays down: the li
 
 ```bash
 npm run cards -- event <kind> --title <t> [--project --bead --ask --url --summary --source]
+npm run cards -- event pr-merged|pr-closed --title <t> --url <pr link> --pr-closed-at <iso>   # fixed file name per PR close; a repeat prints `exists <file>`
+GITHUB_TOKEN=$(gh auth token) npm run cards -- pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix> [--days 7] [--dry-run]
 npm run cards -- ask create --project <p> [--bead <b>] (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
 npm run cards -- ask get <id>
@@ -145,6 +147,18 @@ npm run cards -- request take <id> --bead <b>      # exit 3 if taken
 npm run cards -- request create --project <p> --text <t> [--when next-sprint|nightly|record]
 npm run cards -- beads push --project <p> [--from <file.jsonl>]   # default: `bd export`
 ```
+
+**Pull request events and the reconcile.** A repository's `hub-events.yml` workflow posts `pr-opened`, `pr-merged` and
+`pr-closed` events when a PR changes. A missed post (the secret was not set yet, the API was down, the workflow did not
+exist) would leave a review item waiting for a merge it never hears about. So the same workflow also runs `pr-sync` every
+6 hours, and on demand (`gh workflow run hub-events.yml`, optional `days`): it lists the repository's PRs closed in the
+last 7 days (1 to 30 with `--days`) and posts their close events. The live post and `pr-sync` write the same file,
+`events/<UTC day of the close>/<HHMMSS>-gh-<owner>-<repo>-<n>-<merged|closed>.json`, create-only with the close time as
+`ts`, so whichever comes second gets "already exists" and nothing is posted twice. Nothing needs to read the Hub first.
+By hand from the PC: `GITHUB_TOKEN=$(gh auth token) node ~/.buw/cards.mjs pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix>`
+(`--dry-run` lists the files it would write). The reconcile job uses GitHub's own read-only token and the repository's
+existing card API secret; it needs nothing new. Until the card API serves a client that has `pr-sync`, the job prints a
+warning and exits 0.
 
 **The #needs-you ping.** After `ask create` or `checklist create` the CLI posts one message to a Discord webhook when it
 finds one, looking in this order: `BUW_DISCORD_NEEDS_YOU`, `discord.needsYou` in `~/.buw/hub.json`,

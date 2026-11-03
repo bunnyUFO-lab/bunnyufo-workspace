@@ -35,6 +35,14 @@
 //   cards event <kind> --title <t> [--project <p> --bead <b> --ask <id> --review <file> --url <u> --summary <s> --source <s>]
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
+//        --pr-closed-at <iso> (pr-merged or pr-closed with a PR link as --url only; at most 30 days old): the event's ts is that time and
+//        its file name is fixed by the PR (events/<day>/<HHMMSS>-gh-<owner>-<repo>-<n>-<merged|closed>.json), so a second post of the same
+//        close prints "exists <file>" and writes nothing.
+//   cards pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix> [--days 7] [--dry-run]   (needs GITHUB_TOKEN or GH_TOKEN; BUW_GITHUB_API for tests)
+//        post the close event of every PR of the repo closed in the last --days days (1 to 30), under the same fixed file names, so a
+//        missed live event is filled in and nothing is posted twice. One line per PR (posted|exists|failed <file>), then a summary;
+//        exit 1 when a PR failed or GitHub did not answer 200 (nothing is spooled: the next run is the retry). On the PC:
+//        GITHUB_TOKEN=$(gh auth token) node ~/.buw/cards.mjs pr-sync --repo <owner/repo> --project <p> --prefix <ws|bl|...>
 //   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
 //        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--prose-ok]
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
@@ -142,7 +150,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -665,14 +673,38 @@ async function replaySpool() {
 
 // --- events ---
 
+const PR_URL_RE = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)$/;
+
+/**
+ * The deterministic name of a PR close event: events/<UTC day of closedAt>/<HHMMSS>-gh-<owner>-<repo>-<n>-<merged|closed>.json.
+ * The workflow's live post (--pr-closed-at) and `pr-sync` both build it here, so whichever comes second finds the file there.
+ * `kind` is pr-merged or pr-closed, `url` a PR link, `closedAt` a date at most 5 minutes ahead of `now` and at most 30 days behind it.
+ * Returns { file, ts }; throws on anything else.
+ */
+function prEventFile({ kind, url, closedAt, now = new Date() }) {
+  if (kind !== 'pr-merged' && kind !== 'pr-closed') throw new Error('--pr-closed-at goes only with the event kinds pr-merged and pr-closed.');
+  const match = PR_URL_RE.exec(String(url ?? ''));
+  if (!match) throw new Error('--pr-closed-at needs --url to be a pull request link (https://github.com/<owner>/<repo>/pull/<n>).');
+  const at = new Date(closedAt);
+  if (!closedAt || Number.isNaN(at.getTime())) throw new Error(`--pr-closed-at is not a date: ${closedAt}`);
+  if (at.getTime() > now.getTime() + 5 * 60000) throw new Error('--pr-closed-at is in the future.');
+  if (at.getTime() < now.getTime() - 30 * DAY) throw new Error('--pr-closed-at is more than 30 days old.');
+  const ts = at.toISOString();
+  const tail = `-${match[3]}-${kind === 'pr-merged' ? 'merged' : 'closed'}.json`;
+  const head = `${ts.slice(11, 19).replace(/:/g, '')}-gh-`;
+  const slug = `${match[1]}-${match[2]}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 120 - head.length - tail.length);
+  return { file: inboxPath('events', ts.slice(0, 10), `${head}${slug}${tail}`), ts };
+}
+
 function buildEvent(flags) {
   const kind = flags.kind;
   if (!EVENT_KINDS.includes(kind)) throw new Error(`Event kind is one of: ${EVENT_KINDS.join(', ')}.`);
   if (!flags.title) throw new Error('An event needs --title.');
+  const closed = flags['pr-closed-at'] === undefined ? null : prEventFile({ kind, url: flags.url, closedAt: flags['pr-closed-at'] });
   const now = new Date();
   const host = hostName();
   const event = {
-    ts: now.toISOString(), kind,
+    ts: closed ? closed.ts : now.toISOString(), kind,
     ...(flags.project ? { project: flags.project } : {}),
     ...(flags.bead ? { bead: flags.bead } : {}),
     ...(flags.ask ? { ask: flags.ask } : {}),
@@ -684,7 +716,7 @@ function buildEvent(flags) {
     ...(flags.summary ? { summary: String(flags.summary) } : {}),
   };
   const time = now.toISOString().slice(11, 19).replace(/:/g, '');
-  return { event, file: inboxPath('events', now.toISOString().slice(0, 10), `${time}-${host}-${rand(3)}.json`) };
+  return { event, file: closed ? closed.file : inboxPath('events', now.toISOString().slice(0, 10), `${time}-${host}-${rand(3)}.json`) };
 }
 
 /** Post an event; when the API cannot be reached, keep it in the spool and say so. Never throws for that. */
@@ -697,8 +729,77 @@ async function postEvent(flags, { out = console.log } = {}) {
     out(`spooled ${file} (${result.reason}); it is sent with the next inbox command`);
     return file;
   }
-  out(file);
+  out(result.state === 'exists' && flags['pr-closed-at'] !== undefined ? `exists ${file}` : file);
   return file;
+}
+
+// --- PR sync ---
+
+const PR_SYNC_USAGE = 'Usage: pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix> [--days 7] [--dry-run]';
+
+/** The first bead id in text: `<prefix>-<3 to 10 letters or digits>` with optional .n parts, after the start or a non-alphanumeric. The same pattern as the Hub events workflow. */
+function beadIn(text, prefix) {
+  const found = new RegExp(`(^|[^a-z0-9])${prefix}-[a-z0-9]{3,10}(\\.[0-9]+)*`).exec(String(text ?? ''));
+  return found ? found[0].replace(/^[^a-z0-9]+/, '') : '';
+}
+
+/** Post a close event for every pull request of a repository closed in the last --days days. Idempotent: the file names are deterministic and create-only. */
+async function prSync(flags) {
+  const repo = flags.repo;
+  const prefix = flags.prefix;
+  const days = flags.days === undefined ? 7 : Number(flags.days);
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !flags.project || !prefix || !/^[a-z]{1,10}$/.test(prefix)) throw new Error(PR_SYNC_USAGE);
+  if (!Number.isInteger(days) || days < 1 || days > 30) throw new Error('--days is a whole number from 1 to 30.');
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  if (!token) { console.error('set GITHUB_TOKEN (on the PC: GITHUB_TOKEN=$(gh auth token))'); throw new Exit(2); }
+  const base = (process.env.BUW_GITHUB_API || 'https://api.github.com').replace(/\/+$/, '');
+  const now = new Date();
+  const cutoff = now.getTime() - days * DAY;
+  const counts = { posted: 0, exists: 0, failed: 0 };
+  let listFailed = false;
+  const closedPrs = [];
+  for (let page = 1; page <= 5; page += 1) {
+    let response;
+    try {
+      response = await fetch(`${base}/repos/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`, {
+        headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'cards-pr-sync' },
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (error) {
+      console.error(`GitHub could not be reached (${error.cause?.code ?? error.message}).`);
+      listFailed = true;
+      break;
+    }
+    if (response.status !== 200) { console.error(`GitHub answered HTTP ${response.status} for the pull request list.`); listFailed = true; break; }
+    const list = await response.json().catch(() => null);
+    if (!Array.isArray(list)) { console.error('GitHub sent a pull request list that is not JSON.'); listFailed = true; break; }
+    if (!list.length) break;
+    closedPrs.push(...list);
+    const last = Date.parse(list[list.length - 1]?.updated_at);
+    if (Number.isFinite(last) && last < cutoff) break;
+  }
+  for (const pr of closedPrs) {
+    const closedAt = Date.parse(pr?.closed_at);
+    if (!Number.isFinite(closedAt) || closedAt < cutoff || typeof pr.html_url !== 'string') continue;
+    const kind = pr.merged_at ? 'pr-merged' : 'pr-closed';
+    let target;
+    try { target = prEventFile({ kind, url: pr.html_url, closedAt: pr.closed_at, now }); } catch (error) { counts.failed += 1; console.log(`failed ${pr.html_url} (${error.message})`); continue; }
+    if (flags['dry-run']) { console.log(`would write ${target.file}`); continue; }
+    const bead = beadIn(pr.head?.ref, prefix) || beadIn(pr.title, prefix);
+    const event = {
+      ts: target.ts, kind, project: flags.project, ...(bead ? { bead } : {}),
+      ...(sessionEnv() ? { session: sessionEnv() } : {}),
+      host: hostName(), source: 'hub-reconcile',
+      title: clip(`${flags.project}: PR ${kind === 'pr-merged' ? 'merged' : 'closed'}: ${pr.title ?? ''}`, 120), url: pr.html_url,
+    };
+    const result = await putInbox(target.file, `${JSON.stringify(event, null, 2)}\n`, { createOnly: true });
+    if (result.state === 'ok') { counts.posted += 1; console.log(`posted ${target.file}`); }
+    else if (result.state === 'exists') { counts.exists += 1; console.log(`exists ${target.file}`); }
+    else { counts.failed += 1; console.log(`failed ${target.file} (${result.reason})`); }
+  }
+  if (flags['dry-run']) console.log(`pr-sync: dry run, ${closedPrs.length} closed PR(s) listed, nothing written`);
+  else console.log(`pr-sync: ${counts.posted} posted, ${counts.exists} already there, ${counts.failed} failed`);
+  if (counts.failed || listFailed) throw new Exit(1);
 }
 
 // --- Asks ---
@@ -1907,7 +2008,7 @@ async function markApplied(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -1940,6 +2041,7 @@ async function inbox(command, args) {
   const [sub, id] = flags._;
   await replaySpool().catch(() => {});
   if (command === 'event') return postEvent({ ...flags, kind: sub });
+  if (command === 'pr-sync') return prSync(flags);
   if (command === 'ask' && sub === 'create') return askCreate(flags);
   if (command === 'ask' && sub === 'list') return askList(flags);
   if (command === 'ask' && sub === 'get' && id) return askGet(id);
@@ -1980,7 +2082,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark'].includes(first)) {
+  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;
