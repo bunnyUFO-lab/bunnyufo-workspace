@@ -31,6 +31,7 @@ import { createScrub } from './scrub.mjs';
 import { createHermesApprovals } from './hub-hermes-approvals.mjs';
 import { createNotify } from './notify.mjs';
 import { createPolicy } from './policy.mjs';
+import { createSprints } from './hub-sprints.mjs';
 import { defaultsOf } from './project-defaults.mjs';
 import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
@@ -316,6 +317,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   });
   // Policy approval (off unless HUB_POLICY_APPROVE names kinds): signs eligible proposals through the same path as a tap.
   const policy = createPolicy({ env, requests: requestFiles, listFolders, cached, canSign: on && !!signingKey, now, log, writerOf: async id => (await bucket.head(key(`requests/${id}/request.json`)).catch(() => null))?.metadata?.writer ?? null });
+  // Sprints on the PC (hub-sprints.mjs): the owner starts a chain of runs on a milestone; a sweep signs each next item when the one before it is done.
+  const sprints = createSprints({
+    requests: requestFiles, listFolders, cached, putCreateOnly, signingKey: on ? signingKey : null, fail, now, log, repoOf: project => projectRepo(project),
+    writeEvent: (event, at) => putHubEvent(event, at), sweepMs: Number(env.HUB_SPRINT_SWEEP_MS ?? 60_000),
+    // What eligibility is built from: the same data as the map, read fresh (a start is rare and must not judge from a 30-second-old list).
+    loadInputs: async (project, at) => {
+      const [{ meta, issues }, window, asks, checklists, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), loadMarks(project), loadRequests(at)]);
+      return { issues: issues.map(issue => ({ ...issue, project })), marks, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), requests: requests.filter(item => item.project === project), repo: meta?.repo };
+    },
+  });
   // The cloud fire queue: sweeps approved cloud requests at start and every 5 minutes. Idle without a routine (or the dry run) and a key.
   if (on) routines.start();
   if (on && hermesDispatch.runs.configured) hermesDispatch.reattach().catch(error => log(`[hub] could not re-attach Hermes runs: ${scrub(error.message)}`));
@@ -1384,13 +1395,15 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The cloud routines module (fire, record, cap), for the tests. */
     routines,
     avatar: avatarFlow,
+    /** The sprint module (start, advance, sweep), for the tests. */
+    sprints,
     rerun: rerunFlow,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
     /** Stops the followers and the sweep (shutdown, tests). */
     policy,
-    close: async () => { policy.close(); await routines.close(); await hermesDispatch.close(); },
+    close: async () => { policy.close(); sprints.close(); await routines.close(); await hermesDispatch.close(); },
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
@@ -1441,7 +1454,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') { hermesDispatch.pageLoad(at); policy.pageLoad(at); }
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); }
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
             const status = await loadPcStatus(at);
@@ -1534,14 +1547,19 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             if (!issue) throw fail('No such task in this project.', 404);
             if (issue.status === 'closed') throw fail('That task is closed.', 400);
             reply(beadSeed(issue, kind));
+          } else if ((match = /^\/hub\/map\/([^/]+)\/sprint\/([^/]+)$/.exec(route))) {
+            // What a sprint on this milestone would run and leave out, and the sprint that is going.
+            if (!validProject(match[1])) throw fail('No such project.', 404);
+            reply(await sprints.preview(match[1], decodeURIComponent(match[2]), at));
           } else if ((match = /^\/hub\/map\/([^/]+)$/.exec(route))) {
             const project = match[1];
             if (!validProject(project)) throw fail('No such project.', 404);
             const [{ meta, issues }, window, asks, checklists, cards, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), cardResolver(), loadMarks(project), loadMapRequests(at)]);
             const repo = meta?.repo || await projectRepo(project);
+            const sprintRows = await sprints.summaries(project, at).catch(() => []);
             reply(buildMap({
               project, meta, issues: applyMarks(issues, marks, project), events: window.events, repo, cards,
-              asks: asks.map(askRow), checklists: checklists.map(checklistRow), requests: requests.filter(item => item.project === project), now: at,
+              asks: asks.map(askRow), checklists: checklists.map(checklistRow), requests: requests.filter(item => item.project === project), runSprints: sprintRows, now: at,
             }));
           } else if (route === '/hub/file') {
             await serveFile(response, query.get('path'));
@@ -1595,6 +1613,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await markReviewDone(decodeURIComponent(match[1]), user, at, 'blocked'));
         } else if ((match = /^\/hub\/needs\/([a-z]+)\/([^/]+)\/not-useful$/.exec(route))) {
           send(await notUseful(match[1], decodeURIComponent(match[2]), raw, user, at));
+        } else if ((match = /^\/hub\/map\/([^/]+)\/sprint\/([^/]+)$/.exec(route))) {
+          if (!user) throw fail('Sign in to start a sprint.', 401);
+          const started = await sprints.start(decodeURIComponent(match[1]), decodeURIComponent(match[2]), Number(raw?.timebox), user, at);
+          mapRequests = null;
+          send({ status: 201, body: started });
         } else if ((match = /^\/hub\/map\/([^/]+)\/marks$/.exec(route))) {
           if (!user) throw fail('Sign in to mark this.', 401);
           send(await markBead(decodeURIComponent(match[1]), raw, user, at));

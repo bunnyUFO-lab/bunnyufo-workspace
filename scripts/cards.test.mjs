@@ -553,7 +553,7 @@ test('replay: only event files (and a run\'s own progress files) are replayed; a
     const runFile = 'requests/20261030-sprite-studio-job-a1b2/run-20261030T101500123Z-ab12.json';
     const refused = [
       'asks/20261030-sprite-studio-planted-a1b2/ask.json', 'requests/20261030-sprite-studio-job-a1b2/request.json', 'requests/20261030-sprite-studio-job-a1b2/approved.json',
-      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
+      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'requests/20261030-sprite-studio-job-a1b2/sprint.json', 'requests/20261030-sprite-studio-job-a1b2/sprint-end.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
       'asks/20261030-sprite-studio-planted-a1b2/delivered.json', 'events/2026-10-30/../../asks/x/ask.json', 'events/not-a-date/x.json', 'events/2026-10-30/sub/x.json', 'events/2026-10-30/x.png',
       'requests/x/run-bad.json', 'requests/x/y/run-20261030T101500123Z-ab12.json', 'workspace.json', '../events/2026-10-30/x.json',
     ];

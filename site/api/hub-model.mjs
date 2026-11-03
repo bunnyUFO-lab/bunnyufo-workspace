@@ -450,6 +450,7 @@ export function requestItem(request, state, taken, extra = {}) {
   const item = {
     kind: state === 'proposed' ? 'approval' : state === 'asking' ? 'run-question' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
     ...((request.bead ?? taken?.bead) ? { bead: request.bead ?? taken.bead } : {}),
+    ...(request.sprint ? { sprint: request.sprint } : {}),
     ...(request.by ? { by: request.by } : {}),
     ...(request.preset ? { preset: request.preset } : {}),
     ...(state === 'asking' && result?.question ? { question: result.question, ...(result.summary ? { summary: result.summary } : {}) } : {}),

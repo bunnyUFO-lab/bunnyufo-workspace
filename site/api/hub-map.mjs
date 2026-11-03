@@ -215,8 +215,10 @@ const LIVE_RUN = new Set(['proposed', 'approved', 'taken', 'running', 'stopping'
  * @param repo   the project's repository (a GitHub remote or `owner/name`), to link PRs and commits
  * @param cards  `ref → { title, href } | null` for `section/folder` or `section#id`; unresolved refs are dropped
  * @param requests [{ id, bead?, state, at }]: a task with a live one from the Hub gets `run: { id, state }` (the newest)
+ * @param runSprints [{ head, milestone, until, items: [{ id, seq, bead, title }], ended? }] newest first (`createSprints().summaries`): a milestone gets
+ *   `sprint: { head, until, items: [{ id, bead, title, state, pr? }], ended? }` for its newest one; an item whose request does not exist yet is `waiting`
  */
-export function buildMap({ project, meta = null, issues = [], events = [], asks = [], checklists = [], repo = '', cards = () => null, requests = [], now = new Date() }) {
+export function buildMap({ project, meta = null, issues = [], events = [], asks = [], checklists = [], repo = '', cards = () => null, requests = [], runSprints = [], now = new Date() }) {
   const byId = new Map(issues.map(issue => [issue.id, issue]));
   const parentOf = new Map();
   const childrenOf = new Map();
@@ -336,8 +338,19 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     const tasks = taskIssues.map(toTask);
     return { id, title, state: stateOf(id, tasks.map(task => task.state)), ...notesOf(id), tasks };
   };
+  // The newest sprint on a milestone, each item with the state and PR of its own request.
+  const requestsById = new Map(requests.map(request => [request.id, request]));
+  const sprintOf = id => {
+    const row = runSprints.find(item => item.milestone === id);
+    if (!row) return {};
+    const items = row.items.map(item => {
+      const request = requestsById.get(item.id);
+      return { id: item.id, bead: item.bead, title: item.title, state: request?.state ?? 'waiting', ...(request?.finish?.pr ? { pr: request.finish.pr } : {}) };
+    });
+    return { sprint: { head: row.head, until: row.until, items, ...(row.ended ? { ended: row.ended } : {}) } };
+  };
   const makeMilestone = (id, title, features) => ({
-    id, title, state: stateOf(id, features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), features,
+    id, title, state: stateOf(id, features.flatMap(feature => feature.tasks.map(task => task.state))), ...notesOf(id), ...sprintOf(id), features,
   });
 
   /** A milestone from an issue: its child groups are features, its loose children one more. */

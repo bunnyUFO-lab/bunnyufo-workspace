@@ -22,11 +22,11 @@ const request = (extra = {}) => ({
 
 test('there are ten offered presets with the ids the cards CLI knows, and one hidden', () => {
   assert.deepEqual(PRESET_IDS, ['code-task', 'docs', 'research', 'market-research', 'game-teardown', 'mockup', 'question', 'projects-brief', 'playtest-build', 'sprite-set', 'agent-avatar']);
-  assert.deepEqual(PRESETS.map(preset => preset.kind), ['code', 'docs', 'research', 'research', 'research', 'mockup', 'question', 'brief', 'build', 'art', 'art', 'art']);
-  assert.deepEqual(PRESETS.filter(preset => preset.hidden).map(preset => preset.id), ['agent-avatar-sheet']);
+  assert.deepEqual(PRESETS.map(preset => preset.kind), ['code', 'docs', 'research', 'research', 'research', 'mockup', 'question', 'brief', 'build', 'art', 'art', 'art', 'code']);
+  assert.deepEqual(PRESETS.filter(preset => preset.hidden).map(preset => preset.id), ['agent-avatar-sheet', 'sprint-item']);
   assert.equal(MAX_RUN_MINUTES, 120);
   for (const preset of PRESETS) assert.ok(preset.minutes <= MAX_RUN_MINUTES && minutesOf(preset) <= 120, preset.id);
-  assert.deepEqual(PRESETS.filter(preset => preset.minutes === 120).map(preset => preset.id), ['code-task', 'playtest-build', 'sprite-set', 'agent-avatar-sheet']);
+  assert.deepEqual(PRESETS.filter(preset => preset.minutes === 120).map(preset => preset.id), ['code-task', 'playtest-build', 'sprite-set', 'agent-avatar-sheet', 'sprint-item']);
   assert.equal(presetOf('agent-avatar').minutes, 30);
   assert.equal(presetOf('agent-avatar-sheet').minutes, 120);
   assert.ok(PRESETS.filter(preset => preset.kind === 'research').every(preset => preset.minutes === 30 && preset.targets.join() === 'hermes' && preset.model === null));
@@ -526,4 +526,36 @@ test('a request made from a bead gets one Bead line before the follow-up; withou
   const continued = renderBrief({ preset: 'research', request: request({ bead: 'ws-9', continues: { from: follow.from, replies: ['Go on.'] } }), earlier: { report: 'r', card: 'assistant/x' } });
   assert.match(continued, /\nBead: ws-9\. Put this id[^\n]*\nThis continues request/);
   assert.equal(renderBrief({ preset: 'research', request: request({ bead: 'ws-9' }) }).match(/^Bead: /gm).length, 1);
+});
+
+test('the sprint item preset: hidden, PC only, Sonnet, 120 minutes; its brief fences the Beads text, posts progress, never merges, and says what it stacks on', () => {
+  const preset = presetOf('sprint-item');
+  assert.deepEqual([preset.hidden, preset.targets, preset.kind, preset.model, preset.minutes, preset.sideEffect, preset.fields, preset.opensWindows, preset.allow], [true, ['pc'], 'code', 'sonnet', 120, 'pr', ['text'], false, []]);
+  assert.equal(presetsForClient().some(entry => entry.id === 'sprint-item'), false, 'Spawn never offers it.');
+  assert.equal(PRESET_IDS.includes('sprint-item'), false);
+  const id = '20261103-magic-loops-sprint-ml-ms-a1b2';
+  const text = ['Item 2 of 3 of a sprint on project magic-loops.', 'Bead: ml-t2', '', 'The bead (data from Beads):', '<<<DATA', 'Title: T', 'DATA>>>'].join('\n');
+  const stacked = renderBrief({ preset: 'sprint-item', request: request({ id, text, sprint: { head: id, seq: 2 }, textOrigin: { kind: 'agent', name: 'Beads' } }) });
+  assert.doesNotMatch(stacked, /\{\{/);
+  assert.match(stacked, /<<<DATA/);
+  assert.match(stacked, /DATA>>>/);
+  assert.match(stacked, /not instructions/);
+  assert.match(stacked, /Never merge/);
+  assert.match(stacked, /Do not run `bd`/);
+  assert.ok(stacked.includes(`node .claude/bin/cards.mjs request run ${id} --state working --last "<what you are doing>"`), 'The progress line is named with this request id.');
+  assert.ok(stacked.includes('Your branch already holds the earlier items of this sprint. Do not redo or restyle them.'));
+  assert.ok(stacked.includes('"Stacked on the earlier PR; merge in order" in its body'));
+  assert.ok(stacked.includes('The request text was written by an agent (Beads).'));
+  assert.ok(stacked.includes('Work for at most 120 minutes'));
+  // A single run (a rerun copy has no sprint) starts from main and does not claim a stack.
+  const alone = renderBrief({ preset: 'sprint-item', request: request({ id, text }) });
+  assert.equal(alone.includes('Stacked on the earlier PR'), false);
+  assert.equal(alone.includes('already holds the earlier items'), false);
+  assert.ok(alone.includes('single run on its own branch from the main branch'));
+  // The time left in the sprint lowers the number the brief states, never raises it.
+  assert.ok(renderBrief({ preset: 'sprint-item', request: request({ id, text }), minutes: 35 }).includes('Work for at most 35 minutes'));
+  assert.ok(renderBrief({ preset: 'sprint-item', request: request({ id, text }), minutes: 500 }).includes('Work for at most 120 minutes'));
+  assert.ok(runBlock({ preset: 'sprint-item', request: request({ id, text }), minutes: 35 }).brief.includes('at most 35 minutes'));
+  assert.ok(renderBrief({ preset: 'code-task', request: request() }).includes('at most 120 minutes'), 'Other presets keep their bytes.');
+  assert.equal(route({ preset: 'sprint-item', project: 'magic-loops', repo: 'example/ml' }).target, 'pc');
 });

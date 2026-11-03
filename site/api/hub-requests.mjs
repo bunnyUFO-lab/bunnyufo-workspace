@@ -13,6 +13,7 @@ import { createHash, createPublicKey, randomBytes } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
 import { BEAD_ID } from './hub-marks.mjs';
 import { newNonce, sha256Hex, sign, verify } from './signing.mjs';
+import { MIN_ITEM_MINUTES, SPRINT_MAX_ITEMS, afterOf, chainOf, checkSprintDoc, itemId, itemTitle, jobText, minutesLeft } from './hub-sprints.mjs';
 import { WHEN, newRequestId, requestItem, requestState, runFileTime, staleSince, validId, validProject } from './hub-model.mjs';
 
 /** The needs a request may name. */
@@ -142,6 +143,13 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
     if (!fromOwner) throw fail('Only the site can say which bead a request came from.');
     if (typeof data.bead !== 'string' || !BEAD_ID.test(data.bead)) throw fail('The bead is a Beads issue id.');
     out.bead = data.bead;
+  }
+  // The place of a request in a sprint (hub-sprints.mjs): the head request's id and the item's number. The approval, not this field, decides what it may do.
+  if (data.sprint !== undefined && data.sprint !== null) {
+    if (!fromOwner) throw fail('Only the site can put a request in a sprint.');
+    const place = data.sprint;
+    if (typeof place !== 'object' || Array.isArray(place) || !validId(place.head) || !Number.isInteger(place.seq) || place.seq < 1 || place.seq > SPRINT_MAX_ITEMS) throw fail('A sprint place is { head: a request id, seq: 1 to 8 }.');
+    out.sprint = { head: place.head, seq: place.seq };
   }
   if (data.followUp !== undefined && data.followUp !== null) {
     if (!fromOwner) throw fail('Only the site can add a follow-up.');
@@ -385,7 +393,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
    * the owner's (`origin.kind: owner`, set here and never taken from the body) and carries the proposed target.
    */
   async function createRequest(data, user, at) {
-    const { origin: _origin, followUp: _followUp, continues: _continues, textOrigin: _textOrigin, doneWhenOrigin: _doneWhenOrigin, ...body } = data ?? {};
+    const { origin: _origin, followUp: _followUp, continues: _continues, textOrigin: _textOrigin, doneWhenOrigin: _doneWhenOrigin, sprint: _sprint, ...body } = data ?? {};
     const clean = checkRequest(body, { fromOwner: true });
     const preset = clean.preset ? presetOf(clean.preset) : null;
     if (clean.preset && !preset) throw fail('There is no such preset.', 400);
@@ -582,7 +590,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
     // A hidden preset is the Hub's own: only a request the site wrote (owner origin, from an Ask) can be signed, never one an agent wrote at that id.
-    if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
+    // A sprint item is the other way in: owner origin, written by the site, and named by a sprint.json the Hub signed (`sprintStep` checks it all).
+    let sprint = null;
+    if (preset.hidden && preset.id === 'sprint-item' && request.sprint) sprint = await sprintStep(id, request, preset, at);
+    else if (preset.hidden && !(request.origin?.kind === 'owner' && request.fromAsk && await siteWrote(id))) throw fail('That request was not made by the Hub, so it cannot be approved.', 400);
+    if (request.sprint && !sprint) throw fail('That request is not an item of a sprint the Hub signed, so it cannot be approved.', 400);
     const chosen = target ?? request.target;
     // The repo the approval is signed with: the request's own, else the one the owner picked in the sheet, else its project's. request.json is never
     // rewritten (its bytes are hashed); the signed approval and the brief carry the resolved repo, and the cloud and the PC read it from there.
@@ -596,9 +608,12 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }
     const body = {
       v: 1, request: id, project: request.project, repo: repo ?? null, target: chosen,
-      requestSha256: sha256Hex(stored.buffer), limits: { minutes: minutesOf(preset) },
-      expires: new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by,
-      run: runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier }),
+      requestSha256: sha256Hex(stored.buffer), limits: { minutes: sprint ? sprint.minutes : minutesOf(preset) },
+      expires: sprint ? sprint.expires : new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by: sprint ? sprint.by : by,
+      run: {
+        ...runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier, ...(sprint ? { minutes: sprint.minutes } : {}) }),
+        ...(sprint ? { sprint: { head: sprint.head, seq: sprint.seq, of: sprint.of, until: sprint.until, after: sprint.after } } : {}),
+      },
     };
     const approved = sign(body, signingKey);
     await writeSigned(id, 'approved.json', approved, 'That request is already approved.');
@@ -617,6 +632,36 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     }
     const after = await loadOne(id, at).catch(() => null);
     return { state: after?.state ?? 'approved', approved: withoutBrief(approved), ...(waiting ? { waiting } : {}), ...(cloud ? { cloud } : {}), ...(woke ? { wake: 'sent' } : {}) };
+  }
+
+  /**
+   * What a sprint item is signed with, or a refusal. The item must be the Hub's (owner origin, written by the site, at the id its place
+   * names), the sprint.json it names must verify with this host's key and say the same bead, repo and text, the sprint must not have ended,
+   * and there must be time left. `after` is worked out here from the chain's own files and is never taken from a caller: the watcher reads
+   * `after: null` as "start at main", so an `after` that went missing must not be signable. Every earlier item must be the Hub's, done, and
+   * have ended with a pull request (it becomes `after`) or a card.
+   */
+  async function sprintStep(id, request, preset, at) {
+    const refuse = message => fail(message, 400);
+    if (!(request.origin?.kind === 'owner' && await siteWrote(id))) throw refuse('That request was not made by the Hub, so it cannot be approved.');
+    const { head, seq } = request.sprint;
+    if (id !== itemId(head, seq)) throw refuse('That request is not at the id its sprint place names.');
+    const sprint = checkSprintDoc((await bucket.getJson(key(`requests/${head}/sprint.json`)).catch(() => null))?.value, publicKey);
+    if (!sprint || sprint.head !== head) throw refuse('That request names a sprint the Hub did not sign.');
+    const item = sprint.items[seq - 1];
+    if (!item || item.bead !== request.bead || sprint.project !== request.project || sprint.repo !== request.repo
+      || request.text !== jobText(sprint, seq) || request.title !== itemTitle(seq, sprint.items.length, item.bead)) throw refuse('That request does not match the sprint it names.');
+    let ended = false;
+    try { await bucket.head(key(`requests/${head}/sprint-end.json`)); ended = true; } catch (error) { if (error?.status !== 404) throw error; }
+    if (ended) throw clash('That sprint has ended.');
+    const found = afterOf(await chainOf(sprint, { loadOne, siteWrote, publicKey }, at, seq - 1), seq);
+    if (found.error) throw clash(found.error);
+    const left = minutesLeft(sprint.until, at);
+    if (!(left >= MIN_ITEM_MINUTES)) throw clash('That sprint has run out of time.');
+    return {
+      head, seq, of: sprint.items.length, until: sprint.until, after: found.after, by: sprint.by,
+      minutes: Math.min(minutesOf(preset), left), expires: new Date(Math.min(at.getTime() + 72 * 3600 * 1000, Date.parse(sprint.until))).toISOString(),
+    };
   }
 
   /** The signed stop of a request, allowed only in the given states. */
@@ -685,7 +730,8 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = forced ?? raw?.target ?? parts.approved?.target ?? request.target;
     if (!preset.targets.includes(target)) throw fail(`${preset.label} runs on ${preset.targets.join(' or ')}.`, 400);
-    const { origin: oldOrigin, followUp: oldFollow, continues: oldContinues, ...kept } = request;
+    // A copy is a single run with no place in a sprint's chain: `sprint` is dropped.
+    const { origin: oldOrigin, followUp: oldFollow, continues: oldContinues, sprint: _sprint, ...kept } = request;
     const followUp = newFollow ?? oldFollow;
     // A copy of a continuation is still one, unless it now carries a follow-up (a request is one or the other).
     const continues = followUp ? undefined : oldContinues;
