@@ -272,12 +272,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     }
   };
   /**
-   * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json) needs a pull request
+   * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json, or deeper) needs a pull request
    * link (`url`, or `prs`) or an `ask` (the owner's action, one line). Every other event kind and every other file passes. A file that is
    * not JSON passes too: the Hub reads only what parses.
    */
   const reviewNeedsAction = (sectionId, file, body) => {
-    if (!INBOXES.has(sectionId) || !/^events\/[^/]+\/[^/]+\.json$/i.test(file)) return;
+    // The Hub lists events/<day>/ without a delimiter, so a file in a subfolder is read as an event too.
+    if (!INBOXES.has(sectionId) || !/^events\/[^/]+\/.+\.json$/i.test(file)) return;
     let parsed;
     try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { return; }
     if (parsed?.kind !== 'ready-for-review') return;

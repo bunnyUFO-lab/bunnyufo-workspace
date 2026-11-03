@@ -192,6 +192,7 @@ test('a ready-for-review event needs a pull request link or an ask; every other 
     assert.match(JSON.stringify(refused.data), /pull request link/);
     assert.equal(fake.text('sections/inbox-dev/events/2026-11-03/a.json'), null, 'nothing stored');
     assert.equal((await put('tok-devbot', 'b.json', review({ url: 'https://example.test/card', ask: '   ' }))).status, 422, 'a link that is no pull request, and a blank ask');
+    assert.equal((await put('tok-devbot', 'sub/b1.json', review({}))).status, 422, 'a subfolder of the day, which the Hub reads too');
     assert.equal((await put('tok-all', 'b2.json', review({ prs: ['https://example.test/x'] }))).status, 422, 'every caller, the unrestricted one too');
     assert.equal((await put('tok-devbot', 'c.json', review({ url: 'https://github.com/example/app/pull/7' }))).status, 200);
     assert.equal((await put('tok-devbot', 'd.json', review({ prs: ['https://github.com/example/app/pull/7'] }))).status, 200);
