@@ -620,6 +620,33 @@ shows it as its own kind (picture left, decisions right), and it never gets Disc
   When the Ask has decisions every id needs a verdict (`approve`, `change` or `skip`); a `note` is at most 1000
   characters. `choice`, `note` and `drawing` keep their meaning.
 
+### Plans (change-list Asks)
+
+A **plan** is an Ask with `changes` (and `"kind": "decision"`): the Planner agent in Chat, or any agent, proposes edits to a project's Beads and
+Library, and the owner approves them row by row. Nothing in Beads changes until a session applies the approved rows.
+
+```json
+{ "kind": "decision", "question": "Apply the Sprint 4 plan?", "changes": [
+  { "op": "create", "title": "Sprint 4", "type": "epic", "labels": ["milestone"] },
+  { "op": "create", "title": "Wall-jump polish", "parent": "#1", "description": "Coyote time and a landing sound." },
+  { "op": "dep", "bead": "#2", "blocks": "ml-9" },
+  { "op": "close", "bead": "ml-4", "reason": "Covered by Sprint 4." }
+] }
+```
+
+- `changes`: 1 to 20 changes, `op` one of `create` (`title` 1 to 120, `type` task, feature or epic, `parent`, `description` at most 2000, `labels`),
+  `update` (`bead`, `title`, `description`), `dep` (`bead` must be done before `blocks`), `close` (`bead`, `reason` at most 200), `label`
+  (`bead`, `add`, `remove`) and `card` (`assistant/<folder>`, copied into the project's section). A bead is a Beads id, or `#n` for the n-th
+  change when that one is a `create`. Labels are only `wayfinder:<type>`, `milestone`, `needs-owner` and `later`. Unknown ops, fields and
+  labels are refused, and so is a command written into any text (the same check as `--prose-ok` skips elsewhere; there is no skip here).
+- One validator, `site/api/ask-changes.mjs`: the card API answers 422 to a limited token's `ask.json` that fails it, the Hub drops a failing
+  list when it reads the Ask, and the cards client carries a copy that `scripts/cards.test.mjs` keeps equal.
+- The Hub makes the Design review rows itself from the ops (`changeRows`), up to 20, and ignores any `decisions`, `options` or `image` the file
+  has. A plan never gets Discord buttons. The answer is a `decisions` map as for any Design review.
+- `cards ask create --changes changes.json` files one; `cards beads show --project <p> [--open] [--json]` reads the project's roadmap;
+  `cards plan apply <ask id> [--dry-run]` runs the approved rows in order (a changed row uses the owner's text), with `bd` called by argument
+  arrays and no shell, and refuses an Ask that is unanswered, has no changes, is for another project than the repository's, or was picked up.
+
 ### Playtests
 
 A checklist is a **Playtest** when its `checklist.json` has `"kind": "playtest"`. Needs you shows it as its own kind: the build link, the

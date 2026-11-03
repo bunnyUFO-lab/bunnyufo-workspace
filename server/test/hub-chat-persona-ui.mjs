@@ -26,7 +26,7 @@ try {
   step('New chat: the picker reads Hermes and lists the three agents; the header says Hermes');
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-persona]').waitFor();
-  assert.deepEqual(await page.locator('[data-chat-persona] option').evaluateAll(list => list.map(option => option.textContent)), ['Hermes', 'Researcher', 'Market researcher', 'Teardown']);
+  assert.deepEqual(await page.locator('[data-chat-persona] option').evaluateAll(list => list.map(option => option.textContent)), ['Hermes', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
   assert.equal(await page.locator('[data-chat-persona]').inputValue(), 'hermes');
   assert.equal(await page.locator('[data-chat-with]').getAttribute('data-chat-with'), 'hermes');
 

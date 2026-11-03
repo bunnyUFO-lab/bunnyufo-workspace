@@ -44,7 +44,12 @@
 //        exit 1 when a PR failed or GitHub did not answer 200 (nothing is spooled: the next run is the retry). On the PC:
 //        GITHUB_TOKEN=$(gh auth token) node ~/.buw/cards.mjs pr-sync --repo <owner/repo> --project <p> --prefix <ws|bl|...>
 //   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
-//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--prose-ok]
+//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--prose-ok]
+//        --changes files a plan (ws-qdh.3): a JSON list of 1 to 20 changes, each { op, ... } with op create (title, type task|feature|epic, parent?, description?,
+//        labels?), update (bead, title?, description?), dep (bead, blocks: bead must be done before blocks), close (bead, reason), label (bead, add?, remove?) or card
+//        (card: assistant/<folder>). A bead is a Beads id, or #n for the n-th change when that one is a create. Labels: wayfinder:<type>, milestone, needs-owner, later.
+//        The Hub shows one Design review row per change (approve, change or skip); the Ask is --kind decision and takes no --option, --decision or --image. A command
+//        written into a change's text is refused; the card API and the Hub check the same rules.
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
@@ -72,6 +77,11 @@
 //        --image and no options, that picture is the one the decisions are about; allowDrawing is on unless the file says no.
 //        A command written into the question, a decision or the context outside a fenced code block is refused (exit 2). Put it in a
 //        ```bash block. --prose-ok skips that check, for text that only looks like a command, and prints a warning.
+//   cards beads show --project <p> [--open] [--json]      (read-only) the project's merged Beads copy, compact: id, status, type, title, parent, labels, blocked-by
+//   cards plan apply <ask id> [--dry-run] [--again]       run the rows of an answered change-list Ask that the owner approved, in order, with bd (argument arrays, no shell);
+//        a changed row uses the owner's text (a create's or update's description, a close's reason). Refuses an Ask that is not answered, has no changes, is for another
+//        project than this repository's (its CLAUDE.md "Beads project:"), or was picked up already (--again). Stops at the first failure and lists the rows left.
+//        Afterwards: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup <id>.
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
 //   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json; for a design
 //        review also one line per decision ("d1 approve", "d2 change: Bottom-left")
@@ -138,7 +148,7 @@
 //   cards feedback filed --project <p> --key <key> --bead <id>        after `bd create`: writes the filed note (create-only); prints "already filed as <X>: close yours ..." when an earlier note names another bead
 import { spawnSync } from 'node:child_process';
 import { createHash, createPublicKey, randomBytes, verify as edVerify } from 'node:crypto';
-import { appendFile, chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -155,7 +165,8 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p> | feedback list|show|body|filed --project <p>\n'
-  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
+  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>]\n'
+  + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again]\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
@@ -877,9 +888,10 @@ function askFromFile(raw, flags, id) {
     ...(raw.options ? { options: raw.options } : {}),
     ...(raw.decisions ? { decisions: raw.decisions } : {}),
     ...(raw.image ? { image: raw.image } : {}),
+    ...(raw.changes !== undefined ? { changes: raw.changes } : {}),
     ...(raw.avatar !== undefined ? { avatar: raw.avatar } : {}),
     ...(raw.rerun !== undefined ? { rerun: raw.rerun } : {}),
-    ...(flags.kind !== undefined ? { kind: flags.kind } : raw.kind !== undefined ? { kind: raw.kind } : {}),
+    ...(flags.kind !== undefined ? { kind: flags.kind } : raw.kind !== undefined ? { kind: raw.kind } : raw.changes !== undefined ? { kind: 'decision' } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
     ...(flags['require-passkey'] ? { requirePasskey: true } : raw.requirePasskey !== undefined ? { requirePasskey: raw.requirePasskey } : {}),
@@ -945,11 +957,19 @@ function optionFromFlag(value) {
 
 /** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
 async function askInput(flags) {
-  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--prose-ok]';
+  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--prose-ok]';
   if (!flags.project || (!flags.file && !flags.question)) throw new Error(usage);
   if (flags.file && flags.question) throw new Error(`Give --file, or --question, not both. ${usage}`);
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { question: flags.question };
   const images = flags.image ?? [];
+  if (flags.changes) {
+    // A change list (ws-qdh.3) is answered row by row: no options, decisions or picture beside it.
+    if (raw.changes !== undefined) throw new Error('The file has changes already: give changes in the file or with --changes, not both.');
+    if (flags.option || flags.decision || raw.options !== undefined || raw.decisions !== undefined || raw.image !== undefined || images.length) throw new Error('A change list is answered row by row: leave out --option, --decision and --image.');
+    const listed = JSON.parse(await readFile(flags.changes, 'utf8'));
+    raw.changes = Array.isArray(listed) ? listed : listed?.changes;
+    if (raw.allowDrawing === undefined) raw.allowDrawing = false;
+  }
   if (flags.option) {
     if (raw.options !== undefined) throw new Error('The file has options already: give options in the file or with --option, not both.');
     raw.options = flags.option.map(optionFromFlag);
@@ -1041,6 +1061,11 @@ function validateAsk(ask, imageNames) {
         }
       }
     }
+  }
+  if (ask.changes !== undefined) {
+    problems.push(...validateChanges(ask.changes));
+    if (ask.kind !== 'decision') problems.push('an Ask with changes is --kind decision');
+    if (ask.options !== undefined || ask.decisions !== undefined || ask.image !== undefined) problems.push('an Ask with changes has no options, decisions or image: the Hub makes one row per change');
   }
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
   if (ask.kind !== undefined && !ASK_KINDS.includes(ask.kind)) problems.push(`--kind is one of: ${ASK_KINDS.join(', ')}`);
@@ -1186,6 +1211,11 @@ async function askGet(id) {
     if (!names.includes(name)) continue;
     const text = (await readInbox(inboxPath('asks', id, name))).trim();
     console.log(`== ${name}\n${text}`);
+    if (name === 'ask.json') {
+      let given = null;
+      try { given = JSON.parse(text); } catch { /* shown as it is */ }
+      if (Array.isArray(given?.changes) && !validateChanges(given.changes).length) console.log(`== changes\n${changeRows(given.changes).map(row => `${row.id}  ${row.text}`).join('\n')}`);
+    }
     if (name === 'answer.json') {
       let answer = null;
       try { answer = JSON.parse(text); } catch { /* shown as it is */ }
@@ -1317,6 +1347,119 @@ function proseCommand(text) {
   return null;
 }
 // --- prose-command:end ---
+
+// --- ask-changes:start (the same block is in site/api/ask-changes.mjs and site/card-api/cards.mjs; scripts/cards.test.mjs keeps them equal) ---
+/**
+ * The change list of a plan Ask (ws-qdh.3): what the owner approves, row by row, before a session applies it to Beads.
+ * `validateChanges` returns the problems with a list (an empty array when it is good); it never throws. Every op, field and label is
+ * allow-listed, ids are Beads ids (or `#n`, the n-th change of the list, for something an earlier `create` makes), and free text
+ * may not hold a command. `describeChange` is the one line the Hub shows for a change: built from the op, with the agent's text
+ * quoted inside it, never alone.
+ */
+const CHANGES_MAX = 20;
+const CHANGE_OPS = ['create', 'update', 'dep', 'close', 'label', 'card'];
+const CHANGE_KEYS = {
+  create: ['op', 'title', 'type', 'parent', 'description', 'labels'],
+  update: ['op', 'bead', 'title', 'description'],
+  dep: ['op', 'bead', 'blocks'],
+  close: ['op', 'bead', 'reason'],
+  label: ['op', 'bead', 'add', 'remove'],
+  card: ['op', 'card'],
+};
+const CHANGE_TYPES = ['task', 'feature', 'epic'];
+const CHANGE_LIMITS = { title: 120, description: 2000, reason: 200, labels: 5 };
+const CHANGE_BEAD = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
+const CHANGE_CARD = /^assistant\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+const CHANGE_LABEL = /^(?:wayfinder:[a-z]{2,20}|milestone|needs-owner|later)$/;
+
+export function validateChanges(changes) {
+  const problems = [];
+  if (!Array.isArray(changes) || changes.length < 1 || changes.length > CHANGES_MAX) return [`changes is a list of 1 to ${CHANGES_MAX}`];
+  const made = new Set();
+  const textOk = (at, name, value, max, { required = false } = {}) => {
+    if (value === undefined && !required) return;
+    if (typeof value !== 'string' || (required && !value.trim()) || value.length > max) { problems.push(`${at}: ${name} is ${required ? `1 to ${max}` : `at most ${max}`} characters of text`); return; }
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u2028\u2029]/.test(value)) { problems.push(`${at}: ${name} has a control character`); return; }
+    const found = proseCommand(value);
+    if (found) problems.push(`${at}: ${name} has a command in its text (${found.slice(0, 40)}); describe it in words`);
+  };
+  const beadOk = (at, name, value, index) => {
+    if (typeof value === 'string' && CHANGE_BEAD.test(value)) return;
+    const ref = typeof value === 'string' ? /^#([1-9][0-9]?)$/.exec(value) : null;
+    if (ref && made.has(Number(ref[1])) && Number(ref[1]) < index + 1) return;
+    problems.push(`${at}: ${name} is a Beads id, or #n for a create earlier in the list`);
+  };
+  const labelsOk = (at, name, value) => {
+    if (value === undefined) return;
+    if (!Array.isArray(value) || value.length < 1 || value.length > CHANGE_LIMITS.labels || new Set(value).size !== value.length || !value.every(label => typeof label === 'string' && CHANGE_LABEL.test(label))) {
+      problems.push(`${at}: ${name} is 1 to ${CHANGE_LIMITS.labels} different labels from: wayfinder:<type>, milestone, needs-owner, later`);
+    }
+  };
+  changes.forEach((change, index) => {
+    const at = `change ${index + 1}`;
+    if (!change || typeof change !== 'object' || Array.isArray(change)) { problems.push(`${at} is not an object`); return; }
+    if (!CHANGE_OPS.includes(change.op)) { problems.push(`${at}: op is one of ${CHANGE_OPS.join(', ')}`); return; }
+    const extra = Object.keys(change).filter(key => !CHANGE_KEYS[change.op].includes(key));
+    if (extra.length) problems.push(`${at}: ${change.op} has no field ${extra.join(', ')}`);
+    if (change.op === 'create') {
+      textOk(at, 'title', change.title, CHANGE_LIMITS.title, { required: true });
+      textOk(at, 'description', change.description, CHANGE_LIMITS.description);
+      if (change.type !== undefined && !CHANGE_TYPES.includes(change.type)) problems.push(`${at}: type is one of ${CHANGE_TYPES.join(', ')}`);
+      if (change.parent !== undefined) beadOk(at, 'parent', change.parent, index);
+      labelsOk(at, 'labels', change.labels);
+      made.add(index + 1);
+    } else if (change.op === 'update') {
+      beadOk(at, 'bead', change.bead, index);
+      textOk(at, 'title', change.title, CHANGE_LIMITS.title);
+      textOk(at, 'description', change.description, CHANGE_LIMITS.description);
+      if (change.title === undefined && change.description === undefined) problems.push(`${at}: update changes a title or a description`);
+    } else if (change.op === 'dep') {
+      beadOk(at, 'bead', change.bead, index);
+      beadOk(at, 'blocks', change.blocks, index);
+      if (change.bead === change.blocks) problems.push(`${at}: a bead cannot block itself`);
+    } else if (change.op === 'close') {
+      beadOk(at, 'bead', change.bead, index);
+      textOk(at, 'reason', change.reason, CHANGE_LIMITS.reason, { required: true });
+    } else if (change.op === 'label') {
+      beadOk(at, 'bead', change.bead, index);
+      labelsOk(at, 'add', change.add);
+      labelsOk(at, 'remove', change.remove);
+      if (change.add === undefined && change.remove === undefined) problems.push(`${at}: label adds or removes at least one label`);
+    } else if (typeof change.card !== 'string' || !CHANGE_CARD.test(change.card)) {
+      problems.push(`${at}: card is assistant/<folder>`);
+    }
+  });
+  return problems;
+}
+
+/** The Design review rows of a valid change list: `{ id: 'd<n>', text, detail? }`, text up to 200 and detail up to 500 characters. */
+export function changeRows(changes) {
+  const clipText = (value, max) => { const flat = String(value ?? '').replace(/\s+/g, ' ').trim(); return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat; };
+  const where = value => (/^#\d+$/.test(value) ? `new item ${value.slice(1)}` : value);
+  return changes.map((change, index) => {
+    let text;
+    let detail = '';
+    if (change.op === 'create') {
+      text = `Add ${change.type ?? 'task'} "${clipText(change.title, 120)}"${change.parent ? ` under ${where(change.parent)}` : ''}`;
+      detail = [change.description ? clipText(change.description, 400) : '', change.labels?.length ? `Labels: ${change.labels.join(', ')}` : ''].filter(Boolean).join(' · ');
+    } else if (change.op === 'update') {
+      text = `Change ${where(change.bead)}${change.title !== undefined ? ` to "${clipText(change.title, 120)}"` : ''}`;
+      detail = change.description !== undefined ? `New description: ${clipText(change.description, 400)}` : '';
+    } else if (change.op === 'dep') {
+      text = `${where(change.bead)} must be done before ${where(change.blocks)}`;
+    } else if (change.op === 'close') {
+      text = `Close ${where(change.bead)}`;
+      detail = `Reason: ${clipText(change.reason, 200)}`;
+    } else if (change.op === 'label') {
+      text = `Labels on ${where(change.bead)}`;
+      detail = [change.add?.length ? `Add: ${change.add.join(', ')}` : '', change.remove?.length ? `Remove: ${change.remove.join(', ')}` : ''].filter(Boolean).join(' · ');
+    } else {
+      text = `Copy the card ${change.card} into this project's section`;
+    }
+    return { id: `d${index + 1}`, text: clipText(text, 200), ...(detail ? { detail: clipText(detail, 500) } : {}) };
+  });
+}
+// --- ask-changes:end ---
 
 const bt = '`';
 const PROSE_ESCAPE = ' --prose-ok skips this check (for text that only looks like a command) and prints a warning.';
@@ -1960,6 +2103,203 @@ async function beadsPush(flags) {
   console.log(`beads/${project}/${copy}.jsonl (${meta.count} issue(s))`);
 }
 
+// --- Plan Asks (ws-qdh.3): `beads show` reads the project's roadmap, `ask create --changes` files a change list, `plan apply` runs the approved rows ---
+
+/** The "Workspace section:" of this repository's CLAUDE.md: where `card` changes put a copy of an assistant card. Undefined when there is none. */
+function folderSection() {
+  const roots = [gitOut('rev-parse', '--show-toplevel'), process.cwd()].filter(Boolean);
+  for (const root of roots) {
+    try {
+      const found = /Workspace section:\s*`([^`\s]+)`/i.exec(readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'));
+      return found ? found[1] : undefined;
+    } catch { /* no CLAUDE.md here */ }
+  }
+  return undefined;
+}
+
+const BEADS_COPY_MAX = 30;
+
+/** Every copy of a project's Beads export, merged as the Hub does: per issue the greatest updated_at wins, a tie goes to the copy pushed later. */
+async function mergedBeads(project) {
+  const files = (await listInbox('beads/')).filter(file => file.startsWith(`beads/${project}/`) || file === `beads/${project}.jsonl` || file === `beads/${project}.meta.json`);
+  const copies = new Map();
+  for (const file of files) {
+    const match = file.startsWith(`beads/${project}/`) ? /^beads\/[^/]+\/([a-z0-9][a-z0-9-]*)(\.jsonl|\.meta\.json)$/.exec(file) : /^beads\/[^/]+(\.jsonl|\.meta\.json)$/.exec(file);
+    if (!match) continue;
+    const copy = match.length === 3 ? match[1] : 'legacy';
+    const kind = match[match.length - 1] === '.jsonl' ? 'data' : 'meta';
+    if (copy !== 'legacy' && /token|secret|password|credential/.test(copy)) continue;
+    copies.set(copy, { ...copies.get(copy), [kind]: file });
+  }
+  const time = value => { const at = new Date(value ?? '').getTime(); return Number.isNaN(at) ? -Infinity : at; };
+  const rows = await mapLimit([...copies], 6, async ([copy, row]) => {
+    if (!row.data) return null;
+    const meta = row.meta ? await readJson(row.meta) : null;
+    const text = await readInbox(row.data);
+    const issues = [];
+    for (const line of String(text ?? '').split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try { const issue = JSON.parse(line); if (issue && typeof issue === 'object' && (issue._type === undefined || issue._type === 'issue') && typeof issue.id === 'string') issues.push(issue); } catch { /* a bad line is skipped */ }
+    }
+    return { copy, pushed: time(meta?.pushedAt), issues };
+  });
+  const kept = rows.filter(Boolean).sort((a, b) => b.pushed - a.pushed).slice(0, BEADS_COPY_MAX);
+  const best = new Map();
+  for (const row of kept) {
+    for (const issue of row.issues) {
+      const at = time(issue.updated_at);
+      const have = best.get(issue.id);
+      if (!have || at > have.at || (at === have.at && row.pushed > have.pushed)) best.set(issue.id, { issue, at, pushed: row.pushed });
+    }
+  }
+  return { copies: kept.length, issues: [...best.values()].map(entry => entry.issue) };
+}
+
+/** An issue as the Planner reads it: id, title, type, status, parent, labels and what it waits for. */
+function compactIssue(issue) {
+  const deps = Array.isArray(issue.dependencies) ? issue.dependencies.filter(dep => dep?.issue_id === issue.id) : [];
+  return {
+    id: issue.id, title: clip(issue.title, 160), type: issue.issue_type ?? 'task', status: issue.status ?? 'open',
+    parent: deps.find(dep => dep.type === 'parent-child')?.depends_on_id ?? null,
+    labels: Array.isArray(issue.labels) ? issue.labels.filter(label => typeof label === 'string') : [],
+    blockers: deps.filter(dep => dep.type === 'blocks').map(dep => dep.depends_on_id),
+  };
+}
+
+/** `beads show --project <p> [--open] [--json]`: the project's merged Beads copy, read-only and compact. Marks are not applied; this is what Beads says. */
+async function beadsShow(flags) {
+  const project = flags.project ?? folderProject();
+  if (!project || !/^[a-z0-9][a-z0-9-]*$/.test(project)) throw new Error('Usage: beads show --project <p> [--open] [--json]');
+  const { issues } = await mergedBeads(project);
+  const rows = issues.map(compactIssue).filter(row => !flags.open || row.status !== 'closed')
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (flags.json) return console.log(JSON.stringify(rows, null, 2));
+  if (!rows.length) return console.log(`(no Beads issues for ${project}${flags.open ? ' that are open' : ''})`);
+  for (const row of rows) console.log([row.id, row.status, row.type, row.title, row.parent ? `parent=${row.parent}` : '', row.labels.length ? `labels=${row.labels.join(',')}` : '', row.blockers.length ? `blocked-by=${row.blockers.join(',')}` : ''].filter(Boolean).join('\t'));
+}
+
+/** How `bd` is run: BUW_BD names a node script (a test's stand-in); on Windows the npm shim is a .cmd, so its node script is run directly, never through a shell. */
+function bdCommand() {
+  if (process.env.BUW_BD) return { cmd: process.execPath, prefix: [process.env.BUW_BD] };
+  if (process.platform === 'win32') {
+    for (const dir of String(process.env.PATH ?? '').split(path.delimiter)) {
+      if (!dir) continue;
+      const script = path.join(dir, 'node_modules', '@beads', 'bd', 'bin', 'bd.js');
+      try { readFileSync(script); return { cmd: process.execPath, prefix: [script] }; } catch { /* not in this folder */ }
+    }
+  }
+  return { cmd: 'bd', prefix: [] };
+}
+
+/** Run bd with an argument array (no shell). → { ok, out, error } */
+function runBd(args) {
+  const { cmd, prefix } = bdCommand();
+  const run = spawnSync(cmd, [...prefix, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
+  if (run.error) return { ok: false, out: '', error: run.error.code === 'ENOENT' ? 'bd is not installed.' : run.error.message };
+  return { ok: run.status === 0, out: String(run.stdout ?? '').trim(), error: clip(String(run.stderr ?? '').split(/\r?\n/).find(line => line.trim()) ?? `bd exited ${run.status}`, 200) };
+}
+
+const showArgs = args => args.map(arg => (/^[\w.:@/=,#+-]+$/.test(arg) ? arg : JSON.stringify(arg))).join(' ');
+
+/** The bd calls for one change, `ref` mapping #n to the id that create made. Each is an argument array for bd. A `card` change has none. */
+function bdCalls(change, text, ref) {
+  const description = text ?? change.description;
+  if (change.op === 'create') {
+    return [['create', `--title=${change.title}`, `--type=${change.type ?? 'task'}`, ...(change.parent ? [`--parent=${ref(change.parent)}`] : []), ...(description ? [`--description=${description}`] : []), ...(change.labels?.length ? [`--labels=${change.labels.join(',')}`] : []), '--silent']];
+  }
+  if (change.op === 'update') return [['update', ref(change.bead), ...(change.title !== undefined ? [`--title=${change.title}`] : []), ...(description !== undefined ? [`--description=${description}`] : [])]];
+  if (change.op === 'dep') return [['dep', 'add', ref(change.blocks), ref(change.bead)]];
+  if (change.op === 'close') return [['close', ref(change.bead), `--reason=${text ?? change.reason}`]];
+  if (change.op === 'label') return [...(change.add?.length ? [['label', 'add', ref(change.bead), change.add.join(',')]] : []), ...(change.remove?.length ? [['label', 'remove', ref(change.bead), change.remove.join(',')]] : [])];
+  return [];
+}
+
+/** A `change` verdict on a row replaces the text the owner can edit: a create's or update's description, a close's reason. Other ops cannot take text. */
+const takesText = change => ['create', 'update', 'close'].includes(change.op);
+
+/** Copy `assistant/<card>` into the project's section, never over a card that is there already. */
+async function copyPlanCard(change, section) {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'cards-plan-'));
+  try {
+    await get(change.card, tmp);
+    const entity = (await readRegistry(tmp)).entities?.[0];
+    if (!entity?.id) throw new Error(`${change.card} has no card entry.`);
+    let there = true;
+    try { await call('GET', `/sections/${section}/cards/${encodeURIComponent(entity.id)}`); } catch (error) { if (error.status === 404) there = false; else throw error; }
+    if (there) throw new Error(`${section} has a card ${entity.id} already; it is not overwritten.`);
+    await put(tmp, section, entity.id, false);
+    return `${section}/${entity.id}`;
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * `plan apply <ask id> [--dry-run] [--again]`: runs the rows of an answered change-list Ask that the owner approved, in order
+ * (a changed row with the owner's text), with bd called by argument arrays and no shell. Refuses an Ask that is not answered, has no
+ * change list, belongs to another project than this repository's, or was picked up already (--again overrides that last one).
+ * Stops at the first failure and says which rows are left.
+ */
+async function planApply(rawId, flags) {
+  const id = idSafe(rawId);
+  const ask = await readJson(inboxPath('asks', id, 'ask.json'));
+  if (!ask) throw new Error(`No ask ${id}.`);
+  const answer = await readJson(inboxPath('asks', id, 'answer.json'));
+  if (!answer) throw new Error(`Ask ${id} is not answered yet; there is nothing to apply.`);
+  if (ask.changes === undefined) throw new Error(`Ask ${id} has no change list.`);
+  const problems = validateChanges(ask.changes);
+  if (problems.length) throw new Error(`The change list of ask ${id} is not valid: ${problems.slice(0, 6).join('; ')}.`);
+  const own = folderProject();
+  if (!own) throw new Error('This repository has no "Beads project:" line in its CLAUDE.md, so it is not clear which project this plan is for. Run this in the project\'s own repository.');
+  if (ask.project !== own) throw new Error(`Ask ${id} is for project ${ask.project}, and this repository is ${own}. Run it in ${ask.project}'s repository.`);
+  if (!flags.again && await readInbox(inboxPath('asks', id, 'pickup.json')) !== null) throw new Error(`Ask ${id} was picked up already, so its plan was applied (or taken over). Use --again only when you are sure it was not.`);
+  const dry = !!flags['dry-run'];
+  const section = folderSection() ?? own;
+  const made = new Map();          // #n -> the id bd gave it
+  const left = [];
+  let applied = 0;
+  let skipped = 0;
+  for (const [index, change] of ask.changes.entries()) {
+    const row = `d${index + 1}`;
+    const given = answer.decisions?.[row];
+    const verdict = given?.verdict;
+    const note = typeof given?.note === 'string' ? given.note.replace(/\s+/g, ' ').trim() : '';
+    if (verdict !== 'approve' && verdict !== 'change') { console.log(`${row} ${change.op}: skipped (${verdict ?? 'no verdict'})`); skipped += 1; continue; }
+    if (verdict === 'change' && (!note || !takesText(change))) { console.log(`${row} ${change.op}: skipped (changed${note ? `, but a ${change.op} takes no text` : ' without text'}; do it by hand)`); skipped += 1; continue; }
+    const missing = [change.parent, change.bead, change.blocks].find(value => typeof value === 'string' && /^#\d+$/.test(value) && !made.has(value) && !dry);
+    if (missing) { console.log(`${row} ${change.op}: skipped (it needs change ${missing.slice(1)}, which was not applied)`); skipped += 1; continue; }
+    const ref = value => (/^#\d+$/.test(value) ? made.get(value) ?? `<new item ${value.slice(1)}>` : value);
+    const text = verdict === 'change' ? note : undefined;
+    if (change.op === 'card') {
+      if (dry) { console.log(`${row} card: would copy ${change.card} into ${section}`); applied += 1; continue; }
+      try { console.log(`${row} card: copied to ${await copyPlanCard(change, section)}`); applied += 1; } catch (error) { left.push(row, ...ask.changes.slice(index + 1).map((_, k) => `d${index + k + 2}`)); console.log(`${row} card: FAILED ${clip(error.message, 200)}`); return stopped(row, left); }
+      continue;
+    }
+    for (const args of bdCalls(change, text, ref)) {
+      if (dry) { console.log(`${row} ${change.op}: would run bd ${showArgs(args)}`); continue; }
+      const run = runBd(args);
+      if (!run.ok) {
+        console.log(`${row} ${change.op}: FAILED bd ${showArgs(args.slice(0, 2))} ... ${run.error}`);
+        return stopped(row, [row, ...ask.changes.slice(index + 1).map((_, k) => `d${index + k + 2}`)]);
+      }
+      if (change.op === 'create') {
+        if (!BEAD_ID.test(run.out)) { console.log(`${row} create: FAILED bd printed no id (${clip(run.out, 80)})`); return stopped(row, [row, ...ask.changes.slice(index + 1).map((_, k) => `d${index + k + 2}`)]); }
+        made.set(`#${index + 1}`, run.out);
+        console.log(`${row} create: made ${run.out}`);
+      } else console.log(`${row} ${change.op}: done`);
+    }
+    if (change.op === 'create' && dry) made.set(`#${index + 1}`, `<new item ${index + 1}>`);
+    applied += 1;
+  }
+  console.log(`${dry ? 'Would apply' : 'Applied'} ${applied} of ${ask.changes.length} row(s); ${skipped} skipped.${dry ? '' : ' Next: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup ' + id}`);
+}
+
+/** The ending of a plan that stopped: what is left, and exit 1. */
+function stopped(row, left) {
+  console.log(`Stopped at ${row}. Not applied: ${left.join(', ')}. Fix the cause and apply those rows by hand, or run plan apply again after removing what is done (rows already applied would be applied twice).`);
+  throw new Exit(1);
+}
+
 // --- The owner's marks on the Roadmap: bead-marks/<project>/<bead>/<stamp>-<verdict>-<rand4>.json ---
 // The Hub writes done, not-needed, unblock and undo; an agent that closed the issue in Beads (or took the
 // needs-owner label off, for unblock) writes applied. A mark is active when the newest owner verdict is not undo
@@ -2141,7 +2481,7 @@ async function feedbackFiled(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok', 'unfiled']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok', 'unfiled', 'again']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
@@ -2206,6 +2546,8 @@ async function inbox(command, args) {
   }
   if (command === 'sheet' && sub === 'put') return sheetPut(flags);
   if (command === 'beads' && sub === 'push') return beadsPush(flags);
+  if (command === 'beads' && sub === 'show') return beadsShow(flags);
+  if (command === 'plan' && sub === 'apply' && id) return planApply(id, flags);
   if (command === 'mark' && sub === 'list') return markList(flags);
   if (command === 'mark' && sub === 'applied') return markApplied(flags);
   if (command === 'feedback' && sub === 'list') return feedbackList(flags);
@@ -2219,7 +2561,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark', 'feedback'].includes(first)) {
+  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark', 'feedback', 'plan'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;

@@ -52,13 +52,13 @@ test('BUILTIN_KEYS equals the client sprite list', () => {
   assert.deepEqual([...BUILTIN_KEYS].sort(), [...CLIENT_KEYS].sort());
 });
 
-test('the agent list is Hermes, Briefs, Claude Code and the three research agents', async () => {
+test('the agent list is Hermes, Briefs, Claude Code, the three research agents and the Planner', async () => {
   const f = await fixture();
   try {
     const { status, body } = await f.get('/hub/team');
     assert.equal(status, 200);
-    assert.deepEqual(body.agents.map(row => row.id), ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown']);
-    assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown']);
+    assert.deepEqual(body.agents.map(row => row.id), ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown', 'planner']);
+    assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
     assert.deepEqual(agent(body, 'market-researcher').presets, ['market-research']);
     assert.deepEqual(agent(body, 'teardown').presets, ['game-teardown']);
     assert.deepEqual(agent(body, 'researcher').presets, ['research', 'mockup'], 'The Researcher also takes mockups; Give work opens Spawn on the first.');
@@ -185,7 +185,7 @@ test('Hermes: not set up is offline; healthy is idle with the last chat and cach
 
 test('agentStatuses and checkAvatar on their own', () => {
   const rows = agentStatuses({ working: [], pc: null, hermes: { ok: true }, lastChat: '', at: NOW });
-  assert.deepEqual(rows.map(row => row.status), ['idle', 'idle', 'offline', 'idle', 'idle', 'idle']);
+  assert.deepEqual(rows.map(row => row.status), ['idle', 'idle', 'offline', 'idle', 'idle', 'idle', 'idle']);
   assert.equal(rows[0].task, 'No chats yet');
   assert.deepEqual(checkAvatar({ kind: 'random', salt: 0, extra: 1 }), { kind: 'random', salt: 0 });
   assert.equal(checkAvatar(null), null);

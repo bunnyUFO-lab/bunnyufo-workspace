@@ -76,3 +76,12 @@
   }
   .hub-map-panel-resolve .hub-q-list li { flex-direction: column; align-items: stretch; }
 }
+
+/* "Plan in Hermes" sits in the Destination row, or alone above the map when the project has no map. */
+.hub-plan-btn { flex: none; white-space: nowrap; }
+.hub-plan-row { flex: none; display: flex; margin: 0 0 8px; }
+@media (max-width: 600px) {
+  .hub-plan-btn { min-height: 44px; }
+  .hub-wayfinder[data-open="true"] .hub-wayfinder-row > .hub-plan-btn { flex: 1 1 100%; margin-left: 0; }
+  .hub-plan-row .hub-plan-btn { flex: 1 1 100%; }
+}

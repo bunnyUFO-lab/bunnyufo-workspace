@@ -1,7 +1,7 @@
 // The ways to resolve a Wayfinder question (ws-qdh.1): which button each kind gets, and the text Spawn, Chat and a session start from.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PREPARE_ALL_MAX, SEED_MAX, actionFor, chatDraft, kindOf, oneLine, preparable, questionSeed, sessionPrompt } from '../../src/hub/questionSeed.ts';
+import { PREPARE_ALL_MAX, SEED_MAX, actionFor, chatDraft, kindOf, oneLine, planDraft, preparable, questionSeed, sessionPrompt } from '../../src/hub/questionSeed.ts';
 
 const question = (id, extra = {}) => ({ id, title: `Title of ${id}`, type: 'grilling', blockedBy: [], unlocks: [], ...extra });
 const way = (open, extra = {}) => ({ mapId: 'wf-map', mapTitle: 'Map title', destination: 'A milestone list the owner accepts.', notes: 'Notes text.', decisions: 0, open, ...extra });
@@ -88,4 +88,13 @@ test('sessionPrompt asks for the wayfinder skill on this ticket and map, with th
   const text = sessionPrompt('Example App', way([item]), item);
   assert.equal(text.split('\n')[0], 'In the Example App repo, use the wayfinder skill to work ticket wf-2 on map wf-map (Beads). It is a research ticket.');
   assert.ok(text.includes('Check the list.'));
+});
+
+test('planDraft names the project and the node, asks the Planner to read the roadmap first, and is never a message sent by itself', () => {
+  const plain = planDraft('wayfind', 'Wayfind', null);
+  assert.match(plain, /^I want to plan work on the Wayfind Roadmap \(project wayfind\)\.\nRead the roadmap with cards beads show --project wayfind --open/);
+  assert.doesNotMatch(plain, /looking at/);
+  const node = planDraft('wayfind', 'Wayfind', { id: 'wf-1', title: 'Which   project\ncomes first?' });
+  assert.match(node, /I am looking at "Which project comes first\?" \(wf-1\)\./);
+  assert.match(node, /Do not file anything until I say the plan is ready\.$/);
 });

@@ -134,6 +134,9 @@ npm run cards -- event <kind> --title <t> [--project --bead --ask --url --summar
 npm run cards -- event pr-merged|pr-closed --title <t> --url <pr link> --pr-closed-at <iso>   # fixed file name per PR close; a repeat prints `exists <file>`
 GITHUB_TOKEN=$(gh auth token) npm run cards -- pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix> [--days 7] [--dry-run]
 npm run cards -- ask create --project <p> [--bead <b>] (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
+npm run cards -- ask create --project <p> --kind decision --question <t> --changes <changes.json>   # a plan: 1 to 20 changes the owner approves row by row (docs/workspaces.md, "Plans")
+npm run cards -- beads show --project <p> [--open] [--json]   # read-only: the project's merged Beads copy
+npm run cards -- plan apply <ask id> [--dry-run]   # run the approved rows of an answered plan with bd
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
 npm run cards -- ask get <id>
 npm run cards -- ask pickup <id>      # also: ask cancel <id>; exit 3 if someone already did

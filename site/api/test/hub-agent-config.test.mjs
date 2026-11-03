@@ -203,7 +203,7 @@ test('the soul note says when the text was cut or secrets were replaced', () => 
 });
 
 test('every agent has a profile field: main, briefs or none', () => {
-  assert.deepEqual(AGENTS.map(agent => [agent.id, agent.profile]), [['hermes', 'main'], ['briefs', 'briefs'], ['claude', null], ['researcher', 'main'], ['market-researcher', 'main'], ['teardown', 'main']]);
+  assert.deepEqual(AGENTS.map(agent => [agent.id, agent.profile]), [['hermes', 'main'], ['briefs', 'briefs'], ['claude', null], ['researcher', 'main'], ['market-researcher', 'main'], ['teardown', 'main'], ['planner', 'main']]);
 });
 
 test('an ID string that holds a secret or a URL is dropped, so model and skill names cannot carry one', () => {

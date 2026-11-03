@@ -19,8 +19,9 @@ import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
 import QuestionActions from './QuestionActions'
-import { COST, preparable, questionSeed } from './questionSeed'
+import { COST, planDraft, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
+import { startChat } from './chatStart'
 import { host } from '../lib/host'
 
 const HINT_KEY = 'hub-map-hint-seen'
@@ -67,7 +68,16 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && (
         <Fragment key={project}>
-          <MapView model={model} project={project} nodeId={nodeId} header={model.wayfinder ? <WayfinderHeader project={project} repoName={list.find(item => item.id === project)?.name ?? project} wayfinder={model.wayfinder} /> : null} />
+          <MapView model={model} project={project} nodeId={nodeId} header={(() => {
+            const name = list.find(item => item.id === project)?.name ?? project
+            const found = nodeId ? find(model, nodeId) : null
+            const selected = found ? { id: nodeId as string, title: found.kind === 'm' ? found.milestone.title : found.kind === 'f' ? found.feature.title : found.task.title } : null
+            const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
+            const way = model.wayfinder
+            return way && (way.destination || way.decisions || way.open.length)
+              ? <WayfinderHeader project={project} repoName={name} wayfinder={way} plan={plan} />
+              : host.write && host.chat ? <div className="hub-plan-row">{plan}</div> : null
+          })()} />
         </Fragment>
       )}
     </>
@@ -75,7 +85,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
 }
 
 /** The Wayfinder destination above the map: one row, with the open questions as links to their nodes. Starts open on a wide box and closed on a narrow one; the state is not remembered. */
-function WayfinderHeader({ project, repoName, wayfinder }: { project: string; repoName: string; wayfinder: MapWayfinder }) {
+function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: string; repoName: string; wayfinder: MapWayfinder; plan?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 700) }, [])
@@ -98,6 +108,7 @@ function WayfinderHeader({ project, repoName, wayfinder }: { project: string; re
             Open questions · {questions.length}
           </button>
         )}
+        {plan}
         {open && host.write && ready.length > 0 && (
           <span className="hub-wayfinder-all">
             <button type="button" className="hub-btn pri" data-q-all onClick={() => openSpawn({ preset: 'question', project, text: questionSeed(project, wayfinder, ready.map(item => item.id), 'grilling') })}>Prepare all · {ready.length}</button>
@@ -116,6 +127,20 @@ function WayfinderHeader({ project, repoName, wayfinder }: { project: string; re
         </ul>
       )}
     </div>
+  )
+}
+
+/**
+ * "Plan in Hermes": opens Chat with the Planner and a draft that names this project and the node the owner is looking at. It files nothing
+ * and sends nothing; the owner reads the draft and presses send. The Planner files one change-list Ask when the plan is ready.
+ */
+function PlanInHermes({ project, projectName, selected }: { project: string; projectName: string; selected: { id: string; title: string } | null }) {
+  if (!host.write || !host.chat) return null
+  return (
+    <button
+      type="button" className="hub-btn hub-plan-btn" data-plan-in-hermes title="Talk the plan through with Hermes. It files a change list for you to approve; nothing changes until you answer."
+      onClick={() => { startChat({ persona: 'planner', draft: planDraft(project, projectName, selected) }); window.location.hash = hubHash('chat') }}
+    >Plan in Hermes</button>
   )
 }
 

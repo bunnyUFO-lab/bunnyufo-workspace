@@ -26,6 +26,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { contentTypeOf, createBucket } from '../api/s3.mjs';
+import { validateChanges } from '../api/ask-changes.mjs';
 
 const CLIENT = new URL('./cards.mjs', import.meta.url);
 
@@ -281,6 +282,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     }
   };
   /**
+   * A change-list Ask (ws-qdh.3) is refused with every problem named when its `changes` are not valid: the same check the site and the cards
+   * client make (site/api/ask-changes.mjs). Only a limited writer's ask.json is looked at; one that does not parse, or has no `changes`, passes.
+   */
+  const changesValid = (caller, sectionId, file, body) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^asks\/[^/]+\/ask\.json$/i.test(file)) return;
+    let parsed;
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { return; }
+    if (!parsed || typeof parsed !== 'object' || parsed.changes === undefined) return;
+    const problems = validateChanges(parsed.changes);
+    if (problems.length) throw new HttpError(422, `The change list is not valid: ${problems.slice(0, 6).join('; ')}.`);
+  };
+  /**
    * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json, or deeper) needs a pull request
    * link (`url`, or `prs`) or an `ask` (the owner's action, one line). Every other event kind and every other file passes. A file that is
    * not JSON passes too: the Hub reads only what parses.
@@ -451,6 +464,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       await runnerOnly(caller, sectionId, file);
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
+      changesValid(caller, sectionId, file, body);
       reviewNeedsAction(sectionId, file, body);
       let put;
       try {
