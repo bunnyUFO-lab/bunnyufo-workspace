@@ -132,7 +132,10 @@ try {
     step(`${label}: a shared link opens the sheet, and closing lands on the board`);
     await page.goto(`${fixture.url}#/~hub/work/lanes/ws-ready`);
     await titled(page, 'Ready to start').waitFor();
-    assert.equal(await page.locator('[data-card="bead:ws-ready"][data-focused="true"]').count(), 1);
+    // The sheet title shows before the board has drawn the card: wait for the focused card, then count it.
+    const focused = page.locator('[data-card="bead:ws-ready"][data-focused="true"]');
+    await focused.waitFor();
+    assert.equal(await focused.count(), 1);
     await page.getByRole('button', { name: 'Close details' }).click();
     await atBoard(page, '#/~hub/work/lanes');
     assert.equal(await panelOf(page).count(), 0);
