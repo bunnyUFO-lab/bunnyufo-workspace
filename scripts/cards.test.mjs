@@ -1711,3 +1711,102 @@ test('ask create: a folder without a CLAUDE.md, or without a Beads project line,
     }
   } finally { cli.cwd = null; await close(); }
 });
+
+// --- a command written into prose is refused at creation (ws-pgw) ---
+
+/** proseCommand, loaded from its marked block in cards.mjs (the client is one file, so it has no exports). */
+async function loadProseCommand() {
+  const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  const block = source.match(/\/\/ --- prose-command:start[^\n]*\n([\s\S]*?)\/\/ --- prose-command:end ---/)?.[1];
+  assert.ok(block, 'The prose-command block is in cards.mjs.');
+  return new Function(`${block}\nreturn proseCommand;`)();
+}
+
+// [text, expected match or null]
+const PROSE_CASES = [
+  // refused
+  ['Run `git status` in the repo', 'git status'],
+  ['Over SSH: `ssh root@host pct list`', 'ssh root@host pct list'],
+  ['Open a terminal and type `npm run build`.', 'npm run build'],
+  ['Use `node scripts/check-leaks.mjs` before pushing', 'node scripts/check-leaks.mjs'],
+  ['Then `cd C:\\work\\app` and look', 'cd C:\\work\\app'],
+  ['Run `.\\install.ps1`', '.\\install.ps1'],
+  ['Run `./deploy.sh --dry-run`', './deploy.sh --dry-run'],
+  ['Start it with `claude --resume` please', 'claude --resume'],
+  ['Check with `ls -la` first', 'ls -la'],
+  ['Set it: `gh secret set TOKEN --repo a/b`', 'gh secret set TOKEN --repo a/b'],
+  ['Run: git fetch origin', 'git fetch origin'],
+  ['In PowerShell: C:\\tools\\run.ps1 -Check', 'C:\\tools\\run.ps1 -Check'],
+  ['In Git Bash: ~/.buw/cards.mjs ask list', '~/.buw/cards.mjs ask list'],
+  ['Over SSH: /usr/local/bin/backup now', '/usr/local/bin/backup now'],
+  ['In a terminal: docker compose up -d', 'docker compose up -d'],
+  ['Run `systemctl restart site`.', 'systemctl restart site'],
+  ['Text.\n```bash\ngit status\n```\nThen `bd ready` too', 'bd ready'],
+  // passes
+  ['Check it worked', null],
+  ['Add the `ws-abc` bead', null],
+  ['Open `Settings` and tick the box', null],
+  ['Run `install.ps1` from the folder', null],
+  ['See https://example.test/a?b=c -d for details', null],
+  ['Open `https://example.test/path --x`', null],
+  ['Git Bash is open on the PC', null],
+  ['Run: the installer from the folder', null],
+  ['Run: git is installed already', null],
+  ['In PowerShell: nothing to type here', null],
+  ['Over SSH: you need the VPN first', null],
+  ['Use `git` for this, not `npm`', null],
+  ['Press `Ctrl+K` to find a card', null],
+  ['Update hub-hooks to 0.1.9', null],
+  ['Install the report task', null],
+  ['Refresh the cards client', null],
+  ['Deploy the card API from main', null],
+  ['Open `./scripts` and look around', null],
+  ['Sign the command line in', null],
+  ['Fenced is fine:\n```bash\ngit status --short\n```', null],
+  ['Fenced with an open end:\n```\nnpm ci', null],
+  [undefined, null],
+  ['', null],
+];
+
+test(`proseCommand: ${PROSE_CASES.length} cases (${PROSE_CASES.filter(c => c[1]).length} refused, ${PROSE_CASES.filter(c => !c[1]).length} pass)`, async () => {
+  const proseCommand = await loadProseCommand();
+  for (const [text, expected] of PROSE_CASES) assert.equal(proseCommand(text), expected, JSON.stringify(text));
+});
+
+for (const via of ['api', 's3']) {
+  test(`prose commands (${via}): a checklist step or an Ask with one is refused with exit 2 and writes nothing; --prose-ok and a command field pass`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const before = () => [...fake.objects.keys()].length;
+      const start = before();
+      const step = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'T', '--item', 'Fine', '--item', 'Run `git push origin main` over SSH');
+      assert.equal(step.code, 2, step.stderr);
+      assert.match(step.stderr, /Step 02 has a command in its text: `git push origin main`\. Put it in --command \(one command per step\) with --shell, and keep the text to where and why\./);
+      const file = path.join(dir, 'c.json');
+      await writeFile(file, JSON.stringify({ title: 'F', items: [{ text: 'In Git Bash: npm run build' }] }));
+      assert.equal((await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file)).code, 2);
+      const q = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Should I run `npm test --silent` now?');
+      assert.equal(q.code, 2, q.stderr);
+      assert.match(q.stderr, /The question has a command in its text: `npm test --silent`\. Put the command in its own fenced code block\./);
+      const d = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Pick', '--decision', 'Use `git rebase -i`|detail');
+      assert.equal(d.code, 2, d.stderr);
+      assert.match(d.stderr, /Decision 1 has a command/);
+      const askFile = path.join(dir, 'a.json');
+      await writeFile(askFile, JSON.stringify({ question: 'Pick', decisions: [{ id: 'd1', text: 'Ok', detail: 'Run: git status' }] }));
+      assert.equal((await cli(via, 'ask', 'create', '--project', 'probe', '--file', askFile)).code, 2);
+      assert.equal(before(), start, 'Nothing was written.');
+
+      const ok = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'T', '--item', 'Over SSH or in Git Bash', '--command', 'git push origin main', '--item', 'Run `git push` is explained here', '--command', 'git push');
+      assert.equal(ok.code, 0, ok.stderr);
+      assert.equal(fake.json(`sections/inbox/checklists/${ok.stdout.trim()}/checklist.json`).items[1].command, 'git push', 'A step with a command field is not checked.');
+      const fenced = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Run this?\n```bash\nnpm test --silent\n```');
+      assert.equal(fenced.code, 0, fenced.stderr);
+      const escaped = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Does `npm test --silent` read as prose?', '--prose-ok');
+      assert.equal(escaped.code, 0, escaped.stderr);
+      assert.match(escaped.stderr, /Warning: The question looks like it has a command/);
+      const stepOk = await cli(via, 'checklist', 'create', '--project', 'probe', '--title', 'T', '--item', 'Mentions `git status -s` as a name', '--prose-ok');
+      assert.equal(stepOk.code, 0, stepOk.stderr);
+      assert.match(stepOk.stderr, /Warning: Step 01 looks like/);
+    } finally { await close(); }
+  });
+}

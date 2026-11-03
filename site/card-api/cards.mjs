@@ -36,7 +36,7 @@
 //        post an event to events/<date>/. A failed send is kept in ~/.buw/spool.jsonl (BUW_SPOOL) and
 //        retried by the next inbox command.
 //   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
-//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision]
+//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--prose-ok]
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
 //        then, when a #needs-you webhook is configured (BUW_DISCORD_NEEDS_YOU, `discord.needsYou` in
 //        ~/.buw/hub.json, or ~/.buw/secrets/discord-webhook-needs-you), post a short note there with a
@@ -62,6 +62,8 @@
 //        --decision repeats (1 to 10) and makes a Design review: each becomes { id: d1, d2, ... , text, detail } (a "|" splits
 //        the text from a detail); a file that has decisions refuses them on the command line. With decisions and exactly one
 //        --image and no options, that picture is the one the decisions are about; allowDrawing is on unless the file says no.
+//        A command written into the question, a decision or the context outside a fenced code block is refused (exit 2). Put it in a
+//        ```bash block. --prose-ok skips that check, for text that only looks like a command, and prints a warning.
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
 //   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json; for a design
 //        review also one line per decision ("d1 approve", "d2 change: Bottom-left")
@@ -84,6 +86,8 @@
 //        before it is an error. A command in a guide or an Ask goes in a fenced code block, never in prose.
 //        --playtest makes it a Playtest: the items are what to try, --build (https only) is the build to open, --platform
 //        defaults to web, --look-for says what to watch for. The #needs-you ping reads "Playtest: <title>".
+//        A step whose text has a command in it (a `git ...` span, or "Run: ...") and no --command is refused (exit 2), nothing written: put the
+//        command in --command with --shell and keep the text to where and why. --prose-ok skips the check (text that only looks like a command).
 //   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
 //   cards checklist get <id> [--json] [--into <dir>]                        progress, the items (an item's command on the line under it), submit.json (for a playtest also its
 //        build, rating, verdict and issues in plain lines); --into downloads the
@@ -140,7 +144,7 @@ const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision]\n'
-  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
+  + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
 /** The cards bucket this machine knows of: BUW_S3_BUCKET, else the first one the registry names. */
@@ -832,7 +836,7 @@ function optionFromFlag(value) {
 
 /** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
 async function askInput(flags) {
-  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision]';
+  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--prose-ok]';
   if (!flags.project || (!flags.file && !flags.question)) throw new Error(usage);
   if (flags.file && flags.question) throw new Error(`Give --file, or --question, not both. ${usage}`);
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { question: flags.question };
@@ -1020,6 +1024,8 @@ function projectNote(project) {
 
 async function askCreate(flags) {
   const raw = await askInput(flags);
+  const askTexts = [['The question', raw.question], ['The context', raw.context], ...(Array.isArray(raw.decisions) ? raw.decisions.flatMap((d, i) => [[`Decision ${i + 1}`, d?.text], [`Decision ${i + 1}'s detail`, d?.detail]]) : [])];
+  for (const [where, text] of askTexts) refuseProseCommand(flags, where, text, 'Put the command in its own fenced code block.');
   const id = newId(flags.project, raw.question);
   const ask = askFromFile(raw, flags, id);
   const images = flags.image ?? [];
@@ -1170,6 +1176,48 @@ const trimBlankLines = value => value.replace(/^(?:[ \t]*\r?\n)+/, '').replace(/
 
 const isHttps = value => { try { return new URL(value).protocol === 'https:' && /^https:\/\//i.test(value); } catch { return false; } };
 
+// --- prose-command:start (self-contained: scripts/cards.test.mjs loads this block on its own) ---
+/**
+ * The command-looking part of a text, or null. Narrow on purpose: a false refusal blocks an agent.
+ * Matches a backtick span that starts with a command word and has arguments, or has a flag; and what follows a
+ * "Run:" style lead-in when it starts with a command word or a path. Text inside ``` fences is skipped.
+ * Ids, names, URLs, a lone tool name and prose that only mentions a tool do not match.
+ */
+function proseCommand(text) {
+  if (typeof text !== 'string') return null;
+  const words = 'git|npm|npx|node|python|py|pwsh|powershell|cd|ssh|scp|curl|gh|bd|claude|docker|systemctl|pct|unity';
+  const startsLikeCommand = new RegExp(`^(?:${words})\\s+\\S`);
+  const scriptPath = /^\.[\\/]\S*(?:\.(?:ps1|sh|mjs|js|py|cmd|bat)\b|\s+\S)/;
+  const flag = /\s--?[A-Za-z][\w-]*/;
+  const proseSecond = /^(?:is|are|was|were|will|would|should|can|could|to|and|or|the|a|an|from|in|on|at|of|you|it|that|this|has|have|not|if|when|as|for|with)$/i;
+  const outside = text.replace(/```[\s\S]*?(?:```|$)/g, ' ');
+  for (const span of outside.matchAll(/`([^`\n]+)`/g)) {
+    const body = span[1].trim();
+    if (/^https?:\/\//i.test(body)) continue;
+    if (scriptPath.test(body) || (/\s/.test(body) && (startsLikeCommand.test(body) || flag.test(body)))) return body;
+  }
+  for (const lead of outside.matchAll(/(?:\bRun:|\bRun `|\bIn PowerShell:|\bIn Git Bash:|\bOver SSH:|\bIn a terminal:)[ \t]*`?([^`\n]*)/gi)) {
+    const rest = lead[1].trim();
+    const [first = '', second = ''] = rest.split(/\s+/);
+    if (new RegExp(`^(?:${words})$`).test(first) && second && !proseSecond.test(second)) return rest;
+    if (/^(?:[A-Za-z]:\\\S|~\/\S|\/\S+\/\S)/.test(first)) return rest;
+  }
+  return null;
+}
+// --- prose-command:end ---
+
+const bt = '`';
+const PROSE_ESCAPE = ' --prose-ok skips this check (for text that only looks like a command) and prints a warning.';
+
+/** Refuse a command written into prose unless --prose-ok; `fix` says how to repair it. Throws an Exit(2) after printing. */
+function refuseProseCommand(flags, where, text, fix) {
+  const found = proseCommand(text);
+  if (!found) return;
+  if (flags['prose-ok']) { console.error(`Warning: ${where} looks like it has a command (${bt}${found}${bt}); --prose-ok skipped the check.`); return; }
+  console.error(`${where} has a command in its text: ${bt}${found}${bt}. ${fix}${PROSE_ESCAPE}`);
+  throw new Exit(2);
+}
+
 /** The problems with a checklist input (the shape of checklist.json without id, project, createdAt, from and item ids). */
 function validateChecklist(raw) {
   const L = CHECKLIST_LIMITS;
@@ -1299,7 +1347,7 @@ function printChecklist(view, asJson) {
 }
 
 async function checklistCreate(flags) {
-  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]';
+  const usage = 'Usage: checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
   if (!flags.project || (!flags.file && !flags.title)) throw new Error(usage);
   if (flags.file && (flags.title || flags.item)) throw new Error(`Give --file, or --title with --item, not both. ${usage}`);
   if (!/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('--project is lower-case letters, digits and dashes');
@@ -1319,6 +1367,9 @@ async function checklistCreate(flags) {
   const problems = validateChecklist(raw);
   if (flags.card !== undefined && !/^https?:\/\//i.test(flags.card)) problems.push('--card is an http:// or https:// link');
   if (problems.length) throw new Error(`checklist.json is not valid: ${problems.join('; ')}.`);
+  raw.items.forEach((item, index) => {
+    if (item.command === undefined) refuseProseCommand(flags, `Step ${String(index + 1).padStart(2, '0')}`, item.text, 'Put it in --command (one command per step) with --shell, and keep the text to where and why.');
+  });
   const id = newId(flags.project, raw.title);
   const checklist = checklistFromInput(raw, flags, id);
   const body = `${JSON.stringify(checklist, null, 2)}\n`;
@@ -1853,7 +1904,7 @@ async function markApplied(flags) {
 
 // --- argument parsing for the inbox commands ---
 
-const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved']);
+const BOOLEAN_FLAGS = new Set(['answered', 'open', 'submitted', 'all', 'json', 'require-passkey', 'playtest', 'approved', 'prose-ok']);
 function parseFlags(args) {
   const flags = { _: [] };
   for (let at = 0; at < args.length; at += 1) {
