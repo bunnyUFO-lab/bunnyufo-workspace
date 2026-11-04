@@ -253,6 +253,26 @@
 .hub-map-node:focus { outline: none; }
 .hub-map-node:focus-visible circle:first-of-type { stroke-width: 5; }
 .hub-map-ring { fill: none; stroke: var(--pink); stroke-width: 2; pointer-events: none; }
+/* The Roadmap's search: a row under the controls. With matches, everything off their path dims; hits get a gold ring and gold bold text. */
+.hub-map-search { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
+.hub-map-search .sf { flex: 0 1 320px; min-width: 0; }
+.hub-map-found { flex: 0 1 auto; min-width: 0; font-size: 0.8125rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.hub-map-steps { display: inline-flex; gap: 6px; }
+.hub-map-steps .hub-btn { min-width: 44px; min-height: 44px; }
+@media (max-width: 640px) {
+  .hub-map-search { justify-content: flex-start; }
+  .hub-map-search .sf { flex: 1 1 100%; }
+  /* A sheet covers the bottom of the screen: the search row gives its height back to the map until the sheet closes. */
+  .hub-map-search[data-sheet] { display: none; }
+  /* The open Wayfinder list takes the height instead (else the box turns wider than tall and flips its axis); a search in progress keeps its row. */
+  .hub[data-screen="map"]:has(.hub-wayfinder[data-open="true"]) .hub-map-search:not([data-query]) { display: none; }
+  .hub-map-found { flex: 1 1 0; }
+}
+.hub-map-dim { opacity: 0.28; }
+@media (prefers-reduced-motion: no-preference) { .hub-map-dim, .hub-map-node, .hub-map-chev { transition: opacity 160ms ease; } }
+.hub-map-ring-hit { stroke: var(--amber); stroke-width: 1.5; }
+.hub-map-ring-current { stroke: var(--amber); stroke-width: 3; }
+.hub-map-hit-text { fill: var(--amber); font-weight: 700; }
 .hub-map-chev { cursor: pointer; outline: none; --hit: 32; }
 @media (pointer: coarse) { .hub-map-chev { --hit: 44; } }
 /* The hit ring is 40 units across; below the zoom where that is --hit px on screen, the whole button grows so it stays that size. */

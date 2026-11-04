@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ago, appUrl, hubPost, remember, sessionUrl } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import type { TeamAgent, TeamView } from '../lib/hubTeam'
+import type { TeamAction, TeamAgent, TeamView } from '../lib/hubTeam'
 import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
 import { AgentSprite } from './team/AgentSprite'
@@ -10,6 +10,7 @@ import SpriteSheet from './team/SpriteSheet'
 import Floor from './team/Floor'
 import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
 import { openSpawn } from './spawnStore'
+import { startChat } from './chatStart'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
 import { useHubData } from './useHub'
@@ -37,11 +38,24 @@ function SessionRow({ item }: { item: WorkingItem }) {
     : <li><span className="team-session">{body}</span></li>
 }
 
+/** The main button's work: Chat on a persona (a fresh conversation, empty composer), or Spawn on a preset. */
+function runAction(action: TeamAction) {
+  if ('chat' in action) {
+    startChat({ persona: action.chat, draft: '' })
+    window.location.hash = hubHash('chat')
+  } else {
+    openSpawn({ preset: action.preset, ...(action.project ? { project: action.project } : {}), ...(action.text ? { text: action.text } : {}) })
+  }
+}
+
 function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent; now: number; canPick: boolean; onSprite: (agent: TeamAgent) => void; opener: (node: HTMLButtonElement | null) => void }) {
   const dot = STATUS_DOT[agent.status]
   const live = agent as TeamAgent & AgentActivity
   const state = stateOf({ status: agent.status, doneAt: live.doneAt, review: live.review, now })
   const sprite = agent.sprite
+  const action = agent.action
+  // The one main button. Spawn and sprites need a signed-in owner (canPick); Chat also needs Chat to be set up.
+  const showMain = canPick && (!('chat' in action) || host.chat)
   return (
     <article className={`team-card st-${agent.status}`} data-agent={agent.id} data-status={agent.status}>
       <header className="team-card-head">
@@ -52,16 +66,20 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
         </span>
         <span className="team-chip">{agent.room}</span>
       </header>
+      <p className="team-role team-dim">{agent.role}</p>
       <p className="team-task">{agent.status === 'offline' ? <span className="team-dim">{agent.task}</span> : <><b>Now</b> · {agent.task}</>}</p>
       <dl className="team-facts">
         <div><dt>Model</dt><dd>{agent.model}</dd></div>
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
       </dl>
       {agent.sessions && agent.sessions.length > 0 && <ul className="team-sessions" aria-label={`${agent.name} sessions`}>{agent.sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>}
-      <footer className="team-card-foot">
-        <span className="team-dim">{agent.role}</span>
+      {showMain && (
+        <div className="team-main">
+          <button type="button" className="hub-btn pri" onClick={() => runAction(action)} data-main-action={agent.id} {...(action.label === 'Give work' ? { 'data-give-work': agent.id } : {})}>{agent.action.label}</button>
+        </div>
+      )}
+      <footer className="team-links">
         <a className="team-details-link" href={hubHash('agent', agent.id)} data-details-open={agent.id} aria-label={`${agent.name}: details`}>Details</a>
-        {canPick && agent.presets?.length ? <button type="button" className="hub-btn" onClick={() => openSpawn({ preset: agent.presets?.[0] })} data-give-work={agent.id}>Give work</button> : null}
         {canPick
           ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
           : <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}

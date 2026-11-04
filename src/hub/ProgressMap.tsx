@@ -7,6 +7,9 @@ import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNo
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
 import MapFilterPanel from './MapFilterPanel'
+import SearchField from './SearchField'
+import { mapMatches } from './mapSearch.ts'
+import { words, type SearchRow } from './beadSearch.ts'
 import { ALL_FILTER, OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, type MapFilter } from './mapFilter'
 import { FIT_MAX, centreOn, clamp, fitScale } from './panZoom'
 import { usePanZoom } from './usePanZoom'
@@ -29,6 +32,10 @@ const FILTER_KEY = 'hub-map-filter'
 /** The viewer's saved filter; a missing or bad value is the default (Open). */
 const savedFilter = (): MapFilter => { try { const raw = localStorage.getItem(FILTER_KEY); return raw ? parseFilter(JSON.parse(raw)) : OPEN_FILTER } catch { return OPEN_FILTER } }
 const saveFilter = (filter: MapFilter) => { try { if (isOpenFilter(filter)) localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, JSON.stringify(filter)) } catch { /* private mode: it is the default next time */ } }
+const QUERY_KEY = 'hub-map-search'
+/** The viewer's saved search; missing storage is no search. */
+const savedQuery = () => { try { return localStorage.getItem(QUERY_KEY) ?? '' } catch { return '' } }
+const saveQuery = (q: string) => { try { if (q.trim()) localStorage.setItem(QUERY_KEY, q); else localStorage.removeItem(QUERY_KEY) } catch { /* private mode: no search next time */ } }
 const PAD = 16
 const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
 /** Where a node's circle is centred in the drawing (a feature's node sits right of the end of its branch). */
@@ -178,8 +185,22 @@ function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
 function MapView({ model: fullModel, project, nodeId, header }: { model: MapModel; project: string; nodeId?: string; header?: ReactNode }) {
   const [filter, setFilter] = useState<MapFilter>(savedFilter)
   const [filterOpen, setFilterOpen] = useState(false)
-  const { model, hidden } = useMemo(() => filterMap(fullModel, filter), [fullModel, filter])
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const [query, setQuery] = useState(savedQuery)
+  const searching = query.trim().length > 0
+  // The text of the beads, read only while there is a query; titles and ids match before it arrives.
+  const text = useHubData<{ rows: SearchRow[] }>(searching ? `/search-text?project=${encodeURIComponent(project)}` : null)
+  const rows = searching ? text.data?.rows : undefined
+  const matches = useMemo(() => mapMatches(fullModel, query, rows), [fullModel, query, rows])
+  // The search looks through the filter: a matched task is drawn whatever the filter says.
+  const { model, hidden } = useMemo(() => filterMap(fullModel, filter, undefined, matches.ids), [fullModel, filter, matches])
+  // A remembered search opens its matches on the first view; what was open before it is the empty map.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => mapMatches(fullModel, query).open)
+  /** What was open before the first search began, to give back when the query is cleared. */
+  const beforeSearch = useRef<ReadonlySet<string> | null>(searching ? new Set() : null)
+  /** The matches' order the view was last placed for: a data refresh that finds the same matches does not move it. */
+  const lastOrder = useRef<string | null>(null)
+  /** The match the owner stepped to; null until the first step (the first match is the current one). */
+  const [cursor, setCursor] = useState<number | null>(null)
   const [sprints, setSprints] = useState(false)
   const [hint, setHint] = useState(() => !hintSeen())
   const box = useRef<HTMLDivElement>(null)
@@ -429,6 +450,68 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
 
+  /** Glide a match into the middle of the free part of the box; one the owner folded away is unfolded first and centred by the layout effect. */
+  const goTo = (id: string) => {
+    const node = byId.get(id)
+    if (node) { pz.go(centreOn(toStage(pointOf(node)), freeRect(), Math.max(pz.current().k, 1)), true); return }
+    const hit = find(fullModel, id)
+    if (!hit) return
+    const missing = [hit.milestone.id, ...(hit.kind === 't' ? [hit.feature.id] : [])].filter(item => !open.has(item))
+    if (!missing.length) return
+    if (after.current === null) { after.current = { how: 'centre', id, axis }; relayoutPending.current = true }
+    setOpen(new Set([...open, ...missing]))
+  }
+  // The matches open their milestones and features, and the first is centred at the current scale. Only a change in the matches does it
+  // (a refresh of the data finds the same ones), and a pending Fit or first view wins.
+  const orderKey = matches.order.join()
+  const openKey = [...matches.open].sort().join()
+  useEffect(() => {
+    if (!searching) {
+      lastOrder.current = null
+      const back = beforeSearch.current
+      beforeSearch.current = null
+      if (back && (back.size !== open.size || [...open].some(id => !back.has(id)))) {
+        if (after.current === null) after.current = 'fit'
+        auto.current = new Set()
+        setOpen(back)
+      }
+      return
+    }
+    const firstLook = lastOrder.current === null
+    const moved = lastOrder.current !== orderKey
+    lastOrder.current = orderKey
+    if (beforeSearch.current === null) beforeSearch.current = open
+    if (moved) setCursor(null)
+    const first = matches.order[0]
+    const missing = [...matches.open].filter(id => !open.has(id))
+    if (missing.length) {
+      if (moved && first && !firstLook && after.current === null) { after.current = { how: 'centre', id: first, axis }; relayoutPending.current = true }
+      setOpen(new Set([...open, ...missing]))
+    } else if (moved && first && !firstLook) goTo(first)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searching, orderKey, openKey])
+
+  const changeQuery = (value: string) => { setQuery(value); saveQuery(value) }
+  const found = matches.order.length
+  const here = found ? (cursor ?? 0) % found : 0
+  const currentId = found ? matches.order[here] : null
+  const step = (by: 1 | -1) => {
+    if (!found) return
+    const next = (here + by + found) % found
+    setCursor(next)
+    goTo(matches.order[next])
+  }
+  const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && found) { event.preventDefault(); step(event.key === 'ArrowDown' ? 1 : -1) }
+    else if (event.key === 'Enter' && currentId) { event.preventDefault(); openPanel(currentId) }
+    else if (event.key === 'Escape' && query) { event.preventDefault(); event.stopPropagation(); changeQuery('') }
+  }
+  const titleOf = (id: string) => { const hit = find(fullModel, id); return hit ? (hit.kind === 'm' ? hit.milestone.title : hit.kind === 'f' ? hit.feature.title : hit.task.title) : id }
+  const countText = !searching ? '' : found ? (cursor === null ? `${found} ${found === 1 ? 'match' : 'matches'}${found > 1 ? ' · ↑ ↓ to step' : ''}` : `${here + 1} of ${found} · ${titleOf(matches.order[here])}`) : text.data || text.error ? 'No matches' : 'Searching…'
+  /** With matches, only the lit part of the map stays at full strength. */
+  const dims = (id: string) => found > 0 && !matches.lit.has(id)
+  const terms = words(query)
+
   /** The "now" pill: below the dot on a horizontal map, to its right on a vertical one. */
   const pill = vertical ? { x: layout.now.x + 16, y: layout.now.y - 8 } : { x: layout.now.x - 18, y: layout.now.y + 14 }
   const bandsDrawn = layout.bands.map(band => (
@@ -463,6 +546,19 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
+      <div className="hub-map-search" data-sheet={shownId || filterOpen || keyOpen ? '' : undefined} data-query={searching ? '' : undefined}>
+        <SearchField label="Search the roadmap" placeholder="Search the roadmap" value={query} onChange={changeQuery} onKeyDown={onSearchKey} data={{ 'data-map-search': '' }} />
+        <span className="hub-map-found" role="status" data-map-count>
+          {countText}
+          {searching && found === 0 && (text.data || text.error) && <> <button type="button" className="hub-link-btn" data-map-clear onClick={() => changeQuery('')}>Clear</button></>}
+        </span>
+        {found > 1 && (
+          <span className="hub-map-steps">
+            <button type="button" className="hub-btn" data-map-step="prev" aria-label="Previous match" onClick={() => step(-1)}>↑</button>
+            <button type="button" className="hub-btn" data-map-step="next" aria-label="Next match" onClick={() => step(1)}>↓</button>
+          </span>
+        )}
+      </div>
       {header}
       <div className="hub-map-wrap" ref={wrap} onKeyDown={onEscape}>
         <div className="hub-map-box" ref={box} data-axis={axis} tabIndex={0} role="group" aria-label="Roadmap. Arrow keys move it, plus and minus zoom.">
@@ -476,19 +572,21 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
               <line x1={layout.spine.from[0]} y1={layout.spine.from[1]} x2={layout.spine.to[0]} y2={layout.spine.to[1]} className="hub-map-spine" strokeWidth="5" strokeLinecap="round" markerEnd="url(#hub-tip)" />
               <line x1={layout.spine.from[0]} y1={layout.spine.from[1]} x2={layout.now.x} y2={layout.now.y} className="hub-map-spine-done" strokeWidth="5" strokeLinecap="round" />
               {layout.branches.map(branch => (
-                <path key={branch.id} data-branch={branch.id} d={branch.points.map(([px, py], at) => `${at ? 'L' : 'M'}${px} ${py}`).join(' ')} strokeWidth="2.5" fill="none" strokeLinejoin="round" style={{ stroke: branch.lit ? branch.col : 'var(--hairline-strong)' }} />
+                <path key={branch.id} data-branch={branch.id} className={dims(branch.id) ? 'hub-map-dim' : undefined} d={branch.points.map(([px, py], at) => `${at ? 'L' : 'M'}${px} ${py}`).join(' ')} strokeWidth="2.5" fill="none" strokeLinejoin="round" style={{ stroke: branch.lit ? branch.col : 'var(--hairline-strong)' }} />
               ))}
               {layout.nodes.filter((item): item is TaskNode => item.kind === 't').map(task => {
                 const color = STATE_COLOR[task.state]
                 return (
-                  <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className={`hub-map-node${shownId === task.id ? ' selected' : ''}`}
+                  <g key={task.id} data-node={task.id} data-kind="t" data-state={task.state} role="button" tabIndex={0} className={`hub-map-node${shownId === task.id ? ' selected' : ''}${dims(task.id) ? ' hub-map-dim' : ''}${matches.ids.has(task.id) ? ' hub-map-hit' : ''}`}
                     aria-label={`${task.title}, ${STATE_LABEL[task.state]}`} aria-pressed={shownId === task.id} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(task.id)} onKeyDown={event => onKey(event, () => openPanel(task.id))}>
                     <title>{nodeTip(task.title, task.id)}</title>
                     <circle cx={task.x} cy={task.y} r="8" strokeWidth="2.5" style={{ stroke: color, fill: task.state === 'done' || task.state === 'you' ? color : 'var(--surface-solid)' }} />
                     {shownId === task.id && <circle cx={task.x} cy={task.y} r="13" className="hub-map-ring" />}
+                    {matches.ids.has(task.id) && <circle cx={task.x} cy={task.y} r="12" className="hub-map-ring hub-map-ring-hit" />}
+                    {currentId === task.id && <circle cx={task.x} cy={task.y} r="16" className="hub-map-ring hub-map-ring-current" />}
                     <MapSigns signs={task.signs} x={task.x + 13} y={task.y - 11} />
                     {task.lines.map((line, k) => (
-                      <text key={k} x={task.label.x} y={task.label.y + k * (task.label.step ?? 12)} fontSize="10.5" textAnchor={task.label.anchor} className={task.state === 'later' ? 'hub-map-label dim' : 'hub-map-label'}>{line}</text>
+                      <text key={k} x={task.label.x} y={task.label.y + k * (task.label.step ?? 12)} fontSize="10.5" textAnchor={task.label.anchor} className={task.state === 'later' ? 'hub-map-label dim' : 'hub-map-label'}>{matches.ids.has(task.id) ? <Marked text={line} terms={terms} /> : line}</text>
                     ))}
                   </g>
                 )
@@ -498,17 +596,19 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
                 const cx = feature.center.x
                 return (
                   <Fragment key={feature.id}>
-                  <g data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className={`hub-map-node${shownId === feature.id ? ' selected' : ''}`}
+                  <g data-node={feature.id} data-kind="f" data-state={feature.state} role="button" tabIndex={0} className={`hub-map-node${shownId === feature.id ? ' selected' : ''}${dims(feature.id) ? ' hub-map-dim' : ''}${matches.ids.has(feature.id) ? ' hub-map-hit' : ''}`}
                     aria-label={`${feature.title}, ${STATE_LABEL[feature.state]}, ${feature.words}`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(feature.id)} onKeyDown={event => onKey(event, () => openPanel(feature.id))}>
                     <title>{`${nodeTip(feature.title, feature.id)} · ${feature.words}`}</title>
                     <circle cx={cx} cy={feature.center.y} r={radius} strokeWidth="2" strokeDasharray={feature.open ? '4 3' : undefined} style={{ fill: feature.col, fillOpacity: feature.state === 'later' ? 0.11 : 0.23, stroke: feature.col }} />
                     <Arc cx={cx} cy={feature.center.y} r={radius} width={4} fraction={tallyFraction(feature)} color={feature.col} />
                     {shownId === feature.id && <circle cx={cx} cy={feature.center.y} r={radius + 5} className="hub-map-ring" />}
-                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.muted ? feature.later : feature.done}</text>
+                    {matches.ids.has(feature.id) && <circle cx={cx} cy={feature.center.y} r={radius + 4} className="hub-map-ring hub-map-ring-hit" />}
+                    {currentId === feature.id && <circle cx={cx} cy={feature.center.y} r={radius + 9} className="hub-map-ring hub-map-ring-current" />}
+                    <text x={feature.countAt.x} y={feature.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{feature.closedEmpty ? '✓' : feature.muted ? feature.later : feature.done}</text>
                     <MapSigns signs={groupSigns(feature.marks)} x={cx + radius - 2} y={feature.center.y - radius + 2} />
-                    <MapTitle label={feature.label} title={feature.title} vertical={vertical} fontWeight="600" className="hub-map-title" />
+                    <MapTitle label={feature.label} title={feature.title} vertical={vertical} fontWeight="600" className="hub-map-title" terms={matches.ids.has(feature.id) ? terms : undefined} />
                   </g>
-                  <Chevron id={feature.id} title={feature.title} open={feature.open} x={feature.chevronAt.x} y={feature.chevronAt.y} onToggle={() => toggle(feature)} />
+                  <Chevron id={feature.id} title={feature.title} dim={dims(feature.id)} open={feature.open} x={feature.chevronAt.x} y={feature.chevronAt.y} onToggle={() => toggle(feature)} />
                   </Fragment>
                 )
               })}
@@ -516,17 +616,19 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
                 const radius = milestone.radius
                 return (
                   <Fragment key={milestone.id}>
-                  <g data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className={`hub-map-node${shownId === milestone.id ? ' selected' : ''}`}
+                  <g data-node={milestone.id} data-kind="m" data-state={milestone.state} role="button" tabIndex={0} className={`hub-map-node${shownId === milestone.id ? ' selected' : ''}${dims(milestone.id) ? ' hub-map-dim' : ''}${matches.ids.has(milestone.id) ? ' hub-map-hit' : ''}`}
                     aria-label={`${milestone.title}, ${STATE_LABEL[milestone.state]}, ${milestone.words}`} aria-haspopup="dialog" aria-controls="hub-map-panel" onClick={() => openPanel(milestone.id)} onKeyDown={event => onKey(event, () => openPanel(milestone.id))}>
                     <title>{`${nodeTip(milestone.title, milestone.id)} · ${milestone.words}`}</title>
                     <circle cx={milestone.x} cy={milestone.y} r={radius} strokeWidth="4" className={milestone.muted ? 'hub-map-muted' : undefined} style={{ stroke: milestone.muted ? undefined : 'var(--hairline-strong)', fill: milestone.state === 'done' ? milestone.col : 'var(--surface-solid)' }} />
                     <Arc cx={milestone.x} cy={milestone.y} r={radius} width={4} fraction={tallyFraction(milestone)} color={milestone.col} />
                     {shownId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 6} className="hub-map-ring" />}
-                    {!milestone.open && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.muted ? milestone.later : milestone.done}</text>}
+                    {matches.ids.has(milestone.id) && <circle cx={milestone.x} cy={milestone.y} r={radius + 4} className="hub-map-ring hub-map-ring-hit" />}
+                    {currentId === milestone.id && <circle cx={milestone.x} cy={milestone.y} r={radius + 10} className="hub-map-ring hub-map-ring-current" />}
+                    {!milestone.open && <text x={milestone.countAt.x} y={milestone.countAt.y} fontSize="11" textAnchor="middle" fontWeight="700" className="hub-map-count">{milestone.closedEmpty ? '✓' : milestone.muted ? milestone.later : milestone.done}</text>}
                     <MapSigns signs={groupSigns(milestone.marks)} x={milestone.x + radius} y={milestone.y - radius} />
-                    <MapTitle label={milestone.label} title={milestone.title} vertical={vertical} fontWeight="700" style={{ fill: milestone.col }} />
+                    <MapTitle label={milestone.label} title={milestone.title} vertical={vertical} fontWeight="700" style={{ fill: milestone.col }} terms={matches.ids.has(milestone.id) ? terms : undefined} />
                   </g>
-                  {!milestone.bare && <Chevron id={milestone.id} title={milestone.title} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />}
+                  {!milestone.bare && <Chevron id={milestone.id} title={milestone.title} dim={dims(milestone.id)} open={milestone.open} x={milestone.chevronAt.x} y={milestone.chevronAt.y} onToggle={() => toggle(milestone)} />}
                   </Fragment>
                 )
               })}
@@ -568,18 +670,27 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
 }
 
 /** A milestone's or feature's title at its place in the layout; the vertical layout wraps it into lines. */
-function MapTitle({ label, title, vertical, fontWeight, className, style }: { label: Label; title: string; vertical: boolean; fontWeight: string; className?: string; style?: CSSProperties }) {
+function MapTitle({ label, title, vertical, fontWeight, className, style, terms }: { label: Label; title: string; vertical: boolean; fontWeight: string; className?: string; style?: CSSProperties; /** The search words to mark in the text. */ terms?: string[] }) {
   const anchor = vertical || label.anchor === 'middle' ? label.anchor : undefined
   // A milestone says what its ring counts in words, after the title or (vertical) on a line below it.
   const count = label.count ? <tspan className="hub-map-count" dx="8">{label.count}</tspan> : null
   const sub = label.sub ? <tspan className="hub-map-count" x={label.x} dy={label.step ?? 14} fontWeight="400" fontSize="11">{label.sub}</tspan> : null
-  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{title}{count}{sub}</text>
+  if (!label.lines) return <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>{terms ? <Marked text={title} terms={terms} /> : title}{count}{sub}</text>
   const last = label.lines.length - 1
   return (
     <text x={label.x} y={label.y} fontSize="12" textAnchor={anchor} fontWeight={fontWeight} className={className} style={style}>
-      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{line}{k === last && count}</tspan>)}{sub}
+      {label.lines.map((line, k) => <tspan key={k} x={label.x} dy={k ? label.step ?? 14 : 0}>{terms ? <Marked text={line} terms={terms} /> : line}{k === last && count}</tspan>)}{sub}
     </text>
   )
+}
+
+const ESCAPE = /[.*+?^${}()|[\]\\]/g
+/** Text with the search words in coloured bold (SVG text has no background to mark with). A word split over two wrapped lines goes unmarked; the node's ring still shows it. */
+function Marked({ text, terms }: { text: string; terms: string[] }) {
+  if (!terms.length) return <>{text}</>
+  const pattern = terms.map(term => term.replace(ESCAPE, '\\$&')).join('|')
+  const parts = text.split(new RegExp(`(${pattern})`, 'i'))
+  return <>{parts.map((part, k) => (k % 2 ? <tspan key={k} className="hub-map-hit-text">{part}</tspan> : part))}</>
 }
 
 /** The done part of a ring: an arc over the circle, from the top, `fraction` of the way round. Nothing when none is done. */
@@ -593,9 +704,9 @@ function Arc({ cx, cy, r, width, fraction, color }: { cx: number; cy: number; r:
 const nodeTip = (title: string, id: string) => (id.includes('~') ? title : `${title} · ${id}`)
 
 /** The button that opens or closes a milestone or feature, beside its node: a node's tap shows details instead. The group is scaled up (CSS, from the map's zoom) so its target is at least 32 px on a desktop and 44 px on a touch screen whatever the zoom. */
-function Chevron({ id, title, open, x, y, onToggle }: { id: string; title: string; open: boolean; x: number; y: number; onToggle: () => void }) {
+function Chevron({ id, title, open, dim, x, y, onToggle }: { id: string; title: string; open: boolean; dim?: boolean; x: number; y: number; onToggle: () => void }) {
   return (
-    <g role="button" tabIndex={0} data-toggle={id} className="hub-map-chev" style={{ transformOrigin: `${x}px ${y}px` }} aria-expanded={open} aria-label={`${open ? 'Close' : 'Open'} ${title}`}
+    <g role="button" tabIndex={0} data-toggle={id} className={`hub-map-chev${dim ? ' hub-map-dim' : ''}`} style={{ transformOrigin: `${x}px ${y}px` }} aria-expanded={open} aria-label={`${open ? 'Close' : 'Open'} ${title}`}
       onClick={onToggle} onKeyDown={(event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle() } }}>
       <circle cx={x} cy={y} r="20" className="hub-map-chev-hit" />
       <circle cx={x} cy={y} r="10" strokeWidth="1.5" className="hub-map-chev-ring" />

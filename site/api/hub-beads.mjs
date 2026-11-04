@@ -5,6 +5,7 @@
 //   beads/<project>.jsonl + .meta.json          the legacy single copy, still read, never written again
 
 import { createHash } from 'node:crypto';
+import { plainText } from './hub-map-notes.mjs';
 
 export const MAX_COPIES = 30;
 export const LEGACY_COPY = 'legacy';
@@ -153,4 +154,17 @@ export function createBeadsReader({ bucket, key }) {
       return found;
     },
   };
+}
+
+export const SEARCH_TEXT_MAX = 4000;
+
+/**
+ * What the Work search reads: one row per issue, `text` being the plain words of its description and acceptance
+ * criteria, cut at 4000 characters. Notes are left out: they are mostly evidence lines and make false hits.
+ */
+export function searchRows(issues) {
+  return (issues ?? []).map(issue => ({
+    id: issue.id, project: issue.project ?? '', title: issue.title ?? issue.id, status: issue.status ?? 'open',
+    text: plainText([issue.description, issue.acceptance_criteria].filter(part => typeof part === 'string' && part.trim()).join(' ')).slice(0, SEARCH_TEXT_MAX),
+  }));
 }

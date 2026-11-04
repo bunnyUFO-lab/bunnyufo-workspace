@@ -102,7 +102,7 @@ function beadCards({ issues, events, asks, checklists, needs, status, now }) {
     const project = issue.project ?? '';
     cards.push({
       key: `bead:${issue.id}`, source: 'beads', id: issue.id, project, title: issue.title ?? issue.id,
-      lane, state: issue.status ?? 'open', ...(why ? { why } : {}), signs,
+      lane, state: issue.status ?? 'open', type: issue.issue_type ?? 'task', labels: issue.labels ?? [], ...(why ? { why } : {}), signs,
       ...(!closed && asked ? { asked } : {}), ...(nothingAsked ? { nothingAsked: true } : {}),
       ...(nothingAsked || markedUnasked ? { reason: reasonOf(issue) } : {}),
       ...(markedUnasked ? { markedUnasked: true, mark: { verdict: issue._mark.verdict, at: issue._mark.at } } : {}),

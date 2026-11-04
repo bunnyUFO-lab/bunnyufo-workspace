@@ -36,6 +36,11 @@ export interface SheetInfo {
   current: boolean
 }
 
+/** The one main button of a card: Chat on a persona, or Spawn on a preset (with the project and text filled in when given). */
+export type TeamAction =
+  | { label: string; chat: string }
+  | { label: string; preset: string; project?: string; text?: string }
+
 export interface TeamAgent {
   id: string
   name: string
@@ -43,9 +48,10 @@ export interface TeamAgent {
   runtime: string
   model: string
   role: string
+  action: TeamAction
   /** The Hermes profile it runs on (`main`, `briefs`), none for Claude Code. */
   profile?: AgentProfile
-  /** Spawn presets this agent takes (the research agents); "Give work" opens Spawn on the first. */
+  /** Spawn presets this agent takes; Details shows the first one's job template. */
   presets?: string[]
   status: AgentStatus
   task: string

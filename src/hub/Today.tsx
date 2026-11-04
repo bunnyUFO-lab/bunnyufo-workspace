@@ -1,18 +1,21 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { HubEvent, Item, MoveOffer, Today as TodayData } from '../lib/hub'
+import type { HubEvent, HubProject, Item, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
 import { KIND_ICON, itemLabel, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
+import { needsHref } from '../lib/needsView.mjs'
 import ItemRow, { openFromClick } from './ItemRow'
 import PcTile from './PcTile'
+import ProjectPicker from './ProjectPicker'
 import UnaskedPanel from './UnaskedPanel'
 import WorkingNow from './WorkingNow'
 import { itemKey, setFocus } from './needsFocus'
 import { openRun } from './runStore'
 import { openSpawn } from './spawnStore'
+import { todayFor } from './todayFilter.ts'
 import { TodayContext, useHubData } from './useHub'
 import './today.css'
 
@@ -59,7 +62,7 @@ function AlertRetry({ request }: { request: string }) {
 }
 
 /** The Alerts panel: Dismiss on each row, Clear all, and Undo for the last dismissal. Dismissals are kept on the server, so they hold on every device. */
-function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: number; index: number }) {
+function AlertsPanel({ alerts, count, index, project }: { alerts: HubEvent[]; count: number; index: number; project?: string }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const [undo, setUndo] = useState<string[] | null>(null)
@@ -94,7 +97,7 @@ function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: numb
           {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
           {host.write && event.key && <button type="button" className="hub-btn alert-dismiss" disabled={busy} onClick={() => void send('dismiss', [event.key as string])} aria-label={`Dismiss: ${event.title}`} data-alert-dismiss>Dismiss</button>}
         </div>
-      )) : <p className="hub-empty">No alerts.</p>}
+      )) : <p className="hub-empty">{project ? `No alerts for ${project}.` : 'No alerts.'}</p>}
     </section>
   )
 }
@@ -140,33 +143,53 @@ function useNarrow() {
   return narrow
 }
 
+/** Today's own project, remembered in this browser. It is not `buw.hub.project`, which Work and the Roadmap share: the default here is All. */
+const PROJECT_KEY = 'hub-today-project'
+const savedProject = () => { try { return localStorage.getItem(PROJECT_KEY) ?? '' } catch { return '' } }
+const saveProject = (project: string) => { try { if (project) localStorage.setItem(PROJECT_KEY, project); else localStorage.removeItem(PROJECT_KEY) } catch { /* private mode: All next time */ } }
+
 export default function Today() {
   const narrow = useNarrow()
   const shared = useContext(TodayContext)
   const own = useHubData<TodayData>(shared ? null : '/today')
-  const { data, error, reload, at, loading } = shared ?? own
-  if (!data) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
+  const projects = useHubData<{ projects: HubProject[] }>('/projects')
+  const [chosen, setChosen] = useState(savedProject)
+  const list = projects.data?.projects
+  // A saved project that is gone counts as All once the list is known, and the key is cleared.
+  const gone = !!chosen && !!list && !list.some(item => item.id === chosen)
+  useEffect(() => { if (gone) saveProject('') }, [gone])
+  // If /projects fails there is no picker to undo a remembered project: show All for this view and leave the saved choice alone.
+  const failed = !!projects.error && !list
+  const project = gone || failed ? '' : chosen
+  const choose = (id: string) => { const next = id === 'all' ? '' : id; setChosen(next); saveProject(next) }
+  const { data: full, error, reload, at, loading } = shared ?? own
+  if (!full) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
+  // Filtered once, here: the sentence, the tiles and both layouts read `data`. The context keeps the full answer for the badge.
+  const { data, elsewhere } = todayFor(full, project)
   const { counts } = data
+  const projectName = list?.find(item => item.id === project)?.name ?? project
+  const needsByProject = full.needsYou.reduce<Record<string, number>>((all, item) => (item.project ? { ...all, [item.project]: (all[item.project] ?? 0) + 1 } : all), {})
   const now = new Date()
   const oldest = data.needsYou.reduce<string | null>((first, item) => (!first || item.at < first ? item.at : first), null)
   const sentence = [
-    counts.needsYou ? `${counts.needsYou} ${counts.needsYou === 1 ? 'thing waits' : 'things wait'} on you.` : 'Nothing waits on you.',
+    counts.needsYou ? `${counts.needsYou} ${counts.needsYou === 1 ? 'thing waits' : 'things wait'} on you.` : project ? `Nothing for ${projectName} waits on you.` : 'Nothing waits on you.',
     counts.running ? `${counts.running} ${counts.running === 1 ? 'session is' : 'sessions are'} running.` : '',
   ].filter(Boolean).join(' ')
+  const needsLink = project ? needsHref('all', project) : hubHash('needs')
   const tiles: [string, number, string, string, string, string][] = [
-    ['needs-you', counts.needsYou, 'Needs you', oldest ? `Oldest waits ${bare(ago(oldest))}` : 'Nothing waiting', hubHash('needs'), 'needs'],
+    ['needs-you', counts.needsYou, 'Needs you', oldest ? `Oldest waits ${bare(ago(oldest))}` : 'Nothing waiting', needsLink, 'needs'],
     ['running', counts.running, 'Running', 'on the PC and in the cloud', hubHash('activity'), 'working'],
     ['recent', counts.recent, 'Since yesterday', 'events in 24 h', hubHash('activity'), 'idle'],
     ['alerts', counts.alerts, 'Alerts', counts.alerts ? 'need a look' : 'all quiet', hubHash('activity', 'alerts'), 'failed'],
   ]
-  const unaskedPanel = <UnaskedPanel />
+  const unaskedPanel = <UnaskedPanel project={project} />
   const needsPanel = (
     <section className="hub-panel rise" style={stagger(2)} aria-label="Needs you">
-      <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={hubHash('needs')}>All {counts.needsYou} →</a></h3>
+      <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={needsLink}>All {counts.needsYou} →</a></h3>
       {data.needsYou.length ? data.needsYou.slice(0, 3).map(item => {
         const kind = needsKind(item)
         return (
-          <a key={itemKey(item)} className="nrow" href={hubHash('needs')} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
+          <a key={itemKey(item)} className="nrow" href={needsLink} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
             <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
             <span className="nrow-text">
               <b>{item.title}</b>
@@ -175,13 +198,13 @@ export default function Today() {
             <span className="nrow-go"><Icon paths={ICON_ARROW} /></span>
           </a>
         )
-      }) : <p className="hub-empty">Nothing waits on you.</p>}
+      }) : <p className="hub-empty">{project ? `Nothing for ${projectName} waits on you.` : 'Nothing waits on you.'}</p>}
     </section>
   )
   const recentPanel = (
     <section className="hub-panel rise" style={stagger(3)} aria-label="Since yesterday">
       <h3>Since yesterday <span>{counts.recent}</span></h3>
-      {data.recent.length ? data.recent.slice(0, 10).map(event => <ItemRow key={event.file} event={event} />) : <p className="hub-empty">Nothing has happened in the last 24 hours.</p>}
+      {data.recent.length ? data.recent.slice(0, 10).map(event => <ItemRow key={event.file} event={event} />) : <p className="hub-empty">{project ? `Nothing has happened for ${projectName} in the last 24 hours.` : 'Nothing has happened in the last 24 hours.'}</p>}
     </section>
   )
   const offersPanel = data.offers?.length && host.write ? (
@@ -190,7 +213,7 @@ export default function Today() {
       {data.offers.slice(0, 3).map(offer => <MoveTile key={offer.request} offer={offer} />)}
     </section>
   ) : null
-  const alertsPanel = <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} />
+  const alertsPanel = <AlertsPanel alerts={data.alerts} count={counts.alerts} index={3} project={projectName} />
   const workingPanel = <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={counts.running} now={new Date(data.at).getTime()} />
   const pcPanel = (data.pc || data.wake?.wakeAvailable) && <PcTile pc={data.pc ?? null} wake={data.wake} />
   return (
@@ -205,11 +228,17 @@ export default function Today() {
         <div className="today-actions">
           <span className="hub-muted">Updated {at ? clock(at.toISOString()) : ''}</span>
           <button type="button" className="hub-btn today-icon" onClick={reload} aria-label="Refresh"><Icon paths={ICON_REFRESH} /></button>
-          {host.write && <button type="button" className="hub-btn" onClick={() => openSpawn()} data-spawn-open>Spawn</button>}
-          <a className="hub-btn today-primary" href={hubHash('needs')} data-today-open>Open Needs you · <span className="today-num">{counts.needsYou}</span></a>
+          {host.write && <button type="button" className="hub-btn" onClick={() => openSpawn(project ? { project } : {})} data-spawn-open>Spawn</button>}
+          <a className="hub-btn today-primary" href={needsLink} data-today-open>Open Needs you · <span className="today-num">{counts.needsYou}</span></a>
         </div>
       </header>
       {error && <p className="hub-error" role="alert">{error}</p>}
+      {!!list?.length && (
+        <div className="today-project rise" style={stagger(1)} data-today-project>
+          <ProjectPicker id="hub-today-project" projects={list} value={project || 'all'} allValue="all" onChange={choose} oneRow counts={needsByProject} allCount={full.counts.needsYou} />
+          {elsewhere > 0 && <p className="hub-muted today-elsewhere" data-today-elsewhere>{elsewhere} more {elsewhere === 1 ? 'waits' : 'wait'} in other projects · <button type="button" className="today-linkbtn" onClick={() => choose('all')}>Show all</button></p>}
+        </div>
+      )}
       <div className="hub-kpis rise" style={stagger(1)}>
         {tiles.map(([key, value, label, sub, href, state]) => (
           <a key={key} className="hub-kpi" href={href} data-kpi={key}>

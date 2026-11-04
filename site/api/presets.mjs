@@ -61,6 +61,17 @@ End the final message with one line: \`CARD: assistant/<folder>\`.`;
 export const MARKET_EXTRA = 'Cover: who makes these games, their prices, review scores, what players praise and what they hate. Close with three takeaways.';
 export const TEARDOWN_EXTRA = 'Use public sources only: store pages, videos, reviews, talks and articles. Never download, decompile, disassemble or memory-inspect another studio\'s game. Our own builds may be inspected.';
 
+/**
+ * The projects brief on demand (ws-im1.1.1): one Hermes run on profile `main` that writes the daily brief as a card. The scheduled
+ * brief is a `briefs` profile job on the Hermes host that the site cannot reach, so this is a stand-in: it posts nowhere.
+ */
+export const BRIEF = `Write the projects brief for the owner: what changed in each project in the last 24 hours and what needs the owner. The project named above is context only.
+1. List the workspace sections with the cards tool and find the cards created or updated in the last 24 hours. Read the ones that matter; skip the rest.
+2. Write exactly one card to the \`assistant\` section with the cards tool. Start it with 3 plain sentences: what moved, what is stuck, what the owner should do first. Then one short block per project that changed: what changed, and what needs the owner. Link the cards you used.
+3. Post nothing to Discord or any other channel. Never create requests or Asks.
+If you cannot finish without the owner, end your final message with one question on its own line, ending in \`?\`, and no \`CARD:\` line.
+End the final message with one line: \`CARD: assistant/<folder>\`.`;
+
 const wrap = (body, extra = '') => `${CONTEXT}\n${body}\n${extra ? `${extra}\n` : ''}\n${SHARED}\n`;
 
 // The two avatar runs (m5). The packer and fetcher come from the pixel-art-pipeline skill, installed in `.claude/bin` on the PC.
@@ -154,6 +165,13 @@ When the pull request is open, finish the request as your run's rules say.`),
     template: wrap(QUESTION),
   },
   {
+    id: 'projects-brief', label: 'Projects brief', icon: 'doc', agent: 'Briefs', kind: 'brief', needs: [], targets: ['hermes'], sideEffect: 'card', modelDefault: 'codex',
+    model: null, permissionMode: null, opensWindows: false, allow: [], minutes: 15, fields: ['text'],
+    example: 'Write the daily projects brief now.', produces: 'a card in assistant. This run is on Hermes main and posts nowhere; the scheduled brief still posts as usual.',
+    estimate: { cost: 'Codex plan · about 0.2 M tokens', time: 'about 5 min' },
+    template: wrap(BRIEF),
+  },
+  {
     id: 'playtest-build', label: 'Playtest build', icon: 'play', agent: 'Builder', kind: 'build', needs: ['unity'], targets: ['pc'], sideEffect: 'build',
     model: 'sonnet', permissionMode: null, opensWindows: true, allow: [], minutes: 120, fields: ['text', 'doneWhen'],
     example: 'Build the current branch for web and playtest the new level', produces: 'a WebGL build on the PC and a report',
@@ -217,6 +235,7 @@ export function route({ preset: given, project, needs = [], repo, cloudRepos = [
   else if (allNeeds.length) found = { target: 'pc', rule: 2, why: `it needs ${inWords(allNeeds)}` };
   else if (preset.kind === 'research') found = { target: 'hermes', rule: 3, why: 'it is research' };
   else if (preset.kind === 'question') found = { target: 'hermes', rule: 3, why: 'it prepares a decision' };
+  else if (preset.kind === 'brief') found = { target: 'hermes', rule: 3, why: 'it is a Hermes job' };
   else if (preset.kind === 'mockup') found = { target: 'hermes', rule: 3, why: 'it is a Hermes job' };
   else if (defaults?.runsOn === 'pc') found = { target: 'pc', rule: 4, why: `${name} defaults to the PC` };
   else if (repo) found = { target: 'cloud', rule: 5, why: 'it only needs the repo on GitHub' };

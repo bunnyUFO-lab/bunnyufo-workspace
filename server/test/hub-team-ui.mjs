@@ -26,7 +26,7 @@ const signatureOf = data => {
 };
 const domSignature = locator => locator.evaluate(svg => [...svg.querySelectorAll('rect')].map(r => `${r.getAttribute('x')},${r.getAttribute('y')},${r.getAttribute('width')},${r.getAttribute('fill')}`).join('|'));
 
-const fixture = await startHubFixture({ pc: 'fresh' });
+const fixture = await startHubFixture({ pc: 'fresh', hermes: true });
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -66,6 +66,57 @@ try {
   assert.ok(await desk.locator('[data-agent="claude"] .team-sessions li').count() >= 2, 'Claude Code lists its sessions.');
   assert.match(await desk.locator('[data-agent="claude"] .team-sessions').innerText(), /Wall-jump tutorial/);
   await noSideways(desk, 'Team at 1280');
+
+  step('each card has one main button with its label; Chat lands in Chat on the right persona; Run now and Start a run open Spawn');
+  const labels = { hermes: 'Chat', briefs: 'Run now', claude: 'Start a run', researcher: 'Give work', 'market-researcher': 'Give work', teardown: 'Give work', planner: 'Chat' };
+  for (const [id, label] of Object.entries(labels)) {
+    assert.equal(await desk.locator(`[data-agent="${id}"] [data-main-action]`).count(), 1, `${id} has one main button.`);
+    assert.equal((await desk.locator(`[data-agent="${id}"] [data-main-action]`).innerText()).trim(), label, id);
+    assert.equal(await desk.locator(`[data-agent="${id}"] .team-links a`).innerText(), 'Details', `${id}: Details comes first in the link row.`);
+  }
+  assert.equal(await desk.locator('[data-main-action]').count(), 7);
+  await desk.locator('[data-main-action="hermes"]').click();
+  await desk.waitForFunction(() => location.hash === '#/~hub/chat');
+  await desk.locator('textarea').first().waitFor();
+  assert.equal(await desk.locator('textarea').first().inputValue(), '', 'The composer is empty.');
+  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'hermes', 'Hermes is no persona.');
+  assert.equal(await desk.locator('[data-spawn-sheet]').count(), 0);
+  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('[data-main-action="planner"]').click();
+  await desk.waitForFunction(() => location.hash === '#/~hub/chat');
+  await desk.locator('textarea').first().waitFor();
+  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'planner', 'Chat opens on the Planner.');
+  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('[data-main-action="briefs"]').click();
+  await desk.locator('[data-spawn-sheet]').waitFor();
+  assert.equal(await desk.locator('[data-preset="projects-brief"]').getAttribute('aria-pressed'), 'true', 'Run now opens Spawn on Projects brief.');
+  assert.equal(await desk.locator('[data-spawn-text]').inputValue(), 'Write the daily projects brief now.');
+  await desk.locator('[data-spawn-route="hermes"]').waitFor();
+  assert.match(await desk.locator('[data-spawn-estimate]').innerText(), /posts nowhere/);
+  assert.equal(await desk.locator('[data-spawn-go]').isEnabled(), true);
+  const sent = desk.waitForRequest(request => request.method() === 'POST' && /\/hub\/requests$/.test(request.url()));
+  await desk.locator('[data-spawn-go]').click();
+  const body = (await sent).postDataJSON();
+  assert.deepEqual([body.preset, body.project, body.text], ['projects-brief', 'workspace-app', 'Write the daily projects brief now.']);
+  await desk.locator('[data-spawn-toast]').waitFor();
+  const filed = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key));
+  assert.equal(filed.length, 1, 'Sending files one request.');
+  assert.deepEqual([fixture.fake.json(filed[0]).preset, fixture.fake.json(filed[0]).target], ['projects-brief', 'hermes'], 'The request is a Hermes one.');
+  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('[data-main-action="claude"]').click();
+  await desk.locator('[data-spawn-sheet]').waitFor();
+  await desk.keyboard.press('Escape');
+  await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
+  await desk.keyboard.press('Escape');
+  await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
+  await desk.locator('[data-main-action="claude"]').click();
+  await desk.locator('[data-spawn-sheet]').waitFor();
+  assert.equal(await desk.locator('[data-preset="code-task"]').getAttribute('aria-pressed'), 'true', 'Start a run opens Spawn on Code task.');
+  await desk.keyboard.press('Escape');
+  await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
 
   step('the sheet opens with the focus inside, shows the current sprite first, and Escape gives the focus back');
   const hermesButton = desk.locator('[data-sprite-open="hermes"]');
@@ -158,6 +209,7 @@ try {
       assert.equal(tab.clipped, false, `${tab.key} at ${width}: the label is whole.`);
     }
     await noSideways(phone, `Team at ${width}`);
+    for (const target of await phone.locator('.team-card [data-main-action], .team-card .team-details-link, .team-card [data-sprite-open]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A main button, Details or Sprite is ${target} px high.`);
     await phone.locator('[data-sprite-open="hermes"]').tap();
     const sheetBox = await phone.locator('dialog.sprite-sheet').boundingBox();
     assert.ok(Math.abs(sheetBox.x) < 1 && Math.abs(sheetBox.width - width) < 1, `The sheet spans the screen at ${width}.`);
@@ -183,6 +235,21 @@ try {
   assert.equal(await guest.locator('[data-sprite-signin]').count(), 7, 'Each card says why.');
   assert.equal(await guest.locator('[data-sprite-signin]').first().innerText(), 'Sign in to change sprites');
   assert.equal(await guest.locator('[data-sprite-signin]').first().isVisible(), true);
+  assert.equal(await guest.locator('[data-main-action]').count(), 0, 'Signed out: no main button.');
+  assert.equal(await guest.locator('[data-details-open]').count(), 7, 'Details stays.');
+
+  step('with chat off the Chat buttons go and the others stay');
+  const quiet = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  contexts.push(quiet);
+  await quiet.route('**/api/capabilities', async route => {
+    const response = await steadyFetch(route);
+    await route.fulfill({ response, json: { ...(await response.json()), chat: false } });
+  });
+  const noChat = await quiet.newPage();
+  noChat.setDefaultTimeout(ms(15000));
+  await noChat.goto(`${fixture.url}#/~hub/team`);
+  await noChat.locator('.team-card').first().waitFor();
+  assert.deepEqual(await noChat.locator('[data-main-action]').allInnerTexts(), ['Run now', 'Start a run', 'Give work', 'Give work', 'Give work']);
 
   console.log('hub-team-ui: passed');
 } finally {

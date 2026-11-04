@@ -955,7 +955,7 @@ try {
     const hub = document.querySelector('.hub');
     const rect = element => element.getBoundingClientRect();
     const box = rect(document.querySelector('.hub-map-box'));
-    const chips = rect(document.querySelector('.hub-map-controls'));
+    const chips = rect(document.querySelector('.hub-map-search'));
     const inner = rect(hub);
     const above = [...hub.children].filter(child => child.getBoundingClientRect().bottom <= box.top + 1 && getComputedStyle(child).position !== 'absolute').map(child => child.className);
     return {
@@ -966,8 +966,8 @@ try {
   assert.ok(bigLayout.scroll <= 1, `The Hub does not scroll (${bigLayout.scroll}).`);
   assert.ok(Math.abs(bigLayout.boxBottom - (bigLayout.hubBottom - 8)) <= 10, `The box reaches the bottom (${bigLayout.boxBottom} vs ${bigLayout.hubBottom}).`);
   assert.ok(bigLayout.boxWidth >= bigLayout.hubWidth - 20, `The box is as wide as the screen (${bigLayout.boxWidth} of ${bigLayout.hubWidth}).`);
-  assert.deepEqual(bigLayout.above, ['hub-map-chips', 'hub-map-controls'], 'Only the project chips row and the control bar sit above the box.');
-  assert.ok(bigLayout.chipsGap <= 12, `The box follows the control bar (${bigLayout.chipsGap}).`);
+  assert.deepEqual(bigLayout.above, ['hub-map-chips', 'hub-map-controls', 'hub-map-search'], 'Only the project chips row, the control bar and the search row sit above the box.');
+  assert.ok(bigLayout.chipsGap <= 12, `The box follows the search row (${bigLayout.chipsGap}).`);
   assert.ok(bigLayout.k > 1, `The first view enlarges the map (${bigLayout.k}).`);
   await noSideways(big, 'Progress map at 1920');
   const bigTap = await big.locator('[data-node="ml-m2"] > circle').first().boundingBox();

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ALL_FILTER, DOING_FILTER, OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, presetOf } from '../../../src/hub/mapFilter.ts';
 import { layoutMap } from '../../../src/hub/mapLayout.ts';
+import { mapMatches } from '../../../src/hub/mapSearch.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 
 const NOW = Date.parse('2026-11-01T12:00:00Z');
@@ -145,4 +146,77 @@ test('the chip says what is on', () => {
   assert.equal(filterLabel(ALL_FILTER), 'All');
   assert.equal(filterLabel({ ...DOING_FILTER, from: '2026-10-03', to: '2026-10-09' }), 'In progress only · 3 Oct to 9 Oct');
   assert.equal(filterLabel({ ...OPEN_FILTER, states: ['you', 'done'] }), 'Needs you, Done');
+});
+
+const titled = (id, title, tasks) => ({ id, title, state: 'doing', tasks });
+const searchable = () => model([
+  {
+    id: 'm1', title: 'Launch plan', state: 'doing', features: [
+      titled('f1', 'Billing', [{ ...task('a', 'done', 1), title: 'Invoice export' }, { ...task('b', 'next', 1), title: 'Refund flow' }]),
+      titled('m1~other', 'Launch plan · other tasks', [{ ...task('c', 'doing', 1), title: 'Sweep' }]),
+    ],
+  },
+  { id: 'm2', title: 'Billing polish', state: 'doing', features: [titled('f2', 'Receipts', [{ ...task('d', 'next', 1), title: 'Receipt layout' }])] },
+]);
+
+test('mapMatches: an empty query matches nothing, and titles and ids need no rows', () => {
+  const none = mapMatches(searchable(), '  ');
+  assert.equal(none.ids.size + none.order.length + none.lit.size + none.open.size, 0);
+  const hit = mapMatches(searchable(), 'refund');
+  assert.deepEqual(hit.order, ['b']);
+  assert.deepEqual([...hit.lit].sort(), ['b', 'f1', 'm1']);
+  assert.deepEqual([...hit.open].sort(), ['f1', 'm1'], 'a task opens its feature and milestone');
+  assert.deepEqual(mapMatches(searchable(), 'F2').order, ['f2'], 'a bead id finds it');
+});
+
+test('mapMatches: a milestone or feature title lights that node and opens only what holds it', () => {
+  const found = mapMatches(searchable(), 'billing');
+  assert.deepEqual(found.order, ['f1', 'm2'], 'model order: milestone, its features, their tasks');
+  assert.deepEqual([...found.open].sort(), ['m1'], 'a feature opens its milestone; a milestone opens nothing');
+  assert.ok(found.lit.has('m2') && found.lit.has('f1') && !found.lit.has('a'), 'its tasks are not lit');
+});
+
+test('mapMatches: text arrives with the rows, all words must match, synthetic groups never match', () => {
+  const rows = [{ id: 'c', project: 'p', title: 'Sweep', status: 'open', text: 'zebra crossing' }, { id: 'a', project: 'p', title: 'Invoice export', status: 'open', text: 'zebra' }];
+  assert.deepEqual(mapMatches(searchable(), 'zebra').order, []);
+  assert.deepEqual(mapMatches(searchable(), 'zebra', rows).order, ['a', 'c']);
+  assert.deepEqual(mapMatches(searchable(), 'zebra crossing', rows).order, ['c']);
+  assert.deepEqual(mapMatches(searchable(), 'other tasks').order, [], 'the made-up "other tasks" feature does not echo its parent');
+  assert.ok(mapMatches(searchable(), 'sweep').lit.has('m1~other'), 'but it is lit as the parent of a matched task');
+});
+
+test('filterMap with `also`: a found task passes the filter, and the tallies stay right', () => {
+  const base = filterMap(sample(), OPEN_FILTER, NOW);
+  assert.deepEqual(ids(base.model), ['c', 'd', 'f', 'g', 'h']);
+  const withB = filterMap(sample(), OPEN_FILTER, NOW, new Set(['b']));
+  assert.deepEqual(ids(withB.model), ['b', 'c', 'd', 'f', 'g', 'h'], 'the done task b is drawn under Open');
+  assert.deepEqual(withB.hidden.get('f1'), { n: 1, done: 1, later: 0 }, 'a is still hidden');
+  assert.deepEqual(withB.hidden.get('m1'), { n: 1, done: 1, later: 0 });
+  assert.deepEqual(base.hidden.get('m1'), { n: 2, done: 2, later: 0 });
+  const layout = layoutMap(withB.model, new Set(['m1', 'f1']), false, 'x', withB.hidden);
+  assert.equal(layout.nodes.find(node => node.id === 'f1').total, 2, 'the ring still counts all of its tasks');
+});
+
+test('filterMap with `also`: a found feature stays when the filter hides all its tasks', () => {
+  assert.equal(filterMap(sample(), OPEN_FILTER, NOW).model.milestones[0].features.length, 0, 'f1 is dropped without the search');
+  const kept = filterMap(sample(), OPEN_FILTER, NOW, new Set(['f1']));
+  assert.deepEqual(kept.model.milestones[0].features.map(feature => feature.id), ['f1']);
+  assert.deepEqual(kept.model.milestones[0].features[0].tasks, []);
+  assert.deepEqual(kept.hidden.get('f1'), { n: 2, done: 2, later: 0 });
+  assert.equal(kept.hidden.get('m1').n, 2, 'and the milestone does not count them twice');
+  assert.ok(!layoutMap(kept.model, new Set(['m1']), false, 'x', kept.hidden).nodes.find(node => node.id === 'm1').bare, 'the milestone has a feature to open');
+});
+
+test('a closed feature or milestone with no tasks is done: a check mark and the word "done"', () => {
+  const done = { id: 'f', title: 'Shipped', state: 'done', tasks: [] };
+  const planned = { id: 'g', title: 'Planned', state: 'later', tasks: [] };
+  const layout = layoutMap(model([milestone('m', [done, planned])]), new Set(['m']), false);
+  const f = layout.nodes.find(node => node.id === 'f');
+  const g = layout.nodes.find(node => node.id === 'g');
+  assert.ok(f.closedEmpty && f.words === 'done');
+  assert.ok(!g.closedEmpty && g.words === 'no tasks yet');
+  const closed = layoutMap(model([{ ...milestone('z', []), state: 'done' }]), new Set(), false).nodes[0];
+  assert.ok(closed.closedEmpty && closed.words === 'done');
+  const lost = filterMap(model([{ ...milestone('m', [feature('f', [task('a', 'done', 1)])]), state: 'done' }]), OPEN_FILTER, NOW);
+  assert.ok(!layoutMap(lost.model, new Set(['m']), false, 'x', lost.hidden).nodes.find(node => node.id === 'm').closedEmpty, 'a milestone whose tasks the filter hid still counts them');
 });

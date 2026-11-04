@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Sign } from '../lib/hub'
 import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
+import { rowMatches, snippetOf, words } from './beadSearch.ts'
+import type { SearchRow } from './beadSearch.ts'
+import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter, type WorkFilter, type WorkType } from './workFilter.ts'
+import Combobox from './Combobox'
+import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
 import { hubHash, mapHash, workHash } from '../lib/route'
@@ -21,19 +26,36 @@ const LANES: [WorkLane, string][] = [
 ]
 const COLLAPSE = 10
 const ASKED_LINK: Record<string, string> = { ask: 'Open Ask →', checklist: 'Open checklist →' }
+const FILTER_KEY = 'hub-work-filter'
+/** The viewer's saved filter, one for the Work view across projects; a missing or bad value is the default. */
+const savedFilter = (): WorkFilter => { try { const raw = localStorage.getItem(FILTER_KEY); return raw ? parseWorkFilter(JSON.parse(raw)) : DEFAULT_WORK_FILTER } catch { return DEFAULT_WORK_FILTER } }
+const saveFilter = (filter: WorkFilter) => { try { if (isDefaultWork(filter)) localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, JSON.stringify(filter)) } catch { /* private mode: it is the default next time */ } }
+const ALSO_MAX = 20
 const SOURCE: Record<WorkCard['source'], [string, string]> = { beads: ['◈', 'Beads task'], request: ['✉', 'Request'], hermes: ['☁', 'Hermes run'] }
 
-function Card({ card, href, showProject, projectName, focused, onSheet }: { card: WorkCard; href: string; showProject: boolean; projectName: string; focused?: boolean; /** A plain click on a Beads card, which opens its sheet; it may take over the navigation. */ onSheet: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
+/** The text with each word of the query wrapped in <mark>. */
+function Marked({ text, q }: { text: string; q: string }) {
+  const found = words(q)
+  if (!found.length) return <>{text}</>
+  const parts = text.split(new RegExp(`(${found.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'i'))
+  return <>{parts.map((part, index) => (index % 2 ? <mark key={index}>{part}</mark> : part))}</>
+}
+
+function Card({ card, href, showProject, projectName, focused, onSheet, q = '', row }: { card: WorkCard; q?: string; /** The bead's text row, once the search has loaded it. */ row?: SearchRow; href: string; showProject: boolean; projectName: string; focused?: boolean; /** A plain click on a Beads card, which opens its sheet; it may take over the navigation. */ onSheet: (event: MouseEvent<HTMLAnchorElement>, href: string) => void }) {
   const [glyph, source] = SOURCE[card.source]
   const beads = card.source === 'beads'
+  // A hit that is only in the description or the acceptance criteria: the words the title and id lack, found in the text.
+  const absent = words(q).filter(word => !`${card.id} ${card.title}`.toLowerCase().includes(word))
+  const snippet = row && absent.length ? snippetOf(row.text, absent.join(' ')) : null
   const cardLink = (
     <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
-      <span className="wk-title">{card.title}</span>
+      <span className="wk-title"><Marked text={card.title} q={q} /></span>
+      {snippet && <small className="wk-snip">text: <Marked text={snippet} q={q} /></small>}
       {card.why && <span className="wk-why">{card.nothingAsked && <><span className="wk-warn" role="img" aria-label="Nothing asked yet">⚠</span>{' '}</>}{card.why}</span>}
       <span className="wk-meta">
         {card.live && <span className={`wk-dot ${card.live.state === 'working' ? 'working' : 'idle'}`} role="img" aria-label={card.live.state === 'working' ? 'A session is working on it' : 'A session is idle on it'} />}
         <span className="wk-src" title={source} aria-label={source}>{glyph}</span>
-        <span className="hub-id">{card.id}</span>
+        <span className="hub-id"><Marked text={card.id} q={q} /></span>
         {showProject && card.project && <span className="wk-project">{projectName}</span>}
         {card.signs.map(sign => <span key={sign} className="hub-sign" title={SIGN_LABEL[sign as Sign]} aria-label={SIGN_LABEL[sign as Sign]}>{SIGN_GLYPH[sign as Sign]}</span>)}
       </span>
@@ -88,9 +110,39 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const work = useHubData<WorkLanes>(all || project ? `/work${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [picked, setPicked] = useState<WorkLane | null>(null)
+  // Read in the initializer: the board re-mounts per project and must not fall back to the default.
+  const [filter, setFilter] = useState<WorkFilter>(savedFilter)
+  const change = (next: Partial<WorkFilter>) => { setFilter(value => ({ ...value, ...next })); setPicked(null) }
+  const clearFilter = () => { setFilter(DEFAULT_WORK_FILTER); setPicked(null) }
+  useEffect(() => { saveFilter(filter) }, [filter])
+  const hasQuery = words(filter.q).length > 0
+  const filtering = !isDefaultWork(filter)
+  // The text of the beads, read only while there is a query.
+  const text = useHubData<{ rows: SearchRow[] }>(hasQuery ? `/search-text${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
+  const rowOf = useMemo(() => new Map((hasQuery ? text.data?.rows ?? [] : []).map(row => [`${row.project}/${row.id}`, row])), [hasQuery, text.data])
   const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
   const data = work.data
   const focusKey = focus ? `bead:${focus}` : undefined
+  // The lanes the board shows. A focused card always passes, so a link to a bead never opens on a hidden card. `focusLane` and `focusCard` read `data.lanes`.
+  const shownLanes = useMemo(() => {
+    if (!data || !filtering) return data?.lanes
+    const textOf = (card: WorkCard) => rowOf.get(`${card.project}/${card.id}`)
+    return Object.fromEntries(LANES.map(([lane]) => [lane, data.lanes[lane].filter(card => card.key === focusKey || cardPasses(card, filter, textOf))])) as Record<WorkLane, WorkCard[]>
+  }, [data, filtering, filter, rowOf, focusKey])
+  const laneCount = (lane: WorkLane) => (filtering && shownLanes ? shownLanes[lane].length : data?.counts[lane] ?? 0)
+  const loaded = data ? LANES.reduce((sum, [lane]) => sum + data.lanes[lane].length, 0) : 0
+  const matching = shownLanes ? LANES.reduce((sum, [lane]) => sum + shownLanes[lane].length, 0) : 0
+  const labelOptions = useMemo(() => {
+    const labels = new Set<string>(filter.label ? [filter.label] : [])
+    if (data) for (const [lane] of LANES) for (const card of data.lanes[lane]) for (const label of card.labels ?? []) labels.add(label)
+    return [{ value: '', label: 'Any label' }, ...[...labels].sort().map(label => ({ value: label, label }))]
+  }, [data, filter.label])
+  // Beads that match the search but have no card here: old Done, past the Backlog cap, a group.
+  const also = useMemo(() => {
+    if (!hasQuery || !data) return []
+    const onBoard = new Set(LANES.flatMap(([lane]) => data.lanes[lane]).map(card => card.key))
+    return (text.data?.rows ?? []).filter(row => !onBoard.has(`bead:${row.id}`) && rowMatches(row, filter.q))
+  }, [hasQuery, data, text.data, filter.q])
   const board = all ? 'all' : project ?? ''
   // The lane that holds the item a link pointed at, once the board has loaded; undefined when the board does not have it.
   const focusLane = focusKey && data ? LANES.find(([lane]) => data.lanes[lane].some(card => card.key === focusKey))?.[0] : undefined
@@ -125,7 +177,9 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
     lastFocus.current = null
     if (id) laneGrid.current?.querySelector<HTMLElement>(`[data-card="${CSS.escape(`bead:${id}`)}"]`)?.focus({ preventScroll: true })
   }, [focus])
-  const active = picked ?? focusLane ?? (data ? defaultLane(data.counts) : 'running')
+  // While filtering, a phone shows the first lane with a match until the person taps another.
+  const firstMatch = filtering && shownLanes ? LANES.find(([lane]) => shownLanes[lane].length)?.[0] : undefined
+  const active = picked ?? focusLane ?? firstMatch ?? (data ? defaultLane(data.counts) : 'running')
   // Each scroller that can hide something shows a fade at its cut edge (the Roadmap's pattern).
   const laneChips = useRef<HTMLDivElement>(null)
   const laneGrid = useRef<HTMLDivElement>(null)
@@ -146,6 +200,26 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   return (
     <div className="work" data-sheet={focus && !unknown ? 'open' : undefined}>
       <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
+      {data && (
+        <>
+          <div className="wk-search"><SearchField label="Search work" value={filter.q} onChange={q => change({ q })} onKeyDown={event => { if (event.key === 'Escape' && filter.q) { event.stopPropagation(); change({ q: '' }) } }} data={{ 'data-work-search': '' }} placeholder="Search id, title and description" /></div>
+          <div className="wk-filters" role="group" aria-label="Filters">
+            <button type="button" className={`hub-chip${filter.needsYou ? ' on' : ''}`} aria-pressed={filter.needsYou} data-filter="needs-you" onClick={() => change({ needsYou: !filter.needsYou })}>Needs you</button>
+            <button type="button" className={`hub-chip${filter.blocked ? ' on' : ''}`} aria-pressed={filter.blocked} data-filter="blocked" onClick={() => change({ blocked: !filter.blocked })}>Blocked</button>
+            <div className="hub-seg" role="group" aria-label="Type">
+              {(['task', 'feature', 'question'] as WorkType[]).map(type => <button key={type} type="button" className={filter.type === type ? 'on' : ''} aria-pressed={filter.type === type} data-filter-type={type} onClick={() => change({ type: filter.type === type ? null : type })}>{type}</button>)}
+            </div>
+            <Combobox className="cb-bar wk-label" id="hub-work-label" value={filter.label} options={labelOptions} onChange={label => change({ label })} openLabel="Show labels" inputAttrs={{ 'aria-label': 'Label', 'data-filter-label': '' }} />
+            <div className="hub-seg" role="group" aria-label="Updated">
+              {([[7, '7d'], [30, '30d'], [null, 'any']] as const).map(([within, label]) => <button key={label} type="button" className={filter.within === within ? 'on' : ''} aria-pressed={filter.within === within} data-filter-within={label} onClick={() => change({ within })}>{label}</button>)}
+            </div>
+          </div>
+          {filtering && (
+            <p className="wk-count" role="status" data-work-count>{matching} of {loaded} shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
+          )}
+          {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
+        </>
+      )}
       {project && host.write && <div className="work-spawn"><button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
@@ -159,7 +233,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           <div className="wk-lane-chips" role="group" aria-label="Lane" ref={laneChips}>
             {LANES.map(([lane, label]) => (
               <button key={lane} type="button" className={`wk-lane-chip${lane === active ? ' on' : ''}`} aria-pressed={lane === active} data-lane-chip={lane} onClick={() => setPicked(lane)}>
-                {label} <span className="n">{data.counts[lane]}</span>
+                {label} <span className="n">{laneCount(lane)}</span>
               </button>
             ))}
           </div>
@@ -167,25 +241,39 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           <div className="wk-lanes-wrap" data-overflow={laneEdges}>
           <div className="wk-lanes" data-active={active} ref={laneGrid}>
             {LANES.map(([lane, label]) => {
-              const cards = data.lanes[lane]
-              const collapsible = (lane === 'backlog' || lane === 'done') && cards.length > COLLAPSE
+              const cards = (shownLanes ?? data.lanes)[lane]
+              // Every match shows while filtering: no fold, no "older not shown".
+              const collapsible = !filtering && (lane === 'backlog' || lane === 'done') && cards.length > COLLAPSE
               const shown = collapsible && !expanded[lane] ? cards.slice(0, COLLAPSE) : cards
               return (
                 <section key={lane} className="wk-lane" data-lane={lane} aria-label={label}>
-                  <h3>{label} <span>{data.counts[lane]}</span></h3>
-                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} onSheet={openFromCard} />)}
-                  {!cards.length && <p className="hub-empty">Nothing here.</p>}
+                  <h3>{label} <span>{laneCount(lane)}</span></h3>
+                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} onSheet={openFromCard} q={filter.q} row={rowOf.get(`${card.project}/${card.id}`)} />)}
+                  {!cards.length && <p className="hub-empty">{filtering ? 'No match' : 'Nothing here.'}</p>}
                   {collapsible && (
                     <button type="button" className="hub-btn wk-more" onClick={() => setExpanded(value => ({ ...value, [lane]: !value[lane] }))}>
                       {expanded[lane] ? 'Show fewer' : `Show all ${cards.length}`}
                     </button>
                   )}
-                  {data.counts[lane] > cards.length && <p className="hub-muted">{data.counts[lane] - cards.length} older not shown.</p>}
+                  {!filtering && data.counts[lane] > cards.length && <p className="hub-muted">{data.counts[lane] - cards.length} older not shown.</p>}
                 </section>
               )
             })}
           </div>
           </div>
+          {also.length > 0 && (
+            <section className="wk-also" aria-label="Also found" data-also-found>
+              <h3>Also found <span>{also.length}</span></h3>
+              <p className="hub-muted">Matches with no card on this board.</p>
+              {also.slice(0, ALSO_MAX).map(row => (
+                <a key={`${row.project}/${row.id}`} className="wk-also-row" href={workHash(board, row.id)} data-also={row.id} onClick={() => { if (all) setCarried({ id: row.id, project: row.project }) }}>
+                  <span className="wk-title"><Marked text={row.title} q={filter.q} /></span>
+                  <span className="wk-meta"><span className="hub-id"><Marked text={row.id} q={filter.q} /></span><span>{row.status === 'closed' ? 'closed' : 'open'}</span>{all && <span className="wk-project">{nameOf(row.project)}</span>}</span>
+                </a>
+              ))}
+              {also.length > ALSO_MAX && <p className="hub-muted">+{also.length - ALSO_MAX} more</p>}
+            </section>
+          )}
         </>
       )}
       {focus && !unknown && (

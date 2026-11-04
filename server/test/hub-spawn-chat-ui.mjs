@@ -41,7 +41,7 @@ try {
   await page.goto(`${fx.url}#/~hub/today`);
   await page.locator('[data-spawn-open]').click();
   await page.locator('[data-spawn-sheet] [data-preset]').first().waitFor();
-  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 9);
+  assert.equal(await page.locator('[data-spawn-sheet] [data-preset]').count(), 10);
   const tile = page.locator('[data-spawn-chat]');
   await tile.waitFor();
   assert.equal((await tile.innerText()).trim(), 'Chat with Hermes');

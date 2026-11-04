@@ -474,7 +474,7 @@ test('a Hermes approval is copied once, pings once, is a Needs you row, and the 
     assert.deepEqual([row.needs, row.request, row.project], ['approval', id, 'probe']);
     assert.equal(row.describe.what, 'Hermes asks to write a protected file');
     assert.equal((await second.get('/hub/inbox?filter=approval')).body.items.some(item => item.kind === 'hermes-approval'), true);
-    assert.equal((await second.get('/hub/today')).body.needsYou.some(item => item.kind === 'hermes-approval'), true);
+    assert.equal((await second.get('/hub/today')).body.needsYou.find(item => item.kind === 'hermes-approval')?.project, 'probe', 'Today fills the approval project from its request, so a project filter keeps it.');
     assert.equal((await second.get(`/hub/hermes-approvals/${row.id}`)).body.state, 'open');
 
     assert.equal((await second.post(`/hub/hermes-approvals/${row.id}/answer`, { choice: 'once' }, {})).status, 401);

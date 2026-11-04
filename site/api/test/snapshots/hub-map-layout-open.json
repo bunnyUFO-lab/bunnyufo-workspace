@@ -52,6 +52,7 @@
     "total": 2,
     "words": "2 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 2,
     "marks": {
      "working": false,
@@ -98,6 +99,7 @@
     "total": 8,
     "words": "1 of 8 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 1,
     "marks": {
      "working": true,
@@ -143,6 +145,7 @@
     "later": 0,
     "words": "1 of 3 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 1,
     "marks": {
      "working": true,
@@ -284,6 +287,7 @@
     "later": 0,
     "words": "0 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -424,6 +428,7 @@
     "later": 0,
     "words": "0 of 1 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -519,6 +524,7 @@
     "later": 0,
     "words": "0 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -662,6 +668,7 @@
     "later": 0,
     "words": "no tasks yet",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -715,6 +722,7 @@
     "total": 2,
     "words": "0 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -760,6 +768,7 @@
     "later": 0,
     "words": "0 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
@@ -1101,6 +1110,7 @@
     "total": 2,
     "words": "2 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 2,
     "marks": {
      "working": false,
@@ -1147,6 +1157,7 @@
     "total": 8,
     "words": "1 of 8 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 1,
     "marks": {
      "working": true,
@@ -1193,6 +1204,7 @@
     "total": 2,
     "words": "0 of 2 done",
     "muted": false,
+    "closedEmpty": false,
     "hidden": 0,
     "marks": {
      "working": false,
