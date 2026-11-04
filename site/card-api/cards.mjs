@@ -2352,9 +2352,17 @@ async function activeMarks(project, only) {
   }
   const rows = await mapLimit([...byBead], 8, async ([bead, names]) => {
     names.sort();
-    const owner = names.filter(name => !name.includes('-applied-')).at(-1);
+    // Only the Hub's own verdicts count (the card API tags everything put through it, as the Hub's own rule does): the newest untagged one is the current verdict.
+    let owner = null;
+    let body = null;
+    for (const name of names.filter(item => !item.includes('-applied-')).reverse()) {
+      const got = await readInboxWithWriter(`bead-marks/${project}/${bead}/${name}`);
+      if (!got || got.writer !== 'none') continue;
+      try { body = JSON.parse(got.text); } catch { body = null; }
+      owner = name;
+      break;
+    }
     if (!owner || MARK_NAME.exec(owner)[2] === 'undo') return null;
-    const body = await readJson(inboxPath('bead-marks', project, bead, owner));
     if (!body || body.verdict !== MARK_NAME.exec(owner)[2] || typeof body.at !== 'string') return null;
     for (const name of names.filter(item => item.includes('-applied-'))) {
       if ((await readJson(inboxPath('bead-marks', project, bead, name)))?.mark === owner) return null;

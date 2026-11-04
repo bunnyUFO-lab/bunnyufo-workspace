@@ -2503,3 +2503,37 @@ test('the agent-side commands write no owner verdict file: the PC step block nam
   const planApplyBody = source.slice(source.indexOf('async function planApply'), source.indexOf('async function readJournal'));
   assert.doesNotMatch(planApplyBody, /claim\(|mustPut\(|pickupBody/, 'plan apply does not call pickup.');
 });
+
+test('mark apply and mark list ignore a verdict the card API wrote (writer tag): it changes nothing in Beads', async () => {
+  const { cli, calls, fake, close } = await markFixture();
+  try {
+    // dr-x: its only verdict is tagged. dr-y: an untagged done, then a newer tagged undo (ignored), so done still counts.
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-x/20261030T170000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-x', verdict: 'done', at: '2026-10-30T17:00:00.000Z', by: 'owner' }), 'application/json', { writer: 'card-api' });
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-y/20261030T180000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-y', verdict: 'done', at: '2026-10-30T18:00:00.000Z', by: 'owner' }), 'application/json');
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-y/20261030T181000000Z-undo-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-y', verdict: 'undo', at: '2026-10-30T18:10:00.000Z', by: 'owner' }), 'application/json', { writer: 'card-api' });
+    const state = JSON.parse(await readFile(cli.env.BUW_BD_STATE, 'utf8'));
+    state['dr-x'] = { status: 'open', labels: [] };
+    state['dr-y'] = { status: 'open', labels: [] };
+    await writeFile(cli.env.BUW_BD_STATE, JSON.stringify(state));
+    const listed = (await cli('api', 'mark', 'list', '--project', 'dev-roadmap')).stdout;
+    assert.doesNotMatch(listed, /dr-x/);
+    assert.match(listed, /dr-y\tdone/);
+    const run = JSON.parse((await cli('api', 'mark', 'apply', '--project', 'dev-roadmap', '--json')).stdout);
+    assert.ok(!run.applied.includes('dr-x') && !run.waiting.includes('dr-x') && !run.failed.some(item => item.bead === 'dr-x'), 'dr-x is not touched.');
+    assert.ok(run.applied.includes('dr-y'));
+    assert.ok(!(await calls()).some(call => call[1] === 'dr-x'), 'bd never saw dr-x.');
+  } finally { await close(); }
+});
+
+test('plan apply --journal that already holds every row exits 0 and runs nothing', async () => {
+  const changes = [{ op: 'create', title: 'A' }, { op: 'close', bead: 'wk-5', reason: 'x' }];
+  const { cli, dir, id, calls, close } = await planFixture({ changes });
+  try {
+    const journal = path.join(dir, 'done.json');
+    await writeFile(journal, JSON.stringify({ rows: { d1: 'done', d2: 'done' }, made: { '#1': 'wk-9' } }));
+    const run = await cli('api', 'plan', 'apply', id, '--journal', journal);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /Applied 2 of 2 row\(s\)/);
+    assert.deepEqual(await calls(), []);
+  } finally { await close(); }
+});
