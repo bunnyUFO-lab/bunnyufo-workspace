@@ -30,6 +30,18 @@ export const AGENTS = [
 /** The agents with a chat persona the owner may edit (chat-personas.mjs has their prompts). chat-personas.test.mjs keeps this equal to the persona table. */
 export const PERSONA_AGENTS = ['researcher', 'market-researcher', 'teardown', 'planner'];
 
+/** The model line of every agent on Hermes main, as the cards above have it. */
+const MAIN_MODEL_LINE = 'Codex gpt-6-sol Â· Sonnet, then DeepSeek fallback';
+
+/**
+ * The Team entry of a persona the owner made (ws-im1.4.3, hub-personas.mjs): a chat agent on Hermes main in the Research room. `entry` is its row of
+ * the persona table. It has no job preset, so its one button is Chat. `custom` marks it for the pages (Retire; no sprite sheet job).
+ */
+export const agentOfPersona = entry => ({
+  id: entry.id, profile: 'main', name: entry.name, room: 'Research', runtime: 'Hermes profile main', model: MAIN_MODEL_LINE, role: entry.role,
+  action: { label: 'Chat', chat: entry.id }, custom: true,
+});
+
 export const AVATAR_FILE_RE = /^avatar-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}\.json$/;
 export const STATUSES = ['working', 'needs-you', 'failed', 'idle', 'offline'];
 
@@ -68,10 +80,11 @@ const ago = (iso, at) => {
 
 /**
  * One status per agent: `{ id, status, task, sessions? }`.
+ * - `extra`: the ids of the personas the owner made, which get the same status as the built-in ones.
  * - working: Working now (`hub-pc.mjs`), PC pcSummary or null, hermes: `null` (not set up) or `{ ok }`,
  *   lastChat: ISO time or ''.
  */
-export function agentStatuses({ working = [], pc = null, hermes = null, lastChat = '', at }) {
+export function agentStatuses({ working = [], pc = null, hermes = null, lastChat = '', extra = [], at }) {
   const sessions = working.filter(item => item.agent === 'claude');
   let claude;
   if (sessions.some(item => item.state === 'needs-you')) claude = 'needs-you';
@@ -89,7 +102,7 @@ export function agentStatuses({ working = [], pc = null, hermes = null, lastChat
     { id: 'hermes', status: hermesStatus, task: hermesTask },
     { id: 'briefs', status: 'idle', task: 'Daily projects brief and weekly digests' },
     { id: 'claude', status: claude, task: claudeTask, sessions },
-    ...PERSONA_AGENTS.map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
+    ...[...PERSONA_AGENTS, ...extra].map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
   ];
 }
 
@@ -102,9 +115,9 @@ const modelLine = block => `${block.model.default}${block.fallbacks.length ? ` Â
  * An agent on a Hermes profile is also `editable: { profile: true }` (the model and fallback order, ws-im1.4.2); with a fresh `exported` (hub-agent-config.mjs)
  * its `model` line is built from the host's own settings, else it stays the text above.
  */
-export function buildTeam({ statuses, choices = {}, personas = [], exported = null, at = new Date() }) {
+export function buildTeam({ statuses, choices = {}, personas = [], exported = null, agents = AGENTS, at = new Date() }) {
   const by = new Map(statuses.map(row => [row.id, row]));
-  return AGENTS.map(agent => {
+  return agents.map(agent => {
     const row = by.get(agent.id) ?? { status: 'offline', task: '' };
     const persona = personas.find(entry => entry.id === agent.id);
     const block = agent.profile && exported && exportFreshness(exported, at) === 'fresh' ? exported.profiles[agent.profile] : null;

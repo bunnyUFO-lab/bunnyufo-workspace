@@ -25,7 +25,8 @@ import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
 import { createRerun } from './hub-rerun.mjs';
-import { createPersonaStore, VIEW_ONLY, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { createPersonaStore, MAX_MADE_PERSONAS, VIEW_ONLY, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { PERSONA_TEMPLATES } from './chat-personas.mjs';
 import { AGENT_EDIT_OPTIONS, validateAgentEdit } from './agent-edit.mjs';
 import { createAgentEdits } from './hub-agent-edit.mjs';
 import { loadSigningKey, verify as verifySigned } from './signing.mjs';
@@ -41,7 +42,7 @@ import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork, unaskedOf } from './hub-work.mjs';
-import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
+import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
@@ -298,7 +299,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now });
   // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
   const agentEditFlow = createAgentEdits({
-    personas: personaStore, log,
+    personas: personaStore, log, agents: () => allAgents(),
     profiles: {
       signingKey,
       exported: at => loadAgentConfig(at),
@@ -530,7 +531,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** The newest valid avatar choice file of each agent, or none. Names sort by their stamp, so the last is the newest. */
   async function avatarChoices() {
     const choices = {};
-    await Promise.all(AGENTS.map(async agent => {
+    await Promise.all((await allAgents()).map(async agent => {
       const base = folder(`team/${agent.id}`);
       const { objects } = await bucket.list(base);
       const names = objects.map(object => object.key.slice(base.length)).filter(name => AVATAR_FILE_RE.test(name)).sort().reverse().slice(0, 5);
@@ -546,11 +547,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return choices;
   }
 
+  /** The agents of the app and the personas the owner made (not the retired ones). The sprite sheet jobs stay on AGENTS: they are for the built-in agents. */
+  async function allAgents() {
+    return [...AGENTS, ...(await personaStore.table()).filter(entry => entry.custom && !entry.retired).map(agentOfPersona)];
+  }
+
   async function teamView(at) {
-    const [window, status, hermes, lastChat, choices, personas, exported] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table(), loadAgentConfig(at).catch(() => null)]);
+    const [window, status, hermes, lastChat, choices, personas, exported, agents] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table(), loadAgentConfig(at).catch(() => null), allAgents()]);
     const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
-    const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, at });
-    return { agents: buildTeam({ statuses, choices, personas, exported, at }) };
+    const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, extra: agents.filter(agent => agent.custom).map(agent => agent.id), at });
+    return { agents: buildTeam({ statuses, choices, personas, exported, agents, at }) };
   }
 
   /** The sheets reader; the keys come from `inboxKey` like every other. */
@@ -566,7 +572,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /** The owner's avatar choice: a create-only file the Hub alone writes (owner-only in the card API). */
   async function chooseAvatar(agentId, raw, user, at) {
-    if (!AGENTS.some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
+    if (!(await allAgents()).some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
     let choice = checkAvatar(raw);
     if (!choice) throw fail('An avatar is a built-in key, a random one with a whole number from 0 to 9999, or a custom sheet.', 400);
     if (choice.kind === 'custom') {
@@ -594,7 +600,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
    */
   async function requestProfileChange(agentId, raw, user, at) {
     if (!user) throw fail('Sign in to change a model.', 401);
-    const agent = AGENTS.find(item => item.id === agentId);
+    const agent = (await allAgents()).find(item => item.id === agentId);
     if (!agent) throw fail('No such agent.', 404);
     if (!agent.profile) throw fail('This agent has no Hermes profile to change.', 404);
     if (Object.keys(raw).some(name => name !== 'fallbacks' && VIEW_ONLY.includes(name))) throw fail(VIEW_ONLY_MESSAGE, 403);
@@ -1706,10 +1712,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if (route === '/hub/team/templates') {
+            // The templates carry their prompt text: same rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);
+            reply({
+              templates: PERSONA_TEMPLATES.map(item => ({ id: item.id, label: item.label, line: item.line, text: item.text('<name>', '<role>') })),
+              retired: await personaStore.retiredList(), max: MAX_MADE_PERSONAS,
+            });
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/details$/.exec(route))) {
             // Prompt text is not for an anonymous LAN read: same rule as the chat reads.
             if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
-            const agent = AGENTS.find(item => item.id === match[1]);
+            const agent = (await allAgents()).find(item => item.id === match[1]);
             if (!agent) throw fail('No such agent.', 404);
             const exported = agent.profile ? await loadAgentConfig(at) : null;
             reply(agentDetails({
@@ -1720,7 +1733,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona$/.exec(route))) {
             // The prompt is not for an anonymous LAN read: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
-            if (!AGENTS.some(item => item.id === match[1])) throw fail('No such agent.', 404);
+            if (!(await allAgents()).some(item => item.id === match[1])) throw fail('No such agent.', 404);
             reply(await personaStore.versions(match[1]));
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/sheets$/.exec(route))) {
             reply(await sheetList(match[1], at));
@@ -1780,6 +1793,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await deleteDrawing(match[1], user, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
           send(await saveDrawingOld(match[1], raw));
+        } else if (route === '/hub/team/new') {
+          if (!user) throw fail('Sign in to make a persona.', 401);
+          send({ status: 201, body: await personaStore.create(raw, user, at) });
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona\/retire$/.exec(route))) {
+          if (!user) throw fail('Sign in to retire a persona.', 401);
+          send({ status: 200, body: await personaStore.retire(match[1], user, at) });
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona(\/revert)?$/.exec(route))) {
           if (!user) throw fail('Sign in to edit a persona.', 401);
           if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);

@@ -27,7 +27,7 @@ const refOf = item => `${item.provider} · ${item.model}`;
 const chainOf = set => [set, ...set.fallbacks].map(refOf).join(', then ');
 const sameSet = (a, b) => a.provider === b.provider && a.model === b.model && a.fallbacks.length === b.fallbacks.length
   && a.fallbacks.every((item, index) => item.provider === b.fallbacks[index].provider && item.model === b.fallbacks[index].model);
-const sharedBy = profile => AGENTS.filter(agent => agent.profile === profile).map(agent => agent.name);
+const sharedBy = (profile, agents) => agents.filter(agent => agent.profile === profile).map(agent => agent.name);
 const listed = names => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 
 /**
@@ -35,9 +35,10 @@ const listed = names => (names.length < 2 ? names.join('') : `${names.slice(0, -
  * @param profiles  the Hermes profile side, from hub.mjs (absent in a test of personas alone):
  *                  `signingKey` (null: Apply is off), `exported(at)` (the newest valid export or null), `changes(profile, at)` ([{ change, result }], newest first),
  *                  `putApproval(id, doc)` and `putAsk(id, ask)` (create-only; throw the `conflict` they are given on a name that exists)
+ * @param agents    `() => agents`: the agents of the app and the personas the owner made, for who shares a profile (default: the app's)
  * @param log       one-line log
  */
-export function createAgentEdits({ personas, profiles = null, log = () => {} }) {
+export function createAgentEdits({ personas, profiles = null, agents = async () => AGENTS, log = () => {} }) {
   const no = why => ({ applied: false, why });
 
   /**
@@ -69,7 +70,7 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
   }
 
   /** The Ask text for a profile edit: old and new order, who shares the profile, and what the restart costs. */
-  function profileAsk({ edit, from, to, user, at }) {
+  function profileAsk({ edit, from, to, sharers, user, at }) {
     const id = `${day8(at)}-profile-${edit.profile}-${randomId(4)}`;
     return {
       id, project: 'workspace-app', createdAt: at.toISOString(), expiresAt: new Date(at.getTime() + ASK_VALID_MS).toISOString(),
@@ -77,7 +78,7 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
       question: `Change the model of the Hermes ${edit.profile} profile?`,
       context: [
         `Now: ${chainOf(from)}.`, `New: ${chainOf(to)}.`,
-        `The profile ${edit.profile} is shared by ${listed(sharedBy(edit.profile))}.`,
+        `The profile ${edit.profile} is shared by ${listed(sharedBy(edit.profile, sharers))}.`,
         `Hermes ${edit.profile} restarts within about 5 minutes. A chat or job running then stops.`,
         ...(user ? [`Asked by ${user}.`] : []),
       ].join('\n'),
@@ -92,8 +93,9 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
    */
   async function createProfileAsk({ edit, user, at }) {
     const { from, to } = await checkProfile(edit, at);
+    const sharers = await agents();
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const ask = profileAsk({ edit, from, to, user, at });
+      const ask = profileAsk({ edit, from, to, sharers, user, at });
       const problems = validateAgentEdit(ask);
       if (problems.length) throw problem(`This edit cannot be asked for: ${problems.slice(0, 3).join('; ')}.`, 400);
       try {

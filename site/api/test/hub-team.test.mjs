@@ -10,7 +10,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { presetOf } from '../presets.mjs';
 import { CHAT_PERSONAS } from '../chat-personas.mjs';
-import { AGENTS, agentStatuses, BUILTIN_KEYS, checkAvatar, PERSONA_AGENTS } from '../hub-team.mjs';
+import { AGENTS, agentOfPersona, agentStatuses, buildTeam, BUILTIN_KEYS, checkAvatar, PERSONA_AGENTS } from '../hub-team.mjs';
 import { BUILTIN_KEYS as CLIENT_KEYS } from '../../../src/hub/team/sprites.ts';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder, teamAvatarJson } from './hub-fixtures.mjs';
@@ -215,4 +215,23 @@ test('agentStatuses and checkAvatar on their own', () => {
   assert.deepEqual(checkAvatar({ kind: 'random', salt: 0, extra: 1 }), { kind: 'random', salt: 0 });
   assert.equal(checkAvatar(null), null);
   assert.equal(checkAvatar([]), null);
+});
+
+test('a made persona is a Research chat agent on Hermes main; statuses and the team builder take the extra ids and agents', () => {
+  const entry = { id: 'level-reviewer', name: 'Level reviewer', role: 'reviews levels', model: 'codex', text: 'You are Level reviewer.', custom: true };
+  const agent = agentOfPersona(entry);
+  assert.deepEqual(agent, {
+    id: 'level-reviewer', profile: 'main', name: 'Level reviewer', room: 'Research', runtime: 'Hermes profile main', model: AGENTS.find(row => row.id === 'planner').model,
+    role: 'reviews levels', action: { label: 'Chat', chat: 'level-reviewer' }, custom: true,
+  });
+  const plain = agentStatuses({ hermes: { ok: true }, at: NOW });
+  assert.equal(plain.length, 7, 'no extra: the seven as before');
+  const rows = agentStatuses({ hermes: { ok: true }, extra: ['level-reviewer'], at: NOW });
+  assert.deepEqual(rows.at(-1), { id: 'level-reviewer', status: 'idle', task: 'Ready for a job' });
+  assert.deepEqual(buildTeam({ statuses: plain, at: NOW }).map(row => row.id), AGENTS.map(row => row.id), 'agents default to the app list');
+  const team = buildTeam({ statuses: rows, personas: [...CHAT_PERSONAS, entry], agents: [...AGENTS, agent], at: NOW });
+  const card = team.at(-1);
+  assert.deepEqual([card.id, card.status, card.custom, card.editable, card.sprite.kind], ['level-reviewer', 'idle', true, { persona: true, profile: true }, 'random']);
+  assert.equal(card.chatModel, undefined, 'not edited yet');
+  assert.equal(team.slice(0, -1).some(row => row.custom), false);
 });

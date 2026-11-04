@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { CHAT_PERSONAS } from '../chat-personas.mjs';
+import { CHAT_PERSONAS, PERSONA_TEMPLATES, chatPersonaOf, chatPersonasForClient, personaTextOf, storedPersona } from '../chat-personas.mjs';
 import { PERSONA_FILE_RE, VIEW_ONLY, checkPersonaEdit, effectivePersona, syncRole } from '../hub-personas.mjs';
 import { AGENT_EDIT_OPTIONS, validateAgentEdit } from '../agent-edit.mjs';
 import { discordEligible, validId } from '../hub-model.mjs';
@@ -730,5 +730,246 @@ test('profile change: an approved.json nobody signed counts for nothing, and a r
       assert.match(done.body.agentEdit.why, /lists a model twice now/);
       assert.equal(approvals(dup).length, 0);
     } finally { await dup.close(); }
+
+// --- A persona made from a template (ws-im1.4.3) ---
+
+const make = async (f, data, user = 'owner') => { f.clock.time += 1000; return f.call('POST', '/hub/team/new', data, user); };
+const LEVEL = { template: 'research', name: 'Level reviewer', role: 'reviews level designs and cites the sources' };
+const retire = async (f, id) => { f.clock.time += 1000; return f.call('POST', `/hub/team/${id}/persona/retire`, {}); };
+const teamRow = async (f, id) => (await f.call('GET', '/hub/team')).body.agents.find(row => row.id === id);
+
+test('new persona from the research template: a Team card, Chat in the menu, its text, Edit and Revert as on a default', async () => {
+  const f = await fixture();
+  try {
+    const before = (await f.call('GET', '/hub/team')).body;
+    const made = await make(f, LEVEL);
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.deepEqual([made.body.id, made.body.name], ['level-reviewer', 'Level reviewer']);
+    const file = f.fake.json(f.files('level-reviewer')[0]);
+    assert.equal(file.template, 'research');
+    assert.equal(file.model, 'codex');
+    assert.equal(file.created, true);
+    assert.equal(file.prompt, personaTextOf({ name: 'Level reviewer', role: LEVEL.role, extra: '' }), 'the research template is the default text under a new name');
+    assert.equal(f.fake.objects.get(f.files('level-reviewer')[0]).metadata?.writer, undefined, 'the Hub\'s own write carries no mark');
+
+    const card = await teamRow(f, 'level-reviewer');
+    assert.deepEqual([card.name, card.room, card.profile, card.runtime, card.custom, card.role], ['Level reviewer', 'Research', 'main', 'Hermes profile main', true, LEVEL.role]);
+    assert.deepEqual(card.action, { label: 'Chat', chat: 'level-reviewer' });
+    assert.deepEqual(card.editable, { persona: true, profile: true });
+    assert.equal(card.model, 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback');
+    assert.equal(card.sprite.kind, 'random');
+    assert.equal(card.status, 'offline', 'Hermes is not set up in this fixture');
+    const after = (await f.call('GET', '/hub/team')).body;
+    assert.deepEqual(after.agents.filter(row => row.id !== 'level-reviewer'), before.agents, 'the others are as before');
+
+    const menu = chatPersonasForClient(await f.hub.personas.table());
+    assert.deepEqual(menu.find(entry => entry.id === 'level-reviewer'), { id: 'level-reviewer', name: 'Level reviewer', role: LEVEL.role, preset: undefined, model: 'codex' });
+    assert.ok(menu.every(entry => !('text' in entry)));
+
+    const details = (await f.call('GET', '/hub/team/level-reviewer/details')).body;
+    assert.equal(details.agent.profile, 'main');
+    assert.equal(details.prompts.find(item => item.id === 'persona').text, file.prompt);
+    assert.equal(details.prompts.find(item => item.id === 'persona').note, undefined, 'not edited yet');
+
+    const view = (await f.call('GET', '/hub/team/level-reviewer/persona')).body;
+    assert.deepEqual([view.custom, view.default, view.versions.length, view.name], [true, null, 1, 'Level reviewer']);
+    assert.ok(view.versions.every(row => !row.default), 'no "Back to the app\'s text" row');
+    const one = await f.save('level-reviewer', { role: LEVEL.role, prompt: `${file.prompt}\n- Two lines.`, model: 'sonnet', base: view.current.version });
+    assert.equal(one.status, 200, JSON.stringify(one.body));
+    assert.equal(f.fake.json(f.files('level-reviewer').at(-1)).name, 'Level reviewer', 'a version of a made persona carries its name');
+    assert.equal((await f.hub.personas.table()).find(entry => entry.id === 'level-reviewer').model, 'sonnet');
+    const back = await f.revert('level-reviewer', { to: view.current.version, base: one.body.version });
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    assert.equal(back.body.current.prompt, file.prompt);
+    assert.equal(back.body.current.model, 'codex');
+    assert.equal((await f.revert('level-reviewer', { to: 'default', base: back.body.version })).status, 400, 'a made persona has no app text');
+    assert.match((await f.call('GET', '/hub/team/level-reviewer/details')).body.prompts.find(item => item.id === 'persona').note, /^Edited /);
+  } finally { await f.close(); }
+});
+
+test('the planner and plain templates are the Planner\'s text under the new name and a short chat prompt; every template passes the edit check', async () => {
+  const f = await fixture();
+  try {
+    const planner = await make(f, { template: 'planner', name: 'Roadmap helper', role: 'plans a roadmap' });
+    assert.equal(planner.status, 201, JSON.stringify(planner.body));
+    const plannerText = f.fake.json(f.files('roadmap-helper')[0]).prompt;
+    const original = CHAT_PERSONAS.find(entry => entry.id === 'planner').text;
+    assert.ok(plannerText.startsWith('You are Roadmap helper, one of the owner\'s agents: you talk a plan'));
+    assert.equal(plannerText.slice(plannerText.indexOf(',')), original.slice(original.indexOf(',')), 'only the name differs');
+    const plain = await make(f, { template: 'plain', name: 'Quick answers', role: 'answers short questions.' });
+    assert.equal(plain.status, 201, JSON.stringify(plain.body));
+    const plainFile = f.fake.json(f.files('quick-answers')[0]);
+    assert.match(plainFile.prompt, /^You are Quick answers, one of the owner's agents: answers short questions\. The owner/, 'a closing full stop of the role is not doubled');
+    assert.equal(plainFile.role, 'answers short questions');
+    assert.match(plainFile.prompt, /Never create requests or Asks, and write no cards\./);
+    assert.ok(!/cards ask|changes\.json/.test(plainFile.prompt));
+    for (const template of PERSONA_TEMPLATES) {
+      const clean = checkPersonaEdit({ role: 'a role', prompt: template.text('A name', 'a role'), model: template.model, base: 'default' });
+      assert.ok(clean.prompt.length > 50, template.id);
+    }
+    const listed = (await f.call('GET', '/hub/team/templates')).body;
+    assert.deepEqual(listed.templates.map(item => item.id), ['research', 'planner', 'plain']);
+    assert.ok(listed.templates.every(item => item.label && item.line && item.text.includes('<name>')));
+    assert.deepEqual([listed.retired, listed.max], [[], 20]);
+  } finally { await f.close(); }
+});
+
+test('refused: a bad template, name or role, a taken or reserved name, a view-only key, an agent, signed out; nothing is written', async () => {
+  const f = await fixture();
+  try {
+    const refuse = async (data, status, pattern, user = 'owner') => {
+      const answer = await make(f, data, user);
+      assert.equal(answer.status, status, `${JSON.stringify(data).slice(0, 80)} -> ${JSON.stringify(answer.body)}`);
+      if (pattern) assert.match(answer.body.error, pattern);
+    };
+    await refuse({ ...LEVEL, template: 'hermes' }, 400, /templates/);
+    await refuse({ ...LEVEL, template: undefined }, 400, /templates/);
+    await refuse({ ...LEVEL, name: '' }, 400, /name/);
+    await refuse({ ...LEVEL, name: 'Level; reviewer' }, 400, /letters, digits and spaces/);
+    await refuse({ ...LEVEL, name: 'L'.repeat(41) }, 400, /40/);
+    await refuse({ ...LEVEL, name: '2nd reviewer' }, 400, /starts with a letter/);
+    await refuse({ ...LEVEL, name: 7 }, 400, /text/);
+    for (const name of ['Hermes', 'New', 'Templates', 'Researcher', 'Market researcher', 'Planner', 'Claude', 'Briefs', 'Teardown']) await refuse({ ...LEVEL, name }, 400, /taken/);
+    await refuse({ ...LEVEL, role: '' }, 400, /role line/);
+    await refuse({ ...LEVEL, role: '...' }, 400, /role line/);
+    await refuse({ ...LEVEL, role: 'r'.repeat(201) }, 400, /at most 200/);
+    await refuse({ ...LEVEL, role: 'two\nlines' }, 400, /control character/);
+    await refuse({ ...LEVEL, role: `uses sk-ant-${'a'.repeat(30)}` }, 400, /secret/);
+    await refuse({ ...LEVEL, prompt: 'You are a pirate.' }, 400, /no field prompt/);
+    await refuse({ ...LEVEL, model: 'sonnet' }, 400, /no field model/);
+    await refuse({ ...LEVEL, toolsets: ['web'] }, 403, /view-only/);
+    await refuse({ ...LEVEL, soul: 'x' }, 403, /view-only/);
+    await refuse(LEVEL, 401, /signed-in|Sign in/, null);
+    await refuse(null, 400, /templates/);
+    assert.deepEqual([...f.fake.objects.keys()].filter(name => /\/team\/.*persona-/.test(name)), []);
+    assert.equal((await make(f, LEVEL)).status, 201);
+    assert.equal((await make(f, { ...LEVEL, name: 'level  REVIEWER' })).status, 409, 'the same id in another spelling is taken');
+    assert.equal((await f.call('GET', '/hub/team/templates', undefined, null)).status, 401, 'the templates carry prompt text: sign in');
+    assert.equal((await f.call('POST', '/hub/team/level-reviewer/persona/retire', {}, null)).status, 401);
+    assert.equal((await retire(f, 'researcher')).status, 400, 'an agent of the app is not retired');
+    assert.equal((await retire(f, 'nobody')).status, 404);
+    assert.equal(f.files('researcher').length, 0);
+  } finally { await f.close(); }
+});
+
+test('a 21st persona is refused, retired ones count, and the Team lists the 19 live ones', async () => {
+  const f = await fixture();
+  try {
+    for (let n = 0; n < 20; n += 1) {
+      const name = `Helper ${String.fromCharCode(97 + n)}`;
+      const answer = await make(f, { template: 'plain', name, role: 'helps' });
+      assert.equal(answer.status, 201, `${name}: ${JSON.stringify(answer.body)}`);
+    }
+    const over = await make(f, { template: 'plain', name: 'One too many', role: 'helps' });
+    assert.equal(over.status, 400);
+    assert.match(over.body.error, /at most 20/);
+    assert.equal((await retire(f, 'helper-a')).status, 200);
+    assert.equal((await make(f, { template: 'plain', name: 'One too many', role: 'helps' })).status, 400, 'retired ones count');
+    const agents = (await f.call('GET', '/hub/team')).body.agents;
+    assert.equal(agents.filter(row => row.custom).length, 19);
+  } finally { await f.close(); }
+});
+
+test('retire leaves the Team and the menu, keeps its text for old chats and every file; Bring back is a Revert and returns it', async () => {
+  const f = await fixture();
+  try {
+    await make(f, LEVEL);
+    const view = (await f.call('GET', '/hub/team/level-reviewer/persona')).body;
+    const retired = await retire(f, 'level-reviewer');
+    assert.equal(retired.status, 200, JSON.stringify(retired.body));
+    const marker = f.fake.json(f.files('level-reviewer').at(-1));
+    assert.deepEqual(Object.keys(marker).sort(), ['at', 'by', 'name', 'retired', 'v']);
+    assert.equal(f.files('level-reviewer').length, 2, 'nothing is deleted');
+    assert.equal(await teamRow(f, 'level-reviewer'), undefined);
+    assert.equal((await f.call('GET', '/hub/team/level-reviewer/details')).status, 404);
+    assert.equal(chatPersonasForClient(await f.hub.personas.table()).some(entry => entry.id === 'level-reviewer'), false);
+    const table = await f.hub.personas.table();
+    const kept = table.find(entry => entry.id === 'level-reviewer');
+    assert.deepEqual([kept.retired, kept.text, kept.name], [true, view.current.prompt, 'Level reviewer'], 'the table keeps it for old chats');
+    assert.throws(() => chatPersonaOf('level-reviewer', table), error => error.status === 400 && error.message === 'Unknown persona.');
+    assert.equal(storedPersona('level-reviewer', table).text, view.current.prompt);
+    assert.equal((await retire(f, 'level-reviewer')).status, 409, 'twice');
+    assert.equal((await f.save('level-reviewer', { role: 'x', prompt: 'You are X.', model: 'codex', base: retired.body.version })).status, 409, 'no edit of a retired persona');
+    assert.equal((await make(f, LEVEL)).status, 409, 'a retired one keeps its id');
+
+    const list = (await f.call('GET', '/hub/team/templates')).body.retired;
+    assert.deepEqual(list, [{ id: 'level-reviewer', name: 'Level reviewer', role: LEVEL.role, to: view.current.version, base: retired.body.version }]);
+    assert.equal((await f.revert('level-reviewer', { to: 'persona-20200101T000000000Z-zzzz', base: list[0].base })).status, 404);
+    const back = await f.revert('level-reviewer', { to: list[0].to, base: list[0].base });
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    assert.equal(f.files('level-reviewer').length, 3);
+    const copy = f.fake.json(f.files('level-reviewer').at(-1));
+    assert.deepEqual([copy.name, copy.template, copy.revertOf], ['Level reviewer', 'research', view.current.version]);
+    assert.ok(await teamRow(f, 'level-reviewer'), 'it returns');
+    assert.ok(chatPersonasForClient(await f.hub.personas.table()).some(entry => entry.id === 'level-reviewer'));
+    assert.deepEqual((await f.call('GET', '/hub/team/templates')).body.retired, []);
+    // The retirement itself is not a version to go back to, and it can be brought back a second time.
+    assert.equal((await f.revert('level-reviewer', { to: retired.body.version, base: back.body.version })).status, 400);
+    const again = await retire(f, 'level-reviewer');
+    assert.equal((await f.revert('level-reviewer', { to: list[0].to, base: again.body.version })).status, 200);
+  } finally { await f.close(); }
+});
+
+test('a folder with only an avatar, an unreadable or marked version, an agent\'s id or a nameless version is no persona', async () => {
+  const f = await fixture();
+  try {
+    const plant = (agent, stamp, body, metadata) => f.fake.seed(`sections/inbox/team/${agent}/persona-${stamp}-zz99.json`, typeof body === 'string' ? body : JSON.stringify(body), 'application/json', metadata);
+    const good = { v: 1, role: 'r', prompt: 'You are Z.', model: 'codex', name: 'Zed', template: 'plain', at: 'T', by: 'owner' };
+    f.fake.seed('sections/inbox/team/only-avatar/avatar-20261101T000000000Z-ab12.json', JSON.stringify({ kind: 'random', salt: 3, at: 'T', by: 'o' }), 'application/json');
+    plant('unreadable', '20261101T000000000Z', 'not json');
+    plant('marked', '20261101T000000000Z', good, { writer: 'card-api' });
+    plant('nameless', '20261101T000000000Z', { ...good, name: undefined });
+    plant('bad-name', '20261101T000000000Z', { ...good, name: 'Bad; name' });
+    plant('briefs', '20261101T000000000Z', good, {});
+    plant('hermes', '20261101T000000000Z', good, {});
+    plant('claude', '20261101T000000000Z', good, {});
+    plant('teardown', '20261101T000000000Z', { ...good, role: 'a hijacked role', prompt: 'x' }, {});
+    plant('retired-only', '20261101T000000000Z', { v: 1, retired: true, name: 'Gone', at: 'T', by: 'o' }, {});
+    assert.deepEqual((await f.hub.personas.table()).map(entry => entry.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
+    const team = (await f.call('GET', '/hub/team')).body.agents;
+    assert.deepEqual(team.map(row => row.id), ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown', 'planner']);
+    assert.equal(team.find(row => row.id === 'teardown').role, 'a hijacked role', 'an agent of the app takes a valid version as before');
+    assert.equal((await f.call('GET', '/hub/team/briefs/persona')).status, 404);
+    assert.equal((await f.call('POST', '/hub/team/hermes/persona', { role: 'r', prompt: 'p', model: 'codex', base: 'default' })).status, 404);
+    assert.equal((await make(f, { ...LEVEL, name: 'Only avatar' })).status, 201, 'an avatar-only folder does not block the name');
+    // An agent of the app cannot carry a retirement.
+    plant('teardown', '20261102T000000000Z', { v: 1, retired: true, name: 'Teardown', at: 'T', by: 'o' }, {});
+    f.hub.personas.forget();
+    assert.equal((await f.hub.personas.table()).find(entry => entry.id === 'teardown').role, 'a hijacked role');
+    assert.equal((await teamRow(f, 'teardown')).id, 'teardown');
+  } finally { await f.close(); }
+});
+
+test('an agent-edit Ask for a made persona applies through the same table; an agent has no way to make or retire one', async () => {
+  const f = await fixture();
+  try {
+    await make(f, LEVEL);
+    const view = (await f.call('GET', '/hub/team/level-reviewer/persona')).body;
+    const id = agentEditAsk(f, 'lv01', proposal({ agent: 'level-reviewer', base: view.current.version, prompt: 'You are Level reviewer. Be brief.' }));
+    f.clock.time += 1000;
+    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal(done.body.agentEdit.applied, true, JSON.stringify(done.body));
+    const stored = f.fake.json(f.files('level-reviewer').at(-1));
+    assert.deepEqual([stored.fromAsk, stored.name, stored.template, stored.prompt], [id, 'Level reviewer', 'research', 'You are Level reviewer. Be brief.']);
+    assert.equal((await f.hub.personas.table()).find(entry => entry.id === 'level-reviewer').text, 'You are Level reviewer. Be brief.');
+    // No op makes or retires a persona.
+    const ask = agentEdit => ({ requirePasskey: true, options: AGENT_EDIT_OPTIONS, agentEdit });
+    for (const op of ['new', 'create', 'retire']) assert.ok(validateAgentEdit(ask({ op, name: 'X', template: 'plain', agent: 'level-reviewer' })).length > 0, op);
+    assert.ok(validateAgentEdit(ask(proposal({ agent: 'level-reviewer', retired: true }))).length > 0);
+    assert.ok(validateAgentEdit(ask(proposal({ agent: 'level-reviewer', name: 'Other', template: 'plain' }))).length > 0, 'no renaming');
+  } finally { await f.close(); }
+});
+
+test('the profile Ask of a made persona is for Hermes main and names it among those who share the profile', async () => {
+  const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
+  try {
+    putExport(f);
+    assert.equal((await make(f, LEVEL)).status, 201);
+    assert.equal((await f.call('GET', '/hub/team/level-reviewer/details')).body.agent.editable.profile, true);
+    const made = await postChange(f, 'level-reviewer', changeBody());
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.match(f.fake.json(`sections/inbox/asks/${made.body.ask}/ask.json`).context, /shared by Hermes, Researcher, Market researcher, Teardown, Planner and Level reviewer\./);
+    assert.equal((await postChange(f, 'claude', changeBody())).status, 404);
   } finally { await f.close(); }
 });

@@ -440,3 +440,27 @@ test('the messages say what happened: a bad field names the bad part, a lost rac
     assert.equal(retry.body.avatar.message, 'The sprite sheet starts on the Gaming PC within a few minutes.');
   } finally { await h.close(); }
 });
+
+test('a persona the owner made (ws-im1.4.3) takes a built-in or random pick, never a sheet or a sheet job; a retired one takes none', async () => {
+  const h = await fixture();
+  try {
+    assert.equal((await h.post('/hub/team/new', { template: 'plain', name: 'Level reviewer', role: 'reviews levels' })).status, 201);
+    const card = async () => (await h.call('GET', '/hub/team')).body.agents.find(row => row.id === 'level-reviewer');
+    assert.deepEqual((await card()).sprite, { kind: 'random', salt: 0, name: 'Level reviewer' });
+    h.clock.time += 1000;
+    assert.equal((await h.post('/hub/team/level-reviewer/avatar', { kind: 'random', salt: 7 })).status, 200);
+    assert.deepEqual((await card()).sprite, { kind: 'random', salt: 7, name: 'Level reviewer' });
+    h.clock.time += 1000;
+    assert.equal((await h.post('/hub/team/level-reviewer/avatar', { kind: 'builtin', key: 'owl_snow' })).status, 200);
+    assert.deepEqual((await card()).sprite, { kind: 'builtin', key: 'owl_snow' });
+    const sheet = await h.post('/hub/team/level-reviewer/avatar', { kind: 'custom', sheet: 'sheet-20261101T000000000Z-ab12' });
+    assert.equal(sheet.status, 400, 'no sheet can be listed for it');
+    assert.equal((await h.call('GET', '/hub/team/level-reviewer/sheets')).status, 404, 'the sheet paths stay on the built-in agents');
+    const job = await h.post('/hub/requests', { project: 'sprite-studio', preset: 'agent-avatar', text: 'Pixel sprite for level-reviewer', agent: 'level-reviewer' });
+    assert.equal(job.status, 400, 'a sprite job is for the built-in agents');
+    h.clock.time += 1000;
+    assert.equal((await h.post('/hub/team/level-reviewer/persona/retire', {})).status, 200);
+    assert.equal((await h.post('/hub/team/level-reviewer/avatar', { kind: 'random', salt: 1 })).status, 404);
+    assert.equal(await card(), undefined);
+  } finally { await h.close(); }
+});

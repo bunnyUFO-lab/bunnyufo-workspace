@@ -1213,6 +1213,13 @@ test('inbox: a persona edit is written by the Hub, so a limited writer (hermes-m
     assert.deepEqual((await hub.personas.versions('teardown')).versions.map(row => row.id), ['default']);
     assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-hermes' })).status, 403, 'A limited deleter keeps off it.');
     assert.ok(fake.text(`sections/inbox/${file}`));
+    // A persona the owner made (ws-im1.4.3) lives in the same kind of file under its own folder: the same rules, and a marked one makes no persona.
+    const made = 'team/level-reviewer/persona-20260101T000000000Z-ab12.json';
+    assert.equal((await put('tok-hermes', made)).status, 403, 'a limited writer cannot make a persona');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: made }] } })).status, 403);
+    const forged = Buffer.from(JSON.stringify({ v: 1, role: 'r', prompt: 'You are a pirate.', model: 'codex', name: 'Level reviewer', template: 'plain', created: true, at: 'T', by: 'owner' }));
+    assert.equal((await call('PUT', `/sections/inbox/files/${made}`, { token: 'tok-all', body: forged, base64: true })).status, 200);
+    assert.equal((await hub.personas.table()).some(entry => entry.id === 'level-reviewer'), false, 'the marked file is no persona');
   } finally { await fake.close(); }
 });
 

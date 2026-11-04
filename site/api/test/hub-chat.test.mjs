@@ -881,6 +881,40 @@ test('persona: an edit of the prompt (ws-im1.4.1) reaches the next turn of a new
   } finally { await close(); }
 });
 
+test('persona: one the owner made (ws-im1.4.3) is in the menu and carries its own text; retired, it is no new choice and an old chat keeps its text', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const made = await call('POST', '/hub/team/new', { template: 'plain', name: 'Level reviewer', role: 'reviews level designs' });
+    assert.equal(made.status, 201, JSON.stringify(await made.clone().json()));
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(listed.personas.map(entry => entry.id), [...PERSONA_AGENTS, 'level-reviewer']);
+    assert.deepEqual(listed.personas.at(-1), { id: 'level-reviewer', name: 'Level reviewer', role: 'reviews level designs', model: 'codex' });
+    const open = (await chatLive(call, { text: 'Is this level fair?', persona: 'level-reviewer' })).events.at(-1);
+    assert.equal(open.event, 'done', JSON.stringify(open.data));
+    const sent = upstream.runs[0].body.conversation_history[0].content;
+    assert.match(sent, /^You are Level reviewer, one of the owner's agents: reviews level designs\./);
+    assert.match(sent, /write no cards/);
+
+    const version = (await (await call('GET', '/hub/team/level-reviewer/persona')).json()).current.version;
+    assert.equal((await call('POST', '/hub/team/level-reviewer/persona/retire', {})).status, 200);
+    const after = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(after.personas.map(entry => entry.id), PERSONA_AGENTS, 'gone from the menu');
+    assert.equal(after.conversations[0].persona, 'level-reviewer', 'the old chat still says who it was with');
+    const fresh = await chat(call, { text: 'New chat', persona: 'level-reviewer' });
+    assert.equal(fresh.status, 400);
+    assert.equal(fresh.body.error, 'Unknown persona.');
+    // The old conversation still sends its text.
+    assert.equal((await chatLive(call, { text: 'And the next one?', conversation: open.data.conversation })).events.at(-1).event, 'done');
+    assert.equal(upstream.runs[1].body.conversation_history[0].content, sent);
+
+    // Brought back, it is a choice again.
+    const retired = (await (await call('GET', '/hub/team/templates')).json()).retired[0];
+    assert.equal(retired.to, version);
+    assert.equal((await call('POST', '/hub/team/level-reviewer/persona/revert', { to: retired.to, base: retired.base })).status, 200);
+    assert.ok((await (await call('GET', '/hub/chat')).json()).personas.some(entry => entry.id === 'level-reviewer'));
+  } finally { await close(); }
+});
+
 test('persona: an unlisted id, free text or a persona on an old chat or a help chat is a 400 before any write', async () => {
   const { fake, upstream, call, close } = await fixture({ env: RUNS });
   try {

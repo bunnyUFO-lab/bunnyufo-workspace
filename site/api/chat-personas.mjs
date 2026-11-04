@@ -49,10 +49,30 @@ export function personaTextOf({ name, role, extra }) {
 
 export const CHAT_PERSONAS = TABLE.map(entry => ({ ...entry, name: agentOf(entry.id).name, role: agentOf(entry.id).role, text: entry.own ? entry.own() : personaTextOf({ name: agentOf(entry.id).name, role: agentOf(entry.id).role, extra: entry.extra }) }));
 
-/** The persona for an id. Nothing, null, '' or 'hermes' is no persona (null); any other value that is not listed is a 400. */
+/** The prompt of a Planner-like persona under another name: the first sentence's name is swapped, the rest is the Planner's. */
+const plannerTextOf = name => PLANNER_TEXT.replace('You are Planner,', `You are ${name},`);
+
+/**
+ * The templates of a new persona (ws-im1.4.3), built from the same text as the defaults so they cannot drift. `text(name, role)` is the whole prompt
+ * (the Edit page changes it after); `model` is a chat-models.mjs id. The Hub copies it into the persona's first stored version and never reads it again.
+ */
+export const PERSONA_TEMPLATES = [
+  { id: 'research', label: 'Research', line: 'Searches the web, cites sources, writes a card when asked.', model: 'codex', text: (name, role) => personaTextOf({ name, role, extra: '' }) },
+  { id: 'planner', label: 'Planner', line: 'Talks a plan through and may file one change list for you to approve.', model: 'codex', text: name => plannerTextOf(name) },
+  {
+    id: 'plain', label: 'Plain chat', line: 'Answers in the chat, cites sources, files and writes nothing.', model: 'codex',
+    text: (name, role) => [
+      `You are ${name}, one of the owner's agents: ${role}. The owner is talking with you in a chat; this is not a job.`,
+      '- Answer in the chat, in plain words. Cite each source with a link.',
+      '- Never create requests or Asks, and write no cards.',
+    ].join('\n'),
+  },
+];
+
+/** The persona for an id. Nothing, null, '' or 'hermes' is no persona (null); any other value that is not listed, or retired, is a 400. */
 export function chatPersonaOf(value, table = CHAT_PERSONAS) {
   if (value === undefined || value === null || value === '' || value === 'hermes') return null;
-  const found = typeof value === 'string' ? table.find(entry => entry.id === value) : undefined;
+  const found = typeof value === 'string' ? table.find(entry => entry.id === value && !entry.retired) : undefined;
   if (!found) throw Object.assign(new Error('Unknown persona.'), { status: 400 });
   return found;
 }
@@ -61,4 +81,4 @@ export function chatPersonaOf(value, table = CHAT_PERSONAS) {
 export const storedPersona = (id, table = CHAT_PERSONAS) => (typeof id === 'string' ? table.find(entry => entry.id === id) ?? null : null);
 
 /** What the page may see: no prompt text. */
-export const chatPersonasForClient = (table = CHAT_PERSONAS) => table.map(({ id, name, role, preset, model }) => ({ id, name, role, preset, model }));
+export const chatPersonasForClient = (table = CHAT_PERSONAS) => table.filter(entry => !entry.retired).map(({ id, name, role, preset, model }) => ({ id, name, role, preset, model }));

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHAT_MODELS } from '../chat-models.mjs';
-import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from '../chat-personas.mjs';
+import { CHAT_PERSONAS, PERSONA_TEMPLATES, chatPersonaOf, chatPersonasForClient, personaTextOf, storedPersona } from '../chat-personas.mjs';
 import { AGENTS, PERSONA_AGENTS } from '../hub-team.mjs';
 import { presetOf } from '../presets.mjs';
 
@@ -65,4 +65,27 @@ test('every persona names a model the chat may ask for (Codex for all of them), 
   }
   assert.deepEqual(chatPersonasForClient().map(entry => [entry.id, entry.model]), CHAT_PERSONAS.map(entry => [entry.id, entry.model]));
   for (const entry of chatPersonasForClient()) assert.equal('text' in entry, false, 'still no prompt text');
+});
+
+test('the templates of a new persona (ws-im1.4.3) are built from the default text and name a listed model', () => {
+  assert.deepEqual(PERSONA_TEMPLATES.map(item => item.id), ['research', 'planner', 'plain']);
+  for (const template of PERSONA_TEMPLATES) assert.ok(CHAT_MODELS.some(model => model.id === template.model), template.id);
+  const research = PERSONA_TEMPLATES.find(item => item.id === 'research');
+  assert.equal(research.text('Researcher', CHAT_PERSONAS[0].role), CHAT_PERSONAS[0].text, 'the research template is the Researcher text');
+  assert.equal(research.text('Scout', 'finds things'), personaTextOf({ name: 'Scout', role: 'finds things', extra: '' }));
+  const planner = CHAT_PERSONAS.find(item => item.id === 'planner').text;
+  assert.equal(PERSONA_TEMPLATES.find(item => item.id === 'planner').text('Planner', 'ignored'), planner, 'the planner template is the Planner text');
+  assert.equal(PERSONA_TEMPLATES.find(item => item.id === 'planner').text('Scout', 'ignored').replace('You are Scout,', 'You are Planner,'), planner);
+  const plain = PERSONA_TEMPLATES.find(item => item.id === 'plain').text('Scout', 'finds things');
+  assert.match(plain, /^You are Scout, one of the owner's agents: finds things\./);
+  assert.doesNotMatch(plain, /--changes|Write exactly one card/);
+  assert.match(plain, /Never create requests or Asks/);
+});
+
+test('a retired entry stays in the table for an old chat but is no choice for a new one', () => {
+  const table = [...CHAT_PERSONAS, { id: 'gone', name: 'Gone', role: 'was here', model: 'codex', text: 'You are Gone.', custom: true, retired: true }];
+  assert.equal(storedPersona('gone', table).text, 'You are Gone.');
+  assert.throws(() => chatPersonaOf('gone', table), error => error.status === 400 && error.message === 'Unknown persona.');
+  assert.equal(chatPersonaOf('teardown', table).id, 'teardown');
+  assert.deepEqual(chatPersonasForClient(table).map(entry => entry.id), CHAT_PERSONAS.map(entry => entry.id));
 });
