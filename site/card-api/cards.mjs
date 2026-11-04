@@ -2211,8 +2211,7 @@ function bdCalls(change, text, ref) {
   }
   if (change.op === 'update') return [['update', ref(change.bead), ...(change.title !== undefined ? [`--title=${change.title}`] : []), ...(description !== undefined ? [`--description=${description}`] : [])]];
   if (change.op === 'dep') return [['dep', 'add', ref(change.blocks), ref(change.bead)]];
-  // --force: bd refuses to close a task that has an open blocker or child. The owner approved this close row, so the refusal is not theirs to hit.
-  if (change.op === 'close') return [['close', ref(change.bead), `--reason=${text ?? change.reason}`, '--force']];
+  if (change.op === 'close') return [['close', ref(change.bead), `--reason=${text ?? change.reason}`]];
   if (change.op === 'label') return [...(change.add?.length ? [['label', 'add', ref(change.bead), change.add.join(',')]] : []), ...(change.remove?.length ? [['label', 'remove', ref(change.bead), change.remove.join(',')]] : [])];
   return [];
 }

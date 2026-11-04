@@ -653,7 +653,7 @@ Library, and the owner approves them row by row. Nothing in Beads changes until 
 - The Hub makes the Design review rows itself from the ops (`changeRows`), up to 20, and ignores any `decisions`, `options` or `image` the file
   has. A plan never gets Discord buttons. The answer is a `decisions` map as for any Design review.
 - `cards ask create --changes changes.json` files one; `cards beads show --project <p> [--open] [--json]` reads the project's roadmap;
-  `cards plan apply <ask id> [--dry-run]` runs the approved rows in order (a `close` row passes `--force`, as a mark does) (a changed row uses the owner's text), with `bd` called by argument
+  `cards plan apply <ask id> [--dry-run]` runs the approved rows in order (a changed row uses the owner's text), with `bd` called by argument
   arrays and no shell, and refuses an Ask that is unanswered, has no changes, is for another project than the repository's, or was picked up.
   With `--journal <file>` it records each row as it is applied (`{ rows: { d1: 'done' }, made: { '#1': 'ws-abc' } }`, a temp file and a rename) and a second run skips the rows in the journal and reuses the ids they made, so a crash never applies a row twice; with every row in the journal it exits 0. It never calls pickup.
 

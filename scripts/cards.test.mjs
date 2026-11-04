@@ -2231,7 +2231,7 @@ test('plan apply --dry-run: prints each row in order, skips what the owner skipp
     assert.equal(lines[2], 'd3 dep: would run bd dep add wk-9 "<new item 2>"');
     assert.equal(lines[3], 'd4 update: skipped (skip)');
     assert.match(lines[4], /^d5 label: skipped \(changed, but a label takes no text; do it by hand\)$/);
-    assert.equal(lines[5], 'd6 close: would run bd close wk-5 "--reason=Covered by Sprint 4." --force');
+    assert.equal(lines[5], 'd6 close: would run bd close wk-5 "--reason=Covered by Sprint 4."');
     assert.match(lines[6], /^d7 card: would copy assistant\/2026-11-mock into wksec$/);
     assert.match(lines[7], /^Would apply 5 of 7 row\(s\); 2 skipped\.$/);
     assert.deepEqual(await calls(), [], 'A dry run calls bd never.');
@@ -2256,7 +2256,7 @@ test('plan apply: runs the approved rows in order with argument arrays, maps #n 
       ['dep', 'add', 'wk-9', 'wk-new2'],
       ['label', 'add', 'wk-4', 'later'],
       ['label', 'remove', 'wk-4', 'needs-owner'],
-      ['close', 'wk-5', '--reason=Merged into Sprint 4.', '--force'],
+      ['close', 'wk-5', '--reason=Merged into Sprint 4.'],
     ]);
     assert.match(run.stdout, /d1 create: made wk-new1/);
     assert.match(run.stdout, /Applied 5 of 5 row\(s\); 0 skipped\. Next: bd export -o \.beads\/issues\.jsonl, commit it, then cards ask pickup /);
@@ -2364,7 +2364,7 @@ test('plan apply --journal: a stop after row 2 is resumed at row 3, rows 1 and 2
     const second = await cli('api', 'plan', 'apply', id, '--journal', journal);
     assert.equal(second.code, 0, second.stdout + second.stderr);
     assert.match(second.stdout, /d1 create: already applied \(journal\)/);
-    assert.deepEqual((await calls()).slice(3), [['dep', 'add', 'wk-9', 'wk-new2'], ['close', 'wk-5', '--reason=Covered.', '--force']], 'Only rows 3 and 4 ran, with the ids row 2 made.');
+    assert.deepEqual((await calls()).slice(3), [['dep', 'add', 'wk-9', 'wk-new2'], ['close', 'wk-5', '--reason=Covered.']], 'Only rows 3 and 4 ran, with the ids row 2 made.');
     assert.equal((await calls()).filter(call => call[0] === 'create').length, 2, 'No create ran twice.');
     assert.deepEqual(JSON.parse(await readFile(journal, 'utf8')).rows, { d1: 'done', d2: 'done', d3: 'done', d4: 'done' });
     // A journal that is not JSON is not guessed at.
