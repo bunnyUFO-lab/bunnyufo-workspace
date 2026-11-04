@@ -7,6 +7,7 @@ import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
+import NewPersona from './team/NewPersona'
 import Floor from './team/Floor'
 import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
 import { openSpawn } from './spawnStore'
@@ -69,7 +70,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
       <p className="team-role team-dim">{agent.role}</p>
       <p className="team-task">{agent.status === 'offline' ? <span className="team-dim">{agent.task}</span> : <><b>Now</b> · {agent.task}</>}</p>
       <dl className="team-facts">
-        <div><dt>Model</dt><dd>{agent.model}</dd></div>
+        <div><dt>Model</dt><dd>{agent.model}{agent.chatModel ? ` · chat: ${agent.chatModel}` : ''}</dd></div>
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
       </dl>
       {agent.sessions && agent.sessions.length > 0 && <ul className="team-sessions" aria-label={`${agent.name} sessions`}>{agent.sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>}
@@ -80,6 +81,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
       )}
       <footer className="team-links">
         <a className="team-details-link" href={hubHash('agent', agent.id)} data-details-open={agent.id} aria-label={`${agent.name}: details`}>Details</a>
+        {agent.editable && canPick && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id} aria-label={`${agent.name}: edit`}>Edit</a>}
         {canPick
           ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
           : <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}
@@ -92,6 +94,8 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
 export default function Team() {
   const { data, error, loading, reload } = useHubData<TeamView>('/team')
   const [sheetFor, setSheetFor] = useState<string | null>(null)
+  const [newOpen, setNewOpen] = useState(false)
+  const newOpener = useRef<HTMLButtonElement>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const openers = useRef(new Map<string, HTMLButtonElement | null>())
@@ -158,6 +162,8 @@ export default function Team() {
           <div><dt>Online</dt><dd data-team-online>{counts.online}<span className="team-dim">/{counts.total}</span></dd></div>
           <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
         </dl>
+        {/* Before the view switch, so Tab from Floor still goes to the first desk. */}
+        {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
         <div className="hub-seg team-view" role="group" aria-label="View">
           <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
           <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
@@ -180,6 +186,12 @@ export default function Team() {
           agent={sheetAgent}
           onClose={() => { const id = sheetAgent.id; setSheetFor(null); window.setTimeout(() => openers.current.get(id)?.focus(), 0) }}
           onUse={next => choose(sheetAgent, next, sheetAgent.sprite)}
+        />
+      )}
+      {newOpen && (
+        <NewPersona
+          onClose={() => { setNewOpen(false); window.setTimeout(() => newOpener.current?.focus(), 0) }}
+          onBrought={who => { reload(); say({ text: `${who} is back on the Team.` }) }}
         />
       )}
       {toast && (

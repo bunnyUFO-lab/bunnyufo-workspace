@@ -2105,6 +2105,14 @@ test('event: --pr-closed-at gives an owner or repo with . or _ a safe file name,
 
 const blockOf = (source, name) => source.match(new RegExp(`// --- ${name}:start[^\\n]*\\n([\\s\\S]*?)// --- ${name}:end ---`))?.[1];
 
+test('the agent-edit validator in cards.mjs is the one in site/api/agent-edit.mjs', async () => {
+  const client = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
+  const shared = await readFile(path.join(repo, 'site/api/agent-edit.mjs'), 'utf8');
+  assert.ok(blockOf(client, 'agent-edit'), 'agent-edit is in cards.mjs');
+  const norm = text => text.replace(/\r\n/g, '\n');
+  assert.equal(norm(blockOf(client, 'agent-edit')), norm(blockOf(shared, 'agent-edit')), 'agent-edit is the same code in both files');
+});
+
 test('the change-list validator in cards.mjs is the one in site/api/ask-changes.mjs, and so is the prose-command block', async () => {
   const client = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
   const shared = await readFile(path.join(repo, 'site/api/ask-changes.mjs'), 'utf8');
@@ -2166,6 +2174,68 @@ test('ask create --changes: the list is stored as written, the Ask is kind decis
     await writeFile(file, JSON.stringify([{ op: 'create', title: 'Agent editing', type: 'epic', labels: ['roadmap'] }, { op: 'label', bead: 'wk-1', add: ['roadmap'], remove: ['milestone'] }]));
     const roadmap = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Make it a roadmap?', '--changes', file);
     assert.equal(roadmap.code, 0, `roadmap is a label a plan may use: ${roadmap.stderr}`);
+  } finally { await close(); }
+});
+
+test('ask create --agent-edit: the Ask is an approval with a passkey and the two fixed options; a bad edit, a view-only key or a mix is refused before anything is sent', async () => {
+  const { fake, cli, keys, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'edit.json');
+    await writeFile(file, JSON.stringify({ op: 'persona', agent: 'teardown', base: 'default', prompt: 'You are Teardown. Keep it short.', why: 'Shorter answers.' }));
+    const made = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Shorten the Teardown prompt?', '--agent-edit', file);
+    assert.equal(made.code, 0, made.stderr);
+    const askId = made.stdout.trim().split(/\r?\n/).at(-1);
+    const got = fake.json(`sections/inbox/asks/${askId}/ask.json`);
+    assert.equal(got.agentEdit.agent, 'teardown');
+    assert.deepEqual([got.kind, got.requirePasskey, got.options.map(option => option.id)], ['approval', true, ['apply', 'skip']]);
+    const before = keys('asks/').length;
+    const bad = [
+      ['a view-only key', { op: 'persona', agent: 'teardown', base: 'default', prompt: 'x', toolsets: ['web'] }, /view-only/],
+      ['nothing to change', { op: 'persona', agent: 'teardown', base: 'default' }, /changes the role, the prompt or the model/],
+      ['a prompt over 8000 characters', { op: 'persona', agent: 'teardown', base: 'default', prompt: 'x'.repeat(8001) }, /1 to 8000/],
+      ['an unknown field', { op: 'persona', agent: 'teardown', base: 'default', prompt: 'x', soulText: 'x' }, /no field soulText/],
+      ['a bad base', { op: 'persona', agent: 'teardown', base: 'latest', prompt: 'x' }, /agentEdit.base/],
+    ];
+    for (const [name, edit, message] of bad) {
+      await writeFile(file, JSON.stringify(edit));
+      const refused = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Edit?', '--agent-edit', file);
+      assert.notEqual(refused.code, 0, name);
+      assert.match(refused.stderr, message, name);
+    }
+    await writeFile(file, JSON.stringify({ op: 'persona', agent: 'teardown', base: 'default', prompt: 'x' }));
+    const mixed = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Edit?', '--agent-edit', file, '--option', 'a=Yes');
+    assert.notEqual(mixed.code, 0);
+    assert.match(mixed.stderr, /leave out --option/);
+    assert.equal(keys('asks/').length, before, 'Nothing was written for a refused edit.');
+  } finally { await close(); }
+});
+
+test('ask create --agent-edit with op profile: the same Ask, a model change for a Hermes profile; a repeated model, five fallbacks or a view-only key is refused before anything is sent', async () => {
+  const { fake, cli, keys, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'edit.json');
+    const edit = (extra = {}) => ({ op: 'profile', profile: 'main', primary: { provider: 'anthropic', model: 'claude-sonnet-5-5' }, fallbacks: [{ provider: 'openai-codex', model: 'gpt-6-sol' }], why: 'Codex is slow today.', ...extra });
+    await writeFile(file, JSON.stringify(edit()));
+    const made = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Move main to Sonnet first?', '--agent-edit', file);
+    assert.equal(made.code, 0, made.stderr);
+    const got = fake.json(`sections/inbox/asks/${made.stdout.trim().split(/\r?\n/).at(-1)}/ask.json`);
+    assert.deepEqual([got.agentEdit.op, got.agentEdit.profile, got.requirePasskey, got.kind, got.options.map(option => option.id)], ['profile', 'main', true, 'approval', ['apply', 'skip']]);
+    const before = keys('asks/').length;
+    const bad = [
+      ['a repeated model', edit({ fallbacks: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }] }), /lists a model twice/],
+      ['five fallbacks', edit({ fallbacks: [1, 2, 3, 4, 5].map(number => ({ provider: 'p', model: `m${number}` })) }), /0 to 4/],
+      ['a view-only key', { ...edit(), toolsets: ['web'] }, /view-only/],
+      ['a skills list', { ...edit(), skills: ['x'] }, /view-only/],
+      ['a persona field', edit({ prompt: 'x' }), /no field prompt/],
+      ['another profile', edit({ profile: 'work' }), /agentEdit.profile/],
+    ];
+    for (const [name, body, message] of bad) {
+      await writeFile(file, JSON.stringify(body));
+      const refused = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Edit?', '--agent-edit', file);
+      assert.notEqual(refused.code, 0, name);
+      assert.match(refused.stderr, message, name);
+    }
+    assert.equal(keys('asks/').length, before, 'Nothing was written for a refused edit.');
   } finally { await close(); }
 });
 

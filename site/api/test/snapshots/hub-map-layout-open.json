@@ -1033,7 +1033,7 @@
      "y": 315
     },
     "col": "var(--purple)",
-    "parts": "2 of 2 tasks of Foundations · 1 of 10 tasks of The long mileston…"
+    "parts": "2 of 2 tasks in Foundations · 1 of 10 tasks in The long mileston…"
    },
    {
     "name": "Sprint 2",
@@ -1053,7 +1053,7 @@
      "y": 345
     },
     "col": "var(--blue)",
-    "parts": "0 of 10 tasks of The long mileston… · 0 of 2 tasks of Launch"
+    "parts": "0 of 10 tasks in The long mileston… · 0 of 2 tasks in Launch"
    }
   ]
  },

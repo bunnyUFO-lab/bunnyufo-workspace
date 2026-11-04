@@ -27,6 +27,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { contentTypeOf, createBucket } from '../api/s3.mjs';
 import { validateChanges } from '../api/ask-changes.mjs';
+import { validateAgentEdit } from '../api/agent-edit.mjs';
 
 const CLIENT = new URL('./cards.mjs', import.meta.url);
 
@@ -153,9 +154,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
   const can = (caller, verb, section) => caller.rights[verb] === null || caller.rights[verb].has(section);
 
-  async function section(caller, id, verb) {
+  /**
+   * The one read the token named `hermes-config` has (ws-im1.4.2), without a `read` right on the token: in the `inbox` section only
+   * (never `inbox-dev`), the signed approvals and the results of profile changes, `agent-config/changes/<id>/approved.json` and `result.json`.
+   * Callers pass `hostChange` only for a listing under `agent-config/changes/` or a GET of a file that matches HOST_CHANGE_FILE; every
+   * other call keeps `can()`. The token's scope is not widened: it still reads no export, no ask and no request.
+   */
+  const HOST_CHANGE_FILE = /^agent-config\/changes\/[^/]+\/(approved|result)\.json$/;
+  const hostChangeReader = (caller, id) => caller.name === 'hermes-config' && caller.rights.write !== null && id === 'inbox';
+
+  async function section(caller, id, verb, { hostChange = false } = {}) {
     if (!SECTION_ID.test(id ?? '')) throw new HttpError(400, 'A section id is lower-case letters, digits and dashes.');
-    if (!can(caller, verb, id)) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
+    if (!can(caller, verb, id) && !(hostChange && verb === 'read' && hostChangeReader(caller, id))) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
     const got = await bucket.getJson(keyOf(id, 'workspace.json'));
     if (!Array.isArray(got?.value?.entities)) throw new HttpError(404, `No section "${id}".`);
     return { id, registry: got.value, etag: got.etag };
@@ -166,8 +176,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice and persona edits (team/<agent>/avatar-*.json, persona-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/(avatar|persona)-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -186,21 +196,25 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     }
   };
   /** The Hermes host's redacted settings export: create-only, one file per publish. */
-  const AGENT_CONFIG_FILE = /^agent-config\/export-\d{8}T\d{6,9}Z\.json$/i;
+  const AGENT_CONFIG_EXPORT = /^agent-config\/export-\d{8}T\d{6,9}Z\.json$/i;
+  /** The result of a profile change (ws-im1.4.2), written once by the Hermes host next to the Hub's approved.json: agent-config/changes/<ask id>/result.json. */
+  const AGENT_CONFIG_RESULT = /^agent-config\/changes\/\d{8}-[a-z0-9-]+-[a-z0-9]{4}\/result\.json$/;
+  const AGENT_CONFIG_FILE = { test: file => AGENT_CONFIG_EXPORT.test(file) || AGENT_CONFIG_RESULT.test(file) };
   /**
    * In the inbox, `agent-config/` is for the token named `hermes-config` only (the exporter on the Hermes host), which may
-   * create `export-<stamp>.json` once (If-None-Match: *, never an upload URL) and nothing else in the inbox. The passphrase is not limited.
+   * create `export-<stamp>.json` and, for a profile change, `changes/<ask id>/result.json`, each once (If-None-Match: *, never an upload URL), and
+   * nothing else in the inbox. The Hub's `changes/<id>/approved.json` is never writable here. The passphrase is not limited.
    */
   const agentConfigOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (!INBOXES.has(sectionId) || caller.rights.write === null) return;
     const inFolder = /^agent-config\//i.test(file);
     if (caller.name === 'hermes-config') {
-      if (!inFolder) throw new HttpError(403, 'This token only publishes agent-config exports.');
+      if (!inFolder) throw new HttpError(403, 'This token only publishes agent-config exports and change results.');
     } else if (inFolder) {
       throw new HttpError(403, 'Only the Hermes config exporter writes agent-config/.');
     }
     if (inFolder && (!AGENT_CONFIG_FILE.test(file) || upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'agent-config/export-<stamp>.json is create-only (If-None-Match: *), never by upload URL.');
+      throw new HttpError(403, 'agent-config/export-<stamp>.json and changes/<id>/result.json are create-only (If-None-Match: *), never by upload URL.');
     }
   };
   const ownerOnly = (caller, sectionId, file) => {
@@ -251,6 +265,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    // A persona edit is the prompt of every chat: whatever this API writes there carries a mark, and the Hub ignores a marked file. Only the Hub's own write has none.
+    if (/^team\/[^/]+\/persona-/i.test(file)) return { writer: 'card-api' };
     // Same for the Not useful records: only a file with no mark is the Hub's.
     if (/^feedback\//i.test(file)) return { writer: 'card-api' };
     // The Away switch is the Hub's own file (it writes it with no mark): anything this API writes there carries one, and hub-hooks ignores it.
@@ -292,6 +308,15 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!parsed || typeof parsed !== 'object' || parsed.changes === undefined) return;
     const problems = validateChanges(parsed.changes);
     if (problems.length) throw new HttpError(422, `The change list is not valid: ${problems.slice(0, 6).join('; ')}.`);
+  };
+  /** An agent-edit Ask (ws-im1.4.1) is refused with its problems named when its `agentEdit` is not valid: the same check as the site's and the cards client's. */
+  const agentEditValid = (caller, sectionId, file, body) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^asks\/[^/]+\/ask\.json$/i.test(file)) return;
+    let parsed;
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { return; }
+    if (!parsed || typeof parsed !== 'object' || parsed.agentEdit === undefined) return;
+    const problems = validateAgentEdit(parsed);
+    if (problems.length) throw new HttpError(422, `The agent edit is not valid: ${problems.slice(0, 6).join('; ')}.`);
   };
   /**
    * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json, or deeper) needs a pull request
@@ -424,18 +449,21 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (/^[/_.]/.test(wanted) || wanted.split('/').some(part => part === '..' || part === '.') || /[\\\0]/.test(wanted)) {
         throw new HttpError(400, 'prefix is empty or a relative path: no "..", and not starting with "/", "_" or ".".');
       }
-      await section(caller, sectionId, 'read');
+      const hostChange = wanted.startsWith('agent-config/changes/');
+      await section(caller, sectionId, 'read', { hostChange });
       const base = keyOf(sectionId, '');
       const { objects } = await bucket.list(keyOf(sectionId, wanted));
       const files = objects
         .map(object => ({ path: object.key.slice(base.length), size: object.size, etag: object.etag, lastModified: object.lastModified }))
         .filter(file => cardPath(file.path) && !SECRET.test(file.path))
+        // A caller with no read right of its own (the Hermes host) sees the change files and nothing else under that prefix.
+        .filter(file => !hostChange || can(caller, 'read', sectionId) || HOST_CHANGE_FILE.test(file.path))
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       return { files: files.slice(0, MAX_LISTED), truncated: files.length > MAX_LISTED };
     },
 
     async getFile(caller, sectionId, file) {
-      await section(caller, sectionId, 'read');
+      await section(caller, sectionId, 'read', { hostChange: HOST_CHANGE_FILE.test(file) });
       const key = keyOf(sectionId, file);
       let head;
       try {
@@ -465,6 +493,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
       changesValid(caller, sectionId, file, body);
+      agentEditValid(caller, sectionId, file, body);
       reviewNeedsAction(sectionId, file, body);
       let put;
       try {
@@ -492,6 +521,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        // A presigned URL carries no metadata, so an upload there would land unmarked and count: refused for every caller, the passphrase too.
+        if (INBOXES.has(sectionId) && /^team\/[^/]+\/persona-/i.test(file)) throw new HttpError(403, 'Persona files are written by the Hub only, never by upload URL.');
         agentConfigOnly(caller, sectionId, file, { upload: true });
         markFiles(caller, sectionId, file, { upload: true });
         feedbackFiles(caller, sectionId, file, { upload: true });

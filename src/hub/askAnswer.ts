@@ -10,7 +10,7 @@ export interface Editing { optionId: string | null; image?: string; w: number; h
 /** What the owner did to take an Ask off the queue. */
 export type AskVerb = 'answered' | 'snoozed' | 'cancelled' | 'reviewed'
 
-/** What the server says an answer set going: the avatar flow's line or the rerun's, or null for any other answer. */
+/** What the server says an answer set going: the avatar flow's line, the rerun's or an applied edit's, or null for any other answer. */
 export function avatarNotice(result: unknown): string | null {
   const rerun = (result as { rerun?: { started?: boolean; request?: string; kind?: string; project?: string; allowed?: string[]; already?: boolean; message?: string; why?: string } } | null)?.rerun
   if (rerun && typeof rerun === 'object') {
@@ -24,6 +24,9 @@ export function avatarNotice(result: unknown): string | null {
       ? 'A new run starts on the Gaming PC within a few minutes, with your answer.'
       : `Approved again as ${text(rerun.request)}. It starts on the Gaming PC within a few minutes of the allow lines being in.`
   }
+  const edit = (result as { agentEdit?: { applied?: boolean; why?: string; profile?: string } } | null)?.agentEdit
+  if (edit && typeof edit === 'object' && edit.applied === true && typeof edit.profile === 'string') return 'Applied. Signed and sent to the Hermes host, which changes the model within about 5 minutes and restarts the gateway. Details of the agent says when it is live.'
+  if (edit && typeof edit === 'object') return edit.applied === true ? 'Applied. The persona has a new version; chats use it from their next message. You can revert it on the Edit page.' : `Not applied: ${text(edit.why)}`
   const avatar = (result as { avatar?: { started?: boolean; message?: string; chosen?: boolean; why?: string } } | null)?.avatar
   if (!avatar || typeof avatar !== 'object') return null
   if (avatar.started === true) return text(avatar.message)
@@ -122,7 +125,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     // An Ask with options needs one of them picked, whatever else it asks for.
     needsOption,
     ready: (!needsOption || !!choice) && (decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing),
-    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}) }), kind ? 'reviewed' : 'answered'),
+    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}), ...(ask.rev ? { rev: ask.rev } : {}) }), kind ? 'reviewed' : 'answered'),
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
   }

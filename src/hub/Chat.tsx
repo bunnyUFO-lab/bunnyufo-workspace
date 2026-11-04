@@ -42,7 +42,7 @@ const when = (iso: string) => {
 const pauseWhen = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : `${new Date(iso).toLocaleDateString([], { weekday: 'short' })} ${clock(iso)}`)
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
 /** The menu text: Auto says what it tries first, the paid ones say API, Codex (the ChatGPT plan) says neither. */
-const menuLabel = (entry: ChatModel) => (entry.id === AUTO ? `${entry.label} · Codex first` : /no API cost/.test(entry.note) ? entry.label : `${entry.label} · API`)
+const menuLabel = (entry: ChatModel, autoFirst: string) => (entry.id === AUTO ? `${entry.label} · ${autoFirst} first` : /no API cost/.test(entry.note) ? entry.label : `${entry.label} · API`)
 
 const openSameOrigin = (url: URL) => { window.location.assign(url.href) }
 
@@ -201,7 +201,7 @@ const isPicture = (file: File) => file.type.startsWith('image/')
 function ChatView({ id }: { id?: string }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
-  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[] }>('/chat')
+  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[]; autoFirst?: string }>('/chat')
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
   // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
   const [start] = useState(() => (id || help ? null : peekChatStart()))
@@ -520,7 +520,7 @@ function ChatView({ id }: { id?: string }) {
             {models.length > 0 && (
               <>
                 <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
-                  {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry)}</option>)}
+                  {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry, list.data?.autoFirst || 'Codex')}</option>)}
                   <option disabled>──────────</option>
                   <option value={JOB}>Start a job instead…</option>
                 </select>

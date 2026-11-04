@@ -37,14 +37,14 @@ export function prsOf(tasks: MapTask[]): PrRow[] {
   return rows.sort((a, b) => (a.pr.state === b.pr.state ? (a.pr.at < b.pr.at ? 1 : a.pr.at > b.pr.at ? -1 : 0) : a.pr.state === 'open' ? -1 : 1))
 }
 
-/** The sprints these tasks are in, as lines such as "sprint-3 · 4 of 7 tasks". For a task, the names alone. */
+/** The sprints these tasks are in, as lines such as "sprint-3 · 4 of 7 tasks in it". For a task, the names alone. */
 export function sprintLines(model: MapModel, found: Found): string[] {
   if (found.kind === 'm') {
-    return model.sprints.flatMap(sprint => sprint.milestones.filter(item => item.id === found.milestone.id).map(item => `${sprint.name} · ${item.count} of ${item.total} tasks`))
+    return model.sprints.flatMap(sprint => sprint.milestones.filter(item => item.id === found.milestone.id).map(item => `${sprint.name} · ${item.count} of ${item.total} tasks in it`))
   }
   const tasks = tasksOf(found)
   const names = [...new Set(tasks.flatMap(task => task.sprints))]
   if (found.kind === 't') return names
-  return names.map(name => `${name} · ${tasks.filter(task => task.sprints.includes(name)).length} of ${tasks.length} tasks`)
+  return names.map(name => `${name} · ${tasks.filter(task => task.sprints.includes(name)).length} of ${tasks.length} tasks in it`)
 }
 

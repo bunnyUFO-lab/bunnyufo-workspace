@@ -25,7 +25,12 @@ import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
 import { createRerun } from './hub-rerun.mjs';
-import { loadSigningKey } from './signing.mjs';
+import { createPersonaStore, MAX_MADE_PERSONAS, VIEW_ONLY, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { PERSONA_TEMPLATES } from './chat-personas.mjs';
+import { AGENT_EDIT_OPTIONS, validateAgentEdit } from './agent-edit.mjs';
+import { createAgentEdits } from './hub-agent-edit.mjs';
+import { loadSigningKey, verify as verifySigned } from './signing.mjs';
+import { createPublicKey } from 'node:crypto';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
 import { createHermesApprovals } from './hub-hermes-approvals.mjs';
@@ -37,10 +42,10 @@ import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork, unaskedOf } from './hub-work.mjs';
-import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
+import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
-import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
-import { CHAT_PERSONAS } from './chat-personas.mjs';
+import { CHAT_MODELS } from './chat-models.mjs';
+import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
@@ -290,6 +295,19 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
+  // The owner's edits of a chat persona (hub-personas.mjs): create-only team/<agent>/persona-*.json, read through a 30 s table the chat uses.
+  const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now });
+  // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
+  const agentEditFlow = createAgentEdits({
+    personas: personaStore, log, agents: () => allAgents(),
+    profiles: {
+      signingKey,
+      exported: at => loadAgentConfig(at),
+      changes: (profile, at) => loadProfileChanges(profile, at),
+      putApproval: (id, doc) => putCreateOnly(`agent-config/changes/${id}/approved.json`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', Object.assign(new Error('That change was already signed.'), { status: 409 })),
+      putAsk: (id, ask) => putCreateOnly(`asks/${id}/ask.json`, `${JSON.stringify(ask, null, 2)}\n`, 'application/json', Object.assign(new Error('That Ask exists.'), { status: 409, conflict: true })),
+    },
+  });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
@@ -435,6 +453,56 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return null;
   }
 
+  /** The chat label of what Hermes `main` tries first, from a fresh export ("Codex", "Sonnet", ...), or null: then the chat says Codex. */
+  let autoFirstMemo = { until: 0, value: null };   // the chat list is read often; the export changes every few hours
+  async function autoFirstLabel() {
+    const at = now();
+    if (autoFirstMemo.until > at.getTime()) return autoFirstMemo.value;
+    const exported = await loadAgentConfig(at);
+    const model = exported && exportFreshness(exported, at) === 'fresh' ? exported.profiles.main?.model : null;
+    const value = model?.provider && model?.default ? CHAT_MODELS.find(entry => entry.provider === model.provider && entry.model === model.default)?.label ?? model.default : null;
+    autoFirstMemo = { until: at.getTime() + 30000, value };
+    return value;
+  }
+
+  /**
+   * The signed changes of one Hermes profile with the host's results, newest first (at most 20 are read). The Hub wrote each `approved.json`
+   * (create-only, `agent-config/changes/<ask id>/`; no token but the Hermes host's writes under agent-config/, and only a result); a
+   * `result.json` counts only with the card API's mark `writer: hermes-config`, from a head and never from the body, and only beside an approval.
+   * @returns {Promise<{ change: object, result: object | null }[]>}
+   */
+  async function loadProfileChanges(profile, at) {
+    const found = new Map();
+    for (const month of monthPrefixes(at)) {
+      const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
+      for (const object of objects) {
+        const parts = object.key.slice(folder('agent-config').length).split('/');
+        // Exactly changes/<id>/<file>.
+        if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
+        if (!found.has(parts[1])) found.set(parts[1], new Set());
+        found.get(parts[1]).add(parts[2]);
+      }
+    }
+    const out = [];
+    for (const [id, names] of [...found].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
+      if (!names.has('approved.json')) continue;
+      // Only an approval this Hub signed counts: a file anyone else put there (the passphrase writes unmarked) verifies with no key.
+      const doc = await cached(`agent-config/changes/${id}/approved.json`);
+      if (!signingKey || !verifySigned(doc, createPublicKey(signingKey))) continue;
+      const change = validChange(doc);
+      if (!change || change.change !== id || change.profile !== profile) continue;
+      let result = null;
+      if (names.has('result.json')) {
+        const rel = `agent-config/changes/${id}/result.json`;
+        const head = await bucket.head(key(rel)).catch(error => { if (error.status === 404) return null; throw error; });
+        const read = head?.metadata?.writer === CONFIG_WRITER && head.size <= 4096 ? validResult(await cached(rel)) : null;
+        if (read?.change === id) result = read;
+      }
+      out.push({ change, result });
+    }
+    return out.sort((a, b) => (a.change.at < b.change.at ? 1 : a.change.at > b.change.at ? -1 : 0));
+  }
+
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
   const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
   // The Away switch (presence.json): the owner's, read by hub-hooks on the PC.
@@ -463,7 +531,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** The newest valid avatar choice file of each agent, or none. Names sort by their stamp, so the last is the newest. */
   async function avatarChoices() {
     const choices = {};
-    await Promise.all(AGENTS.map(async agent => {
+    await Promise.all((await allAgents()).map(async agent => {
       const base = folder(`team/${agent.id}`);
       const { objects } = await bucket.list(base);
       const names = objects.map(object => object.key.slice(base.length)).filter(name => AVATAR_FILE_RE.test(name)).sort().reverse().slice(0, 5);
@@ -479,11 +547,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return choices;
   }
 
+  /** The agents of the app and the personas the owner made (not the retired ones). The sprite sheet jobs stay on AGENTS: they are for the built-in agents. */
+  async function allAgents() {
+    return [...AGENTS, ...(await personaStore.table()).filter(entry => entry.custom && !entry.retired).map(agentOfPersona)];
+  }
+
   async function teamView(at) {
-    const [window, status, hermes, lastChat, choices] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices()]);
+    const [window, status, hermes, lastChat, choices, personas, exported, agents] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table(), loadAgentConfig(at).catch(() => null), allAgents()]);
     const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
-    const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, at });
-    return { agents: buildTeam({ statuses, choices }) };
+    const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, extra: agents.filter(agent => agent.custom).map(agent => agent.id), at });
+    return { agents: buildTeam({ statuses, choices, personas, exported, agents, at }) };
   }
 
   /** The sheets reader; the keys come from `inboxKey` like every other. */
@@ -499,7 +572,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   /** The owner's avatar choice: a create-only file the Hub alone writes (owner-only in the card API). */
   async function chooseAvatar(agentId, raw, user, at) {
-    if (!AGENTS.some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
+    if (!(await allAgents()).some(agent => agent.id === agentId)) throw fail('No such agent.', 404);
     let choice = checkAvatar(raw);
     if (!choice) throw fail('An avatar is a built-in key, a random one with a whole number from 0 to 9999, or a custom sheet.', 400);
     if (choice.kind === 'custom') {
@@ -518,6 +591,28 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       }
     }
     return { status: 200, body: { ok: true, ...choice } };
+  }
+
+  /**
+   * "Send for approval" on the Edit page: a change of the model and fallback order of the agent's Hermes profile. Strict body `{ primary, fallbacks, why? }`;
+   * a view-only key is a 403 and any other unknown key a 400. Writes the Ask (hub-agent-edit.mjs) and answers `{ ask, state, from, to }`; nothing is signed
+   * until the owner answers Apply on that Ask, behind the passkey.
+   */
+  async function requestProfileChange(agentId, raw, user, at) {
+    if (!user) throw fail('Sign in to change a model.', 401);
+    const agent = (await allAgents()).find(item => item.id === agentId);
+    if (!agent) throw fail('No such agent.', 404);
+    if (!agent.profile) throw fail('This agent has no Hermes profile to change.', 404);
+    if (Object.keys(raw).some(name => name !== 'fallbacks' && VIEW_ONLY.includes(name))) throw fail(VIEW_ONLY_MESSAGE, 403);
+    const extra = Object.keys(raw).filter(name => !['primary', 'fallbacks', 'why'].includes(name));
+    if (extra.length) throw fail(`A model change has no field ${extra.slice(0, 3).join(', ')}.`, 400);
+    const edit = { op: 'profile', profile: agent.profile, primary: raw.primary, fallbacks: raw.fallbacks, ...(raw.why === undefined ? {} : { why: typeof raw.why === 'string' ? raw.why.replace(/\s+/g, ' ').trim() : raw.why }) };
+    const problems = validateAgentEdit({ agentEdit: edit, requirePasskey: true, options: AGENT_EDIT_OPTIONS });
+    if (problems.length) throw fail(`${problems.slice(0, 2).join('; ')}.`, 400);
+    for (const item of [edit.primary, ...edit.fallbacks]) if (!cleanId(item.provider) || !cleanId(item.model)) throw fail('That is not a model id.', 400);
+    if (edit.why !== undefined && redactSecrets(edit.why).count > 0) throw fail('That text looks like a secret.', 400);
+    const made = await agentEditFlow.createProfileAsk({ edit, user, at });
+    return { status: 201, body: { ask: made.ask, state: 'open', from: made.from, to: made.to } };
   }
 
   const stale = what => fail(`This ${what} changed while you were looking; reload and try again.`, 409);
@@ -558,7 +653,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   async function askDetail(id, at) {
-    const { ask, names } = await askFolder(id);
+    const found = await askFolder(id);
+    const { names } = found;
+    let ask = found.ask;
+    // An edit of an agent is shown from the file as it is now, not from the cache, with the rev of those same bytes: what the page shows is what Apply applies.
+    let rev;
+    if (ask.agentEdit !== undefined) {
+      const got = await bucket.getText(key(`asks/${id}/ask.json`));
+      let parsed = null;
+      try { parsed = got ? JSON.parse(got.text) : null; } catch { /* shown as the cached file, with no rev: Apply is then refused */ }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.question === 'string') { ask = readAsk(parsed, id); rev = askRev(got.text); }
+    }
     const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
     const state = askState(names, ask, at, snooze);
     const read = async name => (names.has(name) ? cached(`asks/${id}/${name}`) : undefined);
@@ -566,13 +671,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
+    // Only an Ask that can still be answered can be blocked: once answered, its own change would read as "still waiting".
+    const agentEditBlocked = canAnswer(state.state) ? await agentEditFlow.blockedReason(ask, at).catch(() => null) : null;
     const sub = askSubtype(ask);
     const beadTitle = await decidesTitle(ask);
     return {
       ...ask, ...state,
+      ...(rev ? { rev } : {}),
       ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
+      ...(agentEditBlocked ? { agentEditBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
       files: [...names].sort(),
@@ -885,6 +994,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       throw fail(state === 'expired' ? `This Ask is expired: it ran out at ${ask.expiresAt}.` : `This Ask is ${state.replace('-', ' ')}.`, 409);
     }
     checkAnswer(ask, data);
+    // What an answer applies (an agent's model or persona) must be what the owner's page showed, not the file as it is now: read it fresh, not
+    // from the cache, and refuse the answer, writing nothing, when its revision is not the one the page holds. The fresh parse is what is applied.
+    let applied = ask;
+    if (ask.agentEdit !== undefined) {
+      const got = await bucket.getText(key(`asks/${id}/ask.json`));
+      if (!got || typeof data.rev !== 'string' || data.rev !== askRev(got.text)) throw fail('This Ask changed while you were looking; reload and try again.', 409);
+      let parsed = null;
+      try { parsed = JSON.parse(got.text); } catch { /* refused below */ }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw fail('This Ask changed while you were looking; reload and try again.', 409);
+      applied = readAsk(parsed, id);
+    }
     const help = await helpFor(data.help, 'ask', id);
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const answer = { at: at.toISOString(), by: user || 'local' };
@@ -906,8 +1026,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
     const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });
+    const agentEdit = await agentEditFlow.afterAnswer({ ask: applied, answer, user, at });
     await markFromAnswer({ ask, answer, user: user || 'local', at });
-    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}) } };
+    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}), ...(agentEdit ? { agentEdit } : {}) } };
   }
 
   // --- Discord: the bot's two routes (see docs/workspaces.md, "Answers from Discord") ---
@@ -1397,7 +1518,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
 
   const self = {
     enabled: on,
@@ -1410,6 +1531,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The sprint module (start, advance, sweep), for the tests. */
     sprints,
     rerun: rerunFlow,
+    /** The persona store and the agent-edit flow, for the tests. */
+    personas: personaStore,
+    agentEdit: agentEditFlow,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
@@ -1588,17 +1712,29 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if (route === '/hub/team/templates') {
+            // The templates carry their prompt text: same rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);
+            reply({
+              templates: PERSONA_TEMPLATES.map(item => ({ id: item.id, label: item.label, line: item.line, text: item.text('<name>', '<role>') })),
+              retired: await personaStore.retiredList(), max: MAX_MADE_PERSONAS,
+            });
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/details$/.exec(route))) {
             // Prompt text is not for an anonymous LAN read: same rule as the chat reads.
             if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
-            const agent = AGENTS.find(item => item.id === match[1]);
+            const agent = (await allAgents()).find(item => item.id === match[1]);
             if (!agent) throw fail('No such agent.', 404);
             const exported = agent.profile ? await loadAgentConfig(at) : null;
             reply(agentDetails({
-              agent, exported, at,
-              persona: CHAT_PERSONAS.find(item => item.id === agent.id) ?? null,
+              agent, exported, at, changes: agent.profile ? await loadProfileChanges(agent.profile, at) : [],
+              persona: (await personaStore.table()).find(item => item.id === agent.id) ?? null,
               preset: agent.presets?.[0] ? presetOf(agent.presets[0]) : null,
             }));
+          } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona$/.exec(route))) {
+            // The prompt is not for an anonymous LAN read: same rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
+            if (!(await allAgents()).some(item => item.id === match[1])) throw fail('No such agent.', 404);
+            reply(await personaStore.versions(match[1]));
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/sheets$/.exec(route))) {
             reply(await sheetList(match[1], at));
           } else {
@@ -1657,6 +1793,18 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await deleteDrawing(match[1], user, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
           send(await saveDrawingOld(match[1], raw));
+        } else if (route === '/hub/team/new') {
+          if (!user) throw fail('Sign in to make a persona.', 401);
+          send({ status: 201, body: await personaStore.create(raw, user, at) });
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona\/retire$/.exec(route))) {
+          if (!user) throw fail('Sign in to retire a persona.', 401);
+          send({ status: 200, body: await personaStore.retire(match[1], user, at) });
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona(\/revert)?$/.exec(route))) {
+          if (!user) throw fail('Sign in to edit a persona.', 401);
+          if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);
+          send({ status: 200, body: match[2] ? await personaStore.revert(match[1], raw, user, at) : await personaStore.save(match[1], raw, user, at) });
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/profile-change$/.exec(route))) {
+          send(await requestProfileChange(match[1], raw, user, at));
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {
           send(await chooseAvatar(match[1], raw, user, at));
         } else {

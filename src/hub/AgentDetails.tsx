@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ago, HubError, hubGet } from '../lib/hub'
 import { hubHash } from '../lib/route'
-import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileSettings, TeamView } from '../lib/hubTeam'
+import { host } from '../lib/host'
+import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileChange, ProfileSettings, TeamView } from '../lib/hubTeam'
 import { AgentSprite } from './team/AgentSprite'
 import { STATUS_DOT, STATUS_LABEL } from './team/teamModel'
 import { stateOf } from './team/spriteState'
@@ -43,6 +44,24 @@ function FreshnessNote({ freshness, hasPrompts }: { freshness: DetailsFreshness;
       Settings checked {checked}{freshness.changedAt ? ` · last changed ${ago(freshness.changedAt)}` : ''}
     </p>
   )
+}
+
+/** What happened to the owner's last change of this profile's model, in words. A failure says the old settings stay. */
+export function ChangeBanner({ change }: { change: ProfileChange }) {
+  const model = change.to.model
+  const when = ago(change.resultAt ?? change.at)
+  if (change.state === 'failed') {
+    const hung = change.code === 'rollback-failed'
+    return (
+      <p className="hub-banner ad-note" role="alert" data-details-change="failed">
+        The change to {model} failed: {change.reason ?? 'the host gave no reason'}. {hung ? 'Hermes may be down.' : 'The old settings stay.'} <span className="team-dim">{when}</span>
+      </p>
+    )
+  }
+  if (change.state === 'late') return <p className="hub-banner ad-note" role="note" data-details-change="late">The change to {model} was signed {ago(change.at)}. {change.reason ?? 'The Hermes host did not pick this up.'} The old settings stay.</p>
+  if (change.state === 'live') return <p className="ad-note" role="status" data-details-change="live">The change to {model} is live. The host applied it {when}.</p>
+  if (change.state === 'applied') return <p className="ad-note" role="status" data-details-change="applied">The Hermes host applied the change to {model} {when}. The settings below update with its next export.</p>
+  return <p className="ad-note" role="status" data-details-change="waiting">The change to {model} was approved {ago(change.at)} and is waiting for the Hermes host, which applies it within about 5 minutes.</p>
 }
 
 function Settings({ settings }: { settings: ProfileSettings }) {
@@ -127,14 +146,17 @@ export default function AgentDetails({ id }: { id: string }) {
           <h2>{agent.name}</h2>
           {live && <span className="team-status" data-details-status><span className={`dot st-${STATUS_DOT[live.status]}`} aria-hidden="true" />{STATUS_LABEL[live.status]}</span>}
           <p className="team-dim">{agent.role}</p>
+          {agent.editable && host.write && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id}>{agent.editable.persona ? 'Edit the persona and model' : 'Edit the model'}</a>}
         </div>
       </header>
       <dl className="ad-facts">
         <div><dt>Room</dt><dd>{agent.room}</dd></div>
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
         <div><dt>Profile</dt><dd data-details-profile-name>{agent.profile ?? 'None'}</dd></div>
+        {agent.chatModel && <div><dt>Chat model</dt><dd data-details-chat-model>{agent.chatModel}</dd></div>}
       </dl>
       <FreshnessNote freshness={body.freshness} hasPrompts={body.prompts.length > 0} />
+      {body.change && <ChangeBanner change={body.change} />}
       {body.settings && <Settings settings={body.settings} />}
       {body.prompts.length > 0 && (
         <section className="ad-section" aria-labelledby="ad-prompts" data-details-prompts>

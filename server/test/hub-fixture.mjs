@@ -158,7 +158,9 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     // Off by default. The Hermes host's settings export, marked as the card API marks it. 'fresh': published 12 minutes ago, changed 2 days ago. 'stale': 9 hours ago.
     // The SOUL.md text holds a fake key (as if the host's cleaning had missed it) to show the site cleans it again.
     const soulText = ['## Role', 'You are the owner\'s assistant.', 'Always answer in plain words.', 'Key for tests: sk-ant-api03-FAKEFAKEFAKEFAKE1234567890', ''].join('\n');
-    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: agentConfig === 'stale' ? 9 * 60 : 12, soulText }));
+    const model = (provider, name) => ({ provider, model: name });
+    const modelOptions = { main: [model('openai-codex', 'gpt-6-sol'), model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')], briefs: [model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')] };
+    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: agentConfig === 'stale' ? 9 * 60 : 12, soulText, modelOptions }));
   }
 
   if (oldSessions) {

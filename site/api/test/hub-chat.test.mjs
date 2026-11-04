@@ -5,6 +5,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { IDLE_MS_DEFAULT, TOTAL_MS_DEFAULT } from '../hub-chat.mjs';
+import { PERSONA_AGENTS } from '../hub-team.mjs';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
@@ -849,8 +850,68 @@ test('persona: a listed id pins its server-built text first, stores the id on ev
     assert.deepEqual(lines(fake, done.data.conversation).map(line => line.persona), Array(4).fill('market-researcher'));
     const listed = await (await call('GET', '/hub/chat')).json();
     assert.equal(listed.conversations[0].persona, 'market-researcher');
-    assert.deepEqual(listed.personas.map(entry => entry.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
+    assert.deepEqual(listed.personas.map(entry => entry.id), PERSONA_AGENTS);
     assert.ok(listed.personas.every(entry => !('text' in entry) && !('prompt' in entry)));
+  } finally { await close(); }
+});
+
+test('persona: an edit of the prompt (ws-im1.4.1) reaches the next turn of a new chat and of one that is already open, and Revert takes it back', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const open = (await chatLive(call, { text: 'First question', persona: 'teardown' })).events.at(-1).data.conversation;
+    assert.match(upstream.runs[0].body.conversation_history[0].content, /^You are Teardown, one of the owner's agents/);
+    const saved = await (await call('POST', '/hub/team/teardown/persona', { role: 'taking a game apart', prompt: 'You are Teardown, edited by the owner.', model: 'haiku', base: 'default' })).json();
+    assert.ok(saved.version, JSON.stringify(saved));
+    // The conversation that was open uses the new text from its next turn.
+    assert.equal((await chatLive(call, { text: 'Second question', conversation: open })).events.at(-1).event, 'done');
+    const second = upstream.runs[1].body.conversation_history;
+    assert.equal(second[0].content, 'You are Teardown, edited by the owner.');
+    assert.equal(second.filter(line => /^You are /.test(line.content)).length, 1, 'the old text is not sent beside it');
+    // A new chat starts on it, and the list tells the page the persona's new default model.
+    assert.equal((await chatLive(call, { text: 'New chat', persona: 'teardown' })).events.at(-1).event, 'done');
+    assert.equal(upstream.runs[2].body.conversation_history[0].content, 'You are Teardown, edited by the owner.');
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(listed.personas.find(entry => entry.id === 'teardown'), { id: 'teardown', name: 'Teardown', role: 'taking a game apart', preset: 'game-teardown', model: 'haiku' });
+    assert.ok(listed.personas.every(entry => !('text' in entry) && !('prompt' in entry) && !('edited' in entry)));
+    // Back to the app's text: the next turn of the same chat carries the default again.
+    const back = await (await call('POST', '/hub/team/teardown/persona/revert', { to: 'default', base: saved.version })).json();
+    assert.ok(back.version, JSON.stringify(back));
+    assert.equal((await chatLive(call, { text: 'Third question', conversation: open })).events.at(-1).event, 'done');
+    assert.match(upstream.runs[3].body.conversation_history[0].content, /^You are Teardown, one of the owner's agents: how a public game works/);
+  } finally { await close(); }
+});
+
+test('persona: one the owner made (ws-im1.4.3) is in the menu and carries its own text; retired, it is no new choice and an old chat keeps its text', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const made = await call('POST', '/hub/team/new', { template: 'plain', name: 'Level reviewer', role: 'reviews level designs' });
+    assert.equal(made.status, 201, JSON.stringify(await made.clone().json()));
+    const listed = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(listed.personas.map(entry => entry.id), [...PERSONA_AGENTS, 'level-reviewer']);
+    assert.deepEqual(listed.personas.at(-1), { id: 'level-reviewer', name: 'Level reviewer', role: 'reviews level designs', model: 'codex' });
+    const open = (await chatLive(call, { text: 'Is this level fair?', persona: 'level-reviewer' })).events.at(-1);
+    assert.equal(open.event, 'done', JSON.stringify(open.data));
+    const sent = upstream.runs[0].body.conversation_history[0].content;
+    assert.match(sent, /^You are Level reviewer, one of the owner's agents: reviews level designs\./);
+    assert.match(sent, /write no cards/);
+
+    const version = (await (await call('GET', '/hub/team/level-reviewer/persona')).json()).current.version;
+    assert.equal((await call('POST', '/hub/team/level-reviewer/persona/retire', {})).status, 200);
+    const after = await (await call('GET', '/hub/chat')).json();
+    assert.deepEqual(after.personas.map(entry => entry.id), PERSONA_AGENTS, 'gone from the menu');
+    assert.equal(after.conversations[0].persona, 'level-reviewer', 'the old chat still says who it was with');
+    const fresh = await chat(call, { text: 'New chat', persona: 'level-reviewer' });
+    assert.equal(fresh.status, 400);
+    assert.equal(fresh.body.error, 'Unknown persona.');
+    // The old conversation still sends its text.
+    assert.equal((await chatLive(call, { text: 'And the next one?', conversation: open.data.conversation })).events.at(-1).event, 'done');
+    assert.equal(upstream.runs[1].body.conversation_history[0].content, sent);
+
+    // Brought back, it is a choice again.
+    const retired = (await (await call('GET', '/hub/team/templates')).json()).retired[0];
+    assert.equal(retired.to, version);
+    assert.equal((await call('POST', '/hub/team/level-reviewer/persona/revert', { to: retired.to, base: retired.base })).status, 200);
+    assert.ok((await (await call('GET', '/hub/chat')).json()).personas.some(entry => entry.id === 'level-reviewer'));
   } finally { await close(); }
 });
 

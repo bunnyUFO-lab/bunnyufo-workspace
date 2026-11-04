@@ -59,6 +59,12 @@ export interface TeamAgent {
   sprite: AvatarSprite | CustomSprite
   /** Claude Code only: its sessions, as Working now lists them. */
   sessions?: WorkingItem[]
+  /** What the Edit page may change: the chat persona of the research agents, and the model of an agent on a Hermes profile. */
+  editable?: { persona?: boolean; profile?: boolean }
+  /** The label of the chat model an edited persona starts a chat on; none while the persona follows the app's text. */
+  chatModel?: string
+  /** A persona the owner made from a template: it chats, can be retired, and has no sprite sheet job. */
+  custom?: boolean
 }
 
 export interface TeamView {
@@ -88,10 +94,34 @@ export interface DetailsJob {
 export interface ProfileSettings {
   model?: { provider?: string; default?: string }
   fallbacks: { provider: string; model: string }[]
+  /** The models the Hermes host would apply for this profile; none until its exporter publishes the list. */
+  modelOptions?: ModelRef[]
   toolsets?: string[]
   platformToolsets?: Record<string, string[]>
   skills: { autoLoad: string[]; installed: string[] }
   terminal?: { backend?: string; containerMemoryMb?: number }
+}
+
+export interface ModelRef { provider: string; model: string }
+/** A primary model with its fallbacks, in order. */
+export interface ModelSet extends ModelRef { fallbacks: ModelRef[] }
+
+/** Where a signed change of a profile's model stands: sent, applied by the host, shown in its export, failed, or not picked up in time. */
+export type ChangeState = 'waiting' | 'applied' | 'live' | 'failed' | 'late'
+
+/** One change of a profile's model and fallback order (site/api/hub-agent-config.mjs changeView). `reason` is the Hub's words for the host's code. */
+export interface ProfileChange {
+  id: string
+  profile: 'main' | 'briefs'
+  state: ChangeState
+  at: string
+  by: string
+  from: ModelSet
+  to: ModelSet
+  resultAt?: string
+  code?: string
+  reason?: string
+  rolledBack?: boolean
 }
 
 /** `fresh` under 7 h, `stale` from 7 h, `missing` when the host has published nothing usable, `none` for an agent without a profile. */
@@ -104,9 +134,50 @@ export interface DetailsFreshness {
 
 /** GET /api/hub/team/:agent/details */
 export interface AgentDetailsView {
-  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile }
+  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile; editable?: { persona?: boolean; profile?: boolean }; chatModel?: string }
   freshness: DetailsFreshness
   settings: ProfileSettings | null
   prompts: DetailsPrompt[]
   jobs: DetailsJob[]
+  /** The newest change of the profile that waits or ended in the last day, and the recent ones, newest first. */
+  change?: ProfileChange
+  changes?: ProfileChange[]
 }
+
+/** One version of a persona on the Edit page. `default` is the app's own text (a stored "back to the app's text" is a default row too). */
+export interface PersonaVersion {
+  id: string
+  at: string
+  by: string
+  default?: boolean
+  /** The first version of a persona the owner made. */
+  created?: boolean
+  /** The retirement of a made persona: no text, and nothing to revert to. */
+  retired?: boolean
+  role?: string
+  prompt?: string
+  model?: string
+  note?: string
+  revertOf?: string
+  fromAsk?: string
+}
+
+/** GET /api/hub/team/:agent/persona, and what a save or a revert answers beside `ok` and `version`. */
+export interface PersonaView {
+  current: { version: string; role: string; prompt: string; model: string }
+  /** The app's own text; null for a persona the owner made. */
+  default: { role: string; prompt: string; model: string } | null
+  versions: PersonaVersion[]
+  models: { id: string; label: string; note: string }[]
+  custom?: boolean
+  name?: string
+  retired?: boolean
+}
+
+/** One template of a new persona (GET /api/hub/team/templates). `text` shows `<name>` and `<role>` where the owner's words go. */
+export interface PersonaTemplate { id: string; label: string; line: string; text: string }
+
+/** A retired persona with what Bring back needs: the version to go back to and the one the page looks at. */
+export interface RetiredPersona { id: string; name: string; role: string; to: string; base: string }
+
+export interface TemplatesView { templates: PersonaTemplate[]; retired: RetiredPersona[]; max: number }

@@ -93,7 +93,7 @@ const freeCentre = page => page.evaluate(() => {
 });
 
 /** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-1kw (every ring says what it counts in words, with a done arc; an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
-const DESKTOP_EXPANDED = 'dc1c1af34dccf7cc67057eecdeae007a072e33928e3ac60dd0fbcfb2e2c27583';
+const DESKTOP_EXPANDED = '3f9a7e2b0b496a072efde3249a1b923836e18aea49033dfdd23fb157cc3afa67';
 const DESKTOP_EXPANDED_NO_SPRINTS = '4aa7d66def5b8dd3da5d065649bd5a440d79ec1f948467e6d4cac8c6f5e2bbf0';
 const sha = text => createHash('sha256').update(text).digest('hex');
 
@@ -119,7 +119,7 @@ const svgForms = page => page.evaluate(geometry => {
   walk(svg, 0);
   return { raw: svg.outerHTML, structure: lines.join(String.fromCharCode(10)) };
 }, [...GEOMETRY]);
-const STRUCTURE_EXPANDED = 'b1a260dd876b5a73f016fa6820a0ee045efd4fd118ccc614ca4e35db5ca811e6';
+const STRUCTURE_EXPANDED = '6b316fc34a972674bc909b9da9619ff770ce1c685c99a2e1f6e2849b40b377da';
 const STRUCTURE_EXPANDED_NO_SPRINTS = '7b45ae19c25525e24f22e6e751f39624a5b80d3d1a998b4638449b9c06ea5ebe';
 /** Checks a drawing against its recorded hashes; a mismatch says the actual hash, so a recording is one copy away. */
 const sameDrawing = (forms, structureHash, exactHash, what) => {

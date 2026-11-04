@@ -264,7 +264,7 @@ export function layoutMap(model: ProgressMap, open: ReadonlySet<string>, showSpr
       if (!xs.length) return
       const parts = sprint.milestones.map(item => {
         const milestone = model.milestones.find(candidate => candidate.id === item.id)
-        return `${item.count} of ${item.total} tasks of ${clip(milestone?.title ?? item.id, 18)}`
+        return `${item.count} of ${item.total} tasks in ${clip(milestone?.title ?? item.id, 18)}`
       }).join(' · ')
       if (vertical) {
         // A thin bar left of the spine over its milestones' stretch, the name above it; the "4 of 7" parts stay in the tooltip.
