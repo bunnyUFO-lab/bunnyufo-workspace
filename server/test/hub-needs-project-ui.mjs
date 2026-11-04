@@ -54,6 +54,15 @@ try {
   ]);
   copy('sprite-studio', [beadsIssue({ id: 'ss-m1', title: 'Editor', type: 'milestone', status: 'closed', closed: '2026-10-03T10:00:00Z', ...stamp }), closedTask('ss-t1', 'Draw', 'ss-m1')]);
   for (const [project, prefix] of [['workspace-app', 'ws'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
+  // A project with roadmaps: the Roadmap tab lists them (ws-im1.3.2).
+  copy('roadmapped', [
+    beadsIssue({ id: 'rd-r1', title: 'Hub work', type: 'epic', labels: ['roadmap'], ...stamp }),
+    beadsIssue({ id: 'rd-f1', title: 'First ring', type: 'feature', parent: 'rd-r1', ...stamp }),
+    closedTask('rd-t1', 'Done thing', 'rd-f1'),
+    beadsIssue({ id: 'rd-t2', title: 'Open thing', parent: 'rd-f1', ...stamp }),
+    beadsIssue({ id: 'rd-r2', title: 'Editing', type: 'epic', parent: 'rd-r1', labels: ['roadmap'], ...stamp }),
+    beadsIssue({ id: 'rd-t3', title: 'Loose thing', parent: 'rd-r2', ...stamp }),
+  ]);
   fixture.fake.seed('sections/magic-loops/workspace.json', JSON.stringify({ name: 'Magic Loops', entities: [{ id: 'jump-notes', title: 'Jump notes', folder: 'jump-notes', updated: '2026-10-20' }, { id: 'dash-report', title: 'Dash report', folder: 'dash-report', updated: '2026-10-28' }] }), 'application/json');
   await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -222,6 +231,20 @@ try {
   await page.waitForFunction(() => location.hash === '#/~hub/map/magic-loops');
   await page.goBack();
   await page.locator('[data-pp-roadmap]').waitFor();
+
+  step('project page, Roadmap tab with roadmaps (RoadmapRows): nested rows instead of the flat list; a row opens that roadmap\'s map, and Back returns');
+  await goPage(page, '#/~hub/project/roadmapped');
+  await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').first().waitFor();
+  assert.deepEqual(await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').evaluateAll(list => list.map(row => [row.dataset.roadmapRow, row.dataset.depth])), [['rd-r1', '0'], ['rd-r2', '1']]);
+  assert.equal(await page.locator('[data-pp-roadmap]').count(), 0, 'The flat milestone list is not shown.');
+  assert.equal(await page.locator('[data-roadmap-row="rd-r1"] .rm-row-count').innerText(), '0 of 1 done');
+  await page.locator('[data-roadmap-row="rd-r1"]').click();
+  await page.waitForFunction(() => location.hash === '#/~hub/map/roadmapped/rd-r1');
+  await page.locator('.hub-map-box svg').waitFor();
+  assert.equal(await page.locator('[data-roadmap-toggle="branch"]').getAttribute('aria-current'), 'page');
+  await page.goBack();
+  await page.locator('[data-pp-roadmap-rows]').waitFor();
+  await goPage(page, '#/~hub/project/magic-loops');
 
   step('project page, wide: the Running panel sits beside the Roadmap tab, and only there');
   await page.locator('[data-pp-side] [aria-label="Working now"]').waitFor();
