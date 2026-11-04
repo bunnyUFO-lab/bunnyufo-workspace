@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react'
 import type { Item } from '../lib/hub'
 import { appUrl as safeApp, sessionUrl } from '../lib/hub'
 import type { WorkingItem, WorkingLinks } from '../lib/hubPc'
-import { hubHash, mapHash, workHash } from '../lib/route'
+import { hubHash, mapHash, projectHash, workHash } from '../lib/route'
+import type { ReactNode } from 'react'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
 import { stateOf } from './team/spriteState'
@@ -43,14 +44,15 @@ function Links({ links }: { links: WorkingLinks }) {
 
 function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: number }) {
   const link = sessionUrl(item.url) ?? safeApp(item.appUrl)
-  const where = [item.project, item.branch].filter(Boolean).join(' · ')
+  const projectLink = item.project ? <a className="wn-project" href={projectHash(item.project)} data-project-link={item.project}>{item.project}</a> : null
+  const where = [projectLink, item.branch].filter(Boolean)
   const stale = item.state === 'stale'
   const since = stale || item.state === 'idle' ? '' : duration(item.since, now)
   const isRun = item.source === 'run'
   const runHref = item.request ? hubHash('request', item.request) : ''
   const sprite = item.agent === 'hermes' ? HERMES_SPRITE : SPRITE
   const name = item.agent === 'hermes' ? 'Hermes' : 'Claude Code'
-  const what = isRun ? [item.preset ? presetLabel(item.preset) : '', item.project].filter(Boolean).join(' · ') : where
+  const what: ReactNode[] = isRun ? [item.preset ? presetLabel(item.preset) : '', projectLink].filter(Boolean) : where
   const title = item.state === 'needs-you' && !isRun
     ? <a href={needsHref(item, blocked)}>{item.title}</a>
     : runHref && isRun ? <a href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>{item.title}</a> : item.title
@@ -60,8 +62,8 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
       <span className="wn-text">
         <b>{title}</b>
         <small>
-          {what}
-          {item.bead && !item.links?.beads?.length && <>{what ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
+          {what.map((part, index) => <span key={index}>{index > 0 ? ' · ' : ''}{part}</span>)}
+          {item.bead && !item.links?.beads?.length && <>{what.length ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
         </small>
         {item.links && <Links links={item.links} />}
       </span>

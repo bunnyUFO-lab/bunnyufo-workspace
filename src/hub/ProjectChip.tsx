@@ -1,5 +1,6 @@
 import type { HubProject } from '../lib/hub'
 import { needsHref, projectName } from '../lib/needsView.mjs'
+import { projectHash } from '../lib/route'
 import { useHubData } from './useHub'
 
 export type ProjectNames = Record<string, string>
@@ -27,8 +28,15 @@ export default function ProjectChip({ id, names, filter = 'all', className = 'ni
   return <a className={`${pill ? 'hub-pill ' : ''}${className} ni-project`} href={needsHref(filter, id)} data-project-chip={id} title={`Show only ${projectName(names, id)}`}>{projectName(names, id)}</a>
 }
 
-/** The same chip for a page that opens one item alone: it loads the names itself. */
+/** The project's name on a page that opens one item alone, as a chip that opens the project's page. It loads the names itself. */
 export function PageProjectChip({ id, pill = true }: { id: string | undefined; pill?: boolean }) {
   const names = useProjectNames(!!id)
-  return <ProjectChip id={id} names={names} className={pill ? '' : 'ni-chip'} pill={pill} />
+  if (!id) return null
+  const name = projectName(names, id)
+  return <a className={`${pill ? 'hub-pill' : 'ni-chip'} ni-project`} href={projectHash(id)} data-project-chip={id} title={`Open ${name}`}>{name}</a>
+}
+
+/** A link to a project's page: `Open <name> ›` by default, or the `label` you give it (`Project`). */
+export function ProjectLink({ id, name, label, className = 'pp-link' }: { id: string; name?: string; label?: string; className?: string }) {
+  return <a className={className} href={projectHash(id)} data-project-link={id}>{label ?? `Open ${name || id}`} ›</a>
 }

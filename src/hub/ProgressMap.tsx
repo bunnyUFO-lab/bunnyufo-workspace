@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
-import type { MapWayfinder, ProgressMap as MapModel, RunsOn, TaskState } from '../lib/hub'
+import type { MapWayfinder, ProgressMap as MapModel, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { hubHash, mapHash } from '../lib/route'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
@@ -22,9 +22,11 @@ import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
 import QuestionActions from './QuestionActions'
-import { COST, planDraft, preparable, questionSeed } from './questionSeed'
+import { COST, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
-import { startChat } from './chatStart'
+import PlanInHermes from './PlanInHermes'
+import { ProjectLink } from './ProjectChip'
+import RunsOnChip from './RunsOnChip'
 import { host } from '../lib/host'
 
 const HINT_KEY = 'hub-map-hint-seen'
@@ -69,6 +71,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       <div className="hub-map-chips">
         <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} href={id => hubHash('map', id)} oneRow inRow />
         <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
+        {project && <ProjectLink id={project} label="Project" className="pp-map-link" />}
       </div>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
@@ -134,51 +137,6 @@ function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: stri
         </ul>
       )}
     </div>
-  )
-}
-
-/**
- * "Plan in Hermes": opens Chat with the Planner and a draft that names this project and the node the owner is looking at. It files nothing
- * and sends nothing; the owner reads the draft and presses send. The Planner files one change-list Ask when the plan is ready.
- */
-function PlanInHermes({ project, projectName, selected }: { project: string; projectName: string; selected: { id: string; title: string } | null }) {
-  if (!host.write || !host.chat) return null
-  return (
-    <button
-      type="button" className="hub-btn hub-plan-btn" data-plan-in-hermes title="Talk the plan through with Hermes. It files a change list for you to approve; nothing changes until you answer."
-      onClick={() => { startChat({ persona: 'planner', draft: planDraft(project, projectName, selected) }); window.location.hash = hubHash('chat') }}
-    >Plan in Hermes</button>
-  )
-}
-
-/** Where a project's work runs by default: full text and the rule in plain words, a short text on a phone. */
-const RUNS_ON: Record<RunsOn, { full: string; short: string; rule: string }> = {
-  pc: { full: 'Runs on: Gaming PC', short: 'Runs on PC', rule: 'Work for this project runs on the PC by default.' },
-  cloud: { full: 'Runs on: cloud', short: 'Runs in cloud', rule: 'This project lives in a GitHub repository, so its work runs in the cloud.' },
-  'at-pc': { full: 'Started by you at the PC', short: 'You start it', rule: 'This project is never started remotely; you start its work at the PC.' },
-}
-
-function RunsOnChip({ runsOn }: { runsOn?: RunsOn }) {
-  const text = runsOn && RUNS_ON[runsOn]
-  const [shown, setShown] = useState(false)
-  const root = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    if (!shown) return
-    const away = (event: Event) => { if (!root.current?.contains(event.target as Node)) setShown(false) }
-    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setShown(false) }
-    document.addEventListener('pointerdown', away)
-    document.addEventListener('keydown', escape)
-    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', escape) }
-  }, [shown])
-  if (!text) return null
-  return (
-    <span className="hub-runs-wrap" ref={root}>
-      <button type="button" className="hub-runs" title={text.rule} aria-label={`${text.full}. ${text.rule}`} aria-expanded={shown} aria-controls="hub-runs-rule" onClick={() => setShown(value => !value)}>
-        <span className="hub-runs-full">{text.full}</span>
-        <span className="hub-runs-short" aria-hidden="true">{text.short}</span>
-      </button>
-      {shown && <span className="hub-runs-rule" id="hub-runs-rule" role="note">{text.rule}</span>}
-    </span>
   )
 }
 

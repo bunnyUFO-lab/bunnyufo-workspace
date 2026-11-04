@@ -1142,9 +1142,11 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   /** Every card of every card section: `sections/<id>/workspace.json` entities, with the section's tracked repo. */
+  let lastSections = new Set();
   async function allCards() {
     const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
     const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && !/^inbox(-[a-z0-9]+)?$/.test(id));
+    lastSections = new Set(sections);
     const lists = await pool(6, sections, async section => {
       const got = await bucket.getJson(`${prefix}/${section}/workspace.json`).catch(() => null);
       const entities = got?.value?.entities;
@@ -1161,7 +1163,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   // The cards by `section/folder` and `section#id`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
-  let cardIndex = { at: 0, byRef: new Map() };
+  let cardIndex = { at: 0, byRef: new Map(), rows: [], sections: new Set() };
   const cardRow = row => ({ title: row.title, href: `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}` });
   /** Make sure the index is no older than a minute (`maxAge` ms), listing the sections at most once per call. */
   async function refreshCardIndex(maxAge = 60000) {
@@ -1170,11 +1172,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const at = now().getTime();
     try {
       const byRef = new Map();
-      for (const row of await allCards()) {
+      const rows = await allCards();
+      for (const row of rows) {
         byRef.set(`${row.section}/${row.folder}`, cardRow(row));
         if (!byRef.has(`${row.section}#${row.id}`)) byRef.set(`${row.section}#${row.id}`, cardRow(row));
       }
-      cardIndex = { at, byRef };
+      cardIndex = { at, byRef, rows, sections: lastSections };
     } catch { cardIndex = { ...cardIndex, at }; }
   }
   /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
@@ -1184,6 +1187,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // A card a run has just written is not in an index built a moment ago: on a miss, look again once the index is 10 s old.
     if (!cardIndex.byRef.has(card)) await refreshCardIndex(10000);
     return cardIndex.byRef.get(card)?.href;
+  }
+  /** A project's Library cards: the section whose id is the project id, newest first, at most 20, from the one-minute index. `section` is null when there is no such section (`agent-plans` is never a project's). */
+  async function projectCards(project) {
+    await refreshCardIndex();
+    if (project === 'agent-plans' || !cardIndex.sections.has(project)) return { section: null, cards: [], total: 0 };
+    const when = row => row.updated ?? row.created ?? '';
+    const mine = cardIndex.rows.filter(row => row.section === project).sort((a, b) => when(b).localeCompare(when(a)));
+    return { section: project, cards: mine.slice(0, 20).map(row => ({ ...cardRow(row), ...(when(row) ? { updated: when(row) } : {}) })), total: mine.length };
   }
   /** A resolver for the map: `section/folder` or `section#id` to `{ title, href }`, from the one-minute index (no listing of its own per request). */
   async function cardResolver() {
@@ -1530,6 +1541,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
             const loaded = await pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) }));
             reply({ rows: loaded.flatMap(row => searchRows(row.issues.map(issue => ({ ...issue, project: row.id })))), at: at.toISOString() });
+          } else if (route === '/hub/project-cards') {
+            const project = query.get('project');
+            if (!validProject(project)) throw fail('Say which project.', 400);
+            reply(await projectCards(project));
           } else if (route === '/hub/unasked') {
             const work = buildWork(await loadWorkInputs(null, at));
             reply({ items: unaskedOf(Object.values(work.lanes).flat()).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href, ...(card.reason ? { reason: card.reason } : {}), ...(card.mark ? { mark: card.mark } : {}) })) });

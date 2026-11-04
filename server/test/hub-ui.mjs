@@ -242,9 +242,9 @@ try {
   assert.equal(await tabs.locator('nav.hub-tabs .hub-tab').count(), 6, 'Six items in the bar.');
   assert.equal(await tabs.locator('[data-hub-tab="search"]').count(), 0, 'No Search tab: Search is under More.');
   await tabs.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['library', 'sketch']);
+  assert.deepEqual(await tabs.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['project', 'library', 'sketch']);
   assert.equal(await tabs.locator('[data-hub-more-search]').count(), 1, 'Search is the last row of More.');
-  assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
+  assert.deepEqual(await tabs.locator('[data-hub-more-group] .hub-more-heading').allTextContents(), ['Plan', 'Know'], 'The More sheet has the rail group headings, without the groups whose rows are on the bar.');
   await tabs.locator('[data-hub-tab="map"]').tap();
   await tabs.locator('.hub[data-screen="map"]').waitFor();
   assert.equal(await tabs.locator('[data-hub-more]').count(), 0, 'The sheet shuts after a move.');
@@ -990,6 +990,19 @@ try {
   });
   assert.ok(small390.scroll <= 1, `The Hub does not scroll (${small390.scroll}).`);
   assert.ok(Math.abs(small390.box - (small390.tabs - 8)) <= 10, `The box reaches the tab bar (${small390.box} vs ${small390.tabs}).`);
+  // ws-im1.3.1: `Project ›` sits in the chips row at chip height, so the box under it does not move; its 44 px target hangs outside.
+  const link = phone.locator('.hub-map-chips [data-project-link]');
+  const withLink = await phone.evaluate(() => ({ top: document.querySelector('.hub-map-box').getBoundingClientRect().top, chips: document.querySelector('.hub-map-chips').getBoundingClientRect().height, link: document.querySelector('.hub-map-chips [data-project-link]').getBoundingClientRect().height }));
+  assert.equal(await link.count(), 1, 'The Roadmap has a Project link in its chips row.');
+  const without = await phone.evaluate(() => { const element = document.querySelector('.hub-map-chips [data-project-link]'); element.style.display = 'none'; const top = document.querySelector('.hub-map-box').getBoundingClientRect().top; element.style.display = ''; return top; });
+  assert.ok(Math.abs(withLink.top - without) <= 1, `The map box does not move for the link (${withLink.top} vs ${without}).`);
+  assert.ok(withLink.link < 40, `The link is chip height (${withLink.link}).`);
+  const where = await link.boundingBox();
+  for (const dy of [-20, 20]) {
+    const hit = await phone.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-project-link]')?.getAttribute('data-project-link') ?? null, [where.x + where.width / 2, where.y + where.height / 2 + dy]);
+    assert.equal(hit, 'magic-loops', `A tap ${dy} px from the link's centre still hits it.`);
+  }
+  assert.equal(await phone.locator('.hub-map-box').getAttribute('data-axis'), 'y', 'The phone map stays vertical.');
   await phone.locator('.hub-map-controls button:has-text("Key")').tap();
   const legendBox = await phone.locator('.hub-legend').boundingBox();
   assert.ok(legendBox.x >= 0 && legendBox.x + legendBox.width <= 390 && legendBox.y >= 0 && legendBox.y + legendBox.height <= 844, 'The Key fits on the screen.');

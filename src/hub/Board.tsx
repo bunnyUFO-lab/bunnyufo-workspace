@@ -15,6 +15,7 @@ import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
+import { ProjectLink } from './ProjectChip'
 import { useProject } from './useProject'
 import './work.css'
 import MapPanel from './MapPanel'
@@ -220,7 +221,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
       )}
-      {project && host.write && <div className="work-spawn"><button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button></div>}
+      {project && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button>}<ProjectLink id={project} label="Project" /></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}

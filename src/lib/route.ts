@@ -2,7 +2,7 @@
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
-export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'map', 'work', 'team', 'activity', 'sketch', 'chat', 'request', 'agent'] as const
+export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'project', 'map', 'work', 'team', 'activity', 'sketch', 'chat', 'request', 'agent'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */
@@ -57,6 +57,20 @@ export function entityHash(id: string, step = -1): string {
 
 export function hubHash(screen: HubScreen, id?: string): string {
   return id ? `#/~hub/${screen}/${encodeURIComponent(id)}` : `#/~hub/${screen}`
+}
+
+/** `#/~hub/project[/<id>[/<tab>]]`: a project's page. No tab is the Roadmap tab; `running`, `needs` and `library` are the others. No id is the project last chosen. */
+export function projectHash(id?: string, tab?: string): string {
+  if (!id) return '#/~hub/project'
+  const base = `#/~hub/project/${encodeURIComponent(id)}`
+  return tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base
+}
+
+/** The project id and the raw tab out of a project route id (`[<id>[/<tab>]]`); `tabOf` (projectPage.ts) turns the tab into one of the four. */
+export function parseProjectId(id: string | undefined): { project?: string; tab?: string } {
+  if (!id) return {}
+  const [project, tab] = id.split('/')
+  return { ...(project ? { project } : {}), ...(tab ? { tab } : {}) }
 }
 
 /** `#/~hub/map/<project>[/<node>]`: the map, and with a node its details panel open. */

@@ -15,6 +15,7 @@ import Needs from './Needs'
 import Sketch from './Sketch'
 import SpawnHost from './Spawn'
 import ProgressMap from './ProgressMap'
+import ProjectPage from './ProjectPage.tsx' // the extension: projectPage.ts differs from this file's name only in casing
 import Team from './Team'
 import Today from './Today'
 import WorkTabs from './WorkTabs'
@@ -39,6 +40,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
+      {route.screen === 'project' && <ProjectPage route={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && <Chat id={route.id} />}
       {host.write && <SpawnHost />}

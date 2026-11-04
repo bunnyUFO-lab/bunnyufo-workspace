@@ -332,6 +332,8 @@ export interface SprintPreview {
   /** What the list was when shown: Start sends it back, and a changed list is a 409. */
   digest?: string
 }
+/** `GET /hub/project-cards?project=<id>`: the cards of the section whose id is the project's (newest first, at most 20; `total` is all of them). `section` is null when there is no such section. */
+export interface ProjectCards { section: string | null; cards: { title: string; href: string; updated?: string }[]; total: number }
 export interface ProgressMap {
   project: string
   meta: { pushedAt: string; host: string; count: number; repo: string } | null

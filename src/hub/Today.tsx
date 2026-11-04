@@ -1,8 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { HubEvent, HubProject, Item, MoveOffer, Today as TodayData } from '../lib/hub'
+import type { HubEvent, HubProject, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
-import { KIND_ICON, itemLabel, needsKind } from '../lib/needsKinds'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
@@ -10,9 +9,10 @@ import { needsHref } from '../lib/needsView.mjs'
 import ItemRow, { openFromClick } from './ItemRow'
 import PcTile from './PcTile'
 import ProjectPicker from './ProjectPicker'
+import { ProjectLink } from './ProjectChip'
 import UnaskedPanel from './UnaskedPanel'
 import WorkingNow from './WorkingNow'
-import { itemKey, setFocus } from './needsFocus'
+import NeedsRows, { Icon } from './NeedsRows'
 import { openRun } from './runStore'
 import { openSpawn } from './spawnStore'
 import { todayFor } from './todayFilter.ts'
@@ -20,18 +20,11 @@ import { TodayContext, useHubData } from './useHub'
 import './today.css'
 
 const ICON_ALERT = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 16.8h.01"/>'
-const ICON_ARROW = '<path d="M5 12h14M13 6l6 6-6 6"/>'
 const ICON_REFRESH = '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/>'
 
-function Icon({ paths }: { paths: string }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: paths }} />
-}
-
-const titleCase = (text: string) => text.replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase())
-const who = (item: Item) => item.by ?? titleCase(item.project ?? '')
 const bare = (text: string) => text.replace(/ ago$/, '')
 /** An old site API sends only `running`: show those sessions as event rows. */
-const legacyRunning = (data: TodayData): WorkingItem[] =>
+export const legacyRunning = (data: TodayData): WorkingItem[] =>
   data.running.map(item => ({ id: item.id, source: 'events', host: item.host ?? '', agent: 'claude', title: item.title, project: item.project, state: 'working', since: item.at, url: item.url }))
 const stagger = (index: number) => ({ '--i': index }) as CSSProperties
 
@@ -186,19 +179,7 @@ export default function Today() {
   const needsPanel = (
     <section className="hub-panel rise" style={stagger(2)} aria-label="Needs you">
       <h3><span className="dot st-needs" aria-hidden="true" />Needs you<a className="today-all" href={needsLink}>All {counts.needsYou} →</a></h3>
-      {data.needsYou.length ? data.needsYou.slice(0, 3).map(item => {
-        const kind = needsKind(item)
-        return (
-          <a key={itemKey(item)} className="nrow" href={needsLink} data-nrow={kind} onClick={() => setFocus(itemKey(item))}>
-            <span className="kind"><Icon paths={KIND_ICON[kind]} /></span>
-            <span className="nrow-text">
-              <b>{item.title}</b>
-              <small>{[itemLabel(item), who(item), ago(item.at)].filter(Boolean).join(' · ')}</small>
-            </span>
-            <span className="nrow-go"><Icon paths={ICON_ARROW} /></span>
-          </a>
-        )
-      }) : <p className="hub-empty">{project ? `Nothing for ${projectName} waits on you.` : 'Nothing waits on you.'}</p>}
+      {data.needsYou.length ? <NeedsRows items={data.needsYou.slice(0, 3)} href={needsLink} /> : <p className="hub-empty">{project ? `Nothing for ${projectName} waits on you.` : 'Nothing waits on you.'}</p>}
     </section>
   )
   const recentPanel = (
@@ -236,6 +217,7 @@ export default function Today() {
       {!!list?.length && (
         <div className="today-project rise" style={stagger(1)} data-today-project>
           <ProjectPicker id="hub-today-project" projects={list} value={project || 'all'} allValue="all" onChange={choose} oneRow counts={needsByProject} allCount={full.counts.needsYou} />
+          {project && <ProjectLink id={project} name={projectName} />}
           {elsewhere > 0 && <p className="hub-muted today-elsewhere" data-today-elsewhere>{elsewhere} more {elsewhere === 1 ? 'waits' : 'wait'} in other projects · <button type="button" className="today-linkbtn" onClick={() => choose('all')}>Show all</button></p>}
         </div>
       )}
