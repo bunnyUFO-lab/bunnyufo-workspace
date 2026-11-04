@@ -8,6 +8,7 @@ import { mapHash, parseProjectId, projectHash } from '../lib/route'
 import NeedsRows from './NeedsRows'
 import PlanInHermes from './PlanInHermes'
 import ProjectPicker from './ProjectPicker'
+import RoadmapRows from './RoadmapRows'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
 import { isLaterOnly, tallyFraction, tallyWords } from './mapCount.ts'
@@ -79,6 +80,15 @@ function RoadmapTab({ project, model, error, loading }: { project: string; model
   if (error) return <p className="hub-error" role="alert">{error}</p>
   if (!model) return loading ? <p className="hub-empty">Loading…</p> : null
   if (!model.meta) return <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
+  // A project with roadmaps lists them, nested; a row opens that roadmap's map.
+  if (model.roadmaps?.length) {
+    return (
+      <>
+        <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} /></div>
+        <p className="pp-foot"><a className="pp-link" href={mapHash(project)} data-pp-open-map>Open the Roadmap ›</a></p>
+      </>
+    )
+  }
   const open = model.milestones.filter(milestone => milestone.state !== 'done')
   const finished = model.milestones.filter(milestone => milestone.state === 'done')
   return (

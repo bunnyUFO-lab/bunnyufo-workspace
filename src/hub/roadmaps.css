@@ -1,0 +1,51 @@
+/* Nested roadmaps (ws-im1.3.2): the bar above the map and the rows of the full map. Every control is at least 44 px. */
+.hub-map-branchbar { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-height: 44px; height: 44px; margin: 0 0 8px; }
+.rm-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+.rm-crumbs::-webkit-scrollbar { display: none; }
+.rm-crumb, .rm-inside { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 6px; color: var(--text-dim); font-size: 0.85rem; text-decoration: none; }
+.rm-inside { padding: 0; gap: 2px; }
+a.rm-crumb:hover { color: var(--text); text-decoration: underline; }
+a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+.rm-crumb.now { color: var(--text-bright); font-weight: 600; }
+.rm-sep { color: var(--text-dim); margin-right: 2px; }
+.rm-label { flex: none; margin: 0 4px 0 8px; color: var(--text-dim); font-size: 0.75rem; }
+.rm-toggle { flex: none; display: inline-flex; border: 1px solid var(--hairline-strong); border-radius: var(--radius-pill); overflow: hidden; }
+.rm-toggle a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; color: var(--text-dim); font-size: 0.85rem; text-decoration: none; white-space: nowrap; }
+.rm-toggle a[aria-current] { background: var(--surface-2); color: var(--text-bright); }
+.rm-toggle a:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
+
+.hub[data-screen="map"] > .rm-full { flex: 1; min-height: 0; overflow-y: auto; }
+.rm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.rm-search .sf { flex: 1 1 280px; min-width: 0; max-width: 420px; }
+.rm-found { font-size: 0.8125rem; color: var(--text-dim); }
+.rm-rows, .rm-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rm-rows li { margin-left: calc(var(--depth, 0) * 12px); }
+.rm-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; box-sizing: border-box; min-height: 44px; padding: 8px 14px; color: var(--text); text-decoration: none; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-md, 10px); }
+.rm-row:hover { border-color: var(--hairline-strong); }
+.rm-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rm-row.from { border-color: var(--blue); }
+.rm-row.closed { opacity: 0.6; }
+.rm-row-head { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rm-row-title { font-weight: 600; font-size: 0.9rem; overflow-wrap: anywhere; }
+.rm-row-count { font-size: 0.75rem; color: var(--text-dim); }
+.rm-from { font-size: 0.7rem; color: var(--blue); }
+.rm-dots { flex: 1 1 160px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; min-width: 0; }
+.rm-dots i { width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--dot, var(--text-muted)); background: transparent; }
+.rm-dots i[data-state="done"] { background: var(--dot); }
+.rm-hit { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; box-sizing: border-box; padding: 6px 14px; color: var(--text); text-decoration: none; background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-md, 10px); }
+.rm-hit:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rm-hit-title { font-size: 0.9rem; overflow-wrap: anywhere; }
+.rm-hit-where { font-size: 0.72rem; color: var(--text-dim); }
+@media (max-width: 640px) {
+  .rm-toggle a { padding: 0 10px; }
+  .rm-dots { flex-basis: 100%; justify-content: flex-start; }
+}
+
+/* On a phone the bar takes the project chips' slot (its first crumb leads to the Project page, which has the picker), so the map box keeps its height. */
+@media (max-width: 640px), (max-height: 500px) {
+  .hub[data-screen="map"]:has(.hub-map-branchbar) > .hub-map-chips { display: none; }
+}
+/* The bar is 44 px against about 30 px for the chips: a sheet in a project with roadmaps leaves the map the same room above it. */
+@media (max-width: 640px) {
+  .hub[data-screen="map"]:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 310px)); }
+}

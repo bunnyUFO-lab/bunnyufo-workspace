@@ -21,6 +21,9 @@ import { tallyFraction } from './mapCount.ts'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
+import RoadmapRows, { RoadmapBar } from './RoadmapRows'
+import { FULL, branchModel, resolveBranch } from './mapBranch.ts'
+import { saveBranch, savedBranch } from './branchMemory.ts'
 import QuestionActions from './QuestionActions'
 import { COST, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
@@ -74,20 +77,42 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && (
         <Fragment key={project}>
-          <MapView model={model} project={project} nodeId={nodeId} header={(() => {
+          {(() => {
             const name = list.find(item => item.id === project)?.name ?? project
             const found = nodeId ? find(model, nodeId) : null
             const selected = found ? { id: nodeId as string, title: found.kind === 'm' ? found.milestone.title : found.kind === 'f' ? found.feature.title : found.task.title } : null
             const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
             const way = model.wayfinder
-            return way && (way.destination || way.decisions || way.open.length)
+            const header = way && (way.destination || way.decisions || way.open.length)
               ? <WayfinderHeader project={project} repoName={name} wayfinder={way} plan={plan} />
               : host.write && host.chat ? <div className="hub-plan-row">{plan}</div> : null
-          })()} />
+            // A project with roadmaps shows one part of them at a time; one without draws the map as it always has.
+            return model.roadmaps?.length
+              ? <Branched model={model} project={project} projectName={name} param={nodeId} header={header} />
+              : <MapView model={model} project={project} nodeId={nodeId} header={header} />
+          })()}
         </Fragment>
       )}
     </>
   )
+}
+
+/**
+ * A project with roadmaps: the bar, then the map of one branch or the rows of the full map. The address names the view (`~full`, a roadmap,
+ * `~unfiled` or a bead in one); a new branch is a new map (`key`), as a new project is, so nothing in the drawing learns about branches.
+ */
+function Branched({ model, project, projectName, param, header }: { model: MapModel; project: string; projectName: string; param?: string; header: ReactNode }) {
+  const view = resolveBranch(model, param, savedBranch(project))
+  const branch = view.view === 'branch' ? view.branch : null
+  const node = view.view === 'branch' ? view.node : undefined
+  useEffect(() => { saveBranch(project, branch ? { view: 'branch', branch } : { view: 'full' }) }, [project, branch])
+  const shown = useMemo(() => (branch ? branchModel(model, branch) : null), [model, branch])
+  const bar = <RoadmapBar project={project} projectName={projectName} model={model} view={view} />
+  if (!branch || !shown || shown.milestones.length === 0) {
+    return <>{bar}<RoadmapRows key={branch ?? FULL} project={project} model={model} root={branch ?? FULL} search={!branch} /></>
+  }
+  const noMatch = <a className="hub-link-btn" href={mapHash(project, FULL)} data-map-full>Search the full map ›</a>
+  return <>{bar}<MapView key={branch} model={shown} panelModel={model} closeTo={branch} noMatch={noMatch} project={project} nodeId={node} header={header} /></>
 }
 
 /** The Wayfinder destination above the map: one row, with the open questions as links to their nodes. Starts open on a wide box and closed on a narrow one; the state is not remembered. */
@@ -136,7 +161,8 @@ function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: stri
   )
 }
 
-function MapView({ model: fullModel, project, nodeId, header }: { model: MapModel; project: string; nodeId?: string; header?: ReactNode }) {
+/** `panelModel`, `closeTo` and `noMatch` are for a branch (ws-im1.3.2): the panel reads the whole project, closing it stays in the branch, and an empty search offers the full map. */
+function MapView({ model: fullModel, project, nodeId, header, panelModel, closeTo, noMatch }: { model: MapModel; project: string; nodeId?: string; header?: ReactNode; panelModel?: MapModel; closeTo?: string; noMatch?: ReactNode }) {
   const [filter, setFilter] = useState<MapFilter>(savedFilter)
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState(savedQuery)
@@ -367,8 +393,8 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
     window.location.assign(mapHash(project, id))
   }, [project, shownId])
   const closePanel = useCallback(() => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(mapHash(project))
-  }, [project])
+    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(mapHash(project, closeTo))
+  }, [project, closeTo])
 
   // Opening or closing a node keeps that node where it is on screen; the rest of the map moves around it.
   const toggle = useCallback((node: MilestoneNode | FeatureNode) => {
@@ -504,7 +530,7 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
         <SearchField label="Search the roadmap" placeholder="Search the roadmap" value={query} onChange={changeQuery} onKeyDown={onSearchKey} data={{ 'data-map-search': '' }} />
         <span className="hub-map-found" role="status" data-map-count>
           {countText}
-          {searching && found === 0 && (text.data || text.error) && <> <button type="button" className="hub-link-btn" data-map-clear onClick={() => changeQuery('')}>Clear</button></>}
+          {searching && found === 0 && (text.data || text.error) && <> <button type="button" className="hub-link-btn" data-map-clear onClick={() => changeQuery('')}>Clear</button> {noMatch}</>}
         </span>
         {found > 1 && (
           <span className="hub-map-steps">
@@ -618,7 +644,7 @@ function MapView({ model: fullModel, project, nodeId, header }: { model: MapMode
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
+      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }
