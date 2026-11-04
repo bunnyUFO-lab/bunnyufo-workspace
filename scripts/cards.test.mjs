@@ -2210,6 +2210,35 @@ test('ask create --agent-edit: the Ask is an approval with a passkey and the two
   } finally { await close(); }
 });
 
+test('ask create --agent-edit with op profile: the same Ask, a model change for a Hermes profile; a repeated model, five fallbacks or a view-only key is refused before anything is sent', async () => {
+  const { fake, cli, keys, dir, close } = await setup();
+  try {
+    const file = path.join(dir, 'edit.json');
+    const edit = (extra = {}) => ({ op: 'profile', profile: 'main', primary: { provider: 'anthropic', model: 'claude-sonnet-5-5' }, fallbacks: [{ provider: 'openai-codex', model: 'gpt-6-sol' }], why: 'Codex is slow today.', ...extra });
+    await writeFile(file, JSON.stringify(edit()));
+    const made = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Move main to Sonnet first?', '--agent-edit', file);
+    assert.equal(made.code, 0, made.stderr);
+    const got = fake.json(`sections/inbox/asks/${made.stdout.trim().split(/\r?\n/).at(-1)}/ask.json`);
+    assert.deepEqual([got.agentEdit.op, got.agentEdit.profile, got.requirePasskey, got.kind, got.options.map(option => option.id)], ['profile', 'main', true, 'approval', ['apply', 'skip']]);
+    const before = keys('asks/').length;
+    const bad = [
+      ['a repeated model', edit({ fallbacks: [{ provider: 'anthropic', model: 'claude-sonnet-5-5' }] }), /lists a model twice/],
+      ['five fallbacks', edit({ fallbacks: [1, 2, 3, 4, 5].map(number => ({ provider: 'p', model: `m${number}` })) }), /0 to 4/],
+      ['a view-only key', { ...edit(), toolsets: ['web'] }, /view-only/],
+      ['a skills list', { ...edit(), skills: ['x'] }, /view-only/],
+      ['a persona field', edit({ prompt: 'x' }), /no field prompt/],
+      ['another profile', edit({ profile: 'work' }), /agentEdit.profile/],
+    ];
+    for (const [name, body, message] of bad) {
+      await writeFile(file, JSON.stringify(body));
+      const refused = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Edit?', '--agent-edit', file);
+      assert.notEqual(refused.code, 0, name);
+      assert.match(refused.stderr, message, name);
+    }
+    assert.equal(keys('asks/').length, before, 'Nothing was written for a refused edit.');
+  } finally { await close(); }
+});
+
 test('beads show: the newest version of each issue across copies, compact, open only on request', async () => {
   const { fake, cli, close } = await setup();
   try {
