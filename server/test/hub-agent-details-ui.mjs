@@ -3,7 +3,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { askId, startHubFixture } from './hub-fixture.mjs';
-import { askJson } from '../../site/api/test/hub-fixtures.mjs';
+import { agentConfigJson, askJson, seedAgentConfig } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -28,7 +28,14 @@ const visit = async (page, url, id) => {
   await details(page, id).locator('.ad-facts').waitFor();
 };
 
-const fresh = await startHubFixture({ pc: 'fresh', agentConfig: 'fresh' });
+// The lists the Hermes host would publish with its export (the same as the fixture's first one), for the export the test makes later.
+const ref = (provider, name) => ({ provider, model: name });
+const MODEL_OPTIONS = {
+  main: [ref('openai-codex', 'gpt-6-sol'), ref('anthropic', 'claude-sonnet-5-5'), ref('anthropic', 'claude-haiku-5-5'), ref('deepseek', 'deepseek-v4-pro'), ref('deepseek', 'deepseek-flash')],
+  briefs: [ref('anthropic', 'claude-sonnet-5-5'), ref('anthropic', 'claude-haiku-5-5'), ref('deepseek', 'deepseek-v4-pro'), ref('deepseek', 'deepseek-flash')],
+};
+// signing: the owner's Apply on a model change signs it.
+const fresh = await startHubFixture({ pc: 'fresh', agentConfig: 'fresh', signing: true });
 const stale = await startHubFixture({ agentConfig: 'stale' });
 // An agent's proposal to edit the Planner's persona (ws-im1.4.1): applied only by the owner's answer.
 const EDIT_ASK = askId('planner-edit', 'e1d1');
@@ -106,11 +113,13 @@ try {
   assert.match(await teardown.locator('[data-prompt="job"] pre').innerText(), /\{\{requestId\}\}/);
   assert.match(await teardown.locator('[data-prompt="job"] .ad-prompt-note').innerText(), /Placeholders are filled in when a job starts\./);
 
-  step('Teardown: an Edit link in the head and a Chat model row; Hermes has neither');
+  step('Teardown: an Edit link in the head and a Chat model row; Hermes has an Edit link for its model and no Chat model row');
   assert.equal(await teardown.locator('[data-edit-open="teardown"]').getAttribute('href'), '#/~hub/agent-edit/teardown');
   assert.equal(flat(await teardown.locator('[data-details-chat-model]').innerText()), 'Codex');
   await visit(desk, fresh.url, 'hermes');
-  assert.equal(await details(desk, 'hermes').locator('[data-edit-open], [data-details-chat-model]').count(), 0);
+  assert.equal(await details(desk, 'hermes').locator('[data-edit-open]').innerText(), 'Edit the model');
+  assert.equal(await details(desk, 'hermes').locator('[data-details-chat-model]').count(), 0);
+  assert.equal(await details(desk, 'teardown').count(), 0);
   await visit(desk, fresh.url, 'teardown');
 
   step('keyboard: Tab reaches each details summary, and Enter opens it');
@@ -179,6 +188,109 @@ try {
   assert.match(await edit.locator('[data-edit-prompt]').inputValue(), /^You are Teardown, one of the owner's agents/);
   assert.equal(await edit.locator('[data-edit-model]').inputValue(), 'codex');
   assert.equal(await edit.locator('[data-version]').nth(2).locator('[data-revert]').count(), 1, 'The edited version can be reverted to.');
+
+  step('Profile: Teardown Edit says the profile is shared by five agents, lists the host\'s own models and keeps Send off until something changes');
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  const model = desk.locator('[data-edit-profile="main"]');
+  await model.waitFor();
+  assert.equal(flat(await model.locator('[data-profile-shared]').innerText()), 'Profile main. Shared by Hermes, Researcher, Market researcher, Teardown and Planner');
+  assert.equal(await model.locator('[data-profile-briefs]').count(), 0, 'the weekly jobs line is Briefs only');
+  assert.deepEqual((await model.locator('[data-profile-primary] option').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'anthropic · claude-sonnet-5-5', 'anthropic · claude-haiku-5-5', 'deepseek · deepseek-v4-pro', 'deepseek · deepseek-flash']);
+  assert.equal(flat(await model.locator('[data-profile-primary] option:checked').innerText()), 'openai-codex · gpt-6-sol');
+  assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'deepseek · deepseek-v4-pro']);
+  assert.equal(await model.locator('[data-profile-send]').isDisabled(), true);
+  assert.equal(await model.locator('[data-profile-nochain]').count(), 0);
+  assert.match(flat(await model.locator('[data-profile-restart]').innerText()), /restarts Hermes main within about 5 minutes\. A chat or job running then stops\./);
+  await noSideways(desk, 'Edit with the model section at 1280');
+
+  step('Profile: a new primary leaves the chain; Remove empties it and says what that means; Add and Down reorder; Send opens an Ask');
+  await model.locator('[data-profile-primary]').selectOption({ label: 'anthropic · claude-sonnet-5-5' });
+  assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['deepseek · deepseek-v4-pro'], 'the new primary is not also a fallback');
+  assert.equal(await model.locator('[data-profile-send]').isEnabled(), true);
+  await model.locator('[data-fallback-remove]').click();
+  assert.equal(flat(await model.locator('[data-profile-nochain]').innerText()), 'With no fallbacks, a Codex limit means no reply.');
+  await model.locator('[data-fallback-add]').click();
+  await model.locator('[data-fallback-add]').click();
+  assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'anthropic · claude-haiku-5-5']);
+  assert.equal(await model.locator('[data-profile-fallback="0"] [data-fallback-up]').isDisabled(), true, 'the first row cannot go up');
+  await model.locator('[data-profile-fallback="0"] [data-fallback-down]').click();
+  assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['anthropic · claude-haiku-5-5', 'openai-codex · gpt-6-sol']);
+  assert.equal(await model.locator('[data-profile-nochain]').count(), 0);
+  for (const control of await model.locator('[data-profile-fallback] .hub-btn').all()) assert.ok((await control.boundingBox()).height >= 44, 'a touch target');
+  await model.locator('[data-profile-why]').fill('Codex is slow today.');
+  await model.locator('[data-profile-send]').click();
+  await model.locator('[data-profile-sent]').waitFor();
+  await model.locator('[data-profile-ask]').click();
+  const modelAsk = desk.locator('[data-agent-edit-ask="profile-main"]');
+  await modelAsk.waitFor();
+  const changeId = new URL(desk.url()).hash.split('/').pop();
+  assert.match(changeId, /^\d{8}-profile-main-[a-z0-9]{4}$/);
+
+  step('Profile Ask: the order now and the order proposed as plain text, the passkey tag, and what Apply does');
+  assert.equal(await desk.locator('[data-agent-edit-tag]').innerText(), 'Changes a model');
+  await desk.waitForFunction(() => !/loading/.test(document.querySelector('[data-profile-ask-chain="old"]')?.textContent ?? 'loading'));
+  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="old"] li').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'then anthropic · claude-sonnet-5-5', 'then deepseek · deepseek-v4-pro']);
+  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="new"] li').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
+  assert.equal(flat(await modelAsk.locator('[data-edit-ask-why]').innerText()), 'Why: Codex is slow today.');
+  assert.match(flat(await modelAsk.locator('[data-profile-ask-restart]').innerText()), /within about 5 minutes and restarts the main gateway: a chat or job running then stops/);
+  assert.equal(await modelAsk.locator('script, img, a').count(), 0, 'the text is plain text');
+  await noSideways(desk, 'Model Ask at 1280');
+  await desk.locator('[data-option="apply"] button').click();
+  await desk.locator('[data-send]').click();
+  await desk.locator('[data-avatar-notice]').waitFor();
+  assert.match(await desk.locator('[data-avatar-notice]').innerText(), /^Applied\. Signed and sent to the Hermes host/);
+
+  step('Waiting: Details of any agent on the profile says the change is waiting for the host, and a second request is off');
+  await visit(desk, fresh.url, 'teardown');
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change="waiting"]').innerText()), /^The change to claude-sonnet-5-5 was approved .* and is waiting for the Hermes host, which applies it within about 5 minutes\.$/);
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/hermes`);
+  await desk.locator('[data-edit-profile="main"]').waitFor();
+  assert.equal(flat(await desk.locator('[data-profile-off]').innerText()), 'A change is already waiting for the Hermes host.');
+  assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true);
+  assert.equal(await desk.locator('[data-profile-change] [data-change-state]').innerText(), 'Waiting for the host');
+  assert.equal(await desk.locator('[data-edit-profile="main"] [data-edit-form], [data-edit-versions]').count(), 0, 'Hermes has no persona form');
+
+  step('The host answers: applied, then a newer export shows the new order and Details says live; the Team card follows');
+  const resultAt = new Date()
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${changeId}/result.json`, JSON.stringify({ v: 1, change: changeId, outcome: 'applied', code: 'ok', rolledBack: false, at: resultAt.toISOString() }), 'application/json', { writer: 'hermes-config' });
+  await visit(desk, fresh.url, 'teardown');
+  await details(desk, 'teardown').locator('[data-details-change="applied"]').waitFor();
+  const after = agentConfigJson({ now: new Date(resultAt.getTime() + 2000), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
+  after.profiles.main.model = { provider: 'anthropic', default: 'claude-sonnet-5-5' };
+  after.profiles.main.fallbacks = [{ provider: 'anthropic', model: 'claude-haiku-5-5' }, { provider: 'openai-codex', model: 'gpt-6-sol' }];
+  seedAgentConfig(fresh.fake, after);
+  await visit(desk, fresh.url, 'teardown');
+  await details(desk, 'teardown').locator('[data-details-change="live"]').waitFor();
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^The change to claude-sonnet-5-5 is live\./);
+  assert.equal(flat(await details(desk, 'teardown').locator('[data-model-primary]').innerText()), 'anthropic · claude-sonnet-5-5');
+  assert.deepEqual((await details(desk, 'teardown').locator('[data-model-fallbacks] li').allInnerTexts()).map(flat), ['then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
+  await desk.goto(`${fresh.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  assert.match(flat(await desk.locator('[data-agent="teardown"] .team-facts').innerText()), /Model claude-sonnet-5-5 · then claude-haiku-5-5, gpt-6-sol/);
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await desk.locator('[data-edit-profile="main"]').waitFor();
+  assert.equal(await desk.locator('[data-profile-change][data-state="live"]').count(), 1, 'the Edit page lists it as live');
+  assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'and there is nothing new to send');
+
+  step('Failed: Details says the change failed with the reason in words and that the old settings stay; a failed rollback says Hermes may be down');
+  const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
+  const briefsAt = new Date(Date.now() - 600000);
+  const side = (provider, name, fallbacks) => ({ provider, model: name, fallbacks });
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${failedId}/approved.json`, JSON.stringify({ v: 1, kind: 'profile-change', change: failedId, profile: 'briefs', from: side('openai-codex', 'claude-haiku-5-5', [{ provider: 'deepseek', model: 'deepseek-v4-pro' }]), to: side('anthropic', 'claude-sonnet-5-5', []), expires: new Date(briefsAt.getTime() + 86400000).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: briefsAt.toISOString(), by: 'owner', ask: failedId, signature: 'c2ln' }), 'application/json');
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${failedId}/result.json`, JSON.stringify({ v: 1, change: failedId, outcome: 'failed', code: 'health', rolledBack: true, at: new Date(briefsAt.getTime() + 120000).toISOString() }), 'application/json', { writer: 'hermes-config' });
+  await visit(desk, fresh.url, 'briefs');
+  const failed = details(desk, 'briefs').locator('[data-details-change="failed"]');
+  assert.match(flat(await failed.innerText()), /^The change to claude-sonnet-5-5 failed: The gateway did not stay up after the restart\. The old settings stay\./);
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/briefs`);
+  assert.equal(flat(await desk.locator('[data-profile-briefs]').innerText()), 'The three weekly jobs are pinned to Sonnet and do not follow this.');
+  assert.deepEqual((await desk.locator('[data-profile-primary] option').allInnerTexts()).map(flat).slice(0, 1), ['anthropic · claude-sonnet-5-5'], 'Briefs cannot pick Codex: the host does not offer it there');
+  await desk.route('**/api/hub/team/briefs/details', async route => {
+    const real = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...real, change: { ...real.change, code: 'rollback-failed', reason: 'The host could not put the old settings back' } } });
+  });
+  await visit(desk, fresh.url, 'briefs');
+  assert.match(flat(await details(desk, 'briefs').locator('[data-details-change="failed"]').innerText()), /The host could not put the old settings back\. Hermes may be down\./);
+  await desk.unroute('**/api/hub/team/briefs/details');
 
   step('Claude Code: the settings live on the PC, no warning, no prompts');
   await visit(desk, fresh.url, 'claude');
@@ -253,8 +365,12 @@ try {
   for (const summary of await phone.locator('[data-edit-versions] details > summary').all()) await summary.click();
   await noSideways(phone, 'Edit at 390');
   assert.ok((await phone.locator('[data-edit-save]').boundingBox()).height >= 44, 'Save is a touch target.');
-  step('Edit: an agent with no persona says so');
-  await phone.goto(`${fresh.url}#/~hub/agent-edit/hermes`);
+  step('Edit: Teardown at 390 px keeps the model rows inside the page; an agent with nothing to edit says so');
+  await phone.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await phone.locator('[data-edit-profile="main"]').waitFor();
+  await phone.locator('[data-fallback-add]').click();
+  await noSideways(phone, 'Edit with the model section at 390');
+  await phone.goto(`${fresh.url}#/~hub/agent-edit/claude`);
   await phone.locator('[data-edit-none]').waitFor();
 } finally {
   for (const context of contexts) await context.close();

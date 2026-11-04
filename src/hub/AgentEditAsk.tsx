@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Ask } from '../lib/hub'
 import { hubGet } from '../lib/hub'
-import type { PersonaView } from '../lib/hubTeam'
+import type { AgentDetailsView, ModelRef, PersonaView } from '../lib/hubTeam'
 import { text } from './askAnswer'
-import { agentEditOf } from './agentEditField'
+import { agentEditOf, profileEditOf } from './agentEditField'
 import './team/agentDetails.css'
 
 function Pair({ label, old, next, field, note = '' }: { label: string; old: string | undefined; next: string | undefined; field: string; note?: string }) {
@@ -16,8 +16,55 @@ function Pair({ label, old, next, field, note = '' }: { label: string; old: stri
   )
 }
 
-/** The proposal of an agent-edit Ask in full: the old and the new text side by side as plain text, with the agent's own words under their label. */
+const nameOf = (item: ModelRef) => `${item.provider} · ${item.model}`
+
+/** A model order as plain rows: the primary, then each fallback. */
+function Chain({ primary, fallbacks, field }: { primary: ModelRef | undefined; fallbacks: ModelRef[]; field: string }) {
+  if (!primary) return <p className="team-dim" data-profile-ask-chain={field}>(not published)</p>
+  return (
+    <ol className="ad-fallbacks ae-chain" data-profile-ask-chain={field}>
+      <li>{nameOf(primary)}</li>
+      {fallbacks.map((item, index) => <li key={`${nameOf(item)}/${index}`}>then {nameOf(item)}</li>)}
+    </ol>
+  )
+}
+
+/** A profile-edit Ask: the order the Hermes host has now, and the order proposed, as plain text, with what Apply does. */
+function ProfileEditAsk({ ask }: { ask: Ask }) {
+  const edit = profileEditOf(ask)
+  const [details, setDetails] = useState<AgentDetailsView | null>(null)
+  const [failed, setFailed] = useState(false)
+  const profile = edit?.profile
+  useEffect(() => {
+    if (!profile) return undefined
+    const abort = new AbortController()
+    hubGet<AgentDetailsView>(`/team/${profile === 'main' ? 'hermes' : 'briefs'}/details`, abort.signal).then(setDetails, () => { if (!abort.signal.aborted) setFailed(true) })
+    return () => abort.abort()
+  }, [profile])
+  if (!edit) return <section className="ae-ask" data-agent-edit-ask="bad"><p>This Ask names a model change that cannot be read, so answering it changes nothing.</p></section>
+  const open = ask.state === 'open' || ask.state === 'snoozed'
+  const now = details?.settings
+  return (
+    <section className="ae-ask" data-agent-edit-ask={`profile-${edit.profile}`} aria-label="The proposed model change">
+      <p className="team-dim" data-edit-ask-says><b>The request says</b>: {text(ask.question)}</p>
+      {edit.why && <p data-edit-ask-why><b>Why</b>: {edit.why}</p>}
+      <p>Changes the model and the fallback order of the Hermes profile <b>{edit.profile}</b>.</p>
+      {failed && <p className="hub-muted" role="note">The order the host has now could not be loaded.</p>}
+      <div className="ae-ask-pair">
+        <div><h4>Now</h4>{details ? <Chain primary={now?.model?.provider && now.model.default ? { provider: now.model.provider, model: now.model.default } : undefined} fallbacks={now?.fallbacks ?? []} field="old" /> : <p className="team-dim" data-profile-ask-chain="old">(loading)</p>}</div>
+        <div><h4>Proposed</h4><Chain primary={edit.primary} fallbacks={edit.fallbacks} field="new" /></div>
+      </div>
+      {open && !ask.agentEditBlocked && <p className="hub-muted" data-profile-ask-restart>Apply signs the change. The Hermes host applies it within about 5 minutes and restarts the {edit.profile} gateway: a chat or job running then stops. If anything fails, the old settings are put back.</p>}
+    </section>
+  )
+}
+
+/** The proposal of an agent-edit Ask in full: a persona's old and new text side by side, or a profile's old and new model order, as plain text, with the agent's own words under their label. */
 export default function AgentEditAsk({ ask }: { ask: Ask }) {
+  return ask.agentEdit?.op === 'profile' ? <ProfileEditAsk ask={ask} /> : <PersonaEditAsk ask={ask} />
+}
+
+function PersonaEditAsk({ ask }: { ask: Ask }) {
   const edit = agentEditOf(ask)
   const [view, setView] = useState<PersonaView | null>(null)
   const [failed, setFailed] = useState(false)

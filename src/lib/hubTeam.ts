@@ -59,8 +59,8 @@ export interface TeamAgent {
   sprite: AvatarSprite | CustomSprite
   /** Claude Code only: its sessions, as Working now lists them. */
   sessions?: WorkingItem[]
-  /** Set on the agents with a chat persona the owner may edit (Edit page). */
-  editable?: { persona?: boolean }
+  /** What the Edit page may change: the chat persona of the research agents, and the model of an agent on a Hermes profile. */
+  editable?: { persona?: boolean; profile?: boolean }
   /** The label of the chat model an edited persona starts a chat on; none while the persona follows the app's text. */
   chatModel?: string
 }
@@ -92,10 +92,34 @@ export interface DetailsJob {
 export interface ProfileSettings {
   model?: { provider?: string; default?: string }
   fallbacks: { provider: string; model: string }[]
+  /** The models the Hermes host would apply for this profile; none until its exporter publishes the list. */
+  modelOptions?: ModelRef[]
   toolsets?: string[]
   platformToolsets?: Record<string, string[]>
   skills: { autoLoad: string[]; installed: string[] }
   terminal?: { backend?: string; containerMemoryMb?: number }
+}
+
+export interface ModelRef { provider: string; model: string }
+/** A primary model with its fallbacks, in order. */
+export interface ModelSet extends ModelRef { fallbacks: ModelRef[] }
+
+/** Where a signed change of a profile's model stands: sent, applied by the host, shown in its export, failed, or not picked up in time. */
+export type ChangeState = 'waiting' | 'applied' | 'live' | 'failed' | 'late'
+
+/** One change of a profile's model and fallback order (site/api/hub-agent-config.mjs changeView). `reason` is the Hub's words for the host's code. */
+export interface ProfileChange {
+  id: string
+  profile: 'main' | 'briefs'
+  state: ChangeState
+  at: string
+  by: string
+  from: ModelSet
+  to: ModelSet
+  resultAt?: string
+  code?: string
+  reason?: string
+  rolledBack?: boolean
 }
 
 /** `fresh` under 7 h, `stale` from 7 h, `missing` when the host has published nothing usable, `none` for an agent without a profile. */
@@ -108,11 +132,14 @@ export interface DetailsFreshness {
 
 /** GET /api/hub/team/:agent/details */
 export interface AgentDetailsView {
-  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile; editable?: { persona?: boolean }; chatModel?: string }
+  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile; editable?: { persona?: boolean; profile?: boolean }; chatModel?: string }
   freshness: DetailsFreshness
   settings: ProfileSettings | null
   prompts: DetailsPrompt[]
   jobs: DetailsJob[]
+  /** The newest change of the profile that waits or ended in the last day, and the recent ones, newest first. */
+  change?: ProfileChange
+  changes?: ProfileChange[]
 }
 
 /** One version of a persona on the Edit page. `default` is the app's own text (a stored "back to the app's text" is a default row too). */

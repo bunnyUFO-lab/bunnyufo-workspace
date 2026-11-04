@@ -66,7 +66,7 @@ export default function AskView({ id }: { id: string }) {
         {ask.requirePasskey === true && <li className="tag" title="This Ask is answered in the Hub with a passkey, never from Discord">Passkey only</li>}
         {ask.rerun && typeof ask.rerun === 'object' && !ask.rerunBlocked && <li className="tag" title="Answering this Ask runs the work again on the Gaming PC">Runs again</li>}
         {Array.isArray(ask.rerun?.allow) && ask.rerun.allow.length > 0 && !ask.rerunBlocked && <li className="tag" title="The Allow option adds these rules to the project's PC allow list">Allows on PC</li>}
-        {ask.agentEdit && typeof ask.agentEdit === 'object' && <li className="tag" data-agent-edit-tag title="Applying this Ask changes the text a chat with an agent starts from">Changes a persona</li>}
+        {ask.agentEdit && typeof ask.agentEdit === 'object' && <li className="tag" data-agent-edit-tag title={ask.agentEdit.op === 'profile' ? 'Applying this Ask changes the model a Hermes profile runs on' : 'Applying this Ask changes the text a chat with an agent starts from'}>{ask.agentEdit.op === 'profile' ? 'Changes a model' : 'Changes a persona'}</li>}
         {SIDE[ask.state] && <li className="side on">{SIDE[ask.state]}{ask.state === 'snoozed' && ask.snoozedUntil ? ` until ${when(ask.snoozedUntil)}` : ''}</li>}
       </ol>
       {ask.rerunBlocked && <p className="hub-muted" role="note" data-rerun-blocked>This Ask asks to run something again. Answering it starts nothing: {text(ask.rerunBlocked)}</p>}

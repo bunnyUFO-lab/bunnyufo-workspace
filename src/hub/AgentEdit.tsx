@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ago, HubError, hubGet, hubPost } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import type { PersonaVersion, PersonaView } from '../lib/hubTeam'
+import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, TeamAgent, TeamView } from '../lib/hubTeam'
 import './team/agentDetails.css'
 
 const LIMITS = { role: 200, prompt: 8000, note: 200 }
@@ -34,8 +34,8 @@ function VersionRow({ version, current, models, busy, onRevert }: { version: Per
   )
 }
 
-/** `#/~hub/agent-edit/<id>`: the role line, prompt and chat model of an agent's persona, with its versions. Toolsets, skills, SOUL.md and jobs stay on the details page, view-only. */
-export default function AgentEdit({ id }: { id: string }) {
+/** The role line, prompt and chat model of an agent's persona, with its versions. */
+function PersonaEdit({ id }: { id: string }) {
   const [view, setView] = useState<PersonaView | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +43,6 @@ export default function AgentEdit({ id }: { id: string }) {
   const [stale, setStale] = useState(false)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState<string | null>(null)
-  const [name, setName] = useState('')
 
   /** Shows a view from the server. `keep` leaves what was typed as it is (after a 409) and only moves the base. */
   const show = useCallback((next: PersonaView, keep: boolean) => {
@@ -60,26 +59,14 @@ export default function AgentEdit({ id }: { id: string }) {
   useEffect(() => {
     const controller = new AbortController()
     hubGet<PersonaView>(`/team/${encodeURIComponent(id)}/persona`, controller.signal).then(next => show(next, false), refuse)
-    hubGet<{ agents: { id: string; name: string }[] }>('/team', controller.signal).then(team => setName(team.agents.find(agent => agent.id === id)?.name ?? ''), () => {})
     return () => controller.abort()
   }, [id, show, refuse])
   const reload = () => { hubGet<PersonaView>(`/team/${encodeURIComponent(id)}/persona`).then(next => show(next, true), refuse) }
 
-  const back = <a className="ad-back" href={hubHash('agent', id)} data-edit-back>← {name || 'Details'}</a>
-  if (!host.write) {
-    return <div className="ad team" data-agent-edit={id}>{back}<p className="hub-empty" role="status" data-edit-signin>Sign in to edit this persona.</p></div>
-  }
   if (!view || !draft) {
-    return (
-      <div className="ad team" data-agent-edit={id}>
-        {back}
-        {status === 401
-          ? <p className="hub-empty" role="status" data-edit-signin>Sign in to edit this persona.</p>
-          : status === 404
-            ? <p className="hub-empty" role="status" data-edit-none>This agent has no chat persona to edit.</p>
-            : <p className={error ? 'hub-error' : 'hub-empty'} role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>}
-      </div>
-    )
+    return status === 401
+      ? <p className="hub-empty" role="status" data-edit-signin>Sign in to edit this agent.</p>
+      : <p className={error ? 'hub-error' : 'hub-empty'} role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p>
   }
 
   const changed = draft.role !== view.current.role || draft.prompt !== view.current.prompt || draft.model !== view.current.model
@@ -111,14 +98,7 @@ export default function AgentEdit({ id }: { id: string }) {
   }
 
   return (
-    <div className="ad team" data-agent-edit={id}>
-      {back}
-      <header className="ad-head">
-        <div className="ad-title">
-          <h2>Edit {name || 'persona'}</h2>
-          <p className="team-dim">The text every chat with this agent starts from. Toolsets, skills, SOUL.md and scheduled jobs stay view-only: see Details.</p>
-        </div>
-      </header>
+    <>
       <form className="ad-section ae-form" onSubmit={event => { event.preventDefault(); if (changed && !invalid && !busy) void save() }} data-edit-form>
         <label className="ae-field">
           <span>Role line</span>
@@ -158,6 +138,171 @@ export default function AgentEdit({ id }: { id: string }) {
           {view.versions.map((version, index) => <VersionRow key={version.id} version={version} current={index === 0} models={view.models} busy={busy} onRevert={item => { void revert(item) }} />)}
         </ul>
       </section>
+    </>
+  )
+}
+
+const MAX_FALLBACKS = 4
+const same = (a: ModelRef, b: ModelRef) => a.provider === b.provider && a.model === b.model
+const refName = (item: ModelRef) => `${item.provider} · ${item.model}`
+const STATE_WORDS: Record<ProfileChange['state'], string> = { waiting: 'Waiting for the host', applied: 'Applied, not in an export yet', live: 'Live', failed: 'Failed', late: 'Not picked up' }
+/** "claude-sonnet-5-5, then gpt-6-sol" */
+const chainText = (set: { provider: string; model: string; fallbacks: ModelRef[] }) => [set.model, ...set.fallbacks.map(item => item.model)].join(', then ')
+
+/** One row of the changes list: when, the order it asked for, and where it stands. */
+function ChangeRow({ change }: { change: ProfileChange }) {
+  return (
+    <li className="ae-version" data-profile-change={change.id} data-state={change.state}>
+      <div className="ae-version-head">
+        <span className="ae-version-who">{chainText(change.to)}</span>
+        <span className={`ad-tag${change.state === 'live' ? ' on' : ''}`} data-change-state>{STATE_WORDS[change.state]}</span>
+      </div>
+      <p className="ae-version-note team-dim">Asked {ago(change.at)} by {change.by}. Before: {chainText(change.from)}.{change.reason ? ` ${change.reason}.` : ''}</p>
+    </li>
+  )
+}
+
+/** The model of a Hermes profile and the order of its fallbacks. "Send for approval" opens an Ask only the owner's passkey answers; the Hermes host applies it. */
+function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
+  const profile = agent.profile
+  const [view, setView] = useState<AgentDetailsView | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [primary, setPrimary] = useState<ModelRef | null>(null)
+  const [chain, setChain] = useState<ModelRef[]>([])
+  const [why, setWhy] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
+
+  const load = useCallback((signal?: AbortSignal) => hubGet<AgentDetailsView>(`/team/${encodeURIComponent(agent.id)}/details`, signal).then(next => {
+    setView(next)
+    const model = next.settings?.model
+    setPrimary(previous => previous ?? (model?.provider && model.default ? { provider: model.provider, model: model.default } : null))
+    setChain(previous => (previous.length ? previous : next.settings?.fallbacks.map(item => ({ provider: item.provider, model: item.model })) ?? []))
+  }, problem => { if ((problem as { name?: string }).name !== 'AbortError') setError(problem instanceof Error ? problem.message : 'Could not load this.') }), [agent.id])
+  useEffect(() => {
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
+  }, [load])
+
+  const shared = team.filter(item => item.profile === profile).map(item => item.name)
+  const heading = <><h3 id="ae-profile">Model and fallbacks</h3><p className="team-dim" data-profile-shared>Profile {profile}. Shared by {shared.length > 1 ? `${shared.slice(0, -1).join(', ')} and ${shared[shared.length - 1]}` : shared.join('')}</p></>
+  if (!view) return <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>{heading}<p className={error ? 'hub-error' : 'hub-empty'} role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p></section>
+
+  const settings = view.settings
+  const options = settings?.modelOptions ?? []
+  const current = settings?.model?.provider && settings.model.default ? { provider: settings.model.provider, model: settings.model.default } : null
+  const nowChain = settings?.fallbacks ?? []
+  // The select shows what the host offers, and also what is set now when the host no longer offers it (marked), so a row never goes blank.
+  const choices: { ref: ModelRef; label: string }[] = options.map(ref => ({ ref, label: refName(ref) }))
+  for (const ref of [current, ...chain, ...nowChain, primary]) if (ref && !choices.some(choice => same(choice.ref, ref))) choices.push({ ref, label: `${refName(ref)} (not offered now)` })
+  const indexOf = (ref: ModelRef | null) => String(choices.findIndex(choice => ref && same(choice.ref, ref)))
+  const waiting = view.change?.state === 'waiting'
+  const fresh = view.freshness.state === 'fresh'
+  const noList = options.length === 0
+  const changed = !!primary && !!current && (!same(primary, current) || chain.length !== nowChain.length || chain.some((item, index) => !same(item, nowChain[index])))
+  const off = noList ? 'The Hermes host has not published its model list yet.' : !fresh ? 'The last export from the Hermes host is old, so its settings may have changed. Changing the model is off until a new one arrives.' : waiting ? 'A change is already waiting for the Hermes host.' : null
+  const unused = options.filter(ref => !(primary && same(ref, primary)) && !chain.some(item => same(item, ref)))
+  const move = (index: number, by: -1 | 1) => setChain(list => { const next = [...list]; [next[index], next[index + by]] = [next[index + by], next[index]]; return next })
+
+  const send = async () => {
+    if (!primary) return
+    setBusy(true)
+    setError(null)
+    setSent(null)
+    try {
+      const made = await hubPost<{ ask: string }>(`/team/${encodeURIComponent(agent.id)}/profile-change`, { primary, fallbacks: chain, ...(why.trim() ? { why: why.trim() } : {}) })
+      setSent(made.ask)
+      setWhy('')
+      await load()
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'That did not work.') } finally { setBusy(false) }
+  }
+
+  return (
+    <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>
+      {heading}
+      {profile === 'briefs' && <p className="team-dim" data-profile-briefs>The three weekly jobs are pinned to Sonnet and do not follow this.</p>}
+      {off && <p className="hub-banner ad-note" role="note" data-profile-off>{off}</p>}
+      <form className="ae-form" onSubmit={event => { event.preventDefault(); if (changed && !off && !busy) void send() }} data-profile-form>
+        <label className="ae-field">
+          <span>Primary model</span>
+          <select value={indexOf(primary)} disabled={noList || busy} onChange={event => { const next = choices[Number(event.target.value)].ref; setPrimary(next); setChain(list => list.filter(item => !same(item, next))) }} data-profile-primary>
+            {choices.map((choice, index) => <option key={choice.label} value={String(index)}>{choice.label}</option>)}
+          </select>
+        </label>
+        <div className="ae-field" role="group" aria-label="Fallbacks, in the order they are tried">
+          <span>Fallbacks, tried in this order</span>
+          {chain.length === 0 && <p className="team-dim" data-profile-nochain>With no fallbacks, a Codex limit means no reply.</p>}
+          <ol className="ae-chain-list" data-profile-fallbacks>
+            {chain.map((item, index) => (
+              <li key={refName(item)} className="ae-chain-row" data-profile-fallback={index}>
+                <select aria-label={`Fallback ${index + 1}`} value={indexOf(item)} disabled={busy} onChange={event => { const next = choices[Number(event.target.value)].ref; setChain(list => list.map((entry, at) => (at === index ? next : entry)).filter((entry, at, all) => all.findIndex(other => same(other, entry)) === at && !(primary && same(entry, primary)))) }}>
+                  {choices.filter(choice => same(choice.ref, item) || !(primary && same(choice.ref, primary)) && !chain.some(entry => same(entry, choice.ref))).map(choice => <option key={choice.label} value={String(choices.indexOf(choice))}>{choice.label}</option>)}
+                </select>
+                <button type="button" className="hub-btn" disabled={busy || index === 0} onClick={() => move(index, -1)} aria-label={`Move ${item.model} up`} data-fallback-up>Up</button>
+                <button type="button" className="hub-btn" disabled={busy || index === chain.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${item.model} down`} data-fallback-down>Down</button>
+                <button type="button" className="hub-btn" disabled={busy} onClick={() => setChain(list => list.filter((_, at) => at !== index))} aria-label={`Remove ${item.model}`} data-fallback-remove>Remove</button>
+              </li>
+            ))}
+          </ol>
+          <div className="ae-actions">
+            <button type="button" className="hub-btn" disabled={busy || noList || chain.length >= MAX_FALLBACKS || unused.length === 0} onClick={() => setChain(list => [...list, unused[0]])} data-fallback-add>Add a fallback</button>
+          </div>
+          <small className="team-dim">Up to {MAX_FALLBACKS}. Each model once.</small>
+        </div>
+        <label className="ae-field">
+          <span>Why (optional)</span>
+          <input type="text" value={why} maxLength={400} placeholder="Shown on the request" onChange={event => setWhy(event.target.value)} data-profile-why />
+        </label>
+        <p className="hub-muted" data-profile-restart>Applying restarts Hermes {profile} within about 5 minutes. A chat or job running then stops.</p>
+        {error && <p className="hub-error" role="alert" data-profile-error>{error}</p>}
+        {sent && <p className="hub-muted" role="status" data-profile-sent>Sent for approval. <a href={hubHash('ask', sent)} data-profile-ask>Open the request</a> and approve it with your passkey.</p>}
+        <div className="ae-actions">
+          <button type="submit" className="hub-btn pri" disabled={!changed || !!off || busy || !primary} data-profile-send>Send for approval</button>
+          {changed && <button type="button" className="hub-btn" disabled={busy} onClick={() => { setPrimary(current); setChain(nowChain.map(item => ({ provider: item.provider, model: item.model }))) }} data-profile-discard>Discard changes</button>}
+        </div>
+      </form>
+      {(view.changes?.length ?? 0) > 0 && (
+        <>
+          <h3 id="ae-changes">Changes</h3>
+          <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map(change => <ChangeRow key={change.id} change={change} />)}</ul>
+        </>
+      )}
+    </section>
+  )
+}
+
+/** `#/~hub/agent-edit/<id>`: what the owner may change of an agent. Its chat persona (role line, prompt, chat model, with versions), and the model and fallback order of its Hermes profile. Toolsets, skills, SOUL.md and jobs stay on the details page, view-only. */
+export default function AgentEdit({ id }: { id: string }) {
+  const [team, setTeam] = useState<TeamAgent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    hubGet<TeamView>('/team', controller.signal).then(next => setTeam(next.agents), problem => { if ((problem as { name?: string }).name !== 'AbortError') setError(problem instanceof HubError ? problem.message : 'Could not load this.') })
+    return () => controller.abort()
+  }, [])
+  const agent = team?.find(item => item.id === id) ?? null
+  const back = <a className="ad-back" href={hubHash('agent', id)} data-edit-back>← {agent?.name || 'Details'}</a>
+  if (!host.write) {
+    return <div className="ad team" data-agent-edit={id}>{back}<p className="hub-empty" role="status" data-edit-signin>Sign in to edit this agent.</p></div>
+  }
+  if (!team || !agent) {
+    return <div className="ad team" data-agent-edit={id}>{back}<p className={error || team ? 'hub-error' : 'hub-empty'} role={error || team ? 'alert' : undefined}>{error ?? (team ? 'No such agent.' : 'Loading…')}</p></div>
+  }
+  if (!agent.editable) {
+    return <div className="ad team" data-agent-edit={id}>{back}<p className="hub-empty" role="status" data-edit-none>{agent.name} has nothing to edit here: its settings live on the PC.</p></div>
+  }
+  return (
+    <div className="ad team" data-agent-edit={id}>
+      {back}
+      <header className="ad-head">
+        <div className="ad-title">
+          <h2>Edit {agent.name}</h2>
+          <p className="team-dim">{agent.editable.persona ? 'The text every chat with this agent starts from, and the model it runs on. ' : 'The model it runs on. '}Toolsets, skills, SOUL.md and scheduled jobs stay view-only: see Details.</p>
+        </div>
+      </header>
+      {agent.editable.persona && <PersonaEdit id={id} />}
+      {agent.editable.profile && agent.profile && <ProfileEdit agent={agent} team={team} />}
     </div>
   )
 }

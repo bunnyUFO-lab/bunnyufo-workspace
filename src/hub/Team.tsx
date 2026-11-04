@@ -80,7 +80,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
       )}
       <footer className="team-links">
         <a className="team-details-link" href={hubHash('agent', agent.id)} data-details-open={agent.id} aria-label={`${agent.name}: details`}>Details</a>
-        {agent.editable?.persona && canPick && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id} aria-label={`${agent.name}: edit`}>Edit</a>}
+        {agent.editable && canPick && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id} aria-label={`${agent.name}: edit`}>Edit</a>}
         {canPick
           ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
           : <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}
