@@ -101,3 +101,28 @@ test('newNonce is 22 base64url characters and does not repeat', () => {
   assert.equal(seen.size, 50);
   for (const nonce of seen) assert.match(nonce, /^[A-Za-z0-9_-]{22}$/);
 });
+
+// --- the profile-change vector (ws-im1.4.2) ---
+// The Hermes host (apply_change.py in the homelab repo) verifies this same file with its own canonical(); a copy sits in that repo's tests.
+const profileVector = JSON.parse(readFileSync(new URL('./fixtures/profile-change-vector.json', import.meta.url), 'utf8'));
+
+test('the profile-change vector verifies with plain crypto.verify over canonical(rest); any changed field, a swapped model or a longer chain fails', () => {
+  const { signature, ...rest } = profileVector.approved;
+  assert.equal(canonical(rest), profileVector.canonical);
+  const pub = parsePublicKey(profileVector.publicKeyPem);
+  assert.equal(nodeVerify(null, Buffer.from(profileVector.canonical, 'utf8'), pub, Buffer.from(signature, 'base64')), true);
+  assert.equal(verify(profileVector.approved, pub), true);
+  assert.deepEqual(Object.keys(rest).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'to', 'v']);
+  assert.match(profileVector.approved.by, /[^\x00-\x7f]/, 'the vector holds a non-ASCII value, so the host checks its UTF-8 handling');
+  assert.ok(!/[.]\d+[,}\]]/.test(profileVector.canonical.replace(/"[^"]*"/g, '')), 'no number but v is in the document, so no float to canonicalise');
+  const tampered = [
+    d => { d.to.model = 'claude-haiku-5-5'; }, d => { d.to.fallbacks.push({ provider: 'deepseek', model: 'deepseek-v4-pro' }); }, d => { d.from.fallbacks.pop(); },
+    d => { d.profile = 'briefs'; }, d => { d.expires = '2026-11-05T10:00:00.000Z'; }, d => { d.kind = 'request'; }, d => { d.change = '20261103-profile-main-ab13'; }, d => { d.extra = 1; },
+  ];
+  for (const change of tampered) {
+    const copy = structuredClone(profileVector.approved);
+    change(copy);
+    assert.equal(verify(copy, pub), false, change.toString());
+  }
+  assert.doesNotMatch(readFileSync(new URL('./fixtures/profile-change-vector.json', import.meta.url), 'utf8'), /BEGIN [A-Z ]*PRIVATE KEY/, 'The vector holds no private key.');
+});

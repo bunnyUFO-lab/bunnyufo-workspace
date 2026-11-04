@@ -39,7 +39,7 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
@@ -47,6 +47,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
   const titles = new Map();   // etag → { title, count }
   /** The persona table of this request: the app's, with the owner's edits (hub-personas.mjs) when the Hub gave a reader. */
+  /** What Auto tries first: the label of the model the Hermes host says profile main uses (an export, ws-im1.4.2), else Codex, the app's own default. */
+  const autoFirstLabel = async () => (autoFirst ? await autoFirst().catch(() => null) : null) || 'Codex';
   const tableNow = async () => (personas ? await personas() : CHAT_PERSONAS);   // persona:
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
@@ -437,7 +439,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, autoFirst: await autoFirstLabel(), pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);

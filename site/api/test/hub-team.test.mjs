@@ -60,8 +60,10 @@ test('the agent list is Hermes, Briefs, Claude Code, the three research agents a
     const { status, body } = await f.get('/hub/team');
     assert.equal(status, 200);
     assert.deepEqual(body.agents.map(row => row.id), ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown', 'planner']);
-    assert.deepEqual(body.agents.filter(row => row.editable).map(row => row.id), PERSONA_AGENTS, 'Only the agents with a chat persona can be edited here.');
-    assert.ok(body.agents.filter(row => row.editable).every(row => row.editable.persona === true && row.role === CHAT_PERSONAS.find(item => item.id === row.id).role));
+    assert.deepEqual(body.agents.filter(row => row.editable?.persona).map(row => row.id), PERSONA_AGENTS, 'Only the agents with a chat persona have a persona to edit.');
+    assert.ok(body.agents.filter(row => row.editable?.persona).every(row => row.role === CHAT_PERSONAS.find(item => item.id === row.id).role));
+    assert.deepEqual(body.agents.filter(row => row.editable?.profile).map(row => row.id), AGENTS.filter(row => row.profile).map(row => row.id), 'Every agent on a Hermes profile can change the profile model; Claude Code has nothing to edit.');
+    assert.equal(agent(body, 'claude').editable, undefined);
     assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
     assert.deepEqual(agent(body, 'market-researcher').presets, ['market-research']);
     assert.deepEqual(agent(body, 'teardown').presets, ['game-teardown']);

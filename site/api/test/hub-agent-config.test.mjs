@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { AGENTS } from '../hub-team.mjs';
 import { CHAT_PERSONAS } from '../chat-personas.mjs';
 import { presetOf } from '../presets.mjs';
-import { agentDetails, EXPORT_MAX_BYTES, SECRET_PATTERNS, SOUL_MAX_BYTES, STALE_SECONDS, validExport, WRITER, redactSecrets } from '../hub-agent-config.mjs';
+import { agentDetails, CHANGE_CODES, changeState, EXPORT_MAX_BYTES, SECRET_PATTERNS, SOUL_MAX_BYTES, STALE_SECONDS, validChange, validExport, validResult, WRITER, redactSecrets } from '../hub-agent-config.mjs';
 import { agentConfigJson } from './hub-fixtures.mjs';
 
 // The vectors are a copy of scripts/assistant/config-export/secret-vectors.json in the homelab repo (proxmox-bunnylink), where the
@@ -169,7 +169,7 @@ test('freshness: 6:59:59 is fresh, 7:00:00 is stale, no export is missing, Claud
 test('Hermes gets its soul only; Briefs gets its soul and jobs; the research agents get soul, persona and the job template', () => {
   const exported = exportAt(NOW.toISOString());
   const hermes = detailsOf('hermes', exported);
-  assert.deepEqual(hermes.agent, { id: 'hermes', name: 'Hermes', role: 'chats, plans and dispatches', room: 'Command', runtime: 'Hermes profile main', profile: 'main' });
+  assert.deepEqual(hermes.agent, { id: 'hermes', name: 'Hermes', role: 'chats, plans and dispatches', room: 'Command', runtime: 'Hermes profile main', profile: 'main', editable: { profile: true } });
   assert.deepEqual(hermes.prompts.map(prompt => [prompt.id, prompt.source]), [['soul', 'hermes-host']]);
   assert.equal(hermes.prompts[0].title, 'SOUL.md (profile main)');
   assert.match(hermes.prompts[0].text, /^## Role/);
@@ -179,6 +179,7 @@ test('Hermes gets its soul only; Briefs gets its soul and jobs; the research age
   assert.ok(!('soul' in hermes.settings) && !('cron' in hermes.settings));
   const briefs = detailsOf('briefs', exported);
   assert.equal(briefs.agent.profile, 'briefs');
+  assert.deepEqual(briefs.agent.editable, { profile: true }, 'a profile agent without a persona can change its model only');
   assert.deepEqual(briefs.prompts.map(prompt => [prompt.id, prompt.source]), [['soul', 'hermes-host'], ['job', 'app']], 'Briefs also shows the template of its Run now job.');
   assert.equal(briefs.prompts[1].title, 'Job template (Projects brief)');
   assert.deepEqual(briefs.jobs, [{ name: 'Daily brief', schedule: '0 8 * * *', enabled: true, prompt: 'Write the daily projects brief.' }]);
@@ -224,4 +225,89 @@ test('an ID string that holds a secret or a URL is dropped, so model and skill n
   assert.deepEqual(main.fallbacks, [{ provider: 'ok', model: 'fine' }]);
   assert.deepEqual(main.toolsets, ['web']);
   assert.deepEqual(main.skills.installed, ['good']);
+});
+
+// --- profile changes (ws-im1.4.2) ---
+
+const CODEX = { provider: 'openai-codex', model: 'gpt-6-sol' };
+const SONNET = { provider: 'anthropic', model: 'claude-sonnet-5-5' };
+const FLASH = { provider: 'deepseek', model: 'deepseek-flash' };
+const approvedDoc = (extra = {}) => ({
+  v: 1, kind: 'profile-change', change: '20261101-profile-main-ab12', profile: 'main',
+  from: { ...CODEX, fallbacks: [SONNET] }, to: { ...SONNET, fallbacks: [CODEX, FLASH] },
+  expires: '2026-11-02T10:00:00.000Z', nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: '2026-11-01T10:00:00.000Z', by: 'owner', ask: '20261101-profile-main-ab12', signature: 'c2ln', ...extra,
+});
+const resultDoc = (extra = {}) => ({ v: 1, change: '20261101-profile-main-ab12', outcome: 'applied', code: 'ok', rolledBack: false, at: '2026-11-01T10:03:00.000Z', ...extra });
+
+test('modelOptions are kept only when the export has them, cleaned, and at most 20; the exact-keys export stays as it was', () => {
+  const plain = validExport(agentConfigJson({ now: NOW }));
+  assert.ok(!('modelOptions' in plain.profiles.main), 'an older exporter\'s profile has no such key');
+  const raw = agentConfigJson({ now: NOW });
+  raw.profiles.main.modelOptions = [CODEX, { provider: 'x', model: 'sk-abcdefghijklmnopqrstuv' }, { provider: 'a b', model: 'c' }, 'junk', { ...SONNET, needs: 'ANTHROPIC_API_KEY' }];
+  raw.profiles.briefs.modelOptions = Array.from({ length: 30 }, (_, index) => ({ provider: 'p', model: `m${index}` }));
+  const clean = validExport(raw);
+  assert.deepEqual(clean.profiles.main.modelOptions, [CODEX, SONNET], 'secret-looking, malformed and extra keys are dropped');
+  assert.equal(clean.profiles.briefs.modelOptions.length, 20);
+  const empty = agentConfigJson({ now: NOW });
+  empty.profiles.main.modelOptions = [];
+  assert.deepEqual(validExport(empty).profiles.main.modelOptions, [], 'an empty list is a list: the host has nothing to offer');
+});
+
+test('validChange keeps a good signed change and refuses a wrong kind, extra or missing key, a mismatched id, a bad profile, a duplicate model or five fallbacks', () => {
+  const good = validChange(approvedDoc());
+  assert.deepEqual(good, { change: '20261101-profile-main-ab12', profile: 'main', from: { ...CODEX, fallbacks: [SONNET] }, to: { ...SONNET, fallbacks: [CODEX, FLASH] }, expires: '2026-11-02T10:00:00.000Z', at: '2026-11-01T10:00:00.000Z', by: 'owner', ask: '20261101-profile-main-ab12' });
+  const bad = [
+    { kind: 'request' }, { v: 2 }, { extra: 1 }, { profile: 'prod' }, { ask: '20261101-profile-main-zzzz' }, { signature: undefined }, { nonce: 7 }, { expires: 'soon' },
+    { to: { ...SONNET, fallbacks: [SONNET] } }, { to: { ...SONNET, fallbacks: [CODEX, FLASH, { provider: 'a', model: 'b' }, { provider: 'c', model: 'd' }, { provider: 'e', model: 'f' }] } },
+    { from: { ...CODEX, fallbacks: [], extra: 1 } }, { to: { provider: 'anthropic', model: 'sk-abcdefghijklmnopqrstuv', fallbacks: [] } },
+  ];
+  for (const extra of bad) assert.equal(validChange(approvedDoc(extra)), null, JSON.stringify(extra));
+  const lacking = approvedDoc();
+  delete lacking.nonce;
+  assert.equal(validChange(lacking), null);
+  assert.equal(validChange(null), null);
+});
+
+test('validResult accepts the fixed codes and nothing else; ok goes with applied only', () => {
+  assert.deepEqual(validResult(resultDoc()), { change: '20261101-profile-main-ab12', outcome: 'applied', code: 'ok', rolledBack: false, at: '2026-11-01T10:03:00.000Z' });
+  for (const code of Object.keys(CHANGE_CODES).filter(code => code !== 'ok')) assert.equal(validResult(resultDoc({ outcome: 'failed', code }))?.code, code, code);
+  const bad = [{ code: 'it-broke', outcome: 'failed' }, { outcome: 'applied', code: 'restart' }, { outcome: 'failed', code: 'ok' }, { extra: 1 }, { rolledBack: 'yes' }, { at: 'now' }, { v: 2 }, { outcome: 'maybe' }, { change: 7 }];
+  for (const extra of bad) assert.equal(validResult(resultDoc(extra)), null, JSON.stringify(extra));
+  const lacking = resultDoc();
+  delete lacking.rolledBack;
+  assert.equal(validResult(lacking), null);
+  assert.deepEqual(Object.keys(CHANGE_CODES), ['ok', 'bad-signature', 'bad-shape', 'expired', 'stale', 'unknown-model', 'missing-key', 'no-codex-login', 'config-write', 'config-check', 'restart', 'health', 'interrupted', 'rollback-failed']);
+});
+
+test('changeState: waiting, late, failed, applied and live, and a result for another change counts for nothing', () => {
+  const change = validChange(approvedDoc());
+  const at = iso => new Date(iso);
+  const liveExport = stamp => validExport({ ...agentConfigJson({ now: NOW }), exportedAt: stamp, profiles: { main: { model: { provider: 'anthropic', default: 'claude-sonnet-5-5' }, fallbacks: [CODEX, FLASH] } } });
+  assert.equal(changeState({ change, at: at('2026-11-01T11:00:00Z') }), 'waiting');
+  assert.equal(changeState({ change, at: at('2026-11-02T10:00:01Z') }), 'late');
+  assert.equal(changeState({ change, result: validResult(resultDoc({ outcome: 'failed', code: 'health', rolledBack: true })), at: at('2026-11-01T11:00:00Z') }), 'failed');
+  assert.equal(changeState({ change, result: validResult(resultDoc()), exported: validExport(agentConfigJson({ now: NOW })), at: at('2026-11-01T11:00:00Z') }), 'applied', 'the export still shows the old settings');
+  assert.equal(changeState({ change, result: validResult(resultDoc()), exported: liveExport('2026-11-01T10:02:00Z'), at: at('2026-11-01T11:00:00Z') }), 'applied', 'an export made before the result is not proof');
+  assert.equal(changeState({ change, result: validResult(resultDoc()), exported: liveExport('2026-11-01T10:03:00Z'), at: at('2026-11-01T11:00:00Z') }), 'live', 'an export at the result\'s time is');
+  assert.equal(changeState({ change, result: validResult(resultDoc({ change: '20261101-profile-main-zzzz' })), at: at('2026-11-01T11:00:00Z') }), 'waiting');
+  // The primary alone is not enough: the order of the fallbacks counts.
+  const swapped = validExport({ ...agentConfigJson({ now: NOW }), exportedAt: '2026-11-01T10:05:00Z', profiles: { main: { model: { provider: 'anthropic', default: 'claude-sonnet-5-5' }, fallbacks: [FLASH, CODEX] } } });
+  assert.equal(changeState({ change, result: validResult(resultDoc()), exported: swapped, at: at('2026-11-01T11:00:00Z') }), 'applied');
+});
+
+test('agentDetails: a change shows while it waits and for a day after it ended; Briefs and the research agents share their profile\'s; Claude Code has none', () => {
+  const exported = exportAt(NOW.toISOString());
+  const change = validChange(approvedDoc({ at: '2026-11-01T11:30:00.000Z', expires: '2026-11-02T11:30:00.000Z' }));
+  const pair = { change, result: null };
+  const view = (id, changes, at = NOW) => agentDetails({ agent: agentOf(id), exported, at, changes });
+  const waiting = view('teardown', [pair]);
+  assert.deepEqual([waiting.change.state, waiting.changes.length, waiting.change.to.model], ['waiting', 1, 'claude-sonnet-5-5']);
+  assert.equal(view('claude', [pair]).change, undefined, 'no profile, no change');
+  const ended = { change, result: validResult(resultDoc({ outcome: 'failed', code: 'restart', rolledBack: true, at: '2026-11-01T12:00:00.000Z' })) };
+  const failed = view('hermes', [ended], new Date('2026-11-02T11:59:00Z')).change;
+  assert.deepEqual([failed.state, failed.code, failed.reason, failed.rolledBack], ['failed', 'restart', CHANGE_CODES.restart, true]);
+  assert.equal(view('hermes', [ended], new Date('2026-11-02T12:01:00Z')).change, undefined, 'a day after the result it is gone');
+  const late = view('hermes', [pair], new Date('2026-11-02T12:00:00Z')).change;
+  assert.deepEqual([late.state, late.reason], ['late', 'The Hermes host did not pick this up.']);
+  assert.equal(view('hermes', [pair], new Date('2026-11-03T11:31:00Z')).change, undefined, 'and a day after it ran out');
 });

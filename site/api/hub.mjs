@@ -25,7 +25,8 @@ import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
 import { createRerun } from './hub-rerun.mjs';
-import { createPersonaStore, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { createPersonaStore, VIEW_ONLY, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { AGENT_EDIT_OPTIONS, validateAgentEdit } from './agent-edit.mjs';
 import { createAgentEdits } from './hub-agent-edit.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
@@ -41,7 +42,8 @@ import { createPlanPauses } from './plan-pauses.mjs';
 import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
-import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
+import { CHAT_MODELS } from './chat-models.mjs';
+import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
@@ -294,7 +296,16 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   // The owner's edits of a chat persona (hub-personas.mjs): create-only team/<agent>/persona-*.json, read through a 30 s table the chat uses.
   const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now });
   // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
-  const agentEditFlow = createAgentEdits({ personas: personaStore, log });
+  const agentEditFlow = createAgentEdits({
+    personas: personaStore, log,
+    profiles: {
+      signingKey,
+      exported: at => loadAgentConfig(at),
+      changes: (profile, at) => loadProfileChanges(profile, at),
+      putApproval: (id, doc) => putCreateOnly(`agent-config/changes/${id}/approved.json`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', Object.assign(new Error('That change was already signed.'), { status: 409 })),
+      putAsk: (id, ask) => putCreateOnly(`asks/${id}/ask.json`, `${JSON.stringify(ask, null, 2)}\n`, 'application/json', Object.assign(new Error('That Ask exists.'), { status: 409, conflict: true })),
+    },
+  });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
@@ -440,6 +451,53 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     return null;
   }
 
+  /** The chat label of what Hermes `main` tries first, from a fresh export ("Codex", "Sonnet", ...), or null: then the chat says Codex. */
+  let autoFirstMemo = { until: 0, value: null };   // the chat list is read often; the export changes every few hours
+  async function autoFirstLabel() {
+    const at = now();
+    if (autoFirstMemo.until > at.getTime()) return autoFirstMemo.value;
+    const exported = await loadAgentConfig(at);
+    const model = exported && exportFreshness(exported, at) === 'fresh' ? exported.profiles.main?.model : null;
+    const value = model?.provider && model?.default ? CHAT_MODELS.find(entry => entry.provider === model.provider && entry.model === model.default)?.label ?? model.default : null;
+    autoFirstMemo = { until: at.getTime() + 30000, value };
+    return value;
+  }
+
+  /**
+   * The signed changes of one Hermes profile with the host's results, newest first (at most 20 are read). The Hub wrote each `approved.json`
+   * (create-only, `agent-config/changes/<ask id>/`; no token but the Hermes host's writes under agent-config/, and only a result); a
+   * `result.json` counts only with the card API's mark `writer: hermes-config`, from a head and never from the body, and only beside an approval.
+   * @returns {Promise<{ change: object, result: object | null }[]>}
+   */
+  async function loadProfileChanges(profile, at) {
+    const found = new Map();
+    for (const month of monthPrefixes(at)) {
+      const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
+      for (const object of objects) {
+        const parts = object.key.slice(folder('agent-config').length).split('/');
+        // Exactly changes/<id>/<file>.
+        if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
+        if (!found.has(parts[1])) found.set(parts[1], new Set());
+        found.get(parts[1]).add(parts[2]);
+      }
+    }
+    const out = [];
+    for (const [id, names] of [...found].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
+      if (!names.has('approved.json')) continue;
+      const change = validChange(await cached(`agent-config/changes/${id}/approved.json`));
+      if (!change || change.change !== id || change.profile !== profile) continue;
+      let result = null;
+      if (names.has('result.json')) {
+        const rel = `agent-config/changes/${id}/result.json`;
+        const head = await bucket.head(key(rel)).catch(error => { if (error.status === 404) return null; throw error; });
+        const read = head?.metadata?.writer === CONFIG_WRITER && head.size <= 4096 ? validResult(await cached(rel)) : null;
+        if (read?.change === id) result = read;
+      }
+      out.push({ change, result });
+    }
+    return out.sort((a, b) => (a.change.at < b.change.at ? 1 : a.change.at > b.change.at ? -1 : 0));
+  }
+
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
   const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
   // The Away switch (presence.json): the owner's, read by hub-hooks on the PC.
@@ -485,10 +543,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   async function teamView(at) {
-    const [window, status, hermes, lastChat, choices, personas] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table()]);
+    const [window, status, hermes, lastChat, choices, personas, exported] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table(), loadAgentConfig(at).catch(() => null)]);
     const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
     const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, at });
-    return { agents: buildTeam({ statuses, choices, personas }) };
+    return { agents: buildTeam({ statuses, choices, personas, exported, at }) };
   }
 
   /** The sheets reader; the keys come from `inboxKey` like every other. */
@@ -523,6 +581,28 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       }
     }
     return { status: 200, body: { ok: true, ...choice } };
+  }
+
+  /**
+   * "Send for approval" on the Edit page: a change of the model and fallback order of the agent's Hermes profile. Strict body `{ primary, fallbacks, why? }`;
+   * a view-only key is a 403 and any other unknown key a 400. Writes the Ask (hub-agent-edit.mjs) and answers `{ ask, state, from, to }`; nothing is signed
+   * until the owner answers Apply on that Ask, behind the passkey.
+   */
+  async function requestProfileChange(agentId, raw, user, at) {
+    if (!user) throw fail('Sign in to change a model.', 401);
+    const agent = AGENTS.find(item => item.id === agentId);
+    if (!agent) throw fail('No such agent.', 404);
+    if (!agent.profile) throw fail('This agent has no Hermes profile to change.', 404);
+    if (Object.keys(raw).some(name => name !== 'fallbacks' && VIEW_ONLY.includes(name))) throw fail(VIEW_ONLY_MESSAGE, 403);
+    const extra = Object.keys(raw).filter(name => !['primary', 'fallbacks', 'why'].includes(name));
+    if (extra.length) throw fail(`A model change has no field ${extra.slice(0, 3).join(', ')}.`, 400);
+    const edit = { op: 'profile', profile: agent.profile, primary: raw.primary, fallbacks: raw.fallbacks, ...(raw.why === undefined ? {} : { why: typeof raw.why === 'string' ? raw.why.replace(/\s+/g, ' ').trim() : raw.why }) };
+    const problems = validateAgentEdit({ agentEdit: edit, requirePasskey: true, options: AGENT_EDIT_OPTIONS });
+    if (problems.length) throw fail(`${problems.slice(0, 2).join('; ')}.`, 400);
+    for (const item of [edit.primary, ...edit.fallbacks]) if (!cleanId(item.provider) || !cleanId(item.model)) throw fail('That is not a model id.', 400);
+    if (edit.why !== undefined && redactSecrets(edit.why).count > 0) throw fail('That text looks like a secret.', 400);
+    const made = await agentEditFlow.createProfileAsk({ edit, user, at });
+    return { status: 201, body: { ask: made.ask, state: 'open', from: made.from, to: made.to } };
   }
 
   const stale = what => fail(`This ${what} changed while you were looking; reload and try again.`, 409);
@@ -571,7 +651,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
-    const agentEditBlocked = await agentEditFlow.blockedReason(ask).catch(() => null);
+    // Only an Ask that can still be answered can be blocked: once answered, its own change would read as "still waiting".
+    const agentEditBlocked = canAnswer(state.state) ? await agentEditFlow.blockedReason(ask, at).catch(() => null) : null;
     const sub = askSubtype(ask);
     const beadTitle = await decidesTitle(ask);
     return {
@@ -1405,7 +1486,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
 
   const self = {
     enabled: on,
@@ -1606,7 +1687,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             if (!agent) throw fail('No such agent.', 404);
             const exported = agent.profile ? await loadAgentConfig(at) : null;
             reply(agentDetails({
-              agent, exported, at,
+              agent, exported, at, changes: agent.profile ? await loadProfileChanges(agent.profile, at) : [],
               persona: (await personaStore.table()).find(item => item.id === agent.id) ?? null,
               preset: agent.presets?.[0] ? presetOf(agent.presets[0]) : null,
             }));
@@ -1677,6 +1758,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           if (!user) throw fail('Sign in to edit a persona.', 401);
           if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);
           send({ status: 200, body: match[2] ? await personaStore.revert(match[1], raw, user, at) : await personaStore.save(match[1], raw, user, at) });
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/profile-change$/.exec(route))) {
+          send(await requestProfileChange(match[1], raw, user, at));
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {
           send(await chooseAvatar(match[1], raw, user, at));
         } else {

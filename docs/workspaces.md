@@ -967,6 +967,42 @@ An avatar choice is the owner's. The site writes it as a create-only file, `inbo
 
 The Hermes host publishes a redacted copy of its profile settings as create-only files, `inbox/agent-config/export-<YYYYMMDDTHHMMSSZ>.json`, so the Hub can show an agent's model settings and prompts. The card API accepts these only from a token named `hermes-config` (rights `write=inbox`), only with `If-None-Match: *` and never through an upload URL; that token may write nothing else in the inbox, no other limited token may write under `agent-config/`, and a limited deleter cannot remove them. A file the token creates is stored with the object metadata `writer: hermes-config`, set by the handler alone (a caller's `x-amz-meta-*` headers are never forwarded). The passphrase can still write there, but its files carry no mark, so the Hub ignores them. Adding the token to `BUW_CARD_TOKENS` needs the card API deployed with this rule first.
 
+### Profile changes (a signed change the Hermes host applies)
+
+The owner can change the primary model and the fallback order of a Hermes profile from the Edit page of any agent on it (ws-im1.4.2). **There is no per-agent model on the host.** Teardown, Researcher, Market researcher, Planner and Hermes all run on profile `main`; `briefs` is the other profile (`PROFILES`). So the Edit section reads "Profile main. Shared by Hermes, Researcher, Market researcher, Teardown and Planner", built from `AGENTS`, and a change started from Teardown moves all five. Briefs adds "The three weekly jobs are pinned to Sonnet and do not follow this." Claude Code has nothing to edit. Toolsets, skills, `SOUL.md` and scheduled jobs stay view-only, in the route, in `agentEdit` and on the host.
+
+| Route | Does |
+|---|---|
+| `POST /api/hub/team/:agent/profile-change` | `{ primary: { provider, model }, fallbacks: [{ provider, model }] (0 to 4), why? (400) }`. Signed in (401). The profile is the agent's own, so a body naming `profile` is a 400, like every other unknown key; a view-only key (`toolsets`, `platformToolsets`, `skills`, `soul`, `cron`, `jobs`, `terminal`, `provider`) is a 403. Ids match `^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$`, a model appears once, and every model must be in the `modelOptions` of the newest **fresh** export of that profile (409 otherwise, also with no signing key, nothing changed, or an earlier change of the profile still waiting). It writes the Ask and answers 201 `{ ask, state: 'open', from, to }`; it signs nothing. |
+| `GET /api/hub/team/:agent/details` | also carries `change` (the newest change of the agent's profile that waits or ended in the last 24 hours) and `changes` (the recent ones, newest first): `{ id, profile, state, at, by, from, to, resultAt?, code?, reason?, rolledBack? }` with `state` one of `waiting`, `applied`, `live`, `failed`, `late`; `settings.modelOptions` is the list the host publishes |
+
+**The flow.** The request (or `cards ask create --agent-edit`, `agentEdit: { op: 'profile', profile, primary, fallbacks, why? }`) makes an Ask. The Hub writes `asks/<id>/ask.json` itself for the Edit page: id `<yyyymmdd>-profile-<profile>-<rand4>`, `project: 'workspace-app'`, `from: { tool: 'hub' }`, `kind: 'approval'`, `requirePasskey: true`, the two fixed options, and a context with the old and new order, who shares the profile and "Hermes main restarts within about 5 minutes. A chat or job running then stops." Discord never lists or answers it (`discordEligible`). Answering `apply` over the web runs `afterAnswer`, which checks everything again (the shape, a signing key, a fresh export, every model in its list, something changed, no earlier change waiting; the old order, `from`, is read from the export at that moment, never from the Ask), signs the change and stores it create-only as `inbox/agent-config/changes/<ask id>/approved.json`. The change id is the Ask id, so one Ask makes one approval. The site never reaches into the host: the host pulls the file within about 5 minutes (a timer on the Hermes host, one apply per tick), applies it, restarts that one profile's gateway and puts `result.json` next to it.
+
+**What "signed" means.** There is no WebAuthn signature to check. The passkey gate is the reverse proxy in front of the site, which sets `Remote-User`; a signed-in POST then makes the Hub sign with `HUB_SIGNING_KEY` (Ed25519, `site/api/signing.mjs`), the key it signs run approvals with. The host verifies with the pinned public key. Whoever controls the site host can sign, as for every PC run.
+
+**The signed format** (`approved.json`; `canonical()` of `signing.mjs`: keys sorted at every level, no whitespace, UTF-8, `undefined` dropped; `signature` is base64 of the Ed25519 signature over the canonical form of the rest):
+
+```json
+{ "v": 1, "kind": "profile-change", "change": "20261103-profile-main-ab12", "profile": "main",
+  "from": { "provider": "openai-codex", "model": "gpt-6-sol", "fallbacks": [{ "provider": "anthropic", "model": "claude-sonnet-5-5" }] },
+  "to":   { "provider": "anthropic", "model": "claude-sonnet-5-5", "fallbacks": [{ "provider": "deepseek", "model": "deepseek-flash" }] },
+  "expires": "<at + 24 h>", "nonce": "<22 characters>", "at": "<ISO time>", "by": "<the signed-in user>", "ask": "20261103-profile-main-ab12", "signature": "<base64>" }
+```
+
+Exactly these keys, at every level. `change` equals `ask` and the folder name; `profile` is `main` or `briefs`; `fallbacks` has 0 to 4 entries; the primary and each fallback are different. No number but `v` appears in the document, so no float needs canonicalising. The host accepts it only while `expires` is ahead, only when its current `model.provider`, `model.default` and `fallback_providers` equal `from` (else `stale`), and it knows no other setting. The pinned vector is `site/api/test/fixtures/profile-change-vector.json` (made once with a throwaway key; it holds `canonical`, `approved` and the public key; the homelab repo keeps a copy and verifies it in Python). It has a non-ASCII letter in `by` on purpose.
+
+**The result** (`result.json`, create-only, put by the host through the card API token `hermes-config`, stored with `writer: hermes-config`; the Hub reads it only with that mark, from a head, and only beside a good `approved.json`):
+
+```json
+{ "v": 1, "change": "<ask id>", "outcome": "applied", "code": "ok", "rolledBack": false, "at": "<ISO time>" }
+```
+
+`outcome` is `applied` or `failed`; `code` is from a fixed list and never carries host text: `ok` (with `applied` only), `bad-signature`, `bad-shape`, `expired`, `stale`, `unknown-model`, `missing-key`, `no-codex-login`, `config-write`, `config-check`, `restart`, `health`, `interrupted`, `rollback-failed`. The Hub turns the code into words (`CHANGE_CODES` in `hub-agent-config.mjs`).
+
+**States** on Details and the Edit page: `waiting` (signed, no result, not past `expires`), `applied` (the host says it worked; the newest export does not show it yet), `live` (an export made at or after `result.at` has the new model and fallbacks), `failed` ("The change to X failed: <words>. The old settings stay."; with `rollback-failed`, "Hermes may be down."), `late` (past `expires` with no result: "The Hermes host did not pick this up"). A change shows while it waits and for 24 hours after it ended. A `late` change no longer blocks a new request. Auto in the chat menu names the model `main` tries first from the export (default Codex), and the Team card builds its model line from a fresh export.
+
+**The model list.** The exporter adds `modelOptions` per profile to `export-*.json` (`[{ provider, model }]`, up to 20, left out until the host has one). The host decides what it offers, from its own repo list and the keys and logins the profile has; the site offers nothing else. The card API lets `hermes-config` create `agent-config/changes/<id>/result.json` and, narrowly and in the `inbox` section only, list `agent-config/changes/` and read `approved.json` and `result.json` there (`site/card-api/README.md`).
+
 ### Custom sprites
 
 A custom sprite is a pet sheet an agent made on the Gaming PC: `inbox/team/<agent>/sheet-<YYYYMMDDTHHMMSSZ>-<rand4>.png` and a `.json` of the same name. The PNG is 1536 x 1872 (8 columns by 9 rows of 192 x 208 frames, art drawn at 48 x 52 and scaled x4); the rows are `idle`, `run-right`, `run-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, `review`. The JSON is `{ v: 1, agent, frame, cols, rows: [{ state, frames, fps }], source?, sha256, at }`.

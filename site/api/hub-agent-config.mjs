@@ -20,6 +20,7 @@ export const PROFILES = ['main', 'briefs'];
 export const SOUL_MAX_BYTES = 32 * 1024;
 export const CRON_PROMPT_MAX_BYTES = 4 * 1024;
 const MAX_FALLBACKS = 10;
+const MAX_MODEL_OPTIONS = 20;
 const MAX_TOOLSETS = 50;
 const MAX_AUTOLOAD = 50;
 const MAX_INSTALLED = 100;
@@ -72,7 +73,8 @@ function cutBytes(text, max) {
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 /** An ID string is also refused when it holds a URL (`://`, as in `user:pass@host`) or when redaction would change it (an `sk-` model name). */
-const id = value => (typeof value === 'string' && ID_RE.test(value) && !value.includes('://') && redactSecrets(value).count === 0 ? value : '');
+export const cleanId = value => (typeof value === 'string' && ID_RE.test(value) && !value.includes('://') && redactSecrets(value).count === 0 ? value : '');
+const id = cleanId;
 const ids = (value, max) => (Array.isArray(value) ? value.map(id).filter(Boolean).slice(0, max) : []);
 const count = value => (Number.isInteger(value) && value >= 0 && value <= 1e9 ? value : 0);
 
@@ -121,6 +123,8 @@ function cleanProfile(raw) {
   out.fallbacks = Array.isArray(raw.fallbacks)
     ? raw.fallbacks.filter(isObject).map(item => ({ provider: id(item.provider), model: id(item.model) })).filter(item => item.provider && item.model).slice(0, MAX_FALLBACKS)
     : [];
+  // The models the host would apply (ws-im1.4.2): kept only when the export has the list, so an older exporter's profile has the same keys as before.
+  if (Array.isArray(raw.modelOptions)) out.modelOptions = raw.modelOptions.filter(isObject).map(item => ({ provider: id(item.provider), model: id(item.model) })).filter(item => item.provider && item.model).slice(0, MAX_MODEL_OPTIONS);
   if (Array.isArray(raw.toolsets)) out.toolsets = ids(raw.toolsets, MAX_TOOLSETS);
   if (isObject(raw.platformToolsets)) {
     const platforms = {};
@@ -164,28 +168,131 @@ export function validExport(raw) {
   return { v: 1, exportedAt, ...(changedAt ? { changedAt } : {}), profiles, ownerSkills: ids(raw.ownerSkills, MAX_OWNER_SKILLS) };
 }
 
+// --- profile changes (ws-im1.4.2) ---
+// The Hub signs an approved change into create-only `agent-config/changes/<ask id>/approved.json`; the Hermes host applies it and puts
+// `result.json` beside it (card API, `writer: hermes-config`). The format is in docs/workspaces.md ("Profile changes").
+
+/** The fixed list of reasons in a result.json; the host never sends free text. The words are for the owner. */
+export const CHANGE_CODES = {
+  ok: 'It worked.',
+  'bad-signature': 'The host did not accept the Hub\'s signature. After a key rotation the host needs a deploy',
+  'bad-shape': 'The host could not read the change',
+  expired: 'The change was not applied in time',
+  stale: 'The settings on the host changed after you asked',
+  'unknown-model': 'The host does not offer one of the models',
+  'missing-key': 'The host has no API key for one of the models',
+  'no-codex-login': 'The profile is not signed in to Codex',
+  'config-write': 'The host could not write the settings',
+  'config-check': 'Hermes did not accept the new settings',
+  restart: 'The gateway did not restart',
+  health: 'The gateway did not stay up after the restart',
+  interrupted: 'The host stopped in the middle of the change',
+  'rollback-failed': 'The host could not put the old settings back',
+};
+export const CHANGE_WINDOW_MS = 24 * 3600 * 1000;
+export const CHANGE_MAX_FALLBACKS = 4;
+const CHANGE_KEYS = ['v', 'kind', 'change', 'profile', 'from', 'to', 'expires', 'nonce', 'at', 'by', 'ask', 'signature'];
+const RESULT_KEYS = ['v', 'change', 'outcome', 'code', 'rolledBack', 'at'];
+
+const modelRef = raw => (isObject(raw) && Object.keys(raw).length === 2 && id(raw.provider) && id(raw.model) ? { provider: raw.provider, model: raw.model } : null);
+/** `{ provider, model, fallbacks }` or null. The primary and the fallbacks are different; at most four fallbacks. */
+function modelSet(raw) {
+  if (!isObject(raw) || Object.keys(raw).length !== 3 || !Array.isArray(raw.fallbacks) || raw.fallbacks.length > CHANGE_MAX_FALLBACKS) return null;
+  const primary = modelRef({ provider: raw.provider, model: raw.model });
+  const chain = raw.fallbacks.map(modelRef);
+  if (!primary || chain.some(item => !item)) return null;
+  const names = [primary, ...chain].map(item => `${item.provider}/${item.model}`);
+  return new Set(names).size === names.length ? { ...primary, fallbacks: chain } : null;
+}
+const changeTime = value => (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value) && !Number.isNaN(Date.parse(value)) ? value : '');
+
+/**
+ * A clean signed change from the parsed `approved.json`, or null. The shape only: this site wrote the file and the host checks the signature.
+ * → { change, profile, from, to, expires, at, by, ask }
+ */
+export function validChange(raw) {
+  if (!isObject(raw) || raw.v !== 1 || raw.kind !== 'profile-change') return null;
+  if (Object.keys(raw).length !== CHANGE_KEYS.length || !CHANGE_KEYS.every(name => Object.hasOwn(raw, name))) return null;
+  if (typeof raw.change !== 'string' || raw.change !== raw.ask || !PROFILES.includes(raw.profile) || typeof raw.by !== 'string' || typeof raw.nonce !== 'string' || typeof raw.signature !== 'string') return null;
+  const from = modelSet(raw.from);
+  const to = modelSet(raw.to);
+  const expires = changeTime(raw.expires);
+  const at = changeTime(raw.at);
+  if (!from || !to || !expires || !at) return null;
+  return { change: raw.change, profile: raw.profile, from, to, expires, at, by: raw.by.slice(0, 80), ask: raw.ask };
+}
+
+/** A clean result.json, or null. → { change, outcome, code, rolledBack, at } */
+export function validResult(raw) {
+  if (!isObject(raw) || raw.v !== 1) return null;
+  if (Object.keys(raw).length !== RESULT_KEYS.length || !RESULT_KEYS.every(name => Object.hasOwn(raw, name))) return null;
+  const at = changeTime(raw.at);
+  if (typeof raw.change !== 'string' || !['applied', 'failed'].includes(raw.outcome) || !Object.hasOwn(CHANGE_CODES, raw.code) || typeof raw.rolledBack !== 'boolean' || !at) return null;
+  if ((raw.outcome === 'applied') !== (raw.code === 'ok')) return null;
+  return { change: raw.change, outcome: raw.outcome, code: raw.code, rolledBack: raw.rolledBack, at };
+}
+
+const sameModels = (block, set) => !!block?.model && block.model.provider === set.provider && block.model.default === set.model
+  && block.fallbacks.length === set.fallbacks.length && block.fallbacks.every((item, index) => item.provider === set.fallbacks[index].provider && item.model === set.fallbacks[index].model);
+
+/**
+ * Where a signed change stands.
+ * - waiting: signed, no result yet, not past `expires`
+ * - late: past `expires` with no result ("The Hermes host did not pick this up")
+ * - failed: the host says it failed (the old settings stay, unless `rolledBack` is false and the code is `rollback-failed`)
+ * - applied: the host says it worked; the export does not show it yet
+ * - live: an export made at or after the result shows the new settings
+ * `change` is `validChange(...)`, `result` is `validResult(...)` or null (a result for another change is ignored), `exported` is `validExport(...)` or null.
+ */
+export function changeState({ change, result = null, exported = null, at }) {
+  const mine = result && result.change === change.change ? result : null;
+  if (mine?.outcome === 'failed') return 'failed';
+  if (mine) {
+    const made = exported ? Date.parse(exported.exportedAt) : NaN;
+    return made >= Date.parse(mine.at) && sameModels(exported.profiles[change.profile], change.to) ? 'live' : 'applied';
+  }
+  return at.getTime() > Date.parse(change.expires) ? 'late' : 'waiting';
+}
+
+/** One change as the page gets it. */
+export function changeView({ change, result = null, exported = null, at }) {
+  const state = changeState({ change, result, exported, at });
+  const mine = result && result.change === change.change ? result : null;
+  return {
+    id: change.change, profile: change.profile, state, at: change.at, by: change.by, from: change.from, to: change.to,
+    ...(mine ? { resultAt: mine.at } : {}),
+    ...(state === 'failed' ? { code: mine.code, reason: CHANGE_CODES[mine.code], rolledBack: mine.rolledBack } : {}),
+    ...(state === 'late' ? { reason: 'The Hermes host did not pick this up.' } : {}),
+  };
+}
+
+/** 'fresh' for an export the host made lately, else 'stale' (the exporter stopped, or the export is stamped in the future). The same rule as the details page. */
+export function exportFreshness(exported, at) {
+  const raw = Math.floor((at.getTime() - new Date(exported.exportedAt).getTime()) / 1000);
+  return raw < -FUTURE_SKEW_SECONDS || Math.max(0, raw) >= STALE_SECONDS ? 'stale' : 'fresh';
+}
+
 const KB = 1024;
 
 /**
  * The details page's answer for one agent.
  * - `agent`: an AGENTS entry (hub-team.mjs); `exported`: `validExport(...)` or null; `at`: a Date.
  * - `persona`: the agent's CHAT_PERSONAS entry, `preset`: the Spawn preset it takes (presetOf(agent.presets[0])); both optional.
+ * - `changes`: the signed changes of the agent's profile with their results, newest first (`[{ change, result }]`, hub.mjs); the answer carries the recent ones as `changes` (waiting, or ended in the last 24 hours), and the newest as `change`.
  */
-export function agentDetails({ agent, exported = null, at, persona = null, preset = null }) {
+export function agentDetails({ agent, exported = null, at, persona = null, preset = null, changes = [] }) {
   const profile = agent.profile ?? null;
   const block = profile && exported ? exported.profiles[profile] ?? null : null;
   const chatModel = persona ? CHAT_MODELS.find(entry => entry.id === persona.model)?.label : undefined;
-  const who = { id: agent.id, name: agent.name, role: persona?.role ?? agent.role, room: agent.room, runtime: agent.runtime, profile, ...(persona ? { editable: { persona: true } } : {}), ...(chatModel ? { chatModel } : {}) };
+  const who = { id: agent.id, name: agent.name, role: persona?.role ?? agent.role, room: agent.room, runtime: agent.runtime, profile, ...(persona || profile ? { editable: { ...(persona ? { persona: true } : {}), ...(profile ? { profile: true } : {}) } } : {}), ...(chatModel ? { chatModel } : {}) };
 
   let freshness;
   if (!profile) freshness = { state: 'none' };
   else if (!exported || !block) freshness = { state: 'missing' };
   else {
-    const raw = Math.floor((at.getTime() - new Date(exported.exportedAt).getTime()) / 1000);
-    const ageSeconds = Math.max(0, raw);
+    const ageSeconds = Math.max(0, Math.floor((at.getTime() - new Date(exported.exportedAt).getTime()) / 1000));
     // An export stamped in the future (a clock that ran ahead, or a forged time) is not fresh: past the allowed skew it reads as stale.
-    const ahead = raw < -FUTURE_SKEW_SECONDS;
-    freshness = { state: ahead || ageSeconds >= STALE_SECONDS ? 'stale' : 'fresh', exportedAt: exported.exportedAt, ...(exported.changedAt ? { changedAt: exported.changedAt } : {}), ageSeconds };
+    freshness = { state: exportFreshness(exported, at), exportedAt: exported.exportedAt, ...(exported.changedAt ? { changedAt: exported.changedAt } : {}), ageSeconds };
   }
 
   let settings = null;
@@ -203,5 +310,7 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
   if (persona) prompts.push({ id: 'persona', title: 'Chat persona', source: 'app', text: persona.text, ...(persona.edited ? { note: `Edited ${persona.edited.at.slice(0, 10)} by ${persona.edited.by}.` } : {}) });
   if (preset?.template) prompts.push({ id: 'job', title: `Job template (${preset.label})`, source: 'app', text: preset.template, note: 'Placeholders are filled in when a job starts.' });
 
-  return { agent: who, freshness, settings, prompts, jobs: block?.cron ?? [] };
+  // A change is shown while it waits, and for 24 hours after it ended: after the host's result, or after it ran out with none (`late`).
+  const recent = profile ? changes.filter(item => at.getTime() - Date.parse(item.result?.at ?? item.change.expires) < CHANGE_WINDOW_MS).map(item => changeView({ ...item, exported, at })) : [];
+  return { agent: who, freshness, settings, prompts, jobs: block?.cron ?? [], ...(recent.length ? { change: recent[0], changes: recent } : {}) };
 }

@@ -245,9 +245,9 @@ export function teamSheet(agent, { stamp = '20261029T100000Z', rand = 'ab12', wi
 
 /**
  * A v1 settings export as the Hermes host's exporter writes it (made-up values; the "secret" is a fake key made of repeated letters).
- * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`.
+ * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`. `modelOptions` is `{ main, briefs }`, the lists the host would publish (ws-im1.4.2); left out, the export has none, as an older exporter's.
  */
-export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {} } = {}) {
+export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {}, modelOptions = null } = {}) {
   const profile = name => ({
     model: { provider: 'openai-codex', default: name === 'main' ? 'gpt-6-sol' : 'claude-haiku-5-5' },
     fallbacks: name === 'main'
@@ -259,6 +259,7 @@ export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, cha
     terminal: { backend: 'docker', containerMemoryMb: 512 },
     soul: { text: soulText ?? `## Role\nYou are ${name === 'main' ? 'Hermes' : 'Briefs'}, the owner's assistant.\nAlways answer in plain words.\n`, sha256: 'a'.repeat(64), bytes: 120, truncated: false, redacted: 0 },
     cron: name === 'briefs' ? [{ name: 'Daily brief', schedule: '0 8 * * *', enabled: true, prompt: 'Write the daily projects brief.' }] : [],
+    ...(modelOptions?.[name] ? { modelOptions: modelOptions[name] } : {}),
     ...extraProfile,
   });
   return {

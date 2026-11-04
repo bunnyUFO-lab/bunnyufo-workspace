@@ -10,8 +10,11 @@ import { createHub } from '../hub.mjs';
 import { CHAT_PERSONAS } from '../chat-personas.mjs';
 import { PERSONA_FILE_RE, VIEW_ONLY, checkPersonaEdit, effectivePersona, syncRole } from '../hub-personas.mjs';
 import { AGENT_EDIT_OPTIONS, validateAgentEdit } from '../agent-edit.mjs';
+import { discordEligible, validId } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { askJson, seeder } from './hub-fixtures.mjs';
+import { agentConfigJson, askJson, seedAgentConfig, seeder } from './hub-fixtures.mjs';
+import { generateKeyPairSync } from 'node:crypto';
+import { parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
@@ -20,14 +23,14 @@ const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
 const TEARDOWN = CHAT_PERSONAS.find(entry => entry.id === 'teardown');
 const edit = (extra = {}) => ({ role: TEARDOWN.role, prompt: TEARDOWN.text, model: TEARDOWN.model, base: 'default', ...extra });
 
-async function fixture({ requireRemoteUser = true } = {}) {
+async function fixture({ requireRemoteUser = true, env = {} } = {}) {
   const clock = { time: NOW.getTime() };
   const root = await mkdtemp(path.join(tmpdir(), 'buw-persona-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env: {} });
+  const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, hub, allowedOrigins: [SITE] });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -112,7 +115,7 @@ test('signed out: no read of the prompts and no write, and an agent with no pers
     assert.equal((await f.call('GET', '/hub/team/nobody/persona')).status, 404);
     assert.equal(f.files('teardown').length, 0);
     const team = (await f.call('GET', '/hub/team')).body.agents;
-    assert.deepEqual(team.filter(agent => agent.editable).map(agent => agent.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
+    assert.deepEqual(team.filter(agent => agent.editable?.persona).map(agent => agent.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
     assert.ok(team.every(agent => !('chatModel' in agent)), 'nothing is edited yet');
   } finally { await f.close(); }
 });
@@ -152,7 +155,7 @@ test('save keeps the old version: a new create-only file, listed newest first wi
     const prompt = details.prompts.find(item => item.id === 'persona');
     assert.equal(prompt.text, 'You are Teardown. Be terse.');
     assert.match(prompt.note, /^Edited \d{4}-\d{2}-\d{2} by owner\.$/);
-    assert.deepEqual([details.agent.chatModel, details.agent.editable, details.agent.role], ['Haiku', { persona: true }, TEARDOWN.role]);
+    assert.deepEqual([details.agent.chatModel, details.agent.editable, details.agent.role], ['Haiku', { persona: true, profile: true }, TEARDOWN.role]);
     const job = details.prompts.find(item => item.id === 'job');
     assert.ok(job && !('note' in job && /Edited/.test(job.note)), 'the job template stays the app\'s');
   } finally { await f.close(); }
@@ -292,7 +295,7 @@ test('validateAgentEdit: a good proposal passes; every other shape, limit, optio
   assert.deepEqual(validateAgentEdit(ask(proposal({ prompt: undefined, role: 'a role', model: 'haiku' }))), []);
   const has = (problems, pattern) => assert.ok(problems.some(line => pattern.test(line)), `${pattern}: ${problems.join(' | ')}`);
   has(validateAgentEdit(ask(null)), /is an object/);
-  has(validateAgentEdit(ask(proposal({ op: 'profile' }))), /op is persona/);
+  has(validateAgentEdit(ask(proposal({ op: 'model' }))), /op is persona or profile/);
   has(validateAgentEdit(ask(proposal({ agent: 'Bad Id' }))), /agent is an agent id/);
   has(validateAgentEdit(ask(proposal({ base: 'newest' }))), /base is the version/);
   has(validateAgentEdit(ask(proposal({ prompt: undefined }))), /changes the role, the prompt or the model/);
@@ -305,6 +308,33 @@ test('validateAgentEdit: a good proposal passes; every other shape, limit, optio
   has(validateAgentEdit(ask(proposal(), { options: [{ ...AGENT_EDIT_OPTIONS[0], image: 'a.png' }, AGENT_EDIT_OPTIONS[1]] })), /exactly the options/);
   has(validateAgentEdit(ask(proposal(), { changes: [] })), /no changes, decisions/);
   for (const name of VIEW_ONLY) has(validateAgentEdit(ask(proposal({ [name]: 'x' }))), /view-only/);
+});
+
+test('validateAgentEdit, op profile: a good proposal passes; the models, the chain, the profile, the keys and the view-only names are checked', () => {
+  const ask = (agentEdit, extra = {}) => ({ requirePasskey: true, options: AGENT_EDIT_OPTIONS, agentEdit, ...extra });
+  const model = (provider, name) => ({ provider, model: name });
+  const good = (extra = {}) => ({ op: 'profile', profile: 'main', primary: model('anthropic', 'claude-sonnet-5-5'), fallbacks: [model('openai-codex', 'gpt-6-sol')], why: 'Codex is slow.', ...extra });
+  assert.deepEqual(validateAgentEdit(ask(good())), []);
+  assert.deepEqual(validateAgentEdit(ask(good({ fallbacks: [], why: undefined }))), []);
+  const has = (problems, pattern) => assert.ok(problems.some(line => pattern.test(line)), `${pattern}: ${problems.join(' | ')}`);
+  has(validateAgentEdit(ask(good({ profile: 'other' }))), /profile is main or briefs/);
+  has(validateAgentEdit(ask(good({ primary: undefined }))), /primary is/);
+  has(validateAgentEdit(ask(good({ primary: model('anthropic', 'a b') }))), /primary is/);
+  has(validateAgentEdit(ask(good({ primary: { ...model('a', 'b'), env: 'KEY' } }))), /primary is/);
+  has(validateAgentEdit(ask(good({ fallbacks: 'none' }))), /fallbacks is a list of 0 to 4/);
+  has(validateAgentEdit(ask(good({ fallbacks: Array.from({ length: 5 }, (_, index) => model('p', `m${index}`)) }))), /0 to 4/);
+  has(validateAgentEdit(ask(good({ fallbacks: [model('anthropic', 'claude-sonnet-5-5')] }))), /lists a model twice/);
+  has(validateAgentEdit(ask(good({ fallbacks: [model('p', 'm'), model('p', 'm')] }))), /lists a model twice/);
+  has(validateAgentEdit(ask(good({ agent: 'teardown' }))), /no field agent/);
+  has(validateAgentEdit(ask(good({ prompt: 'x' }))), /no field prompt/);
+  has(validateAgentEdit(ask(good({ model: 'haiku' }))), /no field model/);
+  has(validateAgentEdit(ask(good({ why: 'w'.repeat(401) }))), /why is 1 to 400/);
+  has(validateAgentEdit(ask(good(), { requirePasskey: false })), /requires a passkey/);
+  has(validateAgentEdit(ask(good(), { options: [AGENT_EDIT_OPTIONS[1], AGENT_EDIT_OPTIONS[0]] })), /exactly the options/);
+  has(validateAgentEdit(ask(good(), { decisions: [] })), /no changes, decisions/);
+  // 'fallbacks' belongs to a profile edit and stays view-only on a persona edit; the other view-only names are refused on both.
+  has(validateAgentEdit(ask(proposal({ fallbacks: [] }))), /view-only/);
+  for (const name of VIEW_ONLY.filter(item => item !== 'fallbacks')) has(validateAgentEdit(ask(good({ [name]: 'x' }))), /view-only/);
 });
 
 test('an agent-edit Ask answered Apply over the web writes one version with fromAsk; Skip writes none', async () => {
@@ -345,6 +375,11 @@ test('an agent-edit Ask that cannot be trusted writes nothing, says why, and the
       ['an unlisted model', agentEditAsk(f, 'e006', proposal({ base: one.body.version, prompt: undefined, model: 'opus' })), /not in the list/],
       ['an agent with no persona', agentEditAsk(f, 'e007', proposal({ agent: 'hermes', base: one.body.version })), /No such persona/],
     ];
+    // The page learns beforehand which Asks cannot be applied (only while they can still be answered).
+    const blocked = (await f.call('GET', `/hub/asks/${cases[0][1]}`)).body;
+    assert.match(blocked.agentEditBlocked ?? '', /changed after the edit was written/);
+    const bad = (await f.call('GET', `/hub/asks/${cases[1][1]}`)).body;
+    assert.match(bad.agentEditBlocked ?? '', /requires a passkey/);
     for (const [name, id, why] of cases) {
       const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
       assert.equal(done.status, 201, name);
@@ -353,11 +388,7 @@ test('an agent-edit Ask that cannot be trusted writes nothing, says why, and the
       assert.match(done.body.agentEdit.why, why, name);
     }
     assert.equal(f.files('teardown').length, 1, 'only the owner\'s own save');
-    // The page learns beforehand which Asks cannot be applied.
-    const blocked = (await f.call('GET', `/hub/asks/${cases[0][1]}`)).body;
-    assert.match(blocked.agentEditBlocked ?? '', /changed after the edit was written/);
-    const bad = (await f.call('GET', `/hub/asks/${cases[1][1]}`)).body;
-    assert.match(bad.agentEditBlocked ?? '', /requires a passkey/);
+    assert.equal((await f.call('GET', `/hub/asks/${cases[0][1]}`)).body.agentEditBlocked, undefined, 'an answered Ask is done, not blocked');
   } finally { await f.close(); }
 });
 
@@ -370,5 +401,251 @@ test('a role-only proposal carries into the prompt\'s first line, like the Edit 
     const view = (await f.call('GET', '/hub/team/researcher/persona')).body;
     assert.match(view.current.prompt.split('\n')[0], /agents: research cards with sources, shorter\. The owner/);
     assert.equal(view.current.role, 'research cards with sources, shorter');
+  } finally { await f.close(); }
+});
+
+// --- the profile change (ws-im1.4.2): Edit -> Ask -> Apply -> signed approved.json -> the host's result -> a newer export ---
+
+const CODEX = { provider: 'openai-codex', model: 'gpt-6-sol' };
+const SONNET = { provider: 'anthropic', model: 'claude-sonnet-5-5' };
+const HAIKU = { provider: 'anthropic', model: 'claude-haiku-5-5' };
+const DEEPSEEK = { provider: 'deepseek', model: 'deepseek-v4-pro' };
+const FLASH = { provider: 'deepseek', model: 'deepseek-flash' };
+const OPTIONS = { main: [CODEX, SONNET, HAIKU, DEEPSEEK, FLASH], briefs: [SONNET, HAIKU, DEEPSEEK, FLASH] };
+const keyPair = generateKeyPairSync('ed25519');
+const SIGNING = { HUB_SIGNING_KEY: keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') };
+const publicKey = parsePublicKey(publicKeyPem(keyPair.privateKey));
+const changeKey = (id, file) => `sections/inbox/agent-config/changes/${id}/${file}`;
+
+/** The host's export `minutes` before the fixture clock; `main` is Codex first, then Sonnet and DeepSeek (agentConfigJson), unless `main` says otherwise. */
+let exportSeq = 0;
+function putExport(f, { minutes = 12, main, options = OPTIONS } = {}) {
+  // Each export has its own name (the Hub remembers a name's content), a second later than the one before.
+  exportSeq += 1;
+  const raw = agentConfigJson({ now: new Date(f.clock.time + exportSeq * 1000), exportedMinutesAgo: minutes });
+  for (const name of ['main', 'briefs']) if (options?.[name]) raw.profiles[name].modelOptions = options[name];
+  if (main) { raw.profiles.main.model = { provider: main.provider, default: main.model }; raw.profiles.main.fallbacks = main.fallbacks; }
+  seedAgentConfig(f.fake, raw);
+  return raw;
+}
+const changeBody = (extra = {}) => ({ primary: SONNET, fallbacks: [CODEX, FLASH], why: 'Codex is slow today.', ...extra });
+const approvals = f => [...f.fake.objects.keys()].filter(name => name.includes('/agent-config/changes/') && name.endsWith('/approved.json'));
+const asksWritten = f => [...f.fake.objects.keys()].filter(name => /\/asks\/[^/]+\/ask\.json$/.test(name)).length;
+const hostResult = (f, id, outcome, code, extra = {}) => f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome, code, rolledBack: false, at: new Date(f.clock.time).toISOString(), ...extra }), 'application/json', { writer: 'hermes-config' });
+const detailsOf = async (f, agent = 'teardown') => (await f.call('GET', `/hub/team/${agent}/details`)).body;
+const postChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
+
+test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, Apply signs, the host answers, a newer export shows it live', async () => {
+  const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
+  try {
+    putExport(f);
+    const before = await detailsOf(f);
+    assert.equal(before.agent.editable.profile, true);
+    assert.deepEqual(before.settings.modelOptions, OPTIONS.main, 'the host\'s own list reaches the page');
+    assert.equal(before.change, undefined);
+
+    // 1. The request makes one Ask, written by the Hub: its id, project, origin, kind and passkey flag are the Hub's.
+    const made = await postChange(f, 'teardown', changeBody());
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const id = made.body.ask;
+    assert.match(id, new RegExp(`^${day}-profile-main-[a-z0-9]{4}$`));
+    assert.deepEqual(made.body.from, { ...CODEX, fallbacks: [SONNET, DEEPSEEK] });
+    assert.deepEqual(made.body.to, { ...SONNET, fallbacks: [CODEX, FLASH] });
+    const stored = f.fake.json(`sections/inbox/asks/${id}/ask.json`);
+    assert.deepEqual([stored.project, stored.from, stored.kind, stored.requirePasskey, stored.options], ['workspace-app', { tool: 'hub' }, 'approval', true, AGENT_EDIT_OPTIONS]);
+    assert.deepEqual(validateAgentEdit(stored), []);
+    assert.match(stored.context, /Now: openai-codex · gpt-6-sol, then anthropic · claude-sonnet-5-5, then deepseek · deepseek-v4-pro\./);
+    assert.match(stored.context, /New: anthropic · claude-sonnet-5-5, then openai-codex · gpt-6-sol, then deepseek · deepseek-flash\./);
+    assert.match(stored.context, /shared by Hermes, Researcher, Market researcher, Teardown and Planner\./);
+    assert.match(stored.context, /Hermes main restarts within about 5 minutes\. A chat or job running then stops\./);
+    assert.equal(approvals(f).length, 0, 'asking signs nothing');
+
+    // 2. The Hub's own read of that file: the Ask folder, the id check and the state all accept it. It is open and the Discord path cannot answer it.
+    assert.equal(validId(id), true);
+    const open = (await f.call('GET', `/hub/asks/${id}`)).body;
+    assert.deepEqual([open.state, open.agentEdit.op, open.requirePasskey, open.agentEditBlocked], ['open', 'profile', true, undefined]);
+    assert.ok(JSON.stringify((await f.call('GET', '/hub/inbox')).body).includes(id), 'it is in the inbox, among the Asks');
+    assert.deepEqual(discordEligible(stored), { ok: false, reason: 'This Ask requires a passkey.' });
+    assert.equal(discordEligible({ ...stored, requirePasskey: false }).ok, false, 'and still not if the flag were missing');
+
+    // 3. Apply signs: one approved.json, create-only, with the old chain read from the export at this moment.
+    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal(done.body.agentEdit.applied, true);
+    assert.deepEqual(approvals(f), [changeKey(id, 'approved.json')]);
+    const signed = f.fake.json(changeKey(id, 'approved.json'));
+    assert.deepEqual(Object.keys(signed).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'signature', 'to', 'v']);
+    assert.deepEqual([signed.v, signed.kind, signed.change, signed.ask, signed.profile, signed.by], [1, 'profile-change', id, id, 'main', 'owner']);
+    assert.deepEqual([signed.from, signed.to], [made.body.from, made.body.to]);
+    assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 24 * 3600 * 1000);
+    assert.equal(verify(signed, publicKey), true, 'the Hub\'s signature verifies with the public key');
+    assert.equal(verify({ ...signed, to: { ...signed.to, model: 'claude-haiku-5-5' } }, publicKey), false);
+    assert.equal((await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' })).status, 409, 'answered twice');
+    assert.equal(approvals(f).length, 1, 'one Ask makes one approval');
+
+    // 4. Waiting: Details of any agent on the profile says so, and a second request for the profile is refused until the host answers.
+    f.clock.time += 60000;
+    const waiting = await detailsOf(f, 'hermes');
+    assert.deepEqual([waiting.change.state, waiting.change.id, waiting.change.to.model], ['waiting', id, 'claude-sonnet-5-5']);
+    assert.equal((await postChange(f, 'planner', changeBody({ fallbacks: [] }))).status, 409);
+
+    // 5. The host applied it: a result with the card API's mark. The export does not show it yet.
+    f.clock.time += 120000;
+    hostResult(f, id, 'applied', 'ok');
+    assert.equal((await detailsOf(f)).change.state, 'applied');
+    // 6. A newer export, made at or after the result, with the new settings: live in Details, on the Team card and in Auto's label.
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, main: { ...SONNET, fallbacks: [CODEX, FLASH] } });
+    const live = await detailsOf(f);
+    assert.equal(live.change.state, 'live');
+    assert.deepEqual(live.settings.model, { provider: 'anthropic', default: 'claude-sonnet-5-5' });
+    assert.deepEqual(live.settings.fallbacks, [CODEX, FLASH]);
+    assert.equal((await f.call('GET', '/hub/team')).body.agents.find(agent => agent.id === 'teardown').model, 'claude-sonnet-5-5 · then gpt-6-sol, deepseek-flash');
+    f.clock.time += 31000;
+    assert.equal((await f.call('GET', '/hub/chat')).body.autoFirst, 'Sonnet');
+  } finally { await f.close(); }
+});
+
+test('profile change: signed out, no key, no list, a model the host does not offer, no change and every other bad body are refused before an Ask is written', async () => {
+  const f = await fixture({ env: SIGNING });
+  const keyless = await fixture();
+  try {
+    assert.equal((await postChange(f, 'teardown', changeBody(), null)).status, 401, 'signed out');
+    assert.equal((await postChange(f, 'teardown', changeBody())).status, 409, 'no export yet');
+    putExport(f, { options: {} });
+    const noList = await postChange(f, 'teardown', changeBody());
+    assert.equal(noList.status, 409);
+    assert.match(noList.body.error, /has not published its model list/);
+    putExport(f);
+    const refused = async (data, status, pattern, agent = 'teardown') => {
+      const got = await postChange(f, agent, data);
+      assert.equal(got.status, status, `${JSON.stringify(data).slice(0, 80)}: ${JSON.stringify(got.body)}`);
+      assert.match(got.body.error, pattern);
+    };
+    await refused(changeBody({ primary: { provider: 'anthropic', model: 'claude-opus-5' } }), 409, /not a model the Hermes host offers/);
+    await refused(changeBody({ fallbacks: [{ provider: 'anthropic', model: 'claude-opus-5' }] }), 409, /not a model the Hermes host offers/);
+    await refused({ primary: CODEX, fallbacks: [SONNET, DEEPSEEK] }, 409, /uses already/);
+    await refused(changeBody({ primary: CODEX, fallbacks: [CODEX] }), 400, /lists a model twice/);
+    await refused(changeBody({ fallbacks: [HAIKU, DEEPSEEK, FLASH, CODEX, { provider: 'x', model: 'y' }] }), 400, /0 to 4/);
+    await refused(changeBody({ primary: { provider: 'anthropic' } }), 400, /primary is/);
+    await refused(changeBody({ primary: { ...SONNET, key: 'x' } }), 400, /primary is/);
+    await refused(changeBody({ why: `key: sk-ant-${'c'.repeat(30)}` }), 400, /looks like a secret/);
+    await refused(changeBody({ profile: 'briefs' }), 400, /no field profile/);
+    await refused(changeBody({ model: 'x' }), 400, /no field model/);
+    for (const name of ['toolsets', 'platformToolsets', 'skills', 'soul', 'cron', 'jobs', 'terminal', 'provider']) await refused(changeBody({ [name]: 'x' }), 403, /view-only/);
+    await refused(changeBody(), 404, /no Hermes profile/, 'claude');
+    await refused(changeBody(), 404, /No such agent/, 'nobody');
+    // Briefs cannot pick Codex: the host's list for briefs has none.
+    await refused(changeBody({ primary: CODEX, fallbacks: [] }), 409, /not a model the Hermes host offers/, 'briefs');
+    assert.equal(asksWritten(f), 0, 'nothing was written');
+    // An export 8 hours old: the settings may have changed since.
+    f.clock.time += 8 * 3600 * 1000;
+    const old = await postChange(f, 'teardown', changeBody());
+    assert.equal(old.status, 409);
+    assert.match(old.body.error, /is old/);
+    // A server with no signing key cannot ask at all.
+    putExport(keyless);
+    const off = await postChange(keyless, 'teardown', changeBody());
+    assert.equal(off.status, 409);
+    assert.match(off.body.error, /no signing key/);
+    assert.equal(asksWritten(f) + asksWritten(keyless), 0);
+  } finally { await f.close(); await keyless.close(); }
+});
+
+test('profile change: Apply signs nothing for an Ask that cannot be trusted, and the answer stands', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const profileEdit = (extra = {}) => ({ op: 'profile', profile: 'main', primary: SONNET, fallbacks: [CODEX], ...extra });
+    const cases = [
+      ['no passkey', agentEditAsk(f, 'p001', profileEdit(), { requirePasskey: false }), /requires a passkey/],
+      ['other options', agentEditAsk(f, 'p002', profileEdit(), { options: [{ id: 'apply', label: 'Do it' }, AGENT_EDIT_OPTIONS[1]] }), /exactly the options/],
+      ['a view-only key', agentEditAsk(f, 'p003', { ...profileEdit(), toolsets: ['web'] }), /view-only/],
+      ['a model the host does not offer', agentEditAsk(f, 'p004', profileEdit({ primary: { provider: 'anthropic', model: 'claude-opus-5' } })), /not a model the Hermes host offers/],
+      ['no change', agentEditAsk(f, 'p005', profileEdit({ primary: CODEX, fallbacks: [SONNET, DEEPSEEK] })), /uses already/],
+      ['a duplicate', agentEditAsk(f, 'p006', profileEdit({ fallbacks: [SONNET] })), /twice/],
+      ['another profile than the export has', agentEditAsk(f, 'p007', profileEdit({ profile: 'prod' })), /profile is main or briefs/],
+    ];
+    assert.match((await f.call('GET', `/hub/asks/${cases[3][1]}`)).body.agentEditBlocked ?? '', /not a model the Hermes host offers/);
+    for (const [name, id, why] of cases) {
+      const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+      assert.equal(done.status, 201, name);
+      assert.equal(done.body.state, 'answered', name);
+      assert.equal(done.body.agentEdit.applied, false, name);
+      assert.match(done.body.agentEdit.why, why, name);
+    }
+    assert.equal(approvals(f).length, 0, 'nothing was signed');
+    // The same good Ask: signed out of the passkey gate (no Remote-User) there is no one to sign for, and an old export is not trusted either.
+    const open = agentEditAsk(f, 'p008', profileEdit());
+    assert.equal((await f.call('GET', `/hub/asks/${open}`)).body.agentEditBlocked, undefined);
+    f.clock.time += 8 * 3600 * 1000;
+    assert.match((await f.call('GET', `/hub/asks/${open}`)).body.agentEditBlocked ?? '', /is old/);
+    const late = await f.call('POST', `/hub/asks/${open}/answer`, { choice: 'apply' });
+    assert.equal(late.body.agentEdit.applied, false);
+    assert.equal(approvals(f).length, 0);
+    // A skip writes nothing at all.
+    putExport(f, { minutes: 0 });
+    const skip = agentEditAsk(f, 'p009', profileEdit());
+    assert.equal((await f.call('POST', `/hub/asks/${skip}/answer`, { choice: 'skip' })).body.agentEdit, undefined);
+    assert.equal(approvals(f).length, 0);
+  } finally { await f.close(); }
+});
+
+test('profile change: the old settings are read at Apply, not when the Ask was written; a waiting change blocks a second approval; a late one does not', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const edit = { op: 'profile', profile: 'main', primary: SONNET, fallbacks: [CODEX] };
+    const first = agentEditAsk(f, 'q001', edit);
+    const second = agentEditAsk(f, 'q002', { ...edit, fallbacks: [FLASH] });
+    // The host's settings moved between asking and answering (newer export, one minute on).
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, main: { ...HAIKU, fallbacks: [DEEPSEEK] } });
+    const done = await f.call('POST', `/hub/asks/${first}/answer`, { choice: 'apply' });
+    assert.equal(done.body.agentEdit.applied, true, JSON.stringify(done.body));
+    assert.deepEqual(f.fake.json(changeKey(first, 'approved.json')).from, { ...HAIKU, fallbacks: [DEEPSEEK] });
+    // A second Ask for the same profile, while the first still waits for the host.
+    const blocked = await f.call('POST', `/hub/asks/${second}/answer`, { choice: 'apply' });
+    assert.equal(blocked.body.agentEdit.applied, false);
+    assert.match(blocked.body.agentEdit.why, /still waiting for the Hermes host/);
+    assert.equal(approvals(f).length, 1);
+    // The briefs profile is its own: a change there is not blocked by the main one.
+    const other = await postChange(f, 'briefs', { primary: SONNET, fallbacks: [DEEPSEEK] });
+    assert.equal(other.status, 201, JSON.stringify(other.body));
+    // Past its 24 hours with no result the first is late: Details says so, and it no longer blocks a new request.
+    f.clock.time += 25 * 3600 * 1000;
+    putExport(f, { minutes: 0, main: { ...HAIKU, fallbacks: [DEEPSEEK] } });
+    const lateDetails = await detailsOf(f);
+    assert.deepEqual([lateDetails.change.state, lateDetails.change.reason], ['late', 'The Hermes host did not pick this up.']);
+    // A day after that it is not shown any more.
+    f.clock.time += 24 * 3600 * 1000;
+    putExport(f, { minutes: 0, main: { ...HAIKU, fallbacks: [DEEPSEEK] } });
+    assert.equal((await detailsOf(f)).change, undefined);
+    const retry = await postChange(f, 'teardown', changeBody({ primary: FLASH, fallbacks: [] }));
+    assert.equal(retry.status, 201, JSON.stringify(retry.body));
+  } finally { await f.close(); }
+});
+
+test('profile change: a result counts only with the host\'s mark and beside a good approval; failures carry words, never the host\'s text', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const made = await postChange(f, 'teardown', changeBody());
+    const id = made.body.ask;
+    assert.equal((await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' })).body.agentEdit.applied, true);
+    f.clock.time += 60000;
+    // No mark, or the passphrase's: ignored.
+    f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date(f.clock.time).toISOString() }), 'application/json');
+    assert.equal((await detailsOf(f)).change.state, 'waiting', 'a result with no mark is ignored');
+    f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date(f.clock.time).toISOString() }), 'application/json', { writer: 'agent' });
+    assert.equal((await detailsOf(f)).change.state, 'waiting', 'nor one from another token');
+    // A failed result: the state, the words for the code and "the old settings stay".
+    hostResult(f, id, 'failed', 'missing-key', { rolledBack: false });
+    const failed = (await detailsOf(f)).change;
+    assert.deepEqual([failed.state, failed.code, failed.reason], ['failed', 'missing-key', 'The host has no API key for one of the models']);
+    assert.equal(JSON.stringify(failed).includes('stderr'), false);
+    // The next change is allowed once the host has answered, failed or not.
+    const next = await postChange(f, 'teardown', changeBody({ fallbacks: [FLASH] }));
+    assert.equal(next.status, 201, JSON.stringify(next.body));
   } finally { await f.close(); }
 });

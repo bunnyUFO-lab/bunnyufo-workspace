@@ -129,10 +129,13 @@ test('4. a passkey-only Ask has no buttons: not listed, and a click on it is ref
     const pictured = f.ask('pictured', { options: [{ id: 'A', label: 'Yes', image: 'a.png' }, { id: 'B', label: 'No' }] }, {}, 'b4b4');
     // An agent-edit Ask (ws-im1.4.1) stays in the Hub even when it forgot requirePasskey: only the web answer applies it.
     const edit = f.ask('edit', { agentEdit: { op: 'persona', agent: 'teardown', base: 'default', prompt: 'x' }, options: [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }] }, {}, 'b5b5');
+    // The Ask the Hub writes itself for a change of a Hermes profile's model (ws-im1.4.2): the Hub's own file, with the passkey flag, and still never a button.
+    const profile = f.ask('profile', { from: { tool: 'hub' }, kind: 'approval', requirePasskey: true, agentEdit: { op: 'profile', profile: 'main', primary: { provider: 'anthropic', model: 'claude-sonnet-5-5' }, fallbacks: [] }, options: [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }] }, {}, 'b6b6');
+    const unflagged = f.ask('profile-bare', { agentEdit: { op: 'profile', profile: 'main', primary: { provider: 'anthropic', model: 'claude-sonnet-5-5' }, fallbacks: [] }, options: [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }] }, {}, 'b7b7');
     const { status, body } = await f.list();
     assert.equal(status, 200);
     assert.deepEqual(body.asks.map(item => item.id), [plain.id], 'Only the simple Ask is listed.');
-    for (const made of [locked, drawn, pictured, edit]) {
+    for (const made of [locked, drawn, pictured, edit, profile, unflagged]) {
       const refused = await f.answer(f.answerBody(made, f.revOf(made)));
       assert.equal(refused.status, 403, made.id);
       assert.equal(f.fake.text(f.answerKey(made)), null);

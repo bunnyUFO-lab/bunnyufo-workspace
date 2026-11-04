@@ -1,0 +1,41 @@
+{
+  "note": "Made once with a throwaway key; the private key was discarded. The Hermes host verifies canonical(rest) against signature with the public key (scripts/assistant/config-export/apply_change.py in the homelab repo keeps a copy of this file). The by value holds a non-ASCII letter on purpose.",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAb4jMs6UgG9BYBhkTH0xIrv1bjxCuCYx3LkGDIkxMmyE=\n-----END PUBLIC KEY-----\n",
+  "canonical": "{\"ask\":\"20261103-profile-main-ab12\",\"at\":\"2026-11-03T10:00:00.000Z\",\"by\":\"owner-é\",\"change\":\"20261103-profile-main-ab12\",\"expires\":\"2026-11-04T10:00:00.000Z\",\"from\":{\"fallbacks\":[{\"model\":\"claude-sonnet-5-5\",\"provider\":\"anthropic\"},{\"model\":\"deepseek-v4-pro\",\"provider\":\"deepseek\"}],\"model\":\"gpt-6-sol\",\"provider\":\"openai-codex\"},\"kind\":\"profile-change\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"profile\":\"main\",\"to\":{\"fallbacks\":[{\"model\":\"deepseek-flash\",\"provider\":\"deepseek\"}],\"model\":\"claude-sonnet-5-5\",\"provider\":\"anthropic\"},\"v\":1}",
+  "approved": {
+    "v": 1,
+    "kind": "profile-change",
+    "change": "20261103-profile-main-ab12",
+    "profile": "main",
+    "from": {
+      "provider": "openai-codex",
+      "model": "gpt-6-sol",
+      "fallbacks": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5"
+        },
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro"
+        }
+      ]
+    },
+    "to": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "fallbacks": [
+        {
+          "provider": "deepseek",
+          "model": "deepseek-flash"
+        }
+      ]
+    },
+    "expires": "2026-11-04T10:00:00.000Z",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+    "at": "2026-11-03T10:00:00.000Z",
+    "by": "owner-é",
+    "ask": "20261103-profile-main-ab12",
+    "signature": "v6QiOLa4gkp7nm8gM3PaREYHR8noAtF81JKNiR8jki3ZThk9xzhhDEKGBDJDntGmUxqCOjH7C1At9OXVsqlKCg=="
+  }
+}

@@ -8,6 +8,7 @@
 import { SHEET_ID_RE } from './hub-sheets.mjs';
 // The chat model labels are those of chat-models.mjs: the Team card names the model an edited persona starts a chat on.
 import { CHAT_MODELS } from './chat-models.mjs';
+import { exportFreshness } from './hub-agent-config.mjs';
 
 /** Mirrors `BUILTIN_KEYS` in src/hub/team/sprites.ts; site/api/test/hub-team.test.mjs keeps them equal. */
 export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'architect', 'developer', 'reviewer', 'qa', 'artist', 'lib_b', 'lib_c', 'lib_d', 'dev_teal', 'qa_violet', 'owl_snow', 'artist_blue', 'arch_red'];
@@ -92,15 +93,23 @@ export function agentStatuses({ working = [], pc = null, hermes = null, lastChat
   ];
 }
 
+/** The Team card's model line from a profile's settings: the primary, then the fallbacks in order. */
+const modelLine = block => `${block.model.default}${block.fallbacks.length ? ` · then ${block.fallbacks.map(item => item.model).join(', ')}` : ' · no fallback'}`;
+
 /**
  * The Team answer: each agent with its status, task and sprite. `choices` maps agent id to its newest choice. `personas` is the effective persona
  * table (hub-personas.mjs): an agent in it takes the persona's role line, is `editable: { persona: true }`, and names its chat model once edited.
+ * An agent on a Hermes profile is also `editable: { profile: true }` (the model and fallback order, ws-im1.4.2); with a fresh `exported` (hub-agent-config.mjs)
+ * its `model` line is built from the host's own settings, else it stays the text above.
  */
-export function buildTeam({ statuses, choices = {}, personas = [] }) {
+export function buildTeam({ statuses, choices = {}, personas = [], exported = null, at = new Date() }) {
   const by = new Map(statuses.map(row => [row.id, row]));
   return AGENTS.map(agent => {
     const row = by.get(agent.id) ?? { status: 'offline', task: '' };
     const persona = personas.find(entry => entry.id === agent.id);
-    return { ...agent, ...(persona ? { role: persona.role, editable: { persona: true }, ...(persona.edited ? { chatModel: CHAT_MODELS.find(entry => entry.id === persona.model)?.label ?? persona.model } : {}) } : {}), status: row.status, task: row.task, ...(row.sessions ? { sessions: row.sessions } : {}), sprite: spriteOf(agent, choices[agent.id] ?? null) };
+    const block = agent.profile && exported && exportFreshness(exported, at) === 'fresh' ? exported.profiles[agent.profile] : null;
+    const model = block?.model?.default ? modelLine(block) : agent.model;
+    const editable = persona || agent.profile ? { ...(persona ? { persona: true } : {}), ...(agent.profile ? { profile: true } : {}) } : null;
+    return { ...agent, model, ...(editable ? { editable } : {}), ...(persona ? { role: persona.role, ...(persona.edited ? { chatModel: CHAT_MODELS.find(entry => entry.id === persona.model)?.label ?? persona.model } : {}) } : {}), status: row.status, task: row.task, ...(row.sessions ? { sessions: row.sessions } : {}), sprite: spriteOf(agent, choices[agent.id] ?? null) };
   });
 }
