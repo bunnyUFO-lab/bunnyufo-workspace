@@ -252,6 +252,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!INBOXES.has(sectionId)) return undefined;
     // Whatever goes into bead-marks/ through this API is tagged, so the Hub reads an owner verdict only from a file it wrote itself.
     if (/^bead-marks\//i.test(file)) return { writer: 'card-api' };
+    // A persona edit is the prompt of every chat: whatever this API writes there carries a mark, and the Hub ignores a marked file. Only the Hub's own write has none.
+    if (/^team\/[^/]+\/persona-/i.test(file)) return { writer: 'card-api' };
     // Same for the Not useful records: only a file with no mark is the Hub's.
     if (/^feedback\//i.test(file)) return { writer: 'card-api' };
     // The Away switch is the Hub's own file (it writes it with no mark): anything this API writes there carries one, and hub-hooks ignores it.
@@ -503,6 +505,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         ownerOnly(caller, sectionId, file);
+        // A presigned URL carries no metadata, so an upload there would land unmarked and count: refused for every caller, the passphrase too.
+        if (INBOXES.has(sectionId) && /^team\/[^/]+\/persona-/i.test(file)) throw new HttpError(403, 'Persona files are written by the Hub only, never by upload URL.');
         agentConfigOnly(caller, sectionId, file, { upload: true });
         markFiles(caller, sectionId, file, { upload: true });
         feedbackFiles(caller, sectionId, file, { upload: true });

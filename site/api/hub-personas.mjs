@@ -223,6 +223,7 @@ export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = 
     let prompt = edit.prompt;
     // The role line is the one thing the prompt's first line repeats: a role change with the prompt left alone carries it into the prompt.
     if (prompt === was.text.trim() && edit.role !== was.role) prompt = syncRole(prompt, was.role, edit.role);
+    if (prompt.length > PERSONA_LIMITS.prompt) throw fail(`The prompt is at most ${PERSONA_LIMITS.prompt} characters, and the new role line makes it longer. Shorten the role or the prompt.`, 400);
     if (prompt === was.text.trim() && edit.role === was.role && edit.model === was.model) throw fail('Nothing changed.', 400);
     const at$ = at.toISOString();
     const id = await write(agentId, {
@@ -235,6 +236,8 @@ export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = 
   /** Writes a new version that copies the chosen one (`to`: a version id or `default`), with `revertOf`. */
   async function revert(agentId, { to, base } = {}, user, at) {
     need(agentId);
+    const stray = Object.keys(arguments[1] ?? {}).filter(name => name !== 'to' && name !== 'base');
+    if (stray.length) throw fail(`A revert takes only to and base, not ${stray.slice(0, 3).join(', ')}.`, 400);
     if (typeof to !== 'string' || !(to === 'default' || VERSION_ID_RE.test(to))) throw fail('Say which version to go back to.', 400);
     if (typeof base !== 'string' || !(base === 'default' || VERSION_ID_RE.test(base))) throw fail('Say which version you were looking at (base).', 400);
     const newest = await current(agentId);

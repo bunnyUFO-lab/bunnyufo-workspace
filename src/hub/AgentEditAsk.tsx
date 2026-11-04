@@ -6,8 +6,8 @@ import { text } from './askAnswer'
 import { agentEditOf } from './agentEditField'
 import './team/agentDetails.css'
 
-function Pair({ label, old, next, field }: { label: string; old: string | undefined; next: string | undefined; field: string }) {
-  if (next === undefined) return <p className="team-dim" data-edit-ask-same={field}>{label}: unchanged.</p>
+function Pair({ label, old, next, field, note = '' }: { label: string; old: string | undefined; next: string | undefined; field: string; note?: string }) {
+  if (next === undefined) return <p className="team-dim" data-edit-ask-same={field}>{label}: unchanged{note}.</p>
   return (
     <div className="ae-ask-pair" data-edit-ask-field={field}>
       <div><h4>{label}: now</h4><pre className="ad-pre" data-edit-ask-old={field}>{old === undefined ? '(loading)' : old}</pre></div>
@@ -38,7 +38,7 @@ export default function AgentEditAsk({ ask }: { ask: Ask }) {
       <p>Changes the chat persona of <b>{edit.agent}</b>.</p>
       {failed && <p className="hub-muted" role="note">The text it has now could not be loaded.</p>}
       <Pair label="Role line" field="role" old={view?.current.role} next={edit.role} />
-      <Pair label="Prompt" field="prompt" old={view?.current.prompt} next={edit.prompt} />
+      <Pair label="Prompt" field="prompt" old={view?.current.prompt} next={edit.prompt} note={edit.role !== undefined && edit.role !== view?.current.role ? ', except that the role in its first line changes to the new role line' : ''} />
       <Pair label="Chat model" field="model" old={view ? view.models.find(item => item.id === view.current.model)?.label ?? view.current.model : undefined} next={edit.model === undefined ? undefined : view?.models.find(item => item.id === edit.model)?.label ?? edit.model} />
       {open && !ask.agentEditBlocked && view && view.current.version !== edit.base && <p className="hub-muted" role="note" data-edit-ask-stale>The persona changed after this edit was written, so Apply would be refused.</p>}
       {open && !ask.agentEditBlocked && <p className="hub-muted">Apply saves one new version you can revert. Nothing changes if you leave it.</p>}

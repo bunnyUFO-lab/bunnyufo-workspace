@@ -180,6 +180,21 @@ test('save refuses a stale base (409), a no-op, a secret, an unlisted model, and
   } finally { await f.close(); }
 });
 
+test('a role change that would push the prompt past 8000 characters is a 400, not a version the page cannot read', async () => {
+  const f = await fixture();
+  try {
+    const long = `${TEARDOWN.text} ` + 'x '.repeat((8000 - TEARDOWN.text.length - 1) / 2);
+    const one = await f.save('teardown', edit({ prompt: long.slice(0, 7990) }));
+    assert.equal(one.status, 200, JSON.stringify(one.body));
+    const grow = await f.save('teardown', edit({ prompt: one.body.current.prompt, role: 'a much longer role line, '.repeat(6), base: one.body.version }));
+    assert.equal(grow.status, 400, JSON.stringify(grow.body));
+    assert.match(grow.body.error, /at most 8000/);
+    assert.equal(f.files('teardown').length, 1);
+    const stray = await f.revert('teardown', { to: 'default', base: one.body.version, meta: { toolsets: [] } });
+    assert.equal(stray.status, 400, 'a revert takes exactly to and base');
+  } finally { await f.close(); }
+});
+
 test('a role change on an unedited prompt carries into its first line; one with an edited prompt does not touch it', async () => {
   const f = await fixture();
   try {

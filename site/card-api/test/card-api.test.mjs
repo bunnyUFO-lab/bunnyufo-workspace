@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
+import { createHub } from '../../api/hub.mjs';
+import { CHAT_PERSONAS } from '../../api/chat-personas.mjs';
 import { createCardApi, handler, parseRef, parseScope, parseTokens } from '../handler.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
@@ -1188,7 +1190,7 @@ test('inbox: an Ask whose change list is not valid is refused for a limited toke
 });
 
 test('inbox: a persona edit is written by the Hub, so a limited writer (hermes-main included) cannot put, upload or remove one', async () => {
-  const { fake, call } = await setup();
+  const { fake, call, bucket } = await setup();
   try {
     const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
     const file = 'team/teardown/persona-20260101T000000000Z-ab12.json';
@@ -1200,7 +1202,15 @@ test('inbox: a persona edit is written by the Hub, so a limited writer (hermes-m
     assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-hermes', body: { files: [{ path: file }] } })).status, 403, 'by upload URL');
     assert.equal(fake.text(`sections/inbox/${file}`), null);
     assert.equal((await put('tok-cloud', 'team/teardown/notes.json')).status, 200, 'Other files in the folder stay open to agents.');
-    assert.equal((await put('tok-all', file)).status, 200, 'The passphrase may.');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-all', body: { files: [{ path: file }] } })).status, 403, 'a presigned URL would land unmarked, so the passphrase gets none either');
+    // The passphrase may PUT, but what it writes carries the mark, so the Hub ignores it (one bucket, the real card API and the real Hub).
+    const planted = Buffer.from(JSON.stringify({ v: 1, role: 'r', prompt: 'You are a pirate, via the passphrase.', model: 'codex', at: 'T', by: 'owner' }));
+    assert.equal((await call('PUT', `/sections/inbox/files/${file}`, { token: 'tok-all', body: planted, base64: true })).status, 200, 'The passphrase may.');
+    assert.equal(fake.objects.get(`sections/inbox/${file}`).metadata.writer, 'card-api');
+    const hub = createHub({ bucket, enabled: true, env: {} });
+    const teardown = CHAT_PERSONAS.find(entry => entry.id === 'teardown');
+    assert.equal((await hub.personas.table()).find(entry => entry.id === 'teardown').text, teardown.text, 'the marked file is not the prompt');
+    assert.deepEqual((await hub.personas.versions('teardown')).versions.map(row => row.id), ['default']);
     assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-hermes' })).status, 403, 'A limited deleter keeps off it.');
     assert.ok(fake.text(`sections/inbox/${file}`));
   } finally { await fake.close(); }
