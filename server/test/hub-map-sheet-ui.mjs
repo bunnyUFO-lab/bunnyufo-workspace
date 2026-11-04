@@ -144,6 +144,7 @@ try {
     assert.equal(await panel.locator('[data-mark-unblock]').count(), 0, 'Unblock is for a task that waits on the owner.');
     assert.equal(await panel.locator('h4', { hasText: "What's needed" }).count(), 0);
     await noSideways(page, `${label} open task marks`);
+    if (process.env.BUW_SHOTS) await page.screenshot({ path: `${process.env.BUW_SHOTS}/open-task-marks-${label}.png` });
 
     step(`${label}: a done feature says when it finished, not that nothing happened`);
     panel = await sheet(page, 'sd-f-done');
