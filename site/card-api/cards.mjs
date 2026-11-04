@@ -47,7 +47,7 @@
 //        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--prose-ok]
 //        --changes files a plan (ws-qdh.3): a JSON list of 1 to 20 changes, each { op, ... } with op create (title, type task|feature|epic, parent?, description?,
 //        labels?), update (bead, title?, description?), dep (bead, blocks: bead must be done before blocks), close (bead, reason), label (bead, add?, remove?) or card
-//        (card: assistant/<folder>). A bead is a Beads id, or #n for the n-th change when that one is a create. Labels: wayfinder:<type>, milestone, needs-owner, later.
+//        (card: assistant/<folder>). A bead is a Beads id, or #n for the n-th change when that one is a create. Labels: wayfinder:<type>, milestone, roadmap, needs-owner, later.
 //        The Hub shows one Design review row per change (approve, change or skip); the Ask is --kind decision and takes no --option, --decision or --image. A command
 //        written into a change's text is refused; the card API and the Hub check the same rules.
 //        put an Ask (its pictures first, ask.json last) and post an ask-created event; prints its id
@@ -1372,7 +1372,7 @@ const CHANGE_TYPES = ['task', 'feature', 'epic'];
 const CHANGE_LIMITS = { title: 120, description: 2000, reason: 200, labels: 5 };
 const CHANGE_BEAD = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
 const CHANGE_CARD = /^assistant\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
-const CHANGE_LABEL = /^(?:wayfinder:[a-z]{2,20}|milestone|needs-owner|later)$/;
+const CHANGE_LABEL = /^(?:wayfinder:[a-z]{2,20}|milestone|roadmap|needs-owner|later)$/;
 
 export function validateChanges(changes) {
   const problems = [];
@@ -1394,7 +1394,7 @@ export function validateChanges(changes) {
   const labelsOk = (at, name, value) => {
     if (value === undefined) return;
     if (!Array.isArray(value) || value.length < 1 || value.length > CHANGE_LIMITS.labels || new Set(value).size !== value.length || !value.every(label => typeof label === 'string' && CHANGE_LABEL.test(label))) {
-      problems.push(`${at}: ${name} is 1 to ${CHANGE_LIMITS.labels} different labels from: wayfinder:<type>, milestone, needs-owner, later`);
+      problems.push(`${at}: ${name} is 1 to ${CHANGE_LIMITS.labels} different labels from: wayfinder:<type>, milestone, roadmap, needs-owner, later`);
     }
   };
   changes.forEach((change, index) => {

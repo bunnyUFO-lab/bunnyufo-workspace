@@ -2144,6 +2144,7 @@ test('ask create --changes: the list is stored as written, the Ask is kind decis
       ['an unknown op', [{ op: 'delete', bead: 'wk-1' }], /op is one of/],
       ['an unknown field', [{ op: 'close', bead: 'wk-1', reason: 'x', force: true }], /has no field force/],
       ['an unknown label', [{ op: 'label', bead: 'wk-1', add: ['p0'] }], /labels from/],
+      ['a wrong-case roadmap label', [{ op: 'label', bead: 'wk-1', add: ['Roadmap'] }], /labels from/],
       ['a bad bead id', [{ op: 'close', bead: 'WK 1', reason: 'x' }], /Beads id/],
       ['a ref to a later create', [{ op: 'dep', bead: '#2', blocks: 'wk-1' }, { op: 'create', title: 'x' }], /Beads id, or #n/],
       ['an oversize description', [{ op: 'update', bead: 'wk-1', description: 'x'.repeat(2001) }], /at most 2000/],
@@ -2162,6 +2163,9 @@ test('ask create --changes: the list is stored as written, the Ask is kind decis
     assert.notEqual(mixed.code, 0);
     assert.match(mixed.stderr, /leave out --option, --decision and --image/);
     assert.equal(keys('asks/').length, before, 'Nothing was written for a refused list.');
+    await writeFile(file, JSON.stringify([{ op: 'create', title: 'Agent editing', type: 'epic', labels: ['roadmap'] }, { op: 'label', bead: 'wk-1', add: ['roadmap'], remove: ['milestone'] }]));
+    const roadmap = await cli('api', 'ask', 'create', '--project', 'wk', '--question', 'Make it a roadmap?', '--changes', file);
+    assert.equal(roadmap.code, 0, `roadmap is a label a plan may use: ${roadmap.stderr}`);
   } finally { await close(); }
 });
 

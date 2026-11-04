@@ -646,7 +646,7 @@ Library, and the owner approves them row by row. Nothing in Beads changes until 
 - `changes`: 1 to 20 changes, `op` one of `create` (`title` 1 to 120, `type` task, feature or epic, `parent`, `description` at most 2000, `labels`),
   `update` (`bead`, `title`, `description`), `dep` (`bead` must be done before `blocks`), `close` (`bead`, `reason` at most 200), `label`
   (`bead`, `add`, `remove`) and `card` (`assistant/<folder>`, copied into the project's section). A bead is a Beads id, or `#n` for the n-th
-  change when that one is a `create`. Labels are only `wayfinder:<type>`, `milestone`, `needs-owner` and `later`. Unknown ops, fields and
+  change when that one is a `create`. Labels are only `wayfinder:<type>`, `milestone`, `roadmap`, `needs-owner` and `later`. Unknown ops, fields and
   labels are refused, and so is a command written into any text (the same check as `--prose-ok` skips elsewhere; there is no skip here).
 - One validator, `site/api/ask-changes.mjs`: the card API answers 422 to a limited token's `ask.json` that fails it, the Hub drops a failing
   list when it reads the Ask, and the cards client carries a copy that `scripts/cards.test.mjs` keeps equal.
