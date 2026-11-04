@@ -1239,3 +1239,61 @@ test('inbox: an Ask whose agentEdit is not valid is refused for a limited token 
     assert.equal((await putAsk('tok-all', 'e-3', ask({ op: 'x' }))).status, 200, 'The passphrase is not limited.');
   } finally { await fake.close(); }
 });
+
+test('inbox: the hermes-config token creates a change result once and reads the signed changes and results only, in the inbox only', async () => {
+  const { fake, call } = await setup();
+  try {
+    const id = '20261103-profile-main-ab12';
+    const approved = `agent-config/changes/${id}/approved.json`;
+    const result = `agent-config/changes/${id}/result.json`;
+    const url = name => `/sections/inbox/files/${name}`;
+    const put = (token, name, headers = { 'If-None-Match': '*' }, body = '{"v":1}') => call('PUT', url(name), { token, body: Buffer.from(body), base64: true, headers });
+    // The Hub's approval (the passphrase writes it here; the real Hub writes it with its own credentials).
+    assert.equal((await put('tok-all', approved)).status, 200);
+    // The host creates its result once, marked, never an upload URL, never the approval.
+    const created = await put('tok-hermes-config', result, { 'If-None-Match': '*', 'x-amz-meta-writer': 'agent' });
+    assert.equal(created.status, 200);
+    assert.deepEqual(fake.objects.get(`sections/inbox/${result}`).metadata, { writer: 'hermes-config' });
+    assert.equal((await put('tok-hermes-config', result)).status, 412, 'not replaced');
+    assert.equal((await put('tok-hermes-config', `agent-config/changes/${id}/result.json`, {})).status, 403, 'no replace');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-hermes-config', body: { files: [{ path: `agent-config/changes/20261103-profile-main-ab13/result.json` }] } })).status, 403, 'no upload URL');
+    for (const name of [approved, `agent-config/changes/${id}/other.json`, `agent-config/changes/${id}/sub/result.json`, 'agent-config/changes/result.json', 'agent-config/changes/not-an-ask/result.json', `agent-config/changes/${id}/result.json.bak`]) {
+      assert.equal((await put('tok-hermes-config', name.replace(id, '20261103-profile-main-ab14'))).status, 403, `write ${name}`);
+    }
+    for (const token of ['tok-hermes-main', 'tok-hermes', 'tok-agent', 'tok-pc-runner', 'tok-cloud', 'tok-deleter']) {
+      assert.equal((await put(token, `agent-config/changes/20261103-profile-main-ab15/result.json`)).status, 403, token);
+    }
+
+    // The narrow read: a listing under agent-config/changes/ shows approved.json and result.json files and nothing else.
+    fake.seed(`sections/inbox/agent-config/changes/${id}/note.json`, '{}', 'application/json');
+    fake.seed('sections/inbox/agent-config/export-20261103T101500Z.json', '{"v":1}', 'application/json');
+    fake.seed(`sections/inbox/asks/${id}/ask.json`, '{}', 'application/json');
+    const listed = await call('GET', '/sections/inbox/files', { token: 'tok-hermes-config', query: { prefix: 'agent-config/changes/202611' } });
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.data.files.map(file => file.path), [approved, result]);
+    const got = await call('GET', url(approved), { token: 'tok-hermes-config' });
+    assert.equal(got.status, 200);
+    assert.equal((await call('GET', url(result), { token: 'tok-hermes-config' })).status, 200);
+    // Nothing else is readable: the token still has no read right on the inbox.
+    for (const name of [`agent-config/changes/${id}/note.json`, 'agent-config/export-20261103T101500Z.json', `asks/${id}/ask.json`, 'agent-config/changes/x/approved.json/../../../export-20261103T101500Z.json']) {
+      assert.equal((await call('GET', url(name), { token: 'tok-hermes-config' })).status, name.includes('..') ? 400 : 403, `read ${name}`);
+    }
+    for (const prefix of ['agent-config/', 'agent-config/changes', 'agent-config/export-2026', 'asks/', 'agent-config/changes/../export', '']) {
+      const refused = await call('GET', '/sections/inbox/files', { token: 'tok-hermes-config', query: { prefix } });
+      assert.ok([400, 403].includes(refused.status), `list ${JSON.stringify(prefix)}: ${refused.status}`);
+    }
+    assert.equal((await call('GET', '/sections/inbox/cards/anything', { token: 'tok-hermes-config' })).status, 403, 'no card reads either');
+    assert.equal((await call('DELETE', url(result), { token: 'tok-hermes-config' })).status, 403);
+    // The development inbox is not covered by the narrow read, even when the section exists.
+    fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+    fake.seed(`sections/inbox-dev/${approved}`, '{}', 'application/json');
+    assert.equal((await call('GET', `/sections/inbox-dev/files/${approved}`, { token: 'tok-hermes-config' })).status, 403);
+    assert.equal((await call('GET', '/sections/inbox-dev/files', { token: 'tok-hermes-config', query: { prefix: 'agent-config/changes/' } })).status, 403);
+    // Other limited tokens gain nothing: a token with a read right reads as before, and one without still does not.
+    assert.equal((await call('GET', url(approved), { token: 'tok-reader' })).status, 200);
+    assert.equal((await call('GET', url(approved), { token: 'tok-deploy' })).status, 200);
+    assert.equal((await call('GET', url(approved), { token: 'tok-devbot' })).status, 200, 'read=* includes the inbox, as before');
+  } finally {
+    await fake.close();
+  }
+});

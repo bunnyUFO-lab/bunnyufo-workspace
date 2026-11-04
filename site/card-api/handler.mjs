@@ -154,9 +154,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
   const can = (caller, verb, section) => caller.rights[verb] === null || caller.rights[verb].has(section);
 
-  async function section(caller, id, verb) {
+  /**
+   * The one read the token named `hermes-config` has (ws-im1.4.2), without a `read` right on the token: in the `inbox` section only
+   * (never `inbox-dev`), the signed approvals and the results of profile changes, `agent-config/changes/<id>/approved.json` and `result.json`.
+   * Callers pass `hostChange` only for a listing under `agent-config/changes/` or a GET of a file that matches HOST_CHANGE_FILE; every
+   * other call keeps `can()`. The token's scope is not widened: it still reads no export, no ask and no request.
+   */
+  const HOST_CHANGE_FILE = /^agent-config\/changes\/[^/]+\/(approved|result)\.json$/;
+  const hostChangeReader = (caller, id) => caller.name === 'hermes-config' && caller.rights.write !== null && id === 'inbox';
+
+  async function section(caller, id, verb, { hostChange = false } = {}) {
     if (!SECTION_ID.test(id ?? '')) throw new HttpError(400, 'A section id is lower-case letters, digits and dashes.');
-    if (!can(caller, verb, id)) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
+    if (!can(caller, verb, id) && !(hostChange && verb === 'read' && hostChangeReader(caller, id))) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
     const got = await bucket.getJson(keyOf(id, 'workspace.json'));
     if (!Array.isArray(got?.value?.entities)) throw new HttpError(404, `No section "${id}".`);
     return { id, registry: got.value, etag: got.etag };
@@ -187,21 +196,25 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     }
   };
   /** The Hermes host's redacted settings export: create-only, one file per publish. */
-  const AGENT_CONFIG_FILE = /^agent-config\/export-\d{8}T\d{6,9}Z\.json$/i;
+  const AGENT_CONFIG_EXPORT = /^agent-config\/export-\d{8}T\d{6,9}Z\.json$/i;
+  /** The result of a profile change (ws-im1.4.2), written once by the Hermes host next to the Hub's approved.json: agent-config/changes/<ask id>/result.json. */
+  const AGENT_CONFIG_RESULT = /^agent-config\/changes\/\d{8}-[a-z0-9-]+-[a-z0-9]{4}\/result\.json$/;
+  const AGENT_CONFIG_FILE = { test: file => AGENT_CONFIG_EXPORT.test(file) || AGENT_CONFIG_RESULT.test(file) };
   /**
    * In the inbox, `agent-config/` is for the token named `hermes-config` only (the exporter on the Hermes host), which may
-   * create `export-<stamp>.json` once (If-None-Match: *, never an upload URL) and nothing else in the inbox. The passphrase is not limited.
+   * create `export-<stamp>.json` and, for a profile change, `changes/<ask id>/result.json`, each once (If-None-Match: *, never an upload URL), and
+   * nothing else in the inbox. The Hub's `changes/<id>/approved.json` is never writable here. The passphrase is not limited.
    */
   const agentConfigOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
     if (!INBOXES.has(sectionId) || caller.rights.write === null) return;
     const inFolder = /^agent-config\//i.test(file);
     if (caller.name === 'hermes-config') {
-      if (!inFolder) throw new HttpError(403, 'This token only publishes agent-config exports.');
+      if (!inFolder) throw new HttpError(403, 'This token only publishes agent-config exports and change results.');
     } else if (inFolder) {
       throw new HttpError(403, 'Only the Hermes config exporter writes agent-config/.');
     }
     if (inFolder && (!AGENT_CONFIG_FILE.test(file) || upload || ifNoneMatch !== '*')) {
-      throw new HttpError(403, 'agent-config/export-<stamp>.json is create-only (If-None-Match: *), never by upload URL.');
+      throw new HttpError(403, 'agent-config/export-<stamp>.json and changes/<id>/result.json are create-only (If-None-Match: *), never by upload URL.');
     }
   };
   const ownerOnly = (caller, sectionId, file) => {
@@ -436,18 +449,21 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (/^[/_.]/.test(wanted) || wanted.split('/').some(part => part === '..' || part === '.') || /[\\\0]/.test(wanted)) {
         throw new HttpError(400, 'prefix is empty or a relative path: no "..", and not starting with "/", "_" or ".".');
       }
-      await section(caller, sectionId, 'read');
+      const hostChange = wanted.startsWith('agent-config/changes/');
+      await section(caller, sectionId, 'read', { hostChange });
       const base = keyOf(sectionId, '');
       const { objects } = await bucket.list(keyOf(sectionId, wanted));
       const files = objects
         .map(object => ({ path: object.key.slice(base.length), size: object.size, etag: object.etag, lastModified: object.lastModified }))
         .filter(file => cardPath(file.path) && !SECRET.test(file.path))
+        // A caller with no read right of its own (the Hermes host) sees the change files and nothing else under that prefix.
+        .filter(file => !hostChange || can(caller, 'read', sectionId) || HOST_CHANGE_FILE.test(file.path))
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       return { files: files.slice(0, MAX_LISTED), truncated: files.length > MAX_LISTED };
     },
 
     async getFile(caller, sectionId, file) {
-      await section(caller, sectionId, 'read');
+      await section(caller, sectionId, 'read', { hostChange: HOST_CHANGE_FILE.test(file) });
       const key = keyOf(sectionId, file);
       let head;
       try {

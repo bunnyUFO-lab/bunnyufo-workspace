@@ -108,7 +108,8 @@ out of `GET /sections`. Deploy the handler before putting a rights entry in the 
 older handler cannot parse it and answers 500 to everyone.
 
 **The Hermes config exporter's token.** `hermes-config=<sha256>:write=inbox` (make it with `new-token.mjs hermes-config --rights 'write=inbox' --out <file>`).
-It may only create `agent-config/export-<YYYYMMDDTHHMMSSZ>.json` in the inbox (see below). Deploy the handler with the `agent-config/` rule
+It may only create `agent-config/export-<YYYYMMDDTHHMMSSZ>.json` and `agent-config/changes/<ask id>/result.json` in the inbox (see below), and read
+`agent-config/changes/<ask id>/approved.json` and `result.json` there (a narrow read in the handler, not a `read=inbox` right). Deploy the handler with the `agent-config/` rule
 *before* adding this token to `BUW_CARD_TOKENS`: an older handler would let a `write=inbox` token write anywhere in the inbox.
 
 ## Use
@@ -248,7 +249,10 @@ What it refuses:
   must equal what the watcher computed, and the rerun gate)
 - in the `inbox` and `inbox-dev` sections, anything under `agent-config/` from a limited writer unless the token is named `hermes-config`, the path is
   `agent-config/export-<YYYYMMDDTHHMMSSZ>.json` (stamp `\d{8}T\d{6,9}Z`), the write sends `If-None-Match: *` and it is not an upload URL request (403, no
-  delete for a limited deleter). The `hermes-config` token is refused every other inbox path. A file it creates is stored with the object metadata
+  delete for a limited deleter). The same token may also create `agent-config/changes/<ask id>/result.json` (the host's answer to a signed profile change, same rules;
+  the Hub's `approved.json` beside it is never writable by a token). The `hermes-config` token is refused every other inbox path.
+  It has no `read` right: the handler lets it, in the `inbox` section only (not `inbox-dev`), list a prefix that starts with `agent-config/changes/` (the
+  listing shows only `approved.json` and `result.json` files) and get `agent-config/changes/<id>/approved.json` or `result.json`. Reading an export, an ask or anything else is still 403. A file it creates is stored with the object metadata
   `x-amz-meta-writer: hermes-config`, set only by the handler; the passphrase's files there carry no mark, and the site API ignores an export without it
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
