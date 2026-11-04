@@ -162,11 +162,12 @@ export default function Team() {
           <div><dt>Online</dt><dd data-team-online>{counts.online}<span className="team-dim">/{counts.total}</span></dd></div>
           <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
         </dl>
+        {/* Before the view switch, so Tab from Floor still goes to the first desk. */}
+        {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
         <div className="hub-seg team-view" role="group" aria-label="View">
           <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
           <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
         </div>
-        {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
       </header>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {failure && <p className="hub-error" role="alert">{failure}</p>}
