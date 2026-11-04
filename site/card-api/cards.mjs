@@ -78,7 +78,7 @@
 //        A command written into the question, a decision or the context outside a fenced code block is refused (exit 2). Put it in a
 //        ```bash block. --prose-ok skips that check, for text that only looks like a command, and prints a warning.
 //   cards beads show --project <p> [--open] [--json]      (read-only) the project's merged Beads copy, compact: id, status, type, title, parent, labels, blocked-by
-//   cards plan apply <ask id> [--dry-run] [--again]       run the rows of an answered change-list Ask that the owner approved, in order, with bd (argument arrays, no shell);
+//   cards plan apply <ask id> [--dry-run] [--again] [--journal <file>]       run the rows of an answered change-list Ask that the owner approved, in order, with bd (argument arrays, no shell);
 //        a changed row uses the owner's text (a create's or update's description, a close's reason). Refuses an Ask that is not answered, has no changes, is for another
 //        project than this repository's (its CLAUDE.md "Beads project:"), or was picked up already (--again). Stops at the first failure and lists the rows left.
 //        Afterwards: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup <id>.
@@ -141,6 +141,8 @@
 //        The agent is the one on that request (preset agent-avatar-sheet), never an argument. The JSON must name the request in source.request. PC runs reach it through run-sheet.mjs.
 //   cards beads push --project <p> [--from <file.jsonl>] [--copy <id>]   this worktree's Beads copy (`bd export` by default; <id> defaults to <host>-<hash of the worktree root>)
 //   cards mark list --project <p> [--json]                            the owner's marks on the Roadmap that no agent has applied yet (bead, verdict, time, reason), oldest first
+//   cards mark apply --project <p> [--json]                           the PC's step for each active mark: bd close / bd label remove, cancel the bead's open Asks and checklists; writes NO owner file and no applied note (cards mark applied does, after the push)
+//   cards apply pending --project <p> --json                          what is waiting for the PC: { plans: [answered change-list Ask ids not picked up], marks: n }; read-only
 //   cards mark applied --project <p> --bead <id>                      after `bd close` (done, not-needed) or `bd label remove <id> needs-owner` (unblock): writes the applied note for the active mark; "nothing to apply" and exit 0 when there is none
 //   cards feedback list [--project <p>] [--unfiled] [--json]          the owner's Not useful records (key, kind, id, project, reason, time, bead or -); --unfiled keeps those no session has filed as a bug. Only records the Hub wrote count; others end in an "ignored (not written by the Hub): n" line
 //   cards feedback show --project <p> --key <key> [--json]            one record with its copy (what a fix's regression fixture is made from)
@@ -164,9 +166,9 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|applied --project <p> | feedback list|show|body|filed --project <p>\n'
+  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>]\n'
-  + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again]\n'
+  + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again] [--journal <file>] | apply pending --project <p> --json\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
 
@@ -2194,7 +2196,7 @@ function bdCommand() {
 /** Run bd with an argument array (no shell). → { ok, out, error } */
 function runBd(args) {
   const { cmd, prefix } = bdCommand();
-  const run = spawnSync(cmd, [...prefix, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
+  const run = spawnSync(cmd, [...prefix, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024, timeout: 30000 });
   if (run.error) return { ok: false, out: '', error: run.error.code === 'ENOENT' ? 'bd is not installed.' : run.error.message };
   return { ok: run.status === 0, out: String(run.stdout ?? '').trim(), error: clip(String(run.stderr ?? '').split(/\r?\n/).find(line => line.trim()) ?? `bd exited ${run.status}`, 200) };
 }
@@ -2259,8 +2261,12 @@ async function planApply(rawId, flags) {
   const left = [];
   let applied = 0;
   let skipped = 0;
+  // --journal <file>: after each row { rows: { d1: 'done' }, made: { '#1': 'ws-abc' } } (temp file, then rename). A row in it is not run again and `made` is reloaded, so a crash resumes at the next row.
+  const journal = flags.journal !== undefined && !dry ? await readJournal(flags.journal) : { rows: {}, made: {} };
+  for (const [ref, bead] of Object.entries(journal.made)) made.set(ref, bead);
   for (const [index, change] of ask.changes.entries()) {
     const row = `d${index + 1}`;
+    if (journal.rows[row] === 'done') { console.log(`${row} ${change.op}: already applied (journal)`); applied += 1; continue; }
     const given = answer.decisions?.[row];
     const verdict = given?.verdict;
     const note = typeof given?.note === 'string' ? given.note.replace(/\s+/g, ' ').trim() : '';
@@ -2272,7 +2278,7 @@ async function planApply(rawId, flags) {
     const text = verdict === 'change' ? note : undefined;
     if (change.op === 'card') {
       if (dry) { console.log(`${row} card: would copy ${change.card} into ${section}`); applied += 1; continue; }
-      try { console.log(`${row} card: copied to ${await copyPlanCard(change, section)}`); applied += 1; } catch (error) { left.push(row, ...ask.changes.slice(index + 1).map((_, k) => `d${index + k + 2}`)); console.log(`${row} card: FAILED ${clip(error.message, 200)}`); return stopped(row, left); }
+      try { console.log(`${row} card: copied to ${await copyPlanCard(change, section)}`); applied += 1; await journalRow(flags.journal, journal, row); } catch (error) { left.push(row, ...ask.changes.slice(index + 1).map((_, k) => `d${index + k + 2}`)); console.log(`${row} card: FAILED ${clip(error.message, 200)}`); return stopped(row, left); }
       continue;
     }
     for (const args of bdCalls(change, text, ref)) {
@@ -2290,13 +2296,36 @@ async function planApply(rawId, flags) {
     }
     if (change.op === 'create' && dry) made.set(`#${index + 1}`, `<new item ${index + 1}>`);
     applied += 1;
+    if (!dry) await journalRow(flags.journal, journal, row, change.op === 'create' ? { ref: `#${index + 1}`, bead: made.get(`#${index + 1}`) } : undefined);
   }
   console.log(`${dry ? 'Would apply' : 'Applied'} ${applied} of ${ask.changes.length} row(s); ${skipped} skipped.${dry ? '' : ' Next: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup ' + id}`);
 }
 
+async function readJournal(file) {
+  if (typeof file !== 'string' || !file) throw new Error('--journal is a file to keep the applied rows in.');
+  let text;
+  try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return { rows: {}, made: {} }; throw error; }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { throw new Error(`The journal ${file} is not valid JSON; it is not guessed at. Look at it, or remove it only when no row of this plan was applied.`); }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.rows !== 'object' || !parsed.rows || typeof parsed.made !== 'object' || !parsed.made) throw new Error(`The journal ${file} has no rows and made maps.`);
+  return { rows: { ...parsed.rows }, made: { ...parsed.made } };
+}
+
+/** Record one applied row (and the id a create made) in the journal, atomically: a temp file, then a rename. No journal flag: nothing. */
+async function journalRow(file, journal, row, made) {
+  if (file === undefined) return;
+  journal.rows[row] = 'done';
+  if (made?.bead) journal.made[made.ref] = made.bead;
+  await mkdir(path.dirname(path.resolve(file)), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(journal, null, 2)}
+`);
+  await rename(tmp, file);
+}
+
 /** The ending of a plan that stopped: what is left, and exit 1. */
 function stopped(row, left) {
-  console.log(`Stopped at ${row}. Not applied: ${left.join(', ')}. Fix the cause and apply those rows by hand, or run plan apply again after removing what is done (rows already applied would be applied twice).`);
+  console.log(`Stopped at ${row}. Not applied: ${left.join(', ')}. Fix the cause and apply those rows by hand. Run plan apply again only with --journal <file> (it skips the rows done) or after removing what is done; without a journal, rows already applied would be applied twice.`);
   throw new Exit(1);
 }
 
@@ -2309,7 +2338,7 @@ function stopped(row, left) {
 const MARK_NAME = /^(\d{8}T\d{9}Z)-(done|not-needed|unblock|undo|applied)-([a-z0-9]{4})\.json$/;
 const BEAD_ID = /^[a-z][a-z0-9]*-[a-z0-9][a-z0-9.-]{0,60}$/;
 const markProject = flags => {
-  if (!flags.project || !/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('Usage: mark list|applied --project <p> [--bead <id>]');
+  if (!flags.project || !/^[a-z0-9][a-z0-9-]*$/.test(flags.project)) throw new Error('Usage: mark list|apply|applied --project <p> [--bead <id>]');
   return flags.project;
 };
 
@@ -2323,14 +2352,22 @@ async function activeMarks(project, only) {
   }
   const rows = await mapLimit([...byBead], 8, async ([bead, names]) => {
     names.sort();
-    const owner = names.filter(name => !name.includes('-applied-')).at(-1);
+    // Only the Hub's own verdicts count (the card API tags everything put through it, as the Hub's own rule does): the newest untagged one is the current verdict.
+    let owner = null;
+    let body = null;
+    for (const name of names.filter(item => !item.includes('-applied-')).reverse()) {
+      const got = await readInboxWithWriter(`bead-marks/${project}/${bead}/${name}`);
+      if (!got || got.writer !== 'none') continue;
+      try { body = JSON.parse(got.text); } catch { body = null; }
+      owner = name;
+      break;
+    }
     if (!owner || MARK_NAME.exec(owner)[2] === 'undo') return null;
-    const body = await readJson(inboxPath('bead-marks', project, bead, owner));
     if (!body || body.verdict !== MARK_NAME.exec(owner)[2] || typeof body.at !== 'string') return null;
     for (const name of names.filter(item => item.includes('-applied-'))) {
       if ((await readJson(inboxPath('bead-marks', project, bead, name)))?.mark === owner) return null;
     }
-    return { bead, verdict: body.verdict, at: body.at, ...(typeof body.reason === 'string' && body.reason ? { reason: clip(body.reason, 200) } : {}), file: owner };
+    return { bead, verdict: body.verdict, at: body.at, ...(typeof body.reason === 'string' && body.reason ? { reason: clip(body.reason, 500) } : {}), file: owner };
   });
   return rows.filter(Boolean).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.bead < b.bead ? -1 : 1));
 }
@@ -2352,6 +2389,113 @@ async function markApplied(flags) {
     if (await mustPut(file, `${JSON.stringify(body, null, 2)}\n`, { createOnly: true }) === 'ok') return console.log(file);
     if (attempt >= 2) throw new Error('Could not find a free name for the applied note; run it again.');
   }
+}
+
+// --- The PC's step for the owner's marks and plans (ws-im1.2.3): no session, no model ---
+// `mark apply` changes Beads (and withdraws what asked about the bead) and nothing else: it writes no verdict file and no applied
+// note. The script that runs it exports Beads, pushes the copy to the Hub and only then writes the applied notes (`mark applied`)
+// and the pickups (`ask pickup`). An agent never writes the owner's files (done, not-needed, unblock and undo verdicts).
+
+const NOT_FOUND = /not found|no issues? found|no such issue/i;
+
+/** `bd show <id> --json`: { found, issue? } or { error }. A bd that says the issue is not in this database is `found: false`. */
+function bdShow(bead) {
+  const run = runBd(['show', bead, '--json']);
+  if (!run.ok) return NOT_FOUND.test(`${run.out}\n${run.error}`) ? { found: false } : { error: run.error };
+  let rows;
+  try { rows = JSON.parse(run.out); } catch { return { error: 'bd show printed no JSON.' }; }
+  const issue = Array.isArray(rows) ? rows[0] : rows;
+  if (!issue || typeof issue !== 'object' || issue.id !== bead) return { found: false };
+  return { found: true, issue };
+}
+
+/** Withdraw the open Asks and checklists of a project that name these beads: create-only cancel.json, an existing one is fine. */
+async function cancelAskedAbout(project, beads) {
+  const wanted = new RegExp(`^\\d{8}-${project}-`);
+  const [asks, lists] = await Promise.all([listFolders('asks'), listFolders('checklists')]);
+  const open = (folders, file, skip) => [...folders].filter(([id, names]) => wanted.test(id) && names.has(file) && !skip.some(name => names.has(name))).map(([id]) => id);
+  const targets = [
+    ...open(asks, 'ask.json', ['cancel.json', 'pickup.json', 'answer.json']).map(id => ({ folder: 'asks', id, file: 'ask.json' })),
+    ...open(lists, 'checklist.json', ['cancel.json', 'pickup.json', 'submit.json']).map(id => ({ folder: 'checklists', id, file: 'checklist.json' })),
+  ];
+  await mapLimit(targets, 8, async ({ folder, id, file }) => {
+    const body = await readJson(inboxPath(folder, id, file));
+    if (body?.project !== project || !beads.has(body.bead)) return;
+    await mustPut(inboxPath(folder, id, 'cancel.json'), `${JSON.stringify({ at: isoNow(), by: hostName() }, null, 2)}\n`, { createOnly: true });
+  });
+}
+
+/** The bd calls of one active mark on an open issue. Each is an argument array; the owner's reason stays one argument. */
+function markCalls(mark, issue) {
+  const date = String(mark.at).slice(0, 10);
+  const labels = Array.isArray(issue.labels) ? issue.labels : [];
+  if (mark.verdict === 'unblock') {
+    return [...(labels.includes('needs-owner') ? [['label', 'remove', mark.bead, 'needs-owner']] : []), ...(issue.status === 'blocked' ? [['update', mark.bead, '--status=open']] : [])];
+  }
+  const why = mark.reason ? `: ${mark.reason}` : '';
+  // --force on both closes: bd refuses to close a task with an open blocker or child, and the owner's tap is the decision; there is no one to ask.
+  if (mark.verdict === 'done') return [['close', mark.bead, `--reason=Done (owner, Roadmap ${date})${why}`, '--force']];
+  return [['close', mark.bead, `--reason=Not needed (owner, Roadmap ${date})${why}`, '--force'], ...(labels.includes('not-needed') ? [] : [['update', mark.bead, '--add-label=not-needed']])];
+}
+
+/**
+ * `mark apply --project <p> [--json]`: for each active mark of the project, the steps of "Applying marks" that touch Beads:
+ * `bd show` (not in this database: waiting), no bd call for an issue that is closed already, else the verdict's bd calls, then the
+ * bead's open Asks and checklists are cancelled. Run it in the project's own checkout. It writes no applied note and no verdict file.
+ * → { applied, waiting, failed: [{ bead, error }] }
+ */
+async function markApply(flags) {
+  const project = markProject(flags);
+  const marks = await activeMarks(project);
+  const result = { applied: [], waiting: [], failed: [] };
+  const done = [];
+  for (const mark of marks) {
+    const shown = bdShow(mark.bead);
+    if (shown.error) { result.failed.push({ bead: mark.bead, error: shown.error }); continue; }
+    if (!shown.found) { result.waiting.push(mark.bead); continue; }
+    let error = '';
+    if (shown.issue.status !== 'closed') {
+      for (const args of markCalls(mark, shown.issue)) {
+        const run = runBd(args);
+        if (!run.ok) { error = `bd ${args[0]} failed: ${run.error}`; break; }
+      }
+    }
+    if (error) result.failed.push({ bead: mark.bead, error });
+    else done.push(mark.bead);
+  }
+  if (done.length) {
+    try {
+      await cancelAskedAbout(project, new Set(done));
+      result.applied.push(...done);
+    } catch (failure) {
+      for (const bead of done) result.failed.push({ bead, error: `could not cancel the Asks on it: ${clip(failure.message, 160)}` });
+    }
+  }
+  if (flags.json) return console.log(JSON.stringify(result, null, 2));
+  for (const bead of result.applied) console.log(`${bead}\tapplied`);
+  for (const bead of result.waiting) console.log(`${bead}\twaiting (not in this checkout's Beads yet)`);
+  for (const { bead, error } of result.failed) console.log(`${bead}\tFAILED ${error}`);
+  if (!marks.length) console.log('no active marks');
+  if (result.failed.length) throw new Exit(1);
+}
+
+/**
+ * `apply pending --project <p> --json`: what the PC has to apply for a project, read-only. Plans are the Asks of this and last month
+ * that have `changes`, an answer.json and neither pickup.json nor cancel.json; marks is the number of active marks.
+ * Only folder names are listed first; ask.json is read for an answered, unpicked Ask of the project.
+ */
+async function applyPending(flags) {
+  const project = markProject(flags);
+  const folders = await listFolders('asks');
+  const wanted = new RegExp(`^\\d{8}-${project}-`);
+  const candidates = [...folders].filter(([id, names]) => wanted.test(id) && names.has('ask.json') && names.has('answer.json') && !names.has('pickup.json') && !names.has('cancel.json')).map(([id]) => id).sort();
+  const plans = (await mapLimit(candidates, 8, async id => {
+    const ask = await readJson(inboxPath('asks', id, 'ask.json'));
+    return ask?.project === project && Array.isArray(ask.changes) && !validateChanges(ask.changes).length ? id : null;
+  })).filter(Boolean);
+  const result = { plans, marks: (await activeMarks(project)).length };
+  if (flags.json) return console.log(JSON.stringify(result));
+  console.log(`${plans.length} plan(s), ${result.marks} mark(s)${plans.length ? `: ${plans.join(', ')}` : ''}`);
 }
 
 // --- The owner's "Not useful" records: feedback/<project>/<kind>/<id>/not-useful.json, filed-<stamp>-<rand4>.json ---
@@ -2549,6 +2693,8 @@ async function inbox(command, args) {
   if (command === 'beads' && sub === 'show') return beadsShow(flags);
   if (command === 'plan' && sub === 'apply' && id) return planApply(id, flags);
   if (command === 'mark' && sub === 'list') return markList(flags);
+  if (command === 'mark' && sub === 'apply') return markApply(flags);
+  if (command === 'apply' && sub === 'pending') return applyPending(flags);
   if (command === 'mark' && sub === 'applied') return markApplied(flags);
   if (command === 'feedback' && sub === 'list') return feedbackList(flags);
   if (command === 'feedback' && sub === 'show') return feedbackShow(flags);
@@ -2561,7 +2707,7 @@ async function inbox(command, args) {
 async function main() {
   const args = process.argv.slice(2);
   const [first] = args;
-  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark', 'feedback', 'plan'].includes(first)) {
+  if (['event', 'pr-sync', 'ask', 'checklist', 'request', 'sheet', 'beads', 'mark', 'feedback', 'plan', 'apply'].includes(first)) {
     const rest = args.slice(1);
     const at = rest.indexOf('--via');
     const via = (at >= 0 ? rest.splice(at, 2)[1] : undefined) ?? process.env.BUW_CARDS_VIA;

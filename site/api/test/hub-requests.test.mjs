@@ -12,7 +12,7 @@ import { buildToday, markStamp, needsKindOf, requestItem, requestState, runFileT
 import { checkRequest } from '../hub-requests.mjs';
 import { parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
-import { requestJson, seeder } from './hub-fixtures.mjs';
+import { beadsIssue, requestJson, seeder } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
@@ -1009,5 +1009,128 @@ test('approve again keeps the model, and the owner can change or drop it', async
     const refused = researchRequest('againp', { model: 'haiku' });
     put(refused);
     assert.equal((await post(`/hub/requests/${refused.id}/again`, { target: 'hermes', model: 'opus' })).status, 400);
+  } finally { await close(); }
+});
+
+// --- a request made from a bead (ws-im1.2.1) ---
+
+const seedBeads = (seed, project, issues) => {
+  seed.put(`beads/${project}.jsonl`, issues.map(line => JSON.stringify(line)).join('\n') + '\n', 'application/x-ndjson');
+  seed.put(`beads/${project}.meta.json`, { pushedAt: NOW.toISOString(), count: issues.length });
+};
+
+test('checkRequest: bead is the site\'s, and must have the shape of a Beads id', () => {
+  const body = { project: 'probe', text: 'Do it', preset: 'code-task' };
+  assert.equal(checkRequest({ ...body, bead: 'ws-im1.2.1' }, { fromOwner: true }).bead, 'ws-im1.2.1');
+  assert.equal('bead' in checkRequest({ ...body, bead: null }, { fromOwner: true }), false);
+  assert.throws(() => checkRequest({ ...body, bead: 'ws-im1.2.1' }), /Only the site/);
+  for (const bad of ['', 'NOPE', 'ws', 'ws-', '../x', 5, 'ws-1 ; rm']) {
+    assert.throws(() => checkRequest({ ...body, bead: bad }, { fromOwner: true }), /Beads issue id/, String(bad));
+  }
+});
+
+test('a request made from a bead keeps the bead, says an agent wrote the text, and approves as the owner\'s; the body cannot choose the origins', async () => {
+  const { fake, post, close } = await fixture({ env: KEY_ENV });
+  try {
+    const made = await post('/hub/requests', {
+      project: 'probe', preset: 'code-task', text: 'Bead text', title: 'ws-9 Wall', doneWhen: 'It jumps', bead: 'ws-9',
+      textOrigin: { kind: 'owner', name: 'me' }, doneWhenOrigin: { kind: 'owner' }, origin: { kind: 'agent', name: 'x' },
+    });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const stored = fake.json(`sections/inbox/requests/${made.body.id}/request.json`);
+    assert.equal(stored.bead, 'ws-9');
+    assert.deepEqual(stored.textOrigin, { kind: 'agent', name: 'Beads' });
+    assert.deepEqual(stored.doneWhenOrigin, { kind: 'agent', name: 'Beads' });
+    assert.equal(stored.origin.kind, 'owner');
+    const signed = await post(`/hub/requests/${made.body.id}/approve`, { target: made.body.target });
+    assert.equal(signed.status, 201, JSON.stringify(signed.body));
+    const approved = fake.json(`sections/inbox/requests/${made.body.id}/approved.json`);
+    assert.equal(verify(approved, PUB), true);
+    assert.match(approved.run.brief, /Bead text/);
+    assert.match(approved.run.brief, /Bead: ws-9\. Put this id in the pull request's title, so the Roadmap links the PR to it\./);
+    assert.match(approved.run.brief, /written by an agent \(Beads\)/);
+    assert.match(approved.run.brief, /"done when" was written by an agent \(Beads\), not by the owner/);
+
+    // Without a bead nothing of the sort is stored, and a body that sets the origins alone has them ignored.
+    const plain = await post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'Plain', doneWhen: 'Done', textOrigin: { kind: 'agent', name: 'forged' }, doneWhenOrigin: { kind: 'run' } });
+    const plainStored = fake.json(`sections/inbox/requests/${plain.body.id}/request.json`);
+    assert.deepEqual(['bead' in plainStored, 'textOrigin' in plainStored, 'doneWhenOrigin' in plainStored], [false, false, false]);
+
+    // A bad bead is a 400 and writes nothing.
+    const before = fake.objects.size;
+    assert.equal((await post('/hub/requests', { project: 'probe', preset: 'code-task', text: 'x', bead: 'NOT A BEAD' })).status, 400);
+    assert.equal(fake.objects.size, before);
+  } finally { await close(); }
+});
+
+test('Approve again and Edit keep the bead and who wrote the text', async () => {
+  const { fake, post, close } = await fixture({ env: KEY_ENV });
+  try {
+    const made = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'From a bead', doneWhen: 'A card', bead: 'ws-9' });
+    const same = await post(`/hub/requests/${made.body.id}/again`, { target: 'hermes' });
+    assert.equal(same.status, 201, JSON.stringify(same.body));
+    const kept = fake.json(`sections/inbox/requests/${same.body.id}/request.json`);
+    assert.deepEqual([kept.bead, kept.textOrigin, kept.doneWhenOrigin, kept.origin.kind], ['ws-9', { kind: 'agent', name: 'Beads' }, { kind: 'agent', name: 'Beads' }, 'owner']);
+    const second = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'From a bead', bead: 'ws-9' });
+    const edited = await post(`/hub/requests/${second.body.id}/again`, { target: 'hermes', text: 'My own words' });
+    const copy = fake.json(`sections/inbox/requests/${edited.body.id}/request.json`);
+    assert.equal(copy.bead, 'ws-9');
+    assert.equal(copy.textOrigin, undefined, 'The owner rewrote the text.');
+  } finally { await close(); }
+});
+
+test('the map shows the live run of a bead on its task until the run ends, and Needs you names the bead', async () => {
+  const { fake, post, get, seed, close } = await fixture({ env: { ...KEY_ENV, HUB_MAP_REQUESTS_MS: '0' } });
+  try {
+    seedBeads(seed, 'probe', [beadsIssue({ id: 'pr-m', type: 'milestone' }), beadsIssue({ id: 'pr-f', type: 'epic', parent: 'pr-m' }), beadsIssue({ id: 'pr-t', title: 'The task', parent: 'pr-f', description: 'Do the thing.' })]);
+    const taskOf = async () => (await get('/hub/map/probe')).body.milestones[0].features[0].tasks[0];
+    assert.equal('run' in await taskOf(), false);
+    const made = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'x', bead: 'pr-t' });
+    assert.deepEqual((await taskOf()).run, { id: made.body.id, state: 'proposed' });
+    assert.equal((await get('/hub/inbox')).body.items.find(item => item.id === made.body.id).bead, 'pr-t');
+    await post(`/hub/requests/${made.body.id}/approve`, { target: 'hermes' });
+    assert.equal((await taskOf()).run.state, 'approved');
+    // A failed run lets the buttons return.
+    fake.seed(`sections/inbox/requests/${made.body.id}/taken.json`, JSON.stringify({ v: 1, at: NOW.toISOString() }), 'application/json');
+    fake.seed(`sections/inbox/requests/${made.body.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: NOW.toISOString() }), 'application/json');
+    assert.equal('run' in await taskOf(), false);
+  } finally { await close(); }
+});
+
+test('GET /hub/map/:project/beads/:bead/seed: the seed for an open bead; 404 unknown, 400 closed or a wrong kind', async () => {
+  const { get, seed, close } = await fixture();
+  try {
+    seedBeads(seed, 'probe', [
+      { ...beadsIssue({ id: 'pr-t', title: 'The task', description: 'Do the thing.' }), acceptance_criteria: 'It works' },
+      beadsIssue({ id: 'pr-c', title: 'Closed', status: 'closed', closed: '2026-10-02T10:00:00Z' }),
+    ]);
+    const ok = await get('/hub/map/probe/beads/pr-t/seed?kind=build');
+    assert.equal(ok.status, 200, ok.text);
+    assert.deepEqual([ok.body.preset, ok.body.title, ok.body.doneWhen], ['code-task', 'pr-t The task', 'It works']);
+    assert.match(ok.body.text, /Bead pr-t: The task\n\nDo the thing\.$/);
+    assert.equal((await get('/hub/map/probe/beads/pr-t/seed?kind=mockup')).body.preset, 'mockup');
+    assert.equal((await get('/hub/map/probe/beads/pr-t/seed?kind=nope')).status, 400);
+    assert.equal((await get('/hub/map/probe/beads/pr-t/seed')).status, 400);
+    assert.equal((await get('/hub/map/probe/beads/pr-c/seed?kind=build')).status, 400);
+    assert.equal((await get('/hub/map/probe/beads/pr-zz/seed?kind=build')).status, 404);
+    assert.equal((await get('/hub/map/Bad_Id/beads/pr-t/seed?kind=build')).status, 404);
+  } finally { await close(); }
+});
+
+test('the map keeps the request list for about 30 s, and creating a request clears it', async () => {
+  const { fake, post, get, seed, close } = await fixture({ env: KEY_ENV });
+  try {
+    seedBeads(seed, 'probe', [beadsIssue({ id: 'pr-m', type: 'milestone' }), beadsIssue({ id: 'pr-f', type: 'epic', parent: 'pr-m' }), beadsIssue({ id: 'pr-t', title: 'The task', parent: 'pr-f' }), beadsIssue({ id: 'pr-u', title: 'Another', parent: 'pr-f' })]);
+    const tasks = async () => (await get('/hub/map/probe')).body.milestones[0].features[0].tasks;
+    const runOf = async id => (await tasks()).find(task => task.id === id).run;
+    const made = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'x', bead: 'pr-t' });
+    assert.equal((await runOf('pr-t')).id, made.body.id);
+    // A write that bypasses the API is not seen until the memo ages out.
+    fake.seed(`sections/inbox/requests/${made.body.id}/taken.json`, JSON.stringify({ v: 1, at: NOW.toISOString() }), 'application/json');
+    fake.seed(`sections/inbox/requests/${made.body.id}/result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: NOW.toISOString() }), 'application/json');
+    assert.equal((await runOf('pr-t')).id, made.body.id, 'Polling reuses the list.');
+    const other = await post('/hub/requests', { project: 'probe', preset: 'research', text: 'y', bead: 'pr-u' });
+    assert.equal((await runOf('pr-u')).id, other.body.id, 'A new request shows at once.');
+    assert.equal(await runOf('pr-t'), undefined, 'And the cleared memo read the rest fresh.');
   } finally { await close(); }
 });

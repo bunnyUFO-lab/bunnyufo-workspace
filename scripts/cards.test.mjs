@@ -553,7 +553,7 @@ test('replay: only event files (and a run\'s own progress files) are replayed; a
     const runFile = 'requests/20261030-sprite-studio-job-a1b2/run-20261030T101500123Z-ab12.json';
     const refused = [
       'asks/20261030-sprite-studio-planted-a1b2/ask.json', 'requests/20261030-sprite-studio-job-a1b2/request.json', 'requests/20261030-sprite-studio-job-a1b2/approved.json',
-      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
+      'requests/20261030-sprite-studio-job-a1b2/stop.json', 'requests/20261030-sprite-studio-job-a1b2/allow-grant.json', 'requests/20261030-sprite-studio-job-a1b2/sprint.json', 'requests/20261030-sprite-studio-job-a1b2/sprint-end.json', 'asks/20261030-sprite-studio-planted-a1b2/answer.json',
       'asks/20261030-sprite-studio-planted-a1b2/delivered.json', 'events/2026-10-30/../../asks/x/ask.json', 'events/not-a-date/x.json', 'events/2026-10-30/sub/x.json', 'events/2026-10-30/x.png',
       'requests/x/run-bad.json', 'requests/x/y/run-20261030T101500123Z-ab12.json', 'workspace.json', '../events/2026-10-30/x.json',
     ];
@@ -2341,5 +2341,201 @@ test('plan apply: a card change copies an assistant card into the project\'s sec
     assert.equal(again.code, 1);
     assert.match(again.stdout, /wksec has a card 2026-11-mock already; it is not overwritten/);
     assert.equal(keys('').filter(key => key.includes('wksec')).length, 0, 'Nothing of the plan went into the inbox.');
+  } finally { await close(); }
+});
+
+// --- ws-im1.2.3: the PC applies plans and marks without a session (plan apply --journal, mark apply, apply pending) ---
+
+test('plan apply --journal: a stop after row 2 is resumed at row 3, rows 1 and 2 are not run twice and #n keeps the ids bd made', async () => {
+  const changes = [
+    { op: 'create', title: 'A', type: 'epic' },
+    { op: 'create', title: 'B', parent: '#1' },
+    { op: 'dep', bead: '#2', blocks: 'wk-9' },
+    { op: 'close', bead: 'wk-5', reason: 'Covered.' },
+  ];
+  const { cli, dir, id, calls, close } = await planFixture({ changes, extra: { BUW_BD_FAIL_ON: '3' } });
+  try {
+    const journal = path.join(dir, 'apply', `${id}.json`);
+    const first = await cli('api', 'plan', 'apply', id, '--journal', journal);
+    assert.equal(first.code, 1, 'Row 3 failed.');
+    assert.deepEqual(JSON.parse(await readFile(journal, 'utf8')), { rows: { d1: 'done', d2: 'done' }, made: { '#1': 'wk-new1', '#2': 'wk-new2' } });
+    assert.deepEqual((await readdir(path.dirname(journal))).filter(name => name.endsWith('.tmp')), [], 'The temp file was renamed.');
+    cli.env = { ...cli.env, BUW_BD_FAIL_ON: '0' };
+    const second = await cli('api', 'plan', 'apply', id, '--journal', journal);
+    assert.equal(second.code, 0, second.stdout + second.stderr);
+    assert.match(second.stdout, /d1 create: already applied \(journal\)/);
+    assert.deepEqual((await calls()).slice(3), [['dep', 'add', 'wk-9', 'wk-new2'], ['close', 'wk-5', '--reason=Covered.']], 'Only rows 3 and 4 ran, with the ids row 2 made.');
+    assert.equal((await calls()).filter(call => call[0] === 'create').length, 2, 'No create ran twice.');
+    assert.deepEqual(JSON.parse(await readFile(journal, 'utf8')).rows, { d1: 'done', d2: 'done', d3: 'done', d4: 'done' });
+    // A journal that is not JSON is not guessed at.
+    await writeFile(journal, '{not json');
+    const broken = await cli('api', 'plan', 'apply', id, '--journal', journal, '--again');
+    assert.equal(broken.code, 1);
+    assert.match(broken.stderr, /is not valid JSON/);
+    assert.equal((await calls()).length, 5, 'Nothing ran.');
+  } finally { await close(); }
+  const plain = await planFixture({ changes: changes.slice(0, 2) });
+  try {
+    assert.equal((await plain.cli('api', 'plan', 'apply', plain.id)).code, 0);
+    assert.deepEqual(await readdir(plain.dir).then(names => names.filter(name => name.includes('apply'))), [], 'No journal without the flag.');
+  } finally { await plain.close(); }
+});
+
+/** A stand-in bd for marks: a state file of issues ({ id: { status, labels } }), show/close/label/update, a log, and a close that fails for BUW_BD_FAIL_ID. */
+const MARK_BD = `
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(process.env.BUW_BD_LOG, JSON.stringify(args) + '\\n');
+const state = JSON.parse(readFileSync(process.env.BUW_BD_STATE, 'utf8'));
+const issue = state[args[1]];
+if (args[0] === 'show') {
+  if (!issue) { console.error('Issue ' + args[1] + ' not found'); process.exit(1); }
+  console.log(JSON.stringify([{ id: args[1], ...issue }]));
+} else if (args[0] === 'close' && issue && issue.blockedBy && !args.includes('--force')) { console.error('cannot close blocked issue: ' + args[1] + ' is blocked by [' + issue.blockedBy + '] (use --force to override)'); process.exit(1); }
+else if (args[0] === 'close' && args[1] === process.env.BUW_BD_FAIL_ID) { console.error('bd: database is locked'); process.exit(1); }
+else {
+  if (args[0] === 'close') issue.status = 'closed';
+  if (args[0] === 'label' && args[1] === 'remove') { const target = state[args[2]]; target.labels = (target.labels ?? []).filter(label => label !== args[3]); }
+  if (args[0] === 'update' && args.includes('--status=open')) issue.status = 'open';
+  writeFileSync(process.env.BUW_BD_STATE, JSON.stringify(state));
+}
+`;
+
+async function markFixture() {
+  const s = await setup();
+  await writeFile(path.join(s.dir, 'mark-bd.mjs'), MARK_BD);
+  const stateFile = path.join(s.dir, 'bd-state.json');
+  const log = path.join(s.dir, 'bd.log');
+  await writeFile(stateFile, JSON.stringify({
+    'dr-a': { status: 'open', labels: [], blockedBy: ['dr-zz'] }, 'dr-c': { status: 'open', labels: [], blockedBy: ['dr-zz'] }, 'dr-e': { status: 'closed', labels: [] },
+    'dr-f': { status: 'blocked', labels: ['needs-owner'] }, 'dr-h': { status: 'open', labels: [] }, 'dr-i': { status: 'open', labels: [] },
+  }));
+  s.fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
+  s.cli.env = { BUW_INBOX_SECTION: 'inbox-dev', BUW_BD: path.join(s.dir, 'mark-bd.mjs'), BUW_BD_LOG: log, BUW_BD_STATE: stateFile, BUW_BD_FAIL_ID: 'dr-h' };
+  const mark = (bead, stamp, verdict, extra = {}) => s.fake.seed(`sections/inbox-dev/bead-marks/dev-roadmap/${bead}/${stamp}-${verdict}-ab12.json`, JSON.stringify({ v: 1, project: 'dev-roadmap', bead, verdict, at: `2026-10-30T${stamp.slice(9, 11)}:00:00.000Z`, by: 'owner', ...extra }), 'application/json');
+  mark('dr-a', '20261030T100000000Z', 'done');
+  mark('dr-c', '20261030T110000000Z', 'not-needed', { reason: 'Superseded; $(whoami)' });
+  mark('dr-e', '20261030T120000000Z', 'done');
+  mark('dr-f', '20261030T130000000Z', 'unblock');
+  mark('dr-g', '20261030T140000000Z', 'done');
+  mark('dr-h', '20261030T150000000Z', 'done');
+  mark('dr-i', '20261030T160000000Z', 'done');
+  mark('dr-i', '20261030T161000000Z', 'undo');
+  const day = today().replace(/-/g, '');
+  const ask = (name, bead, extra = {}) => s.fake.seed(`sections/inbox-dev/asks/${day}-dev-roadmap-${name}/ask.json`, JSON.stringify({ id: `${day}-dev-roadmap-${name}`, project: 'dev-roadmap', bead, question: 'Q?', ...extra }), 'application/json');
+  ask('on-a-1111', 'dr-a');
+  ask('on-f-2222', 'dr-f');
+  ask('on-other-3333', 'dr-zz');
+  ask('on-h-4444', 'dr-h');
+  s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-5555/checklist.json`, JSON.stringify({ project: 'dev-roadmap', bead: 'dr-a', title: 'T', items: [{ id: '01', text: 'x' }] }), 'application/json');
+  const calls = async () => (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const markKeys = () => [...s.fake.objects.keys()].filter(key => key.includes('/bead-marks/')).sort();
+  return { ...s, calls, stateFile, markKeys, day };
+}
+
+test('mark apply: the documented bd calls for each verdict, a no-op on a closed issue, waiting and failed reported, open Asks and checklists cancelled, and no file under bead-marks/', async () => {
+  const { cli, calls, stateFile, markKeys, fake, day, close } = await markFixture();
+  try {
+    const before = markKeys();
+    const run = await cli('api', 'mark', 'apply', '--project', 'dev-roadmap', '--json');
+    assert.equal(run.code, 0, run.stderr);
+    // dr-h failed on its close, so the cancel step covers only the others and dr-h is not applied.
+    assert.deepEqual(JSON.parse(run.stdout), { applied: ['dr-a', 'dr-c', 'dr-e', 'dr-f'], waiting: ['dr-g'], failed: [{ bead: 'dr-h', error: 'bd close failed: bd: database is locked' }] });
+    assert.deepEqual((await calls()).filter(call => call[0] !== 'show'), [
+      ['close', 'dr-a', '--reason=Done (owner, Roadmap 2026-10-30)', '--force'],
+      ['close', 'dr-c', '--reason=Not needed (owner, Roadmap 2026-10-30): Superseded; $(whoami)', '--force'],
+      ['update', 'dr-c', '--add-label=not-needed'],
+      ['label', 'remove', 'dr-f', 'needs-owner'],
+      ['update', 'dr-f', '--status=open'],
+      ['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)', '--force'],
+    ], 'dr-e was closed already: only a show. dr-g was not found: only a show.');
+    assert.deepEqual((await calls()).filter(call => call[0] === 'show').map(call => call[1]), ['dr-a', 'dr-c', 'dr-e', 'dr-f', 'dr-g', 'dr-h']);
+    const state = JSON.parse(await readFile(stateFile, 'utf8'));
+    assert.deepEqual([state['dr-a'].status, state['dr-f'].labels, state['dr-f'].status, state['dr-e'].status], ['closed', [], 'open', 'closed']);
+    assert.deepEqual(markKeys(), before, 'It wrote no verdict and no applied note.');
+    const cancelled = key => fake.objects.has(`sections/inbox-dev/${key}/cancel.json`);
+    assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-a-1111`), cancelled(`asks/${day}-dev-roadmap-on-f-2222`), cancelled(`checklists/${day}-dev-roadmap-list-5555`)], [true, true, true]);
+    assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-other-3333`), cancelled(`asks/${day}-dev-roadmap-on-h-4444`)], [false, false], 'An Ask about another bead, and about a bead that failed, stays open.');
+    // A second run writes nothing in Beads for what is closed now; the failed one is tried again.
+    const seen = (await calls()).length;
+    const again = JSON.parse((await cli('api', 'mark', 'apply', '--project', 'dev-roadmap', '--json')).stdout);
+    assert.deepEqual(again.applied, ['dr-a', 'dr-c', 'dr-e', 'dr-f']);
+    assert.deepEqual((await calls()).slice(seen).filter(call => call[0] !== 'show'), [['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)', '--force']], 'Closed issues get no bd write.');
+    assert.equal((await cli('api', 'mark', 'apply')).code, 1, 'A project is needed.');
+    assert.ok((await calls()).filter(call => call[0] === 'close' && call[1] !== 'dr-h').every(call => call.includes('--force')), 'A done and a not-needed close of a task with an open blocker pass --force, as real bd needs.');
+  } finally { await close(); }
+});
+
+test('apply pending: answered plans with no pickup and no cancel, and the number of active marks; read-only', async () => {
+  const { cli, fake, close } = await markFixture();
+  try {
+    const day = today().replace(/-/g, '');
+    const plan = (name, { answer = true, pickup = false, cancel = false, project = 'dev-roadmap', changes = [{ op: 'close', bead: 'dr-a', reason: 'x' }] } = {}) => {
+      const id = `${day}-dev-roadmap-${name}`;
+      fake.seed(`sections/inbox-dev/asks/${id}/ask.json`, JSON.stringify({ id, project, question: 'Apply?', kind: 'decision', ...(changes ? { changes } : {}) }), 'application/json');
+      if (answer) fake.seed(`sections/inbox-dev/asks/${id}/answer.json`, JSON.stringify({ at: new Date().toISOString(), by: 'owner', decisions: { d1: { verdict: 'approve' } } }), 'application/json');
+      if (pickup) fake.seed(`sections/inbox-dev/asks/${id}/pickup.json`, '{"at":"2026-11-01T00:00:00Z","host":"pc"}', 'application/json');
+      if (cancel) fake.seed(`sections/inbox-dev/asks/${id}/cancel.json`, '{"at":"2026-11-01T00:00:00Z","by":"pc"}', 'application/json');
+      return id;
+    };
+    const ready = plan('plan-b-0002');
+    plan('plan-a-0001', { project: 'other' });   // the folder name says this project, the file says another: not this project's plan
+    plan('plan-unanswered-0003', { answer: false });
+    plan('plan-picked-0004', { pickup: true });
+    plan('plan-cancelled-0005', { cancel: true });
+    plan('plan-nochanges-0006', { changes: null });
+    plan('plan-bad-0007', { changes: [{ op: 'close', bead: 'dr-a', reason: 'Run `rm -rf x`' }] });
+    const before = [...fake.objects.keys()].sort();
+    const run = await cli('api', 'apply', 'pending', '--project', 'dev-roadmap', '--json');
+    assert.equal(run.code, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), { plans: [ready], marks: 6 });
+    assert.deepEqual([...fake.objects.keys()].sort(), before, 'Read-only.');
+    const none = await cli('api', 'apply', 'pending', '--project', 'nothing-here', '--json');
+    assert.deepEqual(JSON.parse(none.stdout), { plans: [], marks: 0 });
+  } finally { await close(); }
+});
+
+test('the agent-side commands write no owner verdict file: the PC step block names no -done-, -not-needed-, -unblock- or -undo- file, and plan apply does not call pickup', async () => {
+  const source = (await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8')).replace(/\r\n/g, '\n');
+  const block = source.slice(source.indexOf("// --- The PC's step for the owner's marks and plans"), source.indexOf('// --- The owner\'s "Not useful" records'));
+  assert.ok(block.length > 2000, 'The block was found.');
+  assert.doesNotMatch(block, /-(done|not-needed|unblock|undo)-/);
+  assert.doesNotMatch(block, /bead-marks/, 'The apply step does not name the marks folder at all.');
+  assert.doesNotMatch(block.replace(/\/\/.*\n/g, ''), /-applied-/, 'It leaves the applied note to the script, after the push.');
+  const planApplyBody = source.slice(source.indexOf('async function planApply'), source.indexOf('async function readJournal'));
+  assert.doesNotMatch(planApplyBody, /claim\(|mustPut\(|pickupBody/, 'plan apply does not call pickup.');
+});
+
+test('mark apply and mark list ignore a verdict the card API wrote (writer tag): it changes nothing in Beads', async () => {
+  const { cli, calls, fake, close } = await markFixture();
+  try {
+    // dr-x: its only verdict is tagged. dr-y: an untagged done, then a newer tagged undo (ignored), so done still counts.
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-x/20261030T170000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-x', verdict: 'done', at: '2026-10-30T17:00:00.000Z', by: 'owner' }), 'application/json', { writer: 'card-api' });
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-y/20261030T180000000Z-done-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-y', verdict: 'done', at: '2026-10-30T18:00:00.000Z', by: 'owner' }), 'application/json');
+    fake.seed('sections/inbox-dev/bead-marks/dev-roadmap/dr-y/20261030T181000000Z-undo-ab12.json', JSON.stringify({ v: 1, project: 'dev-roadmap', bead: 'dr-y', verdict: 'undo', at: '2026-10-30T18:10:00.000Z', by: 'owner' }), 'application/json', { writer: 'card-api' });
+    const state = JSON.parse(await readFile(cli.env.BUW_BD_STATE, 'utf8'));
+    state['dr-x'] = { status: 'open', labels: [] };
+    state['dr-y'] = { status: 'open', labels: [] };
+    await writeFile(cli.env.BUW_BD_STATE, JSON.stringify(state));
+    const listed = (await cli('api', 'mark', 'list', '--project', 'dev-roadmap')).stdout;
+    assert.doesNotMatch(listed, /dr-x/);
+    assert.match(listed, /dr-y\tdone/);
+    const run = JSON.parse((await cli('api', 'mark', 'apply', '--project', 'dev-roadmap', '--json')).stdout);
+    assert.ok(!run.applied.includes('dr-x') && !run.waiting.includes('dr-x') && !run.failed.some(item => item.bead === 'dr-x'), 'dr-x is not touched.');
+    assert.ok(run.applied.includes('dr-y'));
+    assert.ok(!(await calls()).some(call => call[1] === 'dr-x'), 'bd never saw dr-x.');
+  } finally { await close(); }
+});
+
+test('plan apply --journal that already holds every row exits 0 and runs nothing', async () => {
+  const changes = [{ op: 'create', title: 'A' }, { op: 'close', bead: 'wk-5', reason: 'x' }];
+  const { cli, dir, id, calls, close } = await planFixture({ changes });
+  try {
+    const journal = path.join(dir, 'done.json');
+    await writeFile(journal, JSON.stringify({ rows: { d1: 'done', d2: 'done' }, made: { '#1': 'wk-9' } }));
+    const run = await cli('api', 'plan', 'apply', id, '--journal', journal);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /Applied 2 of 2 row\(s\)/);
+    assert.deepEqual(await calls(), []);
   } finally { await close(); }
 });

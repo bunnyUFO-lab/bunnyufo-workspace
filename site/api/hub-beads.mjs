@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { plainText } from './hub-map-notes.mjs';
+import { REQUEST_LIMITS } from './hub-requests.mjs';
 
 export const MAX_COPIES = 30;
 export const LEGACY_COPY = 'legacy';
@@ -167,4 +168,40 @@ export function searchRows(issues) {
     id: issue.id, project: issue.project ?? '', title: issue.title ?? issue.id, status: issue.status ?? 'open',
     text: plainText([issue.description, issue.acceptance_criteria].filter(part => typeof part === 'string' && part.trim()).join(' ')).slice(0, SEARCH_TEXT_MAX),
   }));
+}
+
+export const SEED_KINDS = ['build', 'mockup', 'research'];
+const SEED_PRESET = { build: 'code-task', mockup: 'mockup', research: 'research' };
+const SEED_INTENT = {
+  build: 'Do the work this bead describes, and open one pull request for it.',
+  mockup: 'Mock up what this bead describes.',
+  research: 'Research the question this bead raises, and write a card with sources.',
+};
+
+/**
+ * What Spawn starts from for one bead: `{ preset, title, text, doneWhen? }`. Pure. The text is one line of intent, the bead's id and
+ * title, then its description, cut on a line end (with a note) so the whole fits the request limit. Notes, comments and design are
+ * left out: they are mostly evidence lines and would eat the room. `doneWhen` is the acceptance criteria as plain words (build and
+ * research only).
+ */
+export function beadSeed(issue, kind) {
+  const id = String(issue.id);
+  const name = String(issue.title ?? id);
+  const head = `${SEED_INTENT[kind]}\n\nBead ${id}: ${name}`;
+  const description = typeof issue.description === 'string' ? issue.description.trim() : '';
+  let text = description ? `${head}\n\n${description}` : head;
+  if (text.length > REQUEST_LIMITS.text) {
+    const note = `\n(cut; the full text is on bead ${id})`;
+    const room = REQUEST_LIMITS.text - note.length;
+    let kept = text.slice(0, Math.max(room, 0));
+    const lineEnd = kept.lastIndexOf('\n');
+    // Cut on a line end; a single huge line is cut where it stands.
+    if (lineEnd > head.length) kept = kept.slice(0, lineEnd);
+    text = `${kept.trimEnd()}${note}`;
+  }
+  let title = `${id} ${name}`;
+  if (title.length > REQUEST_LIMITS.title) title = title.slice(0, REQUEST_LIMITS.title - 1).trimEnd() + '…';
+  const done = kind === 'mockup' || typeof issue.acceptance_criteria !== 'string' ? '' : plainText(issue.acceptance_criteria);
+  const doneWhen = done.length > REQUEST_LIMITS.doneWhen ? `${done.slice(0, REQUEST_LIMITS.doneWhen - 1).trimEnd()}…` : done;
+  return { preset: SEED_PRESET[kind], title, text, ...(doneWhen ? { doneWhen } : {}) };
 }

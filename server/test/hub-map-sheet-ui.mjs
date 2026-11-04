@@ -11,6 +11,7 @@ import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, checklistJson, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
+import { itemId } from '../../site/api/hub-sprints.mjs';
 import { listenOnGoodPort } from '../listen.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -18,7 +19,9 @@ const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 const PROJECT = 'sheetdev';
 const BACKFILL = 'Backfilled 2026-10-26 from git, PRs and cards.';
 
-const fixture = await startHubFixture();
+// This test writes requests into the bucket by hand, so the map's 30-second request cache is off (HUB_MAP_REQUESTS_MS).
+// The sweep that signs the next item of a sprint runs every second here, so the test need not wait a minute for it.
+const fixture = await startHubFixture({ signing: true, env: { HUB_MAP_REQUESTS_MS: '0', HUB_SPRINT_SWEEP_MS: '1000' } });
 const extra = (issue, more) => ({ ...issue, ...more });
 const issues = [
   beadsIssue({ id: 'sd-m1', title: 'Sheet milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
@@ -34,8 +37,24 @@ const issues = [
   beadsIssue({ id: 'sd-f-race', title: 'Race feature', type: 'epic', parent: 'sd-m1', created: '2026-10-03T11:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-desktop', title: 'Race one', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T12:00:00Z' }),
   beadsIssue({ id: 'sd-t-race-phone', title: 'Race two', parent: 'sd-f-race', labels: ['needs-owner'], created: '2026-10-03T13:00:00Z' }),
+  beadsIssue({ id: 'sd-f-do', title: 'Do-it feature', type: 'epic', parent: 'sd-m1', created: '2026-10-04T11:00:00Z' }),
+  ...['desktop', 'phone'].map(label => extra(beadsIssue({ id: `sd-t-do-${label}`, title: `Wire the exit door ${label}`, parent: 'sd-f-do', created: '2026-10-04T12:00:00Z', description: 'Players need a door at the end of the level.\n\nIt opens when the key is held.' }), { acceptance_criteria: '- The door opens with the key\n- A test covers it' })),
 ];
 fixture.seed.beads(PROJECT, issues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sheetdev' });
+// Two projects that run on the PC, one per viewport: a sprint is one per project at a time.
+const SPRINT_PROJECTS = { desktop: { id: 'magic-loops', prefix: 'ml' }, phone: { id: 'sprite-studio', prefix: 'ss' } };
+for (const { id, prefix } of Object.values(SPRINT_PROJECTS)) {
+  const sprintIssues = [
+    beadsIssue({ id: `${prefix}-ms`, title: 'Sprint milestone', type: 'milestone', created: '2026-10-01T10:00:00Z' }),
+    beadsIssue({ id: `${prefix}-ft`, title: 'Sprint feature', type: 'epic', parent: `${prefix}-ms`, created: '2026-10-01T10:01:00Z' }),
+    extra(beadsIssue({ id: `${prefix}-a`, title: 'Read the level file', parent: `${prefix}-ft`, created: '2026-10-01T11:00:00Z', description: 'Parse the level file.\nKeep it small.' }), { acceptance_criteria: 'The level loads' }),
+    beadsIssue({ id: `${prefix}-b`, title: 'Draw the door', parent: `${prefix}-ft`, created: '2026-10-01T11:01:00Z' }),
+    beadsIssue({ id: `${prefix}-c`, title: 'Wire the door', parent: `${prefix}-ft`, blocks: [`${prefix}-b`], created: '2026-10-01T11:02:00Z' }),
+    beadsIssue({ id: `${prefix}-owner`, title: 'Pick the door colour', parent: `${prefix}-ft`, labels: ['needs-owner'], created: '2026-10-01T11:03:00Z' }),
+  ];
+  fixture.seed.beads(id, sprintIssues, { pushedAt: minutesAgo(fixture.now, 5).toISOString(), host: 'pc.example.test', count: sprintIssues.length, repo: `example/${id}` });
+  fixture.fake.seed(`sections/${id}/workspace.json`, JSON.stringify({ name: id, tracked: { repo: `example/${id}` }, entities: [] }), 'application/json');
+}
 fixture.fake.seed('sections/sheetlib/workspace.json', JSON.stringify({ name: 'Sheet library', entities: [{ id: 'mission', title: 'Mission control', folder: '2026-10-27_plan' }] }), 'application/json');
 const ASK = askId('sheet-arc', 's1s1');
 const CHECKLIST = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-sheetdev-set-up-the-bot-c1c1`;
@@ -76,8 +95,8 @@ const open = async (viewport, options = {}) => {
   };
   return page;
 };
-const sheet = async (page, node) => {
-  await page.goto(`${fixture.url}#/~hub/map/${PROJECT}/${node}`);
+const sheet = async (page, node, project = PROJECT) => {
+  await page.goto(`${fixture.url}#/~hub/map/${project}/${node}`);
   const panel = page.locator('.hub-map-panel');
   await panel.waitFor();
   await page.waitForFunction(id => document.querySelector('.hub-map-panel-heading')?.textContent?.includes(id), node);
@@ -119,6 +138,13 @@ try {
     panel = await sheet(page, 'sd-t-hash');
     assert.equal(await panel.locator('[data-summary]').innerText(), 'No description yet.');
     assert.equal(await panel.locator('[data-cards]').count(), 0);
+    step(`${label}: an open task that waits on nobody has Mark done and No longer needed, and no Unblock or What's needed`);
+    assert.equal(await panel.locator('[data-mark-open] [data-mark-done]').count(), 1);
+    assert.equal(await panel.locator('[data-mark-open] [data-mark-not-needed]').count(), 1);
+    assert.equal(await panel.locator('[data-mark-unblock]').count(), 0, 'Unblock is for a task that waits on the owner.');
+    assert.equal(await panel.locator('h4', { hasText: "What's needed" }).count(), 0);
+    await noSideways(page, `${label} open task marks`);
+    if (process.env.BUW_SHOTS) await page.screenshot({ path: `${process.env.BUW_SHOTS}/open-task-marks-${label}.png` });
 
     step(`${label}: a done feature says when it finished, not that nothing happened`);
     panel = await sheet(page, 'sd-f-done');
@@ -200,11 +226,11 @@ try {
     assert.ok((await panel.locator('[data-mark-unblock]').boundingBox()).height >= 43.5, 'Unblock is tall enough to tap.');
     assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
     await markDone.click();
-    assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /^This closes .+ in Beads. Undo stays here until a session applies it./, 'The first mark on a device says what it closes.');
+    assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /^This closes .+ in Beads. Undo stays here until the PC applies it, within minutes./, 'The first mark on a device says what it closes.');
     assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Nothing is written before the confirmation.');
     await panel.locator('[data-mark-confirm-yes]').click();
     await panel.locator('[data-mark-pending]').waitFor();
-    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. The PC applies it in Sheetdev within minutes.\s*Undo$/);
     assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'done');
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · done/);
     assert.equal(await panel.locator('[data-mark-done]').count(), 0);
@@ -220,7 +246,7 @@ try {
     await panel.locator('[data-mark-unblock]').click();
     await panel.locator('[data-mark-pending]').waitFor();
     assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'unblock');
-    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this unblocked on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this unblocked on \d{1,2} \w{3}\. The PC applies it in Sheetdev within minutes.\s*Undo$/);
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · next up/, 'It is next, not yellow and not closed.');
     assert.equal(await panel.locator('[data-mark-unblock]').count(), 0);
     await noSideways(page, `${label} unblock pending`);
@@ -257,6 +283,167 @@ try {
     await panel.locator('[data-mark-done]').waitFor({ state: 'detached' });
     assert.equal(await alert.count(), 1, 'The message stays when the sheet learns it is closed.');
 
+    // ws-im1.2.1: the "Do it" block on an open task's sheet, and Spawn filled from the bead.
+    step(`${label}: an open task has Build it, Mock it up and Research it; a done task and a read-only host have none`);
+    const doId = `sd-t-do-${label}`;
+    panel = await sheet(page, doId);
+    const doBlock = panel.locator('[data-bead-work]');
+    await doBlock.waitFor();
+    assert.deepEqual(await doBlock.locator('[data-bead-do]').evaluateAll(buttons => buttons.map(button => button.getAttribute('data-bead-do'))), ['build', 'mockup', 'research']);
+    assert.equal(await doBlock.locator('[data-bead-do="build"] small').innerText(), 'Claude · opens a PR');
+    const boxes = await doBlock.locator('[data-bead-do]').evaluateAll(buttons => buttons.map(button => { const box = button.getBoundingClientRect(); return { h: box.height, left: Math.round(box.left), right: box.right }; }));
+    for (const box of boxes) assert.ok(box.h >= 44, `${label}: a Do it button is ${box.h}px tall.`);
+    assert.equal(new Set(boxes.map(box => box.left)).size, 1, 'The buttons are stacked.');
+    await noSideways(page, `${label} Do it block`);
+    panel = await sheet(page, 'sd-t-done');
+    assert.equal(await panel.locator('[data-bead-work]').count(), 0, 'A done task has no Do it block.');
+
+    step(`${label}: Mock it up opens Spawn on the Mockup preset, filled from the bead, with no Done when`);
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="mockup"]').click();
+    const spawn = page.locator('[data-spawn-sheet]');
+    await spawn.locator('[data-spawn-bead]').waitFor();
+    assert.equal(await spawn.locator('[data-spawn-bead]').innerText(), `From bead ${doId}`);
+    assert.equal(await spawn.locator('[data-preset="mockup"]').getAttribute('aria-pressed'), 'true');
+    assert.equal(await spawn.locator('[data-spawn-done]').inputValue(), '');
+    await spawn.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
+    await page.keyboard.press('Escape');
+    await spawn.waitFor({ state: 'detached' });
+
+    step(`${label}: Build it fills Spawn from the bead and one Approve makes and signs one request`);
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="build"]').click();
+    await spawn.locator('[data-spawn-bead]').waitFor();
+    assert.equal(await spawn.locator('[data-preset="code-task"]').getAttribute('aria-pressed'), 'true');
+    const filled = await spawn.locator('[data-spawn-text]').inputValue();
+    assert.match(filled, new RegExp(`Bead ${doId}: Wire the exit door ${label}`));
+    assert.match(filled, /It opens when the key is held\./);
+    assert.equal(await spawn.locator('[data-spawn-done]').inputValue(), '- The door opens with the key - A test covers it');
+    await spawn.locator('[data-spawn-machine]').waitFor();
+    const goButton = spawn.locator('[data-spawn-go]');
+    await page.waitForFunction(() => !document.querySelector('[data-spawn-go]').disabled);
+    await goButton.click();
+    await page.locator('[data-spawn-toast]').waitFor();
+    const mine = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key) && fixture.fake.json(key).bead === doId);
+    assert.equal(mine.length, 1, 'One request was made from the bead.');
+    const stored = fixture.fake.json(mine[0]);
+    assert.deepEqual([stored.preset, stored.project, stored.origin.kind, stored.textOrigin, stored.title], ['code-task', PROJECT, 'owner', { kind: 'agent', name: 'Beads' }, `${doId} Wire the exit door ${label}`]);
+    const approvedKey = mine[0].replace('request.json', 'approved.json');
+    assert.ok(fixture.fake.objects.has(approvedKey), 'It was signed by the Approve tap.');
+    assert.match(fixture.fake.json(approvedKey).run.brief, new RegExp(`Bead: ${doId}\. Put this id in the pull request`));
+
+    step(`${label}: while the run is on the bead the sheet says so and links to it; once it fails the buttons return`);
+    panel = await sheet(page, doId);
+    const live = panel.locator('[data-bead-run]');
+    await live.waitFor();
+    assert.equal(await panel.locator('[data-bead-do]').count(), 0, 'No second run is offered.');
+    assert.match(await live.innerText(), /· Open the run$/);
+    const requestId = mine[0].split('/').at(-2);
+    assert.equal(await live.locator('a').getAttribute('href'), `#/~hub/request/${encodeURIComponent(requestId)}`);
+    await noSideways(page, `${label} run line`);
+    step(`${label}: marking a task with a run on it keeps the run line and says the run keeps going; Undo brings the marks back`);
+    await panel.locator('[data-mark-done]').click();
+    const confirmYes = panel.locator('[data-mark-confirm-yes]');
+    if (await confirmYes.count()) { assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /A run is on it and keeps going\./); await confirmYes.click(); }
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.equal(await panel.locator('[data-bead-run]').count(), 1, 'The run line stays on a marked task.');
+    assert.equal(await panel.locator('[data-bead-run] a').getAttribute('href'), `#/~hub/request/${encodeURIComponent(requestId)}`);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /The run keeps going\. Open it to stop it\./);
+    assert.equal(await panel.locator('[data-bead-do]').count(), 0, 'No build buttons on a marked task.');
+    await panel.locator('[data-mark-undo]').click();
+    await panel.locator('[data-mark-pending]').waitFor({ state: 'detached' });
+    const folder = mine[0].replace('request.json', '');
+    fixture.fake.seed(`${folder}taken.json`, JSON.stringify({ v: 1, at: new Date().toISOString() }), 'application/json');
+    fixture.fake.seed(`${folder}result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: new Date().toISOString() }), 'application/json');
+    panel = await sheet(page, doId);
+    await panel.locator('[data-bead-do="build"]').waitFor();
+    assert.equal(await panel.locator('[data-bead-run]').count(), 0);
+
+
+    // ws-im1.2.2: "Run a sprint" on a milestone's sheet.
+    step(`${label}: a project with no PC runs says so and offers no sprint`);
+    panel = await sheet(page, 'sd-m1');
+    await panel.locator('[data-sprint-not-pc]').waitFor();
+    assert.equal(await panel.locator('[data-sprint-not-pc]').innerText(), 'Sprints run on the PC. sheetdev has no PC runs.');
+    assert.equal(await panel.locator('[data-sprint-start], [data-sprint-chip]').count(), 0);
+
+    step(`${label}: the sheet shows the timebox chips (4h on), the beads in order and the ones left out with why`);
+    const { id: sprintProject, prefix } = SPRINT_PROJECTS[label];
+    panel = await sheet(page, `${prefix}-ms`, sprintProject);
+    const sprintBlock = panel.locator('[data-sprint]');
+    await sprintBlock.locator('[data-sprint-plan]').waitFor();
+    assert.match(await sprintBlock.innerText(), /run a sprint/i, 'The heading may be set in capitals.');
+    assert.match(await sprintBlock.innerText(), /Claude · stacked PRs, questions come to Needs you/);
+    assert.deepEqual(await sprintBlock.locator('[data-sprint-chip]').allInnerTexts(), ['90m', '4h', 'until done']);
+    assert.equal(await sprintBlock.locator('[data-sprint-chip="240"]').getAttribute('aria-pressed'), 'true', '4h is the default.');
+    assert.equal(await sprintBlock.locator('[data-sprint-chip="90"]').getAttribute('aria-pressed'), 'false');
+    assert.deepEqual(await sprintBlock.locator('[data-sprint-plan] .hub-sprint-title').allInnerTexts(), ['Read the level file', 'Draw the door', 'Wire the door']);
+    assert.deepEqual(await sprintBlock.locator('[data-sprint-left-out] li').allInnerTexts().then(rows => rows.map(row => row.replace(/\s+/g, ' ').trim())), ['Pick the door colour waits for you']);
+    for (const box of await sprintBlock.locator('[data-sprint-chip], [data-sprint-start]').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height))) assert.ok(box >= 43.5, `${label}: a sprint button is ${box}px tall.`);
+    await noSideways(page, `${label} sprint offer`);
+
+    step(`${label}: Start asks once, listing the beads; Cancel leaves nothing started`);
+    await sprintBlock.locator('[data-sprint-chip="90"]').click();
+    assert.equal(await sprintBlock.locator('[data-sprint-chip="90"]').getAttribute('aria-pressed'), 'true');
+    await sprintBlock.locator('[data-sprint-start]').click();
+    const confirm = sprintBlock.locator('[data-sprint-confirm]');
+    await confirm.waitFor();
+    assert.match(await confirm.innerText(), /^Run 3 beads one after the other, for 90 minutes\./);
+    assert.deepEqual(await confirm.locator('[data-sprint-confirm-items] .hub-sprint-title').allInnerTexts(), ['Read the level file', 'Draw the door', 'Wire the door']);
+    await noSideways(page, `${label} sprint confirm`);
+    await confirm.locator('[data-sprint-cancel]').click();
+    await confirm.waitFor({ state: 'detached' });
+    assert.equal([...fixture.fake.objects.keys()].filter(key => key.endsWith('/sprint.json') && fixture.fake.json(key).project === sprintProject).length, 0, 'Cancel starts nothing.');
+
+    step(`${label}: Confirm starts it: item 1 of 3 with the time left, signed with no after`);
+    await sprintBlock.locator('[data-sprint-start]').click();
+    await sprintBlock.locator('[data-sprint-go]').click();
+    await sprintBlock.locator('[data-sprint-progress]').waitFor();
+    assert.match(await sprintBlock.locator('[data-sprint-progress]').innerText(), /^Item 1 of 3 · (1 h \d+ min|\d+ min) left$/);
+    assert.deepEqual(await sprintBlock.locator('[data-sprint-state]').allInnerTexts(), ['Queued', 'Waiting', 'Waiting']);
+    assert.equal(await sprintBlock.locator('[data-sprint-start]').count(), 0, 'Nothing to start while it goes.');
+    const sprintKeys = [...fixture.fake.objects.keys()].filter(key => key.endsWith('/sprint.json') && fixture.fake.json(key).project === sprintProject);
+    assert.equal(sprintKeys.length, 1);
+    const head = sprintKeys[0].split('/').at(-2);
+    const sprintFolder = `sections/inbox/requests/${head}/`;
+    const approvedOne = fixture.fake.json(`${sprintFolder}approved.json`);
+    assert.deepEqual([approvedOne.run.sprint.seq, approvedOne.run.sprint.of, approvedOne.run.sprint.after, approvedOne.limits.minutes], [1, 3, null, 90]);
+    assert.ok(approvedOne.run.brief.includes('Never merge') && approvedOne.run.brief.includes('<<<DATA'), 'The brief has the fence and the rule.');
+    assert.ok(await sprintBlock.locator('[data-sprint-stop]').isVisible());
+    await noSideways(page, `${label} sprint progress`);
+
+    step(`${label}: when item 1 opens a PR, item 2 is signed on top of it and the sheet shows both`);
+    const pcFinish = (id, outcome, extraBody = {}) => {
+      fixture.fake.seed(`sections/inbox/requests/${id}/taken.json`, JSON.stringify({ v: 1, runner: 'pc', session: 's1', at: new Date().toISOString() }), 'application/json');
+      fixture.fake.seed(`sections/inbox/requests/${id}/result.json`, JSON.stringify({ v: 1, outcome, at: new Date().toISOString(), ...extraBody }), 'application/json');
+    };
+    pcFinish(head, 'pr', { pr: 'https://example.test/example/pull/41' });
+    const two = itemId(head, 2);
+    for (let waited = 0; !fixture.fake.objects.has(`sections/inbox/requests/${two}/approved.json`); waited += 100) {
+      assert.ok(waited < ms(15000), 'The sweep signed item 2.');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    assert.equal(fixture.fake.json(`sections/inbox/requests/${two}/approved.json`).run.sprint.after, head, 'Item 2 stacks on item 1.');
+    panel = await sheet(page, `${prefix}-ms`, sprintProject);
+    const progress = panel.locator('[data-sprint-progress]');
+    await progress.waitFor();
+    assert.match(await progress.innerText(), /^Item 2 of 3 · /);
+    assert.deepEqual(await panel.locator('[data-sprint-state]').allInnerTexts(), ['Done', 'Queued', 'Waiting']);
+    const prLink = panel.locator('[data-sprint-pr]');
+    assert.equal(await prLink.count(), 1);
+    assert.equal(await prLink.getAttribute('href'), 'https://example.test/example/pull/41');
+    await noSideways(page, `${label} sprint, item 2`);
+
+    step(`${label}: Stop ends the sprint at once and starts no item 3`);
+    await panel.locator('[data-sprint-stop]').click();
+    await panel.locator('[data-sprint-ended]').waitFor({ timeout: ms(20000) });
+    assert.equal(await panel.locator('[data-sprint-ended]').innerText(), 'Sprint ended. 1 of 3 PRs open. Stopped: you stopped it');
+    assert.equal(await panel.locator('[data-sprint-stop]').count(), 0);
+    assert.equal(fixture.fake.objects.has(`sections/inbox/requests/${itemId(head, 3)}/request.json`), false, 'No item 3.');
+    assert.equal(fixture.fake.objects.has(`${sprintFolder}sprint-end.json`), true);
+    assert.equal(await panel.locator('[data-sprint-start]').count(), 1, 'A new sprint can be started once the last one ended.');
+    await noSideways(page, `${label} sprint ended`);
+
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
   }
 
@@ -278,6 +465,7 @@ try {
       '/api/hub/today': { counts: { needsYou: 0, running: 0, recent: 0, alerts: 0 }, needsYou: [], running: [], recent: [], alerts: [], at: new Date().toISOString() },
       '/api/hub/projects': { projects: [{ id: 'rodev', name: 'Read-only dev', beads: true }] },
       '/api/hub/map/rodev': model,
+      '/api/hub/map/rodev/sprint/ro-m': { allowed: true, max: 8, items: [{ id: 'ro-t', title: 'Waits on you' }], left: [], active: null },
       '/api/hub/inbox': { items: [], counts: {}, at: new Date().toISOString() },
     };
     const writes = [];
@@ -300,6 +488,11 @@ try {
       await panel.waitFor();
       await panel.locator('[data-readonly-note]', { hasText: 'Sign in to mark this.' }).waitFor();
       assert.equal(await panel.locator('[data-mark-done]').count(), 0);
+      assert.equal(await panel.locator('[data-bead-work]').count(), 0, 'A read-only host has no Do it block.');
+      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-m`);
+      await panel.locator('h4', { hasText: 'Sprint' }).first().waitFor();
+      await guest.waitForTimeout(ms(500));
+      assert.equal(await panel.locator('[data-sprint], [data-sprint-start], [data-sprint-chip]').count(), 0, 'A read-only host has no way to start a sprint.');
       await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-marked`);
       await panel.locator('[data-mark-pending]').waitFor();
       assert.equal(await panel.locator('button').filter({ hasText: /Undo|Mark done|No longer needed/ }).count(), 0, 'A marked task has no buttons on a read-only copy.');

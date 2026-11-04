@@ -449,7 +449,8 @@ export function requestItem(request, state, taken, extra = {}) {
   const since = cloud?.since ? cloud.since : state === 'failed' ? result?.at : state === 'lost' && taken?.at ? new Date(new Date(taken.at).getTime() + RUN_STALE_MS).toISOString() : state === 'expired' ? approved?.expires : undefined;
   const item = {
     kind: state === 'proposed' ? 'approval' : state === 'asking' ? 'run-question' : 'request', id: request.id, project: request.project, title: request.title ? clip(request.title) : clip(request.text), at: request.createdAt, state,
-    ...(taken?.bead ? { bead: taken.bead } : {}),
+    ...((request.bead ?? taken?.bead) ? { bead: request.bead ?? taken.bead } : {}),
+    ...(request.sprint ? { sprint: request.sprint } : {}),
     ...(request.by ? { by: request.by } : {}),
     ...(request.preset ? { preset: request.preset } : {}),
     ...(state === 'asking' && result?.question ? { question: result.question, ...(result.summary ? { summary: result.summary } : {}) } : {}),

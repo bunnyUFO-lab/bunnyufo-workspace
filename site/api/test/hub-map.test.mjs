@@ -390,3 +390,13 @@ test('a closed feature or milestone with no tasks is done; an open one is still 
   assert.equal(feature('f-busy').state, 'doing', 'a closed feature with open tasks still rolls up from them');
   assert.equal(map.milestones.find(m => m.id === 'm-open').state, 'doing');
 });
+
+test('a task gets the newest live request made from its bead as run; an ended one gives none', () => {
+  const issues = [issue({ id: 'm', type: 'milestone' }), issue({ id: 'f', type: 'epic', parent: 'm' }), issue({ id: 't', parent: 'f' }), issue({ id: 'u', parent: 'f' })];
+  const request = (id, state, at, bead = 't') => ({ id, bead, state, at });
+  const map = build(issues, { requests: [request('old', 'running', '2026-10-26T10:00:00Z'), request('new', 'asking', '2026-10-26T11:00:00Z'), request('dead', 'failed', '2026-10-26T11:30:00Z'), request('other', 'running', '2026-10-26T11:00:00Z', 'u'), { id: 'nobead', state: 'running', at: '2026-10-26T11:00:00Z' }] });
+  assert.deepEqual(task(map, 't').run, { id: 'new', state: 'asking' });
+  assert.deepEqual(task(map, 'u').run, { id: 'other', state: 'running' });
+  for (const state of ['done', 'failed', 'expired', 'declined', 'stopped']) assert.equal('run' in task(build(issues, { requests: [request('r', state, '2026-10-26T10:00:00Z')] }), 't'), false, state);
+  assert.equal('run' in task(build(issues), 't'), false);
+});

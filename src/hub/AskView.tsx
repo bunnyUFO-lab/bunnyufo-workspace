@@ -49,6 +49,7 @@ export default function AskView({ id }: { id: string }) {
   const from = { tool: text(ask.from?.tool), host: text(ask.from?.host) }
   const stepIndex = STEPS.findIndex(([key]) => key === (ask.state === 'snoozed' ? 'open' : ask.state))
   const answer = ask.answer ?? taken
+  const isPlan = Array.isArray(ask.changes) && ask.changes.length > 0
 
   return (
     <>
@@ -73,8 +74,10 @@ export default function AskView({ id }: { id: string }) {
         <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail)} view />
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
-      {answer && ask.delivery && !ask.pickup && <Delivery noun="Ask" project={ask.project} delivery={ask.delivery} />}
-      {ask.pickup && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
+      {answer && isPlan && !ask.pickup && !ask.cancel && <p className="hub-muted" data-plan-state="waiting">Waiting for the PC to apply it.</p>}
+      {answer && ask.delivery && !isPlan && !ask.pickup && <Delivery noun="Ask" project={ask.project} delivery={ask.delivery} />}
+      {ask.pickup && isPlan && <p className="hub-muted" data-plan-state="applied">Applied {when(ask.pickup.at)}.</p>}
+      {ask.pickup && !isPlan && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}
       <p><a className="hub-btn" href={needsHash()}>Back to Needs you</a></p>
     </>
   )

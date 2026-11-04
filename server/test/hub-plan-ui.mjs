@@ -112,6 +112,20 @@ try {
   assert.deepEqual(writes.filter(line => !/\/(chat|asks\/[^/]+\/answer)/.test(line)), [], 'Nothing else was written: no mark, no request.');
   assert.deepEqual([...fx.fake.objects.keys()].filter(key => key.includes('/bead-marks/')), [], 'A plan decides no Roadmap question by itself.');
 
+  step('desktop: an answered plan says it waits for the PC, then when it was applied (ws-im1.2.3)');
+  await desk.goto(`${fx.url}#/~hub/ask/${ask}`);
+  await desk.locator('[data-plan-state="waiting"]').waitFor();
+  assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), 'Waiting for the PC to apply it.');
+  await desk.locator('[data-plan-state="waiting"]').scrollIntoViewIfNeeded();
+  await shot(desk, 'plan-waiting-desktop');
+  fx.fake.seed(`sections/inbox/asks/${ask}/pickup.json`, JSON.stringify({ at: new Date().toISOString(), host: 'pc' }), 'application/json');
+  await desk.reload();
+  await desk.locator('[data-plan-state="applied"]').waitFor();
+  assert.match(await desk.locator('[data-plan-state="applied"]').innerText(), /^Applied .+\.$/);
+  assert.equal(await desk.locator('[data-plan-state="waiting"]').count(), 0);
+  await desk.locator('[data-plan-state="applied"]').scrollIntoViewIfNeeded();
+  await shot(desk, 'plan-applied-desktop');
+
   step('phone: Plan in Hermes and the change list fit, every control is 44 px, nothing scrolls sideways');
   const second = askId('plan-sprint-5', 'p5p5');
   fx.seed.ask({ ...askJson({ id: second, project: 'wayfind', now: minutesAgo(fx.now, 4), kind: 'decision', allowDrawing: false, question: 'Apply the Sprint 5 plan to the Roadmap?', context: 'One epic and one closed question.' }), changes: CHANGES.slice(0, 4) });

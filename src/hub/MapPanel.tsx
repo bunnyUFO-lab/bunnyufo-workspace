@@ -8,6 +8,10 @@ import { useHubData } from './useHub'
 import { SIGN_WORDS, STATE_COLOR, STATE_LABEL, find, sprintLines, tasksOf, type Found } from './mapState'
 import MarkActions from './MarkActions'
 import QuestionActions from './QuestionActions'
+import BeadWork from './BeadWork'
+import SprintPanel from './SprintPanel'
+import { visible as beadWorkVisible } from './beadActions'
+import { host } from '../lib/host'
 import { cardHref, closedLine, finishedLine, hasNeedsItem, noPrs, prLabel, sheetPrs, type SheetPr } from './mapSheet'
 
 /** The signs in the legend's order, with the short word the panel counts them under. */
@@ -144,6 +148,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
             <QuestionActions project={model.project} repoName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project} wayfinder={model.wayfinder} item={resolving} layout="sheet" />
           </div>
         )}
+        {(beadWorkVisible(task, resolving, host.write) || (host.write && !resolving && task.run)) && <BeadWork key={task.id} task={task} project={model.project} />}
         {words.length > 0 && <p className="hub-muted">{words.join(' · ')}</p>}
         {task.deps.length > 0 && <p className="hub-muted">Needs first: {task.deps.map(nameOf).join(', ')}</p>}
         {unlocks.length > 0 && <p className="hub-muted">Unlocks: {unlocks.join(', ')}</p>}
@@ -172,11 +177,20 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
                   : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
             <MarkActions
               task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
-              eligible={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+              eligible={task.state !== 'done'} waiting={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
             />
           </div>
         )}
-        {!(task.state === 'you' || task.mark) && markFailure.id === nodeId && markFailure.message && <p className="hub-error" role="alert">{markFailure.message}</p>}
+        {/* Any other open task: Mark done and No longer needed (the PC applies them within minutes). Unblock is only for a task that waits on you. */}
+        {!(task.state === 'you' || task.mark) && task.state !== 'done' && (
+          <div className="hub-map-panel-needed" data-mark-open>
+            <MarkActions
+              task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+              eligible waiting={false} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+            />
+          </div>
+        )}
+        {!(task.state === 'you' || task.mark) && task.state === 'done' && markFailure.id === nodeId && markFailure.message && <p className="hub-error" role="alert">{markFailure.message}</p>}
       </>
     )
   } else {
@@ -186,6 +200,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
       <>
         <Summary text={node.summary} show={!synthetic} />
         <Library cards={node.cards} />
+        {found.kind === 'm' && <SprintPanel project={model.project} milestone={found.milestone} />}
         <h4>Sprint</h4>
         {sprints.length ? <ul className="hub-map-panel-list plain">{sprints.map(line => <li key={line}>{line}</li>)}</ul> : <p className="hub-muted">Not in a sprint.</p>}
         <h4>Signs</h4>

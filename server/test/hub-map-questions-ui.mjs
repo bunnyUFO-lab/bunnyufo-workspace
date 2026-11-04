@@ -211,7 +211,7 @@ try {
   step('desktop: the side sheet says what was decided and Undo takes it back');
   await desk.goto(`${fx.url}#/~hub/map/wayfind/wf-q1`);
   await desk.locator('[data-decided]').waitFor();
-  assert.match(await desk.locator('[data-decided]').innerText(), /^Decided: Start with the small version\. · applies at the next session in /);
+  assert.match(await desk.locator('[data-decided]').innerText(), /^Decided: Start with the small version\. · the PC applies it within minutes/);
   assert.equal(await desk.locator('[data-resolve]').count(), 0, 'A decided question has no Resolve block.');
   await shot(desk, 'side-sheet-decided-desktop');
   await desk.locator('[data-mark-undo]').click();

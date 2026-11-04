@@ -165,14 +165,20 @@ test('the route: who may mark, what is refused and why', async () => {
     assert.equal((await post('/hub/map/Bad_Id/marks', { bead: 'mk-label', verdict: 'done' })).status, 404);
     assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-ghost', verdict: 'done' })).status, 404, 'A bead that is not in that project.');
     assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-label', verdict: 'maybe' })).status, 400);
+    const onlyTasks = 'Only a task can be marked here, not a milestone or a feature.';
     const refusals = [
-      ['mk-plain', 'This is not waiting on you.'], ['mk-shut', 'Already closed in Beads.'], ['mk-f', 'This is not waiting on you.'],
+      ['mk-shut', 'done', 'Already closed in Beads.'], ['mk-shut', 'not-needed', 'Already closed in Beads.'], ['mk-f', 'done', onlyTasks], ['mk-m', 'not-needed', onlyTasks], ['mk-m', 'done', onlyTasks],
+      ['mk-plain', 'unblock', 'Unblock changes nothing here: this task has no needs-owner label and is not blocked, it waits only through an Ask or a checklist. Answer or cancel that Ask, or use Mark done or Not needed.'],
     ];
-    for (const [bead, message] of refusals) {
-      const answer = await post('/hub/map/mk/marks', { bead, verdict: 'done' });
-      assert.deepEqual([answer.status, answer.body.error], [409, message], bead);
+    for (const [bead, verdict, message] of refusals) {
+      const answer = await post('/hub/map/mk/marks', { bead, verdict });
+      assert.deepEqual([answer.status, answer.body.error], [409, message], `${bead} ${verdict}`);
     }
     assert.deepEqual(marks(), [], 'Nothing was written.');
+    // An open task that waits on nobody may be marked done or no longer needed (ws-im1.2.3); the PC applies it.
+    assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-plain', verdict: 'done' })).status, 201);
+    assert.equal((await post('/hub/map/mk/marks', { bead: 'mk-askonly', verdict: 'not-needed', reason: 'Not wanted' })).status, 201);
+    assert.deepEqual(marks().map(key => key.split('/').slice(-2)[0]), ['mk-askonly', 'mk-plain']);
   } finally { await close(); }
 });
 
@@ -384,19 +390,20 @@ test('the route: an open Wayfinder question is decided without waiting on you, w
   } finally { await close(); }
 });
 
-test('the route: only an open Wayfinder question skips "waiting on you"; an ordinary task, a closed question and unblock are refused as before', async () => {
+test('the route: any open task may be marked done or not needed; the map itself, a closed question and unblock on a task that waits on nobody are refused', async () => {
   const { post, wayMarks, close } = await fixture();
   try {
-    const plain = await post('/hub/map/wk/marks', { bead: 'wk-task', verdict: 'done', reason: 'x' });
-    assert.deepEqual([plain.status, plain.body.error], [409, 'This is not waiting on you.']);
     const map = await post('/hub/map/wk/marks', { bead: 'wk-map', verdict: 'done' });
-    assert.deepEqual([map.status, map.body.error], [409, 'This is not waiting on you.'], 'The map itself is not a question.');
+    assert.deepEqual([map.status, map.body.error], [409, 'Only a task can be marked here, not a milestone or a feature.'], 'The map itself is not a question.');
+    const plain = await post('/hub/map/wk/marks', { bead: 'wk-task', verdict: 'done', reason: 'x' });
+    assert.deepEqual([plain.status, plain.body.verdict], [201, 'done'], 'An ordinary open task may be marked done.');
+    assert.equal(wayMarks().length, 1);
     const closed = await post('/hub/map/wk/marks', { bead: 'wk-q9', verdict: 'done', reason: 'x' });
     assert.deepEqual([closed.status, closed.body.error], [409, 'Already closed in Beads.']);
     const unblock = await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'unblock' });
     assert.equal(unblock.status, 409, 'Unblock is for tasks that wait on you.');
     assert.equal((await post('/hub/map/wk/marks', { bead: 'wk-q1', verdict: 'done', reason: 'x'.repeat(501) })).status, 400);
-    assert.deepEqual(wayMarks(), []);
+    assert.equal(wayMarks().length, 1, 'Only the one ordinary task was marked.');
   } finally { await close(); }
 });
 

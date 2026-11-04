@@ -136,7 +136,8 @@ GITHUB_TOKEN=$(gh auth token) npm run cards -- pr-sync --repo <owner/repo> --pro
 npm run cards -- ask create --project <p> [--bead <b>] (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
 npm run cards -- ask create --project <p> --kind decision --question <t> --changes <changes.json>   # a plan: 1 to 20 changes the owner approves row by row (docs/workspaces.md, "Plans")
 npm run cards -- beads show --project <p> [--open] [--json]   # read-only: the project's merged Beads copy
-npm run cards -- plan apply <ask id> [--dry-run]   # run the approved rows of an answered plan with bd
+npm run cards -- plan apply <ask id> [--dry-run] [--journal <file>]   # run the approved rows of an answered plan with bd; the journal makes a rerun skip rows done
+npm run cards -- mark apply --project <p> [--json]   # the PC applies the owner's marks in Beads (writes no mark and no applied note); apply pending --project <p> --json lists what waits
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
 npm run cards -- ask get <id>
 npm run cards -- ask pickup <id>      # also: ask cancel <id>; exit 3 if someone already did

@@ -198,6 +198,8 @@ export interface Ask {
   /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
   image?: string
   decisions?: AskDecision[]
+  /** A plan (change-list Ask): the rows the PC applies after the owner's answer. */
+  changes?: unknown[]
   /** The sprite flow: what an avatar Ask points at (an agent's file; checked again where it is used). */
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */
@@ -302,6 +304,8 @@ export interface MapTask {
   you?: 'ask' | 'checklist' | 'label'
   /** The open checklist that names the task. */
   checklist?: string
+  /** The newest request made from this bead that has not ended (the Roadmap's Do it block shows it instead of the buttons). */
+  run?: { id: string; state: string }
   /** One or two plain sentences saying what the work is, from the description. */
   summary?: string
   closeReason?: string
@@ -314,7 +318,20 @@ export interface MapTask {
 export interface UnaskedItem { project: string; id: string; title: string; status: string; href: string; reason?: string; mark?: { verdict: 'done' | 'not-needed'; at: string } }
 export interface MapNotes { summary?: string; closedAt?: string; closeReason?: string; cards?: MapCard[] }
 export interface MapFeature extends MapNotes { id: string; title: string; state: TaskState; tasks: MapTask[] }
-export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[] }
+/** One bead of a sprint: the id of its request, the bead, and its request's state (`waiting` until the request exists) with the PR it opened. */
+export interface MapSprintItem { id: string; bead: string; title: string; state: string; pr?: string }
+/** The newest sprint on a milestone (ws-im1.2.2): `ended` once it stopped, with why and how many PRs it opened. */
+export interface MapSprint { head: string; until: string; items: MapSprintItem[]; ended?: { reason: string; at?: string; prs?: number } }
+export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[]; sprint?: MapSprint }
+/** `GET /hub/map/:project/sprint/:milestone`: the beads a sprint would run, the ones left out and why, and the sprint that is going on the project. */
+export interface SprintPreview {
+  allowed: boolean; why?: string; max: number
+  items: { id: string; title: string }[]
+  left: { id: string; title: string; reason: string; by?: string }[]
+  active: { head: string; milestone: string; until: string } | null
+  /** What the list was when shown: Start sends it back, and a changed list is a 409. */
+  digest?: string
+}
 export interface ProgressMap {
   project: string
   meta: { pushedAt: string; host: string; count: number; repo: string } | null

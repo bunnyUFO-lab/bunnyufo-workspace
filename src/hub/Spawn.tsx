@@ -65,7 +65,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [projects, setProjects] = useState<HubProject[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [presetId, setPresetId] = useState(() => {
-    const wanted = edit?.preset ?? options.preset ?? (options.text ? guessPreset(options.text) : 'code-task')
+    // A bead names its preset: the text is not guessed from.
+    const wanted = edit?.preset ?? options.preset ?? (options.text && !options.bead ? guessPreset(options.text) : 'code-task')
     return wanted === 'agent-avatar' && !agent ? 'code-task' : wanted
   })
   const [project, setProject] = useState(edit?.project ?? options.project ?? '')
@@ -73,7 +74,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [otherRepo, setOtherRepo] = useState(false)
   const [known, setKnown] = useState<{ repo: string; project?: string }[]>([])
   const [text, setText] = useState(edit?.text ?? options.text ?? '')
-  const [doneWhen, setDoneWhen] = useState(edit?.doneWhen ?? '')
+  const [doneWhen, setDoneWhen] = useState(edit?.doneWhen ?? options.doneWhen ?? '')
   const [model, setModel] = useState(edit?.model ?? AUTO)
   const [override, setOverride] = useState<SpawnTarget | ''>((edit?.target as SpawnTarget | undefined) ?? '')
   const [route, setRoute] = useState<SpawnRoute | null>(null)
@@ -203,7 +204,9 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         project, text: trimmed, preset: preset.id,
         ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
         ...(agent && preset.id === 'agent-avatar' ? { agent } : {}),
-        ...(doneWhen.trim() ? { doneWhen: doneWhen.trim() } : {}),
+        ...(doneWhen.trim() && preset.fields.includes('doneWhen') ? { doneWhen: doneWhen.trim() } : {}),
+        ...(options.bead ? { bead: options.bead } : {}),
+        ...(options.bead && options.title ? { title: options.title } : {}),
         ...(choice ? { target: choice } : {}),
         ...(sendModel ? { model: sendModel } : {}),
         ...(edit ? { replaces: edit.id } : {}),
@@ -223,7 +226,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [chatting, chatPersona, onClose, preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel])
+  }, [chatting, chatPersona, onClose, preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel, options.bead, options.title])
 
   const machine = target ? MACHINE[target] : null
   const button = chatting ? 'Open chat' : busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
@@ -281,6 +284,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
               )}
             </div>}
             <p className="sp-agent" data-spawn-agent>Agent · <b>{chatting ? chatAgentName : preset.agent}</b></p>
+            {!chatting && options.bead && <p className="hub-muted" data-spawn-bead>From bead {options.bead}</p>}
             <label className="sp-field" htmlFor={ids.text}>{chatting ? 'What do you want to ask?' : 'What should it do?'}
               <textarea id={ids.text} value={text} onChange={event => setText(event.target.value)} placeholder={chatting ? 'Ask anything. It becomes the first message, not sent yet.' : preset.example} rows={4} maxLength={4000} data-spawn-text />
             </label>

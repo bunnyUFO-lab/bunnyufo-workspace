@@ -1,0 +1,16 @@
+/* The "Run a sprint" block of a milestone's sheet (ws-im1.2.2). Chips are the Hub's own (.hub-chip); everything here is spacing. */
+.hub-sprint { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.hub-sprint h4, .hub-sprint h5 { margin: 0; }
+.hub-sprint p { margin: 0; }
+.hub-sprint-sub { font-size: 0.78rem; color: var(--text-dim); }
+.hub-sprint .hub-chips { margin: 0; }
+.hub-sprint .hub-chip { min-height: 44px; display: inline-flex; align-items: center; cursor: pointer; }
+.hub-sprint-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hub-sprint-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.hub-sprint-list .hub-sprint-title { flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
+.hub-sprint-list .hub-sprint-state { font-size: 0.75rem; color: var(--text-dim); }
+.hub-sprint-list .hub-sprint-why { flex: 1 1 100%; font-size: 0.75rem; color: var(--text-dim); }
+.hub-sprint-order { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 1.5em; }
+.hub-sprint-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--hairline-strong); border-radius: 10px; background: var(--surface-1); }
+.hub-sprint .hub-actions { flex-wrap: wrap; }
+.hub-sprint .hub-btn { min-height: 44px; }
