@@ -193,6 +193,12 @@ test('Hermes gets its soul only; Briefs gets its soul and jobs; the research age
     assert.match(details.prompts[2].text, /\{\{requestId\}\}/, 'placeholders are left as they are');
     assert.equal(details.prompts[2].note, 'Placeholders are filled in when a job starts.');
   }
+  // An edited persona (ws-im1.4.1) shows its own role and text, and says who edited it; the job template stays the app's.
+  const edited = { ...CHAT_PERSONAS.find(item => item.id === 'teardown'), role: 'a new role', text: 'Edited text.', edited: { id: 'persona-20261103T101010123Z-ab12', at: '2026-11-03T10:10:10.123Z', by: 'owner' } };
+  const shown = agentDetails({ agent: agentOf('teardown'), exported, at: NOW, persona: edited, preset: presetOf('game-teardown') });
+  assert.equal(shown.agent.role, 'a new role');
+  assert.deepEqual([shown.prompts[1].text, shown.prompts[1].note], ['Edited text.', 'Edited 2026-11-03 by owner.']);
+  assert.equal(shown.prompts[2].note, 'Placeholders are filled in when a job starts.');
   // With no export the prompts of the app still come.
   assert.deepEqual(detailsOf('teardown', null).prompts.map(prompt => prompt.id), ['persona', 'job']);
   assert.deepEqual(detailsOf('hermes', null).prompts, []);

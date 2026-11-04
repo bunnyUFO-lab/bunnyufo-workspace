@@ -44,7 +44,11 @@
 //        exit 1 when a PR failed or GitHub did not answer 200 (nothing is spooled: the next run is the retry). On the PC:
 //        GITHUB_TOKEN=$(gh auth token) node ~/.buw/cards.mjs pr-sync --repo <owner/repo> --project <p> --prefix <ws|bl|...>
 //   cards ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image file>]]...
-//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--prose-ok]
+//        [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>] [--prose-ok]
+//        --agent-edit proposes an edit of an agent's chat persona (ws-im1.4.1): edit.json is { op: "persona", agent, base, role?, prompt?, model?, why? } with at least one of role, prompt and
+//        model (base: the version you read, `default` or persona-<stamp>-<rand4>; the Hub's GET /hub/team/<agent>/persona lists them). The Ask is --kind approval with --require-passkey and the
+//        two options apply ("Apply this edit") and skip ("Leave it as it is"); nothing changes until the owner answers apply over the web, and an edit written against an older version is not applied.
+//        Toolsets, skills, SOUL.md, scheduled jobs and the profile's model cannot be proposed. The card API and the Hub check the same rules.
 //        --changes files a plan (ws-qdh.3): a JSON list of 1 to 20 changes, each { op, ... } with op create (title, type task|feature|epic, parent?, description?,
 //        labels?), update (bead, title?, description?), dep (bead, blocks: bead must be done before blocks), close (bead, reason), label (bead, add?, remove?) or card
 //        (card: assistant/<folder>). A bead is a Beads id, or #n for the n-th change when that one is a create. Labels: wayfinder:<type>, milestone, roadmap, needs-owner, later.
@@ -167,7 +171,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 const MAX_INLINE = 4 * 1024 * 1024;
 const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
-  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>]\n'
+  + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>]\n'
   + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again] [--journal <file>] | apply pending --project <p> --json\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
 const sha256 = text => createHash('sha256').update(text).digest('hex');
@@ -893,6 +897,7 @@ function askFromFile(raw, flags, id) {
     ...(raw.changes !== undefined ? { changes: raw.changes } : {}),
     ...(raw.avatar !== undefined ? { avatar: raw.avatar } : {}),
     ...(raw.rerun !== undefined ? { rerun: raw.rerun } : {}),
+    ...(raw.agentEdit !== undefined ? { agentEdit: raw.agentEdit } : {}),
     ...(flags.kind !== undefined ? { kind: flags.kind } : raw.kind !== undefined ? { kind: raw.kind } : raw.changes !== undefined ? { kind: 'decision' } : {}),
     allowNote: raw.allowNote ?? true,
     allowDrawing: raw.allowDrawing ?? false,
@@ -959,7 +964,7 @@ function optionFromFlag(value) {
 
 /** The ask input to build from: the file, or --question, with the flags' options, decisions and picture added. */
 async function askInput(flags) {
-  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--prose-ok]';
+  const usage = 'Usage: ask create --project <p> [--bead <b>] (--file ask.json | --question <text>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--require-passkey] [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>] [--prose-ok]';
   if (!flags.project || (!flags.file && !flags.question)) throw new Error(usage);
   if (flags.file && flags.question) throw new Error(`Give --file, or --question, not both. ${usage}`);
   const raw = flags.file ? JSON.parse(await readFile(flags.file, 'utf8')) : { question: flags.question };
@@ -970,6 +975,16 @@ async function askInput(flags) {
     if (flags.option || flags.decision || raw.options !== undefined || raw.decisions !== undefined || raw.image !== undefined || images.length) throw new Error('A change list is answered row by row: leave out --option, --decision and --image.');
     const listed = JSON.parse(await readFile(flags.changes, 'utf8'));
     raw.changes = Array.isArray(listed) ? listed : listed?.changes;
+    if (raw.allowDrawing === undefined) raw.allowDrawing = false;
+  }
+  if (flags['agent-edit']) {
+    // An agent edit is applied or left, nothing else: the two fixed options, a passkey, and no other kind of Ask beside it.
+    if (raw.agentEdit !== undefined) throw new Error('The file has agentEdit already: give it in the file or with --agent-edit, not both.');
+    if (flags.option || flags.decision || flags.changes || raw.options !== undefined || raw.decisions !== undefined || raw.image !== undefined || raw.changes !== undefined || images.length) throw new Error('An agent edit is answered Apply or Leave it: leave out --option, --decision, --changes and --image.');
+    raw.agentEdit = JSON.parse(await readFile(flags['agent-edit'], 'utf8'));
+    raw.options = AGENT_EDIT_OPTIONS.map(option => ({ ...option }));
+    raw.requirePasskey = true;
+    if (raw.kind === undefined && flags.kind === undefined) raw.kind = 'approval';
     if (raw.allowDrawing === undefined) raw.allowDrawing = false;
   }
   if (flags.option) {
@@ -1069,6 +1084,7 @@ function validateAsk(ask, imageNames) {
     if (ask.kind !== 'decision') problems.push('an Ask with changes is --kind decision');
     if (ask.options !== undefined || ask.decisions !== undefined || ask.image !== undefined) problems.push('an Ask with changes has no options, decisions or image: the Hub makes one row per change');
   }
+  if (ask.agentEdit !== undefined) problems.push(...validateAgentEdit(ask));
   if (ask.requirePasskey !== undefined && typeof ask.requirePasskey !== 'boolean') problems.push('requirePasskey is true or false');
   if (ask.kind !== undefined && !ASK_KINDS.includes(ask.kind)) problems.push(`--kind is one of: ${ASK_KINDS.join(', ')}`);
   if (typeof ask.allowNote !== 'boolean' || typeof ask.allowDrawing !== 'boolean') problems.push('allowNote and allowDrawing are true or false');
@@ -1462,6 +1478,50 @@ export function changeRows(changes) {
   });
 }
 // --- ask-changes:end ---
+
+// --- agent-edit:start (the same block is in site/api/agent-edit.mjs and site/card-api/cards.mjs; scripts/cards.test.mjs keeps them equal) ---
+/**
+ * `validateAgentEdit(ask)` returns the problems with an Ask's `agentEdit` field (an empty array when it is good); it never throws.
+ * The field is `{ op: 'persona', agent, base, role?, prompt?, model?, why? }`: at least one of role, prompt and model, the limits of the
+ * Edit page, and `base`, the version the proposal was written against (`default` or a persona-<stamp>-<rand4> id). The Ask must require
+ * a passkey and offer exactly Apply and Leave it. Toolsets, skills, SOUL.md, jobs and the profile's model are view-only and refused.
+ */
+const AGENT_EDIT_KEYS = ['op', 'agent', 'base', 'role', 'prompt', 'model', 'why'];
+const AGENT_EDIT_VIEW_ONLY = ['toolsets', 'platformToolsets', 'skills', 'soul', 'cron', 'jobs', 'terminal', 'fallbacks', 'provider'];
+const AGENT_EDIT_LIMITS = { role: 200, prompt: 8000, why: 400 };
+export const AGENT_EDIT_OPTIONS = [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }];
+
+export function validateAgentEdit(ask) {
+  const problems = [];
+  const edit = ask?.agentEdit;
+  if (!edit || typeof edit !== 'object' || Array.isArray(edit)) return ['agentEdit is an object'];
+  const viewOnly = Object.keys(edit).filter(name => AGENT_EDIT_VIEW_ONLY.includes(name));
+  if (viewOnly.length) problems.push(`agentEdit cannot change ${viewOnly.join(', ')}: toolsets, skills, SOUL.md and scheduled jobs are view-only`);
+  const extra = Object.keys(edit).filter(name => !AGENT_EDIT_KEYS.includes(name) && !AGENT_EDIT_VIEW_ONLY.includes(name));
+  if (extra.length) problems.push(`agentEdit has no field ${extra.slice(0, 3).join(', ')}`);
+  if (edit.op !== 'persona') problems.push('agentEdit.op is persona');
+  if (typeof edit.agent !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/.test(edit.agent)) problems.push('agentEdit.agent is an agent id');
+  if (typeof edit.base !== 'string' || !(edit.base === 'default' || /^persona-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}$/.test(edit.base))) problems.push('agentEdit.base is the version the edit was written against: default, or a persona-<stamp>-<rand4> id');
+  const text = (name, max, multiline) => {
+    const value = edit[name];
+    if (value === undefined) return;
+    if (typeof value !== 'string' || !value.trim() || value.length > max) problems.push(`agentEdit.${name} is 1 to ${max} characters of text`);
+    else if ((multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u2028\u2029]/ : /[\u0000-\u001f\u007f\u2028\u2029]/).test(value)) problems.push(`agentEdit.${name} has a control character`);
+  };
+  text('role', AGENT_EDIT_LIMITS.role, false);
+  text('prompt', AGENT_EDIT_LIMITS.prompt, true);
+  text('why', AGENT_EDIT_LIMITS.why, false);
+  if (edit.model !== undefined && (typeof edit.model !== 'string' || !/^[a-z0-9][a-z0-9.-]{0,39}$/.test(edit.model))) problems.push('agentEdit.model is a chat model id');
+  if (edit.role === undefined && edit.prompt === undefined && edit.model === undefined) problems.push('agentEdit changes the role, the prompt or the model');
+  if (ask.requirePasskey !== true) problems.push('an Ask with agentEdit requires a passkey (--require-passkey)');
+  const options = ask.options;
+  if (!Array.isArray(options) || options.length !== 2 || options.some((option, index) => option?.id !== AGENT_EDIT_OPTIONS[index].id || option?.label !== AGENT_EDIT_OPTIONS[index].label || Object.keys(option).length !== 2)) {
+    problems.push('an Ask with agentEdit offers exactly the options apply ("Apply this edit") and skip ("Leave it as it is")');
+  }
+  if (ask.changes !== undefined || ask.decisions !== undefined || ask.image !== undefined || ask.avatar !== undefined || ask.rerun !== undefined) problems.push('an Ask with agentEdit has no changes, decisions, image, avatar or rerun');
+  return problems;
+}
+// --- agent-edit:end ---
 
 const bt = '`';
 const PROSE_ESCAPE = ' --prose-ok skips this check (for text that only looks like a command) and prints a warning.';

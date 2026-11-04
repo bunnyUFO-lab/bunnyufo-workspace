@@ -6,6 +6,8 @@
 // files, written by the Hub (owner-only in the card API), newest name wins. A choice may name a
 // custom pet sheet (hub-sheets.mjs) with its sha256; it counts only while that sheet still passes.
 import { SHEET_ID_RE } from './hub-sheets.mjs';
+// The chat model labels are those of chat-models.mjs: the Team card names the model an edited persona starts a chat on.
+import { CHAT_MODELS } from './chat-models.mjs';
 
 /** Mirrors `BUILTIN_KEYS` in src/hub/team/sprites.ts; site/api/test/hub-team.test.mjs keeps them equal. */
 export const BUILTIN_KEYS = ['hermes', 'briefs', 'researcher', 'librarian', 'architect', 'developer', 'reviewer', 'qa', 'artist', 'lib_b', 'lib_c', 'lib_d', 'dev_teal', 'qa_violet', 'owl_snow', 'artist_blue', 'arch_red'];
@@ -23,6 +25,9 @@ export const AGENTS = [
   // The Planner is a chat agent with no job preset: it talks a plan through, then files one change-list Ask (ws-qdh.3).
   { id: 'planner', profile: 'main', name: 'Planner', room: 'Research', runtime: 'Hermes profile main', model: 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback', role: 'talks a plan through and files it as a change list for you to approve', action: { label: 'Chat', chat: 'planner' } },
 ];
+
+/** The agents with a chat persona the owner may edit (chat-personas.mjs has their prompts). chat-personas.test.mjs keeps this equal to the persona table. */
+export const PERSONA_AGENTS = ['researcher', 'market-researcher', 'teardown', 'planner'];
 
 export const AVATAR_FILE_RE = /^avatar-\d{8}T\d{6,9}Z-[A-Za-z0-9]{4}\.json$/;
 export const STATUSES = ['working', 'needs-you', 'failed', 'idle', 'offline'];
@@ -83,15 +88,19 @@ export function agentStatuses({ working = [], pc = null, hermes = null, lastChat
     { id: 'hermes', status: hermesStatus, task: hermesTask },
     { id: 'briefs', status: 'idle', task: 'Daily projects brief and weekly digests' },
     { id: 'claude', status: claude, task: claudeTask, sessions },
-    ...['researcher', 'market-researcher', 'teardown', 'planner'].map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
+    ...PERSONA_AGENTS.map(id => ({ id, status: hermesStatus, task: !hermes ? 'Hermes is not set up' : !hermes.ok ? 'Hermes is not answering' : 'Ready for a job' })),
   ];
 }
 
-/** The Team answer: each agent with its status, task and sprite. `choices` maps agent id to its newest choice. */
-export function buildTeam({ statuses, choices = {} }) {
+/**
+ * The Team answer: each agent with its status, task and sprite. `choices` maps agent id to its newest choice. `personas` is the effective persona
+ * table (hub-personas.mjs): an agent in it takes the persona's role line, is `editable: { persona: true }`, and names its chat model once edited.
+ */
+export function buildTeam({ statuses, choices = {}, personas = [] }) {
   const by = new Map(statuses.map(row => [row.id, row]));
   return AGENTS.map(agent => {
     const row = by.get(agent.id) ?? { status: 'offline', task: '' };
-    return { ...agent, status: row.status, task: row.task, ...(row.sessions ? { sessions: row.sessions } : {}), sprite: spriteOf(agent, choices[agent.id] ?? null) };
+    const persona = personas.find(entry => entry.id === agent.id);
+    return { ...agent, ...(persona ? { role: persona.role, editable: { persona: true }, ...(persona.edited ? { chatModel: CHAT_MODELS.find(entry => entry.id === persona.model)?.label ?? persona.model } : {}) } : {}), status: row.status, task: row.task, ...(row.sessions ? { sessions: row.sessions } : {}), sprite: spriteOf(agent, choices[agent.id] ?? null) };
   });
 }

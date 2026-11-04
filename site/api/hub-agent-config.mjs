@@ -172,7 +172,7 @@ const KB = 1024;
 export function agentDetails({ agent, exported = null, at, persona = null, preset = null }) {
   const profile = agent.profile ?? null;
   const block = profile && exported ? exported.profiles[profile] ?? null : null;
-  const who = { id: agent.id, name: agent.name, role: agent.role, room: agent.room, runtime: agent.runtime, profile };
+  const who = { id: agent.id, name: agent.name, role: persona?.role ?? agent.role, room: agent.room, runtime: agent.runtime, profile };
 
   let freshness;
   if (!profile) freshness = { state: 'none' };
@@ -197,7 +197,7 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
       prompts.push({ id: 'soul', title: `SOUL.md (profile ${profile})`, source: 'hermes-host', text: soul.text, ...(notes.length ? { note: notes.join(' ') } : {}) });
     }
   }
-  if (persona) prompts.push({ id: 'persona', title: 'Chat persona', source: 'app', text: persona.text });
+  if (persona) prompts.push({ id: 'persona', title: 'Chat persona', source: 'app', text: persona.text, ...(persona.edited ? { note: `Edited ${persona.edited.at.slice(0, 10)} by ${persona.edited.by}.` } : {}) });
   if (preset?.template) prompts.push({ id: 'job', title: `Job template (${preset.label})`, source: 'app', text: preset.template, note: 'Placeholders are filled in when a job starts.' });
 
   return { agent: who, freshness, settings, prompts, jobs: block?.cron ?? [] };

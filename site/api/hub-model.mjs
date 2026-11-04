@@ -979,6 +979,7 @@ export function discordEligible(ask) {
   if (ask.allowDrawing === true) return no('This Ask takes a drawing.');
   if (ask.decisions !== undefined && ask.decisions !== null) return no('A design review stays in the Hub.');
   if (ask.changes !== undefined && ask.changes !== null) return no('A change list stays in the Hub.');
+  if (ask.agentEdit !== undefined && ask.agentEdit !== null) return no('An edit of an agent stays in the Hub.');
   if (ask.image !== undefined && ask.image !== null) return no('An Ask with a picture stays in the Hub.');
   const options = ask.options;
   if (!Array.isArray(options) || options.length < 2 || options.length > DISCORD_MAX_OPTIONS) return no(`Buttons need 2 to ${DISCORD_MAX_OPTIONS} options.`);

@@ -27,6 +27,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { contentTypeOf, createBucket } from '../api/s3.mjs';
 import { validateChanges } from '../api/ask-changes.mjs';
+import { validateAgentEdit } from '../api/agent-edit.mjs';
 
 const CLIENT = new URL('./cards.mjs', import.meta.url);
 
@@ -166,8 +167,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return prefixes.map(item => item.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => SECTION_ID.test(id) && can(caller, 'read', id));
   }
 
-  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice (team/<agent>/avatar-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/avatar-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json)$/i;
+  /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice and persona edits (team/<agent>/avatar-*.json, persona-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/(avatar|persona)-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -292,6 +293,15 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (!parsed || typeof parsed !== 'object' || parsed.changes === undefined) return;
     const problems = validateChanges(parsed.changes);
     if (problems.length) throw new HttpError(422, `The change list is not valid: ${problems.slice(0, 6).join('; ')}.`);
+  };
+  /** An agent-edit Ask (ws-im1.4.1) is refused with its problems named when its `agentEdit` is not valid: the same check as the site's and the cards client's. */
+  const agentEditValid = (caller, sectionId, file, body) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null || !/^asks\/[^/]+\/ask\.json$/i.test(file)) return;
+    let parsed;
+    try { parsed = JSON.parse(new TextDecoder('utf-8').decode(body)); } catch { return; }
+    if (!parsed || typeof parsed !== 'object' || parsed.agentEdit === undefined) return;
+    const problems = validateAgentEdit(parsed);
+    if (problems.length) throw new HttpError(422, `The agent edit is not valid: ${problems.slice(0, 6).join('; ')}.`);
   };
   /**
    * A review the owner can do nothing with is not filed: a `ready-for-review` event (events/<day>/<name>.json, or deeper) needs a pull request
@@ -465,6 +475,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       askCreateOnly(caller, sectionId, file, { ifNoneMatch });
       noOwnerOrigin(caller, sectionId, file, body);
       changesValid(caller, sectionId, file, body);
+      agentEditValid(caller, sectionId, file, body);
       reviewNeedsAction(sectionId, file, body);
       let put;
       try {

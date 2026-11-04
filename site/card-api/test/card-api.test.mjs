@@ -1186,3 +1186,46 @@ test('inbox: an Ask whose change list is not valid is refused for a limited toke
     assert.equal((await putAsk('tok-all', 'x-6', ask([{ op: 'delete' }]))).status, 200, 'The passphrase is not limited; the Hub drops a list that fails when it reads the Ask.');
   } finally { await fake.close(); }
 });
+
+test('inbox: a persona edit is written by the Hub, so a limited writer (hermes-main included) cannot put, upload or remove one', async () => {
+  const { fake, call } = await setup();
+  try {
+    const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
+    const file = 'team/teardown/persona-20260101T000000000Z-ab12.json';
+    for (const token of ['tok-cloud', 'tok-hermes']) {
+      const refused = await put(token, file);
+      assert.equal(refused.status, 403, token);
+      assert.equal(refused.data.error, 'Only the Hub writes answers.');
+    }
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-hermes', body: { files: [{ path: file }] } })).status, 403, 'by upload URL');
+    assert.equal(fake.text(`sections/inbox/${file}`), null);
+    assert.equal((await put('tok-cloud', 'team/teardown/notes.json')).status, 200, 'Other files in the folder stay open to agents.');
+    assert.equal((await put('tok-all', file)).status, 200, 'The passphrase may.');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-hermes' })).status, 403, 'A limited deleter keeps off it.');
+    assert.ok(fake.text(`sections/inbox/${file}`));
+  } finally { await fake.close(); }
+});
+
+test('inbox: an Ask whose agentEdit is not valid is refused for a limited token (422, the problems named); a good one, and an Ask with none, pass', async () => {
+  const { fake, call } = await setup();
+  try {
+    const putAsk = (token, id, body) => call('PUT', `/sections/inbox/files/asks/${id}/ask.json`, { token, body: Buffer.from(JSON.stringify(body)), base64: true, headers: { 'If-None-Match': '*' } });
+    const options = [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }];
+    const ask = (agentEdit, extra = {}) => ({ id: 'e-1', project: 'wk', question: 'Tighten the Teardown prompt?', kind: 'approval', requirePasskey: true, options, agentEdit, ...extra });
+    const good = { op: 'persona', agent: 'teardown', base: 'default', prompt: 'You are Teardown. Be brief.', why: 'Shorter answers.' };
+    for (const key of ['toolsets', 'platformToolsets', 'skills', 'soul', 'cron', 'jobs', 'terminal', 'fallbacks', 'provider']) {
+      const bad = await putAsk('tok-hermes', 'e-1', ask({ ...good, [key]: ['x'] }));
+      assert.equal(bad.status, 422, key);
+      assert.match(bad.data.error, /view-only/, key);
+    }
+    assert.equal((await putAsk('tok-cloud', 'e-1', ask({ ...good, prompt: 'x'.repeat(8001) }))).status, 422, 'too long');
+    assert.equal((await putAsk('tok-cloud', 'e-1', ask({ op: 'persona', agent: 'teardown', base: 'default' }))).status, 422, 'changes nothing');
+    assert.equal((await putAsk('tok-cloud', 'e-1', ask(good, { requirePasskey: false }))).status, 422, 'no passkey');
+    assert.equal((await putAsk('tok-cloud', 'e-1', ask(good, { options: [{ id: 'apply', label: 'Do it now' }, options[1]] }))).status, 422, 'other options');
+    assert.equal(fake.text('sections/inbox/asks/e-1/ask.json'), null, 'Nothing was written.');
+    assert.equal((await putAsk('tok-hermes', 'e-1', ask(good))).status, 200);
+    assert.equal(JSON.parse(fake.text('sections/inbox/asks/e-1/ask.json')).agentEdit.agent, 'teardown');
+    assert.equal((await putAsk('tok-cloud', 'e-2', { id: 'e-2', project: 'wk', question: 'Which?' })).status, 200, 'An Ask without agentEdit is as before.');
+    assert.equal((await putAsk('tok-all', 'e-3', ask({ op: 'x' }))).status, 200, 'The passphrase is not limited.');
+  } finally { await fake.close(); }
+});

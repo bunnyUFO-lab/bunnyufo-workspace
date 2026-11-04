@@ -25,6 +25,8 @@ import { createRequests } from './hub-requests.mjs';
 import { createRoutines, loadRoutines, routineFor } from './routines.mjs';
 import { createAvatar } from './hub-avatar.mjs';
 import { createRerun } from './hub-rerun.mjs';
+import { createPersonaStore, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
+import { createAgentEdits } from './hub-agent-edit.mjs';
 import { loadSigningKey } from './signing.mjs';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
@@ -40,7 +42,6 @@ import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { agentDetails, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, validExport, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
-import { CHAT_PERSONAS } from './chat-personas.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
@@ -290,6 +291,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   const avatarFlow = createAvatar({ requests: requestFiles, chooseAvatar: (agentId, raw, user, at) => chooseAvatar(agentId, raw, user, at), agents: AGENTS.map(agent => agent.id), log });
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
+  // The owner's edits of a chat persona (hub-personas.mjs): create-only team/<agent>/persona-*.json, read through a 30 s table the chat uses.
+  const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now });
+  // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
+  const agentEditFlow = createAgentEdits({ personas: personaStore, log });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
   const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
@@ -480,10 +485,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   async function teamView(at) {
-    const [window, status, hermes, lastChat, choices] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices()]);
+    const [window, status, hermes, lastChat, choices, personas] = await Promise.all([loadEvents(at), loadPcStatus(at), hermesState(), lastChatAt().catch(() => ''), avatarChoices(), personaStore.table()]);
     const working = workingNow({ status, events: window.events, at, defaults: PROJECT_DEFAULTS });
     const statuses = agentStatuses({ working, pc: status ? pcSummary(status, at) : null, hermes, lastChat, at });
-    return { agents: buildTeam({ statuses, choices }) };
+    return { agents: buildTeam({ statuses, choices, personas }) };
   }
 
   /** The sheets reader; the keys come from `inboxKey` like every other. */
@@ -566,6 +571,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const delivery = await deliveryFor(`asks/${id}`, names, answer, at);
     // A rerun pointer from a token other than the PC watcher's starts nothing; the page says so instead of offering it.
     const rerunBlocked = await rerunFlow.blockedReason(ask).catch(() => null);
+    const agentEditBlocked = await agentEditFlow.blockedReason(ask).catch(() => null);
     const sub = askSubtype(ask);
     const beadTitle = await decidesTitle(ask);
     return {
@@ -573,6 +579,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
+      ...(agentEditBlocked ? { agentEditBlocked } : {}),
       ...(answer ? { answer } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
       files: [...names].sort(),
@@ -906,8 +913,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
     const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });
+    const agentEdit = await agentEditFlow.afterAnswer({ ask, answer, user, at });
     await markFromAnswer({ ask, answer, user: user || 'local', at });
-    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}) } };
+    return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}), ...(agentEdit ? { agentEdit } : {}) } };
   }
 
   // --- Discord: the bot's two routes (see docs/workspaces.md, "Answers from Discord") ---
@@ -1397,7 +1405,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
 
   const self = {
     enabled: on,
@@ -1410,6 +1418,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     /** The sprint module (start, advance, sweep), for the tests. */
     sprints,
     rerun: rerunFlow,
+    /** The persona store and the agent-edit flow, for the tests. */
+    personas: personaStore,
+    agentEdit: agentEditFlow,
     hermes: hermesDispatch,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
@@ -1596,9 +1607,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             const exported = agent.profile ? await loadAgentConfig(at) : null;
             reply(agentDetails({
               agent, exported, at,
-              persona: CHAT_PERSONAS.find(item => item.id === agent.id) ?? null,
+              persona: (await personaStore.table()).find(item => item.id === agent.id) ?? null,
               preset: agent.presets?.[0] ? presetOf(agent.presets[0]) : null,
             }));
+          } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona$/.exec(route))) {
+            // The prompt is not for an anonymous LAN read: same rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the prompts of this agent.', 401);
+            if (!AGENTS.some(item => item.id === match[1])) throw fail('No such agent.', 404);
+            reply(await personaStore.versions(match[1]));
           } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/sheets$/.exec(route))) {
             reply(await sheetList(match[1], at));
           } else {
@@ -1657,6 +1673,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
           send(await deleteDrawing(match[1], user, at));
         } else if ((match = /^\/hub\/drawings\/([^/]+)$/.exec(route))) {
           send(await saveDrawingOld(match[1], raw));
+        } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/persona(\/revert)?$/.exec(route))) {
+          if (!user) throw fail('Sign in to edit a persona.', 401);
+          if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);
+          send({ status: 200, body: match[2] ? await personaStore.revert(match[1], raw, user, at) : await personaStore.save(match[1], raw, user, at) });
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {
           send(await chooseAvatar(match[1], raw, user, at));
         } else {

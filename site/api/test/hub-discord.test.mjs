@@ -127,10 +127,12 @@ test('4. a passkey-only Ask has no buttons: not listed, and a click on it is ref
     const locked = f.ask('locked', { requirePasskey: true }, {}, 'b2b2');
     const drawn = f.ask('drawn', { allowDrawing: true }, {}, 'b3b3');
     const pictured = f.ask('pictured', { options: [{ id: 'A', label: 'Yes', image: 'a.png' }, { id: 'B', label: 'No' }] }, {}, 'b4b4');
+    // An agent-edit Ask (ws-im1.4.1) stays in the Hub even when it forgot requirePasskey: only the web answer applies it.
+    const edit = f.ask('edit', { agentEdit: { op: 'persona', agent: 'teardown', base: 'default', prompt: 'x' }, options: [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }] }, {}, 'b5b5');
     const { status, body } = await f.list();
     assert.equal(status, 200);
     assert.deepEqual(body.asks.map(item => item.id), [plain.id], 'Only the simple Ask is listed.');
-    for (const made of [locked, drawn, pictured]) {
+    for (const made of [locked, drawn, pictured, edit]) {
       const refused = await f.answer(f.answerBody(made, f.revOf(made)));
       assert.equal(refused.status, 403, made.id);
       assert.equal(f.fake.text(f.answerKey(made)), null);

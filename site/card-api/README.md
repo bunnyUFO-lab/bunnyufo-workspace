@@ -135,6 +135,7 @@ npm run cards -- event pr-merged|pr-closed --title <t> --url <pr link> --pr-clos
 GITHUB_TOKEN=$(gh auth token) npm run cards -- pr-sync --repo <owner/repo> --project <p> --prefix <bead prefix> [--days 7] [--dry-run]
 npm run cards -- ask create --project <p> [--bead <b>] (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]...   # prints the id; pings #needs-you when a webhook is set
 npm run cards -- ask create --project <p> --kind decision --question <t> --changes <changes.json>   # a plan: 1 to 20 changes the owner approves row by row (docs/workspaces.md, "Plans")
+npm run cards -- ask create --project <p> --question <t> --agent-edit <edit.json>   # propose a chat-persona edit (role, prompt, model); only the owner's Apply answer applies it (docs/workspaces.md, "A persona edit")
 npm run cards -- beads show --project <p> [--open] [--json]   # read-only: the project's merged Beads copy
 npm run cards -- plan apply <ask id> [--dry-run] [--journal <file>]   # run the approved rows of an answered plan with bd; the journal makes a rerun skip rows done
 npm run cards -- mark apply --project <p> [--json]   # the PC applies the owner's marks in Beads (writes no mark and no applied note); apply pending --project <p> --json lists what waits
@@ -224,7 +225,8 @@ What it refuses:
   (`If-None-Match: *`, never an upload URL), and it cannot delete any of these files
 - in the `inbox` and `inbox-dev` sections, for a limited `write` right, the files only the Hub writes (same 403, same
   rule, no delete): `requests/*/approved.json`, `stop.json`, `hermes-run.json`, `hermes-retry.json`, `fire-*.json`,
-  `answer-*.json`, and everything under `hermes-approvals/`
+  `answer-*.json`, everything under `hermes-approvals/`, and an agent's `team/<agent>/avatar-*.json` and `team/<agent>/persona-*.json` (a persona edit is the prompt of every chat, so `hermes-main` may not write one)
+- in the same sections, an `asks/*/ask.json` with an `agentEdit` field that fails the shape check (422, the problems named; `site/api/agent-edit.mjs`)
 - in the same sections, a run's files `requests/*/taken.json`, `run-*.json`, `result.json` and `report.md` (403 "Only a run
   writes run files.", no delete), unless the token is named `pc-runner`, or named `cloud-<project>` and
   `requests/<id>/request.json` exists with that `project` (one read, only for these writes). Any other limited token,

@@ -20,7 +20,7 @@ import { stripInlineImages } from './inline-images.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
 import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient } from './chat-models.mjs';
 import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
-import { chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
+import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 
 const MB = 1024 * 1024;
@@ -39,13 +39,15 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, copyApproval = null, readApproval = null, scrub = createScrub(env) }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
   const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
   const titles = new Map();   // etag → { title, count }
+  /** The persona table of this request: the app's, with the owner's edits (hub-personas.mjs) when the Hub gave a reader. */
+  const tableNow = async () => (personas ? await personas() : CHAT_PERSONAS);   // persona:
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 
@@ -55,6 +57,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     : null);
 
   async function list() {
+    const table = await tableNow();   // persona:
     const { objects } = await bucket.list(`${key('chat/x.jsonl').slice(0, -'x.jsonl'.length)}`);
     const newest = objects.filter(object => object.key.endsWith('.jsonl')).sort((a, b) => (new Date(b.lastModified) - new Date(a.lastModified)) || (a.key < b.key ? 1 : -1)).slice(0, 30);
     const conversations = [];
@@ -67,7 +70,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const first = lines.find(line => line.role === 'user');
         const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;   // help:
         const asked = lines.findLast(line => line.role === 'user' && typeof line.model === 'string' && chatModelsForClient().some(entry => entry.id === line.model));   // model:
-        const talking = lines.find(line => line.persona && storedPersona(line.persona))?.persona;   // persona:
+        const talking = lines.find(line => line.persona && storedPersona(line.persona, table))?.persona;   // persona:
         info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && asked.model !== 'auto' ? { model: asked.model } : {}), ...(talking ? { persona: talking } : {}) };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
@@ -180,7 +183,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const choice = chatModelOf(data.model);   // model: an id from the table, or a 400 before anything is written
-    const asked = chatPersonaOf(data.persona);   // persona: an id from the table, or a 400 before anything is written
+    const table = await tableNow();
+    const asked = chatPersonaOf(data.persona, table);   // persona: an id from the table, or a 400 before anything is written
     const text = typeof data.text === 'string' ? data.text.trim() : '';
     const pictures = checkChatImages(data.images, fail);
     if ((!text && !pictures.length) || text.length > 8000) throw fail('A message is 1 to 8000 characters.');
@@ -200,7 +204,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (!got) throw fail('No such conversation.', 404);
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
       history = parse(got.text);
-      persona = storedPersona(history.find(line => line.persona)?.persona);   // persona: the one this conversation started with
+      persona = storedPersona(history.find(line => line.persona)?.persona, table);   // persona: the one this conversation started with
     } else {
       id = `${day8(now())}-${randomId(6)}`;
     }
@@ -433,7 +437,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(), chain: CHAT_CHAIN, pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);

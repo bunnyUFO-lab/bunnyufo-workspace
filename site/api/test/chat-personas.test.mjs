@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHAT_MODELS } from '../chat-models.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from '../chat-personas.mjs';
-import { AGENTS } from '../hub-team.mjs';
+import { AGENTS, PERSONA_AGENTS } from '../hub-team.mjs';
 import { presetOf } from '../presets.mjs';
 
 test('every research persona is a Team agent whose first preset is a Hermes research preset, and its text carries that preset\'s rules', () => {
   assert.deepEqual(CHAT_PERSONAS.map(entry => entry.id), ['researcher', 'market-researcher', 'teardown', 'planner']);
+  assert.deepEqual(PERSONA_AGENTS, CHAT_PERSONAS.map(entry => entry.id), 'the Team list of editable personas is the persona table');
   for (const entry of CHAT_PERSONAS.filter(item => item.id !== 'planner')) {
     const agent = AGENTS.find(item => item.id === entry.id);
     assert.ok(agent, entry.id);

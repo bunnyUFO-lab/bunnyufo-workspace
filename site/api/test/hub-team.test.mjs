@@ -10,7 +10,7 @@ import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
 import { presetOf } from '../presets.mjs';
 import { CHAT_PERSONAS } from '../chat-personas.mjs';
-import { AGENTS, agentStatuses, BUILTIN_KEYS, checkAvatar } from '../hub-team.mjs';
+import { AGENTS, agentStatuses, BUILTIN_KEYS, checkAvatar, PERSONA_AGENTS } from '../hub-team.mjs';
 import { BUILTIN_KEYS as CLIENT_KEYS } from '../../../src/hub/team/sprites.ts';
 import { startFakeS3 } from './fake-s3.mjs';
 import { eventJson, minutesAgo, pcStatusJson, seedPcStatus, seeder, teamAvatarJson } from './hub-fixtures.mjs';
@@ -60,6 +60,8 @@ test('the agent list is Hermes, Briefs, Claude Code, the three research agents a
     const { status, body } = await f.get('/hub/team');
     assert.equal(status, 200);
     assert.deepEqual(body.agents.map(row => row.id), ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown', 'planner']);
+    assert.deepEqual(body.agents.filter(row => row.editable).map(row => row.id), PERSONA_AGENTS, 'Only the agents with a chat persona can be edited here.');
+    assert.ok(body.agents.filter(row => row.editable).every(row => row.editable.persona === true && row.role === CHAT_PERSONAS.find(item => item.id === row.id).role));
     assert.deepEqual(AGENTS.map(row => row.name), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
     assert.deepEqual(agent(body, 'market-researcher').presets, ['market-research']);
     assert.deepEqual(agent(body, 'teardown').presets, ['game-teardown']);
