@@ -116,11 +116,14 @@ try {
   await desk.goto(`${fx.url}#/~hub/ask/${ask}`);
   await desk.locator('[data-plan-state="waiting"]').waitFor();
   assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), 'Waiting for the PC to apply it.');
+  await desk.locator('[data-plan-state="waiting"]').scrollIntoViewIfNeeded();
+  await shot(desk, 'plan-waiting-desktop');
   fx.fake.seed(`sections/inbox/asks/${ask}/pickup.json`, JSON.stringify({ at: new Date().toISOString(), host: 'pc' }), 'application/json');
   await desk.reload();
   await desk.locator('[data-plan-state="applied"]').waitFor();
   assert.match(await desk.locator('[data-plan-state="applied"]').innerText(), /^Applied .+\.$/);
   assert.equal(await desk.locator('[data-plan-state="waiting"]').count(), 0);
+  await desk.locator('[data-plan-state="applied"]').scrollIntoViewIfNeeded();
   await shot(desk, 'plan-applied-desktop');
 
   step('phone: Plan in Hermes and the change list fit, every control is 44 px, nothing scrolls sideways');

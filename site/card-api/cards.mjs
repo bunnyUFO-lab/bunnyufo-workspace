@@ -2196,7 +2196,7 @@ function bdCommand() {
 /** Run bd with an argument array (no shell). → { ok, out, error } */
 function runBd(args) {
   const { cmd, prefix } = bdCommand();
-  const run = spawnSync(cmd, [...prefix, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024 });
+  const run = spawnSync(cmd, [...prefix, ...args], { encoding: 'utf8', shell: false, maxBuffer: 16 * 1024 * 1024, timeout: 30000 });
   if (run.error) return { ok: false, out: '', error: run.error.code === 'ENOENT' ? 'bd is not installed.' : run.error.message };
   return { ok: run.status === 0, out: String(run.stdout ?? '').trim(), error: clip(String(run.stderr ?? '').split(/\r?\n/).find(line => line.trim()) ?? `bd exited ${run.status}`, 200) };
 }
@@ -2211,7 +2211,8 @@ function bdCalls(change, text, ref) {
   }
   if (change.op === 'update') return [['update', ref(change.bead), ...(change.title !== undefined ? [`--title=${change.title}`] : []), ...(description !== undefined ? [`--description=${description}`] : [])]];
   if (change.op === 'dep') return [['dep', 'add', ref(change.blocks), ref(change.bead)]];
-  if (change.op === 'close') return [['close', ref(change.bead), `--reason=${text ?? change.reason}`]];
+  // --force: bd refuses to close a task that has an open blocker or child. The owner approved this close row, so the refusal is not theirs to hit.
+  if (change.op === 'close') return [['close', ref(change.bead), `--reason=${text ?? change.reason}`, '--force']];
   if (change.op === 'label') return [...(change.add?.length ? [['label', 'add', ref(change.bead), change.add.join(',')]] : []), ...(change.remove?.length ? [['label', 'remove', ref(change.bead), change.remove.join(',')]] : [])];
   return [];
 }
@@ -2367,7 +2368,7 @@ async function activeMarks(project, only) {
     for (const name of names.filter(item => item.includes('-applied-'))) {
       if ((await readJson(inboxPath('bead-marks', project, bead, name)))?.mark === owner) return null;
     }
-    return { bead, verdict: body.verdict, at: body.at, ...(typeof body.reason === 'string' && body.reason ? { reason: clip(body.reason, 200) } : {}), file: owner };
+    return { bead, verdict: body.verdict, at: body.at, ...(typeof body.reason === 'string' && body.reason ? { reason: clip(body.reason, 500) } : {}), file: owner };
   });
   return rows.filter(Boolean).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.bead < b.bead ? -1 : 1));
 }
@@ -2433,8 +2434,9 @@ function markCalls(mark, issue) {
     return [...(labels.includes('needs-owner') ? [['label', 'remove', mark.bead, 'needs-owner']] : []), ...(issue.status === 'blocked' ? [['update', mark.bead, '--status=open']] : [])];
   }
   const why = mark.reason ? `: ${mark.reason}` : '';
-  if (mark.verdict === 'done') return [['close', mark.bead, `--reason=Done (owner, Roadmap ${date})${why}`]];
-  return [['close', mark.bead, `--reason=Not needed (owner, Roadmap ${date})${why}`], ...(labels.includes('not-needed') ? [] : [['update', mark.bead, '--add-label=not-needed']])];
+  // --force on both closes: bd refuses to close a task with an open blocker or child, and the owner's tap is the decision; there is no one to ask.
+  if (mark.verdict === 'done') return [['close', mark.bead, `--reason=Done (owner, Roadmap ${date})${why}`, '--force']];
+  return [['close', mark.bead, `--reason=Not needed (owner, Roadmap ${date})${why}`, '--force'], ...(labels.includes('not-needed') ? [] : [['update', mark.bead, '--add-label=not-needed']])];
 }
 
 /**

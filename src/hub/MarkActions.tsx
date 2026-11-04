@@ -25,7 +25,7 @@ const PENDING_WORD = { done: 'done', 'not-needed': 'not needed', unblock: 'unblo
  * hubPost refreshes every Hub read after a write, so the map comes back marked and the sheet stays open.
  * `compact` is the buttons alone, for a row on Today.
  */
-export default function MarkActions({ task, title, project, projectName, eligible, waiting = true, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark'>; title?: string; project: string; projectName: string; eligible: boolean; waiting?: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
+export default function MarkActions({ task, title, project, projectName, eligible, waiting = true, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark' | 'run'>; title?: string; project: string; projectName: string; eligible: boolean; waiting?: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
   const [asking, setAsking] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -74,7 +74,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
       <div className="hub-map-panel-mark" data-mark-pending data-mark-verdict={task.mark.verdict}>
         {task.mark.verdict === 'done' && task.mark.reason
           ? <p className="hub-muted" data-decided>Decided: {task.mark.reason} · the PC applies it within minutes{date ? ` (${date})` : ''}.</p>
-          : <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. The PC applies it in {projectName} within minutes.</p>}
+          : <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. The PC applies it in {projectName} within minutes.{task.run && <> <span data-mark-run-note>The run keeps going. Open it to stop it.</span></>}</p>}
         {failed}
         {host.write
           ? <div className="hub-actions start"><button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button></div>
@@ -99,7 +99,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
       )}
       {confirming && (
         <div className="hub-map-panel-confirm" role="alertdialog" aria-label="Confirm" data-mark-confirm-first>
-          <p>This closes {title ? <strong>{title}</strong> : 'this item'} in Beads. Undo stays here until the PC applies it, within minutes.</p>
+          <p>This closes {title ? <strong>{title}</strong> : 'this item'} in Beads. Undo stays here until the PC applies it, within minutes.{task.run && ' A run is on it and keeps going.'}</p>
           <div className="hub-actions start">
             <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void send(confirming)} data-mark-confirm-yes>Confirm</button>
             <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirming(null)} data-mark-confirm-cancel>Cancel</button>

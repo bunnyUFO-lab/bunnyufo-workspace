@@ -672,3 +672,24 @@ test('a stop that lands on item 1 while item 2 is being signed stops item 2 too'
     assert.deepEqual(f.itemsOf(head), [1, 2]);
   } finally { await f.close(); }
 });
+
+test('a mark on the next item ends the sprint: item 3 is not signed after the owner tapped No longer needed on it', async () => {
+  const f = await fixture();
+  try {
+    const { head } = (await f.start(240)).body;
+    f.finish(head, 'pr');
+    await f.hub.sprints.advance(head);
+    const two = itemId(head, 2);
+    assert.deepEqual(f.itemsOf(head), [1, 2]);
+    // The owner marks item 3 no longer needed while item 2 runs.
+    f.seed.put('bead-marks/magic-loops/ml-t3/20261103T100100000Z-not-needed-ab12.json', { v: 1, project: 'magic-loops', bead: 'ml-t3', verdict: 'not-needed', at: '2026-11-03T10:01:00.000Z', by: 'owner' });
+    assert.deepEqual(await f.hub.sprints.advance(head), { waiting: true }, 'Item 2 still runs; the mark ends nothing yet.');
+    f.finish(two, 'pr');
+    assert.deepEqual(await f.hub.sprints.advance(head), { ended: 'marked' });
+    assert.deepEqual(f.itemsOf(head), [1, 2], 'Item 3 was never made or signed.');
+    const end = f.file(head, 'sprint-end.json');
+    assert.ok(verify(end, PUB));
+    assert.equal(end.reason, 'marked');
+    assert.equal(alertsTitle(f), 'Sprint on Milestone Six: 2 of 3 PRs open. Stopped: you marked the next item done or not needed');
+  } finally { await f.close(); }
+});

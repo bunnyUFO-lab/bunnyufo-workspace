@@ -252,6 +252,7 @@ const END_WORDS = {
   foreign: 'Stopped: an item did not match the sprint',
   'unexpected-outcome': 'Stopped: an item ended without a pull request or a card',
   refused: 'Stopped: the Hub could not sign the next item',
+  marked: 'Stopped: you marked the next item done or not needed',
 };
 /** The words after "Stopped:" for an end reason (and the run's own reason when it gave one). */
 export const endWords = (reason, detail) => `${END_WORDS[reason] ?? `Stopped: ${reason}`}${detail && detail !== reason && reason !== 'finished' && reason !== 'timebox' ? ` (${detail})` : ''}`;
@@ -367,6 +368,13 @@ export function createSprints({ requests, listFolders, cached, putCreateOnly, si
     if (step.wait) return { waiting: true };
     if (step.end) { await endSprint(sprint, chain, step.end, step.detail, at); return { ended: step.end }; }
     const seq = step.create ?? step.approve;
+    // The owner may have marked the next item done or no longer needed (or it closed) since the list was signed: nothing is signed for work they set aside.
+    const next = sprint.items.find(item => item.seq === seq);
+    if (next?.bead) {
+      const inputs = await loadInputs(sprint.project, at);
+      const issue = applyMarks(inputs.issues, inputs.marks ?? new Map(), sprint.project).find(entry => entry.id === next.bead);
+      if (issue?.status === 'closed') { await endSprint(sprint, chain, 'marked', '', at); return { ended: 'marked' }; }
+    }
     const id = step.create ? await createItem(sprint, seq, at) : itemId(head, seq);
     try {
       await requests.approveRequest(id, { target: 'pc', by: sprint.by, at });

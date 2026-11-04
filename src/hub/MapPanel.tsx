@@ -148,7 +148,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
             <QuestionActions project={model.project} repoName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project} wayfinder={model.wayfinder} item={resolving} layout="sheet" />
           </div>
         )}
-        {beadWorkVisible(task, resolving, host.write) && <BeadWork key={task.id} task={task} project={model.project} />}
+        {(beadWorkVisible(task, resolving, host.write) || (host.write && !resolving && task.run)) && <BeadWork key={task.id} task={task} project={model.project} />}
         {words.length > 0 && <p className="hub-muted">{words.join(' · ')}</p>}
         {task.deps.length > 0 && <p className="hub-muted">Needs first: {task.deps.map(nameOf).join(', ')}</p>}
         {unlocks.length > 0 && <p className="hub-muted">Unlocks: {unlocks.join(', ')}</p>}

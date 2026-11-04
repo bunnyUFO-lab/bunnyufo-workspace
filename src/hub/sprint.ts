@@ -57,7 +57,7 @@ export function timeLeft(until: string, now: number): string {
 const END_WORDS: Record<string, string> = {
   finished: 'all items done', timebox: 'time ran out', failed: 'an item failed', lost: 'the PC lost an item', stopped: 'you stopped it', expired: 'an item was not picked up in time',
   asking: 'an item asked a question', declined: 'an item was declined', foreign: 'an item did not match the sprint', 'unexpected-outcome': 'an item ended without a pull request or a card',
-  refused: 'the Hub could not sign the next item',
+  refused: 'the Hub could not sign the next item', marked: 'you marked the next item done or not needed',
 }
 /** "3 of 5 PRs open. Stopped: time ran out" (or "All items done"). */
 export function endLine(sprint: MapSprint): string {

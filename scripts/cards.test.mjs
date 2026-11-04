@@ -2231,7 +2231,7 @@ test('plan apply --dry-run: prints each row in order, skips what the owner skipp
     assert.equal(lines[2], 'd3 dep: would run bd dep add wk-9 "<new item 2>"');
     assert.equal(lines[3], 'd4 update: skipped (skip)');
     assert.match(lines[4], /^d5 label: skipped \(changed, but a label takes no text; do it by hand\)$/);
-    assert.equal(lines[5], 'd6 close: would run bd close wk-5 "--reason=Covered by Sprint 4."');
+    assert.equal(lines[5], 'd6 close: would run bd close wk-5 "--reason=Covered by Sprint 4." --force');
     assert.match(lines[6], /^d7 card: would copy assistant\/2026-11-mock into wksec$/);
     assert.match(lines[7], /^Would apply 5 of 7 row\(s\); 2 skipped\.$/);
     assert.deepEqual(await calls(), [], 'A dry run calls bd never.');
@@ -2256,7 +2256,7 @@ test('plan apply: runs the approved rows in order with argument arrays, maps #n 
       ['dep', 'add', 'wk-9', 'wk-new2'],
       ['label', 'add', 'wk-4', 'later'],
       ['label', 'remove', 'wk-4', 'needs-owner'],
-      ['close', 'wk-5', '--reason=Merged into Sprint 4.'],
+      ['close', 'wk-5', '--reason=Merged into Sprint 4.', '--force'],
     ]);
     assert.match(run.stdout, /d1 create: made wk-new1/);
     assert.match(run.stdout, /Applied 5 of 5 row\(s\); 0 skipped\. Next: bd export -o \.beads\/issues\.jsonl, commit it, then cards ask pickup /);
@@ -2364,7 +2364,7 @@ test('plan apply --journal: a stop after row 2 is resumed at row 3, rows 1 and 2
     const second = await cli('api', 'plan', 'apply', id, '--journal', journal);
     assert.equal(second.code, 0, second.stdout + second.stderr);
     assert.match(second.stdout, /d1 create: already applied \(journal\)/);
-    assert.deepEqual((await calls()).slice(3), [['dep', 'add', 'wk-9', 'wk-new2'], ['close', 'wk-5', '--reason=Covered.']], 'Only rows 3 and 4 ran, with the ids row 2 made.');
+    assert.deepEqual((await calls()).slice(3), [['dep', 'add', 'wk-9', 'wk-new2'], ['close', 'wk-5', '--reason=Covered.', '--force']], 'Only rows 3 and 4 ran, with the ids row 2 made.');
     assert.equal((await calls()).filter(call => call[0] === 'create').length, 2, 'No create ran twice.');
     assert.deepEqual(JSON.parse(await readFile(journal, 'utf8')).rows, { d1: 'done', d2: 'done', d3: 'done', d4: 'done' });
     // A journal that is not JSON is not guessed at.
@@ -2391,7 +2391,8 @@ const issue = state[args[1]];
 if (args[0] === 'show') {
   if (!issue) { console.error('Issue ' + args[1] + ' not found'); process.exit(1); }
   console.log(JSON.stringify([{ id: args[1], ...issue }]));
-} else if (args[0] === 'close' && args[1] === process.env.BUW_BD_FAIL_ID) { console.error('bd: database is locked'); process.exit(1); }
+} else if (args[0] === 'close' && issue && issue.blockedBy && !args.includes('--force')) { console.error('cannot close blocked issue: ' + args[1] + ' is blocked by [' + issue.blockedBy + '] (use --force to override)'); process.exit(1); }
+else if (args[0] === 'close' && args[1] === process.env.BUW_BD_FAIL_ID) { console.error('bd: database is locked'); process.exit(1); }
 else {
   if (args[0] === 'close') issue.status = 'closed';
   if (args[0] === 'label' && args[1] === 'remove') { const target = state[args[2]]; target.labels = (target.labels ?? []).filter(label => label !== args[3]); }
@@ -2406,7 +2407,7 @@ async function markFixture() {
   const stateFile = path.join(s.dir, 'bd-state.json');
   const log = path.join(s.dir, 'bd.log');
   await writeFile(stateFile, JSON.stringify({
-    'dr-a': { status: 'open', labels: [] }, 'dr-c': { status: 'open', labels: [] }, 'dr-e': { status: 'closed', labels: [] },
+    'dr-a': { status: 'open', labels: [], blockedBy: ['dr-zz'] }, 'dr-c': { status: 'open', labels: [], blockedBy: ['dr-zz'] }, 'dr-e': { status: 'closed', labels: [] },
     'dr-f': { status: 'blocked', labels: ['needs-owner'] }, 'dr-h': { status: 'open', labels: [] }, 'dr-i': { status: 'open', labels: [] },
   }));
   s.fake.seed('sections/inbox-dev/workspace.json', JSON.stringify({ name: 'Inbox (dev)', hidden: true, entities: [] }), 'application/json');
@@ -2441,12 +2442,12 @@ test('mark apply: the documented bd calls for each verdict, a no-op on a closed 
     // dr-h failed on its close, so the cancel step covers only the others and dr-h is not applied.
     assert.deepEqual(JSON.parse(run.stdout), { applied: ['dr-a', 'dr-c', 'dr-e', 'dr-f'], waiting: ['dr-g'], failed: [{ bead: 'dr-h', error: 'bd close failed: bd: database is locked' }] });
     assert.deepEqual((await calls()).filter(call => call[0] !== 'show'), [
-      ['close', 'dr-a', '--reason=Done (owner, Roadmap 2026-10-30)'],
-      ['close', 'dr-c', '--reason=Not needed (owner, Roadmap 2026-10-30): Superseded; $(whoami)'],
+      ['close', 'dr-a', '--reason=Done (owner, Roadmap 2026-10-30)', '--force'],
+      ['close', 'dr-c', '--reason=Not needed (owner, Roadmap 2026-10-30): Superseded; $(whoami)', '--force'],
       ['update', 'dr-c', '--add-label=not-needed'],
       ['label', 'remove', 'dr-f', 'needs-owner'],
       ['update', 'dr-f', '--status=open'],
-      ['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)'],
+      ['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)', '--force'],
     ], 'dr-e was closed already: only a show. dr-g was not found: only a show.');
     assert.deepEqual((await calls()).filter(call => call[0] === 'show').map(call => call[1]), ['dr-a', 'dr-c', 'dr-e', 'dr-f', 'dr-g', 'dr-h']);
     const state = JSON.parse(await readFile(stateFile, 'utf8'));
@@ -2459,8 +2460,9 @@ test('mark apply: the documented bd calls for each verdict, a no-op on a closed 
     const seen = (await calls()).length;
     const again = JSON.parse((await cli('api', 'mark', 'apply', '--project', 'dev-roadmap', '--json')).stdout);
     assert.deepEqual(again.applied, ['dr-a', 'dr-c', 'dr-e', 'dr-f']);
-    assert.deepEqual((await calls()).slice(seen).filter(call => call[0] !== 'show'), [['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)']], 'Closed issues get no bd write.');
+    assert.deepEqual((await calls()).slice(seen).filter(call => call[0] !== 'show'), [['close', 'dr-h', '--reason=Done (owner, Roadmap 2026-10-30)', '--force']], 'Closed issues get no bd write.');
     assert.equal((await cli('api', 'mark', 'apply')).code, 1, 'A project is needed.');
+    assert.ok((await calls()).filter(call => call[0] === 'close' && call[1] !== 'dr-h').every(call => call.includes('--force')), 'A done and a not-needed close of a task with an open blocker pass --force, as real bd needs.');
   } finally { await close(); }
 });
 

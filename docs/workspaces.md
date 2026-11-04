@@ -555,7 +555,7 @@ The site reads the newest 30 copies of a project (by `pushedAt`) and the older s
 
 ### The owner's marks on the Roadmap
 
-Any open task has **Mark done** and **No longer needed** on its sheet, so a bead whose PR merged can be closed in one tap. A task that waits on the owner (yellow on the Roadmap because of the `needs-owner` label, an Ask, or an open checklist that names it) also has **Unblock**, whether or not something is also asked of the owner in Needs you. Milestones and features are not marked. The Hub cannot run `bd`, so the mark is a log of create-only files, one folder per issue, and the Roadmap and Work show the issue as closed until Beads says so itself:
+Any open task has **Mark done** and **No longer needed** on its sheet, so a bead whose PR merged can be closed in one tap. A task that waits on the owner (yellow on the Roadmap because of the `needs-owner` label, an Ask, or an open checklist that names it) also has **Unblock**, whether or not something is also asked of the owner in Needs you. Milestones and features are not marked. Marking a task a run is on does not stop the run: the sheet keeps its run line and says so. A sprint ends ("you marked the next item done or not needed") instead of signing a later item the owner marked. The Hub cannot run `bd`, so the mark is a log of create-only files, one folder per issue, and the Roadmap and Work show the issue as closed until Beads says so itself:
 
 ```
 bead-marks/<project>/<bead id>/<stamp>-<verdict>-<rand4>.json
@@ -569,7 +569,7 @@ The current verdict is the newest of done, not-needed, unblock and undo. A mark 
 
 **Applying marks (agent side, in a session).** The session route still works. In a session in that project's repository, for each mark listed by `cards mark list --project <p>`:
 
-1. `bd show <id>`. For an unblock: `bd label remove <id> needs-owner` and, if the status is blocked, `bd update <id> --status open`; cancel any open Ask or checklist on the bead (`cards ask cancel <id>`, `cards checklist cancel <id>`). If a done or not-needed one is open: `bd close <id> --reason "Done (owner, Roadmap <date>)"`, or for no longer needed `bd close <id> --reason "Not needed (owner, Roadmap <date>): <reason>"` and `bd update <id> --add-label not-needed`; then `node scripts/export-beads.mjs` and commit `.beads/issues.jsonl` with the session's work, as that repository's rules say.
+1. `bd show <id>`. For an unblock: `bd label remove <id> needs-owner` and, if the status is blocked, `bd update <id> --status open`; cancel any open Ask or checklist on the bead (`cards ask cancel <id>`, `cards checklist cancel <id>`). If a done or not-needed one is open: `bd close <id> --reason "Done (owner, Roadmap <date>)" --force`, or for no longer needed `bd close <id> --reason "Not needed (owner, Roadmap <date>): <reason>" --force` (`--force` because `bd` refuses to close a task with an open blocker or child, and the owner's tap is the decision) and `bd update <id> --add-label not-needed`; then `node scripts/export-beads.mjs` and commit `.beads/issues.jsonl` with the session's work, as that repository's rules say.
 2. `cards mark applied --project <p> --bead <id>` (prints `nothing to apply` and exits 0 when no mark is active). If the issue was already closed, only this step is needed.
 
 The `bd close` (or the label removal) is what the hub-hooks push sends, so the Roadmap shows the real change within a minute.
@@ -653,7 +653,7 @@ Library, and the owner approves them row by row. Nothing in Beads changes until 
 - The Hub makes the Design review rows itself from the ops (`changeRows`), up to 20, and ignores any `decisions`, `options` or `image` the file
   has. A plan never gets Discord buttons. The answer is a `decisions` map as for any Design review.
 - `cards ask create --changes changes.json` files one; `cards beads show --project <p> [--open] [--json]` reads the project's roadmap;
-  `cards plan apply <ask id> [--dry-run]` runs the approved rows in order (a changed row uses the owner's text), with `bd` called by argument
+  `cards plan apply <ask id> [--dry-run]` runs the approved rows in order (a `close` row passes `--force`, as a mark does) (a changed row uses the owner's text), with `bd` called by argument
   arrays and no shell, and refuses an Ask that is unanswered, has no changes, is for another project than the repository's, or was picked up.
   With `--journal <file>` it records each row as it is applied (`{ rows: { d1: 'done' }, made: { '#1': 'ws-abc' } }`, a temp file and a rename) and a second run skips the rows in the journal and reuses the ids they made, so a crash never applies a row twice; with every row in the journal it exits 0. It never calls pickup.
 

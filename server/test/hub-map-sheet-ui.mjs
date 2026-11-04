@@ -341,6 +341,17 @@ try {
     const requestId = mine[0].split('/').at(-2);
     assert.equal(await live.locator('a').getAttribute('href'), `#/~hub/request/${encodeURIComponent(requestId)}`);
     await noSideways(page, `${label} run line`);
+    step(`${label}: marking a task with a run on it keeps the run line and says the run keeps going; Undo brings the marks back`);
+    await panel.locator('[data-mark-done]').click();
+    const confirmYes = panel.locator('[data-mark-confirm-yes]');
+    if (await confirmYes.count()) { assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /A run is on it and keeps going\./); await confirmYes.click(); }
+    await panel.locator('[data-mark-pending]').waitFor();
+    assert.equal(await panel.locator('[data-bead-run]').count(), 1, 'The run line stays on a marked task.');
+    assert.equal(await panel.locator('[data-bead-run] a').getAttribute('href'), `#/~hub/request/${encodeURIComponent(requestId)}`);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /The run keeps going\. Open it to stop it\./);
+    assert.equal(await panel.locator('[data-bead-do]').count(), 0, 'No build buttons on a marked task.');
+    await panel.locator('[data-mark-undo]').click();
+    await panel.locator('[data-mark-pending]').waitFor({ state: 'detached' });
     const folder = mine[0].replace('request.json', '');
     fixture.fake.seed(`${folder}taken.json`, JSON.stringify({ v: 1, at: new Date().toISOString() }), 'application/json');
     fixture.fake.seed(`${folder}result.json`, JSON.stringify({ v: 1, outcome: 'failed', at: new Date().toISOString() }), 'application/json');
