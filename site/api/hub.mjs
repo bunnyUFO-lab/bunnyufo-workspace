@@ -752,9 +752,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   /**
-   * The owner marks a task that waits on them done, no longer needed or unblocked (or takes it back), even when
-   * an Ask or a Needs you item names it: the session that applies the mark cancels those.
-   * Only the Hub writes the verdict; an agent closes the issue in Beads (or drops the label) later and writes `applied`.
+   * The owner marks any open task done or no longer needed, and a task that waits on them also unblocked (or takes it back), even when
+   * an Ask or a Needs you item names it: the PC (or a session) that applies the mark cancels those.
+   * Only the Hub writes the verdict; the PC closes the issue in Beads (or drops the label) later and writes `applied`. Agents never write a verdict.
    */
   async function markBead(project, raw, user, at) {
     if (!validProject(project)) throw fail('No such project.', 404);
@@ -778,11 +778,12 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       if (closed) throw fail('Already closed in Beads.', 409);
       // Unblock removes `needs-owner` or `blocked`; a task that waits only through an Ask or a checklist has neither, so it would change nothing.
       if (verdict === 'unblock' && !isWaiting(issue)) throw fail('Unblock changes nothing here: this task has no needs-owner label and is not blocked, it waits only through an Ask or a checklist. Answer or cancel that Ask, or use Mark done or Not needed.', 409);
-      if (!(wayfinder && (verdict === 'done' || verdict === 'not-needed'))) {
+      if (!(wayfinder && verdict !== 'unblock')) {
+        // Done and not needed apply to any open task. Unblock is for a task that waits on the owner. A milestone or a feature is not a task and stays unmarked.
         const [asks, checklists, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadEvents(at)]);
         const map = buildMap({ project, meta, issues, events: window.events, asks: asks.map(askRow), checklists: checklists.map(checklistRow), now: at });
         const task = map.milestones.flatMap(milestone => milestone.features.flatMap(feature => feature.tasks)).find(item => item.id === bead);
-        if (task?.state !== 'you') throw fail('This is not waiting on you.', 409);
+        if (verdict === 'unblock' ? task?.state !== 'you' : !task) throw fail(verdict === 'unblock' ? 'This is not waiting on you.' : 'Only a task can be marked here, not a milestone or a feature.', 409);
       }
     }
     const stamp = at.toISOString();

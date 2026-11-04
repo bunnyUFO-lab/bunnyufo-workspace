@@ -177,11 +177,20 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
                   : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
             <MarkActions
               task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
-              eligible={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+              eligible={task.state !== 'done'} waiting={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
             />
           </div>
         )}
-        {!(task.state === 'you' || task.mark) && markFailure.id === nodeId && markFailure.message && <p className="hub-error" role="alert">{markFailure.message}</p>}
+        {/* Any other open task: Mark done and No longer needed (the PC applies them within minutes). Unblock is only for a task that waits on you. */}
+        {!(task.state === 'you' || task.mark) && task.state !== 'done' && (
+          <div className="hub-map-panel-needed" data-mark-open>
+            <MarkActions
+              task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+              eligible waiting={false} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+            />
+          </div>
+        )}
+        {!(task.state === 'you' || task.mark) && task.state === 'done' && markFailure.id === nodeId && markFailure.message && <p className="hub-error" role="alert">{markFailure.message}</p>}
       </>
     )
   } else {

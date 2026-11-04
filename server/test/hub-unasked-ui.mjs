@@ -111,7 +111,7 @@ try {
     await panel.waitFor();
     const one = panel.locator('[data-unasked-row="ua-one"]');
     await one.locator('[data-mark-done]').click();
-    assert.equal(await one.locator('[data-mark-confirm-first]').innerText().then(text => text.replace(/\s+/g, ' ')), 'This closes Register the domain in Beads. Undo stays here until a session applies it. Confirm Cancel');
+    assert.equal(await one.locator('[data-mark-confirm-first]').innerText().then(text => text.replace(/\s+/g, ' ')), 'This closes Register the domain in Beads. Undo stays here until the PC applies it, within minutes. Confirm Cancel');
     await one.locator('[data-mark-confirm-cancel]').click();
     assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Cancel writes nothing.');
     await one.locator('[data-mark-done]').click();

@@ -198,6 +198,8 @@ export interface Ask {
   /** A Design review: a picture in the Ask's folder, and decisions to approve, change or skip. */
   image?: string
   decisions?: AskDecision[]
+  /** A plan (change-list Ask): the rows the PC applies after the owner's answer. */
+  changes?: unknown[]
   /** The sprite flow: what an avatar Ask points at (an agent's file; checked again where it is used). */
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */

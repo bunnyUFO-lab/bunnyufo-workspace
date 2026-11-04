@@ -151,7 +151,7 @@ export default function QuestionActions({ project, repoName, wayfinder, item, la
             <button type="button" className="hub-btn" disabled={busy} onClick={() => void record('not-needed')} data-q-not-needed>Not needed</button>
             <button type="button" className="hub-btn" disabled={busy} onClick={() => { setAnswering(false); setProblem('') }}>Cancel</button>
           </div>
-          <p className="hub-q-note">It is saved as your decision and shows on the Roadmap at once. A session in the project closes the question in Beads when it starts there.</p>
+          <p className="hub-q-note">It is saved as your decision and shows on the Roadmap at once. The PC closes the question in Beads within minutes.</p>
         </form>
       )}
       {problem && <p className="hub-error" role="alert">{problem}</p>}

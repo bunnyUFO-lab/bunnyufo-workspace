@@ -138,6 +138,12 @@ try {
     panel = await sheet(page, 'sd-t-hash');
     assert.equal(await panel.locator('[data-summary]').innerText(), 'No description yet.');
     assert.equal(await panel.locator('[data-cards]').count(), 0);
+    step(`${label}: an open task that waits on nobody has Mark done and No longer needed, and no Unblock or What's needed`);
+    assert.equal(await panel.locator('[data-mark-open] [data-mark-done]').count(), 1);
+    assert.equal(await panel.locator('[data-mark-open] [data-mark-not-needed]').count(), 1);
+    assert.equal(await panel.locator('[data-mark-unblock]').count(), 0, 'Unblock is for a task that waits on the owner.');
+    assert.equal(await panel.locator('h4', { hasText: "What's needed" }).count(), 0);
+    await noSideways(page, `${label} open task marks`);
 
     step(`${label}: a done feature says when it finished, not that nothing happened`);
     panel = await sheet(page, 'sd-f-done');
@@ -219,11 +225,11 @@ try {
     assert.ok((await panel.locator('[data-mark-unblock]').boundingBox()).height >= 43.5, 'Unblock is tall enough to tap.');
     assert.equal(await panel.locator('a', { hasText: 'Open in Needs you' }).count(), 0);
     await markDone.click();
-    assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /^This closes .+ in Beads. Undo stays here until a session applies it./, 'The first mark on a device says what it closes.');
+    assert.match(await panel.locator('[data-mark-confirm-first]').innerText(), /^This closes .+ in Beads. Undo stays here until the PC applies it, within minutes./, 'The first mark on a device says what it closes.');
     assert.equal(await panel.locator('[data-mark-pending]').count(), 0, 'Nothing is written before the confirmation.');
     await panel.locator('[data-mark-confirm-yes]').click();
     await panel.locator('[data-mark-pending]').waitFor();
-    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this done on \d{1,2} \w{3}\. The PC applies it in Sheetdev within minutes.\s*Undo$/);
     assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'done');
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · done/);
     assert.equal(await panel.locator('[data-mark-done]').count(), 0);
@@ -239,7 +245,7 @@ try {
     await panel.locator('[data-mark-unblock]').click();
     await panel.locator('[data-mark-pending]').waitFor();
     assert.equal(await panel.locator('[data-mark-pending]').getAttribute('data-mark-verdict'), 'unblock');
-    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this unblocked on \d{1,2} \w{3}\. A session in Sheetdev applies it when it starts there\.\s*Undo$/);
+    assert.match(await panel.locator('[data-mark-pending]').innerText(), /^You marked this unblocked on \d{1,2} \w{3}\. The PC applies it in Sheetdev within minutes.\s*Undo$/);
     assert.match(await panel.locator('.hub-map-panel-heading').innerText(), /sd-t-label · next up/, 'It is next, not yellow and not closed.');
     assert.equal(await panel.locator('[data-mark-unblock]').count(), 0);
     await noSideways(page, `${label} unblock pending`);

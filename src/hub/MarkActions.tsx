@@ -19,13 +19,13 @@ function rememberConfirmed() {
 const PENDING_WORD = { done: 'done', 'not-needed': 'not needed', unblock: 'unblocked' }
 
 /**
- * The owner's actions on a task that waits on them (the caller decides that, an Ask or a checklist or not):
- * Mark done, No longer needed (with an optional reason), Unblock and, once marked, Undo. The write is a
- * create-only log the Hub shows at once; a session in the project applies it in Beads when it starts there.
+ * The owner's actions on an open task: Mark done, No longer needed (with an optional reason) and, once marked, Undo. Unblock is
+ * only for a task that waits on them (`waiting`, the caller decides that, an Ask or a checklist or not). The write is a
+ * create-only log the Hub shows at once; the PC applies it in Beads within minutes (a session in the project can too).
  * hubPost refreshes every Hub read after a write, so the map comes back marked and the sheet stays open.
  * `compact` is the buttons alone, for a row on Today.
  */
-export default function MarkActions({ task, title, project, projectName, eligible, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark'>; title?: string; project: string; projectName: string; eligible: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
+export default function MarkActions({ task, title, project, projectName, eligible, waiting = true, error, onError, compact = false }: { task: Pick<MapTask, 'id' | 'mark'>; title?: string; project: string; projectName: string; eligible: boolean; waiting?: boolean; error: string; onError: (message: string) => void; compact?: boolean }) {
   const [asking, setAsking] = useState(false)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -59,7 +59,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
   if (compact && !task.mark && !host.write) return failed || null
 
   if (task.mark && compact) {
-    // Today's row: the item stays, muted, until a session applies the mark; Undo is a button in the row.
+    // Today's row: the item stays, muted, until the PC applies the mark; Undo is a button in the row.
     return (
       <div className="hub-map-panel-mark compact marked" data-mark-pending data-mark-verdict={task.mark.verdict}>
         <span className="hub-muted">Marked {PENDING_WORD[task.mark.verdict]}</span>
@@ -73,8 +73,8 @@ export default function MarkActions({ task, title, project, projectName, eligibl
     return (
       <div className="hub-map-panel-mark" data-mark-pending data-mark-verdict={task.mark.verdict}>
         {task.mark.verdict === 'done' && task.mark.reason
-          ? <p className="hub-muted" data-decided>Decided: {task.mark.reason} · applies at the next session in {projectName}{date ? ` (${date})` : ''}.</p>
-          : <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. A session in {projectName} applies it when it starts there.</p>}
+          ? <p className="hub-muted" data-decided>Decided: {task.mark.reason} · the PC applies it within minutes{date ? ` (${date})` : ''}.</p>
+          : <p className="hub-muted">You marked this {PENDING_WORD[task.mark.verdict]}{date ? ` on ${date}` : ''}. The PC applies it in {projectName} within minutes.</p>}
         {failed}
         {host.write
           ? <div className="hub-actions start"><button type="button" className="hub-btn" disabled={busy} onClick={() => void send('undo')} data-mark-undo>Undo</button></div>
@@ -88,7 +88,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
       <div className="hub-actions start">
         <button type="button" className="hub-btn pri" disabled={busy} onClick={() => close('done')} data-mark-done>Mark done</button>
         <button type="button" className="hub-btn" disabled={busy} aria-expanded={asking} onClick={() => setAsking(value => !value)} data-mark-not-needed>No longer needed</button>
-        <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('unblock')} data-mark-unblock>Unblock</button>
+        {waiting && <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('unblock')} data-mark-unblock>Unblock</button>}
       </div>
       {asking && (
         <form className="hub-map-panel-reason" onSubmit={event => { event.preventDefault(); close('not-needed') }}>
@@ -99,7 +99,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
       )}
       {confirming && (
         <div className="hub-map-panel-confirm" role="alertdialog" aria-label="Confirm" data-mark-confirm-first>
-          <p>This closes {title ? <strong>{title}</strong> : 'this item'} in Beads. Undo stays here until a session applies it.</p>
+          <p>This closes {title ? <strong>{title}</strong> : 'this item'} in Beads. Undo stays here until the PC applies it, within minutes.</p>
           <div className="hub-actions start">
             <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void send(confirming)} data-mark-confirm-yes>Confirm</button>
             <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirming(null)} data-mark-confirm-cancel>Cancel</button>
@@ -107,7 +107,7 @@ export default function MarkActions({ task, title, project, projectName, eligibl
         </div>
       )}
       {failed}
-      {!compact && <p className="hub-muted">Unblock: it doesn&apos;t wait on you; agents may pick it up.</p>}
+      {!compact && waiting && <p className="hub-muted">Unblock: it doesn&apos;t wait on you; agents may pick it up.</p>}
     </div>
   )
 }
