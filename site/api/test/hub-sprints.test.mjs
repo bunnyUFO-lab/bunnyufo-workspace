@@ -92,6 +92,20 @@ test('eligible: open tasks in dependency order, then the map\'s order', () => {
   assert.equal(eligible(issues, marksNone, 'ml-ms~other', { project: 'magic-loops', now: NOW }).found, false, 'A synthetic group is not a milestone.');
 });
 
+test('eligible: a ring under a roadmap previews like a milestone, and the roadmap pile is no milestone', () => {
+  const issues = [
+    beadsIssue({ id: 'ml-rm', title: 'Roadmap', type: 'epic', labels: ['roadmap'], created: '2026-10-01T10:00:00Z' }),
+    beadsIssue({ id: 'ml-ring', title: 'Ring', type: 'feature', parent: 'ml-rm', created: '2026-10-01T10:01:00Z' }),
+    beadsIssue({ id: 'ml-r1', parent: 'ml-ring', created: '2026-10-01T11:00:00Z' }),
+    beadsIssue({ id: 'ml-r2', parent: 'ml-ring', created: '2026-10-01T11:01:00Z' }),
+    beadsIssue({ id: 'ml-loose', parent: 'ml-rm', created: '2026-10-01T11:02:00Z' }),
+  ].map(issue => ({ ...issue, project: 'magic-loops' }));
+  const result = eligible(issues, marksNone, 'ml-ring', { project: 'magic-loops', now: NOW });
+  assert.equal(result.found, true);
+  assert.deepEqual(ids(result.items), ['ml-r1', 'ml-r2']);
+  assert.equal(eligible(issues, marksNone, 'ml-rm~tasks', { project: 'magic-loops', now: NOW }).found, false, 'The pile has a ~ in its id, like ~none.');
+});
+
 test('eligible: each left-out task says why', () => {
   const issues = [
     ...milestone([

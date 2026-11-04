@@ -1,7 +1,8 @@
 // Run after npm run build. The Roadmap through a real browser, over the hub fixture. Its two axes: vertical on a
 // phone held upright, horizontal in landscape and on a desktop, the switch between them keeping the selection, and
 // the desktop drawing unchanged from before the vertical layout existed. Where a project's work runs (the Runs on
-// chip), which project the Roadmap opens on, and the Wayfinder row.
+// chip), which project the Roadmap opens on, and the Wayfinder row. Nested roadmaps (RoadmapRows, mapBranch): the Full map rows, a branch's own map, the bar,
+// the saved view, and the phone's axis and sheet clearance with the bar in place.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
@@ -17,6 +18,20 @@ const fixture = await startHubFixture();
 for (const [project, title] of [['aardvark', 'Aardvark milestone'], ['workspace-app', 'App milestone']]) {
   fixture.seed.beads(project, [beadsIssue({ id: `${project.slice(0, 2)}-m1`, title, type: 'milestone', created: '2026-10-01T10:00:00Z' })], { pushedAt: minutesAgo(fixture.now, 10).toISOString(), host: 'pc.example.test', count: 1, repo: `example/${project}` });
 }
+// A project with roadmaps (ws-im1.3.2), next to Aardvark: Hub work holds two rings and the roadmap Editing, whose one loose task is a pile; one old milestone is outside.
+const ISO = '2026-10-01T10:00:00Z';
+fixture.seed.beads('aardwolf', [
+  beadsIssue({ id: 'aw-rm1', title: 'Hub work', type: 'epic', labels: ['roadmap'], created: ISO }),
+  beadsIssue({ id: 'aw-f1', title: 'Alpha ring', type: 'feature', parent: 'aw-rm1', labels: ['roadmap'], created: '2026-10-01T10:01:00Z' }),
+  beadsIssue({ id: 'aw-t1', title: 'Alpha one', parent: 'aw-f1', labels: ['roadmap'], status: 'closed', closed: '2026-10-02T10:00:00Z', created: '2026-10-01T10:02:00Z' }),
+  beadsIssue({ id: 'aw-t2', title: 'Alpha two', parent: 'aw-f1', created: '2026-10-01T10:03:00Z' }),
+  beadsIssue({ id: 'aw-f2', title: 'Beta ring', type: 'feature', parent: 'aw-rm1', created: '2026-10-01T10:04:00Z' }),
+  beadsIssue({ id: 'aw-t3', title: 'Beta one', parent: 'aw-f2', created: '2026-10-01T10:05:00Z' }),
+  beadsIssue({ id: 'aw-rm2', title: 'Editing', type: 'epic', parent: 'aw-rm1', labels: ['roadmap'], created: '2026-10-01T10:06:00Z' }),
+  beadsIssue({ id: 'aw-t4', title: 'Zebra stripes', parent: 'aw-rm2', created: '2026-10-01T10:07:00Z' }),
+  beadsIssue({ id: 'aw-m0', title: 'Old milestone', type: 'milestone', created: '2026-10-01T10:08:00Z' }),
+  beadsIssue({ id: 'aw-t5', title: 'Old task', parent: 'aw-m0', created: '2026-10-01T10:09:00Z' }),
+], { pushedAt: minutesAgo(fixture.now, 10).toISOString(), host: 'pc.example.test', count: 10, repo: 'example/aardwolf' });
 const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
@@ -293,7 +308,7 @@ try {
   await desk.locator('.hub-map-wrap').waitFor();
   assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'A first visit opens the first project in table order.');
   const names = await desk.locator('.hub-map-chips .hub-chip').allInnerTexts();
-  assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Nosprint', 'Wayfind']);
+  assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Aardwolf', 'Nosprint', 'Wayfind']);
 
   step('the Runs on chip: full text at desktop width, the rule as its title');
   const chip = desk.locator('.hub-runs');
@@ -473,6 +488,150 @@ try {
     }
   }
 }
+
+{
+  // RoadmapRows and mapBranch (ws-im1.3.2): a project with roadmaps shows the Full map (rows) or one branch (the ordinary map); one without is unchanged.
+  const RW = 'aardwolf';
+  const rowsOnPage = page => page.locator('[data-roadmap-row]');
+  const hashOf = page => page.evaluate(() => location.hash);
+  const clean = async page => { await page.evaluate(() => { try { localStorage.removeItem('hub-map-branch'); localStorage.removeItem('hub-map-search'); } catch { /* none */ } }); };
+  const settle = async (page, selector) => { await page.locator(selector).first().waitFor(); await page.waitForTimeout(400); };
+
+  step('roadmaps: a project with no roadmap label has no bar and no rows');
+  const plain = await open({ width: 1280, height: 800 });
+  const answered = plain.waitForResponse(response => /\/map\/magic-loops$/.test(response.url()));
+  await showMap(plain, '#/~hub/map/magic-loops');
+  assert.equal(await plain.locator('.hub-map-branchbar').count(), 0, 'No bar.');
+  assert.equal(await plain.locator('.rm-full').count(), 0, 'No rows.');
+  assert.equal((await (await answered).json()).roadmaps, undefined, 'The server leaves roadmaps out.');
+
+  step('roadmaps, desktop: Full map is nested rows with the bar above; a row opens only its milestones; the crumb, the toggle and Back return');
+  const desk = await open({ width: 1280, height: 800 });
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await settle(desk, '.rm-full');
+  assert.deepEqual(await rowsOnPage(desk).evaluateAll(list => list.map(row => [row.dataset.roadmapRow, row.dataset.depth])), [['aw-rm1', '0'], ['aw-rm2', '1'], ['~unfiled', '0']], 'Nested rows, then the unfiled row.');
+  assert.equal(await desk.locator('.hub-map-box').count(), 0, 'The full map draws no map.');
+  const layout = await desk.evaluate(() => ({ chips: document.querySelector('.hub-map-chips').getBoundingClientRect().bottom, bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect(), rows: document.querySelector('.rm-full').getBoundingClientRect(), scroll: document.scrollingElement.scrollHeight, inner: innerHeight, hubScroll: document.querySelector('.hub').scrollHeight, hubClient: document.querySelector('.hub').clientHeight }));
+  assert.ok(layout.bar.top >= layout.chips - 1 && layout.rows.top >= layout.bar.bottom - 1, 'The chips, then the bar, then the rows.');
+  assert.ok(layout.scroll <= layout.inner && layout.hubScroll <= layout.hubClient, 'The Hub does not scroll.');
+  assert.equal(await desk.locator('[data-roadmap-toggle="full"]').getAttribute('aria-current'), 'page');
+  await desk.locator('[data-roadmap-row="aw-rm1"]').click();
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/aw-rm1`);
+  assert.deepEqual(await desk.locator('[data-kind="m"]').evaluateAll(list => list.map(node => node.dataset.node)), ['aw-f1', 'aw-f2'], 'Only the roadmap\'s own milestones.');
+  assert.equal(await desk.locator('[data-roadmap-toggle="branch"]').getAttribute('aria-current'), 'page');
+  assert.equal(await desk.locator('[data-crumb="aw-rm1"]').count(), 1, 'The crumb names the branch.');
+  assert.equal(await desk.locator('[data-inside="aw-rm2"]').count(), 1, 'The roadmap inside it is a link.');
+  const above = await desk.evaluate(() => ({ bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect().bottom, controls: document.querySelector('.hub-map-controls').getBoundingClientRect().top, boxTop: document.querySelector('.hub-map-box').getBoundingClientRect().top, boxBottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, inner: innerHeight, scroll: document.scrollingElement.scrollHeight }));
+  assert.ok(above.bar <= above.controls + 1 && above.scroll <= above.inner, 'The bar is above the controls and nothing scrolls.');
+  assert.ok(above.boxBottom >= above.inner - 24, `The map fills the rest (${above.boxBottom} of ${above.inner}).`);
+  await desk.locator('[data-roadmap-toggle="full"]').click();
+  await settle(desk, '.rm-full');
+  assert.equal(await desk.locator('[data-roadmap-row="aw-rm1"].from').count(), 1, 'The branch the viewer came from is marked.');
+  await desk.goBack();
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/aw-rm1`, 'Back returns to the branch.');
+  await desk.locator('[data-roadmap-toggle="full"]').click();
+  await settle(desk, '.rm-full');
+  await desk.locator('[data-roadmap-toggle="branch"]').click();
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/aw-rm1`, 'This branch goes back to the branch last in.');
+  await desk.locator('[data-inside="aw-rm2"]').click();
+  await settle(desk, '.hub-map-box svg');
+  assert.deepEqual(await desk.locator('[data-kind="m"]').evaluateAll(list => list.map(node => node.dataset.node)), ['aw-rm2~tasks'], 'The loose tasks of a roadmap are one pile.');
+  await desk.locator('[data-crumb="project"]').click();
+  await desk.locator('[data-project-page]').waitFor();
+
+  step('roadmaps: a link to a bead in another branch opens that branch with its panel; closing stays; a wrong id leaves the address; the view is kept across a reload');
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}/aw-rm1`);
+  await settle(desk, '.hub-map-box svg');
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}/aw-t5`);
+  await desk.locator('.hub-map-panel').waitFor();
+  assert.deepEqual(await desk.locator('[data-kind="m"]').evaluateAll(list => list.map(node => node.dataset.node)), ['aw-m0'], 'The bead\'s own branch (not in a roadmap).');
+  assert.equal(await desk.locator('[data-crumb="~unfiled"]').count(), 1);
+  await desk.locator('.hub-map-panel-close').click();
+  await desk.locator('.hub-map-panel').waitFor({ state: 'detached' });
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/~unfiled`, 'Closing the panel stays in the branch.');
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}/nonsense`);
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/nonsense`, 'A wrong id leaves the address alone.');
+  assert.equal(await desk.locator('.hub-map-panel').count(), 0);
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await desk.reload();
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await desk.locator('[data-kind="m"]').first().getAttribute('data-node'), 'aw-m0', 'A bare address opens what was last shown.');
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}/~full`);
+  await desk.reload();
+  await settle(desk, '.rm-full');
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await desk.reload();
+  await settle(desk, '.rm-full');
+  await desk.goto(`${fixture.url}#/~hub/map/magic-loops`);
+  await desk.reload();
+  await settle(desk, '.hub-map-box svg');
+  assert.equal(await desk.locator('.hub-map-branchbar').count(), 0, 'Another project has its own choice.');
+  await desk.evaluate(() => localStorage.setItem('hub-map-branch', JSON.stringify({ aardwolf: { view: 'branch', branch: 'gone' } })));
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await desk.reload();
+  await settle(desk, '.rm-full');
+
+  step('roadmaps: a word in a task of another branch is "No matches" with a link to the full map, whose search finds it and opens it in its branch');
+  await clean(desk);
+  await desk.goto(`${fixture.url}#/~hub/map/${RW}/aw-rm1`);
+  await settle(desk, '.hub-map-box svg');
+  await desk.locator('[data-map-search]').fill('zebra');
+  await desk.locator('[data-map-count]', { hasText: 'No matches' }).waitFor();
+  await desk.locator('[data-map-full]').click();
+  await settle(desk, '.rm-full');
+  assert.equal(await desk.locator('[data-roadmap-search]').inputValue(), 'zebra', 'The full map shares the search.');
+  await desk.locator('[data-roadmap-hit="aw-t4"]').waitFor();
+  await desk.locator('[data-roadmap-hit="aw-t4"]').click();
+  await desk.locator('.hub-map-panel').waitFor();
+  assert.equal(await hashOf(desk), `#/~hub/map/${RW}/aw-t4`);
+  assert.equal(await desk.locator('[data-crumb="aw-rm2"]').count(), 1, 'It opened in its own branch.');
+  await clean(desk);
+
+  step('roadmaps, blocked storage for the Roadmap keys still renders');
+  const blocked = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+  contexts.push(blocked);
+  // The app shell itself needs storage; what is blocked here is the Roadmap's own keys (hub-map-*).
+  await blocked.addInitScript(() => { for (const name of ['getItem', 'setItem', 'removeItem']) { const real = Storage.prototype[name]; Storage.prototype[name] = function guarded(key, ...rest) { if (String(key).startsWith('hub-map-')) throw new Error('blocked'); return real.call(this, key, ...rest); }; } });
+  const stuck = await blocked.newPage();
+  stuck.setDefaultTimeout(ms(15000));
+  await stuck.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await settle(stuck, '.rm-full');
+  await stuck.locator('[data-roadmap-row="aw-rm1"]').click();
+  await settle(stuck, '.hub-map-box svg');
+
+  step('roadmaps, phone: the box stays vertical at rest, after Full to branch and with a sheet; the bar takes the chips\' place; every control is 44 px');
+  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  await phone.goto(`${fixture.url}#/~hub/map/${RW}`);
+  await settle(phone, '.rm-full');
+  const sized = async what => {
+    const sizes = await phone.evaluate(() => ({ bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect().height, chips: getComputedStyle(document.querySelector('.hub-map-chips')).display, toggles: [...document.querySelectorAll('.rm-toggle a')].map(item => item.getBoundingClientRect().height), rows: [...document.querySelectorAll('[data-roadmap-row]')].map(item => item.getBoundingClientRect().height) }));
+    assert.ok(sizes.bar >= 44 && sizes.toggles.every(height => height >= 44) && sizes.rows.every(height => height >= 44), `${what}: bar, toggle and rows are at least 44 px (${JSON.stringify(sizes)}).`);
+    assert.equal(sizes.chips, 'none', `${what}: the bar takes the chips' place.`);
+  };
+  await sized('full map');
+  await noSideways(phone, 'full map at 390');
+  await phone.locator('[data-roadmap-row="aw-rm1"]').tap();
+  await settle(phone, '.hub-map-box svg');
+  await axisIs(phone, 'y', 'The box is vertical after Full map to a branch.');
+  await sized('branch');
+  await noSideways(phone, 'branch at 390');
+  const fill = await phone.evaluate(() => ({ bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, tabs: document.querySelector('nav.hub-tabs')?.getBoundingClientRect().top ?? innerHeight }));
+  assert.ok(Math.abs(fill.bottom - (fill.tabs - 8)) <= 10, `The box fills down to the tab bar (${fill.bottom} vs ${fill.tabs}).`);
+  await phone.locator('[data-node="aw-f1"] > circle').first().tap({ force: true });
+  const sheet = phone.locator('.hub-map-panel');
+  await sheet.waitFor();
+  await phone.waitForTimeout(400);
+  await axisIs(phone, 'y', 'The box stays vertical with a sheet open.');
+  const sheetBox = await sheet.boundingBox();
+  const boxTop = (await phone.locator('.hub-map-box').boundingBox()).y;
+  assert.ok(sheetBox.y - boxTop >= 100, `An open sheet leaves the map at least 100 px above it (${sheetBox.y - boxTop}).`);
+  await noSideways(phone, 'branch with the sheet');
+}
+
 
   console.log('hub-map-ui: passed');
 } finally {

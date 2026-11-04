@@ -139,6 +139,26 @@ export function milestoneIssuesOf(issues, parentOf) {
   return issues.filter(issue => isMilestoneIssue(issue) && !(parentOf.has(issue.id) && isMilestoneIssue(byId.get(parentOf.get(issue.id)))));
 }
 
+/**
+ * The issues the map treats as roadmaps: an `epic` labelled `roadmap` that is not a milestone, with no parent or a parent that is itself a roadmap.
+ * Exactly `epic`: `bd create --parent` copies labels to children, so a task or feature that inherited `roadmap` must not become one.
+ * A parent cycle makes none of its members roadmaps.
+ */
+export function roadmapIssuesOf(issues, parentOf) {
+  const byId = new Map(issues.map(issue => [issue.id, issue]));
+  const candidate = issue => !!issue && issue.issue_type === 'epic' && (issue.labels ?? []).includes('roadmap') && !isMilestoneIssue(issue);
+  const memo = new Map();
+  const is = (issue, seen) => {
+    if (memo.has(issue.id)) return memo.get(issue.id);
+    if (!candidate(issue) || seen.has(issue.id)) return false;
+    const parent = parentOf.get(issue.id);
+    const ok = parent === undefined || is(byId.get(parent), new Set([...seen, issue.id]));
+    memo.set(issue.id, ok);
+    return ok;
+  };
+  return issues.filter(issue => is(issue, new Set()));
+}
+
 /** Events grouped by the bead they name, oldest first. */
 export function eventsByBeadOf(events) {
   const grouped = new Map();
@@ -241,6 +261,17 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
 
   const milestoneIssues = milestoneIssuesOf(issues, parentOf);
   const milestoneIds = new Set(milestoneIssues.map(issue => issue.id));
+  const roadmapIssues = roadmapIssuesOf(issues, parentOf);
+  const roadmapIds = new Set(roadmapIssues.map(issue => issue.id));
+  /** The nearest roadmap above an issue (walking parents; a cycle ends the walk), or undefined. */
+  const roadmapAbove = id => {
+    const seen = new Set([id]);
+    for (let at = parentOf.get(id); at !== undefined && !seen.has(at); at = parentOf.get(at)) {
+      if (roadmapIds.has(at)) return at;
+      seen.add(at);
+    }
+    return undefined;
+  };
 
   const asksByBead = new Map();
   for (const ask of asks) {
@@ -368,11 +399,14 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     return makeMilestone(milestone.id, milestone.title ?? milestone.id, features);
   };
   const milestones = orderSiblings(milestoneIssues, blockers).map(milestoneOf);
+  // A roadmap is a place for milestones, not one: it is placed so its group children become rings of their own and its loose tasks a pile.
+  for (const id of roadmapIds) placed.add(id);
 
   // Whatever no milestone reaches: an epic with children is a ring of its own (it is not "not in a milestone"), the loose rest one pile.
   const unplaced = issues.filter(issue => !placed.has(issue.id));
   const features = [];
   const loose = [];
+  const piles = new Map();
   for (const issue of orderSiblings(unplaced, blockers)) {
     if (placed.has(issue.id) || milestoneIds.has(issue.id)) continue;
     const parent = parentOf.get(issue.id);
@@ -382,11 +416,32 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
       if (kept.features.length) milestones.push(kept);
     } else {
       placed.add(issue.id);
-      loose.push(issue, ...collect(issue));
+      // A loose task straight under a roadmap goes to that roadmap's pile, not to "Not in a milestone".
+      const pile = roadmapIds.has(parent) ? (piles.get(parent) ?? piles.set(parent, []).get(parent)) : loose;
+      pile.push(issue, ...collect(issue));
     }
   }
+  const pileMilestones = roadmapIssues.filter(issue => piles.has(issue.id)).map(issue => {
+    const title = issue.title ?? issue.id;
+    return { ...makeMilestone(`${issue.id}~tasks`, `${title} · tasks`, [makeFeature(`${issue.id}~tasks~other`, 'Other tasks', piles.get(issue.id))]), roadmap: issue.id };
+  });
+  milestones.push(...pileMilestones);
   if (loose.length) features.push(makeFeature('~none~other', 'Other tasks', loose));
   if (features.length) milestones.push(makeMilestone('~none', 'Not in a milestone', features));
+
+  // Each milestone with a roadmap above it names it (the flat list stays whole: Work, sprints and search read it).
+  for (const milestone of milestones) {
+    if (milestone.roadmap || milestone.id.includes('~')) continue;
+    const above = roadmapAbove(milestone.id);
+    if (above) milestone.roadmap = above;
+  }
+  // Left out entirely when there are none, so a project with no roadmap label answers as it did.
+  const roadmaps = orderSiblings(roadmapIssues, blockers).map(issue => {
+    const own = milestones.filter(milestone => milestone.roadmap === issue.id).map(milestone => milestone.state);
+    const state = own.length ? roll(own) : issue.status === 'closed' ? 'done' : 'later';
+    const parent = parentOf.get(issue.id);
+    return { id: issue.id, title: issue.title ?? issue.id, state, ...(parent ? { parent } : {}) };
+  });
 
   // Sprint bands: each `sprint:<name>` label, with the milestones it touches.
   const sprintInfo = new Map();
@@ -412,6 +467,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     project, meta,
     ageMinutes: Number.isNaN(pushed) ? null : Math.max(0, Math.floor((now.getTime() - pushed) / 60000)),
     milestones, sprints,
+    ...(roadmaps.length ? { roadmaps } : {}),
     wayfinder: wayfinderOf(issues, childrenOf, blockersOf),
   };
 }

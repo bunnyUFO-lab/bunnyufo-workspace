@@ -37,7 +37,7 @@ test('the Planner is the one persona that may file an Ask, and only a change lis
   assert.match(planner.text, /You do not write to Beads or to a project's cards/);
   assert.match(planner.text, /nothing in Beads has changed/);
   for (const op of ['create', 'update', 'dep', 'close', 'label', 'card']) assert.ok(planner.text.includes(`${op} {`), `the ${op} change is described`);
-  assert.match(planner.text, /Labels are only: wayfinder:<type>, milestone, needs-owner, later/);
+  assert.match(planner.text, /Labels are only: wayfinder:<type>, milestone, roadmap, needs-owner, later/);
   assert.ok(planner.text.length < 4000);
   assert.equal(chatPersonaOf('planner').id, 'planner');
 });

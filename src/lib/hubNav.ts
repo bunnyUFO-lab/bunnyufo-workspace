@@ -10,7 +10,7 @@ export const HUB_SHORT: Partial<Record<HubScreen, string>> = {}
  */
 export function hubRows(caps: Pick<HostCapabilities, 'write' | 'chat'>): [HubScreen, string, string][] {
   const rows: [HubScreen, string, string, boolean][] = [
-    ['today', 'Today', '☀', true], ['needs', 'Needs you', '✉', true], ['work', 'Work', '▦', true], ['team', 'Team', '☺', true], ['map', 'Roadmap', '◈', true],
+    ['today', 'Today', '☀', true], ['needs', 'Needs you', '✉', true], ['work', 'Work', '▦', true], ['team', 'Team', '☺', true], ['project', 'Projects', '◧', true], ['map', 'Roadmap', '◈', true],
     ['sketch', 'Sketch', '✎', caps.write], ['chat', 'Chat', '☁', caps.chat],
   ]
   return rows.filter(row => row[3]).map(([screen, label, icon]) => [screen, label, icon])
@@ -30,7 +30,7 @@ export type HubGroup = 'operate' | 'plan' | 'know' | 'run'
  */
 export const HUB_GROUPS: { id: HubGroup; label: string; rows: (HubScreen | 'library' | 'team')[] }[] = [
   { id: 'operate', label: 'Operate', rows: ['today', 'needs', 'work', 'team'] },
-  { id: 'plan', label: 'Plan', rows: ['map', 'chat'] },
+  { id: 'plan', label: 'Plan', rows: ['project', 'map', 'chat'] },
   { id: 'know', label: 'Know', rows: ['library', 'sketch'] },
   { id: 'run', label: 'Run', rows: [] },
 ]

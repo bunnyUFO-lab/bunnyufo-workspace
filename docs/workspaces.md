@@ -646,7 +646,7 @@ Library, and the owner approves them row by row. Nothing in Beads changes until 
 - `changes`: 1 to 20 changes, `op` one of `create` (`title` 1 to 120, `type` task, feature or epic, `parent`, `description` at most 2000, `labels`),
   `update` (`bead`, `title`, `description`), `dep` (`bead` must be done before `blocks`), `close` (`bead`, `reason` at most 200), `label`
   (`bead`, `add`, `remove`) and `card` (`assistant/<folder>`, copied into the project's section). A bead is a Beads id, or `#n` for the n-th
-  change when that one is a `create`. Labels are only `wayfinder:<type>`, `milestone`, `needs-owner` and `later`. Unknown ops, fields and
+  change when that one is a `create`. Labels are only `wayfinder:<type>`, `milestone`, `roadmap`, `needs-owner` and `later`. Unknown ops, fields and
   labels are refused, and so is a command written into any text (the same check as `--prose-ok` skips elsewhere; there is no skip here).
 - One validator, `site/api/ask-changes.mjs`: the card API answers 422 to a limited token's `ask.json` that fails it, the Hub drops a failing
   list when it reads the Ask, and the cards client carries a copy that `scripts/cards.test.mjs` keeps equal.
@@ -910,6 +910,8 @@ Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status
 `GET /api/hub/work[?project=<id>]` returns `{ lanes, counts, at }`: six lanes (`backlog`, `ready`, `running`, `blocked`, `review`, `done`) of cards `{ key, source, id, project, title, lane, state, why?, signs, live?, updatedAt, href }` (a Beads card also has `type`, the issue type, and `labels`). `source` is `beads`, `request` or `hermes`; `key` is `bead:<id>`, `request:<id>` or `run:<id>`. Without `project` it covers every project with a Beads copy plus all requests; with one, that project's issues and requests. `counts` are real totals: Backlog keeps the newest 50 cards and Done the newest 30 of the last 14 days.
 
 `GET /api/hub/search-text[?project=<id>]` is what the Work search reads, and the board fetches it only while a search is on. It returns `{ rows, at }`, one row `{ id, project, title, status, text }` per Beads issue (groups and old closed ones too) of the project, or of every project with a Beads copy. `text` is the plain words of the description and the acceptance criteria, cut at 4000 characters; notes are left out. It is read like the roadmap and cached by the Beads etag. Matching happens in the browser (`src/hub/beadSearch.ts`).
+
+The Project page (`#/~hub/project[/<id>[/<tab>]]`, the Projects row in the rail's Plan group) is one page per project: its name, where it runs, Plan in Hermes, Build it… and Run a sprint…, the project chips and four tabs (Roadmap, Running, Needs you, Library). It links into the Roadmap, Work and Needs you and replaces none of them. An id the project list does not have says so instead of showing another project. The Run a sprint… button links to the sheet of the project's current milestone and is off, with the server's own sentence, where the preview says sprints are not allowed. The Library tab reads `GET /api/hub/project-cards?project=<id>`: `{ section, cards: [{ title, href, updated? }], total }`, the newest 20 cards of the section whose id is the project id (`section` is null when there is none; a bad id is 400).
 
 | Source | Backlog | Ready | In progress (`running`) | Blocked | Review | Done |
 |---|---|---|---|---|---|---|

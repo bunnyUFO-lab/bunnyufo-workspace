@@ -47,3 +47,8 @@ export function mapMatches(model: ProgressMap, q: string, rows?: readonly Search
   }
   return found
 }
+
+const QUERY_KEY = 'hub-map-search'
+/** The viewer's saved search; missing storage is no search. */
+export const savedQuery = () => { try { return localStorage.getItem(QUERY_KEY) ?? '' } catch { return '' } }
+export const saveQuery = (q: string) => { try { if (q.trim()) localStorage.setItem(QUERY_KEY, q); else localStorage.removeItem(QUERY_KEY) } catch { /* private mode: no search next time */ } }

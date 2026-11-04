@@ -130,6 +130,8 @@ try {
         assert.equal(await page.locator(`${picker.scope} [role="combobox"][aria-label="Project"]`).count(), 0, `${picker.name}: no dropdown.`);
         const chips = row.locator('.hub-chip');
         await chips.nth(1).waitFor();
+        // The row may be redrawn once while the project list settles (seen on CI at Work, 390); the count must be 2 to 11 once it has.
+        await page.waitForFunction(selector => { const n = document.querySelectorAll(selector).length; return n >= 2 && n <= 11; }, `${picker.scope} [aria-label="Project"].hub-chips .hub-chip`, { timeout: ms(5000) }).catch(() => {});
         assert.ok(await chips.count() >= 2 && await chips.count() <= 11, `${picker.name}: chips (${await chips.count()}).`);
         assert.equal(await row.locator('.hub-chip.on').count(), 1);
         const other = chips.locator('xpath=self::*[not(contains(@class,"on")) and not(normalize-space()="All")]').first();

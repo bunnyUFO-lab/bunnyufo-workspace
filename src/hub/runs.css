@@ -51,7 +51,7 @@
 .sp-go { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
 .sp-note { font-size: 11.5px; color: var(--text-dim); text-align: right; max-width: 240px; }
 .runs-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; max-width: calc(100vw - 32px); padding: 10px 16px; border: 1px solid var(--line2); border-radius: 999px; background: var(--s2); color: var(--t1); font-size: 13px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
-.work-spawn { margin-bottom: 12px; }
+.work-spawn { margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
 
 @media (max-width: 767px) {
   /* A bottom sheet. */

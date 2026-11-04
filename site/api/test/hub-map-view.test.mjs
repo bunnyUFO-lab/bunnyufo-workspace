@@ -7,6 +7,9 @@ import { clampView, fitScale, fitView, keepPoint, limitsFor, viewAt, zoomAround 
 import { LABEL_MAX, layoutMap } from '../../../src/hub/mapLayout.ts';
 import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
+import { currentMilestone, milestoneRow, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
+import { parseProjectId, projectHash } from '../../../src/lib/route.ts';
+import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
 
 const box = { w: 390, h: 300 };
 const near = (a, b, message) => assert.ok(Math.abs(a - b) < 1e-6, `${message ?? ''} ${a} != ${b}`);
@@ -446,4 +449,112 @@ test("a branch's toggle sits at its elbow, and the elbow is where it was whether
     const milestoneAt = layout => layout.nodes.find(node => node.id === 'p2');
     assert.deepEqual(milestoneAt(closed).chevronAt, milestoneAt(layoutMap(m, new Set(), false, axis)).chevronAt, `${axis}: a milestone's toggle does not move when it opens`);
   }
+});
+
+// A project's page (ws-im1.3.1): the tab an address names, the milestone a sprint button points at, and the counts.
+const pTask = (id, state, status = state === 'done' ? 'closed' : 'open') => ({ id, title: id, state, status, signs: [], deps: [], sprints: [], prs: [] });
+const pMilestone = (id, tasks, sprint) => ({ id, title: id, state: tasks.every(task => task.state === 'done') ? 'done' : 'doing', features: [{ id: `${id}-f`, title: 'F', state: 'doing', tasks }], ...(sprint ? { sprint } : {}) });
+
+test('tabOf: running, needs and library are tabs; anything else, and none, is the Roadmap', () => {
+  assert.deepEqual(['running', 'needs', 'library', 'roadmap', 'nope', '', undefined].map(tabOf), ['running', 'needs', 'library', 'roadmap', 'roadmap', 'roadmap', 'roadmap']);
+});
+
+test('the project address: no id, an id, and a tab; the Roadmap tab has no segment', () => {
+  assert.equal(projectHash(), '#/~hub/project');
+  assert.equal(projectHash('magic-loops'), '#/~hub/project/magic-loops');
+  assert.equal(projectHash('magic-loops', 'roadmap'), '#/~hub/project/magic-loops');
+  assert.equal(projectHash('magic-loops', 'needs'), '#/~hub/project/magic-loops/needs');
+  assert.deepEqual(parseProjectId(undefined), {});
+  assert.deepEqual(parseProjectId('magic-loops'), { project: 'magic-loops' });
+  assert.deepEqual(parseProjectId('magic-loops/library'), { project: 'magic-loops', tab: 'library' });
+});
+
+test('currentMilestone: a sprint that has not ended wins, else the first milestone with open work that is not later work', () => {
+  const done = pMilestone('m1', [pTask('a', 'done')]);
+  const later = pMilestone('m2', [pTask('b', 'later', 'deferred')]);
+  const open = pMilestone('m3', [pTask('c', 'done'), pTask('d', 'next')]);
+  const other = pMilestone('m4', [pTask('e', 'doing')]);
+  assert.equal(currentMilestone({ milestones: [done, later, open, other] }).id, 'm3', 'The finished one and the one with only deferred work are passed over.');
+  const going = { ...other, sprint: { head: 'h', until: 'u', items: [] } };
+  assert.equal(currentMilestone({ milestones: [done, open, going] }).id, 'm4', 'A sprint in progress comes first, wherever it is.');
+  const ended = { ...other, sprint: { head: 'h', until: 'u', items: [], ended: { reason: 'done' } } };
+  assert.equal(currentMilestone({ milestones: [done, open, ended] }).id, 'm3', 'An ended sprint does not count.');
+  assert.equal(currentMilestone({ milestones: [done, later] }), undefined, 'Nothing open: no milestone.');
+  assert.equal(currentMilestone({ milestones: [] }), undefined);
+  assert.equal(currentMilestone({ milestones: [pMilestone('~none', [pTask('f', 'next')])] }), undefined, 'The milestone the map makes up for loose tasks has no sprint.');
+});
+
+test('milestoneRow: the tally over every task, open tasks first, six chips at most', () => {
+  const tasks = [pTask('t1', 'done'), pTask('t2', 'done'), pTask('t3', 'next'), pTask('t4', 'doing'), pTask('t5', 'later', 'deferred'), pTask('t6', 'you'), pTask('t7', 'next'), pTask('t8', 'done')];
+  const row = milestoneRow(pMilestone('m', tasks));
+  assert.deepEqual(row.tally, { done: 3, later: 1, total: 8 });
+  assert.deepEqual(row.chips.map(task => task.id), ['t4', 't6', 't3', 't7', 't5', 't1']);
+  assert.equal(row.more, 2);
+  assert.deepEqual(milestoneRow(pMilestone('m', [])).chips, []);
+});
+
+test('tabCounts: the same filter as Today at the project', () => {
+  const at = new Date().toISOString();
+  const today = {
+    at, counts: { needsYou: 3, running: 2, recent: 0, alerts: 0 }, needsYou: [{ project: 'a' }, { project: 'a' }, { project: 'b' }], recent: [], alerts: [], running: [],
+    working: [{ id: '1', project: 'a', state: 'working' }, { id: '2', project: 'a', state: 'idle' }, { id: '3', project: 'b', state: 'working' }],
+  };
+  assert.deepEqual(tabCounts(today, 'a'), { running: 1, needs: 2 });
+  assert.deepEqual(tabCounts(today, 'b'), { running: 1, needs: 1 });
+  assert.deepEqual(tabCounts(today, 'c'), { running: 0, needs: 0 });
+});
+
+// --- mapBranch: which part of the roadmaps the map shows ---
+
+const ms = (id, roadmap, state = 'later') => ({ id, title: id.toUpperCase(), state, ...(roadmap ? { roadmap } : {}), features: [{ id: `${id}-f`, title: 'F', state, tasks: [{ id: `${id}-t`, title: 'T', state, status: 'open', signs: [], sprints: [], deps: [] }] }] });
+const nested = {
+  project: 'p', meta: null, ageMinutes: null, wayfinder: null,
+  roadmaps: [{ id: 'r1', title: 'Hub', state: 'doing' }, { id: 'r2', title: 'Editing', state: 'later', parent: 'r1' }, { id: 'r3', title: 'Empty', state: 'later', parent: 'r1' }],
+  milestones: [ms('a', 'r1', 'done'), ms('b', 'r1', 'doing'), ms('c', 'r2'), ms('m0', undefined, 'done')],
+  sprints: [{ name: 's1', milestones: [{ id: 'a', count: 1, total: 1 }, { id: 'c', count: 1, total: 1 }] }, { name: 's2', milestones: [{ id: 'm0', count: 1, total: 1 }] }],
+};
+
+test('a branch holds only its own milestones and the sprint bands that touch them', () => {
+  const r1 = branchModel(nested, 'r1');
+  assert.deepEqual(r1.milestones.map(item => item.id), ['a', 'b'], 'Not the milestones of the roadmaps inside it.');
+  assert.deepEqual(r1.sprints, [{ name: 's1', milestones: [{ id: 'a', count: 1, total: 1 }] }], 'A band keeps only its milestones here, and one with none is dropped.');
+  assert.deepEqual(branchModel(nested, UNFILED).milestones.map(item => item.id), ['m0']);
+  assert.deepEqual(branchModel(nested, 'r3').milestones, []);
+  assert.equal(nested.milestones.length, 4, 'The model it was given is not changed.');
+});
+
+test('the address names the view: the list, a branch, a bead in a branch, or the saved view when it still exists', () => {
+  assert.deepEqual(resolveBranch(nested, FULL, { view: 'branch', branch: 'r1' }), { view: 'full' });
+  assert.deepEqual(resolveBranch(nested, 'r2', null), { view: 'branch', branch: 'r2' });
+  assert.deepEqual(resolveBranch(nested, UNFILED, null), { view: 'branch', branch: UNFILED });
+  assert.deepEqual(resolveBranch(nested, 'c-t', null), { view: 'branch', branch: 'r2', node: 'c-t' }, 'An old link to a task opens its branch with the task.');
+  assert.deepEqual(resolveBranch(nested, 'm0-f', null), { view: 'branch', branch: UNFILED, node: 'm0-f' });
+  assert.deepEqual(resolveBranch(nested, undefined, { view: 'branch', branch: 'r1' }), { view: 'branch', branch: 'r1' });
+  assert.deepEqual(resolveBranch(nested, 'nope', { view: 'branch', branch: 'r1' }), { view: 'branch', branch: 'r1' }, 'A wrong id falls back to the saved view.');
+  assert.deepEqual(resolveBranch(nested, undefined, { view: 'branch', branch: 'gone' }), { view: 'full' }, 'A saved id that vanished is the list.');
+  assert.deepEqual(resolveBranch(nested, undefined, null), { view: 'full' });
+  const bare = { ...nested, milestones: nested.milestones.filter(item => item.roadmap) };
+  assert.deepEqual(resolveBranch(bare, UNFILED, null), { view: 'full' }, 'The unfiled row is a branch only while it has milestones.');
+});
+
+test('crumbs, children, dots and rows', () => {
+  assert.deepEqual(crumbs(nested, 'r2'), [{ id: 'r1', title: 'Hub' }, { id: 'r2', title: 'Editing' }]);
+  assert.deepEqual(crumbs(nested, UNFILED).map(item => item.id), [UNFILED]);
+  assert.deepEqual(crumbs(nested, FULL), []);
+  assert.deepEqual(childrenOf(nested, FULL).map(item => item.id), ['r1']);
+  assert.deepEqual(childrenOf(nested, 'r1').map(item => item.id), ['r2', 'r3']);
+  assert.deepEqual(milestoneDots(nested, 'r1').map(item => [item.id, item.state]), [['a', 'done'], ['b', 'doing']]);
+  assert.deepEqual(rowsOf(nested).map(row => [row.id, row.depth, row.done, row.dots.length]), [['r1', 0, 1, 2], ['r2', 1, 0, 1], ['r3', 1, 0, 0], [UNFILED, 0, 1, 1]]);
+  assert.deepEqual(rowsOf(nested, 'r3'), [], 'A roadmap with nothing inside has no rows.');
+  assert.deepEqual(rowsOf(nested, 'r1').map(row => [row.id, row.depth]), [['r2', 0], ['r3', 0]]);
+});
+
+test('"This branch" goes to the branch last in, else the current milestone, else the first roadmap; a bad stored value is none', () => {
+  assert.equal(branchTarget(nested, { view: 'full', branch: 'r2' }), 'r2');
+  assert.equal(branchTarget(nested, { view: 'full', branch: 'gone' }), 'r1', 'The current milestone is b, in r1.');
+  assert.equal(branchTarget(nested, null), 'r1');
+  const quiet = { ...nested, milestones: [ms('x', 'r2', 'done')] };
+  assert.equal(branchTarget(quiet, null), 'r1', 'With no current milestone, the first roadmap.');
+  assert.deepEqual(parseSaved({ view: 'full', branch: 'r2' }), { view: 'full', branch: 'r2' });
+  for (const bad of [null, 5, 'x', {}, { view: 'branch' }, { view: 'side', branch: 'r1' }]) assert.equal(parseSaved(bad), null);
 });

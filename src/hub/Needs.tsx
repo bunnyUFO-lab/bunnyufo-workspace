@@ -11,7 +11,7 @@ import { NOTE_VERB } from '../lib/nextItem.mjs'
 import { pickNext } from '../lib/nextItem.mjs'
 import NextNote from './NextNote'
 import ProjectPicker from './ProjectPicker'
-import { useProjectNames } from './ProjectChip'
+import { ProjectLink, useProjectNames } from './ProjectChip'
 import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
 import AwayToggle from './AwayToggle'
@@ -182,6 +182,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
         <div className="needs-project" data-needs-project>
           <ProjectPicker id="hub-needs-project" projects={options} value={project || 'all'} allValue="all" allLabel="All projects" counts={Object.fromEntries(options.map(option => [option.id, option.count]))} allCount={total}
             onChange={id => { window.location.hash = needsHref(active, id === 'all' ? '' : id) }} alwaysList inRow />
+          {project && <ProjectLink id={project} name={chosenName} />}
         </div>
       )}
       <div className="hub-chips-wrap" data-overflow={overflow}>

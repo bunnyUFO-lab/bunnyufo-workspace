@@ -1845,3 +1845,31 @@ test('agent details: an export named for the future is skipped, and an oversize 
     assert.equal(body.prompts[0].text, 'real soul', wide);
   } finally { await close(); }
 });
+
+test('GET /hub/project-cards: the cards of the section named for the project, newest first, at most 20, and 400 for a bad id', async () => {
+  const { fake, get, close } = await fixture();
+  try {
+    const entity = (id, title, updated) => ({ id, title, folder: id, ...(updated ? { updated } : {}) });
+    const many = Array.from({ length: 23 }, (_, index) => entity(`c${index}`, `Card ${index}`, `2026-10-${String(index + 1).padStart(2, '0')}`));
+    fake.seed('sections/magic-loops/workspace.json', JSON.stringify({ name: 'Magic Loops', entities: [entity('old', 'Old one', '2026-09-01'), entity('new', 'New one', '2026-10-30'), entity('none', 'No date')] }), 'application/json');
+    fake.seed('sections/many/workspace.json', JSON.stringify({ name: 'Many', entities: many }), 'application/json');
+    fake.seed('sections/empty/workspace.json', JSON.stringify({ name: 'Empty', entities: [] }), 'application/json');
+    fake.seed('sections/agent-plans/workspace.json', JSON.stringify({ name: 'Plans', entities: [entity('p', 'A plan', '2026-10-30')] }), 'application/json');
+    const ml = (await get('/hub/project-cards?project=magic-loops')).body;
+    assert.equal(ml.section, 'magic-loops');
+    assert.deepEqual(ml.cards.map(card => card.title), ['New one', 'Old one', 'No date']);
+    assert.deepEqual(ml.cards[0], { title: 'New one', href: '/magic-loops#/new', updated: '2026-10-30' });
+    assert.equal(ml.cards[2].updated, undefined, 'A card with no date has no updated.');
+    assert.equal(ml.total, 3);
+    const big = (await get('/hub/project-cards?project=many')).body;
+    assert.equal(big.cards.length, 20);
+    assert.equal(big.total, 23);
+    assert.equal(big.cards[0].title, 'Card 22');
+    assert.deepEqual((await get('/hub/project-cards?project=empty')).body, { section: 'empty', cards: [], total: 0 }, 'A section with no cards is still its Library.');
+    assert.deepEqual((await get('/hub/project-cards?project=nothing-here')).body, { section: null, cards: [], total: 0 });
+    assert.equal((await get('/hub/project-cards?project=agent-plans')).body.section, null, 'agent-plans is not a project.');
+    assert.equal((await get('/hub/project-cards?project=inbox')).body.section, null, 'The inbox is not a Library section.');
+    assert.equal((await get('/hub/project-cards')).status, 400);
+    assert.equal((await get('/hub/project-cards?project=Bad_Id')).status, 400);
+  } finally { await close(); }
+});

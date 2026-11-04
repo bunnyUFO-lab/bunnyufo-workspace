@@ -86,6 +86,8 @@ test('text is bounded, has no control characters and no command', () => {
 test('labels, types and cards come from allow lists', () => {
   for (const label of ['p0', 'Milestone', 'wayfinder:', 'wayfinder:Map', 'wayfinder:a', 'sprint:4', 'needs-owner ', 'wayfinder:map;x']) refused([{ op: 'create', title: 'x', labels: [label] }], /labels from/);
   ok([{ op: 'create', title: 'x', labels: ['wayfinder:map', 'wayfinder:research', 'wayfinder:prototype', 'wayfinder:task', 'milestone'] }]);
+  ok([{ op: 'create', title: 'x', type: 'epic', labels: ['roadmap'] }, { op: 'label', bead: 'ml-1', add: ['roadmap'], remove: ['milestone'] }]);
+  refused([{ op: 'create', title: 'x', labels: ['Roadmap'] }], /labels from/);
   refused([{ op: 'create', title: 'x', labels: ['later', 'milestone', 'needs-owner', 'wayfinder:task', 'wayfinder:map', 'wayfinder:research'] }], /1 to 5/);
   refused([{ op: 'create', title: 'x', labels: ['later', 'later'] }], /different labels/);
   refused([{ op: 'create', title: 'x', labels: [] }], /1 to 5/);

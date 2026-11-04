@@ -1,7 +1,7 @@
 // The Progress map's model: milestones, features, tasks, states, signs and sprint bands.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMap, isWayfinderQuestion, orderSiblings, roll, sectionOf } from '../hub-map.mjs';
+import { buildMap, isWayfinderQuestion, orderSiblings, roadmapIssuesOf, roll, sectionOf } from '../hub-map.mjs';
 import { beadsIssue as issue, cujTwo, eventJson, iso, minutesAgo } from './hub-fixtures.mjs';
 
 const NOW = new Date('2026-10-26T12:00:00Z');
@@ -399,4 +399,56 @@ test('a task gets the newest live request made from its bead as run; an ended on
   assert.deepEqual(task(map, 'u').run, { id: 'other', state: 'running' });
   for (const state of ['done', 'failed', 'expired', 'declined', 'stopped']) assert.equal('run' in task(build(issues, { requests: [request('r', state, '2026-10-26T10:00:00Z')] }), 't'), false, state);
   assert.equal('run' in task(build(issues), 't'), false);
+});
+
+// A project shaped like the real one: roadmap R1 with feature rings and a nested roadmap R2 with loose tasks, milestones outside any roadmap,
+// a task and a feature that inherited the `roadmap` label, and an epic that is a milestone as well.
+const roadmapIssues = () => [
+  issue({ id: 'r1', title: 'Hub', type: 'epic', labels: ['roadmap'] }),
+  issue({ id: 'r1-f1', type: 'feature', parent: 'r1', labels: ['roadmap'] }),
+  issue({ id: 'r1-f1-t', parent: 'r1-f1', labels: ['roadmap'] }),
+  issue({ id: 'r1-f2', type: 'feature', parent: 'r1' }),
+  issue({ id: 'r1-f2-t', parent: 'r1-f2' }),
+  issue({ id: 'r2', title: 'Editing', type: 'epic', parent: 'r1', labels: ['roadmap'] }),
+  issue({ id: 'r2-t1', parent: 'r2', labels: ['roadmap'] }),
+  issue({ id: 'r2-t2', parent: 'r2' }),
+  issue({ id: 'both', type: 'epic', labels: ['roadmap', 'milestone'] }),
+  issue({ id: 'both-t', parent: 'both' }),
+  issue({ id: 'm0', type: 'milestone' }),
+  issue({ id: 'm0-t', parent: 'm0' }),
+  issue({ id: 'stray' }),
+];
+
+test('a roadmap is an epic labelled roadmap, not a milestone, with no parent or a roadmap parent', () => {
+  const issues = roadmapIssues();
+  const parentOf = new Map(issues.flatMap(item => (item.dependencies ?? []).filter(dep => dep.type === 'parent-child').map(dep => [item.id, dep.depends_on_id])));
+  assert.deepEqual(roadmapIssuesOf(issues, parentOf).map(item => item.id), ['r1', 'r2'], 'Not the task or feature that inherited the label, not the epic that is a milestone.');
+  assert.deepEqual(roadmapIssuesOf([issue({ id: 'a', type: 'epic', labels: ['roadmap'] }), issue({ id: 'f', type: 'feature', parent: 'a' }), issue({ id: 'e', type: 'epic', parent: 'f', labels: ['roadmap'] })], new Map([['f', 'a'], ['e', 'f']])).map(item => item.id), ['a'], 'An epic under a feature is not one.');
+  const cycle = [issue({ id: 'x', type: 'epic', labels: ['roadmap'], parent: 'y' }), issue({ id: 'y', type: 'epic', labels: ['roadmap'], parent: 'x' })];
+  assert.deepEqual(roadmapIssuesOf(cycle, new Map([['x', 'y'], ['y', 'x']])), [], 'A parent cycle makes none.');
+});
+
+test('roadmaps are listed in order with their parent; milestones name the roadmap above them; the milestone list stays flat', () => {
+  const map = build(roadmapIssues());
+  assert.deepEqual(map.roadmaps.map(item => [item.id, item.title, item.parent ?? null]), [['r1', 'Hub', null], ['r2', 'Editing', 'r1']]);
+  const tag = Object.fromEntries(map.milestones.map(item => [item.id, item.roadmap ?? null]));
+  assert.deepEqual(tag, { both: null, m0: null, 'r1-f1': 'r1', 'r1-f2': 'r1', 'r2~tasks': 'r2', '~none': null });
+  assert.deepEqual(map.milestones.map(item => item.id), ['both', 'm0', 'r1-f1', 'r1-f2', 'r2~tasks', '~none']);
+  assert.equal(map.roadmaps.find(item => item.id === 'r2').state, 'next');
+});
+
+test('a loose task under a roadmap goes to the roadmap pile, not to "Not in a milestone"', () => {
+  const map = build(roadmapIssues());
+  const pile = map.milestones.find(item => item.id === 'r2~tasks');
+  assert.equal(pile.title, 'Editing · tasks');
+  assert.deepEqual(pile.features.map(item => [item.id, item.title]), [['r2~tasks~other', 'Other tasks']]);
+  assert.deepEqual(pile.features[0].tasks.map(item => item.id).sort(), ['r2-t1', 'r2-t2']);
+  assert.deepEqual(map.milestones.at(-1).features[0].tasks.map(item => item.id), ['stray']);
+  assert.ok(!tasksOf(map).some(item => item.id === 'r1' || item.id === 'r2'), 'A roadmap is not a task.');
+});
+
+test('with no roadmap the answer has no roadmap fields', () => {
+  const map = build([issue({ id: 'm', type: 'milestone' }), issue({ id: 't', parent: 'm' }), issue({ id: 'stray' })]);
+  assert.ok(!('roadmaps' in map));
+  assert.ok(map.milestones.every(item => !('roadmap' in item)));
 });
