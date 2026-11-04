@@ -216,7 +216,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
             </div>
           </div>
           {filtering && (
-            <p className="wk-count" role="status" data-work-count>{matching} of {loaded} shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
+            <p className="wk-count" role="status" data-work-count>{matching} of {loaded} on the board shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
           )}
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
@@ -263,8 +263,8 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           </div>
           </div>
           {also.length > 0 && (
-            <section className="wk-also" aria-label="Also found" data-also-found>
-              <h3>Also found <span>{also.length}</span></h3>
+            <section className="wk-also" aria-label="Also found, not on the board" data-also-found>
+              <h3>Also found, not on the board <span>{also.length}</span></h3>
               <p className="hub-muted">Matches with no card on this board.</p>
               {also.slice(0, ALSO_MAX).map(row => (
                 <a key={`${row.project}/${row.id}`} className="wk-also-row" href={workHash(board, row.id)} data-also={row.id} onClick={() => { if (all) setCarried({ id: row.id, project: row.project }) }}>

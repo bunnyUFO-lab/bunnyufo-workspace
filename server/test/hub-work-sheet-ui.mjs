@@ -236,7 +236,7 @@ try {
     assert.deepEqual(await keys(), ['bead:ws-rare']);
     assert.match(await sp.locator('.wk-snip').innerText(), /^text: .*quokka/);
     assert.equal(await sp.locator('.wk-snip mark').innerText(), 'quokka');
-    assert.match(await count(), /^1 of \d+ shown · Clear$/);
+    assert.match(await count(), /^1 of \d+ on the board shown · Clear$/);
     assert.equal(await sp.locator('[data-work-count]').getAttribute('role'), 'status');
     if (phone) assert.equal(await sp.locator('[data-lane-chip="ready"]').getAttribute('aria-pressed'), 'true', 'The phone moves to the first lane with a match.');
     if (phone) assert.equal(await sp.locator('[data-lane-chip="backlog"] .n').innerText(), '0', 'Lane chips count the matches.');
@@ -253,7 +253,7 @@ try {
     assert.deepEqual(await keys(), ['bead:ws-rare']);
     await search('slide zebra');
     await sp.waitForFunction(() => !document.querySelector('[data-card]'));
-    assert.match(await count(), /^0 of \d+ shown/);
+    assert.match(await count(), /^0 of \d+ on the board shown/);
     assert.match(await sp.locator('.wk-lane .hub-empty').first().innerText(), /No match/);
     assert.equal(await sp.locator('.wk-more').count(), 0, 'No fold while searching.');
 
@@ -288,7 +288,7 @@ try {
       await sp.locator(selector).click();
       await sp.locator('[data-work-count]').waitFor();
       assert.deepEqual((await keys()).sort(), expected.map(id => `bead:${id}`).sort(), what);
-      assert.match(await count(), new RegExp(`^${expected.length} of ${full} shown`));
+      assert.match(await count(), new RegExp(`^${expected.length} of ${full} on the board shown`));
       await clear();
     };
     await only('[data-filter="needs-you"]', ['ws-ask', 'ws-owner'], 'Needs you');
@@ -320,7 +320,7 @@ try {
     await sp.locator('.wk-snip').waitFor();
     assert.equal(await sp.locator('[data-work-search]').inputValue(), 'quokka');
     assert.equal(await sp.locator('[data-filter-type="task"]').getAttribute('aria-pressed'), 'true');
-    assert.match(await count(), /^1 of \d+ shown/);
+    assert.match(await count(), /^1 of \d+ on the board shown/);
     for (const bad of ['{not json', '{"type":"epic","within":99,"q":5}', '[]', '"x"']) {
       await sp.evaluate(value => localStorage.setItem('hub-work-filter', value), bad);
       await sp.reload();

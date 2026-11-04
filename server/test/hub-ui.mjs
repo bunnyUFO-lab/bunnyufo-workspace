@@ -458,7 +458,7 @@ try {
   assert.ok((await page.evaluate(() => location.hash)).endsWith('/magic-loops/ml-m2'));
   assert.equal(await fCount(), 0, 'The tap opened the panel and expanded nothing.');
   const text = await panel.innerText();
-  for (const part of ['Wall-jump animation', 'open', 'Open PR', 'merged', 'sprint-3 · 4 of 7 tasks', '⟳ 1', '⇄ 1 PR open']) assert.ok(text.includes(part), `The Milestone 2 panel says "${part}".`);
+  for (const part of ['Wall-jump animation', 'open', 'Open PR', 'merged', 'sprint-3 · 4 of 7 tasks in it', '⟳ 1', '⇄ 1 PR open']) assert.ok(text.includes(part), `The Milestone 2 panel says "${part}".`);
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'hub-map-panel-title', 'Focus is on the panel title.');
   await page.locator('[data-toggle="ml-m2"]').dispatchEvent('click');
   await page.locator('[data-kind="f"]').waitFor();
