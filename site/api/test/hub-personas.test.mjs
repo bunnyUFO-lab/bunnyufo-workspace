@@ -14,7 +14,7 @@ import { discordEligible, validId } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { agentConfigJson, askJson, seedAgentConfig, seeder } from './hub-fixtures.mjs';
 import { generateKeyPairSync } from 'node:crypto';
-import { parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
+import { parsePublicKey, publicKeyPem, sign, verify } from '../signing.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
 
 const SITE = 'https://site.example';
@@ -282,6 +282,12 @@ test('the table is cached for 30 seconds and cleared by a write', async () => {
 
 // --- the agent-edit Ask ---
 
+/** Answers as the page does: with the `rev` of the Ask file it showed. */
+async function answerWith(f, id, choice) {
+  const rev = (await f.call('GET', `/hub/asks/${id}`)).body.rev;
+  return f.call('POST', `/hub/asks/${id}/answer`, { choice, ...(rev ? { rev } : {}) });
+}
+
 const proposal = (extra = {}) => ({ op: 'persona', agent: 'teardown', base: 'default', prompt: 'You are Teardown. Be brief.', why: 'Answers ran long.', ...extra });
 function agentEditAsk(f, tail, agentEdit, extra = {}) {
   const ask = { ...askJson({ id: `${day}-workspace-app-edit-${tail}`, project: 'workspace-app', now: NOW, options: AGENT_EDIT_OPTIONS, question: 'Shorten the Teardown prompt?', allowDrawing: false, kind: 'approval' }), requirePasskey: true, agentEdit, ...extra };
@@ -344,18 +350,18 @@ test('an agent-edit Ask answered Apply over the web writes one version with from
     const detail = (await f.call('GET', `/hub/asks/${id}`)).body;
     assert.equal(detail.agentEdit.agent, 'teardown');
     assert.equal(detail.agentEditBlocked, undefined);
-    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    const done = await answerWith(f, id, 'apply');
     assert.equal(done.status, 201, JSON.stringify(done.body));
     assert.equal(done.body.agentEdit.applied, true);
     assert.equal(f.files('teardown').length, 1);
     const stored = f.fake.json(f.files('teardown')[0]);
     assert.deepEqual([stored.fromAsk, stored.by, stored.prompt, stored.role, stored.model, stored.note], [id, 'owner', 'You are Teardown. Be brief.', TEARDOWN.role, TEARDOWN.model, 'Agent edit: Answers ran long.']);
     assert.equal((await f.hub.personas.table()).find(entry => entry.id === 'teardown').text, 'You are Teardown. Be brief.');
-    assert.equal((await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' })).status, 409, 'a second answer');
+    assert.equal((await answerWith(f, id, 'apply')).status, 409, 'a second answer');
     assert.equal(f.files('teardown').length, 1);
 
     const skip = agentEditAsk(f, 'c3d4', proposal({ base: done.body.agentEdit.version, prompt: 'You are Teardown. Other.' }));
-    const skipped = await f.call('POST', `/hub/asks/${skip}/answer`, { choice: 'skip' });
+    const skipped = await answerWith(f, skip, 'skip');
     assert.equal(skipped.status, 201);
     assert.equal(skipped.body.agentEdit, undefined);
     assert.equal(f.files('teardown').length, 1, 'Skip writes nothing');
@@ -381,7 +387,7 @@ test('an agent-edit Ask that cannot be trusted writes nothing, says why, and the
     const bad = (await f.call('GET', `/hub/asks/${cases[1][1]}`)).body;
     assert.match(bad.agentEditBlocked ?? '', /requires a passkey/);
     for (const [name, id, why] of cases) {
-      const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+      const done = await answerWith(f, id, 'apply');
       assert.equal(done.status, 201, name);
       assert.equal(done.body.state, 'answered', name);
       assert.equal(done.body.agentEdit.applied, false, name);
@@ -396,7 +402,7 @@ test('a role-only proposal carries into the prompt\'s first line, like the Edit 
   const f = await fixture();
   try {
     const id = agentEditAsk(f, 'f001', { op: 'persona', agent: 'researcher', base: 'default', role: 'research cards with sources, shorter' });
-    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    const done = await answerWith(f, id, 'apply');
     assert.equal(done.body.agentEdit.applied, true, JSON.stringify(done.body));
     const view = (await f.call('GET', '/hub/team/researcher/persona')).body;
     assert.match(view.current.prompt.split('\n')[0], /agents: research cards with sources, shorter\. The owner/);
@@ -469,7 +475,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.equal(discordEligible({ ...stored, requirePasskey: false }).ok, false, 'and still not if the flag were missing');
 
     // 3. Apply signs: one approved.json, create-only, with the old chain read from the export at this moment.
-    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    const done = await answerWith(f, id, 'apply');
     assert.equal(done.status, 201, JSON.stringify(done.body));
     assert.equal(done.body.agentEdit.applied, true);
     assert.deepEqual(approvals(f), [changeKey(id, 'approved.json')]);
@@ -480,7 +486,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 24 * 3600 * 1000);
     assert.equal(verify(signed, publicKey), true, 'the Hub\'s signature verifies with the public key');
     assert.equal(verify({ ...signed, to: { ...signed.to, model: 'claude-haiku-5-5' } }, publicKey), false);
-    assert.equal((await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' })).status, 409, 'answered twice');
+    assert.equal((await answerWith(f, id, 'apply')).status, 409, 'answered twice');
     assert.equal(approvals(f).length, 1, 'one Ask makes one approval');
 
     // 4. Waiting: Details of any agent on the profile says so, and a second request for the profile is refused until the host answers.
@@ -568,7 +574,7 @@ test('profile change: Apply signs nothing for an Ask that cannot be trusted, and
     ];
     assert.match((await f.call('GET', `/hub/asks/${cases[3][1]}`)).body.agentEditBlocked ?? '', /not a model the Hermes host offers/);
     for (const [name, id, why] of cases) {
-      const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+      const done = await answerWith(f, id, 'apply');
       assert.equal(done.status, 201, name);
       assert.equal(done.body.state, 'answered', name);
       assert.equal(done.body.agentEdit.applied, false, name);
@@ -580,13 +586,13 @@ test('profile change: Apply signs nothing for an Ask that cannot be trusted, and
     assert.equal((await f.call('GET', `/hub/asks/${open}`)).body.agentEditBlocked, undefined);
     f.clock.time += 8 * 3600 * 1000;
     assert.match((await f.call('GET', `/hub/asks/${open}`)).body.agentEditBlocked ?? '', /is old/);
-    const late = await f.call('POST', `/hub/asks/${open}/answer`, { choice: 'apply' });
+    const late = await answerWith(f, open, 'apply');
     assert.equal(late.body.agentEdit.applied, false);
     assert.equal(approvals(f).length, 0);
     // A skip writes nothing at all.
     putExport(f, { minutes: 0 });
     const skip = agentEditAsk(f, 'p009', profileEdit());
-    assert.equal((await f.call('POST', `/hub/asks/${skip}/answer`, { choice: 'skip' })).body.agentEdit, undefined);
+    assert.equal((await answerWith(f, skip, 'skip')).body.agentEdit, undefined);
     assert.equal(approvals(f).length, 0);
   } finally { await f.close(); }
 });
@@ -601,11 +607,11 @@ test('profile change: the old settings are read at Apply, not when the Ask was w
     // The host's settings moved between asking and answering (newer export, one minute on).
     f.clock.time += 60000;
     putExport(f, { minutes: 0, main: { ...HAIKU, fallbacks: [DEEPSEEK] } });
-    const done = await f.call('POST', `/hub/asks/${first}/answer`, { choice: 'apply' });
+    const done = await answerWith(f, first, 'apply');
     assert.equal(done.body.agentEdit.applied, true, JSON.stringify(done.body));
     assert.deepEqual(f.fake.json(changeKey(first, 'approved.json')).from, { ...HAIKU, fallbacks: [DEEPSEEK] });
     // A second Ask for the same profile, while the first still waits for the host.
-    const blocked = await f.call('POST', `/hub/asks/${second}/answer`, { choice: 'apply' });
+    const blocked = await answerWith(f, second, 'apply');
     assert.equal(blocked.body.agentEdit.applied, false);
     assert.match(blocked.body.agentEdit.why, /still waiting for the Hermes host/);
     assert.equal(approvals(f).length, 1);
@@ -632,7 +638,7 @@ test('profile change: a result counts only with the host\'s mark and beside a go
     putExport(f);
     const made = await postChange(f, 'teardown', changeBody());
     const id = made.body.ask;
-    assert.equal((await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' })).body.agentEdit.applied, true);
+    assert.equal((await answerWith(f, id, 'apply')).body.agentEdit.applied, true);
     f.clock.time += 60000;
     // No mark, or the passphrase's: ignored.
     f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date(f.clock.time).toISOString() }), 'application/json');
@@ -647,5 +653,82 @@ test('profile change: a result counts only with the host\'s mark and beside a go
     // The next change is allowed once the host has answered, failed or not.
     const next = await postChange(f, 'teardown', changeBody({ fallbacks: [FLASH] }));
     assert.equal(next.status, 201, JSON.stringify(next.body));
+  } finally { await f.close(); }
+});
+
+test('profile change: Apply signs the Ask file the page showed; a changed file, or no rev, is a 409 that writes no answer and signs nothing (persona edits too)', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const id = (await postChange(f, 'teardown', changeBody())).body.ask;
+    const shown = (await f.call('GET', `/hub/asks/${id}`)).body;
+    assert.match(shown.rev, /^[0-9a-f]{16}$/);
+    // Someone with the passphrase overwrites ask.json (no writer mark) after the page loaded: another model.
+    const key = `sections/inbox/asks/${id}/ask.json`;
+    const original = f.fake.text(key);
+    const swapped = JSON.parse(original);
+    swapped.agentEdit.primary = FLASH;
+    f.fake.seed(key, `${JSON.stringify(swapped, null, 2)}\n`, 'application/json');
+    const refused = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply', rev: shown.rev });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /changed while you were looking/);
+    assert.equal(f.fake.text(`sections/inbox/asks/${id}/answer.json`), null, 'no answer is written');
+    assert.equal(approvals(f).length, 0, 'nothing is signed');
+    // The page reloads: the new rev is what it shows now, and an answer with it applies the file as it is then.
+    const again = (await f.call('GET', `/hub/asks/${id}`)).body;
+    assert.notEqual(again.rev, shown.rev);
+    assert.equal(again.agentEdit.primary.model, 'deepseek-flash');
+    // No rev at all is refused too.
+    f.fake.seed(key, original, 'application/json');
+    const bare = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    assert.equal(bare.status, 409);
+    assert.equal(approvals(f).length, 0);
+    // The original bytes are back, so the first rev fits again and signs exactly what was shown.
+    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply', rev: shown.rev });
+    assert.equal(done.status, 201, JSON.stringify(done.body));
+    assert.equal(f.fake.json(changeKey(id, 'approved.json')).to.model, 'claude-sonnet-5-5');
+
+    // The persona op has the same protection.
+    const persona = agentEditAsk(f, 'r001', proposal());
+    const personaShown = (await f.call('GET', `/hub/asks/${persona}`)).body;
+    const personaKey = `sections/inbox/asks/${persona}/ask.json`;
+    f.fake.seed(personaKey, `${JSON.stringify({ ...JSON.parse(f.fake.text(personaKey)), agentEdit: proposal({ prompt: 'You are Teardown. Something else.' }) })}\n`, 'application/json');
+    assert.equal((await f.call('POST', `/hub/asks/${persona}/answer`, { choice: 'apply', rev: personaShown.rev })).status, 409);
+    assert.equal(f.files('teardown').length, 0, 'no persona version was written');
+    assert.equal(f.fake.text(`sections/inbox/asks/${persona}/answer.json`), null);
+    // A plain Ask needs no rev.
+    const plain = agentEditAsk(f, 'r002', proposal({ prompt: 'You are Teardown. Be brief.' }));
+    assert.equal((await answerWith(f, plain, 'skip')).status, 201);
+  } finally { await f.close(); }
+});
+
+test('profile change: an approved.json nobody signed counts for nothing, and a repeated model in the old order is refused before it is signed', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const id = `${day}-profile-main-zz01`;
+    const planted = { v: 1, kind: 'profile-change', change: id, profile: 'main', from: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] }, to: { ...SONNET, fallbacks: [] }, expires: new Date(f.clock.time + 86400000).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: new Date(f.clock.time).toISOString(), by: 'owner', ask: id, signature: 'not-a-signature' };
+    f.fake.seed(changeKey(id, 'approved.json'), JSON.stringify(planted), 'application/json');
+    assert.equal((await detailsOf(f)).change, undefined, 'an unsigned approval is not shown');
+    assert.equal((await postChange(f, 'teardown', changeBody())).status, 201, 'and does not block a request');
+    // The same file signed by another key is no better.
+    const other = generateKeyPairSync('ed25519').privateKey;
+    const id2 = `${day}-profile-main-zz02`;
+    f.fake.seed(changeKey(id2, 'approved.json'), JSON.stringify(sign({ ...planted, change: id2, ask: id2, signature: undefined }, other)), 'application/json');
+    assert.equal(((await detailsOf(f)).changes ?? []).some(item => item.id === id2), false);
+
+    // A chain with a model twice, as a hand-edited config could have: the page and the Ask refuse it; nothing is signed.
+    const dup = await fixture({ env: SIGNING });
+    try {
+      putExport(dup, { main: { ...CODEX, fallbacks: [SONNET, SONNET] } });
+      const refused = await postChange(dup, 'teardown', changeBody({ primary: HAIKU, fallbacks: [] }));
+      assert.equal(refused.status, 409);
+      assert.match(refused.body.error, /lists a model twice now/);
+      const hand = agentEditAsk(dup, 's001', { op: 'profile', profile: 'main', primary: HAIKU, fallbacks: [] });
+      const done = await answerWith(dup, hand, 'apply');
+      assert.equal(done.body.agentEdit.applied, false);
+      assert.match(done.body.agentEdit.why, /lists a model twice now/);
+      assert.equal(approvals(dup).length, 0);
+    } finally { await dup.close(); }
   } finally { await f.close(); }
 });

@@ -3,6 +3,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { askId, startHubFixture } from './hub-fixture.mjs';
+import { sign } from '../../site/api/signing.mjs';
 import { agentConfigJson, askJson, seedAgentConfig } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -276,7 +277,7 @@ try {
   const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
   const briefsAt = new Date(Date.now() - 600000);
   const side = (provider, name, fallbacks) => ({ provider, model: name, fallbacks });
-  fresh.fake.seed(`sections/inbox/agent-config/changes/${failedId}/approved.json`, JSON.stringify({ v: 1, kind: 'profile-change', change: failedId, profile: 'briefs', from: side('openai-codex', 'claude-haiku-5-5', [{ provider: 'deepseek', model: 'deepseek-v4-pro' }]), to: side('anthropic', 'claude-sonnet-5-5', []), expires: new Date(briefsAt.getTime() + 86400000).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: briefsAt.toISOString(), by: 'owner', ask: failedId, signature: 'c2ln' }), 'application/json');
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${failedId}/approved.json`, JSON.stringify(sign({ v: 1, kind: 'profile-change', change: failedId, profile: 'briefs', from: side('openai-codex', 'claude-haiku-5-5', [{ provider: 'deepseek', model: 'deepseek-v4-pro' }]), to: side('anthropic', 'claude-sonnet-5-5', []), expires: new Date(briefsAt.getTime() + 86400000).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: briefsAt.toISOString(), by: 'owner', ask: failedId }, fresh.signingKey)), 'application/json');
   fresh.fake.seed(`sections/inbox/agent-config/changes/${failedId}/result.json`, JSON.stringify({ v: 1, change: failedId, outcome: 'failed', code: 'health', rolledBack: true, at: new Date(briefsAt.getTime() + 120000).toISOString() }), 'application/json', { writer: 'hermes-config' });
   await visit(desk, fresh.url, 'briefs');
   const failed = details(desk, 'briefs').locator('[data-details-change="failed"]');

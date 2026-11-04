@@ -28,7 +28,8 @@ import { createRerun } from './hub-rerun.mjs';
 import { createPersonaStore, VIEW_ONLY, VIEW_ONLY_MESSAGE, viewOnlyKey } from './hub-personas.mjs';
 import { AGENT_EDIT_OPTIONS, validateAgentEdit } from './agent-edit.mjs';
 import { createAgentEdits } from './hub-agent-edit.mjs';
-import { loadSigningKey } from './signing.mjs';
+import { loadSigningKey, verify as verifySigned } from './signing.mjs';
+import { createPublicKey } from 'node:crypto';
 import { createHermesDispatch } from './hermes-dispatch.mjs';
 import { createScrub } from './scrub.mjs';
 import { createHermesApprovals } from './hub-hermes-approvals.mjs';
@@ -484,7 +485,10 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const out = [];
     for (const [id, names] of [...found].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
       if (!names.has('approved.json')) continue;
-      const change = validChange(await cached(`agent-config/changes/${id}/approved.json`));
+      // Only an approval this Hub signed counts: a file anyone else put there (the passphrase writes unmarked) verifies with no key.
+      const doc = await cached(`agent-config/changes/${id}/approved.json`);
+      if (!signingKey || !verifySigned(doc, createPublicKey(signingKey))) continue;
+      const change = validChange(doc);
       if (!change || change.change !== id || change.profile !== profile) continue;
       let result = null;
       if (names.has('result.json')) {
@@ -643,7 +647,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   }
 
   async function askDetail(id, at) {
-    const { ask, names } = await askFolder(id);
+    const found = await askFolder(id);
+    const { names } = found;
+    let ask = found.ask;
+    // An edit of an agent is shown from the file as it is now, not from the cache, with the rev of those same bytes: what the page shows is what Apply applies.
+    let rev;
+    if (ask.agentEdit !== undefined) {
+      const got = await bucket.getText(key(`asks/${id}/ask.json`));
+      let parsed = null;
+      try { parsed = got ? JSON.parse(got.text) : null; } catch { /* shown as the cached file, with no rev: Apply is then refused */ }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.question === 'string') { ask = readAsk(parsed, id); rev = askRev(got.text); }
+    }
     const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
     const state = askState(names, ask, at, snooze);
     const read = async name => (names.has(name) ? cached(`asks/${id}/${name}`) : undefined);
@@ -657,6 +671,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const beadTitle = await decidesTitle(ask);
     return {
       ...ask, ...state,
+      ...(rev ? { rev } : {}),
       ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
       ...(rerunBlocked ? { rerunBlocked } : {}),
@@ -973,6 +988,17 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       throw fail(state === 'expired' ? `This Ask is expired: it ran out at ${ask.expiresAt}.` : `This Ask is ${state.replace('-', ' ')}.`, 409);
     }
     checkAnswer(ask, data);
+    // What an answer applies (an agent's model or persona) must be what the owner's page showed, not the file as it is now: read it fresh, not
+    // from the cache, and refuse the answer, writing nothing, when its revision is not the one the page holds. The fresh parse is what is applied.
+    let applied = ask;
+    if (ask.agentEdit !== undefined) {
+      const got = await bucket.getText(key(`asks/${id}/ask.json`));
+      if (!got || typeof data.rev !== 'string' || data.rev !== askRev(got.text)) throw fail('This Ask changed while you were looking; reload and try again.', 409);
+      let parsed = null;
+      try { parsed = JSON.parse(got.text); } catch { /* refused below */ }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw fail('This Ask changed while you were looking; reload and try again.', 409);
+      applied = readAsk(parsed, id);
+    }
     const help = await helpFor(data.help, 'ask', id);
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const answer = { at: at.toISOString(), by: user || 'local' };
@@ -994,7 +1020,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
     const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });
-    const agentEdit = await agentEditFlow.afterAnswer({ ask, answer, user, at });
+    const agentEdit = await agentEditFlow.afterAnswer({ ask: applied, answer, user, at });
     await markFromAnswer({ ask, answer, user: user || 'local', at });
     return { status: 201, body: { state: 'answered', answer, ...(avatar ? { avatar } : {}), ...(rerun ? { rerun } : {}), ...(agentEdit ? { agentEdit } : {}) } };
   }

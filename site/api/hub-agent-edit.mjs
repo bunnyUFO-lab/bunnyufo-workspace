@@ -60,6 +60,8 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
     }
     const from = { provider: block.model.provider, model: block.model.default, fallbacks: block.fallbacks.map(item => ({ provider: item.provider, model: item.model })) };
     if (from.fallbacks.length > 4) throw problem('The profile has more than four fallbacks now, which this page does not change.');
+    // The old order is signed too, and Details shows it: a model listed twice there would be signed and never shown.
+    if (new Set([from, ...from.fallbacks].map(refOf)).size !== from.fallbacks.length + 1) throw problem('The profile lists a model twice now, which this page does not change. Fix it on the host first.');
     if (sameSet(from, to)) throw problem('That is what the profile uses already.');
     const waiting = (await profiles.changes(edit.profile, at)).find(item => changeState({ change: item.change, result: item.result, exported, at }) === 'waiting');
     if (waiting) throw problem(`A change of the ${edit.profile} profile is still waiting for the Hermes host (${waiting.change.change}).`);
