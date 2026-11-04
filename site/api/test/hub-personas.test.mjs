@@ -730,6 +730,8 @@ test('profile change: an approved.json nobody signed counts for nothing, and a r
       assert.match(done.body.agentEdit.why, /lists a model twice now/);
       assert.equal(approvals(dup).length, 0);
     } finally { await dup.close(); }
+  } finally { await f.close(); }
+});
 
 // --- A persona made from a template (ws-im1.4.3) ---
 
@@ -947,7 +949,7 @@ test('an agent-edit Ask for a made persona applies through the same table; an ag
     const view = (await f.call('GET', '/hub/team/level-reviewer/persona')).body;
     const id = agentEditAsk(f, 'lv01', proposal({ agent: 'level-reviewer', base: view.current.version, prompt: 'You are Level reviewer. Be brief.' }));
     f.clock.time += 1000;
-    const done = await f.call('POST', `/hub/asks/${id}/answer`, { choice: 'apply' });
+    const done = await answerWith(f, id, 'apply');
     assert.equal(done.status, 201, JSON.stringify(done.body));
     assert.equal(done.body.agentEdit.applied, true, JSON.stringify(done.body));
     const stored = f.fake.json(f.files('level-reviewer').at(-1));
