@@ -8,7 +8,7 @@ import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
 import MapFilterPanel from './MapFilterPanel'
 import SearchField from './SearchField'
-import { mapMatches } from './mapSearch.ts'
+import { mapMatches, savedQuery, saveQuery } from './mapSearch.ts'
 import { words, type SearchRow } from './beadSearch.ts'
 import { ALL_FILTER, OPEN_FILTER, filterLabel, filterMap, isOpenFilter, parseFilter, type MapFilter } from './mapFilter'
 import { FIT_MAX, centreOn, clamp, fitScale } from './panZoom'
@@ -34,10 +34,6 @@ const FILTER_KEY = 'hub-map-filter'
 /** The viewer's saved filter; a missing or bad value is the default (Open). */
 const savedFilter = (): MapFilter => { try { const raw = localStorage.getItem(FILTER_KEY); return raw ? parseFilter(JSON.parse(raw)) : OPEN_FILTER } catch { return OPEN_FILTER } }
 const saveFilter = (filter: MapFilter) => { try { if (isOpenFilter(filter)) localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, JSON.stringify(filter)) } catch { /* private mode: it is the default next time */ } }
-const QUERY_KEY = 'hub-map-search'
-/** The viewer's saved search; missing storage is no search. */
-const savedQuery = () => { try { return localStorage.getItem(QUERY_KEY) ?? '' } catch { return '' } }
-const saveQuery = (q: string) => { try { if (q.trim()) localStorage.setItem(QUERY_KEY, q); else localStorage.removeItem(QUERY_KEY) } catch { /* private mode: no search next time */ } }
 const PAD = 16
 const hintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
 /** Where a node's circle is centred in the drawing (a feature's node sits right of the end of its branch). */

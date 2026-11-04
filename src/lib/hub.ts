@@ -322,7 +322,13 @@ export interface MapFeature extends MapNotes { id: string; title: string; state:
 export interface MapSprintItem { id: string; bead: string; title: string; state: string; pr?: string }
 /** The newest sprint on a milestone (ws-im1.2.2): `ended` once it stopped, with why and how many PRs it opened. */
 export interface MapSprint { head: string; until: string; items: MapSprintItem[]; ended?: { reason: string; at?: string; prs?: number } }
-export interface MapMilestone extends MapNotes { id: string; title: string; state: TaskState; features: MapFeature[]; sprint?: MapSprint }
+export interface MapMilestone extends MapNotes {
+  id: string; title: string; state: TaskState; features: MapFeature[]; sprint?: MapSprint
+  /** The roadmap above it (ws-im1.3.2); absent for a milestone in no roadmap. */
+  roadmap?: string
+}
+/** A roadmap: an epic labelled `roadmap` that holds milestones and other roadmaps (`parent`). Only the roadmaps' own list is nested; `milestones` stays flat. */
+export interface MapRoadmap { id: string; title: string; state: TaskState; parent?: string }
 /** `GET /hub/map/:project/sprint/:milestone`: the beads a sprint would run, the ones left out and why, and the sprint that is going on the project. */
 export interface SprintPreview {
   allowed: boolean; why?: string; max: number
@@ -340,6 +346,8 @@ export interface ProgressMap {
   ageMinutes: number | null
   milestones: MapMilestone[]
   sprints: { name: string; milestones: { id: string; count: number; total: number }[] }[]
+  /** The project's roadmaps in order; left out when it has none. */
+  roadmaps?: MapRoadmap[]
   /** The Wayfinder destination, when the project has an open `wayfinder:map` issue. */
   wayfinder: MapWayfinder | null
 }
