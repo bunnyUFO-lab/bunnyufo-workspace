@@ -72,7 +72,11 @@ try {
   for (const [id, label] of Object.entries(labels)) {
     assert.equal(await desk.locator(`[data-agent="${id}"] [data-main-action]`).count(), 1, `${id} has one main button.`);
     assert.equal((await desk.locator(`[data-agent="${id}"] [data-main-action]`).innerText()).trim(), label, id);
-    assert.equal(await desk.locator(`[data-agent="${id}"] .team-links a`).innerText(), 'Details', `${id}: Details comes first in the link row.`);
+    // Details comes first; Edit follows on the four agents with a chat persona (ws-im1.4.1) and nowhere else.
+    const editable = ['researcher', 'market-researcher', 'teardown', 'planner'].includes(id);
+    assert.deepEqual(await desk.locator(`[data-agent="${id}"] .team-links a`).allInnerTexts(), editable ? ['Details', 'Edit'] : ['Details'], `${id}: link row.`);
+    assert.equal(await desk.locator(`[data-edit-open="${id}"]`).count(), editable ? 1 : 0, `${id}: Edit link.`);
+    if (editable) assert.equal(await desk.locator(`[data-edit-open="${id}"]`).getAttribute('href'), `#/~hub/agent-edit/${id}`);
   }
   assert.equal(await desk.locator('[data-main-action]').count(), 7);
   await desk.locator('[data-main-action="hermes"]').click();

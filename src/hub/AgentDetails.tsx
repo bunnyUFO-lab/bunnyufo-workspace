@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ago, HubError, hubGet } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import { host } from '../lib/host'
 import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileSettings, TeamView } from '../lib/hubTeam'
 import { AgentSprite } from './team/AgentSprite'
 import { STATUS_DOT, STATUS_LABEL } from './team/teamModel'
@@ -127,12 +128,14 @@ export default function AgentDetails({ id }: { id: string }) {
           <h2>{agent.name}</h2>
           {live && <span className="team-status" data-details-status><span className={`dot st-${STATUS_DOT[live.status]}`} aria-hidden="true" />{STATUS_LABEL[live.status]}</span>}
           <p className="team-dim">{agent.role}</p>
+          {agent.editable?.persona && host.write && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id}>Edit the chat persona</a>}
         </div>
       </header>
       <dl className="ad-facts">
         <div><dt>Room</dt><dd>{agent.room}</dd></div>
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
         <div><dt>Profile</dt><dd data-details-profile-name>{agent.profile ?? 'None'}</dd></div>
+        {agent.chatModel && <div><dt>Chat model</dt><dd data-details-chat-model>{agent.chatModel}</dd></div>}
       </dl>
       <FreshnessNote freshness={body.freshness} hasPrompts={body.prompts.length > 0} />
       {body.settings && <Settings settings={body.settings} />}

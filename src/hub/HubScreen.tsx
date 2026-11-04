@@ -3,6 +3,7 @@ import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
 import Activity from './Activity'
 import AgentDetails from './AgentDetails'
+import AgentEdit from './AgentEdit'
 import ApprovalView from './ApprovalView'
 import AskView from './AskView'
 import Board from './Board'
@@ -38,6 +39,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
       {route.screen === 'team' && <Team />}
       {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
+      {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'project' && <ProjectPage route={route.id} />}

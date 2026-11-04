@@ -4,6 +4,7 @@ import { sessionUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import type { AskVerb } from './askAnswer'
 import AvatarNote from './AvatarNote'
+import AgentEditAsk from './AgentEditAsk'
 import { isSheetCheck } from './avatarAsk'
 import RerunAllow from './RerunAllow'
 import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer'
@@ -93,6 +94,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
       {typeof ask.context === 'string' && ask.context && <Md text={ask.context} />}
       {live && text(ask.beadTitle) && <p className="hub-ask-decides" data-ask-decides>Your answer decides <b>{text(ask.beadTitle)}</b> on the Roadmap.</p>}
       <AvatarNote ask={ask} />
+      <AgentEditAsk ask={ask} />
       <RerunAllow ask={ask} />
       {(picture || decisionRows) && (
         <div className="dr" data-design>

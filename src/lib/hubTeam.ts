@@ -59,6 +59,10 @@ export interface TeamAgent {
   sprite: AvatarSprite | CustomSprite
   /** Claude Code only: its sessions, as Working now lists them. */
   sessions?: WorkingItem[]
+  /** Set on the agents with a chat persona the owner may edit (Edit page). */
+  editable?: { persona?: boolean }
+  /** The label of the chat model an edited persona starts a chat on; none while the persona follows the app's text. */
+  chatModel?: string
 }
 
 export interface TeamView {
@@ -104,9 +108,31 @@ export interface DetailsFreshness {
 
 /** GET /api/hub/team/:agent/details */
 export interface AgentDetailsView {
-  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile }
+  agent: { id: string; name: string; role: string; room: string; runtime: string; profile: AgentProfile; editable?: { persona?: boolean }; chatModel?: string }
   freshness: DetailsFreshness
   settings: ProfileSettings | null
   prompts: DetailsPrompt[]
   jobs: DetailsJob[]
+}
+
+/** One version of a persona on the Edit page. `default` is the app's own text (a stored "back to the app's text" is a default row too). */
+export interface PersonaVersion {
+  id: string
+  at: string
+  by: string
+  default?: boolean
+  role: string
+  prompt: string
+  model: string
+  note?: string
+  revertOf?: string
+  fromAsk?: string
+}
+
+/** GET /api/hub/team/:agent/persona, and what a save or a revert answers beside `ok` and `version`. */
+export interface PersonaView {
+  current: { version: string; role: string; prompt: string; model: string }
+  default: { role: string; prompt: string; model: string }
+  versions: PersonaVersion[]
+  models: { id: string; label: string; note: string }[]
 }

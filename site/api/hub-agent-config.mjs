@@ -6,6 +6,8 @@
 // stamps such a file with the object metadata `writer: hermes-config`; `hub.mjs` reads an export only when it
 // carries that mark. The file is still not trusted: `validExport` applies the allow-list again, field by field,
 // and cleans secret-looking text again. Anything not listed here is dropped, never passed through.
+import { CHAT_MODELS } from './chat-models.mjs';
+
 export const EXPORT_MAX_BYTES = 256 * 1024;
 /** An export older than this means the exporter has stopped (it publishes at least every 6 h). */
 export const STALE_SECONDS = 7 * 3600;
@@ -172,7 +174,8 @@ const KB = 1024;
 export function agentDetails({ agent, exported = null, at, persona = null, preset = null }) {
   const profile = agent.profile ?? null;
   const block = profile && exported ? exported.profiles[profile] ?? null : null;
-  const who = { id: agent.id, name: agent.name, role: persona?.role ?? agent.role, room: agent.room, runtime: agent.runtime, profile };
+  const chatModel = persona ? CHAT_MODELS.find(entry => entry.id === persona.model)?.label : undefined;
+  const who = { id: agent.id, name: agent.name, role: persona?.role ?? agent.role, room: agent.room, runtime: agent.runtime, profile, ...(persona ? { editable: { persona: true } } : {}), ...(chatModel ? { chatModel } : {}) };
 
   let freshness;
   if (!profile) freshness = { state: 'none' };

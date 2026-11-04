@@ -204,6 +204,10 @@ export interface Ask {
   avatar?: { agent?: string; request?: string; subject?: string; sheet?: string }
   /** The watcher's "run it again": the run this Ask points at; an answer approves a copy of it (the Hub checks every claim). */
   rerun?: { request?: string; kind?: string; ask?: string; allow?: string[] }
+  /** An agent's proposal to edit a chat persona (an agent's file; checked again where it is used). The owner's Apply answer applies it. */
+  agentEdit?: { op?: string; agent?: string; base?: string; role?: string; prompt?: string; model?: string; why?: string }
+  /** Set by the Hub when Apply would write nothing on this agent-edit Ask: the reason. */
+  agentEditBlocked?: string
   /** Set by the Hub when this Ask's rerun pointer would start nothing (it was not written by the PC watcher's token): the reason. */
   rerunBlocked?: string
   state: AskState

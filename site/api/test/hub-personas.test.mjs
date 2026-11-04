@@ -152,6 +152,7 @@ test('save keeps the old version: a new create-only file, listed newest first wi
     const prompt = details.prompts.find(item => item.id === 'persona');
     assert.equal(prompt.text, 'You are Teardown. Be terse.');
     assert.match(prompt.note, /^Edited \d{4}-\d{2}-\d{2} by owner\.$/);
+    assert.deepEqual([details.agent.chatModel, details.agent.editable, details.agent.role], ['Haiku', { persona: true }, TEARDOWN.role]);
     const job = details.prompts.find(item => item.id === 'job');
     assert.ok(job && !('note' in job && /Edited/.test(job.note)), 'the job template stays the app\'s');
   } finally { await f.close(); }
