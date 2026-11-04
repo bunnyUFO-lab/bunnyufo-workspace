@@ -19,7 +19,7 @@ const spriteOfSheet = (info: SheetInfo): CustomSprite => ({ kind: 'custom', shee
 function CustomTab({ agent, onUse, onDone }: { agent: TeamAgent; onUse: (sprite: AnySprite) => Promise<boolean>; onDone: () => void }) {
   return (
     <>
-      <MakeNew agent={agent} onDone={onDone} />
+      {!agent.custom && <MakeNew agent={agent} onDone={onDone} />}
       <CustomSheets agent={agent} onUse={onUse} onDone={onDone} />
     </>
   )
@@ -136,10 +136,13 @@ export default function SpriteSheet({ agent, onClose, onUse }: { agent: TeamAgen
             <div className="team-dim" data-sheet-note aria-live="polite">{mode === 'quick' ? sheetNote(agent.name, current, selected) : 'Current sprite'}</div>
           </div>
         </div>
-        <div className="hub-seg sheet-seg" role="group" aria-label="Where the sprite comes from">
-          <button type="button" className={mode === 'quick' ? 'on' : ''} aria-pressed={mode === 'quick'} onClick={() => setMode('quick')} data-sheet-mode="quick">Quick default</button>
-          <button type="button" className={mode === 'custom' ? 'on' : ''} aria-pressed={mode === 'custom'} onClick={() => setMode('custom')} data-sheet-mode="custom">Custom in Sprite Studio</button>
-        </div>
+        {/* Sprite Studio sheets and their job are for the built-in agents: a persona the owner made takes the built-in and random sprites only. */}
+        {!agent.custom && (
+          <div className="hub-seg sheet-seg" role="group" aria-label="Where the sprite comes from">
+            <button type="button" className={mode === 'quick' ? 'on' : ''} aria-pressed={mode === 'quick'} onClick={() => setMode('quick')} data-sheet-mode="quick">Quick default</button>
+            <button type="button" className={mode === 'custom' ? 'on' : ''} aria-pressed={mode === 'custom'} onClick={() => setMode('custom')} data-sheet-mode="custom">Custom in Sprite Studio</button>
+          </div>
+        )}
         {mode === 'quick' ? (
           <>
             <div className="sheet-grid" role="radiogroup" aria-label="Built-in sprites">

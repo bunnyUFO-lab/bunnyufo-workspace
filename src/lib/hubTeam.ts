@@ -63,6 +63,8 @@ export interface TeamAgent {
   editable?: { persona?: boolean; profile?: boolean }
   /** The label of the chat model an edited persona starts a chat on; none while the persona follows the app's text. */
   chatModel?: string
+  /** A persona the owner made from a template: it chats, can be retired, and has no sprite sheet job. */
+  custom?: boolean
 }
 
 export interface TeamView {
@@ -148,9 +150,13 @@ export interface PersonaVersion {
   at: string
   by: string
   default?: boolean
-  role: string
-  prompt: string
-  model: string
+  /** The first version of a persona the owner made. */
+  created?: boolean
+  /** The retirement of a made persona: no text, and nothing to revert to. */
+  retired?: boolean
+  role?: string
+  prompt?: string
+  model?: string
   note?: string
   revertOf?: string
   fromAsk?: string
@@ -159,7 +165,19 @@ export interface PersonaVersion {
 /** GET /api/hub/team/:agent/persona, and what a save or a revert answers beside `ok` and `version`. */
 export interface PersonaView {
   current: { version: string; role: string; prompt: string; model: string }
-  default: { role: string; prompt: string; model: string }
+  /** The app's own text; null for a persona the owner made. */
+  default: { role: string; prompt: string; model: string } | null
   versions: PersonaVersion[]
   models: { id: string; label: string; note: string }[]
+  custom?: boolean
+  name?: string
+  retired?: boolean
 }
+
+/** One template of a new persona (GET /api/hub/team/templates). `text` shows `<name>` and `<role>` where the owner's words go. */
+export interface PersonaTemplate { id: string; label: string; line: string; text: string }
+
+/** A retired persona with what Bring back needs: the version to go back to and the one the page looks at. */
+export interface RetiredPersona { id: string; name: string; role: string; to: string; base: string }
+
+export interface TemplatesView { templates: PersonaTemplate[]; retired: RetiredPersona[]; max: number }

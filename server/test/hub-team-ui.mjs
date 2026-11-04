@@ -241,6 +241,7 @@ try {
   assert.equal(await guest.locator('[data-sprite-signin]').first().isVisible(), true);
   assert.equal(await guest.locator('[data-main-action]').count(), 0, 'Signed out: no main button.');
   assert.equal(await guest.locator('[data-details-open]').count(), 7, 'Details stays.');
+  assert.equal(await guest.locator('[data-new-persona]').count(), 0, 'No New persona without write.');
 
   step('with chat off the Chat buttons go and the others stay');
   const quiet = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -254,6 +255,99 @@ try {
   await noChat.goto(`${fixture.url}#/~hub/team`);
   await noChat.locator('.team-card').first().waitFor();
   assert.deepEqual(await noChat.locator('[data-main-action]').allInnerTexts(), ['Run now', 'Start a run', 'Give work', 'Give work', 'Give work']);
+
+  step('New persona: pick a template, name it, land on its Edit page; it is a card with Chat, Details, Edit and Sprite (no sheet job), in Chat, and shares Hermes main');
+  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  assert.equal(await desk.locator('[data-new-persona]').count(), 1);
+  await desk.locator('[data-new-persona]').click();
+  const sheetNew = desk.locator('dialog[data-new-persona-sheet]');
+  await sheetNew.waitFor();
+  await sheetNew.locator('[data-template-row]').first().waitFor();
+  assert.deepEqual(await sheetNew.locator('[data-template-row]').evaluateAll(list => list.map(item => item.getAttribute('data-template-row'))), ['research', 'planner', 'plain']);
+  assert.equal(await sheetNew.locator('[data-template="research"]').isChecked(), true, 'The research template is the first pick.');
+  assert.equal(await sheetNew.locator('[data-template-row] details[open]').count(), 0, 'The texts are closed.');
+  await sheetNew.locator('[data-template-row="planner"] summary').click();
+  assert.match(await sheetNew.locator('[data-template-row="planner"] pre').innerText(), /^You are <name>, one of the owner's agents/);
+  assert.equal(await sheetNew.locator('[data-new-create]').isDisabled(), true, 'A name and a role come first.');
+  await sheetNew.locator('[data-new-name]').fill('Level; reviewer');
+  await sheetNew.locator('[data-new-role]').fill('reviews level designs');
+  assert.equal(await sheetNew.locator('[data-new-create]').isDisabled(), true, 'A name with a symbol is not allowed.');
+  await sheetNew.locator('[data-new-name]').fill('Level reviewer');
+  await sheetNew.locator('[data-template="research"]').check();
+  await sheetNew.locator('[data-new-create]').click();
+  await desk.waitForFunction(() => location.hash === '#/~hub/agent-edit/level-reviewer');
+  await desk.locator('[data-edit-form]').waitFor();
+  assert.equal(await desk.locator('[data-edit-role]').inputValue(), 'reviews level designs');
+  assert.match(await desk.locator('[data-edit-prompt]').inputValue(), /^You are Level reviewer, one of the owner's agents: reviews level designs\./);
+  await desk.locator('[data-edit-profile="main"]').waitFor();
+  assert.match(await desk.locator('[data-profile-shared]').innerText(), /Level reviewer/, 'The profile section names who shares main, itself included.');
+  assert.equal(await desk.locator('[data-revert="default"]').count(), 0, 'No "Back to the app text" row.');
+  assert.match(await desk.locator('.ae-version').first().innerText(), /Created/);
+
+  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.locator('.team-card').first().waitFor();
+  assert.equal(await desk.locator('.team-card').count(), 8);
+  assert.equal(await desk.locator('[data-agent="level-reviewer"] h3').innerText(), 'Level reviewer');
+  assert.deepEqual(await desk.locator('[data-agent="level-reviewer"] .team-links a').allInnerTexts(), ['Details', 'Edit']);
+  assert.equal((await desk.locator('[data-agent="level-reviewer"] [data-main-action]').innerText()).trim(), 'Chat');
+  assert.equal(await desk.locator('[data-agent="level-reviewer"] .team-chip').innerText(), 'Research');
+  await desk.locator('[data-sprite-open="level-reviewer"]').click();
+  const customSheet = desk.locator('dialog[data-sprite-sheet="level-reviewer"]');
+  await customSheet.waitFor();
+  assert.equal(await customSheet.locator('[data-sheet-mode]').count(), 0, 'Sprite Studio sheets are for the built-in agents.');
+  assert.equal(await customSheet.locator('[data-sheet-make]').count(), 0, 'No sheet job for it.');
+  assert.ok(await customSheet.locator('.sheet-tile').count() > 1, 'The built-in and random sprites stay.');
+  await desk.keyboard.press('Escape');
+  await customSheet.waitFor({ state: 'detached' });
+  await desk.locator('[data-main-action="level-reviewer"]').click();
+  await desk.waitForFunction(() => location.hash === '#/~hub/chat');
+  await desk.locator('[data-chat-persona]').waitFor();
+  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'level-reviewer', 'It is in the Talk to menu and Chat opens on it.');
+  await desk.goto(`${fixture.url}#/~hub/agent/level-reviewer`);
+  await desk.locator('[data-prompt="persona"] summary').click();
+  assert.match(await desk.locator('[data-prompt="persona"] pre').innerText(), /^You are Level reviewer, one of the owner's agents/, 'Details shows its persona prompt.');
+
+  step('Retire asks once, takes it off the Team, and Bring back returns it');
+  await desk.goto(`${fixture.url}#/~hub/agent-edit/level-reviewer`);
+  await desk.locator('[data-retire-open]').waitFor();
+  await desk.locator('[data-retire-open]').click();
+  assert.equal(await desk.locator('[data-retire-confirm]').innerText(), 'It leaves the Team and the Talk to menu. Old chats keep working.');
+  await desk.locator('[data-retire-no]').click();
+  assert.equal(await desk.locator('[data-retire-confirm]').count(), 0);
+  await desk.locator('[data-retire-open]').click();
+  await desk.locator('[data-retire-yes]').click();
+  await desk.waitForFunction(() => location.hash === '#/~hub/team');
+  await desk.locator('.team-card').first().waitFor();
+  assert.equal(await desk.locator('.team-card').count(), 7);
+  assert.equal(await desk.locator('[data-agent="level-reviewer"]').count(), 0);
+  await desk.locator('[data-new-persona]').click();
+  await sheetNew.locator('[data-retired-row="level-reviewer"]').waitFor();
+  assert.match(await sheetNew.locator('[data-retired]').innerText(), /Level reviewer/);
+  await sheetNew.locator('[data-bring-back="level-reviewer"]').click();
+  await sheetNew.waitFor({ state: 'detached' });
+  await desk.locator('[data-team-toast]').waitFor();
+  await desk.locator('[data-agent="level-reviewer"]').waitFor();
+  assert.equal(await desk.locator('.team-card').count(), 8);
+  await desk.waitForFunction(() => document.activeElement?.hasAttribute('data-new-persona'));
+
+  step('phone: New persona is a bottom sheet, every button is 44 px high, nothing scrolls sideways');
+  for (const width of [375, 390]) {
+    const phone = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
+    await phone.goto(`${fixture.url}#/~hub/team`);
+    await phone.locator('.team-card').first().waitFor();
+    await noSideways(phone, `Team with a made persona at ${width}`);
+    assert.ok((await phone.locator('[data-new-persona]').boundingBox()).height >= 44 - 0.5);
+    await phone.locator('[data-new-persona]').tap();
+    const dialogNew = phone.locator('dialog[data-new-persona-sheet]');
+    await dialogNew.locator('[data-template-row]').first().waitFor();
+    const box2 = await dialogNew.boundingBox();
+    assert.ok(Math.abs(box2.x) < 1 && Math.abs(box2.width - width) < 1, `The sheet spans the screen at ${width}.`);
+    assert.ok(Math.abs(box2.y + box2.height - 844) < 2, `The sheet sits at the bottom at ${width}.`);
+    await noSideways(phone, `New persona at ${width}`);
+    for (const target of await dialogNew.locator('button, input[type="text"], summary').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A control in the sheet is ${target} px high.`);
+    await phone.keyboard.press('Escape');
+  }
 
   console.log('hub-team-ui: passed');
 } finally {

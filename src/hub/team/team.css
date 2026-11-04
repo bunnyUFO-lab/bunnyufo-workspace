@@ -73,6 +73,22 @@ a.team-session:hover { background: var(--s2); }
 .sheet-foot { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
 .sheet-spacer { flex: 1; }
 
+/* New persona: a template list, two fields and the retired ones, in the same dialog. */
+.np-lead { margin: 0; font-size: 13px; }
+.np-templates { display: flex; flex-direction: column; gap: 8px; }
+.np-template { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--ground); }
+.np-template.on { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink); }
+.np-pick { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; cursor: pointer; }
+.np-pick input { margin-top: 4px; width: 18px; height: 18px; flex: none; accent-color: var(--pink); }
+.np-pick span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.np-pick small, .np-retired-text small { overflow-wrap: anywhere; }
+.np-actions { display: flex; justify-content: flex-end; }
+.np-retired { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.np-retired h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.np-retired ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.np-retired li { display: flex; align-items: center; gap: 10px; }
+.np-retired-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
 .team-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 8px 8px 8px 16px; border: 1px solid var(--line2); border-radius: 999px; background: var(--s2); color: var(--t1); font-size: 13px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); }
 
 @media (max-width: 640px) {

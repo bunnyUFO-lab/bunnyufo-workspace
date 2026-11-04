@@ -13,8 +13,17 @@ const draftOf = (view: PersonaView): Draft => ({ role: view.current.role, prompt
 /** One version in the list: when, who, why, the whole text closed under a summary, and the button that takes it back. */
 function VersionRow({ version, current, models, busy, onRevert }: { version: PersonaVersion; current: boolean; models: PersonaView['models']; busy: boolean; onRevert: (version: PersonaVersion) => void }) {
   const isApp = version.id === 'default'
-  const who = isApp ? "The app's own text" : [version.default ? "Back to the app's text" : version.revertOf ? 'Reverted' : version.fromAsk ? 'Agent edit' : 'Edited', version.at ? ago(version.at) : '', version.by && `by ${version.by}`].filter(Boolean).join(' · ')
+  const first = version.retired ? 'Retired' : version.default ? "Back to the app's text" : version.created ? 'Created' : version.revertOf ? 'Reverted' : version.fromAsk ? 'Agent edit' : 'Edited'
+  const who = isApp ? "The app's own text" : [first, version.at ? ago(version.at) : '', version.by && `by ${version.by}`].filter(Boolean).join(' · ')
   const model = models.find(item => item.id === version.model)?.label ?? version.model
+  // The retirement has no text and nothing to go back to: Bring back on the Team screen reverts to the version before it.
+  if (version.retired) {
+    return (
+      <li className="ae-version" data-version={version.id} data-current={current ? '' : undefined} data-retired-version>
+        <div className="ae-version-head"><span className="ae-version-who">{who}</span>{current && <span className="ad-tag on" data-version-current>Current</span>}</div>
+      </li>
+    )
+  }
   return (
     <li className="ae-version" data-version={version.id} data-current={current ? '' : undefined}>
       <div className="ae-version-head">
@@ -31,6 +40,41 @@ function VersionRow({ version, current, models, busy, onRevert }: { version: Per
         <pre className="ad-pre">{version.prompt}</pre>
       </details>
     </li>
+  )
+}
+
+/** A persona the owner made leaves the Team and the Talk to menu when retired. Nothing is deleted: Bring back on the Team screen returns it. */
+function RetireSection({ agent }: { agent: TeamAgent }) {
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const retire = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await hubPost(`/team/${encodeURIComponent(agent.id)}/persona/retire`, {})
+      window.location.hash = hubHash('team')
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'That did not work.')
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="ad-section" aria-labelledby="ae-retire" data-edit-retire>
+      <h3 id="ae-retire">Retire</h3>
+      {asking ? (
+        <>
+          <p data-retire-confirm>It leaves the Team and the Talk to menu. Old chats keep working.</p>
+          {error && <p className="hub-error" role="alert" data-retire-error>{error}</p>}
+          <div className="ae-actions">
+            <button type="button" className="hub-btn pri" disabled={busy} onClick={() => { void retire() }} data-retire-yes>Retire {agent.name}</button>
+            <button type="button" className="hub-btn" disabled={busy} onClick={() => setAsking(false)} data-retire-no>Keep it</button>
+          </div>
+        </>
+      ) : (
+        <div className="ae-actions"><button type="button" className="hub-btn" onClick={() => setAsking(true)} data-retire-open>Retire this persona</button></div>
+      )}
+    </section>
   )
 }
 
@@ -303,6 +347,7 @@ export default function AgentEdit({ id }: { id: string }) {
       </header>
       {agent.editable.persona && <PersonaEdit id={id} />}
       {agent.editable.profile && agent.profile && <ProfileEdit agent={agent} team={team} />}
+      {agent.custom && <RetireSection agent={agent} />}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { stateOf, type AgentActivity } from './team/spriteState'
 import type { WorkingItem } from '../lib/hubPc'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
+import NewPersona from './team/NewPersona'
 import Floor from './team/Floor'
 import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
 import { openSpawn } from './spawnStore'
@@ -93,6 +94,8 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
 export default function Team() {
   const { data, error, loading, reload } = useHubData<TeamView>('/team')
   const [sheetFor, setSheetFor] = useState<string | null>(null)
+  const [newOpen, setNewOpen] = useState(false)
+  const newOpener = useRef<HTMLButtonElement>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const openers = useRef(new Map<string, HTMLButtonElement | null>())
@@ -163,6 +166,7 @@ export default function Team() {
           <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
           <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
         </div>
+        {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
       </header>
       {error && <p className="hub-error" role="alert">{error}</p>}
       {failure && <p className="hub-error" role="alert">{failure}</p>}
@@ -181,6 +185,12 @@ export default function Team() {
           agent={sheetAgent}
           onClose={() => { const id = sheetAgent.id; setSheetFor(null); window.setTimeout(() => openers.current.get(id)?.focus(), 0) }}
           onUse={next => choose(sheetAgent, next, sheetAgent.sprite)}
+        />
+      )}
+      {newOpen && (
+        <NewPersona
+          onClose={() => { setNewOpen(false); window.setTimeout(() => newOpener.current?.focus(), 0) }}
+          onBrought={who => { reload(); say({ text: `${who} is back on the Team.` }) }}
         />
       )}
       {toast && (
