@@ -15,8 +15,12 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
-  // Headless Edge holds the page's first /live request for about half a minute after a burst of Hub refetches (a Node client gets it at once), so
-  // the two steps that follow a turn this page did not start can take 30 s each. Nothing is lost: the replay at the end has every event.
+    // How long each /live took to answer: the page follows the queue's turn through it, and it must not wait. (It once waited 30 s: the test run's own
+  // /api proxy in ui-timeouts.mjs fetches whatever does not ask for text/event-stream whole, and a stream has no end.)
+  const liveAsked = new Map();
+  const liveWaits = [];
+  page.on('request', request => { if (request.url().endsWith('/live')) liveAsked.set(request, Date.now()); });
+  page.on('response', response => { const began = liveAsked.get(response.request()); if (began) liveWaits.push(Date.now() - began); });
   const field = page.locator('textarea[aria-label="Message"]');
   const rows = page.locator('[data-queued]');
   const send = async text => { await field.fill(text); await page.keyboard.press('Enter'); };
@@ -65,6 +69,8 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('[data-queued]').length === 0);
   assert.equal(fixture.hermes.runs.length, 2);
   assert.equal(fixture.hermes.runs[1].body.input, 'Also check the forest level.');
+
+  assert.ok(liveWaits.length > 0 && liveWaits.every(wait => wait < 5000), `/live answered at once: ${liveWaits.join(', ')} ms`);
 
   step('a reload mid-reply loses nothing: the question, the stream and a queued row are all still there');
   await send('Then the cave.');
