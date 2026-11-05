@@ -93,6 +93,18 @@ function conflictReport({ conflicts, saved, root, id, dryRun }) {
   return lines.join('\n');
 }
 
+/** Everything a run left for a person: files changed on both sides, and site keys that clash with a name here (case, a file where a folder is). */
+export const unsettledOf = result => [...(result?.conflicts ?? []), ...(result?.clashes ?? [])];
+
+/** What to tell a person about site keys this disk cannot hold: they stay on the site, untouched. */
+function clashReport({ clashes, dryRun }) {
+  return [
+    `  ${clashes.length} file(s) on the site clash with a name here (a case-only difference, or a file where a folder is), left alone${dryRun ? '' : ' and not touched'}:`,
+    ...clashes.map(file => `    ${file}`),
+    '  rename or remove one of each pair on the site (or here), then publish again',
+  ].join('\n');
+}
+
 /** The process exit code: 1 for a failure, 2 when a real publish left files unsettled, else 0. */
 export function exitCodeFor({ dryRun = false, conflicts = 0, failed = 0 } = {}) {
   const count = value => (Array.isArray(value) ? value.length : Number(value) || 0);
@@ -131,14 +143,17 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
     // bucket's copy of it must not replace this folder's (it may hold cards not published yet).
     if (force && named.length) scope.files = [];
     const result = await syncDown({ root, bucket: client, prefix, scope, dryRun, force, remoteList: list.list, log });
+    if (result.clashes.length) log(clashReport({ clashes: result.clashes, dryRun }));
     log(`${workspace.name} (${root}) <- ${where}\n  ${result.written.length} file(s) ${dryRun ? 'to fetch' : 'fetched'}, ${result.unchanged} unchanged${result.differs.length ? `\n  left alone, different here: ${result.differs.join(', ')}  (publish them, or --force to take the bucket's)` : ''}`);
     return { published: false, pulled: !dryRun && result.written.length > 0, workspace, ...result };
   }
 
   const result = await syncUp({ root, bucket: client, prefix, scope, dryRun, force, allowDeletes, listEtag: list.etag, log });
   const total = result.uploads.length + result.downloads.length + result.deletes.length;
-  const conflicted = result.conflicts.length;
-  if (conflicted) log(conflictReport({ conflicts: result.conflicts, saved: result.saved ?? [], root, id: workspace.id, dryRun }));
+  const clashed = result.clashes?.length ?? 0;
+  const conflicted = result.conflicts.length + clashed;
+  if (clashed) log(clashReport({ clashes: result.clashes, dryRun }));
+  if (result.conflicts.length) log(conflictReport({ conflicts: result.conflicts, saved: result.saved ?? [], root, id: workspace.id, dryRun }));
   if (!total && conflicted) {
     log(`Nothing ${dryRun ? 'to publish' : 'published'} in ${workspace.name}: ${conflicted} file(s) need settling; ${result.unchanged} already match.`);
     return { published: false, workspace, ...result };
@@ -156,7 +171,7 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
   log(`${workspace.name} (${root}) -> ${where}\n  ${subject}, ${result.unchanged} unchanged`);
   if (dryRun) { log('Dry run: nothing uploaded.'); return { published: false, workspace, subject, ...result }; }
   log(`Published.${workspace.site ? ` It is live now: ${workspace.site}` : ''}`);
-  if (conflicted) log(`${conflicted} file(s) were left out; settle them with the commands above.`);
+  if (conflicted) log(`${conflicted} file(s) were left out; settle them as described above.`);
   return { published: true, workspace, subject, ...result };
 }
 
@@ -183,7 +198,7 @@ export async function publishAll({ message, dryRun = false, pull = false, allowD
   }
 
   // A dry run never sets `published`; it reports what it would do by returning a subject.
-  const settle = result => (result.conflicts?.length ? `${result.conflicts.length} to settle` : '');
+  const settle = result => (unsettledOf(result).length ? `${unsettledOf(result).length} to settle` : '');
   const line = result => {
     if (result.error) return 'needs a hand';
     const rest = settle(result);
@@ -193,7 +208,7 @@ export async function publishAll({ message, dryRun = false, pull = false, allowD
   log(`\n${dryRun ? 'Dry run' : pull ? 'Pull' : 'Publish'} summary`);
   for (const result of results) log(`  ${result.workspace.name}: ${line(result)}`);
   const failed = results.filter(result => result.error);
-  const conflicted = results.filter(result => result.conflicts?.length);
+  const conflicted = results.filter(result => unsettledOf(result).length);
   if (failed.length) log(`\n${failed.length} workspace(s) did not publish; their messages are above.`);
   if (conflicted.length) log(`\n${conflicted.length} workspace(s) have files to settle; the commands are above.`);
   return { results, failed, conflicted };
@@ -215,7 +230,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = exitCodeFor({ dryRun, failed, conflicts: conflicted });
     } else {
       const result = await publish({ content: value('--content'), message, dryRun, pull, force, allowDeletes, cards: every('--card'), paths: every('--path') });
-      process.exitCode = exitCodeFor({ dryRun, conflicts: result.conflicts });
+      process.exitCode = exitCodeFor({ dryRun, conflicts: unsettledOf(result) });
     }
   } catch (error) {
     console.error(error.message);

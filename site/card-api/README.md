@@ -287,7 +287,11 @@ What a Library write must do:
 - send `x-card-agent` (name), `x-card-why` (URI-encoded, 1 to 300 characters) and for an edit `x-card-context` (`chat` or `job:<id>`), else 422. `x-card-batch` (8 to 32 lower-case letters and digits) groups the writes of one `put`. `agent`, `why` and `context` are what the agent says; the token is proven
 - use paths every part of which is safe on Windows (project sections come down to the owner's PC): letters, digits, space, dot, dash, underscore and brackets, no device names (`con`, `nul`, `com1`), no trailing dot or space; a card `folder` is stricter: letters, digits, dot, dash, underscore
 - stay under 4 MB per file: no upload URLs for a Library section (403)
-- not write into a Trash or moved card's folder (409), or a name that differs only by case from a file there (409)
+- not write into a Trash or moved card's folder (409), or a name that differs only by case from a file there (409); reserved and retired names are compared without case
+- not put a file below an existing file, or where a folder already is (409): S3 allows it, Windows does not, and one such key would stop every publish and pull
+- not use a card folder the publish skips (`categories`, `node_modules`, `README.md`, `index.md`, `Gemfile` and the like, in any case) (403), nor spell a folder two ways within a card (409); the sync also leaves any such key on the site and reports it (`clashes`, exit 2)
+- not edit an existing script file (`.js`, `.mjs`, `.cjs`, `.wasm`; 403): add a new tab with a new file name
+- an `If-Match` edit of an existing `.html` tab marks that step `agentTab: true` (the record says `markedAgentTab`), so the viewer gives it no card bridge; a posted step never brings back a tab in `removedTabs`
 
 The entry route keeps its shape, but the server builds the entry. A **new card** may set `id, title, description, type, category,
 created, updated, folder, steps, defaultStep, status` only (422 names any other field); `status` is `active`; a step is
