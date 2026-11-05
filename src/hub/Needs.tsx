@@ -19,6 +19,7 @@ import NeedsItem from './NeedsItem'
 import type { SettleExtra, SettleVerb } from './NeedsItem'
 import { itemKey, rememberFilter, takeFocus } from './needsFocus'
 import { openSpawn } from './spawnStore'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import './needs.css'
 
@@ -211,7 +212,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
           })}
         </div>
       )}
-      {error && <p className="hub-error" role="alert">{error}</p>}
+      <RefreshNote error={error} hasData={!!data} at={at} />
       {data ? (
         isHistory ? (
           <section className="hub-panel">

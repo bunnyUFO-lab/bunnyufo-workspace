@@ -18,6 +18,7 @@ import { stableOf, zoomStep } from './semanticZoom'
 import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { tallyFraction } from './mapCount.ts'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
@@ -63,7 +64,7 @@ const splitId = (id?: string): [string | undefined, string | undefined] => {
 export default function ProgressMap({ project: routeId }: { project?: string }) {
   const [wanted, nodeId] = splitId(routeId)
   const { list, project, loading: listing } = useProject(wanted)
-  const { data: model, error, loading: mapping } = useHubData<MapModel>(project ? `/map/${encodeURIComponent(project)}` : null)
+  const { data: model, error, loading: mapping, at } = useHubData<MapModel>(project ? `/map/${encodeURIComponent(project)}` : null)
   return (
     <>
       <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
@@ -72,7 +73,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
         <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
         {project && <ProjectLink id={project} label="Project" className="pp-map-link" />}
       </div>
-      {error && <p className="hub-error" role="alert">{error}</p>}
+      <RefreshNote error={error} hasData={!!model} at={at} />
       {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
       {model?.meta && project && (

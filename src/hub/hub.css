@@ -197,7 +197,7 @@
   .hub-runs-short { display: inline; }
 }
 .hub[data-screen="map"] > .hub-wayfinder { flex: none; }
-.hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty { flex: none; }
+.hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty, .hub[data-screen="map"] > .hub-stale { flex: none; }
 /* The control bar is a row of its own just under the project chips (above the Wayfinder row). The map takes everything below; the hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
 .hub-map-wrap { position: relative; flex: 1; min-height: 0; }
 .hub-map-top, .hub-legend {

@@ -10,6 +10,7 @@ import { goNext, useQueueOrder } from './useGoNext'
 import Md from './Md'
 import HubImage from './HubImage'
 import { VERDICT_LABEL } from './playtest'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
@@ -37,6 +38,7 @@ export default function ChecklistView({ id }: { id: string }) {
 
   return (
     <div className="hub-cl" data-state={detail.state}>
+      <RefreshNote error={error} hasData at={loadedAt} />
       {handoff && <NextNote note={handoff} />}
       <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>
       <div className="hub-top">

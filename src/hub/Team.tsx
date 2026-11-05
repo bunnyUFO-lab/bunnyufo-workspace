@@ -14,6 +14,7 @@ import { openSpawn } from './spawnStore'
 import { startChat } from './chatStart'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 
 interface Toast { text: string; undo?: () => void }
@@ -92,7 +93,7 @@ function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent
 
 /** The Team screen: one card per agent (the Roster view), and the Sprite sheet. */
 export default function Team() {
-  const { data, error, loading, reload } = useHubData<TeamView>('/team')
+  const { data, error, loading, reload, at } = useHubData<TeamView>('/team')
   const [sheetFor, setSheetFor] = useState<string | null>(null)
   const [newOpen, setNewOpen] = useState(false)
   const newOpener = useRef<HTMLButtonElement>(null)
@@ -169,7 +170,7 @@ export default function Team() {
           <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
         </div>
       </header>
-      {error && <p className="hub-error" role="alert">{error}</p>}
+      <RefreshNote error={error} hasData={!!data} at={at} />
       {failure && <p className="hub-error" role="alert">{failure}</p>}
       {view === 'floor'
         ? <Floor agents={data.agents} now={now} onOpen={id => { focusId.current = id; setView('roster') }} />

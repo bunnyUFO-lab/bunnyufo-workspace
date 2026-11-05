@@ -4,6 +4,7 @@
 import { authHeaders } from '../local/client'
 import type { PcSummary, PcWake, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
+import { clearHub } from './hubCache.mjs'
 import { holdReload } from './reloadGate'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'review' | 'blocked' | 'session'
@@ -384,6 +385,15 @@ export async function hubGet<T>(path: string, signal?: AbortSignal): Promise<T> 
 /** Fired on window after a Hub write, so the data behind the badges is fetched again at once. */
 export const HUB_WROTE = 'buw:hub-wrote'
 
+// A write from this browser empties the last-answer store (src/lib/hubCache.mjs) before any hook
+// refetches. Registered at module level so it always runs ahead of a hook's own listener: the
+// refetch then takes the new stamp. Do not move this into a component.
+if (typeof window !== 'undefined') {
+  window.addEventListener(HUB_WROTE, () => clearHub())
+  // Cards are written through the workspace routes; only the Library read depends on them.
+  window.addEventListener('bunnyufo-workspace-changed', () => clearHub('/project-cards'))
+}
+
 export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal): Promise<T> {
   const changed = () => window.dispatchEvent(new Event(HUB_WROTE))
   const release = holdReload()   // an update reload waits for this write
@@ -396,6 +406,8 @@ export async function hubPost<T>(path: string, data: unknown = {}, signal?: Abor
   } catch (failure) {
     // "Already answered" means the Hub moved on without this screen, so the counts have changed too.
     if (failure instanceof HubError && failure.status === 409) changed()
+    // Any other failure (a cut connection, a 500) may still have written something.
+    else clearHub()
     throw failure
   } finally {
     release()

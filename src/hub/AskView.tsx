@@ -7,6 +7,7 @@ import { goNext, useQueueOrder } from './useGoNext'
 import AskBody from './AskBody'
 import { VERDICTS, decisionList, optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import GetHelp, { HelpAttachedNote } from './GetHelp'
 import Delivery from './Delivery'
@@ -40,7 +41,7 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
 
 /** One Ask on its own page: its state, the shared answer body, and what became of it. */
 export default function AskView({ id }: { id: string }) {
-  const { data: ask, error, reload } = useHubData<Ask>(`/asks/${encodeURIComponent(id)}`)
+  const { data: ask, error, reload, at } = useHubData<Ask>(`/asks/${encodeURIComponent(id)}`)
   const [taken, setTaken] = useState<AskAnswer | null>(null)
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
@@ -53,6 +54,7 @@ export default function AskView({ id }: { id: string }) {
 
   return (
     <>
+      <RefreshNote error={error} hasData at={at} />
       {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{text(ask.question)}</h2>
