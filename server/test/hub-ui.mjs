@@ -577,6 +577,7 @@ try {
 
   step('map: Loading shows while the map is fetched')
   await page.route('**/api/hub/map/*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
+  await page.reload();   // nosprint was visited above: a reload makes this a first visit (the last answer is kept in memory)
   await go(page, '#/~hub/map/nosprint');
   await page.locator('.hub-empty', { hasText: 'Loading…' }).waitFor();
   await page.locator('.hub-map-box svg').waitFor();

@@ -9,6 +9,7 @@ import { goNext, useQueueOrder } from './useGoNext'
 import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
 import Md from './Md'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
 import { needsHash } from './needsFocus'
@@ -95,7 +96,7 @@ export default function ReviewView({ route }: { route: string }) {
   const slash = route.indexOf('/')
   const id = slash < 0 ? route : route.slice(0, slash)
   const file = slash < 0 ? undefined : route.slice(slash + 1) || undefined
-  const { data: detail, error } = useHubData<ReviewDetail>(`/reviews/${encodeURIComponent(id)}`)
+  const { data: detail, error, at } = useHubData<ReviewDetail>(`/reviews/${encodeURIComponent(id)}`)
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
   const root = useRef<HTMLDivElement>(null)
@@ -160,6 +161,7 @@ export default function ReviewView({ route }: { route: string }) {
 
   return (
     <div className="hub-review" ref={root} data-open={file ? 'true' : undefined}>
+      <RefreshNote error={error} hasData at={at} />
       {handoff && <NextNote note={handoff} />}
       <div className="hub-review-head">
         <p><a className="hub-btn" href={needsHash()} data-back-top>‹ Needs you</a></p>

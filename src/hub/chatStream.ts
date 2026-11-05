@@ -1,6 +1,7 @@
 import type { ChatHandlers } from './chatRead'
 import { readChatStream } from './chatRead'
 import { HubError } from '../lib/hub'
+import { clearHub } from '../lib/hubCache.mjs'
 import { authHeaders } from '../local/client'
 
 export type { ChatHandlers } from './chatRead'
@@ -12,14 +13,19 @@ export { StreamCut } from './chatRead'
  * anything streams, when the server refuses (a 502 from Hermes, a 503 when chat is not set up).
  */
 export async function streamChat(body: { conversation?: string; model?: string; persona?: string; text: string; images?: { type: string; data: string }[]; about?: { kind: string; id: string; step?: string } }, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
-  const response = await fetch('/api/hub/chat', {
-    method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
-  })
-  if (!response.ok || !response.body) {
-    const answer = await response.json().catch(() => null) as { error?: string } | null
-    throw new HubError(answer?.error ?? `The Hub answered ${response.status}.`, response.status, answer as Record<string, unknown> | null)
+  try {
+    const response = await fetch('/api/hub/chat', {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
+    })
+    if (!response.ok || !response.body) {
+      const answer = await response.json().catch(() => null) as { error?: string } | null
+      throw new HubError(answer?.error ?? `The Hub answered ${response.status}.`, response.status, answer as Record<string, unknown> | null)
+    }
+    await readChatStream(response.body, handlers, signal)
+  } finally {
+    // A chat turn changes the chat list; no HUB_WROTE, so a running stream is not disturbed.
+    clearHub('/chat')
   }
-  await readChatStream(response.body, handlers, signal)
 }
 
 /** Markdown reduced to what a voice should say: no code blocks, no link syntax, no emphasis marks. */

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { HubProject, MapMilestone, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
 import { ago } from '../lib/hub'
@@ -19,7 +19,8 @@ import type { ProjectTab } from './projectPage.ts'
 import { openSpawn } from './spawnStore'
 import { legacyRunning } from './Today'
 import { todayFor } from './todayFilter.ts'
-import { TodayContext, useHubData } from './useHub'
+import RefreshNote from './RefreshNote'
+import { useHubData, useTodayScreen } from './useHub'
 import { useProject } from './useProject'
 import './today.css'
 import './project.css'
@@ -76,9 +77,12 @@ function MilestoneRow({ project, milestone }: { project: string; milestone: MapM
 }
 
 /** The Roadmap tab: one row per milestone, from the same read as the map. */
-function RoadmapTab({ project, model, error, loading }: { project: string; model: MapModel | null; error: string | null; loading: boolean }) {
-  if (error) return <p className="hub-error" role="alert">{error}</p>
-  if (!model) return loading ? <p className="hub-empty">Loading…</p> : null
+function RoadmapTab({ project, model, error, loading, at }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null }) {
+  if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
+  return <><RefreshNote error={error} hasData at={at} /><RoadmapBody project={project} model={model} /></>
+}
+
+function RoadmapBody({ project, model }: { project: string; model: MapModel }) {
   if (!model.meta) return <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
   // A project with roadmaps lists them, nested; a row opens that roadmap's map.
   if (model.roadmaps?.length) {
@@ -124,13 +128,14 @@ function NeedsTab({ project, name, today }: { project: string; name: string; tod
 const SAFE_CARD = /^\/[\w%-]+#\/[\w%.~-]+$/
 
 function LibraryTab({ project }: { project: string }) {
-  const { data, error, loading } = useHubData<ProjectCards>(`/project-cards?project=${enc(project)}`)
-  if (error) return <p className="hub-error" role="alert">{error}</p>
-  if (!data) return loading ? <p className="hub-empty">Loading…</p> : null
-  if (!data.section) return <p className="hub-empty" data-pp-no-library>No Library section for this project.</p>
+  const { data, error, loading, at } = useHubData<ProjectCards>(`/project-cards?project=${enc(project)}`)
+  if (!data) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
+  const note = <RefreshNote error={error} hasData at={at} />
+  if (!data.section) return <>{note}<p className="hub-empty" data-pp-no-library>No Library section for this project.</p></>
   const cards = data.cards.filter(card => SAFE_CARD.test(card.href))
   return (
     <section className="hub-panel" aria-label="Library">
+      {note}
       {cards.length
         ? <ul className="pp-cards" data-pp-cards>{cards.map(card => <li key={card.href}><a href={card.href} data-pp-card>{card.title}</a>{card.updated && ago(card.updated) && <small>{ago(card.updated)}</small>}</li>)}</ul>
         : <p className="hub-empty">No cards in this section yet.</p>}
@@ -186,10 +191,8 @@ export default function ProjectPage({ route }: { route?: string }) {
   const known = !wanted || !all.data || all.data.projects.some(item => item.id === wanted)
   // useProject would fall back to another project for an id the list does not have; the page says so instead.
   const { list, project } = useProject(known ? wanted : undefined)
-  const shared = useContext(TodayContext)
-  const own = useHubData<TodayData>(shared ? null : '/today')
-  const today = (shared ?? own).data
-  const { data: model, error, loading } = useHubData<MapModel>(known && project ? `/map/${enc(project)}` : null)
+  const today = useTodayScreen().data
+  const { data: model, error, loading, at: modelAt } = useHubData<MapModel>(known && project ? `/map/${enc(project)}` : null)
   const wide = useWide()
   const go = (id: string) => { window.location.hash = projectHash(id, tab) }
 
@@ -232,7 +235,7 @@ export default function ProjectPage({ route }: { route?: string }) {
       </div>
       <div className="pp-body" data-tab={tab} data-side={side ? 'true' : undefined}>
         <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
-          {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} />}
+          {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} />}
           {tab === 'running' && (running || <p className="hub-empty">Loading…</p>)}
           {tab === 'needs' && <NeedsTab project={project} name={name} today={today} />}
           {tab === 'library' && <LibraryTab project={project} />}

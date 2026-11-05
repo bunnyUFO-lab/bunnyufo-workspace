@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { HubEvent, HubProject, MoveOffer, Today as TodayData } from '../lib/hub'
 import { HUB_WROTE, ago, clock, hubPost } from '../lib/hub'
@@ -16,7 +16,8 @@ import NeedsRows, { Icon } from './NeedsRows'
 import { openRun } from './runStore'
 import { openSpawn } from './spawnStore'
 import { todayFor } from './todayFilter.ts'
-import { TodayContext, useHubData } from './useHub'
+import RefreshNote from './RefreshNote'
+import { useHubData, useTodayScreen } from './useHub'
 import './today.css'
 
 const ICON_ALERT = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 16.8h.01"/>'
@@ -143,8 +144,7 @@ const saveProject = (project: string) => { try { if (project) localStorage.setIt
 
 export default function Today() {
   const narrow = useNarrow()
-  const shared = useContext(TodayContext)
-  const own = useHubData<TodayData>(shared ? null : '/today')
+  const today = useTodayScreen()
   const projects = useHubData<{ projects: HubProject[] }>('/projects')
   const [chosen, setChosen] = useState(savedProject)
   const list = projects.data?.projects
@@ -155,7 +155,7 @@ export default function Today() {
   const failed = !!projects.error && !list
   const project = gone || failed ? '' : chosen
   const choose = (id: string) => { const next = id === 'all' ? '' : id; setChosen(next); saveProject(next) }
-  const { data: full, error, reload, at, loading } = shared ?? own
+  const { data: full, error, reload, at, loading } = today
   if (!full) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
   // Filtered once, here: the sentence, the tiles and both layouts read `data`. The context keeps the full answer for the badge.
   const { data, elsewhere } = todayFor(full, project)
@@ -213,7 +213,7 @@ export default function Today() {
           <a className="hub-btn today-primary" href={needsLink} data-today-open>Open Needs you · <span className="today-num">{counts.needsYou}</span></a>
         </div>
       </header>
-      {error && <p className="hub-error" role="alert">{error}</p>}
+      <RefreshNote error={error} hasData at={at} />
       {!!list?.length && (
         <div className="today-project rise" style={stagger(1)} data-today-project>
           <ProjectPicker id="hub-today-project" projects={list} value={project || 'all'} allValue="all" onChange={choose} oneRow counts={needsByProject} allCount={full.counts.needsYou} />

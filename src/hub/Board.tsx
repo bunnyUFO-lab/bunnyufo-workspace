@@ -13,6 +13,7 @@ import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
+import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { ProjectLink } from './ProjectChip'
@@ -226,7 +227,8 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
       {!listing && !listError && !project && !all && <p className="hub-empty">No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.</p>}
-      {(work.error || listError) && <p className="hub-error" role="alert">{work.error ?? listError}</p>}
+      {listError && <p className="hub-error" role="alert">{listError}</p>}
+      {!listError && <RefreshNote error={work.error} hasData={!!work.data} at={work.at} />}
       {data && unknown && <p className="hub-muted" role="status" data-board-note>{focus} is not on the board: it may be closed long ago, a group, or in another project.</p>}
       {data && (
         <>
