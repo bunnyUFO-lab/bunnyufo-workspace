@@ -179,10 +179,11 @@ try {
   step('/projects failing with a remembered project: the red line shows, never the early lanes; the retry brings them');
   {
     const { page } = await open('magic-loops');
-    const left = page.waitForRequest(request => request.url().endsWith('/work?project=magic-loops'));
-    await page.route('**/api/hub/projects', route => route.fulfill({ status: 500, json: { error: 'down' } }));
+    // The list answers 500 only once the early request has been answered, so the response cannot be aborted away.
+    const landed = page.waitForResponse(response => response.url().endsWith('/work?project=magic-loops'));
+    await page.route('**/api/hub/projects', async route => { await landed; await route.fulfill({ status: 500, json: { error: 'down' } }); });
     await page.goto(`${fixture.url}#/~hub/work`);
-    await left;
+    await landed;
     await page.locator('.hub-error').first().waitFor();
     assert.equal(await lanes(page).count(), 0, 'No lanes while the list is failing.');
     await page.unroute('**/api/hub/projects');
