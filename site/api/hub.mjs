@@ -8,7 +8,9 @@
 //
 // State is derived, never stored: an Ask's state is which files exist next to it, and Today and
 // the Inbox are computed from a seven-day window of event files. Event files, ask.json and
-// request.json are create-only and so never change; they are cached by key.
+// request.json are create-only and so never change; they are cached by key. The read routes in
+// LIST_CACHED_ROUTES also see the bucket's listings through a short cache (list-cache.mjs), which every
+// write through this process clears; everything else, writes and sweeps included, lists live.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
@@ -54,6 +56,7 @@ import { createWake } from './pc-wake.mjs';
 import { createPresence } from './hub-presence.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
+import { createListCache } from './list-cache.mjs';
 
 const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config', 'feedback'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
@@ -65,6 +68,9 @@ const LIMITS = { big: 8 * MB, chat: 64 * 1024, small: 256 * 1024 };
 const CACHE_MAX = 5000;
 const EVENT_CAP = 2000;
 const POOL = 16;
+
+/** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|projects|team|events|search-text|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -143,7 +149,9 @@ const sendTime = value => (typeof value === 'string' && !Number.isNaN(new Date(v
  * @param env      the merged environment (the chat routes and the Hermes request runs read HERMES_* from it)
  * @param hermesTiming  intervals of the Hermes followers and sweep, for tests (see hermes-dispatch.mjs)
  */
-export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log, hermesTiming = {} } = {}) {
+export function createHub({ bucket: store = null, prefix = 'sections', inbox = 'inbox', enabled = false, env = {}, fetchImpl = fetch, now = () => new Date(), log = console.log, hermesTiming = {}, listCacheMs = 0 } = {}) {
+  const listCache = createListCache({ bucket: store, root: `${prefix}/${inbox}/`, ttlMs: listCacheMs, clock: () => now().getTime() });
+  const bucket = listCache.bucket;
   const on = !!enabled && !!bucket;
   const key = rel => inboxKey(rel, prefix, inbox);
   const cache = new Map();
@@ -180,8 +188,8 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   const listFolders = async (root, at) => {
     const found = new Map();
-    for (const month of monthPrefixes(at)) {
-      const { objects } = await bucket.list(key(`${root}/${month}`));
+    const lists = await Promise.all(monthPrefixes(at).map(month => bucket.list(key(`${root}/${month}`))));
+    for (const { objects } of lists) {
       for (const object of objects) {
         const parts = object.key.slice(folder(root).length).split('/');
         // Exactly <id>/<file>: a deeper key (<id>/x/submit.json) is no file of the folder, whatever its last segment says.
@@ -237,13 +245,14 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
   /** The last `days` UTC days of events, newest first, capped. */
   async function loadEvents(at, days = WINDOW_DAYS) {
     const names = [];
-    for (const day of windowDays(at, days)) {
-      const { objects } = await bucket.list(key(`events/${day}`) + '/');
-      for (const object of objects) {
+    const dayList = windowDays(at, days);
+    const lists = await pool(POOL, dayList, day => bucket.list(key(`events/${day}`) + '/'));
+    dayList.forEach((day, index) => {
+      for (const object of lists[index].objects) {
         const file = object.key.split('/').pop();
         if (file.endsWith('.json')) names.push({ day, file });
       }
-    }
+    });
     names.sort((a, b) => (a.day === b.day ? (a.file < b.file ? 1 : -1) : a.day < b.day ? 1 : -1));
     const truncated = names.length > EVENT_CAP;
     const kept = names.slice(0, EVENT_CAP);
@@ -395,8 +404,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
     const day = date => markStamp(date).slice(0, 8);
     const names = async prefixes => {
       const found = [];
-      for (const prefix of prefixes) {
-        const { objects } = await bucket.list(key(`pc/status-${prefix}`));
+      for (const { objects } of await Promise.all(prefixes.map(prefix => bucket.list(key(`pc/status-${prefix}`))))) {
         for (const object of objects) {
           const name = object.key.slice(folder('pc').length);
           if (/^status-\d{8}T\d{6,9}Z\.json$/.test(name)) found.push(name);
@@ -847,7 +855,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
    */
   async function loadWorkInputs(only, at) {
     if (only && !validProject(only)) throw fail('No such project.', 404);
-    const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
+    const ids = only ? [only] : (await beadRows()).map(row => row.id);
     const [loaded, { requests, window, asks, checklists, waiting }, status, marks] = await Promise.all([
       pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) })), loadNeeds(at), loadPcStatus(at), loadMarks(only),
     ]);
@@ -1378,6 +1386,27 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || (a.id < b.id ? -1 : 1));
   }
 
+  /** The projects that have a Beads copy, with the table's order and names: one listing, nothing else read. */
+  async function beadRows() {
+    const found = new Map();
+    const { objects } = await bucket.list(folder('beads'));
+    for (const [id, pushedAt] of await beadsReader.projects(objects)) {
+      if (validProject(id)) found.set(id, { id, name: titleCase(id), beads: true, ...(pushedAt ? { pushedAt } : {}) });
+    }
+    return orderProjects([...found.values()]);
+  }
+
+  /** The project named by each file of a create-only folder (asks, checklists, requests); only that file is read. */
+  async function projectsIn(root, file, valid, at) {
+    const folders = await listFolders(root, at);
+    const rows = await pool(POOL, [...folders], async ([id, names]) => {
+      if (!names.has(file) || !validId(id)) return null;
+      const body = await cached(`${root}/${id}/${file}`);
+      return valid(body) ? body.project : null;
+    });
+    return rows;
+  }
+
   async function projects(at) {
     const found = new Map();
     const add = (id, patch = {}) => {
@@ -1385,11 +1414,15 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       found.set(id, { id, name: titleCase(id), beads: false, ...found.get(id), ...patch });
     };
     const { objects } = await bucket.list(folder('beads'));
-    for (const [id, pushedAt] of await beadsReader.projects(objects)) add(id, { beads: true, ...(pushedAt ? { pushedAt } : {}) });
-    const [asks, checklists, requests, window] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at)]);
-    for (const row of asks) add(row.ask.project);
-    for (const row of checklists) add(row.checklist.project);
-    for (const item of requests) add(item.project);
+    const [beads, asks, checklists, requests, window] = await Promise.all([
+      beadsReader.projects(objects),
+      projectsIn('asks', 'ask.json', ask => !!ask && typeof ask.question === 'string', at),
+      projectsIn('checklists', 'checklist.json', validChecklist, at),
+      projectsIn('requests', 'request.json', request => !!request && typeof request.text === 'string', at),
+      loadEvents(at),
+    ]);
+    for (const [id, pushedAt] of beads) add(id, { beads: true, ...(pushedAt ? { pushedAt } : {}) });
+    for (const project of [...asks, ...checklists, ...requests]) add(project);
     for (const event of window.events) add(event.project);
     return orderProjects([...found.values()].filter(row => row.beads || !WORKTREE_NAME.test(row.id)));
   }
@@ -1522,6 +1555,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
 
   const self = {
     enabled: on,
+    /** The listing cache, for the tests. */
+    listCache,
+    async handle(args) { const run = () => self.handleRoute(args); return args.method === 'GET' && LIST_CACHED_ROUTES.test(String(args.route)) ? listCache.cachedReads(run) : run(); },
     /** The request module, for the later items that sign (follow-ups, policy) and for the Hermes follower to plug its hooks into. */
     requests: requestFiles,
     requestHooks: requestFiles.hooks,
@@ -1578,7 +1614,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
       }
       return true;
     },
-    async handle({ request, response, method, route, query = new URLSearchParams(), user = null, requireRemoteUser = false }) {
+    async handleRoute({ request, response, method, route, query = new URLSearchParams(), user = null, requireRemoteUser = false }) {
       if (!String(route).startsWith('/hub/')) return false;
       try {
         if (!on) throw fail('The Hub is off on this host.', 404);
@@ -1590,10 +1626,9 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); }
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); });
           if (route === '/hub/today') {
-            const [asks, checklists, requests, window, hermesOpen] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at)]);
-            const status = await loadPcStatus(at);
+            const [asks, checklists, requests, window, hermesOpen, status] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at), loadPcStatus(at)]);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
             const cloud = cloudOn ? await routines.capacity(at, { memo: true }).catch(() => null) : null;
             const today = buildToday({ asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, hermesApprovals: hermesOpen, events: await eventsWithRuns(window.events, requests, at), now: at, alerts: routines.alerts(), cloud, dismissed: dismissedAlerts(window.events), repoProjects: await repoProjects() });
@@ -1662,7 +1697,7 @@ export function createHub({ bucket = null, prefix = 'sections', inbox = 'inbox',
             // The text the Work search reads: one project, or every project with Beads. Loaded only while a search is on.
             const only = query.get('project');
             if (only && !validProject(only)) throw fail('No such project.', 404);
-            const ids = only ? [only] : (await projects(at)).filter(row => row.beads).map(row => row.id);
+            const ids = only ? [only] : (await beadRows()).map(row => row.id);
             const loaded = await pool(POOL, ids, async id => ({ id, ...(await loadBeads(id)) }));
             reply({ rows: loaded.flatMap(row => searchRows(row.issues.map(issue => ({ ...issue, project: row.id })))), at: at.toISOString() });
           } else if (route === '/hub/project-cards') {

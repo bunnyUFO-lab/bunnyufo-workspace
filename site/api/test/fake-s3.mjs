@@ -23,7 +23,7 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     const url = new URL(request.url, 'http://fake');
     const [, name, ...rest] = url.pathname.split('/');
     const key = decodeURIComponent(rest.join('/'));
-    log.push({ method: request.method, key, headers: request.headers });
+    log.push({ method: request.method, key, headers: request.headers, prefix: url.searchParams.get('prefix') });
     if (name !== bucket) return error(response, 404, 'NoSuchBucket');
     // A test may make some keys fail with a storage error: `fake.fail = key => key.endsWith('x.json')`.
     if (faults.fail?.(key, request.method)) return error(response, 500, 'InternalError');
