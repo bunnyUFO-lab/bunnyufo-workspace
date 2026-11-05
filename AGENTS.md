@@ -138,7 +138,7 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
-**Architecture in one line:** issues live on a Dolt server, with `s3://bunnyufo-beads-dolt/beads/ws` as its backup and sync point. A cloud session works on a replica: run `CLOUD_BEADS=1 bash .claude/hooks/beads-start.sh` first and `CLOUD_BEADS=1 bash .claude/hooks/beads-stop.sh` last. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md
+**Architecture in one line:** issues live on a Dolt server, with `s3://bunnyufo-beads-dolt/beads/ws` as its backup and sync point. A cloud session works on a replica: run `CLOUD_BEADS=1 bash scripts/beads-cloud/beads-start.sh` first and `CLOUD_BEADS=1 bash scripts/beads-cloud/beads-stop.sh` last. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md
 
 ## Agent Context Profiles
 
@@ -195,5 +195,5 @@ bd prime                # Refresh Beads context
 - Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
 - Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
 
-**Architecture in one line:** issues live on a Dolt server, with `s3://bunnyufo-beads-dolt/beads/ws` as its backup and sync point. A cloud session works on a replica: run `CLOUD_BEADS=1 bash .claude/hooks/beads-start.sh` first and `CLOUD_BEADS=1 bash .claude/hooks/beads-stop.sh` last. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md
+**Architecture in one line:** issues live on a Dolt server, with `s3://bunnyufo-beads-dolt/beads/ws` as its backup and sync point. A cloud session works on a replica: run `CLOUD_BEADS=1 bash scripts/beads-cloud/beads-start.sh` first and `CLOUD_BEADS=1 bash scripts/beads-cloud/beads-stop.sh` last. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md
 <!-- END BEADS CODEX SETUP -->
