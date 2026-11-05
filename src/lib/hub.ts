@@ -459,7 +459,9 @@ export const appUrl = (value: string | undefined): string | undefined => (value 
 export interface ChatImage { file: string; type: string; width: number; height: number }
 /** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
 export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; model?: string; persona?: string }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string }
+/** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
+export interface ChatDelegate { id: string; index?: number; count?: number; goal: string; state: 'running' | 'done' | 'failed' | 'unknown'; summary?: string; seconds?: number }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }
 /** An agent a new chat may talk to instead of Hermes: the id is all the page ever sends. */
 export interface ChatPersona { id: string; name: string; role: string; /** The Spawn preset this agent takes; none for an agent that only chats (the Planner). */ preset?: string; /** the model id this agent's chat starts on */ model?: string }

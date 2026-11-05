@@ -685,6 +685,86 @@ test('runs on: a new turn in a conversation whose reply is still being written i
   } finally { await close(); }
 });
 
+test('runs on: reading a conversation says a reply is still coming, and stops saying so only once it is saved', async () => {
+  const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'first', /Working/);
+    turn.controller.abort();
+    const early = await call('GET', `/hub/chat/${turn.conversation}`);
+    assert.equal(early.status, 200, 'A new chat has no file yet, and is not a 404 while its reply comes.');
+    assert.deepEqual(await early.json(), { id: turn.conversation, messages: [], running: true, run: turn.run });
+    const other = await call('GET', `/hub/chat/${turn.conversation}`, undefined, { 'Remote-User': 'someone-else', Origin: 'https://site.example' });
+    assert.equal((await other.json()).run, null, 'Only who started it gets the run to stop.');
+    upstream.release(turn.run, 'Working. Done.');
+    for (let tries = 0; ; tries += 1) {
+      const answer = await (await call('GET', `/hub/chat/${turn.conversation}`)).json();
+      if (!answer.running) {
+        assert.equal(answer.messages.at(-1).role, 'assistant', 'Not running means saved.');
+        assert.equal(answer.run, undefined);
+        break;
+      }
+      assert.ok(tries < 200);
+      await new Promise(resolve => setTimeout(resolve, 15));
+    }
+    assert.equal((await call('GET', '/hub/chat/20200101-zzzzzz')).status, 404, 'A conversation nobody started is still a 404.');
+    assert.equal(lines(fake, turn.conversation).length, 2);
+  } finally { await close(); }
+});
+
+const DELEGATE_GOALS = ['Read the mood board', 'Read the scenery cards'];
+const DELEGATE_BATCH = `[ASYNC DELEGATION BATCH COMPLETE — deleg_fake]\nFinished.\n\n--- ✓ TASK 1/2: Read the mood board  (status=completed, api_calls=3, 64.2s) ---\nDusk colours.\n\n--- ✗ TASK 2/2: Read the scenery cards  (status=error, 11s) ---\n(error: gone)`;
+
+test('runs on: a delegate_task streams what it started and saves it on the reply, while a list call saves nothing', async () => {
+  const { fake, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Started. ', { delegate: { goals: DELEGATE_GOALS } }, { delegateDone: { index: 0, summary: 'Early result.' } }] } });
+  try {
+    const turn = await chat(call, { text: 'review it' });
+    const stream = turn.events.filter(item => item.event === 'delegates').map(item => item.data.items);
+    assert.ok(stream.length >= 2);
+    assert.deepEqual(stream[0].map(item => [item.goal, item.state]), DELEGATE_GOALS.map(goal => [goal, 'running']));
+    const saved = lines(fake, turn.events.at(-1).data.conversation)[1];
+    assert.deepEqual(saved.tools, ['delegate_task']);
+    assert.deepEqual(saved.delegates.map(item => [item.goal, item.state, item.summary]), [[DELEGATE_GOALS[0], 'done', 'Early result.'], [DELEGATE_GOALS[1], 'running', undefined]]);
+  } finally { await close(); }
+  const quiet = await fixture({ env: RUNS, hermes: { runScript: ['Nothing new. ', { tool: 'delegate_task', preview: 'list' }] } });
+  try {
+    const turn = await chat(quiet.call, { text: 'anything running?' });
+    assert.equal(turn.events.filter(item => item.event === 'delegates').length, 0);
+    assert.equal(lines(quiet.fake, turn.events.at(-1).data.conversation)[1].delegates, undefined);
+  } finally { await quiet.close(); }
+});
+
+test('runs on: results Hermes saves after the run reach the reply when the conversation is read, once, and stay when Hermes is gone', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Started.', { delegate: { goals: DELEGATE_GOALS } }] } });
+  try {
+    const turn = await chat(call, { text: 'review it' });
+    const id = turn.events.at(-1).data.conversation;
+    const run = upstream.runs[0].id;
+    const read = async () => (await (await call('GET', `/hub/chat/${id}`)).json()).messages[1].delegates;
+    assert.deepEqual((await read()).map(item => item.state), ['running', 'running']);
+    upstream.deliver(run, 'A note that is not a result.');
+    assert.deepEqual((await read()).map(item => item.state), ['running', 'running']);
+    upstream.deliver(run, DELEGATE_BATCH);
+    const settled = await read();
+    assert.deepEqual(settled.map(item => [item.state, item.summary, item.seconds]), [['done', 'Dusk colours.', 64], ['failed', '(error: gone)', 11]]);
+    assert.deepEqual(lines(fake, id)[1].delegates, settled, 'Saved back.');
+    assert.equal(lines(fake, id).length, 2);
+    upstream.forget(run);
+    assert.deepEqual(await read(), settled);
+  } finally { await close(); }
+});
+
+test('runs on: a Hermes that does not answer leaves the delegates running and the conversation readable', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Started.', { delegate: { goals: DELEGATE_GOALS } }] } });
+  try {
+    const turn = await chat(call, { text: 'review it' });
+    const id = turn.events.at(-1).data.conversation;
+    upstream.forget(upstream.runs[0].id);
+    const answer = await call('GET', `/hub/chat/${id}`);
+    assert.equal(answer.status, 200);
+    assert.deepEqual((await answer.json()).messages[1].delegates.map(item => item.state), ['running', 'running']);
+  } finally { await close(); }
+});
+
 test('runs on: Stop ends the run through its own route, which needs a signed-in user and a run this relay is carrying', async () => {
   const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
   try {

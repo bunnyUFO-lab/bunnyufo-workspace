@@ -10,10 +10,13 @@
 //   hermes.release(id, output?)  ends a run held by a `{ hold: true }` step as completed
 //   hermes.go(name)     opens the gate `{ until: name }` for every run, now or later (it stays open)
 //   hermes.forget(id)   drops one run, as a Hermes restart would (status and events answer 404)
+//   hermes.deliver(id, content)  saves a message in the run's session, as Hermes saves a delegate batch's results after the run; `GET /api/sessions/:id/messages` answers them
 // Options for runs:
 //   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms?, until? } (ms: how long the step runs before it completes; until: 'name' keeps it running until `hermes.go('name')`, for a test that must see it running however slow the PC) | { approval: { command?, description? } }
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
 //                  | { until: 'name' } (waits for `hermes.go('name')`: a step the test releases, not a delay a slow PC can overrun)
+//                  | { delegate: { goals, id?, started? } } (a background delegate_task: the tool lines, its handle cut to 500 characters as Hermes cuts it, and `subagent.start` per goal unless started is false)
+//                  | { delegateDone: { index, status?, summary?, id? } } (`subagent.complete`)
 //                  | { end: 'output' } | { fail: 'error text' }. Default: the `chunks` as deltas.
 //   refuseSteer    POST /v1/runs/:id/steer always answers 409 steer_not_accepted
 //   steerMissing   the steer route answers 404 not_found (an older Hermes without it)
@@ -69,6 +72,7 @@ export async function startFakeHermes({
   const steers = [];
   const byId = new Map();
   const byKey = new Map();
+  const sessions = new Map();
 
   const emit = (run, event, fields = {}) => {
     if (TERMINAL.has(run.status)) return null; // a finished run emits nothing more (an interrupt ends it from outside)
@@ -160,6 +164,20 @@ export async function startFakeHermes({
         if (step.until !== undefined) while (!gates.has(step.until) && !run.stopped) await pause(run, 20); // held until the test says so
         if (run.stopped) break;
         emit(run, 'tool.completed', { tool: step.tool, duration: 0, error: Boolean(step.error), tool_call_id: id, preview: '' });
+        continue;
+      }
+      if (step.delegate) {
+        const { goals, id: delegation = 'deleg_fake', started = true } = step.delegate;
+        const call = `toolu_${randomBytes(8).toString('hex')}`;
+        const handle = JSON.stringify({ status: 'dispatched', mode: 'background', count: goals.length, delegation_id: delegation, goals });
+        emit(run, 'tool.started', { tool: 'delegate_task', preview: `${goals.length} tasks`, tool_call_id: call });
+        emit(run, 'tool.completed', { tool: 'delegate_task', duration: 0, error: false, tool_call_id: call, preview: handle.length > 500 ? `${handle.slice(0, 497)}...` : handle });
+        if (started) goals.forEach((goal, index) => emit(run, 'subagent.start', { preview: goal, goal, task_index: index, task_count: goals.length, subagent_id: `sa-${index}-${delegation}`, tool_count: 0 }));
+        continue;
+      }
+      if (step.delegateDone) {
+        const { index = 0, status = 'completed', summary = 'Done.', id: delegation = 'deleg_fake' } = step.delegateDone;
+        emit(run, 'subagent.complete', { preview: summary.slice(0, 160), task_index: index, subagent_id: `sa-${index}-${delegation}`, delegation_id: delegation, status, summary: summary.slice(0, 500), duration_seconds: 12.4, tool_count: 3 });
         continue;
       }
       if (step.approval) {
@@ -301,6 +319,11 @@ export async function startFakeHermes({
     if (fail) { response.writeHead(500); return response.end('{"error":"boom"}'); }
     const url = new URL(request.url, 'http://fake');
     if (url.pathname === '/v1/runs' || url.pathname.startsWith('/v1/runs/')) return handleRuns(request, response, url, raw);
+    const session = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+    if (session && request.method === 'GET') {
+      if (!byId.has(session[1])) return json(response, 404, { error: { message: 'Session not found', code: 'session_not_found' } });
+      return json(response, 200, { object: 'list', session_id: session[1], data: sessions.get(session[1]) ?? [] });
+    }
     if (request.method === 'POST' && request.url === '/v1/chat/completions') {
       const body = JSON.parse(raw.toString('utf8'));
       if (body.stream !== true) { response.writeHead(400); return response.end('{"error":"stream must be true"}'); }
@@ -331,6 +354,7 @@ export async function startFakeHermes({
     go: name => { gates.add(name); },
     release: (id, output) => { const run = byId.get(id); run.released = { output }; wakeAll(run); },
     forget: id => { byId.delete(id); },
+    deliver: (id, content) => { sessions.set(id, [...(sessions.get(id) ?? []), { role: 'user', content, display_kind: 'async_delegation_complete' }]); },
     // A gateway shutdown: a live run ends `interrupted` (event run.interrupted), as Hermes does.
     interrupt: id => {
       const run = byId.get(id);

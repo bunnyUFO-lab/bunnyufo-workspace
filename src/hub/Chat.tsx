@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatLine, ChatModel, ChatPersona, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatDelegate, ChatLine, ChatModel, ChatPersona, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
@@ -8,6 +8,7 @@ import { hubHash, parseHelpId, reviewHash } from '../lib/route'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
+import { elapsedLabel } from './runLines'
 import { StreamCut, plainText, streamChat } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
@@ -24,6 +25,7 @@ import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
 import { AgentSprite } from './team/AgentSprite'
 import { chooseModel, pauseNote, type ChatPause } from './chatModel'
+import { MAX_MISSES, hasRunningDelegate, nextLookMs, replySaved, sameLines, type ChatAnswer } from './chatWatch'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
 
 const READ_KEY = 'buw.hub.readAloud'
@@ -69,6 +71,39 @@ function ToolLines({ tools }: { tools: ChatTool[] }) {
   return (
     <div className="hub-tools" data-tools>
       {tools.map(tool => <span className="hub-tool" key={tool.id || tool.name} data-state={tool.state} data-tool={tool.name}>{tool.name}{tool.summary ? ` ${tool.summary}` : ''}</span>)}
+    </div>
+  )
+}
+
+const DELEGATE_TOOL = 'delegate_task'
+const DELEGATE_LABEL: Record<ChatDelegate['state'], string> = { running: 'Running', done: 'Finished', failed: 'Failed', unknown: 'No result' }
+const DELEGATE_NOTE: Partial<Record<ChatDelegate['state'], string>> = {
+  running: 'The result shows here when it finishes.',
+  failed: 'Hermes gave no reason.',
+  unknown: 'No result reached the Hub in two hours. Hermes may have restarted, so ask it here.',
+}
+
+function DelegateCard({ delegate }: { delegate: ChatDelegate }) {
+  const [open, setOpen] = useState(false)
+  const note = DELEGATE_NOTE[delegate.state]
+  return (
+    <div className="hub-delegate" data-delegate={delegate.id} data-state={delegate.state}>
+      <button type="button" className={`hub-delegate-goal${open ? ' open' : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)} data-delegate-goal>{delegate.goal || 'Hermes did not send the goal.'}</button>
+      <span className="hub-delegate-state" data-delegate-state>{DELEGATE_LABEL[delegate.state]}{delegate.seconds !== undefined ? ` · ${elapsedLabel(delegate.seconds * 1000)}` : ''}</span>
+      {delegate.summary
+        ? <details className="hub-delegate-result" data-delegate-result><summary>Result</summary><Md text={delegate.summary} onSameOrigin={openSameOrigin} copy breaks /></details>
+        : note && <span className="hub-muted hub-delegate-note">{note}</span>}
+    </div>
+  )
+}
+
+/** What `delegate_task` started: each delegate's goal, how far it is, and its result. */
+function Delegates({ items }: { items: ChatDelegate[] }) {
+  if (!items.length) return null
+  return (
+    <div className="hub-delegates" data-delegates role="group" aria-label="Delegates Hermes started">
+      <span className="hub-muted hub-delegates-head">Hermes started {items.length === 1 ? 'a delegate' : `${items.length} delegates`}</span>
+      {items.map(delegate => <DelegateCard key={delegate.id} delegate={delegate} />)}
     </div>
   )
 }
@@ -170,7 +205,8 @@ function Bubble({ line, conversation, models, who, agents }: { line: Shown; conv
           {urls.map((url, index) => <HubImage key={url} url={url} open className="hub-bubble-image" alt={`Picture ${index + 1}`} />)}
         </div>
       )}
-      {line.tools && line.tools.length > 0 && <ToolLines tools={line.tools.map(name => ({ id: name, name, state: 'done' as const }))} />}
+      {line.tools && line.tools.length > 0 && <ToolLines tools={line.tools.filter(name => name !== DELEGATE_TOOL || !line.delegates?.length).map(name => ({ id: name, name, state: 'done' as const }))} />}
+      {line.delegates && <Delegates items={line.delegates} />}
       {line.created && line.created.length > 0 && <Created items={line.created} />}
       {line.role === 'assistant' && line.model && line.model !== AUTO && <span className="hub-muted hub-bubble-model" data-bubble-model>{nameOf(models, line.model)}</span>}
     </div>
@@ -197,6 +233,13 @@ let carried: { id: string; lines: Shown[]; model: string; persona: string } | nu
 const carry = (id: string, lines: Shown[], model: string, persona: string) => { carried = { id, lines, model, persona } }
 
 const isPicture = (file: File) => file.type.startsWith('image/')
+
+/** A reply whose stream broke: what to show if it never gets saved. */
+interface CutTurn { text: string; sentAt: string; fallback: Shown[]; previews: string[]; model: string; persona: string }
+
+const CUT_NOTE = 'The connection dropped. Hermes is still working, and the reply shows here when it is saved.'
+const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is saved.'
+const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
 function ChatView({ id }: { id?: string }) {
   const help = parseHelpId(id)
@@ -229,6 +272,10 @@ function ChatView({ id }: { id?: string }) {
   const [error, setError] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [tools, setTools] = useState<ChatTool[]>([])
+  const [delegates, setDelegates] = useState<ChatDelegate[]>([])
+  const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
+  const [note, setNote] = useState<string | null>(null)
+  const cutTurn = useRef<CutTurn | null>(null)
   const [approval, setApproval] = useState<ChatApproval | null>(null)
   const [drawer, setDrawer] = useState(false)
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
@@ -248,8 +295,12 @@ function ChatView({ id }: { id?: string }) {
   useEffect(() => {
     if (!id || initial || help) return undefined
     let stopped = false
-    hubGet<{ messages: ChatLine[] }>(`/chat/${encodeURIComponent(id)}`)
-      .then(answer => { if (!stopped) { setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES) } })   // model: an old chat opens on its last choice
+    hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
+      .then(answer => {
+        if (stopped) return
+        setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
+        if (answer.running) { run.current = answer.run ?? null; setPending(''); setStreaming(true); setNote(REOPEN_NOTE); setRecovering(true) }   // opened while the reply is still coming
+      })
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
   }, [id, initial, help])
@@ -259,6 +310,65 @@ function ChatView({ id }: { id?: string }) {
     const made = urls.current
     return () => { abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
   }, [speaks])
+
+  // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
+  // page returns to the front, because a phone stops timers in the background.
+  const watching = recovering || (!streaming && hasRunningDelegate(messages))
+  const reloadList = list.reload
+  useEffect(() => {
+    const name = conversation.current
+    if (!watching || !name) return undefined
+    let stopped = false
+    let looking = false
+    let misses = 0
+    let timer: number | undefined
+    const began = Date.now()
+    const land = (lines: Shown[], problem: string | null) => {
+      const turn = cutTurn.current
+      cutTurn.current = null
+      setMessages(lines)
+      setPending(null)
+      setDelegates([])
+      setStreaming(false)
+      setRecovering(false)
+      setNote(null)
+      setError(problem)
+      setShownId(name)
+      reloadList()
+      if (problem) return
+      turn?.previews.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
+      if (name !== id) { carry(name, lines, turn?.model ?? AUTO, turn?.persona ?? HERMES); window.location.assign(hubHash('chat', name)) }
+    }
+    const missed = () => {
+      misses += 1
+      if (misses < MAX_MISSES) return
+      if (cutTurn.current) land(cutTurn.current.fallback, LOST_NOTE)
+      else { setPending(null); setStreaming(false); setRecovering(false); setNote(null) }
+    }
+    const look = async () => {
+      if (stopped || looking) return
+      looking = true
+      window.clearTimeout(timer)
+      try {
+        const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
+        if (stopped) return
+        if (!recovering) setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+        else if (answer.running) { if (answer.run) run.current = answer.run }
+        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
+        else missed()
+      } catch (failure) {
+        if (recovering && failure instanceof HubError && failure.status === 404) missed()   // anything else: offline for now, so look again
+      } finally {
+        looking = false
+      }
+      if (!stopped) timer = window.setTimeout(() => void look(), nextLookMs(recovering, Date.now() - began))
+    }
+    const onFront = () => { if (document.visibilityState === 'visible') void look() }
+    document.addEventListener('visibilitychange', onFront)
+    window.addEventListener('online', onFront)
+    timer = window.setTimeout(() => void look(), recovering ? 1000 : nextLookMs(false, 0))
+    return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onFront); window.removeEventListener('online', onFront) }
+  }, [watching, recovering, id, reloadList])
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
@@ -336,6 +446,7 @@ function ChatView({ id }: { id?: string }) {
     setStreaming(true)
     if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
     setTools([])
+    setDelegates([])
     setApproval(null)
     setPending('')
     const before = messages
@@ -357,6 +468,7 @@ function ChatView({ id }: { id?: string }) {
     let cut = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
     const used: string[] = []
+    let started: ChatDelegate[] = []
     try {
       const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
       const gone = !!help && !!preview.error && preview.data === null
@@ -367,6 +479,7 @@ function ChatView({ id }: { id?: string }) {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
         },
+        onDelegates: items => { started = items; setDelegates(items) },
         onStarted: (id, name) => {
           run.current = id
           if (name) conversation.current = name   // a resend joins this conversation, not a second one
@@ -397,11 +510,21 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(created.length ? { created } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
+    // Hermes goes on without the page, so the reply comes from the saved chat: the turn stays open until it is there.
+    if (cut && conversation.current) {
+      cutTurn.current = { text, sentAt: optimistic.at, fallback: lines, previews, model: askedModel, persona: askedPersona }
+      setTools([])
+      setApproval(null)
+      setNote(CUT_NOTE)
+      setRecovering(true)
+      return
+    }
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
     setTools([])
+    setDelegates([])
     setApproval(null)
     setStreaming(false)
     if (swapped) release(previews)
@@ -486,11 +609,13 @@ function ChatView({ id }: { id?: string }) {
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
               {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}
-              <ToolLines tools={tools} />
+              <ToolLines tools={delegates.length ? tools.filter(tool => tool.name !== DELEGATE_TOOL) : tools} />
+              <Delegates items={delegates} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}
             </div>
           )}
         </div>
+        {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {(images.length > 0 || preparing > 0 || trayNote) && (
           <div className="hub-tray" data-tray>
