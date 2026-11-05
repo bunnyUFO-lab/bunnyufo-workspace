@@ -257,7 +257,8 @@ export default function ProjectPage({ route }: { route?: string }) {
   )
   const hidden = more.map(key => TAB_LABEL[key] + numbered(key))
   const held = moreCount(more, counts)
-  const side = wide && tab === 'roadmap' && running
+  // The side panel of Running takes the room the sheet needs, so it steps aside while a sheet is open.
+  const side = wide && tab === 'roadmap' && !shown && running
   return (
     <div className="pp today" data-project-page={project} data-sheet={shown ? '' : undefined}>
       <header className="pp-head">
