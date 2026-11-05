@@ -4,10 +4,15 @@
 const clip = (value, length) => String(value ?? '').slice(0, length);
 const flat = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
-/** `assistant/<folder>` from the last `CARD:` line of the output, or null. */
-export function cardOf(output) {
-  const matches = [...String(output ?? '').matchAll(/^[ \t]*CARD:[ \t]*(assistant\/[A-Za-z0-9._-]+)[ \t]*$/gm)];
-  return matches.length ? matches.at(-1)[1] : null;
+/**
+ * `<section>/<folder>` from the last `CARD:` line of the output that names one of `sections`, or null. The caller passes the
+ * sections the run may write: `assistant`, and the signed project. A line naming any other section is not trusted, so an earlier
+ * good line can still count.
+ */
+export function cardOf(output, { sections = ['assistant'] } = {}) {
+  const matches = [...String(output ?? '').matchAll(/^[ \t]*CARD:[ \t]*([a-z0-9][a-z0-9-]*\/[A-Za-z0-9._-]+)[ \t]*$/gm)]
+    .map(match => match[1]).filter(card => sections.includes(card.split('/')[0]) && !/^\.{1,2}$/.test(card.split('/')[1]));
+  return matches.length ? matches.at(-1) : null;
 }
 
 /**
@@ -15,9 +20,9 @@ export function cardOf(output) {
  * Markdown emphasis and trailing space removed: it must end in `?` and be at most 600 characters. A `CARD:` line always
  * wins, so callers check `cardOf` first. Chat turns never use this rule.
  */
-export function questionOf(output) {
+export function questionOf(output, { sections } = {}) {
   const text = String(output ?? '').trim();
-  if (!text || cardOf(text)) return null;
+  if (!text || cardOf(text, { sections })) return null;
   const last = text.split(/\r?\n[ \t]*\r?\n/).at(-1) ?? '';
   const plain = last.replace(/[*_`~]+/g, '').replace(/\s+/g, ' ').trim();
   return plain.endsWith('?') && plain.length <= 600 ? plain : null;
@@ -33,16 +38,17 @@ export const isQuotaError = error => /429|quota/i.test(String(error ?? ''));
  * @param timedOut the follower stopped it at the time limit
  * @param retried  this is the one retry on Anthropic after a quota failure
  * @param at       an ISO time
+ * @param sections the sections a `CARD:` line may name (default: assistant)
  */
-export function outcomeOf({ run, stopped = false, timedOut = false, retried = false, at }) {
+export function outcomeOf({ run, stopped = false, timedOut = false, retried = false, at, sections }) {
   const output = String(run.output ?? '');
   const usage = run.usage && Object.keys(run.usage).length ? { ...run.usage, ...(run.runtime?.requested ? { requested: run.runtime.requested } : {}) } : undefined;
   const base = { v: 1, by: 'hub', at, ...(usage ? { usage } : {}) };
   if (timedOut && run.status !== 'completed') return { ...base, outcome: 'failed', reason: 'time-limit', summary: 'The run reached its time limit and was stopped.' };
   if (run.status === 'completed') {
-    const card = cardOf(output);
+    const card = cardOf(output, { sections });
     if (card) return { ...base, outcome: 'card', card, summary: clip(output, 500) };
-    const question = questionOf(output);
+    const question = questionOf(output, { sections });
     if (question) return { ...base, outcome: 'question', question, summary: clip(output, 500) };
     return { ...base, outcome: 'failed', summary: 'Hermes finished without a card.' };
   }
@@ -64,6 +70,12 @@ export function unknownOutcome({ card, at }) {
 
 /** The result when a run could not be started at all. */
 export const startFailedOutcome = ({ reason, at }) => ({ v: 1, outcome: 'failed', reason: 'start-failed', summary: `Hermes did not start: ${flat(reason, 300) || 'no reason given'}`, by: 'hub', at });
+
+/**
+ * The result when the first run started, hit the plan's quota, and only the retry on Anthropic could not start. Not `start-failed` (the run did
+ * start) and not `usage-limit` (`routines.mjs` reads that as a cloud pause signal).
+ */
+export const retryFailedOutcome = ({ at }) => ({ v: 1, outcome: 'failed', reason: 'retry-failed', summary: 'Codex quota reached; the retry on Anthropic could not start.', by: 'hub', at });
 
 /** `report.md` is the run's output, at most 256 KB. */
 export const reportOf = output => clip(output, 256 * 1024);

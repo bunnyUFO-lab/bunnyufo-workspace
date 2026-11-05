@@ -107,12 +107,36 @@ What it does:
 3. Merges the bucket's card list into the local one first, so cards made on the site are kept
    and their folders come down.
 4. Uploads what changed here, brings down what changed on the site, and deletes what was removed
-   here. A file changed in both places is left alone and reported; `--force` uploads this
-   folder's copy anyway. The site serves the bucket, so the card is live when the command returns.
+   here. Every upload and delete is conditional on what the bucket held when it was listed, so a
+   change written to the bucket meanwhile is never overwritten. A file changed in both places is
+   left alone and reported (see below); `--force` uploads this folder's copy anyway. The site
+   serves the bucket, so the card is live when the command returns.
 
 Telling "changed here" from "changed on the site" needs a record of the last sync, which publish
-and pull keep in the workspace's `.buw/sync.json`. Before a workspace has one, this folder's copy
-wins, except where the bucket's copy is newer, which is reported instead.
+and pull keep in the workspace's `.buw/sync.json`. Only on a true first sync (no record for this
+bucket place at all) does this folder's copy win, except where the bucket's copy is newer, which is
+reported instead. With any record, a file that differs from the bucket and has no entry in it is a
+conflict, whichever is newer. A card published alone with `--card` builds a partial record, so a
+later whole-workspace publish can report a differing `_shared/` file once; settle it with `--force`.
+
+### When a publish reports a conflict
+
+The conflicting file is left alone, the rest of the publish goes ahead, and the site's copy is
+saved under `.buw/conflicts/<path>` in the workspace (never uploaded; a dry run saves nothing). The
+report lists both ways to settle each file:
+
+```bash
+npm run publish -- --content <id> --path "hub/index.md" --force          # keep this folder's
+npm run publish -- --content <id> --path "hub/index.md" --pull --force   # keep the site's
+```
+
+Copying the saved file over the local one and publishing also works. Settling a file clears its
+saved copy; a publish of one card never clears another card's. A named `--pull --force` leaves
+`workspace.json` alone. The exit code is **2** when a real publish left conflicts (the rest went
+up), 1 for an error and 0 otherwise; a dry run with conflicts exits 0.
+
+A file deleted here is deleted from the bucket only while the bucket still holds the version that
+was last synced. If it changed on the site meanwhile it stays, and comes down on the next publish.
 
 It needs AWS credentials that can write the bucket: the aws CLI's default profile
 (`~/.aws/credentials`), or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment.
@@ -175,6 +199,12 @@ A section whose `workspace.json` carries `"hidden": true` holds data, not cards 
 `/sites.json` lists it with `hidden: true` and `/w/<id>/…` serves it, but the switcher and the
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
+
+A card API token whose `write` list holds `@library` may add cards and tabs (never delete) to any section that has a card list
+and is not hidden, archived or an inbox, with a name, a reason and conditional writes; each write leaves a record in the
+inbox. The owner's off-list is `library-writes.json` at the root of the inbox. See `site/card-api/README.md`, "The `@library` right".
+`npm run publish` skips a key on the site that is not a safe path on this PC (a backslash, a colon, a device name, a trailing
+dot or space) and says `left on the site: <key> is not a safe path here`; it never writes or deletes it.
 
 A small service (`site/api`, container `buw-site-api`, port 8099) is the only thing that reads
 it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and `/api/*` to it:
@@ -452,10 +482,13 @@ Hermes runs (`hermes-dispatch.mjs`, `hermes-follower.mjs`, `hermes-runs.mjs`, `r
 `hermes` request writes `taken.json` (`runner: hermes`), starts a run with `{ input: run.brief }` and the request id
 as idempotency key (no provider, no model: Hermes's own default and fallback chain apply), writes
 `hermes-run.json`, and follows the run in the site API process, so `report.md` and `result.json` are written even
-with no page open. A run that ends `completed` with a `CARD: assistant/<folder>` line is outcome `card`; without
-one it is `failed` ("finished without a card"). When Hermes drops a run's event buffer (a few minutes after the last
+with no page open. A run that ends `completed` with a `CARD: <section>/<folder>` line is outcome `card`; without
+one it is `failed` ("finished without a card"). The section is `assistant`, or the project's own section when the Hub signed that
+(`cardSectionOf` in `hub.mjs`, at approval: the project's section if it is a Library section that agent cards are not turned off for,
+else `assistant`; on the development copy only a `dev-` section). The brief carries `{{cardSection}}` and `--agent/--why/--context job:<id>`,
+filled from the Hub's choice and never from request text. A `CARD:` line naming any other section is not trusted. The brief and the chat personas (`CARD_WRITE` in `site/api/presets.mjs`) also tell the agent to prefer a new tab: an existing script file (`.js`, `.mjs`, `.cjs`, `.wasm`) cannot be edited by an agent, and editing an owner's HTML tab turns off that tab's saving until the owner reverts it. A chat persona picks the section from the chat (the project it is about, else `assistant`) and says which and why in `--why`. When Hermes drops a run's event buffer (a few minutes after the last
 reader) the follower polls the status instead; only a 404 on the status ends the request `unknown`
-(`hermes-forgot`, pointing at the newest `assistant` card made after the start). A run that fails with `429` or
+(`hermes-forgot`, pointing at the newest card made after the start in `assistant` or the signed project's section). A run that fails with `429` or
 `quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`; a value naming Opus is refused with one log line and the default is used; key
 `<id>-retry`), recorded in `hermes-retry.json` (with `until` when the error named a reset time); a second quota failure is `failed` with reason `usage-limit`. The
 follower stops a run at `limits.minutes` (`time-limit`). At most 3 Hermes runs go at a time: a fourth approval is
@@ -479,7 +512,7 @@ prompt, so a replayed event writes nothing and pings nothing. `#needs-you` gets 
 has a result, or at `expiresAt`, because Hermes denies it on its own after 300 seconds.
 
 Run questions: Hermes clarify stays off, so a run asks by ending its output with a question. When a run is `completed`
-with no `CARD: assistant/<folder>` line and its last paragraph (after the last blank line, Markdown emphasis removed)
+with no trusted `CARD: <section>/<folder>` line and its last paragraph (after the last blank line, Markdown emphasis removed)
 ends in `?` and is at most 600 characters, `result.json` has outcome `question` with that `question` and a `summary` (the
 first 500 characters of the output); the state is `asking` and the request is a Needs you row of kind
 `run-question` ("Hermes asks"). A `CARD:` line always wins, and Chat turns never use this rule.
@@ -768,6 +801,40 @@ itself off after that).
   session carries "Open the session" when the session has a Remote Control link; without one it says "No phone link came
   with this session. Open the Claude app on <host>." An Ask a session files with `from.url` shows the same link.
 
+### Agent cards: who wrote what, Revert, and the setting
+
+An agent with the card API's `@library` right adds cards and tabs to Library sections (see `site/card-api/README.md`). The Hub shows
+every such write and lets the owner undo it. Nothing an agent does is a delete, and nothing Revert does is a delete either.
+
+- **Rows.** `GET /hub/card-writes?section=<s>[&folder=<f>][&limit=<n>]` reads the card API's records
+  (`card-writes/<section>/<folder>/<stamp>-<rand>.json` in the inbox) into up to 20 groups, newest first, grouped by the
+  write's `batch`. Only a record carrying the card API's writer mark is read. `agent`, `why` and `context` are what the agent
+  says; `token` is proven by the hash. The page shows them as text, never as HTML. A card page shows one line above it
+  (`Researcher added a tab · 2 h ago`, History) only when it has rows; History opens them. The project page's Library tab shows the
+  newest ten and a line saying whether agents may write there.
+- **Revert** (`POST /hub/card-writes/revert { section, folder, batch }`, owner signed in). It checks everything before it changes
+  anything, then restores files, then the card list:
+  - an edited file: the earlier version is read (`s3:GetObjectVersion`) and written again as a new current version with
+    `If-Match`; if the file changed after the write, 409 and nothing moves;
+  - a new tab: off the card's steps into `removedTabs` (the "+" form brings it back);
+  - a new card: into the Trash, restorable for 30 days;
+  - a file no tab shows stays in the folder and is listed as `skipped`.
+
+  It leaves `<stamp>-<rand>-revert.json` beside the records (no writer mark, so it is told apart from a record). A second Revert is
+  409. A failure midway stops there, says what went back and records `partial: true`. A publish from the PC keeps the result: a PC
+  that never saw the edit finds the bucket equal to its own file, one that pulled it takes the old text back, one that also changed
+  it gets the usual conflict with a saved copy, and a removed tab or a trashed card stays out of the list a publish writes.
+  Without the permission the Hub answers 503 `The Hub cannot read older versions yet.`; a version over 25 MB is 413.
+- **The setting.** `library-writes.json` at the root of the inbox, `{ v: 1, off: [section], at, by }`, written by the Hub with no
+  mark, only through `POST /hub/card-write-sections { section, on }` (or `{ save: true }`). Team shows a checkbox per Library
+  section and `assistant` locked on. It always saves an explicit list, because the card API's role may not be allowed to read a
+  missing key. Off reaches the card API within 30 s; cards already there stay. `GET /hub/card-write-sections` also says whether the
+  file is saved and whether it is unreadable (everything off until it is saved again).
+- **The development copy** reads and writes `inbox-dev` and refuses (403) a Revert or a setting for any section that does not start
+  with `dev-`; the real Hub lists no `dev-` section. `scripts/qa/card-writes-fixture.mjs` seeds and checks `dev-project-writes`
+  and refuses any other key.
+- **Not here:** a Revert of a write whose record failed (the card API logs those), and rows for a card moved to another section.
+
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,
@@ -840,6 +907,12 @@ through the **card API** (`site/card-api`, a SAM stack), which needs only a pass
 npm run cards -- get https://<your-site>/my-workspace#/my-card --into ./ws
 npm run cards -- put ./ws --section my-workspace --card my-card
 ```
+
+`put` removes nothing unless you pass `--remove`: a file gone from the folder stays in the section and is listed as kept
+(it used to be removed). In a project section an agent may only add to, `put` also takes `--agent`, `--why`,
+`--context chat|job:<id>` and `--edit` (a changed file needs `--edit` and the version `get` recorded in
+`.cards-base.json`); `cards sections` shows `write`, `add` or `read` for each section, and `cards request card <id>`
+prints the card a finished request made.
 
 Setup, where to put the passphrase for each kind of agent, and the routes are in
 [site/card-api/README.md](../site/card-api/README.md).

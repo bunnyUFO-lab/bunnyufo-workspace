@@ -227,6 +227,8 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     contentType: response.headers.get('content-type') || null,
     size: Number(response.headers.get('content-length')) || 0,
     lastModified: response.headers.get('last-modified') || null,
+    // Set when the bucket is versioned: the version this response is about (a PUT's answer names the one it made).
+    versionId: response.headers.get('x-amz-version-id') || null,
     // User metadata (`x-amz-meta-*`), by name: who wrote an object is recorded here, never in its body.
     metadata: Object.fromEntries([...response.headers.entries()].filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value])),
   });
@@ -242,6 +244,16 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     async head(key) {
       const response = await send('HEAD', key, { stream: true });
       return meta(response);
+    },
+    /** One earlier version of an object, as bytes (a Buffer); null when that version is not there. Needs `s3:GetObjectVersion`. */
+    async getVersion(key, versionId) {
+      try {
+        const response = await send('GET', key, { stream: true, query: { versionId } });
+        return { ...meta(response), buffer: Buffer.from(await response.arrayBuffer()) };
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
     },
     /** Whole object as text; null when it is not there. */
     async getText(key) {
@@ -300,8 +312,12 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
       if (tag(text, 'Code')) throw new S3Error(tag(text, 'Message') || 'Copy failed', { status: 502, code: tag(text, 'Code'), key: toKey });
       return { etag: (tag(text, 'ETag') || '').replace(/^"|"$/g, '') || null };
     },
-    async del(key) {
-      await send('DELETE', key);
+    /**
+     * Delete an object. `ifMatch` (an ETag) deletes it only while it still has that ETag: S3 answers
+     * 412 for a different one, 409 for a write racing the delete, and 404 when it is already gone.
+     */
+    async del(key, { ifMatch } = {}) {
+      await send('DELETE', key, ifMatch ? { headers: { 'if-match': `"${ifMatch}"` } } : undefined);
     },
     /**
      * Every object under a prefix (paginated through), and with a delimiter the "folders" too.

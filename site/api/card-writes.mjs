@@ -260,7 +260,8 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         await store.write('workspace.json', `${JSON.stringify(list, null, 2)}\n`, { ifMatch: got.etag });
         return result;
       } catch (error) {
-        if (error.status !== 412 || attempt >= retries) throw error;
+        // AWS can answer 409 as well as 412 for a write that raced another.
+        if ((error.status !== 412 && error.status !== 409) || attempt >= retries) throw error;
       }
     }
   }
@@ -416,6 +417,20 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
         card.updated = today(now());
         return { card, removed: step };
       });
+    },
+
+    /**
+     * Clear the `agentTab` mark on the step of the card in `folder` that shows `path`: Revert of an agent's edit to an owner's HTML page,
+     * which is the owner's page again. Nothing is written when the step is not there or is not marked.
+     */
+    async clearAgentTab({ folder, path: file }) {
+      return editList(async list => {
+        const card = list.entities.find(item => item?.folder === folder);
+        const step = Array.isArray(card?.steps) ? card.steps.find(item => item?.path === file) : null;
+        if (!step || step.agentTab !== true) return { cleared: false };
+        delete step.agentTab;
+        return { cleared: true };
+      }, { quiet: true });
     },
 
     /** Put a removed tab back where it was (or at the end if the card is shorter now). */

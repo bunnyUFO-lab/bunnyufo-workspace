@@ -48,7 +48,7 @@ const expired = (at, todayMs) => {
 };
 
 /** Names a workspace keeps for itself; a card's folder is never one of them. */
-const RESERVED = new Set(['card-responses', '_shared', 'workspace.json', 'state.json', 'sections', 'inbox']);
+export const RESERVED = new Set(['card-responses', '_shared', 'workspace.json', 'state.json', 'sections', 'inbox']);
 
 /** A folder name that is safe to delete under: ONE plain segment, nothing reserved, no way out. */
 export function safeFolder(folder) {
