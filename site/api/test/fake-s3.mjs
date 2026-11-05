@@ -29,7 +29,9 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     log.push({ method: request.method, key, headers: request.headers, prefix: url.searchParams.get('prefix') });
     if (name !== bucket) return error(response, 404, 'NoSuchBucket');
     // A test may make some keys fail with a storage error: `fake.fail = key => key.endsWith('x.json')`.
-    if (faults.fail?.(key, request.method)) return error(response, 500, 'InternalError');
+    // It may answer a status number instead (`fake.fail = (key, method, query) => query.has('versionId') && 403`).
+    const failed = faults.fail?.(key, request.method, url.searchParams);
+    if (failed) return error(response, typeof failed === 'number' ? failed : 500, failed === 403 ? 'AccessDenied' : 'InternalError');
 
     if (request.method === 'GET' && url.searchParams.get('list-type') === '2') {
       const prefix = url.searchParams.get('prefix') || '';

@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { bucketFor, exitCodeFor, publish, publishAll } from './publish.mjs';
 import { defaultScope, mergeCardList, safeKey, syncDown, syncUp } from './shared/s3-sync.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
+import { createHash } from 'node:crypto';
+import { createCardApi, parseTokens } from '../site/card-api/handler.mjs';
+import { createCardWrites } from '../site/api/hub-card-writes.mjs';
+import { inboxKey } from '../site/api/hub.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1211,5 +1215,119 @@ test('a key on the site that is not a safe path here is skipped, logged and neve
     const dryLines = [];
     await syncDown({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, dryRun: true, log: line => dryLines.push(line) });
     assert.equal(dryLines.filter(line => line.includes('not a safe path')).length, evil.length);
+  } finally { await fake.close(); }
+});
+
+// ---- Revert survives a publish from the PC (ws brief 2.5). The agent writes through the real card API handler; the Hub's Revert
+// runs over the same fake bucket; the PC then publishes. Nothing here touches a real bucket.
+const WHO = { 'x-card-agent': 'Researcher', 'x-card-why': encodeURIComponent('Notes for the owner') };
+const md5Of = text => createHash('md5').update(text).digest('hex');
+
+/** The card API with a `@library` token over the fake, and the Hub's Revert over the same bucket. */
+function agentWorld(fake, client) {
+  const sha = text => createHash('sha256').update(text).digest('hex');
+  let clock = 1_800_000_000_000;
+  const api = createCardApi({ bucket: client, tokens: parseTokens(`lib=${sha('tok')}:read=*;write=inbox|assistant|@library`), today: () => '2026-11-05', now: () => { clock += 1000; return clock; } });
+  const call = async (method, rawPath, body, headers) => {
+    const response = await api({ requestContext: { http: { method } }, rawPath, headers: { Authorization: 'Bearer tok', ...headers }, body });
+    assert.equal(response.statusCode, 200, response.body);
+    return JSON.parse(response.body);
+  };
+  const fail = (message, status) => Object.assign(new Error(message), { status });
+  const writes = createCardWrites({ bucket: client, key: rel => inboxKey(rel), fail, sections: async () => [], now: () => new Date(clock) });
+  return {
+    file: (file, text, headers) => call('PUT', `/sections/my-workspace/files/${file}`, text, { 'content-type': 'text/plain', ...WHO, ...headers }),
+    entry: (id, entity, batch) => call('PUT', `/sections/my-workspace/cards/${id}`, JSON.stringify(entity), { ...WHO, 'x-card-batch': batch }),
+    revert: (folder, batch) => writes.revert({ section: 'my-workspace', folder, batch }, 'owner'),
+  };
+}
+const EDIT_AS = (text, batch) => ({ 'if-match': `"${md5Of(text)}"`, 'x-card-context': 'chat', 'x-card-batch': batch });
+
+test('Revert, the PC never saw the edit: the bucket goes back to what the PC has, and the publish finds nothing to do', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const agent = agentWorld(fake, w.client);
+    await agent.file('hub/index.md', '# Hub, agent\n', EDIT_AS('# Hub\n', 'edit0000001'));
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub, agent\n');
+    await agent.revert('hub', 'edit0000001');
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub\n');
+    const result = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual([result.uploads, result.downloads, result.conflicts, result.deletes], [[], [], [], []]);
+    assert.ok(result.unchanged >= 1);
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub\n');
+  } finally { await fake.close(); }
+});
+
+test('Revert, the PC pulled the edit: the old text comes down on the next publish', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const agent = agentWorld(fake, w.client);
+    await agent.file('hub/index.md', '# Hub, agent\n', EDIT_AS('# Hub\n', 'edit0000001'));
+    await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub, agent\n', 'the PC has the edit');
+    await agent.revert('hub', 'edit0000001');
+    const result = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual(result.downloads, ['hub/index.md']);
+    assert.deepEqual(result.conflicts, []);
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub\n');
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub\n');
+  } finally { await fake.close(); }
+});
+
+test('Revert, the PC pulled the edit and changed it: a conflict with a saved copy, and nothing overwritten', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const agent = agentWorld(fake, w.client);
+    await agent.file('hub/index.md', '# Hub, agent\n', EDIT_AS('# Hub\n', 'edit0000001'));
+    await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    await agent.revert('hub', 'edit0000001');
+    const result = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual(result.conflicts, ['hub/index.md']);
+    assert.deepEqual(result.saved, ['hub/index.md']);
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub, desk\n', 'the desk text is kept');
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub\n', 'the site keeps the reverted text');
+    assert.equal(await readFile(copyOf(w.site)('hub/index.md'), 'utf8'), '# Hub\n');
+  } finally { await fake.close(); }
+});
+
+test('Revert a new tab the PC pulled: the tab stays off the published list, and the local list loses it', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const agent = agentWorld(fake, w.client);
+    const card = (await localList(w.site)).entities[0];
+    await agent.file('hub/notes.md', '# Agent notes\n', { 'if-none-match': '*', 'x-card-batch': 'tab00000001' });
+    await agent.entry('hub', { ...card, steps: [...card.steps, step('Agent notes', 'notes.md')] }, 'tab00000001');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.deepEqual((await localList(w.site)).entities[0].steps.map(item => item.path), ['index.md', 'notes.md'], 'the PC has the tab');
+    await agent.revert('hub', 'tab00000001');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.deepEqual(fake.json(LIST).entities[0].steps.map(item => item.path), ['index.md']);
+    assert.deepEqual(fake.json(LIST).entities[0].removedTabs.map(item => item.path), ['notes.md']);
+    assert.deepEqual((await localList(w.site)).entities[0].steps.map(item => item.path), ['index.md']);
+    assert.ok(fake.objects.has(`${KEY}hub/notes.md`), 'the file stays in the folder');
+  } finally { await fake.close(); }
+});
+
+test('Revert a new card the PC pulled: the card stays in the Trash and a publish does not add it back', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const agent = agentWorld(fake, w.client);
+    await agent.file('2026-11-05_agent/index.md', '# Agent card\n', { 'if-none-match': '*', 'x-card-batch': 'card0000001' });
+    await agent.entry('agent-card', { id: 'agent-card', title: 'Agent card', folder: '2026-11-05_agent', steps: [step('Notes', 'index.md')] }, 'card0000001');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.ok((await localList(w.site)).entities.some(item => item.id === 'agent-card'), 'the PC has the card');
+    await agent.revert('2026-11-05_agent', 'card0000001');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    const list = fake.json(LIST);
+    assert.deepEqual(list.entities.map(item => item.id), ['hub']);
+    assert.equal(list.retired['agent-card'].kind, 'deleted');
+    assert.ok(!(await localList(w.site)).entities.some(item => item.id === 'agent-card'), 'the local list drops it too');
   } finally { await fake.close(); }
 });

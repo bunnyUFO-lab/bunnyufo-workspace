@@ -795,6 +795,40 @@ itself off after that).
   session carries "Open the session" when the session has a Remote Control link; without one it says "No phone link came
   with this session. Open the Claude app on <host>." An Ask a session files with `from.url` shows the same link.
 
+### Agent cards: who wrote what, Revert, and the setting
+
+An agent with the card API's `@library` right adds cards and tabs to Library sections (see `site/card-api/README.md`). The Hub shows
+every such write and lets the owner undo it. Nothing an agent does is a delete, and nothing Revert does is a delete either.
+
+- **Rows.** `GET /hub/card-writes?section=<s>[&folder=<f>][&limit=<n>]` reads the card API's records
+  (`card-writes/<section>/<folder>/<stamp>-<rand>.json` in the inbox) into up to 20 groups, newest first, grouped by the
+  write's `batch`. Only a record carrying the card API's writer mark is read. `agent`, `why` and `context` are what the agent
+  says; `token` is proven by the hash. The page shows them as text, never as HTML. A card page shows one line above it
+  (`Researcher added a tab · 2 h ago`, History) only when it has rows; History opens them. The project page's Library tab shows the
+  newest ten and a line saying whether agents may write there.
+- **Revert** (`POST /hub/card-writes/revert { section, folder, batch }`, owner signed in). It checks everything before it changes
+  anything, then restores files, then the card list:
+  - an edited file: the earlier version is read (`s3:GetObjectVersion`) and written again as a new current version with
+    `If-Match`; if the file changed after the write, 409 and nothing moves;
+  - a new tab: off the card's steps into `removedTabs` (the "+" form brings it back);
+  - a new card: into the Trash, restorable for 30 days;
+  - a file no tab shows stays in the folder and is listed as `skipped`.
+
+  It leaves `<stamp>-<rand>-revert.json` beside the records (no writer mark, so it is told apart from a record). A second Revert is
+  409. A failure midway stops there, says what went back and records `partial: true`. A publish from the PC keeps the result: a PC
+  that never saw the edit finds the bucket equal to its own file, one that pulled it takes the old text back, one that also changed
+  it gets the usual conflict with a saved copy, and a removed tab or a trashed card stays out of the list a publish writes.
+  Without the permission the Hub answers 503 `The Hub cannot read older versions yet.`; a version over 25 MB is 413.
+- **The setting.** `library-writes.json` at the root of the inbox, `{ v: 1, off: [section], at, by }`, written by the Hub with no
+  mark, only through `POST /hub/card-write-sections { section, on }` (or `{ save: true }`). Team shows a checkbox per Library
+  section and `assistant` locked on. It always saves an explicit list, because the card API's role may not be allowed to read a
+  missing key. Off reaches the card API within 30 s; cards already there stay. `GET /hub/card-write-sections` also says whether the
+  file is saved and whether it is unreadable (everything off until it is saved again).
+- **The development copy** reads and writes `inbox-dev` and refuses (403) a Revert or a setting for any section that does not start
+  with `dev-`; the real Hub lists no `dev-` section. `scripts/qa/card-writes-fixture.mjs` seeds and checks `dev-project-writes`
+  and refuses any other key.
+- **Not here:** a Revert of a write whose record failed (the card API logs those), and rows for a card moved to another section.
+
 Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxKey()` in
 `hub.mjs` builds every key it uses. State is derived from the files that exist (an Ask with an
 `answer.json` is answered), never stored. The keys of `api.env` that belong to the Hub: `HUB`,
