@@ -27,7 +27,9 @@ async function fixture({ hermes = {}, refuseStarts = null } = {}) {
   const owner = { 'Remote-User': 'owner', Origin: 'https://site.example' };
   const servers = [];
   // Switches on Hermes's side of the wire: on (429 on every start), delay (ms before a start is sent), lose (Hermes takes the start, the answer is lost), ignoreStop (a stop is not passed on).
-  const refuse = { on: false, delay: 0, lose: false, ignoreStop: false };
+  const refuse = { on: false, delay: 0, lose: false, ignoreStop: false, slowSave: 0 };
+  const put = bucket.put.bind(bucket);
+  bucket.put = async (key, ...rest) => { if (refuse.slowSave && String(key).endsWith('.jsonl')) await wait(refuse.slowSave); return put(key, ...rest); };   // the lines of a reply take a moment to save
   const fetchImpl = async (url, init) => {
     const starts = init?.method === 'POST' && /\/v1\/runs$/.test(String(url));
     if (starts && refuse.delay) await wait(refuse.delay);
@@ -583,5 +585,43 @@ test('a long reply keeps its start: the run output wins over the events when it 
     await until(() => fake.text(`sections/inbox/chat/${turn.conversation}.jsonl`) && lines(fake, turn.conversation).length >= 2, 'the reply');
     assert.equal(lines(fake, turn.conversation)[1].text, 'The whole reply, with the part the buffer lost, and the tail only.');
     void call;
+  } finally { await close(); }
+});
+
+test('second look A: a Stop pressed while the reply is being saved holds the queue, though Hermes is not asked and the answer is a 404', async () => {
+  const { upstream, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [[{ hold: true }], ['Must not go.']] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await queue(call, turn.conversation, 'Wait.');
+    refuse.slowSave = 500;
+    upstream.release(turn.run, 'It finished.');
+    await until(async () => (await call('POST', '/hub/chat/stop', { run: turn.run })).status === 404, 'the reply to end');   // the Stop that came in the save window
+    refuse.slowSave = 0;
+    const held = await until(async () => { const answer = await read(call, turn.conversation); return answer.held ? answer : null; }, 'the hold');
+    assert.equal(held.held.reason, 'stopped');
+    await wait(150);
+    assert.equal(upstream.runs.length, 1, 'Nothing goes out after a Stop.');
+    assert.deepEqual(upstream.stops, [], 'Hermes was not asked to stop a finished run.');
+  } finally { await close(); }
+});
+
+test('second look B: when Hermes refuses a start, a message queued during it is held, and does not go out alone ahead of the first', async () => {
+  const { fake, upstream, hub, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [['Hi.'], ['Must not go.']] } });
+  try {
+    const first = await startTurn(origin, owner, { text: 'first' });
+    await until(() => fake.text(`sections/inbox/chat/${first.conversation}.jsonl`) && lines(fake, first.conversation).length >= 2, 'the first reply');
+    await until(async () => !(await read(call, first.conversation)).running, 'the end');
+    refuse.delay = 300;
+    refuse.on = true;   // Hermes refuses the next start, after 300 ms
+    const slow = fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: first.conversation, text: 'second' }) });
+    await wait(100);
+    assert.equal((await queue(call, first.conversation, 'queued during the refused start')).status, 201);
+    assert.equal((await slow).status, 502, 'The refused turn answers 502.');
+    const held = await until(async () => { const answer = await read(call, first.conversation); return answer.held ? answer : null; }, 'the hold');
+    assert.equal(held.held.reason, 'failed');
+    assert.deepEqual(held.queued.map(item => item.text), ['queued during the refused start']);
+    await hub.chat.sweep();
+    await wait(200);
+    assert.equal(upstream.runs.length, 1, 'It did not go out alone, ahead of the first.');
   } finally { await close(); }
 });

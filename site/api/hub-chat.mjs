@@ -540,7 +540,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       const emit = busFor(carried);
       if (!turn.run) { await startAndCarry({ id, carried, turn }); return; }
       let status;
-      try { status = await hermesRuns.get(turn.run); } catch { active.delete(carried.key); return; }   // Hermes is unreachable: the next sweep looks again
+      try { status = await hermesRuns.get(turn.run); } catch { active.delete(carried.key); emit('error', { error: 'Hermes did not answer; the Hub will look again.' }); return; }   // Hermes is unreachable: the next sweep looks again
       if (status === null) { await releaseTurn(id, carried, turn, 'lost'); return; }
       const started = Date.parse(turn.at) || Date.now();
       const choice = modelOf(turn.model);
@@ -659,6 +659,13 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (asking && carriedOf(id)) throw fail('Hermes is still answering in this conversation; wait for the reply.', 409);
     const carried = makeCarried({ key: turnKey, user, conversation: id, run: null, text, at: new Date(started).toISOString() });
     active.set(turnKey, carried);
+    /** The turn did not start: what was queued while it was being started is held, as after a failed reply, and anyone following it is told. */
+    const dropTurn = async message => {
+      await advanceQueue(id, carried, message).catch(() => {});
+      active.delete(turnKey);
+      busFor(carried)('error', { error: message });
+    };
+    try {   // not indented: whatever throws below, the entry must not outlive the turn
 
     const abort = new AbortController();
     let idle;
@@ -678,8 +685,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         carried.run = runId;
       } catch (error) {
         finish();
-        active.delete(turnKey);
-        throw fail(error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`, 502);
+        const message = error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`;
+        await dropTurn(message);
+        throw fail(message, 502);
       }
     } else try {
       upstream = await fetchImpl(`${hermesUrl}/v1/chat/completions`, {
@@ -690,12 +698,13 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       });
     } catch (error) {
       finish();
-      active.delete(turnKey);
-      throw fail(`Hermes did not answer (${error.name === 'AbortError' ? 'timed out' : 'unreachable'}).`, 502);
+      const message = `Hermes did not answer (${error.name === 'AbortError' ? 'timed out' : 'unreachable'}).`;
+      await dropTurn(message);
+      throw fail(message, 502);
     }
     if (!runTurn && (!upstream.ok || !upstream.body)) {
       finish();
-      active.delete(turnKey);
+      await dropTurn(`Hermes did not answer (${upstream.status}).`);
       let refusal = null;
       if (hasImages && [400, 413, 415].includes(upstream.status)) {
         const answer = await upstream.json().catch(() => null);
@@ -766,6 +775,15 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const saved = await saveTurn({ carried, id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit });
     // Only now: a page that reads `running: false` finds the reply saved, and a new turn cannot overtake it.
     await endTurn({ carried, response, emit, id, ...saved });
+    } finally {
+      // An unexpected throw must not leave the chat busy until the service restarts: hold the queue, tell followers, end the response.
+      if (active.get(turnKey) === carried) {
+        await advanceQueue(id, carried, 'The reply could not be finished.').catch(() => {});
+        active.delete(turnKey);
+        busFor(carried)('error', { error: 'The reply could not be finished.' });
+        if (response.headersSent && !response.writableEnded) response.end();
+      }
+    }
   }
 
   async function serveImage(response, id, file) {
@@ -892,8 +910,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const data = await readJson(request, 4096);
         const run = typeof data.run === 'string' ? data.run : '';
         const carried = carriedByRun(run);
-        if (!carried || carried.ending || carried.user !== (user ?? null)) throw fail('No such reply is running.', 404);   // a reply that has ended has nothing to stop
-        carried.stopAsked = true;
+        if (!carried || carried.user !== (user ?? null)) throw fail('No such reply is running.', 404);
+        carried.stopAsked = true;   // noted even when the reply is already ending: the queue behind it must not go out after a Stop
+        if (carried.ending) throw fail('No such reply is running.', 404);   // a reply that has ended has nothing to stop
         await hermesRuns.stop(run).catch(() => {});
         return json(response, 200, { stopped: true });
       }
