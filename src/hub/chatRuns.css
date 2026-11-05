@@ -23,3 +23,40 @@
 .hub-chat-approval pre { margin: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hub-chat-approval-a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 @media (max-width: 640px) { .hub-chat-approval-a .hub-btn { flex: 1 1 40%; } }
+/* Messages sent while a reply runs: dashed rows above the composer, until the Hub delivers them. */
+.hub-queue { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; max-height: 38vh; overflow-y: auto; }
+.hub-queued { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px dashed var(--hairline-strong); border-radius: var(--radius); background: transparent; min-width: 0; }
+.hub-queued.held { border-color: var(--amber); }
+.hub-queued-pill { align-self: flex-start; max-width: 100%; padding: 1px 8px; border-radius: var(--radius-pill); border: 1px solid var(--hairline-strong); font-size: 0.72rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.hub-queued.held .hub-queued-pill { border-color: var(--amber); color: var(--amber); }
+.hub-queued-text { margin: 0; font-size: 0.88rem; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.hub-queued-a { display: flex; flex-wrap: wrap; gap: 8px; }
+.hub-queued-a .hub-btn { min-height: 44px; min-width: 44px; }
+/* The composer keeps Attach, the field, Stop and Send on one line down to 360 px: the field never shrinks under 140 px. */
+.hub-compose > textarea { min-width: 140px; }
+.hub-compose > .hub-btn { flex: none; min-height: 44px; min-width: 44px; padding-inline: 12px; }
+@media (max-width: 480px) { .hub-compose { gap: 6px; } .hub-compose > .hub-btn { padding-inline: 8px; } }
+/* Jobs a reply named: their own block under the reply, apart from helpers (the delegates above). */
+.hub-delegates-sub { font-size: 0.72rem; }
+.hub-jobs { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.hub-jobs-head { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
+.hub-jobs-note { margin: 0; font-size: 0.78rem; }
+.hub-job { display: flex; gap: 10px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface-solid); min-width: 0; }
+.hub-job-dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--st-idle, var(--text-dim)); }
+.hub-job[data-job-tone='working'] .hub-job-dot { background: var(--st-working); box-shadow: 0 0 8px var(--st-working); }
+.hub-job[data-job-tone='needs'] .hub-job-dot { background: var(--st-needs, var(--amber)); }
+.hub-job[data-job-tone='done'] .hub-job-dot { background: var(--st-done, var(--green, var(--text-dim))); }
+.hub-job-body { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; flex: 1; }
+.hub-job-title { font-size: 0.9rem; font-weight: 600; overflow-wrap: anywhere; color: inherit; }
+.hub-job-meta { font-size: 0.75rem; overflow-wrap: anywhere; }
+.hub-job-state { font-size: 0.78rem; color: var(--text-dim); }
+.hub-job[data-job-tone='working'] .hub-job-state { color: var(--st-working); }
+.hub-job-read { width: 100%; font-size: 0.82rem; }
+.hub-job-read > summary { cursor: pointer; min-height: 24px; font-size: 0.8rem; }
+.hub-job-text { margin: 4px 0 0; font-family: inherit; font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
+.hub-job-links, .hub-job-why { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+.hub-job-why .hub-muted, .hub-job-note { font-size: 0.78rem; overflow-wrap: anywhere; }
+.hub-job-error { font-size: 0.8rem; overflow-wrap: anywhere; }
+.hub-job .hub-btn, .hub-jobs-a .hub-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
+.hub-jobs-a { display: flex; gap: 8px; }
+@media (max-width: 640px) { .hub-jobs-a .hub-btn { flex: 1 1 auto; justify-content: center; } }

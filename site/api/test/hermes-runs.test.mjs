@@ -61,6 +61,23 @@ test('approve starts a run with the brief and no provider; with nobody watching,
   } finally { await s.close(); }
 });
 
+test('a grilling run ends with ASKS and no card: done with its Asks, not failed', async () => {
+  const asks = ['20261105-colours-c3d3', '20261105-sizes-e5f5'];
+  const s = await stack({ hermesOptions: { endWith: `Two questions for you.
+ASKS: ${asks.join(' ')}` } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    assert.equal((await approve(api, id)).status, 201);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.asks], ['asks', asks]);
+    const detail = (await api.get(`/hub/requests/${id}`)).body;
+    assert.equal(detail.state, 'done', 'Only failed fails.');
+    const row = (await api.get('/hub/jobs?tab=finished')).body.jobs.find(job => job.id === id);
+    assert.deepEqual(row.state, 'done');
+  } finally { await s.close(); }
+});
+
 test('a run whose approval names a model starts with that provider and model; Auto is as before', async () => {
   const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
   try {

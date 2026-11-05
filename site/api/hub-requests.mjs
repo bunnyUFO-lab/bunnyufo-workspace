@@ -665,6 +665,51 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     };
   }
 
+  /**
+   * Read-only: whether one tap in a chat may sign this request, and for which target. It runs the same checks `approveRequest` runs and
+   * signs nothing. Not ok when the request is not proposed, has no preset or a hidden one, belongs to a sprint, a continuation or a
+   * follow-up, was written by the owner (that is not a proposal from an agent: it opens on its page), or when `refuseUnapprovable` or
+   * `needKey` refuse. `why` is the sentence they gave. The target is the one the approval page shows: the request's own, else the route's.
+   * → `{ ok: true, target }` or `{ ok: false, why, status }`.
+   */
+  async function jobApproval(id, at) {
+    const no = (why, status = 409) => ({ ok: false, why, status });
+    try {
+      needKey();
+      const { state } = await loadOne(id, at);
+      if (state !== 'proposed') return no(`That request is ${state}; only a proposed one can be approved.`);
+      const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
+      if (!stored) return no('No such request.', 404);
+      const request = checkedRequest(id, stored.buffer);
+      const preset = presetOf(request.preset);
+      if (!preset) return no('Only a request made from a preset can be approved.', 400);
+      if (preset.hidden) return no('That job is started by the Hub, so it is not approved from a chat.', 400);
+      if (preset.opensWindows) return no('It opens windows on the PC where you work. Open it to approve.', 400);
+      if (request.sprint || request.continues || request.followUp) return no('That job belongs to a sprint, a reply or a follow-up. Open it to approve.', 400);
+      if (request.origin?.kind === 'owner') return no('You wrote this request yourself. Open it to approve.', 400);
+      if (request.origin?.kind === 'run') return no('A run filed this, not Hermes in this chat. Open it to approve.', 400);
+      // What the row cannot show in a line and the owner has not looked at: a pinned model costs money, and a repo other than the project's own is a choice to make on the page.
+      if (request.model) return no('It pins a model, which costs money. Open it to approve.', 400);
+      const tracked = await projectRepo(request.project).catch(() => undefined);
+      if (request.repo && normRepo(request.repo) !== normRepo(tracked ?? '')) return no(`It names a repo (${request.repo}) other than the project's own. Open it to approve.`, 400);
+      // What /hub/presets/route gives the approval page: the repo it passes is the request's own, else the project's tracked repo for a preset that takes one.
+      const repo = request.repo || (preset.fields.includes('repo') ? await projectRepo(request.project) : undefined) || undefined;
+      const target = request.target ?? route({ preset, project: request.project, repo, cloudRepos: hasCloud }).target;
+      await refuseUnapprovable(request, preset, target, await resolveRepo(request, target));
+      return { ok: true, target, ...(repo ? { repo } : {}) };
+    } catch (error) {
+      if (!error?.status) { log(`[hub] could not check ${id} for a one-tap approval: ${scrub(error?.message, 120)}`); return no('It could not be checked just now.', 503); }
+      return no(error.message, error.status);
+    }
+  }
+
+  /** One job of a one-tap approval: the check, then the one path that signs. A refusal is thrown with its sentence and status. */
+  async function approveProposed(id, { user, at }) {
+    const check = await jobApproval(id, at);
+    if (!check.ok) throw fail(check.why, check.status);
+    return approveRequest(id, { target: check.target, by: user, at });
+  }
+
   /** The signed stop of a request, allowed only in the given states. */
   async function writeStop(id, reason, by, at, states) {
     const { state } = await loadOne(id, at);
@@ -1146,5 +1191,5 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     return { request: checkedRequest(id, stored.buffer), approved, state, ranAgain: false };
   }
 
-  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, loadOne, stateOf, continueRequest, sendQueuedReplies, unreadSentIds, hooks: live };
+  return { createFixed, verifiedRun, verifiedPcRun, copyFor, writeStop, writeAllowGrant, siteWrote, loadRequests, detail: requestDetail, create: createRequest, presets: presetRoutes, post, approveRequest, jobApproval, approveProposed, loadOne, stateOf, continueRequest, sendQueuedReplies, unreadSentIds, hooks: live };
 }

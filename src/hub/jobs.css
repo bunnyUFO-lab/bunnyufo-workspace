@@ -1,0 +1,22 @@
+/* Work > Jobs: one row per job, with what it delivered as pills. */
+.jb-seg { display: inline-flex; margin: 0 0 10px; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; font-size: 0.85rem; }
+.jb-seg a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; color: var(--text-dim); text-decoration: none; }
+.jb-seg a.on { background: var(--pink-dim); color: var(--pink-bright); }
+.jb-seg a:focus-visible, .jb-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.jb-list { display: flex; flex-direction: column; background: var(--surface-solid); border: 1px solid var(--hairline); border-radius: var(--radius); }
+.jb-row { display: flex; gap: 10px; padding: 12px; min-width: 0; min-height: 44px; color: inherit; text-decoration: none; border-top: 1px solid var(--hairline); }
+.jb-row:first-child { border-top: 0; }
+.jb-row:hover { background: var(--surface-1); }
+.jb-dot { flex: none; width: 9px; height: 9px; margin-top: 6px; border-radius: 50%; background: var(--st-idle, var(--text-dim)); }
+.jb-row[data-job-tone='working'] .jb-dot { background: var(--st-working); box-shadow: 0 0 8px var(--st-working); }
+.jb-row[data-job-tone='needs'] .jb-dot, .jb-row[data-job-tone='warn'] .jb-dot { background: var(--st-needs, var(--amber)); }
+.jb-row[data-job-tone='done'] .jb-dot { background: var(--st-done, var(--green, var(--text-dim))); }
+.jb-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.jb-title { font-weight: 600; font-size: 0.92rem; overflow-wrap: anywhere; }
+.jb-meta { font-size: 0.78rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.jb-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+.jb-pill { padding: 1px 9px; border-radius: var(--radius-pill); background: var(--surface-1); font-size: 0.75rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.jb-pill.good { background: color-mix(in srgb, var(--st-done, var(--green, #5fd0a0)) 14%, transparent); color: var(--st-done, var(--green, #5fd0a0)); }
+.jb-pill.warn { background: color-mix(in srgb, var(--st-needs, var(--amber)) 14%, transparent); color: var(--st-needs, var(--amber)); }
+.jb-pill.live { background: color-mix(in srgb, var(--st-working) 14%, transparent); color: var(--st-working); }
+.jb-foot { margin: 8px 0 0; font-size: 0.78rem; }

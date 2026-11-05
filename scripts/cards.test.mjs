@@ -389,6 +389,31 @@ for (const via of ['api', 's3']) {
     } finally { await close(); }
   });
 
+  test(`ask and checklist create (${via}): from.request comes from BUW_REQUEST_ID, and a file's own from.request wins`, async () => {
+    const { fake, cli, keys, dir, close } = await setup();
+    const readFrom = (name, id) => JSON.parse(fake.text(keys(`${name}/${id}/`).find(file => file.endsWith(`${name === 'asks' ? 'ask' : 'checklist'}.json`)))).from;
+    try {
+      cli.env = { BUW_REQUEST_ID: '' };
+      const plain = (await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which one?')).stdout.trim().split('\n').at(-1);
+      assert.equal('request' in readFrom('asks', plain), false, 'No run, no from.request.');
+      cli.env = { BUW_REQUEST_ID: 'run-from-env' };
+      const made = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Which other one?');
+      assert.equal(made.code, 0, made.stderr);
+      assert.equal(readFrom('asks', made.stdout.trim().split('\n').at(-1)).request, 'run-from-env');
+      const file = path.join(dir, 'ask.json');
+      await writeFile(file, JSON.stringify({ question: 'Set by the file?', from: { request: 'run-in-file' } }));
+      const own = await cli(via, 'ask', 'create', '--project', 'probe', '--file', file);
+      assert.equal(readFrom('asks', own.stdout.trim().split('\n').at(-1)).request, 'run-in-file', 'A file that already says which job it is from is not overwritten.');
+      await writeFile(file, JSON.stringify({ title: 'Steps', items: [{ text: 'One' }] }));
+      const list = await cli(via, 'checklist', 'create', '--project', 'probe', '--file', file);
+      assert.equal(list.code, 0, list.stderr);
+      assert.equal(readFrom('checklists', list.stdout.trim()).request, 'run-from-env');
+      cli.env = { BUW_REQUEST_ID: 'Not A Valid Id!' };
+      const bad = await cli(via, 'ask', 'create', '--project', 'probe', '--question', 'Odd env?');
+      assert.equal('request' in readFrom('asks', bad.stdout.trim().split('\n').at(-1)), false, 'A value that is no request id is not recorded.');
+    } finally { await close(); }
+  });
+
   test(`request (${via}): --preset takes every new flag, a bad one exits 1, take of a preset request exits 4`, async () => {
     const { cli, keys, fake, close } = await setup();
     try {

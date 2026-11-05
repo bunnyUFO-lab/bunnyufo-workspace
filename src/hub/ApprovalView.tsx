@@ -21,7 +21,7 @@ import { PageProjectChip } from './ProjectChip'
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; agent?: string; model?: string; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; bead?: string; model?: string; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   /** The repo Approve signs a request that has none of its own with: its project's tracked repo. Absent when there is none. */

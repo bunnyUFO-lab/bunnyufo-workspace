@@ -12,6 +12,7 @@ import Md from './Md'
 import ReviewView from './ReviewView'
 import RunDrawerHost from './RunDrawer'
 import Chat from './Chat'
+import Jobs from './Jobs'
 import Needs from './Needs'
 import Sketch from './Sketch'
 import SpawnHost from './Spawn'
@@ -41,6 +42,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
+      {route.screen === 'jobs' && <WorkTabs tab="jobs"><Jobs tab={route.id} /></WorkTabs>}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'project' && <ProjectPage route={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}

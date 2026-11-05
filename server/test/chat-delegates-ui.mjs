@@ -47,6 +47,8 @@ try {
   const cards = page.locator('[data-pending] [data-delegate]');
   await cards.nth(1).waitFor();
   assert.deepEqual(await cards.locator('[data-delegate-goal]').allTextContents(), GOALS);
+  assert.equal(await page.locator('[data-pending] .hub-delegates-head').textContent(), 'Hermes started 2 helpers');
+  assert.equal(await page.locator('[data-pending] [data-delegates-sub]').textContent(), 'Inside this chat. Not tracked as a job.');
   assert.deepEqual(await cards.locator('[data-delegate-state]').allTextContents(), ['Running', 'Running']);
   assert.equal(await page.locator('[data-pending] [data-tool="delegate_task"]').count(), 0, 'The bare tool line is gone.');
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
@@ -93,7 +95,10 @@ try {
   while (fixture.hermes.runs.length < 2) await page.waitForTimeout(50);
   await page.waitForFunction(() => typeof window.__cutStream === 'function');
   await page.reload();
-  await page.locator('[data-chat-note]', { hasText: 'still answering' }).waitFor();
+  // The page follows the running turn live now, so its question shows at once, with no waiting note.
+  await page.locator('.hub-bubble.user', { hasText: 'One more' }).waitFor();
+  await page.locator('[data-pending]').waitFor();
+  assert.equal(await page.locator('[data-chat-note]').count(), 0, 'Following a turn live needs no note.');
   fixture.hermes.release(fixture.hermes.runs[1].id);
   await page.locator('.hub-bubble.user', { hasText: 'One more' }).waitFor();   // the turn's lines come from the saved chat
   await page.locator('.hub-bubble.assistant:not([data-pending])').nth(1).waitFor();
