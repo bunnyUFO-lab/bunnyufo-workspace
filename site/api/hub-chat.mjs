@@ -224,6 +224,107 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     });
   }
 
+  /** What goes to Hermes as the earlier turns: the persona and context text, then the last 20 lines (text only, a picture becomes a note). */
+  function historyFor({ history, persona, context }) {
+    // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.
+    const recent = history[0]?.role === 'context' ? [history[0], ...history.slice(1).slice(-20)] : history.slice(-20);
+    // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
+    const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+    return { recent, earlier };
+  }
+
+  /** Reads one run's events to its end, telling `emit` what it sees. Returns what the turn made; a failure is a sentence, never a throw. */
+  async function carryRun({ carried, runId, choice, emit, signal, started, conversation }) {
+    void carried;
+    let reply = '';
+    let failure = null;
+    const tools = [];
+    let delegates = [];
+    const noteDelegates = (name, data) => {
+      const next = foldDelegates(delegates, name, data);
+      if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
+    };
+    let finishedByHermes = false;
+    try {
+      let ended = false;
+      for await (const event of hermesRuns.events(runId, { signal })) {
+        const data = event.data ?? {};
+        if (event.event === 'message.delta' && typeof data.delta === 'string' && data.delta) { reply += data.delta; emit('delta', { text: data.delta }); }
+        else if (event.event === 'tool.started') {
+          const name = clip(data.tool, 80);
+          if (name && !tools.includes(name) && tools.length < MAX_TOOLS) tools.push(name);
+          emit('tool', { id: clip(data.tool_call_id, 80), name, summary: clip(data.preview, 160), state: 'running' });
+        } else if (event.event === 'tool.completed') {
+          emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
+          noteDelegates(event.event, data);
+        } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
+        else if (event.event === 'approval.request') {
+          // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
+          let stored = null;
+          let copied = null;
+          try {
+            copied = await copyApproval({ runId, chat: conversation, prompt: data, startedAt: new Date(started) });
+            if (copied) stored = await readApproval(copied);
+          } catch { /* stored stays null */ }
+          if (!stored) { failure = 'Hermes asked for approval, but the ask could not be saved.'; ended = true; }
+          else if (stored.state === 'open') {
+            const record = stored.approval;
+            emit('approval', { id: copied, title: record.title, command: record.command, description: record.description, choices: (record.choices ?? []).filter(choice => choice === 'once' || choice === 'deny'), expiresAt: record.expiresAt });
+          }
+        } else if (event.event === 'approval.settled') emit('approval-settled', { prompt: data.prompt_id ?? null });
+        else if (event.event === 'run.completed') {
+          if (!reply && typeof data.output === 'string' && data.output) { reply = data.output; emit('delta', { text: reply }); }
+          ended = true; finishedByHermes = true;
+        } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; planPauses?.note(choice.provider ?? DEFAULT_PROVIDER, data.error); }   // pauses: a quota failure pauses the plan it ran on
+        else if (event.event === 'run.cancelled' || event.event === 'run.interrupted') { failure = 'The run was stopped.'; ended = true; finishedByHermes = true; }
+        if (ended) break;
+      }
+      if (!ended) failure = 'The connection to Hermes broke.';
+    } catch (error) {
+      failure = signal.aborted ? 'Hermes stopped answering.' : error?.code === 'idle' ? 'Hermes stopped answering.' : 'The connection to Hermes broke.';
+    }
+    return { reply, failure, tools, delegates, finishedByHermes };
+  }
+
+  /** Saves a finished turn's lines (the picture files first) and announces what it created. Returns the lines and a failure when they could not be saved. */
+  async function saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit }) {
+    let created = [];
+    try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
+    if (created.length) emit('created', { items: created });
+    const at = now().toISOString();
+    const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
+    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    let contextLine = null;   // help:
+    try {
+      if (context) {
+        contextLine = { role: 'context', about: context.about, text: context.text, at: new Date(started).toISOString() };
+        if (context.pictures.length) contextLine.images = await putContextPictures(id, context.pictures);
+      }
+      // The pictures first, so a line never points at a missing file.
+      if (pictures.length) {
+        userLine.images = [];
+        for (const picture of pictures) {
+          const file = `${randomId(10)}.${picture.ext}`;
+          await bucket.put(key(`chat/${id}/${file}`), picture.buffer, { contentType: picture.type, ifNoneMatch: '*' });
+          userLine.images.push({ file, type: picture.type, width: picture.width, height: picture.height });
+        }
+      }
+      await append(id, [...(contextLine ? [contextLine] : []), userLine, ...(failure && !reply && !delegates.length ? [] : [assistant])]);
+    } catch (error) {
+      failure ??= 'The reply could not be saved.';
+    }
+    return { failure, userLine, contextLine };
+  }
+
+  /** The last step of a turn: the run stops counting as busy, then the page hears `error` or `done`, and its response ends. */
+  function endTurn({ runId, response, emit, id, failure, userLine, contextLine }) {
+    if (runId) active.delete(runId);
+    if (failure) emit('error', { error: failure });
+    else emit('done', { conversation: id, user: userLine, ...(contextLine ? { context: contextLine } : {}) });
+    response.end();
+  }
+
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const choice = chatModelOf(data.model);   // model: an id from the table, or a 400 before anything is written
@@ -267,8 +368,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     }
     const contextPictures = context?.pictures ?? [];
     const spent = [...pictures, ...contextPictures].reduce((sum, picture) => sum + picture.buffer.length, 0);
-    // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.
-    const recent = history[0]?.role === 'context' ? [history[0], ...history.slice(1).slice(-20)] : history.slice(-20);
+    const { recent, earlier } = historyFor({ history, persona, context });
     // Runs carry text only: a turn that has to carry a picture (its own, or the pictures of a help chat's context) stays on completions.
     const runTurn = runsOn && !pictures.length && !contextPictures.length && !(recent[0]?.role === 'context' && recent[0].images?.length);
     const contextMessage = context && {   // help: a new help chat sends its context as the first user message
@@ -292,8 +392,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let upstream;
     let runId = null;
     if (runTurn) {
-      // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
-      const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
       try {
         ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: `${id}-${history.length}-${started.toString(36)}`, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));   // model:
       } catch (error) {
@@ -330,58 +428,18 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       Connection: 'keep-alive',
     });
     const emit = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
-    if (runTurn) active.set(runId, { user: user ?? null, conversation: id });
+    const carried = { user: user ?? null, conversation: id };
+    if (runTurn) active.set(runId, carried);
     emit('started', { conversation: id, run: runTurn ? runId : null });   // run is null on a turn that has none to stop
     const keepalive = setInterval(() => { if (!response.destroyed) response.write(': keepalive\n\n'); }, KEEPALIVE_MS);
 
     let reply = '';
     let failure = null;
-    const tools = [];
+    let tools = [];
     let delegates = [];
-    const noteDelegates = (name, data) => {
-      const next = foldDelegates(delegates, name, data);
-      if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
-    };
     let finishedByHermes = false;
     if (runTurn) {
-      try {
-        let ended = false;
-        for await (const event of hermesRuns.events(runId, { signal: abort.signal })) {
-          const data = event.data ?? {};
-          if (event.event === 'message.delta' && typeof data.delta === 'string' && data.delta) { reply += data.delta; emit('delta', { text: data.delta }); }
-          else if (event.event === 'tool.started') {
-            const name = clip(data.tool, 80);
-            if (name && !tools.includes(name) && tools.length < MAX_TOOLS) tools.push(name);
-            emit('tool', { id: clip(data.tool_call_id, 80), name, summary: clip(data.preview, 160), state: 'running' });
-          } else if (event.event === 'tool.completed') {
-            emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
-            noteDelegates(event.event, data);
-          } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
-          else if (event.event === 'approval.request') {
-            // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
-            let stored = null;
-            let copied = null;
-            try {
-              copied = await copyApproval({ runId, chat: id, prompt: data, startedAt: new Date(started) });
-              if (copied) stored = await readApproval(copied);
-            } catch { /* stored stays null */ }
-            if (!stored) { failure = 'Hermes asked for approval, but the ask could not be saved.'; ended = true; }
-            else if (stored.state === 'open') {
-              const record = stored.approval;
-              emit('approval', { id: copied, title: record.title, command: record.command, description: record.description, choices: (record.choices ?? []).filter(choice => choice === 'once' || choice === 'deny'), expiresAt: record.expiresAt });
-            }
-          } else if (event.event === 'approval.settled') emit('approval-settled', { prompt: data.prompt_id ?? null });
-          else if (event.event === 'run.completed') {
-            if (!reply && typeof data.output === 'string' && data.output) { reply = data.output; emit('delta', { text: reply }); }
-            ended = true; finishedByHermes = true;
-          } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; planPauses?.note(choice.provider ?? DEFAULT_PROVIDER, data.error); }   // pauses: a quota failure pauses the plan it ran on
-          else if (event.event === 'run.cancelled' || event.event === 'run.interrupted') { failure = 'The run was stopped.'; ended = true; finishedByHermes = true; }
-          if (ended) break;
-        }
-        if (!ended) failure = 'The connection to Hermes broke.';
-      } catch (error) {
-        failure = abort.signal.aborted ? 'Hermes stopped answering.' : error?.code === 'idle' ? 'Hermes stopped answering.' : 'The connection to Hermes broke.';
-      }
+      ({ reply, failure, tools, delegates, finishedByHermes } = await carryRun({ carried, runId, choice, emit, signal: abort.signal, started, conversation: id }));
       // Any exit that is not Hermes ending the run (idle, a dropped Hermes stream, an unsaved ask): stop it.
       if (!finishedByHermes) hermesRuns.stop(runId).catch(() => {});
     } else try {
@@ -417,37 +475,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     finish();
     clearInterval(keepalive);
 
-    let created = [];
-    try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
-    if (created.length) emit('created', { items: created });
-    const at = now().toISOString();
-    const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
-    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
-    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
-    let contextLine = null;   // help:
-    try {
-      if (context) {
-        contextLine = { role: 'context', about: context.about, text: context.text, at: new Date(started).toISOString() };
-        if (context.pictures.length) contextLine.images = await putContextPictures(id, context.pictures);
-      }
-      // The pictures first, so a line never points at a missing file.
-      if (pictures.length) {
-        userLine.images = [];
-        for (const picture of pictures) {
-          const file = `${randomId(10)}.${picture.ext}`;
-          await bucket.put(key(`chat/${id}/${file}`), picture.buffer, { contentType: picture.type, ifNoneMatch: '*' });
-          userLine.images.push({ file, type: picture.type, width: picture.width, height: picture.height });
-        }
-      }
-      await append(id, [...(contextLine ? [contextLine] : []), userLine, ...(failure && !reply && !delegates.length ? [] : [assistant])]);
-    } catch (error) {
-      failure ??= 'The reply could not be saved.';
-    }
+    const saved = await saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit });
     // Only now: a page that reads `running: false` finds the reply saved, and a new turn cannot overtake it.
-    if (runId) active.delete(runId);
-    if (failure) emit('error', { error: failure });
-    else emit('done', { conversation: id, user: userLine, ...(contextLine ? { context: contextLine } : {}) });
-    response.end();
+    endTurn({ runId, response, emit, id, ...saved });
   }
 
   async function serveImage(response, id, file) {
