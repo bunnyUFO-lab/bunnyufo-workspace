@@ -13,6 +13,11 @@ export interface WorkspaceStep {
    * when the app does not answer, and on the docs site.
    */
   url?: string
+  /**
+   * Set by the card API, never by a client: an agent added this tab to a card that was not its own. The viewer attaches no
+   * card bridge to such a page, so it cannot read or rewrite the owner's other tabs.
+   */
+  agentTab?: boolean
 }
 
 export interface WorkspaceEntity {

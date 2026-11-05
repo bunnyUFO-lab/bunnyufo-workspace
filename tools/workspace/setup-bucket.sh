@@ -8,7 +8,9 @@
 #     again; it is never suspended, so an overwritten or deleted card can be brought back),
 #   - an IAM user `buw-site-api` whose only policy is list, get and put on that bucket, delete under
 #     sections/inbox/ only, and an explicit deny on deleting versions or changing versioning or
-#     lifecycle rules, so history cannot be lost through this key,
+#     lifecycle rules, so history cannot be lost through this key; and it may read an earlier version
+#     of an object under sections/ (s3:GetObjectVersion), which is how the Hub's Revert puts an
+#     agent-edited file back (it lists no versions and deletes none),
 #   - one access key for it, printed ONCE at the end for /srv/buw-docs/_app/api.env on the server.
 # Safe to run again: each step checks before it creates, and a second run makes no second key.
 #
@@ -64,6 +66,7 @@ POLICY=$(cat <<JSON
   "Statement": [
     { "Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::$BUCKET" },
     { "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject"], "Resource": "arn:aws:s3:::$BUCKET/*" },
+    { "Sid": "ReadOldVersions", "Effect": "Allow", "Action": ["s3:GetObjectVersion"], "Resource": "arn:aws:s3:::$BUCKET/sections/*" },
     { "Sid": "InboxDeletesOnly", "Effect": "Allow", "Action": ["s3:DeleteObject"], "Resource": "arn:aws:s3:::$BUCKET/sections/inbox/*" },
     { "Sid": "NoHistoryLoss", "Effect": "Deny",
       "Action": ["s3:DeleteObjectVersion", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration"],
@@ -73,7 +76,7 @@ POLICY=$(cat <<JSON
 JSON
 )
 aws iam put-user-policy --user-name "$USER_NAME" --policy-name "buw-bucket-$BUCKET" --policy-document "$POLICY"
-echo "   policy: list/get/put on s3://$BUCKET, delete under sections/inbox/ only, no history loss"
+echo "   policy: list/get/put on s3://$BUCKET, read earlier versions under sections/, delete under sections/inbox/ only, no history loss"
 
 if [ -n "$IMPORT" ]; then
   echo "== Card state"

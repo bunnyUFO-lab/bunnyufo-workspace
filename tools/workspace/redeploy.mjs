@@ -62,7 +62,7 @@ async function status() {
       where = `s3://${client.bucket}/${prefix}`;
       const { uploads, downloads, conflicts, deletes } = await syncUp({ root: workspace.root, bucket: client, prefix, scope: await defaultScope(workspace.root), dryRun: true });
       local = [uploads.length && `${uploads.length} file(s) not uploaded`, downloads.length && `${downloads.length} file(s) changed on the site, not brought down`,
-        conflicts.length && `${conflicts.length} file(s) changed in both places`, deletes.length && `${deletes.length} removed file(s) still in the bucket`].filter(Boolean).join(', ');
+        conflicts.length && `${conflicts.length} file(s) changed in both places (publish saves the site's copy and says how to settle them)`, deletes.length && `${deletes.length} removed file(s) still in the bucket`].filter(Boolean).join(', ');
     } catch (error) { local = `cannot compare with the bucket: ${error.message}`; }
     // And whether the site lists this section: it reads the bucket, so "listed" means "serving".
     let live = null;

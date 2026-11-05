@@ -63,7 +63,7 @@ try {
   assert.match(await cardA.locator('[data-approval-text]').innerText(), /tug-of-war/);
   assert.equal((await cardA.locator('[data-approval-preset]').innerText()).trim(), 'Market research');
   assert.equal((await cardA.locator('[data-approval-machine]').innerText()).trim(), 'Hermes');
-  assert.match(await cardA.locator('[data-approval-effect]').innerText(), /One card in assistant/);
+  assert.match(await cardA.locator('[data-approval-effect]').innerText(), /One card in the project's section, or in assistant/);
   assert.equal(await page.locator(`[data-need="approval-${ids.owner}"] [data-approval-warning]`).count(), 0, 'Your own request has no warning.');
   assert.match(await page.locator(`[data-need="approval-${ids.owner}"] [data-approval-effect]`).innerText(), /A new branch and a PR in example\/magic-loops\. No merge, no deploy\./);
 

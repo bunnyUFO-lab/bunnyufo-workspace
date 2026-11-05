@@ -88,6 +88,18 @@ test('GET /hub/today: a taken Hermes run shows in Working now and Running; run e
   } finally { await close(); }
 });
 
+test('a finished run whose card is in a project section links to it in the detail and in the event', async () => {
+  const { fake, get, run, close } = await fixture();
+  try {
+    fake.seed('sections/demo/workspace.json', JSON.stringify({ name: 'Demo', entities: [{ id: 'tugs', title: 'Tugs', folder: '2026-11-04_tugs', created: '2026-11-04' }] }), 'application/json');
+    const done = `${day}-research-proj-cd35`;
+    run(done, { title: 'Tugs', minutes: 30, result: { outcome: 'card', card: 'demo/2026-11-04_tugs' } });
+    assert.equal((await get(`/hub/requests/${done}`)).body.cardHref, '/demo#/tugs');
+    const events = (await get('/hub/events')).body.events;
+    assert.equal(events.find(event => event.request === done && event.kind === 'run-finished').cardHref, '/demo#/tugs');
+  } finally { await close(); }
+});
+
 test('a finished run links to its PR, and its card in the assistant section resolves to the card id', async () => {
   const { fake, get, run, close } = await fixture();
   try {

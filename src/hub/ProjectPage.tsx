@@ -6,8 +6,10 @@ import { host } from '../lib/host'
 import ItemMenu from '../components/ItemMenu'
 import { useIsPhone } from '../lib/chrome'
 import { needsHref } from '../lib/needsView.mjs'
-import { mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
+import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
 import MapPanel from './MapPanel'
+import { CardWriteRows } from './CardWrites'
+import { useCardWrites } from './cardWriteText'
 import NeedsRows from './NeedsRows'
 import PlanInHermes from './PlanInHermes'
 import ProjectPicker from './ProjectPicker'
@@ -28,6 +30,7 @@ import { useProject } from './useProject'
 import './today.css'
 import './work.css'
 import './project.css'
+import './cardWrites.css'
 
 const enc = encodeURIComponent
 const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', running: 'Running', needs: 'Needs you', library: 'Library' }
@@ -135,6 +138,22 @@ function NeedsTab({ project, name, today }: { project: string; name: string; tod
 /** A card link is a site path (`/<section>#/<card>`), nothing else (the same rule as Working now's card chips). */
 const SAFE_CARD = /^\/[\w%-]+#\/[\w%.~-]+$/
 
+/** The newest agent writes in the project's section: who added what, and Revert. Nothing when there are none. */
+function AgentWrites({ section }: { section: string }) {
+  const [older, setOlder] = useState(false)
+  const recent = useCardWrites(section, undefined, 10)
+  const all = useCardWrites(section, undefined, undefined, true, older)
+  const data = older && all.data ? all.data : recent.data
+  if (!data?.groups.length) return null
+  return (
+    <div className="cw-writes" data-pp-agent-writes>
+      <h3>Agent writes</h3>
+      <CardWriteRows section={section} groups={data.groups} showCard />
+      {!older && data.more && <p className="pp-foot"><button type="button" className="cw-btn" onClick={() => setOlder(true)} data-cw-older>Show older</button></p>}
+    </div>
+  )
+}
+
 function LibraryTab({ project }: { project: string }) {
   const { data, error, loading, at } = useHubData<ProjectCards>(`/project-cards?project=${enc(project)}`)
   if (!data) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
@@ -144,9 +163,13 @@ function LibraryTab({ project }: { project: string }) {
   return (
     <section className="hub-panel" aria-label="Library">
       {note}
+      {data.agents !== undefined && (data.agents
+        ? <p className="cw-agents-line" data-pp-agents="on">Agents may add cards here. <a href={hubHash('team')}>Change this in Team ›</a></p>
+        : <p className="cw-agents-line" data-pp-agents="off">Agents may not write here</p>)}
       {cards.length
         ? <ul className="pp-cards" data-pp-cards>{cards.map(card => <li key={card.href}><a href={card.href} data-pp-card>{card.title}</a>{card.updated && ago(card.updated) && <small>{ago(card.updated)}</small>}</li>)}</ul>
         : <p className="hub-empty">No cards in this section yet.</p>}
+      <AgentWrites section={data.section} />
       <p className="pp-foot"><a className="pp-link" href={`/${enc(data.section)}`} data-pp-open-section>Open the Library section ›</a></p>
     </section>
   )

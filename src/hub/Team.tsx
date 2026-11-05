@@ -15,6 +15,7 @@ import { startChat } from './chatStart'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
 import RefreshNote from './RefreshNote'
+import AgentCardSettings from './AgentCardSettings'
 import { useHubData } from './useHub'
 
 interface Toast { text: string; undo?: () => void }
@@ -164,6 +165,7 @@ export default function Team() {
           <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
         </dl>
         {/* Before the view switch, so Tab from Floor still goes to the first desk. */}
+        <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
         {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
         <div className="hub-seg team-view" role="group" aria-label="View">
           <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
@@ -181,6 +183,7 @@ export default function Team() {
             ))}
           </div>
         )}
+      <AgentCardSettings />
       {sheetAgent && (
         <SpriteSheet
           key={sheetAgent.id}

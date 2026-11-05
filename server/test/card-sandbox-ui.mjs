@@ -27,7 +27,7 @@ await mkdir(path.join(root, '.cache'), { recursive: true });
 
 const fake = await startFakeS3();
 const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
-const card = { id: 'alpha', folder: 'alpha', title: 'Alpha card', description: 'A card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Page', path: 'index.html' }, { name: 'Form', path: 'form.html' }, { name: 'Answers page', path: 'answers.html' }, { name: 'Answers', path: 'answers.md' }] };
+const card = { id: 'alpha', folder: 'alpha', title: 'Alpha card', description: 'A card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Page', path: 'index.html' }, { name: 'Form', path: 'form.html' }, { name: 'Answers page', path: 'answers.html' }, { name: 'Answers', path: 'answers.md' }, { name: 'Agent page', path: 'agentpage.html', agentTab: true }] };
 const beta = { ...card, id: 'beta', folder: 'beta', title: 'Beta card', steps: [{ name: 'Page', path: 'index.html' }, { name: 'Answers', path: 'answers.md' }] };
 const seed = (key, body, type) => fake.seed(key, body, type);
 
@@ -99,6 +99,12 @@ window.__answers = {
     return r;
   },
 };
+</script></body></html>`, 'text/html; charset=utf-8');
+// A page an agent added to the owner's card (the step carries `agentTab`): the same page as Answers, which must get no bridge.
+seed('sections/one/alpha/agentpage.html', `<!doctype html><html><head><meta charset="utf-8"><title>Agent page</title></head><body><p id="out"></p>
+<script src="../_shared/card-data.js"></script>
+<script>
+window.__answers = { async load() { const got = await BuwCardData.bridge.call('markdown.get', { path: 'answers.md' }); out.textContent = got.text; return got; } };
 </script></body></html>`, 'text/html; charset=utf-8');
 // A hostile card (alpha) that gets hold of the app's window and tries to script the frame of another card (beta) in it,
 // to send bridge messages as beta. All cards share the content origin, so that frame is script-reachable from alpha
@@ -273,6 +279,13 @@ try {
   assert.equal((await answers.evaluate(() => window.__answers.load())).text, 'start');
   await answers.evaluate(() => window.__answers.save('{"picked":"b"}'));
   assert.equal(fake.text('sections/one/alpha/answers.md'), '{"picked":"b"}');
+
+  step('a tab an agent added to the card (agentTab) gets no bridge: its read of the owner Markdown tab goes unanswered');
+  const readsBefore = log.filter(entry => entry.path === '/api/cards/markdown').length;
+  const agentPage = await appFrame(4, () => window.__answers);
+  assert.equal(await agentPage.evaluate(() => window.__answers.load().then(() => 'answered', error => error.message)), 'Open this card inside the Workspace, signed in, to save it.');
+  assert.equal(await agentPage.locator('#out').textContent(), '', 'nothing of the owner text reached the page');
+  assert.equal(log.filter(entry => entry.path === '/api/cards/markdown').length, readsBefore, 'the app made no card route call for it');
 
   step('the card never sent a credential, and every save came from the app origin');
   await settle(300);

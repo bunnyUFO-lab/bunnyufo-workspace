@@ -19,12 +19,17 @@
 // repository, scripts/cards.mjs (`npm run cards`) runs it.
 //
 //   npm run cards -- login                             ask for the passphrase once and keep it
-//   npm run cards -- sections                          the sections this token may use
+//   npm run cards -- sections                          the sections this token may use, and how: write, add (a project section, new cards and tabs only) or read
 //   npm run cards -- list <section>                    a section's cards
 //   npm run cards -- get <link | section/card | name> [--into <folder>]
-//        fetch a card into <folder>/<card folder>/ and add its entry to <folder>/workspace.json
+//        fetch a card into <folder>/<card folder>/ and add its entry to <folder>/workspace.json; the version of each file read
+//        goes to <folder>/.cards-base.json, which `put --edit` needs (never uploaded)
 //   npm run cards -- put <folder> --section <section> --card <id> [--dry-run]
-//        upload the card folder (what differs, and remove what is gone), then its entry
+//          [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]
+//        upload the card folder (what differs), then its entry. It removes nothing unless --remove (a change from before, when a file gone
+//        from the folder was removed from the section). In a section marked `add` (a project's), --agent and --why are required, only new
+//        files go up unless --edit (a file read with `get`, so its version is known), --remove is refused and files over 4 MB are refused.
+//        A file or entry that changed in the bucket meanwhile stops the run with exit 3.
 //
 // <folder> is a workspace folder: a workspace.json and the card folders beside it. `get` makes
 // one if it is not there, so `get` → edit → `put` works in an empty directory.
@@ -137,6 +142,7 @@
 //   cards request finish <id> --outcome pr|card|failed --summary <s> [--pr <url>] [--card <link>] [--reason <r>] [--report <file.md>]
 //        report.md then result.json, both create-only (exit 3 when result.json exists); posts pr-opened or alert
 //   cards request state <id>                                          proposed | approved | taken | running | stopping | stopped | done | failed | lost | expired | declined
+//   cards request card <id>                                           the card a finished request made, as <section>/<folder> (its result's card); exit 3 and "No card yet." when there is none
 //   cards request create --project <p> --text <t> [--when next-sprint|nightly|record] [--by <name>]
 //        [--preset <id> [--title <t>] [--repo owner/name] [--needs unity,gpu,comfyui,sprite-studio,lan,local-files]
 //        [--target pc|cloud|hermes|at-pc] [--done-when <t>] [--origin-run <id>]]
@@ -171,8 +177,8 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 }
 
 const MAX_INLINE = 4 * 1024 * 1024;
-const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run]  [--via s3|api]\n'
-  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
+const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run] [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]  [--via s3|api]\n'
+  + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state|card | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>]\n'
   + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again] [--journal <file>] | apply pending --project <p> --json\n'
   + '       checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform <p>] [--look-for <t>]] [--prose-ok]';
@@ -339,9 +345,9 @@ const noPassphrase = () => 'The card API wants its passphrase, and none reached 
   + `${new URL(apiBase()).host} with the header Authorization: Bearer <passphrase>. Elsewhere, set BUW_CARDS_PASSWORD.`;
 
 let transport;
-async function call(method, route, { body, raw, contentType } = {}) {
+async function call(method, route, { body, raw, contentType, headers: extra = {} } = {}) {
   const response = await send(method, route, {
-    headers: body !== undefined ? { 'content-type': 'application/json' } : raw !== undefined ? { 'content-type': contentType || 'application/octet-stream' } : {},
+    headers: { ...(body !== undefined ? { 'content-type': 'application/json' } : raw !== undefined ? { 'content-type': contentType || 'application/octet-stream' } : {}), ...extra },
     body: body !== undefined ? JSON.stringify(body) : raw,
   });
   if (response.status === 401 && transport.anonymous) throw Object.assign(new Error(noPassphrase()), { status: 401 });
@@ -383,6 +389,18 @@ async function readRegistry(folder) {
   }
 }
 
+/** The etags `get` read, kept beside the workspace.json it writes: { "<section>/<path>": "<etag>" }. A `put --edit` is conditional on these. */
+const BASE_FILE = '.cards-base.json';
+
+async function readBase(folder) {
+  try {
+    const value = JSON.parse(await readFile(path.join(folder, BASE_FILE), 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
 async function get(ref, into) {
   const { matches } = await call('GET', `/resolve?ref=${encodeURIComponent(ref)}`);
   if (matches.length > 1) {
@@ -392,29 +410,67 @@ async function get(ref, into) {
   }
   const [{ section, id }] = matches;
   const card = await call('GET', `/sections/${section}/cards/${encodeURIComponent(id)}`);
+  const etags = {};
   for (const file of card.files) {
     const target = path.join(into, ...file.path.split('/'));
     await mkdir(path.dirname(target), { recursive: true });
     // Small files through the API, so a session that may reach only the API host still works;
     // bigger ones from the bucket by their short-lived URL.
-    const body = file.size <= MAX_INLINE
-      ? await call('GET', `/sections/${section}/files/${enc(file.path)}`)
-      : Buffer.from(await (await fetch(file.url)).arrayBuffer());
+    let body;
+    if (file.size <= MAX_INLINE) {
+      // The etag of the very bytes read, so a later edit is conditional on what was seen and not on a newer listing.
+      const route = `/sections/${section}/files/${enc(file.path)}`;
+      const response = await send('GET', route, { headers: {} });
+      if (response.status === 401 && transport.anonymous) throw Object.assign(new Error(noPassphrase()), { status: 401 });
+      if (!response.ok) throw new Error(`GET ${route}: ${response.status} ${await response.text()}`);
+      body = Buffer.from(await response.arrayBuffer());
+      const etag = response.headers.get('etag')?.replace(/^W\//, '').replace(/^"|"$/g, '');
+      if (etag) etags[`${section}/${file.path}`] = etag;
+    } else {
+      body = Buffer.from(await (await fetch(file.url)).arrayBuffer());
+    }
     await writeFile(target, body);
   }
   const registry = await readRegistry(into);
   const entities = [...(registry.entities ?? []).filter(item => item?.id !== card.entity.id), card.entity];
   await mkdir(into, { recursive: true });
   await writeFile(path.join(into, 'workspace.json'), `${JSON.stringify({ ...registry, entities }, null, 2)}\n`);
+  const base = { ...(await readBase(into)) };
+  for (const key of Object.keys(base)) if (key.startsWith(`${section}/${card.entity.folder}/`)) delete base[key];
+  await writeFile(path.join(into, BASE_FILE), `${JSON.stringify({ ...base, ...etags }, null, 2)}\n`);
   console.log(`${section}/${id} -> ${path.join(into, card.entity.folder)} (${card.files.length} file(s)); entry in ${path.join(into, 'workspace.json')}`);
 }
 
-async function put(folder, section, id, dryRun) {
+/** What `sections` says about where this token may write. */
+const ACCESS_WORDS = { direct: 'write', library: 'add', read: 'read' };
+const AGENT_RE = /^[A-Za-z0-9][\w .-]{0,39}$/;
+const CONTEXT_RE = /^(chat|job)(:[A-Za-z0-9._-]{1,120})?$/;
+
+/**
+ * Upload a card folder, then its entry. It removes nothing unless `remove` is set, in every section.
+ * `access` (from GET /sections/<s>) is `library`: files are only created, an edit needs `--edit`, the
+ * etag `get` recorded, and who and why; `direct`: as before, with the delete step behind `--remove`.
+ */
+async function put(folder, section, id, dryRun, { agent, why, context, edit = false, remove: removeGone = false } = {}) {
   const registry = await readRegistry(folder);
   const entity = registry.entities?.find(item => item?.id === id);
   if (!entity) throw new Error(`${path.join(folder, 'workspace.json')} has no card "${id}".`);
   const local = await filesUnder(path.join(folder, entity.folder));
   if (!local.length) throw new Error(`${path.join(folder, entity.folder)} has no files.`);
+  if (agent !== undefined && !AGENT_RE.test(agent)) throw new Error('--agent is 1 to 40 characters: letters, digits, space, dot, dash, underscore, starting with a letter or digit.');
+  if (context !== undefined && !CONTEXT_RE.test(context)) throw new Error('--context is chat or job:<id>.');
+  const reason = why === undefined ? undefined : why.replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (why !== undefined && !reason) throw new Error('--why needs some text.');
+
+  let access = 'direct';
+  try {
+    access = (await call('GET', `/sections/${section}`)).access ?? 'direct';   // an older API has no field
+  } catch (error) {
+    if (error.status !== 404) throw error;
+  }
+  const library = access === 'library';
+  const refusals = [];
+  if (access === 'read') refusals.push(`This token may not add to ${section}. Write to assistant instead.`);
 
   let remote = [];
   try {
@@ -423,34 +479,95 @@ async function put(folder, section, id, dryRun) {
     if (error.status !== 404) throw error;
   }
   const remoteByPath = new Map(remote.map(file => [file.path, file]));
-  const upload = [];
+  const base = await readBase(folder);
+  const fresh = [];
+  const changed = [];
   for (const file of local) {
     const body = await readFile(path.join(folder, entity.folder, ...file.split('/')));
     const key = `${entity.folder}/${file}`;
-    if (remoteByPath.get(key)?.etag !== md5(body)) upload.push({ key, body });
+    const there = remoteByPath.get(key);
+    if (!there) fresh.push({ key, body });
+    else if (there.etag !== md5(body)) changed.push({ key, body, listed: there.etag, seen: base[`${section}/${key}`] });
   }
+  const upload = [...fresh, ...changed];
   const localKeys = new Set(local.map(file => `${entity.folder}/${file}`));
-  const remove = remote.map(file => file.path).filter(key => !localKeys.has(key));
-  console.log(`${section}/${id}: ${upload.length} to upload, ${remove.length} to remove, ${local.length - upload.length} unchanged`);
-  if (dryRun) {
-    for (const { key } of upload) console.log(`  + ${key}`);
-    for (const key of remove) console.log(`  - ${key}`);
-    return;
+  const gone = remote.map(file => file.path).filter(key => !localKeys.has(key));
+  const remove = removeGone ? gone : [];
+  const kept = removeGone ? [] : gone;
+  const unchanged = local.length - upload.length;
+
+  if (library) {
+    if (removeGone) refusals.push(`--remove is not allowed in ${section}: a project section only takes new files and edits.`);
+    if (changed.length && !edit) refusals.push(`These files differ from the bucket, and a change needs --edit (run get first, then edit, then put --edit):\n${changed.map(item => `  ${item.key}`).join('\n')}`);
+    if (edit) {
+      const unread = changed.filter(item => !item.seen).map(item => item.key);
+      if (unread.length) refusals.push(`get did not record the version of these files, so an edit cannot be conditional on it; run get again into a fresh folder:\n${unread.map(key => `  ${key}`).join('\n')}`);
+    }
+    const big = upload.filter(item => item.body.length > MAX_INLINE).map(item => item.key);
+    if (big.length) refusals.push(`A project section takes files through the API, at most 4 MB each:\n${big.map(key => `  ${key}`).join('\n')}`);
+    if (!dryRun && !agent) refusals.push('--agent <name> is needed to write to a project section.');
+    if (!dryRun && !reason) refusals.push('--why <text> is needed to write to a project section.');
   }
 
+  if (library) {
+    console.log(`${section}/${id}: ${fresh.length} new, ${changed.length} edit, ${unchanged} unchanged, ${kept.length} kept (in the bucket, not here)`);
+  } else {
+    console.log(`${section}/${id}: ${upload.length} to upload, ${remove.length} to remove, ${unchanged} unchanged${kept.length ? `, ${kept.length} kept (in the bucket, not here; add --remove to remove)` : ''}`);
+  }
+  for (const { key } of fresh) console.log(`  + ${key}`);
+  for (const { key } of changed) console.log(`  ~ ${key}`);
+  for (const key of remove) console.log(`  - ${key}`);
+  for (const key of kept) console.log(`  = ${key}  (kept)`);
+  if (kept.length && !library) console.log('Note: put removes nothing without --remove. Before, a file gone from this folder was removed from the section.');
+  if (refusals.length) {
+    for (const text of refusals) console.error(`Refused: ${text}`);
+    throw new Exit(2);
+  }
+  if (dryRun) return;
+
+  const headers = {
+    ...(agent ? { 'x-card-agent': agent } : {}),
+    ...(reason ? { 'x-card-why': encodeURIComponent(reason) } : {}),
+    ...(agent || library ? { 'x-card-context': context ?? 'chat' } : {}),
+    'x-card-batch': rand(8),
+  };
+  const conditions = item => (!remoteByPath.has(item.key) ? { 'if-none-match': '*' } : { 'if-match': `"${library ? item.seen : item.seen ?? item.listed}"` });
   const big = upload.filter(item => item.body.length > MAX_INLINE);
   const urls = big.length ? new Map((await call('POST', `/sections/${section}/uploads`, { body: { files: big.map(item => ({ path: item.key })) } })).uploads.map(item => [item.path, item.url])) : new Map();
-  for (const { key, body } of upload) {
-    if (body.length > MAX_INLINE) {
-      const response = await fetch(urls.get(key), { method: 'PUT', body });
-      if (!response.ok) throw new Error(`Upload of ${key} failed: ${response.status} ${await response.text()}`);
+  const done = [];
+  let unrecorded = false;
+  const lost = (error, what) => {
+    console.error(`Stopped: ${what} changed in the bucket since it was read (${error.status}${error.data?.error ? ` ${error.data.error}` : ''}).`);
+    console.error(done.length ? `Already uploaded: ${done.join(', ')}. A rerun skips what matches; run get into a fresh folder to see the other change.` : 'Nothing was uploaded.');
+    throw new Exit(3);
+  };
+  for (const item of upload) {
+    if (item.body.length > MAX_INLINE) {
+      const response = await fetch(urls.get(item.key), { method: 'PUT', body: item.body });
+      if (!response.ok) throw new Error(`Upload of ${item.key} failed: ${response.status} ${await response.text()}`);
     } else {
-      await call('PUT', `/sections/${section}/files/${enc(key)}`, { raw: body });
+      try {
+        const answer = await call('PUT', `/sections/${section}/files/${enc(item.key)}`, { raw: item.body, headers: { ...headers, ...conditions(item) } });
+        if (answer.recorded === false) unrecorded = true;
+      } catch (error) {
+        if (error.status === 412 || error.status === 409) lost(error, item.key);
+        throw error;
+      }
     }
+    done.push(item.key);
   }
   for (const key of remove) await call('DELETE', `/sections/${section}/files/${enc(key)}`);
-  const result = await call('PUT', `/sections/${section}/cards/${encodeURIComponent(id)}`, { body: entity });
-  console.log(`${result.created ? 'Added' : 'Updated'} ${section}/${id}.`);
+  let result;
+  try {
+    result = await call('PUT', `/sections/${section}/cards/${encodeURIComponent(id)}`, { body: entity, headers });
+  } catch (error) {
+    if (error.status === 412 || error.status === 409) lost(error, `the card list entry for ${id}`);
+    throw error;
+  }
+  if (result.recorded === false) unrecorded = true;
+  if (result.ignored?.length) console.log(`The card list kept its own ${result.ignored.join(', ')}: an agent only adds new tabs to an existing card, so those changes did nothing.`);
+  console.log(`${result.unchanged ? 'Nothing to change in' : result.created ? 'Added' : 'Updated'} ${section}/${id}${agent ? ` as ${agent}` : ''}.`);
+  if (unrecorded) console.error('Warning: this write was not recorded, so it has no row and no Revert in the Hub.');
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2103,6 +2220,17 @@ async function requestState(rawId) {
   console.log(await requestStateOf(id, names));
 }
 
+/** The card a finished job made, as <section>/<folder>: a job's card is in its project's section or in assistant, and `state` prints only a state. */
+async function requestCard(rawId) {
+  const id = idSafe(rawId);
+  const result = await readJson(inboxPath('requests', id, 'result.json'));
+  if (typeof result?.card !== 'string' || !result.card) {
+    console.error('No card yet.');
+    throw new Exit(3);
+  }
+  console.log(result.card);
+}
+
 // --- An avatar sheet (the sprite flow): team/<agent>/sheet-<stamp>.png and .json, written by the sheet run ---
 
 const SHEET_STAMP_RE = /^\d{8}T\d{6}Z-[a-z0-9]{4}$/;
@@ -2760,6 +2888,7 @@ async function inbox(command, args) {
   if (command === 'request' && sub === 'run') return requestRun(flags);
   if (command === 'request' && sub === 'finish') return requestFinish(id ?? process.env.BUW_REQUEST_ID, flags);
   if (command === 'request' && sub === 'state' && id) return requestState(id);
+  if (command === 'request' && sub === 'card' && id) return requestCard(id);
   if (command === 'request' && sub === 'take' && id && flags.runner !== undefined) return requestTakeRunner(id, flags);
   if (command === 'request' && sub === 'take' && id) {
     const wanted = await readJson(inboxPath('requests', idSafe(id), 'request.json'));
@@ -2803,6 +2932,11 @@ async function main() {
   const section = option('--section');
   const card = option('--card');
   const dryRun = flag('--dry-run');
+  const edit = flag('--edit');
+  const removeGone = flag('--remove');
+  const agent = option('--agent');
+  const why = option('--why');
+  const context = option('--context');
   const via = option('--via') ?? process.env.BUW_CARDS_VIA;
   const [command, target] = args;
   if (!['login', 'sections', 'list', 'get', 'put'].includes(command)) {
@@ -2814,13 +2948,13 @@ async function main() {
   console.error(`(via ${transport.label})`);
 
   if (command === 'sections') {
-    for (const item of (await call('GET', '/sections')).sections) console.log(`${item.id}\t${item.cards} card(s)\t${item.name}`);
+    for (const item of (await call('GET', '/sections')).sections) console.log(`${item.id}\t${item.cards} card(s)\t${item.name}${item.access ? `\t${ACCESS_WORDS[item.access] ?? item.access}` : ''}`);
   } else if (command === 'list' && target) {
     for (const item of (await call('GET', `/sections/${target}`)).cards) console.log(`${item.id}\t${item.updated ?? ''}\t${item.title}`);
   } else if (command === 'get' && target) {
     await get(target, into);
   } else if (command === 'put' && target && section && card) {
-    await put(target, section, card, dryRun);
+    await put(target, section, card, dryRun, { agent, why, context, edit, remove: removeGone });
   } else {
     console.error(USAGE);
     process.exit(1);

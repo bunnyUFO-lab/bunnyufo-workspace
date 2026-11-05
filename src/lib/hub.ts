@@ -346,7 +346,29 @@ export interface SprintPreview {
   digest?: string
 }
 /** `GET /hub/project-cards?project=<id>`: the cards of the section whose id is the project's (newest first, at most 20; `total` is all of them). `section` is null when there is no such section. */
-export interface ProjectCards { section: string | null; cards: { title: string; href: string; updated?: string }[]; total: number }
+export interface ProjectCards { section: string | null; cards: { title: string; href: string; updated?: string }[]; total: number; /** The owner has not turned agent cards off for this section. */ agents?: boolean }
+
+/** One row of `GET /hub/card-writes`: what one agent write (a batch) did to a project section. `agent`, `why` and `context` are the agent's own words; `token` is proven. */
+export interface CardWriteGroup {
+  batch: string
+  folder: string
+  agent: string
+  token: string
+  why: string
+  /** `chat` or `job:<request id>`. */
+  context: string | null
+  at: string | null
+  files: { file: string; kind: 'new-card' | 'new-tab' | 'edit' }[]
+  title: string
+  cardTitle?: string
+  canRevert: boolean
+  reverted?: { at: string | null; by: string; partial?: boolean; /** Nothing was undone: the owner had changed the file after the agent. */ left?: boolean }
+}
+export interface CardWrites { groups: CardWriteGroup[]; /** There are older writes than these (`?older=1` reads them). */ more?: boolean }
+/** The answer to a Revert. */
+export interface CardRevert { restored: string[]; removedTabs: string[]; trashed: string[]; skipped: string[]; /** Files of the batch the Revert did not touch, because someone else changed them after the agent's first write. */ leftAlone?: { file: string; why: string }[]; reverted: { at: string; by: string }; recorded: boolean }
+/** `GET /hub/card-write-sections`: where agents may add cards. `saved` is false until the owner has saved the list once. */
+export interface CardWriteSections { sections: { id: string; name: string; on: boolean; locked?: boolean }[]; saved: boolean; unreadable?: boolean }
 export interface ProgressMap {
   project: string
   meta: { pushedAt: string; host: string; count: number; repo: string } | null
