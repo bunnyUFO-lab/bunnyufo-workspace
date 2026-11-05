@@ -14,7 +14,7 @@ See [docs/skills.md](docs/skills.md).
 
 ## Tracked project
 Workspace section: `workspace-app` · Beads project: `workspace-app` · Issue prefix: `ws`
-- Start with `bd ready`. Beads lives in the private store `bunnyUFO-lab/beads-workspace-app`. The hub-hooks mod connects this checkout at session start. Without it, run `node <bunnyufo:workspace-authoring skill>/scripts/beads-store.mjs setup`. Claim a task with `bd update <id> --claim` before working on it; close it with `bd close <id>` in the PR's last commit, so the close lands with the merge; `main` takes changes only through PRs.
+- Start with `bd ready`. Beads lives in the private store `bunnyUFO-beads/beads-workspace-app`. The hub-hooks mod connects this checkout at session start. Without it, run `node <bunnyufo:workspace-authoring skill>/scripts/beads-store.mjs setup`. Claim a task with `bd update <id> --claim` before working on it; close it with `bd close <id>` in the PR's last commit, so the close lands with the merge; `main` takes changes only through PRs.
 - Stacked PRs: each item branches from the one below; deploy the stack's tip to the development copy before asking for review.
 - Issues travel in the store, not in git, so PRs carry no Beads rows and `.beads/issues.jsonl` is frozen. The hook syncs after `bd` writes. Without it, run `beads-store.mjs sync` at the end of a session. Never `bd init` here: use `setup`. See "Beads on a central store" in that skill's `references/project-hubs.md`.
 - Branch and PR names carry the Beads id: `ws-7f3c-wall-jump`, or `sprint/ws-7f3c-wall-jump` in a dev sprint.
@@ -52,7 +52,7 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on the private store `bunnyUFO-lab/beads-workspace-app`; `.beads/issues.jsonl` is frozen. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on the private store `bunnyUFO-beads/beads-workspace-app`; `.beads/issues.jsonl` is frozen. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 
 ## Agent Context Profiles
 
