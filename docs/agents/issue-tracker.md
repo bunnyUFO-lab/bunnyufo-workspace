@@ -22,8 +22,8 @@ bd ready --exclude-label wayfinder:map,wayfinder:research,wayfinder:prototype,wa
 
 Used by `/wayfinder`. The map is an epic, and each ticket is a child of it.
 
-- **Map**: `bd create "<title>" -t epic -l milestone,wayfinder:map --body-file <file>`. The body (Destination, Notes, Decisions so far, Not yet specified, Out of scope) is the description. The `milestone` label is there so the Roadmap shows the map.
-- **Ticket**: `bd create "<title>" --parent <map> -l wayfinder:<type> --no-inherit-labels -d "## Question ..."`, where `<type>` is `research`, `prototype`, `grilling` or `task`. Without `--no-inherit-labels` a child copies the map's labels, including `milestone`.
+- **Map**: `bd create "<title>" -t epic -l wayfinder:map --body-file <file>`. The body (Destination, Notes, Decisions so far, Not yet specified, Out of scope) is the description. The Roadmap shows a map by this label.
+- **Ticket**: `bd create "<title>" --parent <map> -l wayfinder:<type> --no-inherit-labels -d "## Question ..."`, where `<type>` is `research`, `prototype`, `grilling` or `task`. Without `--no-inherit-labels` a child copies the map's label.
 - **Blocking**: `bd dep add <blocked> <blocker>`, in a second pass once every ticket has an id.
 - **Frontier**: `bd ready --parent <map> --exclude-type epic --unassigned`. `bd ready` already leaves out blocked and in-progress issues.
 - **Claim**: `bd update <id> --claim`, the session's first write. It sets the assignee and moves the ticket to in progress.
