@@ -9,12 +9,24 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { idsIn, jobIdsOf, splitCreated } from '../chat-jobs.mjs';
+import { idsIn, jobIdsOf, jobRow, producesAt, splitCreated } from '../chat-jobs.mjs';
 import { parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { startFakeHermes } from './fake-hermes.mjs';
 import { requestJson } from './hub-fixtures.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
+
+test('a card job names the section its card goes to when the Hub knows it, and says what decides it when not', () => {
+  const text = "a card in the project's section, or in assistant, with sources";
+  assert.equal(producesAt(text, 'magic-loops'), 'a card in magic-loops, with sources');
+  assert.equal(producesAt(text, 'assistant'), 'a card in assistant, with sources');
+  assert.equal(producesAt(text), "a card in the project's section, or in assistant when agents may not write there, with sources");
+  assert.equal(producesAt('a PR'), 'a PR', 'text without a place is left alone');
+  const item = { id: 'r1', title: 'T', project: 'magic-loops', state: 'proposed' };
+  const preset = { agent: 'Researcher', produces: "a card in the project's section, or in assistant", minutes: 30 };
+  assert.equal(jobRow({ item, request: { text: 'x' }, preset, cardSection: 'magic-loops' }).produces, 'a card in magic-loops');
+  assert.match(jobRow({ item, request: { text: 'x' }, preset }).produces, /when agents may not write there/);
+});
 
 const keyPair = generateKeyPairSync('ed25519');
 const KEY_ENV = { HUB_SIGNING_KEY: keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') };

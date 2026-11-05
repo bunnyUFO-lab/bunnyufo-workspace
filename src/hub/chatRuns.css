@@ -58,5 +58,8 @@
 .hub-job-why .hub-muted, .hub-job-note { font-size: 0.78rem; overflow-wrap: anywhere; }
 .hub-job-error { font-size: 0.8rem; overflow-wrap: anywhere; }
 .hub-job .hub-btn, .hub-jobs-a .hub-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
-.hub-jobs-a { display: flex; gap: 8px; }
-@media (max-width: 640px) { .hub-jobs-a .hub-btn { flex: 1 1 auto; justify-content: center; } }
+/* The button never breaks inside a word: it keeps its one line and the cost goes under it when the row is too narrow. */
+.hub-jobs-a { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hub-jobs-a .hub-btn { white-space: nowrap; flex: 0 0 auto; min-width: 120px; justify-content: center; }
+.hub-jobs-a .hub-jobs-cost { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .hub-jobs-a .hub-btn { flex: 1 1 100%; } .hub-jobs-a .hub-jobs-cost { flex-basis: 100%; } }
