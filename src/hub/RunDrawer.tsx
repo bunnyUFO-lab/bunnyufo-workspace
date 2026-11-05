@@ -356,7 +356,20 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const agent = detail.agent
   const where = taken?.runner ?? target
   const kind = [agent, where && where !== 'at-pc' ? (MACHINE[where as SpawnTarget]?.name ?? where) : ''].filter(Boolean).join(' · ')
-  const found = result && (
+  // A failed job leads with why it failed, from the record's own words; with none the page says so instead of staying quiet.
+  const failed = state === 'failed'
+  const whyFailed = result?.summary?.trim() || stop?.reason?.trim() || 'Hermes gave no reason.'
+  const failure = (
+    <>
+      <h4 className="rd-h">Why it failed</h4>
+      <div className="rd-result rd-failure" data-run-result data-run-failure>
+        <p data-run-failure-text>{whyFailed}</p>
+        {result?.reason === 'approval-refused'
+          && <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>}
+      </div>
+    </>
+  )
+  const found = result && (failed ? failure : (
     <>
       <h4 className="rd-h">What it found</h4>
       <div className="rd-result" data-run-result>
@@ -367,18 +380,19 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
       </div>
     </>
-  )
+  ))
   const deliverablesBlock = (
     <>
-      <h4 className="rd-h">Deliverables</h4>
-      <div className="rd-dls" data-run-deliverables>
+      {/* A failed job with nothing to open has no Deliverables block at all: the failure above is the whole answer. */}
+      {(dlist.length > 0 || !failed) && <h4 className="rd-h">Deliverables</h4>}
+      {(dlist.length > 0 || !failed) && <div className="rd-dls" data-run-deliverables>
         {dlist.map(item => <DeliverableCard key={deliverableKey(item)} item={item} />)}
         {!dlist.length && (
           <p className="hub-muted" data-run-no-deliverables>
-            {detail.nothing ? 'Done, nothing to change.' : state === 'failed' ? 'It failed before delivering anything.' : 'This job delivered nothing you can open.'}
+            {detail.nothing ? 'Done, nothing to change.' : 'This job delivered nothing you can open.'}
           </p>
         )}
-      </div>
+      </div>}
       {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={mapHash(request.project, request.bead)}>{request.bead}</a></p>}
     </>
   )
@@ -422,6 +436,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         </>
       ) : (
         <>
+          {failed && !result && failure}
           {timeline}
           {liveBlock}
           {resultBlock}

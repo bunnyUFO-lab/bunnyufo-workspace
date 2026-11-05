@@ -16,7 +16,7 @@ const where = (runner?: string) => (runner && runner in RUNNER_LABEL ? RUNNER_LA
 function JobItem({ job }: { job: JobListRow }) {
   const running = RUNNING.has(job.state)
   const when = ago(running ? job.at : job.finishedAt ?? job.at)
-  const meta = [job.agent, where(job.runner), when].filter(Boolean).join(' · ')
+  const meta = [job.project, job.agent, where(job.runner), when].filter(Boolean).join(' · ')   // the project and the age tell two jobs with one title apart
   const tone = job.state === 'failed' ? 'warn' : jobTone(job.state)
   return (
     <a className="jb-row" href={hubHash('request', job.id)} data-job-row={job.id} data-job-state={job.state} data-job-tone={tone}>

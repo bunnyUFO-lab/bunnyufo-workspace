@@ -29,7 +29,7 @@ try {
   fixtures.push(fx);
   const J = {
     card: id('sizes', 'aa11'), pr: id('crop', 'bb22'), asks: id('grill', 'cc33'), asking: id('palette', 'dd44'), nothing: id('tiles', 'ee55'),
-    failed: id('broken', 'ff66'), stopped: id('halt', 'gg77'), empty: id('vague', 'hh88'), running: id('going', 'ii99'), other: id('else', 'jj00'), child: id('after', 'kk11'),
+    failed: id('broken', 'ff66'), stopped: id('halt', 'gg77'), empty: id('vague', 'hh88'), running: id('going', 'ii99'), silent: id('quiet', 'll22'), other: id('else', 'jj00'), child: id('after', 'kk11'),
   };
   const put = (jobId, title, minutes, { project = 'probe', result, stop, session } = {}) => {
     fx.seed.request({ id: jobId, project, title, text: `Do ${title}`, preset: 'research', target: 'hermes', by: 'hermes', createdAt: iso(minutesAgo(fx.now, minutes + 5)) });
@@ -46,6 +46,7 @@ try {
   put(J.asking, 'Compare enemy palettes', 80, { result: { outcome: 'question', question: 'Which palette do you want?', summary: 'Which palette do you want?' } });
   put(J.nothing, 'Check the old tile import', 90, { result: { outcome: 'failed', reason: 'nothing-to-do', summary: 'Nothing needs changing.' } });
   put(J.failed, 'Broken run', 100, { result: { outcome: 'failed', summary: 'The run failed: boom' } });
+  put(J.silent, 'Silent failure', 130, { result: { outcome: 'failed' } });
   put(J.stopped, 'Halted run', 110, { stop: true, result: { outcome: 'failed', reason: 'stopped', summary: 'Stopped by you.' } });
   put(J.empty, 'Vague run', 120, { result: { outcome: 'unknown', summary: 'Hermes forgot this run.' } });
   put(J.running, 'Still going', 4);
@@ -74,7 +75,7 @@ try {
     assert.equal(await page.locator('[data-work-tab="jobs"][aria-selected="true"]').count(), 1);
     assert.match(await page.locator('[data-jobs-tab="running"]').innerText(), /^Running 1$/);
     const live = page.locator(`[data-job-row="${J.running}"]`);
-    assert.match(await live.innerText(), /Still going[\s\S]*Researcher · Hermes · \d+ min ago[\s\S]*Taken/);
+    assert.match(await live.innerText(), /Still going[\s\S]*probe · Researcher · Hermes · \d+ min ago[\s\S]*Taken/, 'the row names its project and its age');
     assert.equal(await page.locator('[data-job-row]').count(), 1, 'Only the running one is on the Running tab.');
     await noSideways('Running');
 
@@ -167,9 +168,17 @@ try {
     assert.equal((await result.locator('[data-run-no-deliverables]').innerText()).trim(), 'This job delivered nothing you can open.');
     await result.goto(`${fx.url}#/~hub/request/${J.nothing}`);
     assert.equal((await result.locator('[data-run-no-deliverables]').innerText()).trim(), 'Done, nothing to change.');
+    step(`${label}: a failed job leads with why it failed, from the record, and reads unlike a finished job with nothing to open`);
     await result.goto(`${fx.url}#/~hub/request/${J.failed}`);
-    assert.equal((await result.locator('[data-run-no-deliverables]').innerText()).trim(), 'It failed before delivering anything.');
-    assert.match(await result.locator('[data-run-result]').innerText(), /The run failed: boom/, 'The reason comes from the summary.');
+    await result.locator('[data-run-failure]').waitFor();
+    assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'The run failed: boom', 'The reason comes from the record.');
+    assert.equal(await result.locator('[data-run-no-deliverables]').count(), 0, 'A failure is not "delivered nothing".');
+    assert.equal(await result.locator('[data-run-deliverables]').count(), 0);
+    assert.match(await result.locator('.rd .rd-h').first().innerText(), /why it failed/i, 'The failure comes first.');
+    await result.goto(`${fx.url}#/~hub/request/${J.silent}`);
+    await result.locator('[data-run-failure]').waitFor();
+    assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'Hermes gave no reason.', 'With no reason on record the page says so.');
+    assert.equal(await result.locator('[data-run-no-deliverables]').count(), 0);
 
     step(`${label}: a job that asked a question keeps the question block`);
     await result.goto(`${fx.url}#/~hub/request/${J.asking}`);
