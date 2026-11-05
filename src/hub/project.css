@@ -10,6 +10,7 @@
 .pp-note { margin: 8px 0 0; max-width: 46ch; text-align: right; }
 .pp .hub-chip { min-height: 44px; display: inline-flex; align-items: center; }
 .pp .hub-chips-wrap { margin-bottom: 4px; }
+@media (max-width: 640px) { .pp .hub-project-pick { margin-bottom: 4px; } }
 .pp-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; margin-top: 4px; }
 .pp-tabs::-webkit-scrollbar { display: none; }
 .pp-tabs .wk-tab { min-height: 44px; display: inline-flex; align-items: center; flex: none; white-space: nowrap; }

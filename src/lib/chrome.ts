@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 /** Where the screen is a phone's: the header hides on scroll and the tool rail folds into a menu (global.css). */
 export const PHONE = '(max-width: 640px)'
 export const isPhone = () => window.matchMedia(PHONE).matches
+
+const subscribePhone = (changed: () => void) => {
+  const query = window.matchMedia(PHONE)
+  query.addEventListener('change', changed)
+  return () => query.removeEventListener('change', changed)
+}
+/** Whether the screen is a phone's now. Read before the first paint and followed through resize and rotation. */
+export function useIsPhone() { return useSyncExternalStore(subscribePhone, isPhone) }
 
 // Small enough to follow a deliberate flick, large enough to ignore a finger resting on the glass.
 const STEP = 6

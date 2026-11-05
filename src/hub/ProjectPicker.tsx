@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { HubProject } from '../lib/hub'
+import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import Combobox from './Combobox'
 
-/** Up to this many projects the picker is a row of chips (one tap); past it, a typeable list. "All" does not count. */
+/** Up to this many projects the picker is a row of chips (one tap), or on a phone one native select; past it, a typeable list. "All" does not count. */
 export const CHIP_LIMIT = 10
 
 type Props = {
@@ -28,7 +29,10 @@ type Props = {
   allCount?: number
 }
 
-/** The Hub's project picker: chips while the owner has ten or fewer projects, a typeable list once there are more. Matches the name or the id. */
+/**
+ * The Hub's project picker: chips while the owner has ten or fewer projects (a native select at phone width, so nothing scrolls sideways),
+ * a typeable list once there are more. Matches the name or the id.
+ */
 export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList, counts, allCount }: Props) {
   const options = useMemo(() => [
     ...(allValue === undefined ? [] : [{ value: allValue, label: allLabel }]),
@@ -37,11 +41,25 @@ export default function ProjectPicker({ projects, value, onChange, id, allValue,
   const countOf = (option: string) => (option === allValue ? allCount : counts?.[option])
   // A count is its own number on a chip, and part of the label in the typeable list.
   const listOptions = useMemo(() => options.map(option => { const n = option.value === allValue ? allCount : counts?.[option.value]; return n === undefined ? option : { ...option, label: `${option.label} (${n})` } }), [options, allValue, allCount, counts])
-  const chips = !alwaysList && projects.length <= CHIP_LIMIT
+  const phone = useIsPhone()
+  const short = projects.length <= CHIP_LIMIT
+  const native = phone && short
+  const chips = !phone && !alwaysList && short
   const row = useRef<HTMLDivElement>(null)
   const edges = useOverflowEdges(row, [options.length, value, chips])
-  useEffect(() => { if (oneRow) row.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [oneRow, options.length, value])
+  useEffect(() => { if (oneRow) row.current?.querySelector('.hub-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [oneRow, options.length, value, chips])
 
+  if (native) {
+    const known = options.some(option => option.value === value)
+    const field = (
+      <select id={id} className="hub-project-select" aria-label="Project" data-project-picker="" data-value={value}
+        value={known ? value : ''} disabled={!options.length} onChange={event => onChange(event.target.value)}>
+        {!known && <option value="" disabled hidden>Choose a project</option>}
+        {listOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    )
+    return inRow ? field : <div className="hub-project-pick">{field}</div>
+  }
   if (chips) {
     const list = (
       <div className={`hub-chips${oneRow ? ' one-row' : ''}`} aria-label="Project" data-value={value} ref={row}>

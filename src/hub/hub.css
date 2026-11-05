@@ -109,6 +109,11 @@
   width: 100%; background: var(--surface-solid); color: var(--text); border: 1px solid var(--hairline-strong); border-radius: var(--radius); padding: 8px 10px; font: inherit; font-size: 0.88rem;
 }
 .hub select { width: auto; padding: 4px 8px; }
+/* The project picker on a phone (ProjectPicker). The element name keeps it above `.hub select`; 16px stops iOS zooming the page on focus. */
+select.hub-project-select { display: block; width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; padding: 10px 12px; font: inherit; font-size: 16px; color: var(--t1); background: var(--ground); border: 1px solid var(--line2); border-radius: 10px; text-overflow: ellipsis; cursor: pointer; }
+select.hub-project-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+select.hub-project-select:disabled { opacity: 0.6; }
+.hub-map-chips > select.hub-project-select, .needs-project > select.hub-project-select { flex: 1 1 0; width: auto; }
 .hub-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 12px; }
 .hub-note-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .hub-answer h3 span { text-transform: none; }
