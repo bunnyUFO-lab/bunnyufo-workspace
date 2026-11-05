@@ -44,7 +44,10 @@ const arrive = async (page, screen, hash = HASH[screen]) => {
 const pick = async (page, view, screen, id) => {
   const scope = page.locator(SCOPE[screen]);
   if (view.phone) { await scope.getByRole('combobox', { name: 'Project' }).selectOption(id); return; }
-  const chip = scope.locator('.hub-chips[aria-label="Project"] .hub-chip', { hasText: NAME[id] });
+  const chips = scope.locator('.hub-chips[aria-label="Project"] .hub-chip');
+  // Before /projects answers the chip row holds only All: wait for the list (more chips, or the typeable list) before choosing which to use.
+  await expect.poll(async () => (await chips.count()) > 1 || (await scope.getByRole('combobox', { name: 'Project' }).count()) > 0, { message: `${screen} picker lists projects` }).toBe(true);
+  const chip = chips.filter({ hasText: NAME[id] });
   if (await chip.count()) { await chip.first().click(); return; }
   await scope.getByRole('combobox', { name: 'Project' }).click();
   await scope.locator('[role="option"]', { hasText: NAME[id] }).first().click();
