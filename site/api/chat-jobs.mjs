@@ -82,11 +82,21 @@ export function tokensOf(estimate) {
   return single ? { low: Number(single[1]), high: Number(single[1]) } : undefined;
 }
 
+const PLACE = /the project's section, or in assistant/;
+/**
+ * Where a card job's card goes, said as plainly as it is known. `section` is what the Hub chose for the project (the section id), when the
+ * caller knows it: then the text names it. Without it the text says what decides it. Text without the placeholder is returned as it is.
+ */
+export function producesAt(produces, section) {
+  if (typeof produces !== 'string' || !PLACE.test(produces)) return produces;
+  return produces.replace(PLACE, typeof section === 'string' && section ? section : "the project's section, or in assistant when agents may not write there");
+}
+
 /**
  * One row. `item` is the request's list row (state, title, finish...), `request` its request.json (the text), `preset` the preset table's
- * entry, `check` what `jobApproval` said for a proposed one, `verified` what `verifyJob` said, `cardHref` the site path of the card a finished job wrote.
+ * entry, `check` what `jobApproval` said for a proposed one, `verified` what `verifyJob` said, `cardHref` the site path of the card a finished job wrote, `cardSection` the section the Hub chose for its card.
  */
-export function jobRow({ item, request, preset, check = null, verified = { ok: false }, persona = null, cardHref }) {
+export function jobRow({ item, request, preset, check = null, verified = { ok: false }, persona = null, cardHref, cardSection }) {
   const flagged = !!persona;
   const proposed = item.state === 'proposed';
   const approvable = proposed && !flagged && verified.ok === true && check?.ok === true;
@@ -98,7 +108,7 @@ export function jobRow({ item, request, preset, check = null, verified = { ok: f
   return {
     id: item.id, title: item.title, text: String(request?.text ?? '').slice(0, JOB_LIMITS.textShown), project: item.project,
     ...(item.preset ? { preset: item.preset } : {}),
-    ...(preset ? { agent: preset.agent, produces: preset.produces, minutes: preset.minutes, ...(preset.estimate ? { estimate: preset.estimate } : {}), ...(tokens ? { tokens } : {}) } : {}),
+    ...(preset ? { agent: preset.agent, produces: producesAt(preset.produces, cardSection), minutes: preset.minutes, ...(preset.estimate ? { estimate: preset.estimate } : {}), ...(tokens ? { tokens } : {}) } : {}),
     ...(repo ? { repo } : {}), ...(request?.model ? { model: request.model } : {}), ...(request?.doneWhen ? { doneWhen: String(request.doneWhen).slice(0, 400) } : {}),
     ...((check?.target ?? item.target) ? { runsOn: check?.target ?? item.target } : {}),
     state: item.state, ...(item.stale ? { stale: item.stale } : {}),

@@ -82,6 +82,11 @@ try {
   assert.equal((await approve.textContent()).trim(), 'Approve all 2');
   assert.match(await card.locator('[data-jobs-estimate]').textContent(), /^Estimated for all 2: 1\.4–2\.2 M tokens · if Codex is paused it may use paid models$/, 'the cost is on screen before the tap');
   assert.match(await rows.first().locator('[data-job-facts]').textContent(), /^Project probe · Up to 30 minutes · Codex plan/, 'the facts the approval page shows');
+  // Never broken inside a word: the label is one line, on a phone too, and the button is wide enough for it.
+  const approveBox = await approve.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node); return { label: range.getBoundingClientRect().height, line: parseFloat(getComputedStyle(node).lineHeight) || parseFloat(getComputedStyle(node).fontSize) * 1.3, width: node.getBoundingClientRect().width, wrap: getComputedStyle(node).whiteSpace }; });
+  assert.ok(approveBox.label <= approveBox.line * 1.5, `Approve all 2 wraps (text ${approveBox.label} px high, a line is ${approveBox.line}).`);
+  assert.equal(approveBox.wrap, 'nowrap');
+  assert.ok(approveBox.width >= 120, `The button is ${approveBox.width} px wide.`);
   await approve.click();
   await rows.first().locator('[data-job-status]', { hasText: /^(Approved, waiting to start|Taken|Running)/ }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('[data-chat-jobs] [data-job-row]')].every(row => row.getAttribute('data-job-state') !== 'proposed'));
