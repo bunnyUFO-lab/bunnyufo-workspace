@@ -384,12 +384,12 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   )
   return (
     <div className="rd" data-run-view={id} data-run-state={state}>
-      {page && delivered && <a className="rd-back" href={hubHash('jobs', 'finished')} data-run-back>Jobs</a>}
       <div className="rd-head">
         {!page && <span className="hub-id" data-run-id>{request.id}</span>}
         {!page && request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
         <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
         {delivered && kind && <span className="ni-chip" data-run-agent>{kind}</span>}
+        {page && delivered && <a className="rd-back" href={hubHash('jobs', 'finished')} data-run-back>← Jobs</a>}
       </div>
       {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
       {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
