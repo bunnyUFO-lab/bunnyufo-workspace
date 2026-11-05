@@ -1605,7 +1605,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const { request, state, result } = detail;
     if (!request.preset || !['done', 'failed', 'stopped', 'asking'].includes(state)) return null;
     const report = detail.report ? await bucket.getBytes(key(`requests/${request.id}/report.md`)).then(found => found?.buffer.toString('utf8') ?? '', () => '') : '';
-    const source = await deliverableSource(at, () => [request.project]);
+    // Task titles only for the projects of tasks the job's session touched: a plain card job lists no Beads copy.
+    const source = await deliverableSource(at, (rows, touched) => [...new Set((touched.get(rows.find(row => row.id === request.id)?.run?.session)?.beads ?? []).map(row => row.project))]);
     const item = source.requests.find(row => row.id === request.id);
     if (!item) return null;
     return source.of(item, result, report);
@@ -1755,7 +1756,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             const detail = await requestFiles.detail(decodeURIComponent(match[1]), at);
             const cardHref = await cardHrefOf(detail.result?.card);
             // What the job delivered is a read of linked work: a failure there leaves the page without the list, never without the page.
-            const deliverables = await requestDeliverables(detail, at).catch(error => { log(scrub(`[hub] deliverables of ${detail.request.id}: ${error.message}`, 200)); return null; });
+            // Cached like the lists (15 s): only finished states reach it, so the running job's own state above stays live.
+            const deliverables = await listCache.cachedReads(() => requestDeliverables(detail, at)).catch(error => { log(scrub(`[hub] deliverables of ${detail.request.id}: ${error.message}`, 200)); return null; });
             const preset = detail.request.preset ? presetOf(detail.request.preset) : null;
             reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
           } else if (route.startsWith('/hub/presets')) {

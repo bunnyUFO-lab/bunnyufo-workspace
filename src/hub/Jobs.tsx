@@ -56,7 +56,7 @@ export default function Jobs({ tab }: { tab?: string }) {
       {!data && !error && loading && <p className="hub-empty">Loading…</p>}
       {data && !rows.length && <p className="hub-empty" data-jobs-empty>{shown === 'running' ? 'Nothing running.' : `No finished jobs in the last ${data.window}.`}</p>}
       {rows.length > 0 && <div className="jb-list" data-jobs-list={shown}>{rows.map(job => <JobItem key={job.id} job={job} />)}</div>}
-      {data && shown === 'finished' && rows.length > 0 && <p className="hub-muted jb-foot" data-jobs-foot>Jobs from the last {data.window} are listed.</p>}
+      {data && shown === 'finished' && rows.length > 0 && <p className="hub-muted jb-foot" data-jobs-foot>{data.counts.finished > rows.length ? `Newest ${rows.length} of ${data.counts.finished} finished jobs from the last ${data.window}.` : `Jobs from the last ${data.window} are listed.`}</p>}
     </>
   )
 }

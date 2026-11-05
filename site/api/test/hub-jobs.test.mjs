@@ -17,12 +17,12 @@ const NOW = new Date();
 const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
 const id = (name, rand) => `${day}-${name}-${rand}`;
 
-async function fixture() {
+async function fixture({ listCacheMs = 0 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-jobs-'));
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
-  const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev' });
+  const hub = createHub({ bucket, enabled: true, inbox: 'inbox-dev', listCacheMs });
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -116,5 +116,27 @@ test('tasks come from the session-items of the job\'s session, as a project and 
     const [row] = (await get('/hub/jobs?tab=finished')).body.jobs;
     assert.deepEqual(row.deliverables.filter(item => item.kind === 'task'), [{ kind: 'task', project: 'dev-proj', id: 'dp-1a2' }]);
     assert.deepEqual(row.pills.map(pill => pill.text), ['Card', 'Task']);
+  } finally { await close(); }
+});
+
+test('a finished job page lists the bucket for deliverables once, and a repeat open lists none of the Work scan; a plain card job reads no Beads copy', async () => {
+  const { get, job, cards, fake, close } = await fixture({ listCacheMs: 15_000 });
+  try {
+    cards('assistant', [{ id: 'sizes-card', title: 'Sizes', folder: 'sizes' }]);
+    const jobId = id('plain', 'cccc');
+    job(jobId, { title: 'A plain card job', result: { outcome: 'card', card: 'assistant/sizes' } });
+    const lists = () => fake.log.filter(entry => entry.method === 'GET' && entry.prefix !== null && entry.prefix !== undefined).map(entry => entry.prefix);
+    const scan = list => list.filter(prefix => /\/(asks|checklists|events|requests)\/?(\d{4}-\d{2}-\d{2}\/?)?$/.test(prefix) || /beads/.test(prefix));
+    const before = lists().length;
+    const first = (await get(`/hub/requests/${jobId}`)).body;
+    assert.equal(first.deliverables.length, 1);
+    const opened = lists().slice(before);
+    const mid = lists().length;
+    assert.equal((await get(`/hub/requests/${jobId}`)).body.deliverables.length, 1);
+    const repeat = lists().slice(mid);
+    assert.ok(opened.length <= 16, `One open made ${opened.length} LISTs: ${opened.join(' ')}`);
+    assert.equal(scan(repeat).length, 0, `A repeat open lists the Work scan again: ${repeat.join(' ')}`);
+    assert.ok(repeat.length <= 2, `A repeat open made ${repeat.length} LISTs: ${repeat.join(' ')}`);
+    assert.equal(opened.concat(repeat).some(prefix => /beads/.test(prefix)), false, 'A job whose session touched no task reads no Beads copy.');
   } finally { await close(); }
 });
