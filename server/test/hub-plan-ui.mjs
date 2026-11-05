@@ -67,7 +67,7 @@ try {
   assert.match(draft, /cards beads show --project wayfind --open/);
   assert.doesNotMatch(draft, /looking at/, 'No node was selected.');
   assert.equal(await desk.locator('.hub-bubble').count(), 0, 'Nothing was sent.');
-  assert.equal(await desk.locator('[data-chat-model] option:checked').innerText(), 'Codex 6 Sol');
+  assert.equal(await desk.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol');
   assert.deepEqual(writes, [], 'Opening it wrote nothing.');
   await shot(desk, 'chat-planner-desktop');
 
