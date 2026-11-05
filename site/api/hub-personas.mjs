@@ -154,7 +154,7 @@ function madeEntry(id, list) {
  * @param templates    the templates of a new persona (PERSONA_TEMPLATES)
  * @param reserved     ids a made persona may not take: every agent of the app, and RESERVED_PERSONA_IDS
  */
-export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = problem, now = () => new Date(), defaults = CHAT_PERSONAS, templates = PERSONA_TEMPLATES, reserved = [...AGENTS.map(agent => agent.id), ...RESERVED_PERSONA_IDS] }) {
+export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = problem, now = () => new Date(), live = fn => fn(), defaults = CHAT_PERSONAS, templates = PERSONA_TEMPLATES, reserved = [...AGENTS.map(agent => agent.id), ...RESERVED_PERSONA_IDS] }) {
   /** Create-only files never change: whether a name is a valid, unmarked version is remembered. */
   const seen = new Map();
   let cache = null;
@@ -243,9 +243,12 @@ export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = 
   async function table() {
     const at = now().getTime();
     if (cache && at - cache.at < TABLE_TTL_MS) return cache.table;
-    const out = await Promise.all(defaults.map(async entry => effectivePersona(entry, (await valid(entry.id, 1))[0] ?? null)));
-    const made = (await Promise.all((await madeIds()).map(madeOf))).filter(Boolean).map(item => item.entry);
-    const all = [...out, ...made];
+    // `live` steps out of the Hub's listing cache: this table lives 30 s, so it must not be filled from a listing up to 15 s old.
+    const all = await live(async () => {
+      const out = await Promise.all(defaults.map(async entry => effectivePersona(entry, (await valid(entry.id, 1))[0] ?? null)));
+      const made = (await Promise.all((await madeIds()).map(madeOf))).filter(Boolean).map(item => item.entry);
+      return [...out, ...made];
+    });
     cache = { at, table: all };
     return all;
   }

@@ -450,3 +450,19 @@ test('20. search-text with no project lists nothing under asks, checklists, requ
     assert.deepEqual([...new Set(answer.body.rows.map(row => row.project))].sort(), ['mk', 'other']);
   } finally { await f.close(); }
 });
+
+test('18. the persona table is filled from live listings, never from a cached one (ws-ubo.1.3)', async () => {
+  const f = await fixture();
+  try {
+    assert.equal((await f.get('/hub/team')).status, 200, 'fills the 30 s table');
+    f.clock.time += 29_000;
+    const teamPrefix = `${f.prefix}/team/`;
+    await f.hub.listCache.cachedReads(() => f.hub.listCache.bucket.list(teamPrefix));
+    const stamp = new Date(f.clock.time).toISOString().replace(/[-:.]/g, '');
+    f.fake.seed(`${teamPrefix}level-reviewer/persona-${stamp}-ab12.json`, JSON.stringify({ v: 1, role: 'reviews levels', prompt: 'You are Z.', model: 'codex', name: 'Level reviewer', template: 'plain', created: true, at: new Date(f.clock.time).toISOString(), by: 'owner' }), 'application/json');
+    f.clock.time += 2_000;
+    const team = await f.get('/hub/team');
+    assert.ok(team.body.agents.some(row => row.id === 'level-reviewer'), 'a persona made outside this process is listed');
+    assert.notEqual((await f.post('/hub/team/level-reviewer/avatar', { kind: 'random', salt: 1 })).status, 404);
+  } finally { await f.close(); }
+});

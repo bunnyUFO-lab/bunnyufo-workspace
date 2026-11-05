@@ -11,7 +11,7 @@
     "lint": "eslint src",
     "preview": "vite preview",
     "service": "node server/main.mjs",
-    "test:site-api": "node --test --test-concurrency=4 site/api/test/*.test.mjs site/card-api/test/*.test.mjs site/asks-bot/test/*.test.mjs",
+    "test:site-api": "node --test --test-concurrency=4 site/api/test/*.test.mjs site/card-api/test/*.test.mjs site/asks-bot/test/*.test.mjs site/caddy/test/*.test.mjs",
     "test:service": "node --test --test-concurrency=4 server/test/*.test.mjs",
     "test:service:ui": "node scripts/run-ui-tests.mjs",
     "test": "npm run test:service && npm run test:site-api && npm run docs:test && node --test --test-concurrency=4 scripts/publish.test.mjs scripts/cards.test.mjs scripts/check-leaks.test.mjs scripts/export-beads.test.mjs scripts/routine-prompt.test.mjs scripts/ui-shard.test.mjs scripts/run-ui-tests.test.mjs scripts/ci-affected.test.mjs",

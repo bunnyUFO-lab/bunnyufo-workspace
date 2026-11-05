@@ -305,7 +305,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   // A proposal that policy would sign carries a note once the day's limit is reached, so the list says why it waits for a tap.
   // The watcher's "run it again": an answer to a passkey Ask with a `rerun` field makes and approves one copy of the run (hub-rerun.mjs).
   // The owner's edits of a chat persona (hub-personas.mjs): create-only team/<agent>/persona-*.json, read through a 30 s table the chat uses.
-  const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now });
+  const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now, live: fn => listCache.liveReads(fn) });
   // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
   const agentEditFlow = createAgentEdits({
     personas: personaStore, log, agents: () => allAgents(),

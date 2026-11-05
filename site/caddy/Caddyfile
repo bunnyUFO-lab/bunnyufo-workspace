@@ -4,6 +4,10 @@
 # first path segment picks one: /magic-loops, /bunnylink. Each section's files come from its own base
 # under /w/, which is what lets a single copy of the app show any of them, with a switcher in the top bar.
 #
+# Compression: JavaScript, CSS, HTML, JSON and the other text types named in `encode` below, with zstd or gzip.
+# Event streams (text/event-stream: the Hub's chat and run streams) are left out on purpose, see the `encode`
+# block. Hashed assets under /assets/ are cached for a year.
+#
 # $BUW_DOCS_ROOT/_app/ui  the app's built UI, published by site/deploy/publish-ui.sh
 #                         ($BUW_DOCS_ROOT is /srv/buw-docs unless Caddy's environment says otherwise)
 # buw-site-api:8099       the data service ($BUW_DOCS_ROOT/_app/api): it streams every section out of
@@ -57,6 +61,34 @@
 	}
 
 	header Cache-Control "no-cache"
+
+	# Compress text only, named one by one. Never text/*: it holds text/event-stream, and a chat or run stream
+	# must reach the browser piece by piece. Media, images and fonts are already compressed. Only a 200 is
+	# encoded, so a 206 range answer, a 304 and a redirect pass through. Caddy adds -zstd or -gzip to the ETag and
+	# strips it again from If-None-Match, so conditional requests still reach the service with the plain ETag.
+	encode {
+		zstd
+		gzip
+		minimum_length 1024
+		match {
+			status 200
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/javascript*
+			header Content-Type text/plain*
+			header Content-Type text/markdown*
+			header Content-Type text/csv*
+			header Content-Type text/yaml*
+			header Content-Type text/x-python*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type application/manifest+json*
+			header Content-Type application/xml*
+			header Content-Type image/svg+xml*
+			header Content-Type model/gltf+json*
+			header Content-Type application/wasm*
+		}
+	}
 
 	# Only the login proxy may say who is signed in.
 	@notProxy not remote_ip {$NPM_IP:127.0.0.1}
@@ -122,6 +154,14 @@
 		header Content-Security-Policy "frame-ancestors 'none'"
 		header X-Frame-Options "DENY"
 		root * {$BUW_DOCS_ROOT:/srv/buw-docs}/_app/ui
+		# Vite's content-hashed JS and CSS (assets/name-<8 chars>.js|css) never change under the same name. `file`
+		# matters: a missing name falls back to index.html below, and that answer must not be kept for a year.
+		# Inside this handle, so it runs after the site-level no-cache and replaces it.
+		@hashedAsset {
+			path_regexp `^/assets/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$`
+			file {path}
+		}
+		header @hashedAsset Cache-Control "private, max-age=31536000, immutable"
 		try_files {path} /index.html
 		file_server
 	}
