@@ -42,6 +42,12 @@ const stale = await startHubFixture({ agentConfig: 'stale' });
 const EDIT_ASK = askId('planner-edit', 'e1d1');
 const EDIT_OPTIONS = [{ id: 'apply', label: 'Apply this edit' }, { id: 'skip', label: 'Leave it as it is' }];
 fresh.seed.ask({ ...askJson({ id: EDIT_ASK, project: 'probe', question: 'Shorten the Planner prompt?', options: EDIT_OPTIONS, allowDrawing: false, kind: 'approval' }), requirePasskey: true, agentEdit: { op: 'persona', agent: 'planner', base: 'default', prompt: 'You are Planner. Ask one question at a time.', why: 'The chats ran long.' } });
+// An agent's proposals to change a profile's order (ws-im1.4.2): still Asks, still answered by the owner's Apply. The press on the Edit page makes none.
+const PROFILE_ASK = askId('profile-edit', 'e2d2');
+const OPUS_ASK = askId('opus-edit', 'e3d3');
+const agentProfileAsk = (id, question, agentEdit) => ({ ...askJson({ id, project: 'probe', question, options: EDIT_OPTIONS, allowDrawing: false, kind: 'approval' }), requirePasskey: true, agentEdit });
+fresh.seed.ask(agentProfileAsk(PROFILE_ASK, 'Change the model of the Hermes main profile?', { op: 'profile', profile: 'main', primary: ref('anthropic', 'claude-sonnet-5-5'), fallbacks: [ref('anthropic', 'claude-haiku-5-5'), ref('openai-codex', 'gpt-6-sol')], why: 'Codex is slow today.' }));
+fresh.seed.ask(agentProfileAsk(OPUS_ASK, 'Try Opus as a fallback?', { op: 'profile', profile: 'main', primary: ref('anthropic', 'claude-sonnet-5-5'), fallbacks: [ref('openai-codex', 'gpt-6-sol'), ref('anthropic', 'claude-opus-5-5')] }));
 await new Promise(resolve => setTimeout(resolve, 150));
 const bare = await startHubFixture({});
 
@@ -190,7 +196,7 @@ try {
   assert.equal(await edit.locator('[data-edit-model]').inputValue(), 'codex');
   assert.equal(await edit.locator('[data-version]').nth(2).locator('[data-revert]').count(), 1, 'The edited version can be reverted to.');
 
-  step('Profile: Teardown Edit says the profile is shared by five agents, lists the host\'s own models and keeps Send off until something changes');
+  step('Profile: Teardown Edit says the profile is shared by five agents, lists the host\'s own models and keeps the button off until something changes');
   await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
   const model = desk.locator('[data-edit-profile="main"]');
   await model.waitFor();
@@ -207,7 +213,38 @@ try {
   assert.equal(await model.locator('[data-profile-briefs-wait]').count(), 0, 'the weekly-jobs wait is Briefs only');
   await noSideways(desk, 'Edit with the model section at 1280');
 
-  step('Profile: a new primary leaves the chain; Remove empties it and says what that means; Add and Down reorder; Send opens an Ask');
+  step("Profile Ask: an agent's proposal still reads as a plain-text Ask with the order now, the order proposed, the passkey tag and what Apply does");
+  const reader = await open({ width: 1280, height: 800 });
+  await reader.goto(`${fresh.url}#/~hub/ask/${PROFILE_ASK}`);
+  const modelAsk = reader.locator('[data-agent-edit-ask="profile-main"]');
+  await modelAsk.waitFor();
+  assert.equal(await reader.locator('[data-agent-edit-tag]').innerText(), 'Changes a model');
+  await reader.waitForFunction(() => !/loading/.test(document.querySelector('[data-profile-ask-chain="old"]')?.textContent ?? 'loading'));
+  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="old"] li').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'then anthropic · claude-sonnet-5-5', 'then deepseek · deepseek-v4-pro']);
+  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="new"] li').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
+  assert.equal(flat(await modelAsk.locator('[data-edit-ask-why]').innerText()), 'Why: Codex is slow today.');
+  assert.match(flat(await modelAsk.locator('[data-profile-ask-restart]').innerText()), /^Apply signs the change and sends it to the Hermes host\. Changing this restarts Hermes main\. Usually done in about a minute, at most 5 if the host's quick check is off\. A chat or job running then stops\. If anything fails, the old settings/);
+  assert.equal(await modelAsk.locator('script, img, a').count(), 0, 'the text is plain text');
+  await noSideways(reader, 'Model Ask at 1280');
+
+  step('Profile: the URL gives the page no draft, and the page shows the order in use with the button off');
+  const withDraft = new URL(fresh.url);
+  withDraft.searchParams.set('primary', 'claude-haiku-5-5');
+  withDraft.searchParams.set('fallbacks', 'none');
+  withDraft.hash = '#/~hub/agent-edit/teardown';
+  await desk.goto(withDraft.href);
+  await model.waitFor();
+  await desk.waitForFunction(() => /gpt-6-sol/.test(document.querySelector('[data-profile-primary] option:checked')?.textContent ?? ''));
+  assert.equal(flat(await model.locator('[data-profile-primary] option:checked').innerText()), 'openai-codex · gpt-6-sol');
+  assert.equal(await model.locator('[data-profile-send]').isDisabled(), true);
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown?primary=anthropic%20claude-haiku-5-5`);
+  await desk.locator('[data-agent-edit] [role="alert"]').waitFor();
+  assert.equal(await desk.locator('[data-profile-send]').count(), 0, 'a made-up address shows no agent and no button');
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await model.waitFor();
+  await desk.waitForFunction(() => /gpt-6-sol/.test(document.querySelector('[data-profile-primary] option:checked')?.textContent ?? ''));
+
+  step('Profile: a new primary leaves the chain; Remove empties it and says what that means; Add and Down reorder');
   await model.locator('[data-profile-primary]').selectOption({ label: 'anthropic · claude-sonnet-5-5' });
   assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['deepseek · deepseek-v4-pro'], 'the new primary is not also a fallback');
   assert.equal(await model.locator('[data-profile-send]').isEnabled(), true);
@@ -221,29 +258,59 @@ try {
   assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['anthropic · claude-haiku-5-5', 'openai-codex · gpt-6-sol']);
   assert.equal(await model.locator('[data-profile-nochain]').count(), 0);
   for (const control of await model.locator('[data-profile-fallback] .hub-btn').all()) assert.ok((await control.boundingBox()).height >= 44, 'a touch target');
-  await model.locator('[data-profile-why]').fill('Codex is slow today.');
-  await model.locator('[data-profile-send]').click();
-  await model.locator('[data-profile-sent]').waitFor();
-  await model.locator('[data-profile-ask]').click();
-  const modelAsk = desk.locator('[data-agent-edit-ask="profile-main"]');
-  await modelAsk.waitFor();
-  const changeId = new URL(desk.url()).hash.split('/').pop();
-  assert.match(changeId, /^\d{8}-profile-main-[a-z0-9]{4}$/);
 
-  step('Profile Ask: the order now and the order proposed as plain text, the passkey tag, and what Apply does');
-  assert.equal(await desk.locator('[data-agent-edit-tag]').innerText(), 'Changes a model');
-  await desk.waitForFunction(() => !/loading/.test(document.querySelector('[data-profile-ask-chain="old"]')?.textContent ?? 'loading'));
-  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="old"] li').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'then anthropic · claude-sonnet-5-5', 'then deepseek · deepseek-v4-pro']);
-  assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="new"] li').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
-  assert.equal(flat(await modelAsk.locator('[data-edit-ask-why]').innerText()), 'Why: Codex is slow today.');
-  assert.match(flat(await modelAsk.locator('[data-profile-ask-restart]').innerText()), /^Apply signs the change and sends it to the Hermes host\. Changing this restarts Hermes main\. Usually done in about a minute, at most 5 if the host's quick check is off\. A chat or job running then stops\. If anything fails, the old settings are put back\.$/);
-  assert.equal(await modelAsk.locator('script, img, a').count(), 0, 'the text is plain text');
-  await noSideways(desk, 'Model Ask at 1280');
-  await desk.locator('[data-option="apply"] button').click();
-  await desk.locator('[data-send]').click();
-  // Answering leaves the Ask page for the next item, so the line under Send is gone within a moment; the same line stays in the note there.
-  await desk.locator('[data-next-detail]').waitFor();
-  assert.match(await desk.locator('[data-next-detail]').innerText(), /^Sent to the Hermes host\. Not running yet\. Usually about a minute, at most 5\. Details of the agent says when it is running\.$/);
+  step('Profile: above the button the page says what changes, who it moves and the restart; there is no Why box; Enter changes nothing');
+  const summary = model.locator('[data-profile-summary]');
+  await summary.waitFor();
+  assert.equal(flat(await summary.innerText()), 'Now: gpt-6-sol, then claude-sonnet-5-5, then deepseek-v4-pro. New: claude-sonnet-5-5, then claude-haiku-5-5, then gpt-6-sol. This moves Hermes, Researcher, Market researcher, Teardown and Planner, who share profile main. Hermes main restarts about 10 to 40 seconds after you press. A chat or job running then stops. Usually done in about a minute.');
+  assert.equal(flat(await model.locator('[data-profile-send]').innerText()), 'Change and restart Hermes main');
+  assert.equal(await model.locator('[data-profile-restart]').count(), 0, 'the summary replaces the plain restart line');
+  assert.equal(await model.locator('[data-profile-why], [data-profile-sent], [data-profile-ask]').count(), 0, 'no Why box, no request');
+  assert.equal(await model.locator('input[type="text"]').count(), 0, 'no text field is left in the model section');
+  assert.doesNotMatch(await model.innerText(), /Send for approval/);
+  const posts = [];
+  desk.on('request', request => { if (request.method() === 'POST' && request.url().includes('/profile-change')) posts.push(request.url()); });
+  await model.locator('[data-profile-primary]').focus();
+  await desk.keyboard.press('Enter');
+  await desk.waitForTimeout(ms(400));
+  assert.deepEqual(posts, [], 'Enter on a select sends no request');
+  assert.equal(await model.locator('[data-profile-change]').count(), 0);
+  // The summary is on screen with the button, at the phone width too.
+  const askPhone = await open({ width: 390, height: 800 });
+  await askPhone.goto(`${fresh.url}#/~hub/agent-edit/hermes`);
+  await askPhone.locator('[data-edit-profile="main"] [data-profile-form]').waitFor();
+  await askPhone.waitForFunction(() => /gpt-6-sol/.test(document.querySelector('[data-profile-primary] option:checked')?.textContent ?? ''));
+  await askPhone.locator('[data-profile-primary]').selectOption({ label: 'anthropic · claude-sonnet-5-5' });
+  await askPhone.locator('[data-profile-summary]').waitFor();
+  await askPhone.locator('[data-profile-send]').scrollIntoViewIfNeeded();
+  const boxes = { summary: await askPhone.locator('[data-profile-summary]').boundingBox(), restart: await askPhone.locator('[data-profile-summary-restart]').boundingBox(), button: await askPhone.locator('[data-profile-send]').boundingBox() };
+  assert.ok(boxes.restart.y + boxes.restart.height <= boxes.button.y + 1, 'the restart line sits above the button');
+  assert.ok(boxes.summary.y >= 0, 'with the button in view, the top of the summary is in view too: nothing to scroll past');
+  assert.ok(boxes.button.height >= 44, 'the button is a touch target');
+  await noSideways(askPhone, 'the summary at 390');
+
+  step('Profile: the press signs at once: no Ask, no Needs you item, the page waits, and the host\'s file is the Hub\'s own signed one');
+  const needsRows = async () => {
+    await reader.goto(`${fresh.url}#/~hub/needs`);
+    await reader.locator('[data-hub-link="needs"]').waitFor();
+    await reader.waitForTimeout(ms(800));
+    return ((await reader.locator('body').innerText()).match(/Change the model of the Hermes main profile\?/g) ?? []).length;
+  };
+  const rowsBefore = await needsRows();
+  assert.ok(rowsBefore >= 1, 'the agent Ask is there to count');
+  const asksBefore = [...fresh.fake.objects.keys()].filter(name => /\/asks\/[^/]+\/ask\.json$/.test(name)).length;
+  await model.locator('[data-profile-send]').click();
+  await model.locator('[data-profile-off]').waitFor();
+  const changeId = await model.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+  assert.match(changeId, /^\d{8}-profile-main-[a-z0-9]{4}$/);
+  assert.equal(posts.length, 1);
+  assert.equal([...fresh.fake.objects.keys()].filter(name => /\/asks\/[^/]+\/ask\.json$/.test(name)).length, asksBefore, 'no Ask was written');
+  assert.ok(fresh.fake.objects.has(`sections/inbox/agent-config/changes/${changeId}/approved.json`), 'the change is signed');
+  assert.equal(await model.locator('[data-profile-summary]').count(), 0, 'the summary goes when there is nothing left to send');
+  assert.equal(await model.locator('[data-change-undo]').count(), 0, 'no way back while the change waits');
+  assert.equal(await needsRows(), rowsBefore, 'the press left no new item on Needs you');
+  const sentEvent = [...fresh.fake.objects.keys()].map(name => (/\/events\/.*-hub-.*\.json$/.test(name) ? fresh.fake.json(name) : null)).find(event => event?.kind === 'profile-change-sent');
+  assert.equal(sentEvent?.title, 'Model change sent: Hermes main to claude-sonnet-5-5');
 
   step('Waiting: Details of any agent on the profile says the change is waiting for the host, and a second request is off');
   await visit(desk, fresh.url, 'teardown');
@@ -321,6 +388,39 @@ try {
   assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state]').innerText(), 'Replaced');
   assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state].on').count(), 0, 'no green tag');
   assert.doesNotMatch(await desk.locator('[data-profile-change]').innerText(), /Running/);
+
+  step('Way back: a Replaced row has no button; once the host runs the change again, one press goes back to the order it replaced, signed the same way');
+  assert.equal(await desk.locator('[data-change-undo]').count(), 0, 'a Replaced row offers no way back: it would undo the host edit');
+  const again = agentConfigJson({ now: new Date(Date.now() + 1500), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
+  again.profiles.main.model = { provider: 'anthropic', default: 'claude-sonnet-5-5' };
+  again.profiles.main.fallbacks = [ref('anthropic', 'claude-haiku-5-5'), ref('openai-codex', 'gpt-6-sol')];
+  seedAgentConfig(fresh.fake, again);
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  // A screen seen before shows its last answer first: wait for the row to stop saying Replaced.
+  const back = desk.locator('[data-change-undo]');
+  await back.waitFor();
+  assert.equal(await desk.locator(`[data-profile-change="${changeId}"][data-replaced]`).count(), 0);
+  assert.equal(flat(await back.innerText()), 'Go back to gpt-6-sol, then claude-sonnet-5-5, then deepseek-v4-pro');
+  assert.equal(flat(await desk.locator('[data-change-undo-restart]').innerText()), 'This restarts Hermes main too.');
+  await back.click();
+  await desk.locator('[data-profile-off]').waitFor();
+  const backId = await desk.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+  assert.notEqual(backId, changeId);
+  const backFile = fresh.fake.json(`sections/inbox/agent-config/changes/${backId}/approved.json`);
+  assert.deepEqual([backFile.to.model, backFile.from.model, backFile.ask === backFile.change], ['gpt-6-sol', 'claude-sonnet-5-5', true], 'signed in the same format, to the order the change replaced');
+  assert.equal(await desk.locator('[data-change-undo]').count(), 0, 'no way back while the way back waits');
+  const undoEvent = [...fresh.fake.objects.keys()].map(name => (/\/events\/.*-hub-.*\.json$/.test(name) ? fresh.fake.json(name) : null)).find(event => event?.undoOf === changeId);
+  assert.equal(undoEvent?.title, 'Model change sent: Hermes main to gpt-6-sol');
+  await desk.waitForTimeout(ms(2500)); // the host's answer lands after the export above, by whole seconds
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${backId}/result.json`, JSON.stringify({ v: 1, change: backId, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date().toISOString() }), 'application/json', { writer: 'hermes-config' });
+  await desk.locator('[data-profile-off]').waitFor({ state: 'detached', timeout: ms(12000) });
+  await desk.locator(`[data-profile-change="${changeId}"][data-replaced]`).waitFor();
+  assert.equal(await desk.locator(`[data-profile-change="${backId}"] [data-change-state]`).innerText(), 'Running');
+  assert.equal(await desk.locator(`[data-profile-change="${changeId}"] [data-change-state]`).innerText(), 'Replaced', 'the change it undid is not running any more');
+  // The form shows the order the way back restored, not the one just undone, and nothing is armed: a stray press changes nothing.
+  assert.equal(flat(await desk.locator('[data-profile-primary] option:checked').innerText()), 'openai-codex · gpt-6-sol', 'the form holds the order gone back to');
+  assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'the button is off: the owner picked nothing');
+  assert.equal(await desk.locator('[data-profile-summary]').count(), 0, 'no summary for an order nobody chose');
 
   step('Failed: Details says the change failed with the reason in words and that the old settings stay; a failed rollback says Hermes may be down');
   const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
@@ -455,23 +555,73 @@ try {
   await opus.locator('[data-profile-fallback="1"] select').selectOption({ label: billedTo });
   assert.match(flat(await opus.locator('[data-profile-opus-note]').innerText()), /^Opus is a fallback/);
   await noSideways(desk, 'Edit with the Opus note at 1280');
+  const signedCount = () => [...fresh.fake.objects.keys()].filter(name => /\/agent-config\/changes\/[^/]+\/approved\.json$/.test(name)).length;
+  const signedBefore = signedCount();
+  // One press for every model (the owner's decision): the note is on the page before the press, and the press signs.
+  assert.equal(await opus.locator('[data-profile-opus-confirm], [data-profile-opus-yes], [data-profile-opus-no]').count(), 0, 'no second step');
   await opus.locator('[data-profile-send]').click();
-  await opus.locator('[data-profile-sent]').waitFor();
-  await opus.locator('[data-profile-ask]').click();
-  const opusAsk = desk.locator('[data-agent-edit-ask="profile-main"]');
+  await opus.locator('[data-profile-off]').waitFor();
+  assert.equal(signedCount(), signedBefore + 1, 'one press signs');
+  const opusId = await opus.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+  assert.ok(fresh.fake.json(`sections/inbox/agent-config/changes/${opusId}/approved.json`).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the pick is kept as chosen');
+  // An agent's Ask that names Opus still carries the warning on the Ask page.
+  const opusReader = await open({ width: 1280, height: 800 });
+  await opusReader.goto(`${fresh.url}#/~hub/ask/${OPUS_ASK}`);
+  const opusAsk = opusReader.locator('[data-agent-edit-ask="profile-main"]');
   await opusAsk.waitFor();
   assert.equal(flat(await opusAsk.locator('[data-profile-ask-opus]').innerText()), 'Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking.');
   assert.ok((await opusAsk.locator('[data-profile-ask-chain="new"] li').allInnerTexts()).some(line => /claude-opus-5-5/.test(line)), 'the pick is kept as chosen');
-  await noSideways(desk, 'Opus Ask at 1280');
+  await noSideways(opusReader, 'Opus Ask at 1280');
   await phone.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
   await phone.locator('[data-edit-profile="main"] [data-profile-form]').waitFor();
   await phone.waitForFunction(() => /billed through the API/.test(document.querySelector('[data-profile-primary]')?.textContent ?? ''));
   await phone.locator('[data-profile-fallback="0"] select').selectOption({ label: billedTo });
   await phone.locator('[data-profile-opus-note]').waitFor();
   await noSideways(phone, 'Edit with the Opus note at 390');
-  await phone.goto(desk.url());
+  await phone.goto(`${fresh.url}#/~hub/ask/${OPUS_ASK}`);
   await phone.locator('[data-profile-ask-opus]').waitFor();
   await noSideways(phone, 'Opus Ask at 390');
+  step('Opus way back: the note names the billing before the press, and one press goes back');
+  {
+    const reload = async () => {
+      await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+      await desk.locator('[data-edit-profile="main"] [data-profile-form]').waitFor();
+    };
+    const confirmed = async (id, order) => {
+      fresh.fake.seed(`sections/inbox/agent-config/changes/${id}/result.json`, JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date().toISOString() }), 'application/json', { writer: 'hermes-config' });
+      await desk.waitForTimeout(ms(2500));
+      const live = agentConfigJson({ now: new Date(), exportedMinutesAgo: 0, modelOptions: { main: [ref('anthropic', 'claude-opus-5-5'), ref('openai-codex', 'gpt-6-sol'), ref('anthropic', 'claude-sonnet-5-5'), ref('anthropic', 'claude-haiku-5-5')], briefs: MODEL_OPTIONS.briefs } });
+      live.profiles.main.model = { provider: order.provider, default: order.model };
+      live.profiles.main.fallbacks = order.fallbacks.map(item => ({ provider: item.provider, model: item.model }));
+      seedAgentConfig(fresh.fake, live);
+    };
+    const signedOf = id => fresh.fake.json(`sections/inbox/agent-config/changes/${id}/approved.json`);
+    // The Opus change from above is confirmed and runs; then a plain change drops Opus; its way back is to the Opus order.
+    await confirmed(opusId, signedOf(opusId).to);
+    await reload();
+    const row = desk.locator('[data-edit-profile="main"]');
+    await row.locator('[data-profile-off]').waitFor({ state: 'detached', timeout: ms(15000) });
+    await row.locator('[data-profile-fallback]').filter({ has: desk.locator('option:checked', { hasText: 'claude-opus-5-5' }) }).locator('[data-fallback-remove]').click();
+    await row.locator('[data-profile-send]').click();
+    await row.locator('[data-profile-off]').waitFor();
+    const plainId = await row.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+    assert.ok(!signedOf(plainId).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the plain change drops Opus');
+    await confirmed(plainId, signedOf(plainId).to);
+    await reload();
+    const undo = row.locator('[data-change-undo]');
+    await undo.waitFor({ timeout: ms(20000) });
+    const signedBefore = signedCount();
+    // The note names the billing before the press, and one press signs.
+    assert.match(flat(await row.locator('[data-undo-opus-note]').innerText()), /^Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking\.$/);
+    assert.equal(await row.locator('[data-undo-opus-yes], [data-undo-opus-no], [data-undo-opus-confirm]').count(), 0, 'no second step');
+    // Above the button, so it cannot sit behind the phone's bottom bar while the button is on screen.
+    assert.ok((await row.locator('[data-undo-opus-note]').boundingBox()).y < (await undo.boundingBox()).y, 'the note comes before the button');
+    await undo.click();
+    await row.locator('[data-profile-off]').waitFor();
+    assert.equal(signedCount(), signedBefore + 1, 'one press signs');
+    const goneBack = await row.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+    assert.ok(signedOf(goneBack).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the way back is to the Opus order');
+  }
 } finally {
   for (const context of contexts) await context.close();
   await browser.close();

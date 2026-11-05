@@ -7,6 +7,9 @@ export const CHANGE_TIME_TEXT = "Usually done in about a minute, at most 5 if th
 
 export const restartText = (profile: string) => `Changing this restarts Hermes ${profile}. ${CHANGE_TIME_TEXT} A chat or job running then stops.`
 
+/** Said above the button of the owner's press: when it restarts and what that stops. */
+export const pressRestartText = (profile: string) => `Hermes ${profile} restarts about 10 to 40 seconds after you press. A chat or job running then stops. Usually done in about a minute.`
+
 export const BRIEFS_WAIT_TEXT = 'If the weekly jobs are running, it waits until they end, up to an hour.'
 export const AUTO_FOLLOWS_TEXT = 'A chat set to Auto follows this. A chat set to a named model stays on that model.'
 

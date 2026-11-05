@@ -8,6 +8,7 @@ import { AGENTS } from '../hub-team.mjs';
 import { createAgentEdits } from '../hub-agent-edit.mjs';
 import { changeState, validChange, validExport, validResult } from '../hub-agent-config.mjs';
 import { loadSigningKey, parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
+import { AGENT_EDIT_OPTIONS } from '../agent-edit.mjs';
 import { PRESETS } from '../presets.mjs';
 import { chooseModel } from '../../../src/hub/chatModel.ts';
 import { isDear as pageIsDear, isOpus as pageIsOpus, opusNote } from '../../../src/hub/agentEditField.ts';
@@ -119,14 +120,13 @@ test('the quota retry goes to Sonnet when HERMES_RETRY_MODEL names Opus, logs on
 function editsOf({ options, block = {} }) {
   const base = agentConfigJson({ now: NOW, modelOptions: { main: options, briefs: options } });
   Object.assign(base.profiles.main, block);
-  const state = { exported: validExport(base), asks: new Map(), approvals: new Map() };
+  const state = { exported: validExport(base), approvals: new Map() };
   const edits = createAgentEdits({
     personas: { versions: async () => { throw new Error('no persona here'); } },
     profiles: {
       signingKey: loadSigningKey({ HUB_SIGNING_KEY: KEY }),
       exported: async () => state.exported,
       changes: async () => [],
-      putAsk: async (id, ask) => { state.asks.set(id, ask); },
       putApproval: async (id, doc) => { state.approvals.set(id, doc); },
     },
   });
@@ -134,24 +134,32 @@ function editsOf({ options, block = {} }) {
 }
 const answer = choice => ({ choice });
 const edit = fallbacks => ({ profile: 'main', primary: CODEX, fallbacks });
+const NOW_BASE = { ...CODEX, fallbacks: [SONNET, DEEPSEEK] };
+/** An agent's Ask for the same change, as `cards ask create --agent-edit` files it. */
+const agentAsk = (id, fallbacks) => ({ id, requirePasskey: true, options: AGENT_EDIT_OPTIONS.map(option => ({ ...option })), agentEdit: { op: 'profile', ...edit(fallbacks) } });
 
-test('an Opus fallback the host lists is signed unchanged and in order after an Apply, and is live when the export shows it', async () => {
+test('an Opus fallback the host lists is signed unchanged and in order by the owner\'s press and by an Apply, and is live when the export shows it', async () => {
   const { edits, state } = editsOf({ options: [CODEX, SONNET, DEEPSEEK, OPUS] });
-  const made = await edits.createProfileAsk({ edit: edit([SONNET, OPUS, DEEPSEEK]), user: 'owner', at: NOW });
-  const ask = state.asks.get(made.ask);
-  assert.equal(ask.requirePasskey, true, 'only a passkey answers it');
-  assert.equal(state.approvals.size, 0, 'asking writes nothing to the host');
+  // An agent's Ask: a skip or no choice writes nothing; Apply signs.
+  const ask = agentAsk('20261101-workspace-app-edit-ab12', [SONNET, OPUS, DEEPSEEK]);
   assert.equal(await edits.afterAnswer({ ask, answer: answer('skip'), user: 'owner', at: NOW }), null);
-  assert.equal(state.approvals.size, 0, 'a skip writes nothing');
   assert.deepEqual(await edits.afterAnswer({ ask, answer: {}, user: 'owner', at: NOW }), null, 'no choice writes nothing');
-  assert.equal(state.approvals.size, 0);
+  assert.equal(state.approvals.size, 0, 'a skip writes nothing');
   const applied = await edits.afterAnswer({ ask, answer: answer('apply'), user: 'owner', at: NOW });
   assert.equal(applied.applied, true);
-  const doc = state.approvals.get(made.ask);
+  const doc = state.approvals.get(ask.id);
   assert.deepEqual(doc.to.fallbacks, [SONNET, OPUS, DEEPSEEK], 'unchanged and in order');
   assert.ok(verify(doc, parsePublicKey(publicKeyPem(loadSigningKey({ HUB_SIGNING_KEY: KEY })))), 'the signature is the mark');
   const change = validChange(doc);
   assert.ok(change, 'the signed change is valid');
+  // The owner's own press signs the same chain, in the same format, with no Ask.
+  const direct = editsOf({ options: [CODEX, SONNET, DEEPSEEK, OPUS] });
+  const pressed = await direct.edits.applyDirect({ edit: edit([SONNET, OPUS, DEEPSEEK]), base: NOW_BASE, user: 'owner', at: NOW });
+  const pressedDoc = direct.state.approvals.get(pressed.change);
+  assert.deepEqual(pressedDoc.to.fallbacks, [SONNET, OPUS, DEEPSEEK], 'the press keeps it too');
+  assert.deepEqual(Object.keys(pressedDoc).sort(), Object.keys(doc).sort(), 'the same keys as an Apply');
+  assert.equal(pressedDoc.ask, pressedDoc.change);
+  assert.ok(validChange(pressedDoc), 'and the Hub reads it back');
   const result = validResult({ v: 1, change: change.change, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date(NOW.getTime() + 60_000).toISOString() });
   assert.ok(result, 'the result is valid');
   const live = agentConfigJson({ now: new Date(NOW.getTime() + 120_000), exportedMinutesAgo: 0, modelOptions: { main: [CODEX, SONNET, DEEPSEEK, OPUS] } });
@@ -162,14 +170,13 @@ test('an Opus fallback the host lists is signed unchanged and in order after an 
   assert.equal(changeState({ change, result, exported: validExport(agentConfigJson({ now: new Date(NOW.getTime() + 120_000) })), at: new Date(NOW.getTime() + 180_000) }), 'applied', 'not live while the export still shows the old order');
 });
 
-test('an Opus pick the host does not list is refused at the Ask and at Apply, with the existing words', async () => {
+test('an Opus pick the host does not list is refused at the press and at Apply, with the existing words', async () => {
   const { edits, state } = editsOf({ options: [CODEX, SONNET, DEEPSEEK] });
-  await assert.rejects(edits.createProfileAsk({ edit: edit([SONNET, OPUS]), user: 'owner', at: NOW }), error => error.status === 409 && /not a model the Hermes host offers for this profile/.test(error.message));
-  assert.equal(state.asks.size, 0);
+  await assert.rejects(edits.applyDirect({ edit: edit([SONNET, OPUS]), base: NOW_BASE, user: 'owner', at: NOW }), error => error.status === 409 && /not a model the Hermes host offers for this profile/.test(error.message));
+  assert.equal(state.approvals.size, 0);
   // An agent-filed Ask that names it anyway is blocked, and Apply writes nothing.
   const listed = editsOf({ options: [CODEX, SONNET, DEEPSEEK, OPUS] });
-  const made = await listed.edits.createProfileAsk({ edit: edit([SONNET, OPUS]), user: 'owner', at: NOW });
-  const ask = listed.state.asks.get(made.ask);
+  const ask = agentAsk('20261101-workspace-app-edit-cd34', [SONNET, OPUS]);
   listed.state.exported = validExport(agentConfigJson({ now: NOW, modelOptions: { main: [CODEX, SONNET, DEEPSEEK], briefs: [CODEX] } }));
   assert.match(await listed.edits.blockedReason(ask, NOW), /not a model the Hermes host offers/);
   const refused = await listed.edits.afterAnswer({ ask, answer: answer('apply'), user: 'owner', at: NOW });
