@@ -16,7 +16,7 @@ import { createHermesRuns } from './hermes-runs.mjs';
 import { createScrub } from './scrub.mjs';
 import { resetOf } from './plan-pauses.mjs';
 import { stripInlineImages } from './inline-images.mjs';
-import { isQuotaError, outcomeOf, reportOf, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
+import { isQuotaError, outcomeOf, reportOf, retryFailedOutcome, startFailedOutcome, unknownOutcome } from './run-outcome.mjs';
 
 export const MAX_HERMES_RUNS = 3;
 const FORWARD = new Set(['message.delta', 'tool.started', 'tool.completed', 'approval.request', 'approval.settled', 'run.steered', 'reply', 'run.completed', 'run.failed', 'run.cancelled', 'run.interrupted']);
@@ -133,7 +133,8 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     try {
       ({ runId } = await runs.start({ input: approved.run.brief, provider, model: retryModel, idempotencyKey: `${id}-retry` }));
     } catch (error) {
-      await writeResult(id, startFailedOutcome({ reason: `the retry on Anthropic failed: ${scrub(error.message)}`, at: at.toISOString() }));
+      log(`[hermes] retry on Anthropic did not start for ${id}: ${scrub(error.message)}`);
+      await writeResult(id, retryFailedOutcome({ at: at.toISOString() }));
       return;
     }
     await writeOnce(id, 'hermes-retry.json', { runId, at: at.toISOString(), provider, model: retryModel, reason: 'quota', ...(until ? { until } : {}) });

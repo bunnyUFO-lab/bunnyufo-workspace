@@ -308,6 +308,25 @@ test('a quota failure is retried once on Anthropic; the retry is recorded and it
   } finally { await s.close(); }
 });
 
+test('a run that started, hit the quota and only then could not start its retry is not a run that never started', async () => {
+  const s = await stack({ hermesOptions: { chain: [{ provider: 'openai-codex', model: 'gpt-6-sol' }], providerFailures: { 'openai-codex': 'Codex provider quota exhausted (429)' } } });
+  try {
+    let posts = 0;
+    const api = await s.addHub({
+      fetchImpl: async (url, init) => (init?.method === 'POST' && String(url).endsWith('/v1/runs') && ++posts === 2 ? jsonResponse(500, { error: { message: 'retry refused' } }) : fetch(url, init)),
+    });
+    const id = s.propose();
+    await approve(api, id);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(s.hermes.runs.length, 1, 'only the first run exists');
+    assert.equal(result.outcome, 'failed');
+    assert.notEqual(result.reason, 'start-failed', 'the first run started: it is not "could not start"');
+    assert.notEqual(result.reason, 'usage-limit', 'a cloud pause signal is not what this is');
+    assert.equal(result.reason, 'retry-failed');
+    assert.equal(result.summary, 'Codex quota reached; the retry on Anthropic could not start.');
+  } finally { await s.close(); }
+});
+
 test('a second quota failure ends failed with usage-limit; there is no third run', async () => {
   const s = await stack({ hermesOptions: { failWith: 'Codex provider quota exhausted (429)' }, env: { HERMES_RETRY_MODEL: 'claude-test-model' } });
   try {
