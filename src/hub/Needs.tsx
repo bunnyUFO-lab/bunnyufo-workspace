@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
+import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
 import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
@@ -50,6 +51,8 @@ const reducedMotion = () => typeof window.matchMedia === 'function' && window.ma
  * Needs you: one list of cards, one per thing that waits on the owner, each answered where it stands. A chip narrows
  * the list to one kind; the old filter names in links still land on the right chip.
  */
+const BARE_NEEDS = hubHash('needs')
+
 export default function Needs({ filter: address }: { filter?: string }) {
   // The address is `<filter>[/<project>]`, or the name of one item to focus where a filter would go.
   const route = parseNeedsRoute(address, isKnownFilter)
@@ -81,7 +84,8 @@ export default function Needs({ filter: address }: { filter?: string }) {
   // A remembered project that no longer exists is forgotten once the project list has answered.
   useEffect(() => { if (gone) saveScope('') }, [gone])
   // A bare arrival on a remembered project settles on its address, so Back after picking All shows it again. replace adds no history entry.
-  useEffect(() => { if (!address && project && names) window.location.replace(needsHref('all', project)) }, [address, project, names])
+  // Only while the address is still bare: a link followed just now has moved it, and the route has not caught up, so a replace here would undo that link.
+  useEffect(() => { if (!address && project && names && window.location.hash === BARE_NEEDS) window.location.replace(needsHref('all', project)) }, [address, project, names])
 
   // The note belongs to the list it was left on: another chip starts clean.
   const listKey = `${active}/${project}`
