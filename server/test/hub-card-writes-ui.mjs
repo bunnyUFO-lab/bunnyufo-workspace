@@ -162,7 +162,7 @@ try {
   await panel.waitFor();
   await expect(panel).toContainText('Where agents can write');
   await expect(panel).toContainText('Always on: it is where they fall back to.');
-  await expect(panel).toContainText('Turning one off takes up to 30 seconds. Cards already there stay.');
+  await expect(panel).toContainText('Changes save at once and take effect within 30 seconds. Cards already there stay.');
   assert.equal(await panel.locator('[data-card-write-section="assistant"]').isDisabled(), true);
   assert.equal(await panel.locator('[data-card-write-section="assistant"]').isChecked(), true);
   step('the setting is findable: a button at the top of Team jumps to it, and Floor shows it too');
@@ -176,6 +176,7 @@ try {
   for (const height of await panel.locator('li label').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(height >= 44 - 0.5, `a setting row is ${height} px high`);
   await noSideways(phone, 'the Team panel');
   await expect(panel.locator('[data-card-write-unsaved]')).toBeVisible();
+  assert.equal(((await panel.innerText()).match(/at once/g) ?? []).length, 1, 'the panel says once that changes save at once, and the "not saved yet" line does not say otherwise');
   assert.equal(fixture.fake.text('sections/inbox/library-writes.json'), null, 'nothing is saved until the owner changes it');
   // A save that fails says why and puts the box back; the list stays "not saved yet".
   fixture.fake.fail = (key, method) => method === 'PUT' && key.endsWith('library-writes.json') && 500;
@@ -187,7 +188,7 @@ try {
   assert.equal(await panel.locator('[data-card-write-saved]').count(), 0);
   fixture.fake.fail = null;
   await lanes.uncheck();
-  await expect(panel.locator('[data-card-write-saved]')).toHaveText('Saved. Takes effect within 30 seconds.');
+  await expect(panel.locator('[data-card-write-saved]')).toHaveText('Saved.');
   await expect(panel.locator('[data-card-write-unsaved]')).toHaveCount(0);
   assert.ok((await lanes.boundingBox()).height >= 24, 'the box itself is big enough to hit');
   await expect(lanes).not.toBeChecked();

@@ -51,9 +51,9 @@ export default function AgentCardSettings() {
           Not saved yet, so every section is on. <button type="button" className="cw-btn" disabled={busy !== null} onClick={() => void send('save', { save: true })} data-card-write-save>Save this list</button>
         </p>
       )}
-      {saved && <p className="cw-setting-note" role="status" data-card-write-saved>Saved. Takes effect within 30 seconds.</p>}
+      {saved && <p className="cw-setting-note" role="status" data-card-write-saved>Saved.</p>}
       {failure && <p className="hub-error" role="alert" data-card-write-error>{failure}</p>}
-      <p className="cw-setting-note">Turning one off takes up to 30 seconds. Cards already there stay.</p>
+      <p className="cw-setting-note">Changes save at once and take effect within 30 seconds. Cards already there stay.</p>
     </section>
   )
 }
