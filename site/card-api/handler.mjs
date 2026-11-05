@@ -50,6 +50,9 @@ const segmentOk = segment => SEGMENT.test(segment) && !/[. ]$/.test(segment) && 
 export const libraryFolderOk = folder => typeof folder === 'string' && FOLDER.test(folder) && segmentOk(folder);
 /** A file path inside a Library section: `<folder>/<file>`, every segment safe on Windows. */
 export const libraryPathOk = file => typeof file === 'string' && file.split('/').length >= 2 && libraryFolderOk(file.split('/')[0]) && file.split('/').every(segmentOk);
+/** A first path segment the site keeps for itself, in any case: Windows treats `Card-Responses` and `card-responses` as one folder. */
+const reservedName = name => RESERVED.has(String(name).toLowerCase());
+const lower = value => String(value).toLowerCase();
 const stepPathOk = value => typeof value === 'string' && value.split('/').every(segmentOk);
 const ENTRY_FIELDS = new Set(['id', 'title', 'description', 'type', 'category', 'created', 'updated', 'folder', 'steps', 'defaultStep', 'status']);
 const AGENT = /^[A-Za-z0-9][\w .-]{0,39}$/;
@@ -494,6 +497,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return new HttpError(status, `Card "${record.id}" is in the Trash of ${sectionId}; ${verb === 'write' ? 'restore it first' : 'restore it to read it'}.`);
   }
 
+  /** The retired record whose folder is `folder` in any case, or null. */
+  const retiredFolded = (registry, folder) => {
+    const records = registry.retired && typeof registry.retired === 'object' ? registry.retired : {};
+    const id = Object.keys(records).find(key => [records[key]?.folder, records[key]?.entity?.folder].some(name => typeof name === 'string' && lower(name) === lower(folder)));
+    return id ? { id, ...records[id] } : null;
+  };
+
   /** The retired card a write would collide with: one with this id, or one that owns this folder. Null when a live card has the id. */
   function retiredClaim(registry, id, folder) {
     if (registry.entities.some(item => item?.id === id)) return null;
@@ -504,6 +514,29 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     const base = keyOf(sectionId, `${folder}/`);
     const { objects } = await bucket.list(base);
     return objects.map(object => ({ path: object.key.slice(keyOf(sectionId, '').length), size: object.size, etag: object.etag, lastModified: object.lastModified }));
+  }
+
+  /**
+   * Marks the step that shows `path` in `folder`'s card as an agent's tab (`agentTab: true`), so the viewer attaches no card bridge to
+   * it. Returns the path when it set the mark now, null when there was nothing to mark or it was already marked. The list write is
+   * conditional and retried; a list that cannot be written refuses the file write (nothing has changed yet).
+   */
+  async function markAgentTab(caller, sectionId, folder, stepPath) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { registry, etag } = await section(caller, sectionId, 'write');
+      const index = registry.entities.findIndex(item => item?.folder === folder);
+      const card = registry.entities[index];
+      const at = (card?.steps ?? []).findIndex(step => (step?.path ?? step?.file) === stepPath);
+      if (at < 0 || card.steps[at].agentTab === true) return null;
+      const entity = { ...card, steps: card.steps.with(at, { ...card.steps[at], agentTab: true }) };
+      try {
+        await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities: registry.entities.with(index, entity) }, { ifMatch: etag });
+        return stepPath;
+      } catch (error) {
+        if (error.status !== 412 && error.status !== 409) throw error;
+      }
+    }
+    throw new HttpError(409, 'The card list kept changing under this write; try again.');
   }
 
   const routes = {
@@ -548,7 +581,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       const library = first.library;
       const limited = caller.rights.write !== null;
       const info = writeInfo(headers, { strict: library });
-      if (limited && RESERVED.has(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
+      if (limited && reservedName(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
       const existingFirst = library ? first.registry.entities.find(item => item?.id === id) : null;
       const folder = existingFirst?.folder ?? entity.folder;
       /** A step an agent adds is { name, path, viewer? }: no url (it would frame any web address). A posted `agentTab` is dropped; the server sets it. */
@@ -570,7 +603,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (entity.status !== undefined && entity.status !== 'active') throw new HttpError(422, 'A new card from an agent is active.');
         posted = entity.steps.map(checkStep);
       }
-      const claimed = retiredClaim(first.registry, id, folder);
+      const claimed = retiredClaim(first.registry, id, folder) ?? (library && !existingFirst ? retiredFolded(first.registry, folder) : null);
       if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
       const files = await cardFiles(sectionId, folder);
       if (!files.length) throw new HttpError(409, `${folder}/ has no files yet: upload them first, then add the card.`);
@@ -592,7 +625,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
           if (lower) throw new HttpError(409, `Folder ${folder} is the same name as ${lower.folder} in another case; Windows would treat them as one.`);
         }
         const index = registry.entities.findIndex(item => item?.id === id);
-        const taken = retiredClaim(registry, id, folder);
+        const taken = retiredClaim(registry, id, folder) ?? (library && index < 0 ? retiredFolded(registry, folder) : null);
         if (taken) throw retiredError(caller, sectionId, taken, 'write');
         const before = index >= 0 ? registry.entities[index] : null;
         let stored;
@@ -600,8 +633,11 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (library && before) {
           // The stored entry stays, field by field; only steps with a new path are appended, marked as an agent's tab.
           const known = new Set((before.steps ?? []).map(stepKey));
+          // A tab the owner took off (or Revert did) stays off: bringing it back would undo that.
+          const removed = new Set((Array.isArray(before.removedTabs) ? before.removedTabs : []).map(item => (typeof item === 'string' ? item : item?.path ?? item?.file)).filter(Boolean));
           const added = [];
           for (const raw of entity.steps) {
+            if (removed.has(raw?.path) && !known.has(raw?.path)) { if (!ignored.includes(`removed tab: ${raw.path}`)) ignored.push(`removed tab: ${raw.path}`); continue; }
             if (known.has(raw?.path) || added.some(item => item.path === raw?.path)) continue;
             added.push({ ...checkStep(raw), agentTab: true });
           }
@@ -691,7 +727,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       const limited = caller.rights.write !== null;
       // The records of who wrote what are the card API's own: no token, the passphrase included, writes them through a route.
       if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
-      if (limited && !INBOXES.has(sectionId) && RESERVED.has(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
+      if (limited && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
       ownerOnly(caller, sectionId, file);
       agentConfigOnly(caller, sectionId, file, { ifNoneMatch });
       markFiles(caller, sectionId, file, { ifNoneMatch });
@@ -715,11 +751,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         info = writeInfo(headers, { strict: true, needContext: Boolean(ifMatch) });
         const claimed = retiredBy(first.registry, folder);
         if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
-        if (ifNoneMatch) {
-          // Windows would overwrite the other file when this one comes down.
-          const clash = (await cardFiles(sectionId, folder)).find(item => item.path !== file && item.path.toLowerCase() === file.toLowerCase());
-          if (clash) throw new HttpError(409, `${clash.path} is already there; ${file} is the same name in another case, and Windows would treat them as one.`);
-        }
+        if (reservedName(folder)) throw new HttpError(403, `"${folder}" is not a card folder here.`);
+        const retiredVariant = retiredFolded(first.registry, folder);
+        if (retiredVariant) throw retiredError(caller, sectionId, retiredVariant, 'write');
+        const liveVariant = first.registry.entities.find(item => typeof item?.folder === 'string' && item.folder !== folder && lower(item.folder) === lower(folder));
+        if (liveVariant) throw new HttpError(409, `${folder} is the same name as the folder ${liveVariant.folder} in another case, and Windows would treat them as one.`);
+        // S3 allows a key below another key and Windows does not: one such file would stop every publish and pull of the section.
+        const lowFile = lower(file);
+        const clash = (await cardFiles(sectionId, folder)).find(item => {
+          const other = lower(item.path);
+          return item.path !== file && (other === lowFile || lowFile.startsWith(`${other}/`) || other.startsWith(`${lowFile}/`));
+        });
+        if (clash) throw new HttpError(409, `${clash.path} is already there; ${file} would sit below it, on it, or have the same name in another case, and Windows cannot hold both.`);
       } else if (recorded) {
         info = writeInfo(headers);
       }
@@ -730,6 +773,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!head || head.etag !== ifMatch) throw new HttpError(412, 'That file changed since you read it.');
         previous = head;
       }
+      // An agent's edit of an owner's HTML page could keep calling the card bridge with the owner's sign-in: the step loses the bridge until Revert clears the mark.
+      const marked = first.library && ifMatch && /\.html?$/i.test(file) ? await markAgentTab(caller, sectionId, folder, file.slice(folder.length + 1)) : null;
       let put;
       try {
         put = await bucket.put(key, body, {
@@ -738,7 +783,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
           metadata: first.library ? { writer: caller.name, agent: info.agent, 'write-id': id } : writerMetadata(caller, sectionId, file),
         });
       } catch (error) {
-        if (error.status === 412) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
+        // AWS can answer 409 as well as 412 for a write that raced another.
+        if (error.status === 412 || error.status === 409) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
         throw error;
       }
       const answer = { path: file, size: body.length, etag: put.etag, ...(put.versionId ? { versionId: put.versionId } : {}) };
@@ -749,6 +795,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
           agent: info.agent ?? 'unknown', token: caller.name,
           versionId: put.versionId, previousVersionId: previous?.versionId ?? null, etag: put.etag, previousEtag: previous?.etag ?? null,
           context: info.context, why: info.why ?? '', batch: info.batch,
+          ...(marked ? { markedAgentTab: marked } : {}),
         });
       }
       return answer;
@@ -773,7 +820,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
         if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
-        if (caller.rights.write !== null && !INBOXES.has(sectionId) && RESERVED.has(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
+        if (caller.rights.write !== null && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
         ownerOnly(caller, sectionId, file);
         // A presigned URL carries no metadata, so an upload there would land unmarked and count: refused for every caller, the passphrase too.
         if (INBOXES.has(sectionId) && /^team\/[^/]+\/persona-/i.test(file)) throw new HttpError(403, 'Persona files are written by the Hub only, never by upload URL.');

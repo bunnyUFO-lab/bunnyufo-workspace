@@ -1199,3 +1199,24 @@ test('a key on the site that is not a safe path here is skipped, logged and neve
     assert.equal(dryLines.filter(line => line.includes('not a safe path')).length, evil.length);
   } finally { await fake.close(); }
 });
+
+test('a site key that would sit below a local file, or on a local folder, is left on the site and does not stop the pull or the publish', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await mkdir(path.join(w.site, 'hub', 'sub'), { recursive: true });
+    await writeFile(path.join(w.site, 'hub', 'sub', 'a.md'), 'a\n');
+    fake.seed(`${KEY}hub/index.md/evil.txt`, 'bad', 'text/plain');
+    fake.seed(`${KEY}hub/sub`, 'a file where a folder is', 'text/plain');
+    const lines = [];
+    const down = await syncDown({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line) });
+    assert.deepEqual(down.written, []);
+    const up = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line) });
+    assert.ok(up.uploads.includes('hub/sub/a.md'), 'the publish went on');
+    assert.equal(lines.filter(line => line.startsWith('  left on the site: hub/index.md/evil.txt')).length, 2);
+    assert.ok(lines.some(line => line.startsWith('  left on the site: hub/sub ')));
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub\n');
+    assert.ok(fake.objects.has(`${KEY}hub/index.md/evil.txt`), 'nothing was deleted on the site');
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+  } finally { await fake.close(); }
+});

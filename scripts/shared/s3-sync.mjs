@@ -71,6 +71,13 @@ export function safeKey(file) {
   return file.split('/').every(segment => segment !== '.' && segment !== '..' && !/[. ]$/.test(segment) && !DEVICE_NAME.test(segment.split('.')[0]));
 }
 
+/**
+ * A key on the site can sit below a key that is a file here, or on a folder here (S3 allows both, a disk does not). Writing it fails
+ * with one of these codes; the key is left on the site, never written and never deleted, and the rest of the run goes on.
+ */
+const clashes = error => ['EEXIST', 'ENOTDIR', 'EISDIR'].includes(error?.code);
+const leftClash = (file, log) => log(`  left on the site: ${file} clashes with a file or folder here`);
+
 /** Every file under root worth considering, as posix paths relative to root. */
 async function walk(root) {
   const found = [];
@@ -447,12 +454,19 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
       settled[file] = md5(body);
       log(`  up   ${file}`);
     }
-    for (const file of downloads) {
+    for (const file of [...downloads]) {
       const got = await bucket.get(`${base}${file}`);
       const body = Buffer.from(await new Response(got.body).arrayBuffer());
       const target = path.join(root, ...file.split('/'));
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, body);
+      try {
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, body);
+      } catch (error) {
+        if (!clashes(error)) throw error;
+        leftClash(file, log);
+        downloads.splice(downloads.indexOf(file), 1);
+        continue;
+      }
       settled[file] = md5(body);
       log(`  down ${file}`);
     }
@@ -501,6 +515,7 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
     if (!safeKey(file)) { log(`  left on the site: ${file} is not a safe path here`); continue; }
     const target = path.join(root, ...file.split('/'));
     const info = await stat(target).catch(() => null);
+    if (info?.isDirectory()) { leftClash(file, log); continue; }
     if (info) {
       const mine = md5(await readFile(target));
       if (object.etag === mine) { unchanged += 1; record.files[file] = mine; continue; }
@@ -510,8 +525,14 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
     if (!dryRun) {
       const got = await bucket.get(object.key);
       const body = Buffer.from(await new Response(got.body).arrayBuffer());
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, body);
+      try {
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, body);
+      } catch (error) {
+        if (!clashes(error)) throw error;
+        leftClash(file, log);
+        continue;
+      }
       record.files[file] = md5(body);
       log(`  down ${file}`);
     }
