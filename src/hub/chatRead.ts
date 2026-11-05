@@ -10,6 +10,8 @@ export interface ChatHandlers {
   onJobs?: (ids: string[]) => void
   /** The delegates this turn started so far, the whole list each time. */
   onDelegates?: (delegates: ChatDelegate[]) => void
+  /** What Hermes is thinking while it works: the latest text each time, never part of the saved reply. */
+  onThinking?: (text: string) => void
   onApproval?: (approval: ChatApproval) => void
   onApprovalSettled?: () => void
   /** The server took the message. `run` is the Hermes run Stop can end, or null on a turn that has none. */
@@ -48,6 +50,7 @@ export async function readChatStream(stream: ReadableStream<Uint8Array>, handler
     else if (event === 'started') handlers.onStarted?.(typeof value.run === 'string' ? value.run : null, typeof value.conversation === 'string' ? value.conversation : '')
     else if (event === 'tool' && typeof value.name === 'string') handlers.onTool?.(value as unknown as ChatTool)
     else if (event === 'delegates' && Array.isArray(value.items)) handlers.onDelegates?.(value.items as ChatDelegate[])
+    else if (event === 'thinking' && typeof value.text === 'string') handlers.onThinking?.(value.text)
     else if (event === 'approval' && typeof value.id === 'string') handlers.onApproval?.(value as unknown as ChatApproval)
     else if (event === 'approval-settled') handlers.onApprovalSettled?.()
     else if (event === 'error') handlers.onError(typeof value.error === 'string' ? value.error : 'The reply stopped.')

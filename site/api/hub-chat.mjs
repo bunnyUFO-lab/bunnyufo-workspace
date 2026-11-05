@@ -37,6 +37,7 @@ export const TOTAL_MS_DEFAULT = 600_000;
 export const IDLE_MS_DEFAULT = 300_000;
 const MAX_TOOLS = 20;
 const KEEPALIVE_MS = 15_000;
+const MAX_THOUGHT = 1500;   // characters of what Hermes is thinking that a page is sent
 const DELEGATE_LOOK_MS = 4_000;   // how long reading a conversation waits for Hermes's delegate results
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
@@ -218,6 +219,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   function busFor(carried, response = null) {
     return (event, value) => {
       if (response && !response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+      if (event === 'thinking') { const old = carried.log.findLastIndex(entry => entry.event === 'thinking'); if (old >= 0) carried.log.splice(old, 1); }   // only the latest is kept: the log stays the reply's size
       const last = carried.log[carried.log.length - 1];
       if (event === 'delta' && last?.event === 'delta') last.data = { text: last.data.text + value.text };
       else carried.log.push({ event, data: value });
@@ -281,6 +283,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
     };
     let finishedByHermes = false;
+    let thought = '';
     try {
       let ended = false;
       for await (const event of hermesRuns.events(runId, { signal })) {
@@ -296,7 +299,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           see(data.preview);
           noteDelegates(event.event, data);
         } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
-        else if (event.event === 'approval.request') {
+        else if (/^(reasoning|thinking)./.test(event.event)) {
+          // What Hermes is thinking, shown while no text has come. Never saved with the reply. Its delta events add up; `available` gives the whole.
+          const piece = [data.text, data.delta, data.reasoning, data.content].find(value => typeof value === 'string' && value.trim());
+          if (piece) { thought = event.event.endsWith('.delta') ? thought + piece : piece; emit('thinking', { text: thought.length > MAX_THOUGHT ? `…${thought.slice(-MAX_THOUGHT)}` : thought }); }
+        } else if (event.event === 'approval.request') {
           // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
           let stored = null;
           let copied = null;

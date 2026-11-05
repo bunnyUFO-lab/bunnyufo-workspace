@@ -11,7 +11,7 @@ import { holdReload } from '../lib/reloadGate'
 import { elapsedLabel } from './runLines'
 import { StreamCut, plainText, streamChat, streamLive } from './chatStream'
 import type { ChatHandlers } from './chatStream'
-import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
+import { MAX_IMAGES, PICTURE_TYPES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
 import JobsCard from './ChatJobs'
@@ -280,6 +280,7 @@ function ChatView({ id }: { id?: string }) {
   const [streaming, setStreaming] = useState(false)
   const [tools, setTools] = useState<ChatTool[]>([])
   const [delegates, setDelegates] = useState<ChatDelegate[]>([])
+  const [thinking, setThinking] = useState('')   // what Hermes is thinking, shown until the reply has text
   const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
   const [queued, setQueued] = useState<ChatQueued[]>([])   // sent while a reply ran; the Hub delivers them when it ends
   // Every request about the queue is numbered when it starts; an answer older than one already shown is dropped, so a late answer never takes a row away.
@@ -404,7 +405,7 @@ function ChatView({ id }: { id?: string }) {
           setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
           takeView(number, answer)
           if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
-        } else if (answer.running) { if (answer.run) run.current = answer.run }
+        } else if (answer.running) { takeView(number, answer); if (answer.run) run.current = answer.run }   // the queue is shown while the reply is waited for too
         else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
         else missed()
       } catch (failure) {
@@ -607,6 +608,7 @@ function ChatView({ id }: { id?: string }) {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
         },
+        onThinking: setThinking,
         onDelegates: items => { started = items; setDelegates(items) },
         onStarted: (id, name) => {
           run.current = id
@@ -636,7 +638,7 @@ function ChatView({ id }: { id?: string }) {
     stopWanted.current = false   // a Stop held for this turn's run id ends with the turn: it must never fire on a later message
     if (idle) {
       // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
-      setTools([])
+      setTools([]); setThinking('')
       setNote(REOPEN_NOTE)
       setRecovering(true)
       return
@@ -651,7 +653,7 @@ function ChatView({ id }: { id?: string }) {
     // Hermes goes on without the page, so the reply comes from the saved chat: the turn stays open until it is there.
     if (cut && conversation.current) {
       cutTurn.current = { text, sentAt: optimistic.at, fallback: lines, previews, model: askedModel, persona: askedPersona }
-      setTools([])
+      setTools([]); setThinking('')
       setApproval(null)
       setNote(CUT_NOTE)
       setRecovering(true)
@@ -660,7 +662,7 @@ function ChatView({ id }: { id?: string }) {
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setStreaming(false)
@@ -693,7 +695,7 @@ function ChatView({ id }: { id?: string }) {
     setError(null)
     setNote(null)
     setStreaming(true)
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setPending('')
@@ -724,7 +726,7 @@ function ChatView({ id }: { id?: string }) {
     setStopping(false)
     setStreaming(true)
     if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setPending('')
@@ -836,7 +838,7 @@ function ChatView({ id }: { id?: string }) {
           )))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
-              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted">…</span>}
               <ToolLines tools={delegates.length ? tools.filter(tool => tool.name !== DELEGATE_TOOL) : tools} />
               <Delegates items={delegates} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}
@@ -884,7 +886,7 @@ function ChatView({ id }: { id?: string }) {
           </div>
         )}
         <div className="hub-compose">
-          <input ref={picker} type="file" accept="image/*" multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+          <input ref={picker} type="file" accept={PICTURE_TYPES} multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
           <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={busy} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
           <textarea
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"

@@ -78,6 +78,7 @@ before(async () => {
   upstream = http.createServer((req, res) => {
     const url = req.url;
     if (url.startsWith('/api/hub/requests/r1/events')) return lockstepStream(res, 'run');
+    if (req.method === 'GET' && url.startsWith('/api/hub/chat/') && url.endsWith('/live')) return lockstepStream(res, 'live');
     if (url === '/api/hub/chat' && req.method === 'POST') { req.resume(); return lockstepStream(res, 'chat'); }
     if (req.method === 'POST' && url.startsWith('/api/hub/team/')) { upstreamSaw.writes.push(url); req.resume(); res.writeHead(201, { 'Content-Type': 'application/json' }); return res.end('{"reached":true}'); }
     if (url === '/api/whoami') { upstreamSaw.remoteUser = req.headers['remote-user']; res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{}'); }
@@ -135,7 +136,7 @@ const sizes = {};
 const encoded = (answer, label) => { assert.match(answer.h['content-encoding'] ?? '', /^(zstd|gzip)$/, `${label} is compressed`); assert.match(answer.h.vary ?? '', /Accept-Encoding/i); };
 const plain = (answer, label) => assert.equal(answer.h['content-encoding'], undefined, `${label} is not compressed`);
 
-for (const [label, route, method, key] of [['the run stream', '/api/hub/requests/r1/events', 'GET', 'run'], ['the chat stream', '/api/hub/chat', 'POST', 'chat']]) {
+for (const [label, route, method, key] of [['the run stream', '/api/hub/requests/r1/events', 'GET', 'run'], ['the chat stream', '/api/hub/chat', 'POST', 'chat'], ['the chat live stream a reopened chat follows', '/api/hub/chat/20261105-abc123/live', 'GET', 'live']]) {
   test(`${label} arrives event by event, never compressed`, { skip, timeout: 60_000 }, async () => {
     const seen = [];
     const answer = await ask(route, { Accept: 'text/event-stream', ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) }, {
