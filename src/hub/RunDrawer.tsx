@@ -358,7 +358,9 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const kind = [agent, where && where !== 'at-pc' ? (MACHINE[where as SpawnTarget]?.name ?? where) : ''].filter(Boolean).join(' · ')
   // A failed job leads with why it failed, from the record's own words; with none the page says so instead of staying quiet.
   const failed = state === 'failed'
-  const whyFailed = result?.summary?.trim() || stop?.reason?.trim() || 'Hermes gave no reason.'
+  // A run that never started carries the raw error in its summary (it can be a program message): the owner reads a plain lead, the detail is under What it did.
+  const startFailed = result?.reason === 'start-failed'
+  const whyFailed = startFailed ? 'The run could not start.' : result?.summary?.trim() || stop?.reason?.trim() || 'Hermes gave no reason.'
   const failure = (
     <>
       <h4 className="rd-h">Why it failed</h4>
@@ -447,6 +449,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       {delivered && (
         <details className="rd-did" data-run-did>
           <summary>What it did</summary>
+          {startFailed && result?.summary && <p className="hub-muted" data-run-failure-detail>{result.summary}</p>}
           {timeline}
           {liveBlock}
           {usageLine(result?.usage) && <p className="hub-muted" data-run-usage>{usageLine(result?.usage)}</p>}

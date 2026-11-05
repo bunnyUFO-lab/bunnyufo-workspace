@@ -72,6 +72,13 @@ try {
     await page.goto(`${fx.url}#/~hub/activity/agents`);
     await page.locator('[data-run-event="run-started"]').first().waitFor();
     assert.equal(await page.locator('[data-run-event]').count(), 3);
+    // The title keeps the row's width and the buttons go under it on a phone; a title never breaks beside them.
+    const finishedRow = page.locator('[data-run-event="run-finished"]').first();
+    const [titleBox, actionsBox, rowBox] = await Promise.all([finishedRow.locator('.hub-row-title').boundingBox(), finishedRow.locator('.hub-row-actions').boundingBox(), finishedRow.boundingBox()]);
+    if (label === 'phone') {
+      assert.ok(titleBox.width >= rowBox.width * 0.6, `the title is ${titleBox.width} px of a ${rowBox.width} px row`);
+      assert.ok(actionsBox.y >= titleBox.y + titleBox.height - 1, 'the buttons sit under the title');
+    }
 
     step(`${label}: the Working now row opens the run drawer`);
     await page.goto(`${fx.url}#/~hub/today`);

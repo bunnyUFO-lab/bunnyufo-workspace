@@ -29,7 +29,7 @@ try {
   fixtures.push(fx);
   const J = {
     card: id('sizes', 'aa11'), pr: id('crop', 'bb22'), asks: id('grill', 'cc33'), asking: id('palette', 'dd44'), nothing: id('tiles', 'ee55'),
-    failed: id('broken', 'ff66'), stopped: id('halt', 'gg77'), empty: id('vague', 'hh88'), running: id('going', 'ii99'), silent: id('quiet', 'll22'), other: id('else', 'jj00'), child: id('after', 'kk11'),
+    failed: id('broken', 'ff66'), stopped: id('halt', 'gg77'), empty: id('vague', 'hh88'), running: id('going', 'ii99'), silent: id('quiet', 'll22'), noStart: id('nostart', 'mm33'), other: id('else', 'jj00'), child: id('after', 'kk11'),
   };
   const put = (jobId, title, minutes, { project = 'probe', result, stop, session } = {}) => {
     fx.seed.request({ id: jobId, project, title, text: `Do ${title}`, preset: 'research', target: 'hermes', by: 'hermes', createdAt: iso(minutesAgo(fx.now, minutes + 5)) });
@@ -47,6 +47,7 @@ try {
   put(J.nothing, 'Check the old tile import', 90, { result: { outcome: 'failed', reason: 'nothing-to-do', summary: 'Nothing needs changing.' } });
   put(J.failed, 'Broken run', 100, { result: { outcome: 'failed', summary: 'The run failed: boom' } });
   put(J.silent, 'Silent failure', 130, { result: { outcome: 'failed' } });
+  put(J.noStart, 'Never started', 140, { result: { outcome: 'failed', reason: 'start-failed', summary: "Hermes did not start: Cannot read properties of undefined (reading 'model')" } });
   put(J.stopped, 'Halted run', 110, { stop: true, result: { outcome: 'failed', reason: 'stopped', summary: 'Stopped by you.' } });
   put(J.empty, 'Vague run', 120, { result: { outcome: 'unknown', summary: 'Hermes forgot this run.' } });
   put(J.running, 'Still going', 4);
@@ -162,6 +163,12 @@ try {
     await result.goto(`${fx.url}#/~hub/request/${J.other}`);
     await result.locator('[data-run-card]').waitFor();
     assert.equal(await result.locator('[data-run-card]').getAttribute('href'), '/dev-proj#/proj-card');
+    // The local copy has no page at a site path: the click says so in the app instead of leaving for the service's raw error.
+    const here = result.url();
+    await result.locator('[data-run-card]').click();
+    await result.locator('[data-hub-no-site]').waitFor();
+    assert.match(await result.locator('[data-hub-no-site]').innerText(), /dev-proj.*cannot open/);
+    assert.equal(result.url(), here, 'The page did not move.');
 
     step(`${label}: a job that delivered nothing says so, in each of the three ways`);
     await result.goto(`${fx.url}#/~hub/request/${J.empty}`);
@@ -175,6 +182,12 @@ try {
     assert.equal(await result.locator('[data-run-no-deliverables]').count(), 0, 'A failure is not "delivered nothing".');
     assert.equal(await result.locator('[data-run-deliverables]').count(), 0);
     assert.match(await result.locator('.rd .rd-h').first().innerText(), /why it failed/i, 'The failure comes first.');
+    await result.goto(`${fx.url}#/~hub/request/${J.noStart}`);
+    await result.locator('[data-run-failure]').waitFor();
+    assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'The run could not start.');
+    assert.equal(await result.locator('[data-run-failure-detail]').isVisible(), false, 'The raw error is not on the page until What it did is opened.');
+    await result.locator('[data-run-did] summary').click();
+    assert.match(await result.locator('[data-run-failure-detail]').innerText(), /Cannot read properties/);
     await result.goto(`${fx.url}#/~hub/request/${J.silent}`);
     await result.locator('[data-run-failure]').waitFor();
     assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'Hermes gave no reason.', 'With no reason on record the page says so.');

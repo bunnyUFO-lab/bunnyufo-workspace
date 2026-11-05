@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import './hub.css'
 import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
@@ -24,8 +25,24 @@ import WorkTabs from './WorkTabs'
 
 /** The Hub: one entry for every screen, with the banner that says when this visitor can only read. */
 export default function HubScreen({ route }: { route: HubRoute }) {
+  // A card link of the site (`/<section>#/<card>`) means nothing to the local copy of the app, which has no page at that path: it would show the
+  // service's raw error. There the click says so inside the app instead.
+  const [noSite, setNoSite] = useState('')
+  useEffect(() => {
+    if (host.routes !== 'hash') return undefined
+    const onClick = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest?.('a[href]')
+      const href = link?.getAttribute('href') ?? ''
+      if (!/^\/[\w%-]+#\/[\w%.~-]+$/.test(href) || event.defaultPrevented) return
+      event.preventDefault()
+      setNoSite(`This card is in the section "${decodeURIComponent(href.slice(1, href.indexOf('#')))}", which this copy of the app cannot open. Open it on the site.`)
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
+  }, [])
   return (
     <div className="hub" data-screen={route.screen}>
+      {noSite && <div className="hub-banner" role="alert" data-hub-no-site>{noSite} <button type="button" className="hub-btn" onClick={() => setNoSite('')}>Close</button></div>}
       {!host.write && (
         <div className="hub-banner" role="note">
           <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, ticking checklists, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
