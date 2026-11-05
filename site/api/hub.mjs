@@ -11,6 +11,7 @@
 // request.json are create-only and so never change; they are cached by key. The read routes in
 // LIST_CACHED_ROUTES also see the bucket's listings through a short cache (list-cache.mjs), which every
 // write through this process clears; everything else, writes and sweeps included, lists live.
+import { createApplyPoke } from './hub-apply-poke.mjs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
@@ -332,6 +333,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   };
   // Hermes request runs: the hand-off, the followers and the re-attach after a restart. Idle without HERMES_URL and HERMES_API_KEY.
   const notify = createNotify({ env, fetchImpl, log: line => log(scrub(line, 400)) });
+  const applyPoke = createApplyPoke({ env, fetchImpl, log: line => log(scrub(line, 200)) });
   /** What an approval needs to know about the request it belongs to: its project, and whether the run has ended. */
   const requestInfo = async id => {
     const { request, parts } = await requestFiles.loadOne(id, now());
@@ -905,6 +907,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
     const stamp = at.toISOString();
     await putMark({ project, bead, verdict, at, body: { v: 1, project, bead, verdict, at: stamp, by: user, ...(reason ? { reason } : {}) } });
+    applyPoke.poke();
     return answer(201, verdict === 'undo' ? { state: 'unmarked' } : { state: 'marked', verdict, at: stamp });
   }
 
@@ -1031,6 +1034,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
     if (help) answer.help = help;
     await writeAnswer(id, answer);
+    if (ask.changes) applyPoke.poke();
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
     const rerun = await rerunFlow.afterAnswer({ ask, answer, user, at });

@@ -38,16 +38,16 @@ try {
 
   step('a research agent starts on Sonnet while Codex is paused, and the menu says why and until when');
   await page.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(page), 'Sonnet · API');
-  assert.match(await noteOf(page).innerText(), /^Codex is paused by its usage limit until (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)? · using Sonnet$/);
+  assert.equal(await selected(page), 'Sonnet 5.5 · API');
+  assert.match(await noteOf(page).innerText(), /^Codex 6.1 Sol is paused by its usage limit until (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)? · using Sonnet 5.5$/);
   assert.equal(await noteOf(page).getAttribute('data-pause-model'), 'codex');
 
   step('picking Codex by hand keeps Codex, with the same note and no "using"');
   await page.locator('[data-chat-model]').selectOption('codex');
-  assert.equal(await selected(page), 'Codex');
-  assert.match(await noteOf(page).innerText(), /^Codex is paused by its usage limit until [^·]+$/);
+  assert.equal(await selected(page), 'Codex 6.1 Sol');
+  assert.match(await noteOf(page).innerText(), /^Codex 6.1 Sol is paused by its usage limit until [^·]+$/);
   await page.locator('[data-chat-persona]').selectOption('teardown');
-  assert.equal(await selected(page), 'Codex', 'the pick survives a change of agent');
+  assert.equal(await selected(page), 'Codex 6.1 Sol', 'the pick survives a change of agent');
   await page.locator('[data-chat-model]').selectOption('sonnet');
   assert.equal(await noteOf(page).count(), 0, 'a model that is not paused has no note');
 
@@ -65,7 +65,7 @@ try {
   const phone = await open({ width: 390, height: 800 });
   await phone.goto(`${fx.url}#/~hub/chat`);
   await phone.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(phone), 'Sonnet · API');
+  assert.equal(await selected(phone), 'Sonnet 5.5 · API');
   await noteOf(phone).waitFor();
   const box = await noteOf(phone).boundingBox();
   assert.ok(box && box.x >= 0 && box.x + box.width <= 390, 'the note fits the screen');
@@ -79,8 +79,8 @@ try {
   const guessed = await open({ width: 1280, height: 900 });
   await guessed.goto(`${guess.url}#/~hub/chat`);
   await guessed.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(guessed), 'Sonnet · API');
-  assert.match(await noteOf(guessed).innerText(), /^Codex is paused by its usage limit \(seen (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)?\) · using Sonnet$/);
+  assert.equal(await selected(guessed), 'Sonnet 5.5 · API');
+  assert.match(await noteOf(guessed).innerText(), /^Codex 6.1 Sol is paused by its usage limit \(seen (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)?\) · using Sonnet 5.5$/);
 
   step('no evidence: the default is the agent\'s own');
   const calm = await startHubFixture({ hermes: true, chatRuns: true, seedData: false });
@@ -88,7 +88,7 @@ try {
   const quiet = await open({ width: 1280, height: 900 });
   await quiet.goto(`${calm.url}#/~hub/chat`);
   await quiet.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(quiet), 'Codex');
+  assert.equal(await selected(quiet), 'Codex 6.1 Sol');
   assert.equal(await noteOf(quiet).count(), 0);
   console.log('hub-chat-pause-ui: passed');
 } finally {

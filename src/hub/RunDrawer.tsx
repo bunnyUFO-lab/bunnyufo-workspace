@@ -135,7 +135,7 @@ function Live({ lines, ended }: { lines: LiveLine[]; ended: boolean }) {
             <b>{line.settled ? 'Hermes asked, and it is settled' : 'Hermes asks for approval'}</b>
             {line.command && <pre className="ni-mono">{line.command}</pre>}
             {line.description && <p className="hub-muted">{line.description}</p>}
-            {!line.settled && <a href={hubHash('needs')} className="hub-btn" data-run-approval-link>Answer it in Needs you</a>}
+            {!line.settled && <a href={hubHash('needs', 'all')} className="hub-btn" data-run-approval-link>Answer it in Needs you</a>}
           </div>
         )
       })}
