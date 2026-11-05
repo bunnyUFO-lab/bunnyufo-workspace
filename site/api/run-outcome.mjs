@@ -59,10 +59,14 @@ export function outcomeOf({ run, stopped = false, timedOut = false, retried = fa
     const card = cardOf(output, { sections });
     const asks = asksOf(output);
     if (card) return { ...base, outcome: 'card', card, ...(asks.length ? { asks } : {}), summary: clip(output, 500) };
-    // A grilling run files Asks and ends with `ASKS: <ids>` and no card: it delivered, so it is done, not failed.
-    if (asks.length) return { ...base, outcome: 'asks', asks, summary: clip(output, 500) };
+    // A `CARD:` line that is not trusted (any other section) never passes as done: the shared token can write anywhere, and `ASKS:` ids are not checked.
+    const foreignCard = /^[ \t]*CARD:/m.test(output);
+    // A grilling run files Asks and ends with `ASKS: <ids>` and no card line at all: it delivered, so it is done, not failed.
+    if (asks.length && !foreignCard) return { ...base, outcome: 'asks', asks, summary: clip(output, 500) };
     const question = questionOf(output, { sections });
     if (question) return { ...base, outcome: 'question', question, summary: clip(output, 500) };
+    // The Asks stay listed on the failed job (they are their own objects in Needs you); the card line was named, so "without a card" would be untrue.
+    if (foreignCard) return { ...base, outcome: 'failed', ...(asks.length ? { asks } : {}), summary: 'The run named a card in a section it may not write to, so it is not counted as done.' };
     return { ...base, outcome: 'failed', summary: 'Hermes finished without a card.' };
   }
   if (stopped || run.status === 'cancelled') {
