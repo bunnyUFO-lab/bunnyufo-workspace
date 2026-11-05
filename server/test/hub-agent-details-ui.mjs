@@ -268,9 +268,12 @@ try {
   assert.deepEqual((await details(desk, 'teardown').locator('[data-model-fallbacks] li').allInnerTexts()).map(flat), ['then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
   await desk.goto(`${fresh.url}#/~hub/team`);
   await desk.locator('.team-card').first().waitFor();
-  assert.match(flat(await desk.locator('[data-agent="teardown"] .team-facts').innerText()), /Model claude-sonnet-5-5 · then claude-haiku-5-5, gpt-6-sol/);
+  // A screen seen before shows its last answer at once, so wait for the fresh one (ws-ubo.1.1).
+  await desk.waitForFunction(() => /Model claude-sonnet-5-5 · then claude-haiku-5-5, gpt-6-sol/.test((document.querySelector('[data-agent="teardown"] .team-facts')?.innerText ?? '').replace(/\s+/g, ' ')));
   await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
   await desk.locator('[data-edit-profile="main"]').waitFor();
+  // The same here: the last answer shows first, and the export the test just made arrives with the refresh.
+  await desk.locator('[data-profile-change][data-state="live"]').waitFor();
   assert.equal(await desk.locator('[data-profile-change][data-state="live"]').count(), 1, 'the Edit page lists it as live');
   assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'and there is nothing new to send');
 
