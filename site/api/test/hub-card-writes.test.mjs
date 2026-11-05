@@ -195,11 +195,6 @@ test('Revert with several files: one that cannot go back changes none; a race mi
     const batch = { ...EDIT(md5('# a.md v1'), 'multibatch1') };
     assert.equal((await w.put('magic-loops', `${folder}/a.md`, '# a.md v2', batch)).status, 200);
     assert.equal((await w.put('magic-loops', `${folder}/b.md`, '# b.md v2', { ...EDIT(md5('# b.md v1'), 'multibatch1') })).status, 200);
-    // b.md changes after the batch: nothing at all goes back, a.md included.
-    w.seed(`sections/magic-loops/${folder}/b.md`, '# b.md owner', 'text/markdown');
-    const refused = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'multibatch1' });
-    assert.equal(refused.status, 409);
-    assert.equal(w.fake.text(`sections/magic-loops/${folder}/a.md`), '# a.md v2');
     // Put b.md back to what the batch wrote, then make the second put lose a race.
     w.seed(`sections/magic-loops/${folder}/b.md`, '# b.md v2', 'text/markdown');
     const bKey = `sections/magic-loops/${folder}/b.md`;
@@ -660,5 +655,63 @@ test('a revert file with no list of undone ids undoes nothing', async () => {
     w.seed(`sections/inbox/card-writes/magic-loops/${folder}/20990101T000000000Z-aaaa-revert.json`, JSON.stringify({ v: 1, kind: 'revert', section: 'magic-loops', folder, of: 'legacybatch', by: 'owner', at: '2099-01-01T00:00:00.000Z', restored: [] }), 'application/json');
     const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
     assert.deepEqual(rows.map(row => [row.batch, row.canRevert, Boolean(row.reverted)]), [['legacybatch', true, false]]);
+  } finally { await w.close(); }
+});
+
+test('one file the owner changed does not block the row: the other file goes back and the changed one is named', async () => {
+  const w = await world();
+  try {
+    const folder = owned.folder;
+    for (const name of ['a.md', 'b.md']) assert.equal((await w.put('magic-loops', `${folder}/${name}`, `# ${name} v1`, CREATE(`seed${name[0]}00001`))).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/a.md`, '# a.md v2', EDIT(md5('# a.md v1'), 'twofiles001'))).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/b.md`, '# b.md v2', EDIT(md5('# b.md v1'), 'twofiles001'))).status, 200);
+    w.seed(`sections/magic-loops/${folder}/b.md`, '# b.md owner tweak', 'text/markdown');
+    const answer = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'twofiles001' });
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.deepEqual(answer.body.restored, [`${folder}/a.md`]);
+    assert.deepEqual(answer.body.leftAlone, [{ file: `${folder}/b.md`, why: 'You changed this file after the agent, so it was left alone' }]);
+    assert.equal(w.fake.text(`sections/magic-loops/${folder}/a.md`), '# a.md v1');
+    assert.equal(w.fake.text(`sections/magic-loops/${folder}/b.md`), '# b.md owner tweak', 'the owner\'s tweak is untouched');
+    // The row is done: the left file will not be offered again.
+    const row = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups.find(group => group.batch === 'twofiles001');
+    assert.equal(row.canRevert, false);
+    assert.ok(row.reverted);
+  } finally { await w.close(); }
+});
+
+test('when the owner changed the only file, Revert says so plainly, and the row loses its button', async () => {
+  const w = await world();
+  try {
+    const key = `sections/magic-loops/${owned.folder}/index.md`;
+    const folder = owned.folder;
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# agent', { ...EDIT(md5('# Owner')), 'x-card-batch': 'ownerchg001' })).status, 200);
+    w.seed(key, '# agent, then the owner', 'text/markdown');
+    const answer = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'ownerchg001' });
+    assert.equal(answer.status, 409);
+    assert.equal(answer.body.error, 'You changed this file after the agent, so it was left alone.');
+    assert.equal(w.fake.text(key), '# agent, then the owner');
+    const row = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups[0];
+    assert.equal(row.canRevert, false, 'no button: nothing can be undone');
+    assert.equal(row.reverted.left, true);
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'ownerchg001' })).body.error, 'Already reverted.');
+  } finally { await w.close(); }
+});
+
+test('two runs edit a tab and the owner tweaks it: no circular message, and no button on either row', async () => {
+  const w = await world();
+  try {
+    const key = `sections/magic-loops/${owned.folder}/index.md`;
+    const folder = owned.folder;
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# run one', { ...EDIT(md5('# Owner')), 'x-card-batch': 'runone00001' })).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# run two', { ...EDIT(md5('# run one')), 'x-card-batch': 'runtwo00001' })).status, 200);
+    w.seed(key, '# run two, tweaked', 'text/markdown');
+    const newest = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'runtwo00001' });
+    assert.equal(newest.body.error, 'You changed this file after the agent, so it was left alone.');
+    const older = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'runone00001' });
+    assert.equal(older.status, 409);
+    assert.match(older.body.error, /You changed this file after the agent/, 'the older row is not told to revert a newer write that can never go back');
+    const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
+    assert.deepEqual(rows.map(row => row.canRevert), [false, false]);
+    assert.equal(w.fake.text(key), '# run two, tweaked');
   } finally { await w.close(); }
 });

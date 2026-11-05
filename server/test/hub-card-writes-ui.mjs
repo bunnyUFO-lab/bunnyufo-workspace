@@ -6,7 +6,7 @@ import { ms, SCALE } from './ui-timeouts.mjs';
 expect.configure({ timeout: 5000 * SCALE });
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
-import { seedAgentCards, HUB_CARD } from './card-writes-seed.mjs';
+import { seedAgentCards, HUB_CARD, LANES_CARD } from './card-writes-seed.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -99,18 +99,12 @@ try {
   assert.deepEqual(card.removedTabs.map(item => item.path), ['sources.md']);
   assert.equal(fixture.fake.log.some(entry => entry.method === 'DELETE'), false, 'no object is removed');
 
-  step('an edit that cannot go back says why in place and keeps the button: a newer change, then an older version the Hub cannot read yet');
+  step('an edit that cannot go back says why in place and keeps the button: an older version the Hub cannot read yet');
   const editRow = sheet.locator('[data-batch="editbatch01"]');
   assert.equal(await editRow.locator('[data-cw-revert]').count(), 1);
-  const agentText = fixture.fake.text(KEY);
-  fixture.fake.seed(KEY, 'The owner changed this meanwhile.\n', 'text/markdown');
   await editRow.locator('[data-cw-revert]').click();
   await expect(editRow.locator('[data-cw-will]')).toHaveText('Puts the old text back');
-  await editRow.locator('[data-cw-yes]').click();
-  await expect(editRow.locator('[data-cw-error]')).toContainText('changed after this write');
-  await expect(editRow.locator('[data-cw-revert]')).toBeVisible();
-  assert.equal(fixture.fake.text(KEY), 'The owner changed this meanwhile.\n', 'nothing was overwritten');
-  fixture.fake.seed(KEY, agentText, 'text/markdown');
+  await editRow.locator('[data-cw-no]').click();
   fixture.fake.fail = (_key, method, query) => method === 'GET' && query.has('versionId') && 403;
   await editRow.locator('[data-cw-revert]').click();
   await editRow.locator('[data-cw-yes]').click();
@@ -132,6 +126,15 @@ try {
   await expect(projectRows.first()).toContainText('in Lanes plan');
   await tall(phone.locator('[data-pp-agent-writes] button, [data-pp-agents] a'), 'the Library tab');
   await noSideways(phone, 'the Library tab with rows');
+
+  step('a file the owner changed after the agent is left alone, said plainly, and the row loses its button');
+  const laneEdit = phone.locator('[data-batch="laneedit001"]');
+  fixture.fake.seed(`sections/lanes/${LANES_CARD.folder}/index.md`, '# Lanes plan, tweaked by the owner\n', 'text/markdown');
+  await laneEdit.locator('[data-cw-revert]').click();
+  await laneEdit.locator('[data-cw-yes]').click();
+  await expect(laneEdit.locator('[data-cw-reverted]')).toContainText('You changed this file after the agent, so it was left alone');
+  assert.equal(await laneEdit.locator('[data-cw-revert]').count(), 0, 'no button: nothing can be undone');
+  assert.equal(fixture.fake.text(`sections/lanes/${LANES_CARD.folder}/index.md`), '# Lanes plan, tweaked by the owner\n');
 
   step('Team: the setting lists each Library section, assistant locked on, and a change saves a list at once');
   await phone.goto(`${fixture.url}#/~hub/team`);

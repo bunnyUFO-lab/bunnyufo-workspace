@@ -362,7 +362,7 @@ export interface CardWriteGroup {
   title: string
   cardTitle?: string
   canRevert: boolean
-  reverted?: { at: string | null; by: string; partial?: boolean }
+  reverted?: { at: string | null; by: string; partial?: boolean; /** Nothing was undone: the owner had changed the file after the agent. */ left?: boolean }
 }
 export interface CardWrites { groups: CardWriteGroup[]; /** There are older writes than these (`?older=1` reads them). */ more?: boolean }
 /** The answer to a Revert. */

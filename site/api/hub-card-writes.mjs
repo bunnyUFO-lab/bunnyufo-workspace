@@ -76,7 +76,9 @@ export function checkRevert(row, { section, folder }) {
   if (row.folder !== undefined && row.folder !== folder) return null;
   // `undone`: exactly the record ids this Revert undid. A record not listed is still live, whatever its batch label. A file with no list undoes nothing.
   const ids = Array.isArray(row.undone) ? row.undone.filter(id => typeof id === 'string' && /^\d{8}T\d{9}Z-[0-9a-f]{4}$/.test(id)).slice(0, 600) : null;
-  return { of: row.of, by: clip(row.by, 120), at: typeof row.at === 'string' ? row.at : null, partial: row.partial === true, undone: ids };
+  // `left`: record ids the owner had changed the file after; the Revert left them alone and closed them, so they offer no button. They are not undone: agent text may still be there.
+  const left = Array.isArray(row.left) ? row.left.filter(id => typeof id === 'string' && /^\d{8}T\d{9}Z-[0-9a-f]{4}$/.test(id)).slice(0, 600) : [];
+  return { of: row.of, by: clip(row.by, 120), at: typeof row.at === 'string' ? row.at : null, partial: row.partial === true, undone: ids, left };
 }
 
 const LABEL = { 'new-card': 'Added a card', 'new-tab': 'Added a tab', edit: 'Changed a tab' };
@@ -91,11 +93,17 @@ export function revertOf(record, reverts) {
   return reverts.find(item => item.of === label && item.folder === record.folder && item.undone?.includes(record.id)) ?? null;
 }
 
+/** The Revert that closed `record`: one that undid it, or one that left it alone because the owner had changed the file since. Either way the row offers no button for it. */
+export function closedBy(record, reverts) {
+  const label = record.batch ?? record.id;
+  return reverts.find(item => item.of === label && item.folder === record.folder && (item.undone?.includes(record.id) || item.left?.includes(record.id))) ?? null;
+}
+
 export function groupRows(records, reverts, { limit = MAX_GROUPS, titles = {} } = {}) {
   const groups = new Map();
   for (const record of records) {
     const id = record.batch ?? record.id;
-    const covered = revertOf(record, reverts);
+    const covered = closedBy(record, reverts);
     const at = `${record.folder}\0${id}\0${covered ? `${covered.at}|${covered.of}` : 'live'}`;
     if (!groups.has(at)) groups.set(at, { batch: id, folder: record.folder, agent: record.agent, token: record.token, why: record.why, context: record.context, at: record.at, newest: record.id, records: [], covered });
     const group = groups.get(at);
@@ -114,7 +122,7 @@ export function groupRows(records, reverts, { limit = MAX_GROUPS, titles = {} } 
       title: kinds.size === 1 ? LABEL[[...kinds][0]] : `${Math.max(files.length, 1)} files`,
       ...(titles[group.folder] ? { cardTitle: titles[group.folder] } : {}),
       canRevert: undo && !done,
-      ...(done ? { reverted: { at: done.at, by: done.by, ...(done.partial ? { partial: true } : {}) } } : {}),
+      ...(done ? { reverted: { at: done.at, by: done.by, ...(done.partial ? { partial: true } : {}), ...(group.records.every(record => done.left?.includes(record.id)) ? { left: true } : {}) } } : {}),
       newest: group.newest,
     });
   }
@@ -269,7 +277,7 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
     const labelled = records.filter(record => (record.batch ?? record.id) === batch).sort((a, b) => (a.id < b.id ? -1 : 1));
     if (!labelled.length) throw fail('No such write.', 404);
     // Only what no earlier Revert covered: a batch label the agent used again is a new write.
-    const mine = labelled.filter(record => !revertOf(record, reverts));
+    const mine = labelled.filter(record => !closedBy(record, reverts));
     if (!mine.length) throw fail('Already reverted.', 409);
 
     // What the batch holds.
@@ -288,7 +296,7 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
       // One rule: a Revert undoes only the newest live writes on a file. If a newer live record on the file is not this batch's, the file is left alone (Revert that one first). Going back from the
       // newest, a record joins the tail only while the record just before it on the file is this batch's too and its etag leads on from it (an owner's edit leaves no record, but it changes the etag).
       // Older records of the batch stay live, each its own row with its own Revert. The same bytes written again prove nothing: only the order of the records counts.
-      const live = records.filter(item => !item.entry && !revertOf(item, reverts));
+      const live = records.filter(item => !item.entry && !closedBy(item, reverts));
       for (const [file, list] of perFile) {
         const onFile = live.filter(item => inside(item.file, folder) === file).sort((x, y) => (x.id < y.id ? -1 : 1));
         const newest = onFile[onFile.length - 1];
@@ -312,11 +320,20 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
 
     // 1. Check, and read every earlier version.
     const plan = [];
-    for (const [file, { first, last }] of edits) {
+    const ownerLeft = [];
+    for (const [file, { first, last }] of [...edits]) {
       const target = sectionKey(section, file);
       let head;
       try { head = await bucket.head(target); } catch (error) { if (error?.status === 404) throw fail(`${file} is gone from the section.`, 409); throw error; }
-      if (head.etag !== last.etag) throw fail(`${file} changed after this write. Revert the newer write first.`, 409);
+      // No newer agent write is left on the file (that was settled above), so a different etag is the owner's own change: the file stays as it is, and the rest of the row goes on.
+      if (head.etag !== last.etag) {
+        leftAlone.push({ file, why: 'You changed this file after the agent, so it was left alone' });
+        ownerLeft.push(...edits.get(file).tail.map(item => item.id));
+        for (const item of edits.get(file).tail) undoneIds.delete(item.id);
+        tailIds.delete(file);
+        edits.delete(file);
+        continue;
+      }
       if (!first.previousVersionId) throw fail(`No earlier version of ${file} was seen, so it cannot be put back.`, 409);
       let old;
       try {
@@ -328,6 +345,11 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
       if (!old) throw fail(`The earlier version of ${file} is no longer in the bucket.`, 409);
       if (old.buffer.length > MAX_RESTORE) throw fail("Too big to restore here; restore it from the bucket's versions.", 413);
       plan.push({ file, target, etag: head.etag, old });
+    }
+    if (!edits.size && !entries.length) {
+      // Nothing can be undone because the owner changed what is left: close those records, so no button stays for them, and say it plainly.
+      await writeRevertRecord(section, folder, { of: batch, undone: [], left: ownerLeft, by: String(user).slice(0, 120), at: now().toISOString(), restored: [], removedTabs: [], trashed: [], clearedMarks: [], skipped, leftAlone });
+      throw fail('You changed this file after the agent, so it was left alone.', 409);
     }
     const writer = cardWriter(bucketStore(bucket, `${prefix}/${section}`), { section, now });
     const done = { restored: [], removedTabs: [], trashed: [], clearedMarks: [] };
@@ -345,7 +367,7 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
       if (!any) throw raced ? fail(`${what} changed while it was being put back. Reload and look at it.`, 409) : error;
       // Only what went back is undone: the files restored so far. The rest stays live, so a second try can finish it.
       const partialIds = done.restored.flatMap(file => tailIds.get(file) ?? []);
-      await writeRevertRecord(section, folder, { of: batch, undone: partialIds, by: String(user).slice(0, 120), at: now().toISOString(), ...done, skipped, leftAlone, partial: true });
+      await writeRevertRecord(section, folder, { of: batch, undone: partialIds, by: String(user).slice(0, 120), at: now().toISOString(), left: ownerLeft, ...done, skipped, leftAlone, partial: true });
       const message = raced ? `${what} changed while it was being put back.` : error.message;
       throw fail(`Only part of this went back (${[...done.restored, ...done.removedTabs, ...done.trashed].join(', ')}). ${message}`, 409, { partial: true, ...done });
     };
@@ -384,7 +406,7 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
       } catch (error) { await stop(error, 'The card list'); }
     }
     const at = now().toISOString();
-    const recorded = await writeRevertRecord(section, folder, { of: batch, undone: [...undoneIds].sort(), by: String(user).slice(0, 120), at, ...done, skipped, leftAlone });
+    const recorded = await writeRevertRecord(section, folder, { of: batch, undone: [...undoneIds].sort(), left: ownerLeft, by: String(user).slice(0, 120), at, ...done, skipped, leftAlone });
     return { status: 200, body: { ...done, skipped, ...(leftAlone.length ? { leftAlone } : {}), reverted: { at, by: String(user).slice(0, 120) }, recorded } };
   }
 
