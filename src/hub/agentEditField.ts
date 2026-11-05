@@ -29,3 +29,19 @@ export function profileEditOf(ask: Ask): ProfileEditField | null {
   if (!primary || !chain || chain.length > 4 || chain.some(item => !item)) return null
   return { profile: raw.profile, primary, fallbacks: chain as ModelRef[], why: typeof raw.why === 'string' ? raw.why : undefined }
 }
+
+/** True for an Opus model id. The same test as `isOpus` in site/api/chat-models.mjs: Opus bills through the API. */
+export const isOpus = (model: string): boolean => /opus/i.test(String(model))
+
+/** True for a model that only a deliberate pick may add: Opus, and Fable, which costs more than Opus. The same test as `isDear` in site/api/chat-models.mjs. */
+export const isDear = (model: string): boolean => /opus|fable/i.test(String(model))
+
+const dearName = (model: string) => (isOpus(model) ? 'Opus' : 'Fable')
+
+/** The warning for an Opus or Fable pick, as primary or as a fallback; null when the order holds neither. Said on the Edit page and on the Ask. */
+export function opusNote(primary: ModelRef | null | undefined, fallbacks: ModelRef[]): string | null {
+  if (primary && isDear(primary.model)) return `${dearName(primary.model)} is the primary: every reply on this profile bills through the Anthropic API.`
+  const fallback = fallbacks.find(item => isDear(item.model))
+  if (fallback) return `${dearName(fallback.model)} is a fallback: when the models before it fail, replies bill through the Anthropic API without asking.`
+  return null
+}

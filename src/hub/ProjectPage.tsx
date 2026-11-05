@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, MouseEvent } from 'react'
 import type { HubProject, MapMilestone, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { host } from '../lib/host'
 import ItemMenu from '../components/ItemMenu'
 import { useIsPhone } from '../lib/chrome'
 import { needsHref } from '../lib/needsView.mjs'
-import { hubHash, mapHash, parseProjectId, projectHash } from '../lib/route'
+import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
+import MapPanel from './MapPanel'
 import { CardWriteRows } from './CardWrites'
 import { useCardWrites } from './cardWriteText'
 import NeedsRows from './NeedsRows'
@@ -17,7 +18,7 @@ import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
 import { isLaterOnly, tallyFraction, tallyWords } from './mapCount.ts'
 import type { Tally } from './mapCount.ts'
-import { STATE_COLOR, STATE_LABEL } from './mapState'
+import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { PROJECT_TABS, currentMilestone, milestoneRow, moreCount, phoneTabs, tabCounts, tabOf } from './projectPage.ts'
 import type { ProjectTab } from './projectPage.ts'
 import { openSpawn } from './spawnStore'
@@ -27,6 +28,7 @@ import RefreshNote from './RefreshNote'
 import { useHeldHubData, useHubData, useTodayScreen } from './useHub'
 import { useProject } from './useProject'
 import './today.css'
+import './work.css'
 import './project.css'
 import './cardWrites.css'
 
@@ -62,18 +64,20 @@ function Ring({ tally }: { tally: Tally }) {
   )
 }
 
-function MilestoneRow({ project, milestone }: { project: string; milestone: MapMilestone }) {
+type OpenNode = (event: MouseEvent<HTMLAnchorElement>, href: string) => void
+
+function MilestoneRow({ project, milestone, onOpen }: { project: string; milestone: MapMilestone; onOpen: OpenNode }) {
   const { tally, chips, more } = milestoneRow(milestone)
   return (
     <li className="pp-ms" data-pp-milestone={milestone.id} data-state={milestone.state}>
       <Ring tally={tally} />
       <div className="pp-ms-body">
-        <a className="pp-ms-title" href={mapHash(project, milestone.id)}>{milestone.title}</a>
+        <a className="pp-ms-title" href={projectNodeHash(project, milestone.id)} data-pp-node={milestone.id} onClick={event => onOpen(event, projectNodeHash(project, milestone.id))}>{milestone.title}</a>
         <span className="pp-ms-count" data-pp-count>{tallyWords(tally)}</span>
         {chips.length > 0 && (
           <span className="pp-chips">
             {chips.map(task => (
-              <a key={task.id} className="pp-chip" href={mapHash(project, task.id)} style={{ '--chip': STATE_COLOR[task.state] } as CSSProperties} data-pp-task={task.id} data-state={task.state} title={task.title}>{task.id} {STATE_LABEL[task.state]}</a>
+              <a key={task.id} className="pp-chip" href={projectNodeHash(project, task.id)} onClick={event => onOpen(event, projectNodeHash(project, task.id))} style={{ '--chip': STATE_COLOR[task.state] } as CSSProperties} data-pp-task={task.id} data-pp-node={task.id} data-state={task.state} title={task.title}>{task.id} {STATE_LABEL[task.state]}</a>
             ))}
             {more > 0 && <span className="pp-chip more">+{more}</span>}
           </span>
@@ -84,12 +88,12 @@ function MilestoneRow({ project, milestone }: { project: string; milestone: MapM
 }
 
 /** The Roadmap tab: one row per milestone, from the same read as the map. */
-function RoadmapTab({ project, model, error, loading, at }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null }) {
+function RoadmapTab({ project, model, error, loading, at, onOpen }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
   if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
-  return <><RefreshNote error={error} hasData at={at} /><RoadmapBody project={project} model={model} /></>
+  return <><RefreshNote error={error} hasData at={at} /><RoadmapBody project={project} model={model} onOpen={onOpen} /></>
 }
 
-function RoadmapBody({ project, model }: { project: string; model: MapModel }) {
+function RoadmapBody({ project, model, onOpen }: { project: string; model: MapModel; onOpen: OpenNode }) {
   if (!model.meta) return <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
   // A project with roadmaps lists them, nested; a row opens that roadmap's map.
   if (model.roadmaps?.length) {
@@ -105,11 +109,11 @@ function RoadmapBody({ project, model }: { project: string; model: MapModel }) {
   return (
     <>
       {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
-      {open.length > 0 && <ul className="pp-list" data-pp-roadmap>{open.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} />)}</ul>}
+      {open.length > 0 && <ul className="pp-list" data-pp-roadmap>{open.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} onOpen={onOpen} />)}</ul>}
       {finished.length > 0 && (
         <details className="pp-finished" data-pp-finished>
           <summary>{finished.length} finished</summary>
-          <ul className="pp-list">{finished.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} />)}</ul>
+          <ul className="pp-list">{finished.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} onOpen={onOpen} />)}</ul>
         </details>
       )}
       <p className="pp-foot"><a className="pp-link" href={mapHash(project)} data-pp-open-map>Open the Roadmap ›</a></p>
@@ -180,15 +184,15 @@ function useSprintAction(project: string, model: MapModel | null): SprintAction 
   const preview = useHubData<SprintPreview>(host.write && milestone ? `/map/${enc(project)}/sprint/${enc(milestone.id)}` : null)
   if (!model) return {}
   // A visitor who cannot start one sees a sprint that is going, and nothing else.
-  if (!host.write) return going && milestone ? { link: { href: mapHash(project, milestone.id), label: 'Sprint running ›' } } : { hidden: true }
+  if (!host.write) return going && milestone ? { link: { href: projectNodeHash(project, milestone.id), label: 'Sprint running ›' } } : { hidden: true }
   if (!milestone) return { note: 'No open milestone to sprint on.' }
   if (preview.error && !preview.data) return { note: preview.error }
   if (!preview.data) return {}
   if (!preview.data.allowed) return { note: preview.data.why }
-  return { link: { href: mapHash(project, milestone.id), label: going ? 'Sprint running ›' : 'Run a sprint…' } }
+  return { link: { href: projectNodeHash(project, milestone.id), label: going ? 'Sprint running ›' : 'Run a sprint…' } }
 }
 
-function Actions({ project, name, model, runsOn }: { project: string; name: string; model: MapModel | null; runsOn: HubProject['runsOn'] }) {
+function Actions({ project, name, model, runsOn, onOpen }: { project: string; name: string; model: MapModel | null; runsOn: HubProject['runsOn']; onOpen: OpenNode }) {
   const sprint = useSprintAction(project, model)
   const rule = runsOn && runsOn !== 'pc' ? RUNS_ON[runsOn].rule : ''
   return (
@@ -197,7 +201,7 @@ function Actions({ project, name, model, runsOn }: { project: string; name: stri
         <PlanInHermes project={project} projectName={name} selected={null} action="plan" />
         {host.write && <button type="button" className="hub-btn" data-project-action="build" onClick={() => openSpawn({ project, preset: 'code-task' })}>Build it…</button>}
         {!sprint.hidden && (sprint.link
-          ? <a className="hub-btn" href={sprint.link.href} data-project-action="sprint">{sprint.link.label}</a>
+          ? <a className="hub-btn" href={sprint.link.href} onClick={event => onOpen(event, sprint.link!.href)} data-project-action="sprint">{sprint.link.label}</a>
           : <button type="button" className="hub-btn" disabled data-project-action="sprint" aria-describedby={sprint.note ? 'pp-sprint-note' : undefined}>Run a sprint…</button>)}
       </div>
       {!host.write && <p className="hub-muted pp-note" data-project-note="build">Sign in to ask an agent to do something.</p>}
@@ -208,11 +212,12 @@ function Actions({ project, name, model, runsOn }: { project: string; name: stri
 }
 
 /**
- * One page per project (`#/~hub/project[/<id>[/<tab>]]`): name, where it runs, the three buttons, the project chips and four tabs. It links
- * into the Roadmap, Work and Needs you; it does not replace them.
+ * One page per project (`#/~hub/project[/<id>[/<tab>[/<node>]]]`): name, where it runs, the three buttons, the project chips and four tabs. It links
+ * into the Roadmap, Work and Needs you; it does not replace them. A milestone or task on the Roadmap tab opens its details in place (the Roadmap's
+ * panel over the page, as a Work card does), so closing returns to this list.
  */
 export default function ProjectPage({ route }: { route?: string }) {
-  const { project: wanted, tab: rawTab } = parseProjectId(route)
+  const { project: wanted, tab: rawTab, node } = parseProjectId(route)
   const tab = tabOf(rawTab)
   const all = useHubData<{ projects: HubProject[] }>('/projects')
   const known = !wanted || !all.data || all.data.projects.some(item => item.id === wanted)
@@ -224,6 +229,28 @@ export default function ProjectPage({ route }: { route?: string }) {
   const wide = useWide()
   const phone = useIsPhone()
   const go = (id: string) => setHash(projectHash(id, tab))
+  // The details of a milestone or task: the Roadmap's panel over the page. Close returns to the page, one step back when this page pushed
+  // the address, else a replace (a shared link); `pushed` is cleared whenever the sheet goes away.
+  const shown = tab === 'roadmap' && node && project && model && find(model, node) ? node : undefined
+  const pushed = useRef(false)
+  const lastNode = useRef<string | null>(null)
+  const openNode: OpenNode = (event, href) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (node) { event.preventDefault(); window.location.replace(href); return }
+    pushed.current = true
+  }
+  const closeNode = () => {
+    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(projectHash(project))
+  }
+  const openRelated = (id: string) => { if (project) window.location.replace(projectNodeHash(project, id)) }
+  // Whatever closes the sheet (the button, the scrim, Escape, Back), focus goes back to the row that opened it.
+  useEffect(() => {
+    if (node) { lastNode.current = node; return }
+    pushed.current = false
+    const id = lastNode.current
+    lastNode.current = null
+    if (id) document.querySelector<HTMLElement>(`[data-pp-node="${CSS.escape(id)}"]`)?.focus({ preventScroll: true })
+  }, [node])
 
   if (!known) {
     return (
@@ -253,9 +280,10 @@ export default function ProjectPage({ route }: { route?: string }) {
   )
   const hidden = more.map(key => TAB_LABEL[key] + numbered(key))
   const held = moreCount(more, counts)
-  const side = wide && tab === 'roadmap' && running
+  // The side panel of Running takes the room the sheet needs, so it steps aside while a sheet is open.
+  const side = wide && tab === 'roadmap' && !shown && running
   return (
-    <div className="pp today" data-project-page={project}>
+    <div className="pp today" data-project-page={project} data-sheet={shown ? '' : undefined}>
       <header className="pp-head">
         <div className="pp-name">
           <div className="today-eyebrow">Project</div>
@@ -263,7 +291,7 @@ export default function ProjectPage({ route }: { route?: string }) {
           <RunsOnChip key={project} runsOn={item?.runsOn} />
         </div>
         <div className="pp-do">
-          <Actions key={project} project={project} name={name} model={model} runsOn={item?.runsOn} />
+          <Actions key={project} project={project} name={name} model={model} runsOn={item?.runsOn} onOpen={openNode} />
         </div>
       </header>
       <ProjectPicker id="hub-project-page" projects={list} value={project} onChange={go} href={id => projectHash(id, tab)} oneRow />
@@ -281,13 +309,18 @@ export default function ProjectPage({ route }: { route?: string }) {
       ) : tablist}
       <div className="pp-body" data-tab={tab} data-side={side ? 'true' : undefined}>
         <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
-          {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} />}
+          {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
           {tab === 'running' && (running || <p className="hub-empty">Loading…</p>)}
           {tab === 'needs' && <NeedsTab project={project} name={name} today={today} />}
           {tab === 'library' && <LibraryTab project={project} />}
         </div>
         {side && <aside className="pp-side" data-pp-side>{running}<p className="hub-muted">Open the Running tab for logs and stop.</p></aside>}
       </div>
+      {shown && model && (
+        <div className="wk-sheet">
+          <MapPanel model={model} nodeId={shown} onClose={closeNode} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(project, shown)} data-show-on-roadmap>Show on roadmap</a></p>} />
+        </div>
+      )}
     </div>
   )
 }

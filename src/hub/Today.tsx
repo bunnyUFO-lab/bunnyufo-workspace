@@ -18,6 +18,7 @@ import { openSpawn } from './spawnStore'
 import { todayFor } from './todayFilter.ts'
 import RefreshNote from './RefreshNote'
 import { useHubData, useTodayScreen } from './useHub'
+import { chooseProject, savedScope, saveScope } from './useProject'
 import './today.css'
 
 const ICON_ALERT = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 16.8h.01"/>'
@@ -137,24 +138,20 @@ function useNarrow() {
   return narrow
 }
 
-/** Today's own project, remembered in this browser. It is not `buw.hub.project`, which Work and the Roadmap share: the default here is All. */
-const PROJECT_KEY = 'hub-today-project'
-const savedProject = () => { try { return localStorage.getItem(PROJECT_KEY) ?? '' } catch { return '' } }
-const saveProject = (project: string) => { try { if (project) localStorage.setItem(PROJECT_KEY, project); else localStorage.removeItem(PROJECT_KEY) } catch { /* private mode: All next time */ } }
-
+/** Today shows the project last picked in any project picker (`hub-today-project`, shared with Needs you); the default is All. The picker writes it, so a pick here shows on Work, and a pick there shows here on return. */
 export default function Today() {
   const narrow = useNarrow()
   const today = useTodayScreen()
   const projects = useHubData<{ projects: HubProject[] }>('/projects')
-  const [chosen, setChosen] = useState(savedProject)
+  const [chosen, setChosen] = useState(savedScope)
   const list = projects.data?.projects
   // A saved project that is gone counts as All once the list is known, and the key is cleared.
   const gone = !!chosen && !!list && !list.some(item => item.id === chosen)
-  useEffect(() => { if (gone) saveProject('') }, [gone])
+  useEffect(() => { if (gone) saveScope('') }, [gone])
   // If /projects fails there is no picker to undo a remembered project: show All for this view and leave the saved choice alone.
   const failed = !!projects.error && !list
   const project = gone || failed ? '' : chosen
-  const choose = (id: string) => { const next = id === 'all' ? '' : id; setChosen(next); saveProject(next) }
+  const choose = (id: string) => setChosen(id === 'all' ? '' : id)
   const { data: full, error, reload, at, loading } = today
   if (!full) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
   // Filtered once, here: the sentence, the tiles and both layouts read `data`. The context keeps the full answer for the badge.
@@ -218,7 +215,7 @@ export default function Today() {
         <div className="today-project rise" style={stagger(1)} data-today-project>
           <ProjectPicker id="hub-today-project" projects={list} value={project || 'all'} allValue="all" onChange={choose} oneRow counts={needsByProject} allCount={full.counts.needsYou} />
           {project && <ProjectLink id={project} name={projectName} />}
-          {elsewhere > 0 && <p className="hub-muted today-elsewhere" data-today-elsewhere>{elsewhere} more {elsewhere === 1 ? 'waits' : 'wait'} in other projects · <button type="button" className="today-linkbtn" onClick={() => choose('all')}>Show all</button></p>}
+          {elsewhere > 0 && <p className="hub-muted today-elsewhere" data-today-elsewhere>{elsewhere} more {elsewhere === 1 ? 'waits' : 'wait'} in other projects · <button type="button" className="today-linkbtn" onClick={() => { chooseProject(null); choose('all') }}>Show all</button></p>}
         </div>
       )}
       <div className="hub-kpis rise" style={stagger(1)}>
