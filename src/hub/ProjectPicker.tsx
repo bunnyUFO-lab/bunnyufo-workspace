@@ -4,7 +4,7 @@ import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import Combobox from './Combobox'
 
-/** Up to this many projects the picker is a row of chips (one tap), or on a phone one native select; past it, a typeable list. "All" does not count. */
+/** Up to this many projects the picker is a row of chips (one tap) on a desktop; past it, a typeable list. A phone always gets one native select. "All" does not count. */
 export const CHIP_LIMIT = 10
 
 type Props = {
@@ -30,8 +30,8 @@ type Props = {
 }
 
 /**
- * The Hub's project picker: chips while the owner has ten or fewer projects (a native select at phone width, so nothing scrolls sideways),
- * a typeable list once there are more. Matches the name or the id.
+ * The Hub's project picker: at phone width always one native select (no keyboard, nothing scrolls sideways, whatever the number of projects);
+ * on a desktop chips while the owner has ten or fewer projects, a typeable list once there are more. Matches the name or the id.
  */
 export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList, counts, allCount }: Props) {
   const options = useMemo(() => [
@@ -43,7 +43,7 @@ export default function ProjectPicker({ projects, value, onChange, id, allValue,
   const listOptions = useMemo(() => options.map(option => { const n = option.value === allValue ? allCount : counts?.[option.value]; return n === undefined ? option : { ...option, label: `${option.label} (${n})` } }), [options, allValue, allCount, counts])
   const phone = useIsPhone()
   const short = projects.length <= CHIP_LIMIT
-  const native = phone && short
+  const native = phone
   const chips = !phone && !alwaysList && short
   const row = useRef<HTMLDivElement>(null)
   const edges = useOverflowEdges(row, [options.length, value, chips])
