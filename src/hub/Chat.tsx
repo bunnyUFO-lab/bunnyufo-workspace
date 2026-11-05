@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatDelegate, ChatHeld, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
@@ -14,6 +14,8 @@ import type { ChatHandlers } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
+import JobsCard from './ChatJobs'
+import { LIVE_JOB } from './jobStates'
 import Md, { CodeBlock } from './Md'
 import { splitFences } from './chatText'
 import { useHubData } from './useHub'
@@ -59,7 +61,7 @@ function Created({ items }: { items: Item[] }) {
         <div className="hub-created-card" key={`${item.kind}-${item.id}`} data-created={item.kind}>
           <span className="hub-pill">{item.kind}</span>
           <span className="hub-created-title">{item.title}</span>
-          <a className="hub-btn" href={item.kind === 'ask' ? hubHash('ask', item.id) : hubHash('needs', 'requests')}>Open</a>
+          <a className="hub-btn" href={item.kind === 'ask' ? hubHash('ask', item.id) : hubHash('request', item.id)}>Open</a>
         </div>
       ))}
     </div>
@@ -102,8 +104,9 @@ function DelegateCard({ delegate }: { delegate: ChatDelegate }) {
 function Delegates({ items }: { items: ChatDelegate[] }) {
   if (!items.length) return null
   return (
-    <div className="hub-delegates" data-delegates role="group" aria-label="Delegates Hermes started">
-      <span className="hub-muted hub-delegates-head">Hermes started {items.length === 1 ? 'a delegate' : `${items.length} delegates`}</span>
+    <div className="hub-delegates" data-delegates role="group" aria-label="Helpers Hermes started">
+      <span className="hub-muted hub-delegates-head">Hermes started {items.length === 1 ? 'a helper' : `${items.length} helpers`}</span>
+      <span className="hub-muted hub-delegates-sub" data-delegates-sub>Inside this chat. Not tracked as a job.</span>
       {items.map(delegate => <DelegateCard key={delegate.id} delegate={delegate} />)}
     </div>
   )
@@ -195,7 +198,7 @@ function OwnerText({ text }: { text: string }) {
   )
 }
 
-function Bubble({ line, conversation, models, who, agents }: { line: Shown; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[] }) {
+function Bubble({ line, conversation, models, who, agents, jobs, onJobsChanged }: { line: Shown; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[]; jobs: ChatJob[]; onJobsChanged: () => void }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
     <div className={`hub-bubble ${line.role}`}>
@@ -208,6 +211,7 @@ function Bubble({ line, conversation, models, who, agents }: { line: Shown; conv
       )}
       {line.tools && line.tools.length > 0 && <ToolLines tools={line.tools.filter(name => name !== DELEGATE_TOOL || !line.delegates?.length).map(name => ({ id: name, name, state: 'done' as const }))} />}
       {line.delegates && <Delegates items={line.delegates} />}
+      {line.jobs && line.jobs.length > 0 && conversation && <JobsCard conversation={conversation} ids={line.jobs} jobs={jobs} onChanged={onJobsChanged} />}
       {line.created && line.created.length > 0 && <Created items={line.created} />}
       {line.role === 'assistant' && line.model && line.model !== AUTO && <span className="hub-muted hub-bubble-model" data-bubble-model>{nameOf(models, line.model)}</span>}
     </div>
@@ -296,6 +300,19 @@ function ChatView({ id }: { id?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
   const conversation = useRef<string | undefined>(help ? undefined : id)
   const [shownId, setShownId] = useState<string | undefined>(help ? undefined : id)
+  // The jobs the replies name: read only when a line has some. Looked at again when a line gains ids, and every 20 s while a job is going.
+  const jobIds = messages.flatMap(line => line.jobs ?? [])
+  const jobKey = jobIds.join(',')
+  const jobRead = useHubData<{ jobs: ChatJob[] }>(jobIds.length && shownId && !help ? `/chat/${encodeURIComponent(shownId)}/jobs` : null)
+  const jobs = jobRead.data?.jobs ?? []
+  const jobsLive = jobs.some(job => LIVE_JOB.has(job.state))
+  const reloadJobs = jobRead.reload
+  useEffect(() => { if (jobKey) reloadJobs() }, [jobKey, reloadJobs])
+  useEffect(() => {
+    if (!jobsLive) return undefined
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') reloadJobs() }, nextLookMs(false, 0))
+    return () => window.clearInterval(timer)
+  }, [jobsLive, reloadJobs])
   const urls = useRef(new Set<string>())
   const slots = useRef(MAX_IMAGES)
   const speaks = typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -522,6 +539,7 @@ function ChatView({ id }: { id?: string }) {
     live.current = true
     let reply = ''
     let created: Item[] = []
+    let named: string[] = []
     let finished: string | null = null
     let saved: ChatLine | undefined
     let savedContext: ChatLine | undefined
@@ -535,6 +553,7 @@ function ChatView({ id }: { id?: string }) {
       await start({
         onDelta: piece => { reply += piece; setPending(reply) },
         onCreated: items => { created = items },
+        onJobs: ids => { named = ids },
         onTool: tool => {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
@@ -575,7 +594,7 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(named.length ? { jobs: named } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
     // Hermes goes on without the page, so the reply comes from the saved chat: the turn stays open until it is there.
     if (cut && conversation.current) {
       cutTurn.current = { text, sentAt: optimistic.at, fallback: lines, previews, model: askedModel, persona: askedPersona }
@@ -748,7 +767,7 @@ function ChatView({ id }: { id?: string }) {
         {banner}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">{who ? `Ask ${who.name} anything: ${who.role}. It writes a card when you ask for one.` : 'Ask the assistant anything, or tell it what to do.'}</p>}
-          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} who={who} agents={agents} />))}
+          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
               {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}

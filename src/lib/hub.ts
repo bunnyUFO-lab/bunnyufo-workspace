@@ -5,6 +5,7 @@ import { authHeaders } from '../local/client'
 import type { PcSummary, PcWake, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
 import { clearHub } from './hubCache.mjs'
+import type { SpawnTarget } from './hubSpawn'
 import { holdReload } from './reloadGate'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'review' | 'blocked' | 'session'
@@ -459,7 +460,15 @@ export const appUrl = (value: string | undefined): string | undefined => (value 
 export interface ChatImage { file: string; type: string; width: number; height: number }
 /** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
 export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
+/** A job a reply named (`GET /hub/chat/:id/jobs`), built from the request file. A proposal waits for the owner; the rest follow the run. */
+export interface ChatJob {
+  id: string; title: string; text: string; project: string; preset?: string; agent?: string; runsOn?: SpawnTarget; produces?: string
+  state: string; stale?: string; approvable: boolean; why?: string; flag?: 'persona'; by: string; nothing?: boolean
+  finish?: { outcome: string; pr?: string; card?: string; cardHref?: string }
+}
+/** What one tap did to each id, in the order they were signed. Not atomic: a signed approval stands when a later one fails. */
+export interface ChatJobResult { id: string; ok: boolean; state?: string; waiting?: string; error?: string }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
 /** A message sent while a reply was running, waiting for it to end. */
 export interface ChatQueued { id: string; text: string; at: string; model?: string }
 /** Why the waiting messages are not going out by themselves. */

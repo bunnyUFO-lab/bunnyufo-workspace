@@ -6,6 +6,8 @@ export interface ChatHandlers {
   onDone: (conversation: string, user?: ChatLine, context?: ChatLine) => void
   onError: (message: string) => void
   onTool?: (tool: ChatTool) => void
+  /** The ids of the jobs this reply named (ids only: the rows are read from the Hub). */
+  onJobs?: (ids: string[]) => void
   /** The delegates this turn started so far, the whole list each time. */
   onDelegates?: (delegates: ChatDelegate[]) => void
   onApproval?: (approval: ChatApproval) => void
@@ -40,6 +42,7 @@ export async function readChatStream(stream: ReadableStream<Uint8Array>, handler
     try { value = JSON.parse(data.join('\n')) as Record<string, unknown> } catch { return }
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
+    else if (event === 'jobs' && Array.isArray(value.ids)) handlers.onJobs?.((value.ids as unknown[]).filter((item): item is string => typeof item === 'string'))
     else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined, value.context && typeof value.context === 'object' ? value.context as ChatLine : undefined)
     else if (event === 'idle') handlers.onIdle?.()
     else if (event === 'started') handlers.onStarted?.(typeof value.run === 'string' ? value.run : null, typeof value.conversation === 'string' ? value.conversation : '')

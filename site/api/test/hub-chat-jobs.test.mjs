@@ -133,6 +133,29 @@ test('rows are built from the request files: the file\'s title and text, what it
   } finally { await close(); }
 });
 
+test('a finished job\'s row carries its outcome and the site path of its card, in assistant and in any other section', async () => {
+  const inAssistant = job('card-a');
+  const inProject = job('card-b');
+  const withPr = job('card-c');
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    const finished = (request, result) => put({ ...request, createdAt: new Date(Date.now() - 3_600_000).toISOString() }, {
+      'approved.json': { v: 1, request: request.id, target: 'hermes', limits: { minutes: 30 }, expires: new Date(Date.now() + 3_600_000).toISOString(), at: new Date(Date.now() - 3_000_000).toISOString(), by: 'owner' },
+      'taken.json': { runner: 'hermes', at: new Date(Date.now() - 2_900_000).toISOString() },
+      'result.json': { at: new Date(Date.now() - 2_000_000).toISOString(), by: 'hermes', ...result },
+    });
+    finished(inAssistant, { outcome: 'card', card: 'assistant/x' });
+    finished(inProject, { outcome: 'card', card: 'dev-proj/x' });
+    finished(withPr, { outcome: 'pr', pr: 'https://github.com/example/repo/pull/9' });
+    for (const section of ['assistant', 'dev-proj']) fake.seed(`sections/${section}/workspace.json`, JSON.stringify({ name: section, entities: [{ id: 'x', title: 'A card', folder: 'x', created: '2026-11-01' }] }), 'application/json');
+    chatFile(CHAT, [user('go'), assistant([inAssistant.id, inProject.id, withPr.id])]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual(rows.map(row => [row.state, row.approvable]), [['done', false], ['done', false], ['done', false]]);
+    assert.deepEqual(rows.map(row => row.finish.cardHref), ['/assistant#/x', '/dev-proj#/x', undefined]);
+    assert.equal(rows[2].finish.pr, 'https://github.com/example/repo/pull/9');
+  } finally { await close(); }
+});
+
 test('a persona chat flags every request it finds, with no one tap; Approve is refused with nothing signed', async () => {
   const filed = job('persona');
   const { fake, call, put, close } = await fixture({ hermes: { runScript: ['I filed something but never said its id.'] } });

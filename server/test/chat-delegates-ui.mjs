@@ -47,6 +47,8 @@ try {
   const cards = page.locator('[data-pending] [data-delegate]');
   await cards.nth(1).waitFor();
   assert.deepEqual(await cards.locator('[data-delegate-goal]').allTextContents(), GOALS);
+  assert.equal(await page.locator('[data-pending] .hub-delegates-head').textContent(), 'Hermes started 2 helpers');
+  assert.equal(await page.locator('[data-pending] [data-delegates-sub]').textContent(), 'Inside this chat. Not tracked as a job.');
   assert.deepEqual(await cards.locator('[data-delegate-state]').allTextContents(), ['Running', 'Running']);
   assert.equal(await page.locator('[data-pending] [data-tool="delegate_task"]').count(), 0, 'The bare tool line is gone.');
   const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
