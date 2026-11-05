@@ -103,3 +103,20 @@
   .wk-search { max-width: none; }
   .wk-filters .cb.wk-label { flex: 1 1 100%; width: auto; }
 }
+/* Phone: the filters open from a button in the row above the lane chips (ws-ubo.2.4). The sheet is Dialog's, which portals outside .hub, so its rules live here. */
+@media (max-width: 640px) {
+  .wk-phone-bar { display: flex; align-items: stretch; gap: 8px; margin: 0 0 10px; }
+  .wk-phone-bar > select.hub-project-select, .wk-phone-bar > .cb.cb-bar { flex: 1 1 0; width: auto; min-width: 0; }
+  .wk-phone-bar > .hub-btn { flex: none; min-height: 44px; white-space: nowrap; }
+  .wk-filters-btn.on { border-color: var(--pink); color: var(--pink-bright); }
+  .wk-filter-sheet, .wk-filter-sheet * { box-sizing: border-box; }
+  .wk-filter-head { display: flex; align-items: center; gap: 8px; margin: -6px 0 8px; }
+  .wk-filter-head p { flex: 1; min-width: 0; margin: 0; font-size: 12.5px; color: var(--t2); }
+  .wk-filter-sheet .hub-filter-x { flex: none; width: 44px; height: 44px; padding: 0; }
+  .wk-filter-sheet .wk-search { margin: 0 0 10px; }
+  .wk-filter-sheet .wk-filters { margin: 0; }
+  .wk-filter-sheet .hub-chip, .wk-filter-sheet .hub-seg button { min-height: 44px; font-size: 13px; }
+  .wk-filter-sheet .cb .cb-input { min-height: 44px; font-size: 16px; }
+  .wk-filter-sheet .cb-chev { padding: 0; }
+  .wk-filter-sheet .hub-filter-foot .hub-btn { min-height: 44px; }
+}
