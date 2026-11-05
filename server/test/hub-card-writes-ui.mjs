@@ -53,6 +53,8 @@ try {
   await strip.waitFor();
   await expect(strip).toContainText('Researcher changed a tab');
   await expect(strip).toContainText('ago');
+  await expect(phone.locator('.content')).toContainText('A card that happens to be called hub', { timeout: ms(15000) });
+  assert.ok((await phone.locator('.content').boundingBox()).height > 300, 'the card page keeps its room under the strip');
   await tall(phone.locator('[data-cw-history]'), 'History');
   assert.ok((await strip.boundingBox()).height >= 44 - 0.5, 'the strip is 44 px high');
   await noSideways(phone, 'the card page with a strip');
