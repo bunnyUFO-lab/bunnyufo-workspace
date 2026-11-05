@@ -30,7 +30,7 @@ try {
   await page.locator('[data-chat-model]').waitFor();
   assert.equal(await selected(page), 'Auto · Codex first');
   const options = await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent));
-  assert.deepEqual(options, ['Auto · Codex first', 'Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
+  assert.deepEqual(options, ['Auto · Codex first', 'Codex 6 Sol', 'Codex 6.1 Sol', 'Codex 6.1 Terra', 'Codex 6 Astra', 'Codex 6 Luna', 'Sonnet · API', 'Haiku · API', 'Opus · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
   assert.match(await page.locator('[data-chat-model-note]').innerText(), /Codex/);
 
   step('Haiku: the run names the Anthropic pair, the footer says Haiku, the chat reopens on Haiku and the drawer tags it');
@@ -49,6 +49,18 @@ try {
   await page.locator('.hub-bubble.assistant [data-bubble-model]', { hasText: 'Haiku' }).waitFor();
   assert.equal((await page.locator('[data-conversation-model]').first().innerText()).trim(), 'Haiku');
 
+  step('Opus: the menu marks it as billed through the API and says so; picking it sends the Anthropic Opus pair');
+  await page.goto(`${fx.url}#/~hub/chat`);
+  await page.locator('[data-chat-model]').waitFor();
+  await page.locator('[data-chat-model]').selectOption('opus');
+  assert.equal(await selected(page), 'Opus · API');
+  assert.match(await page.locator('[data-chat-model-note]').innerText(), /Billed through the Anthropic API, the most expensive here/);
+  await page.locator('textarea[aria-label="Message"]').fill('Say hi to Opus');
+  await page.keyboard.press('Enter');
+  await page.locator('.hub-bubble.assistant [data-bubble-model]', { hasText: 'Opus' }).waitFor();
+  assert.equal(fx.hermes.runs.length, 2);
+  assert.deepEqual([fx.hermes.runs[1].body.provider, fx.hermes.runs[1].body.model], ['anthropic', 'claude-opus-5-5']);
+
   step('a new chat after that starts on Auto again, and an Auto turn names no provider');
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-model]').waitFor();
@@ -57,8 +69,8 @@ try {
   await page.keyboard.press('Enter');
   await page.locator('.hub-bubble.assistant').first().waitFor();
   await page.waitForURL(/#\/~hub\/chat\/\d{8}-[a-z0-9]{6}$/);
-  assert.equal(fx.hermes.runs.length, 2);
-  assert.ok(!('provider' in fx.hermes.runs[1].body) && !('model' in fx.hermes.runs[1].body));
+  assert.equal(fx.hermes.runs.length, 3);
+  assert.ok(!('provider' in fx.hermes.runs[2].body) && !('model' in fx.hermes.runs[2].body));
   assert.equal(await page.locator('[data-bubble-model]').count(), 0, 'Auto shows no footer.');
 
   step('Start a job instead: the Spawn sheet opens with the draft, nothing is sent, the menu keeps its value');
@@ -70,7 +82,7 @@ try {
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-spawn-text]').inputValue(), 'Research tug-of-war card games');
   assert.equal(chatFiles(fx).length, filesBefore);
-  assert.equal(fx.hermes.runs.length, 2);
+  assert.equal(fx.hermes.runs.length, 3);
   assert.equal(await selected(page), 'Auto · Codex first');
 
   step('Get help: the menu shows on Auto');

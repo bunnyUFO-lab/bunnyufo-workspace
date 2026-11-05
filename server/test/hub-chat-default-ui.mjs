@@ -28,17 +28,17 @@ try {
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-model]').waitFor();
   assert.equal(await selected(page), 'Auto · Codex first');
-  assert.deepEqual(await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent)), ['Auto · Codex first', 'Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
+  assert.deepEqual(await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent)), ['Auto · Codex first', 'Codex 6 Sol', 'Codex 6.1 Sol', 'Codex 6.1 Terra', 'Codex 6 Astra', 'Codex 6 Luna', 'Sonnet · API', 'Haiku · API', 'Opus · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
   assert.match(await page.locator('[data-chat-model-note]').innerText(), /Codex on your ChatGPT plan, then Sonnet, then DeepSeek/);
 
   step('a research agent starts the chat on Codex, and switching the agent moves the default');
   await page.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(page), 'Codex');
+  assert.equal(await selected(page), 'Codex 6 Sol');
   assert.equal(await page.locator('[data-chat-model-note]').innerText(), 'ChatGPT plan, no API cost');
   await page.locator('[data-chat-persona]').selectOption('hermes');
   assert.equal(await selected(page), 'Auto · Codex first', 'back to Hermes: back to Auto');
   await page.locator('[data-chat-persona]').selectOption('teardown');
-  assert.equal(await selected(page), 'Codex');
+  assert.equal(await selected(page), 'Codex 6 Sol');
 
   step('an explicit pick stays when the agent changes');
   await page.locator('[data-chat-model]').selectOption('sonnet');
@@ -64,7 +64,7 @@ try {
   const phone = await open({ width: 390, height: 800 });
   await phone.goto(`${fx.url}#/~hub/chat`);
   await phone.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(phone), 'Codex');
+  assert.equal(await selected(phone), 'Codex 6 Sol');
   const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `the page scrolls sideways (${widths.scroll} > ${widths.inner})`);
   console.log('hub-chat-default-ui: passed');

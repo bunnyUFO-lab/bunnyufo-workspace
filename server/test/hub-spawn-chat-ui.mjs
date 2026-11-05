@@ -77,7 +77,7 @@ try {
   await page.locator('[data-spawn-go]').click();
   await page.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'researcher');
   assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'Compare two tug-of-war card games');
-  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex', "The agent's own model.");
+  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex 6 Sol', "The agent's own model.");
   assert.equal(await page.locator('[data-chat-with]').getAttribute('data-chat-with'), 'researcher');
   await shot(page, 'chat-opened-with-draft');
 
@@ -102,7 +102,7 @@ try {
   await page.locator('[data-spawn-text]').fill('How does it teach?');
   await page.locator('[data-spawn-go]').click();
   await page.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'teardown');
-  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex');
+  assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex 6 Sol');
   assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'How does it teach?');
 
   step('Busy: a reply is still streaming; Open chat lands in a fresh conversation, and nothing stays queued for a later open');
@@ -125,7 +125,7 @@ try {
   await other.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'researcher');
   assert.equal(await other.locator('textarea[aria-label="Message"]').inputValue(), 'A second thought');
   assert.equal(await other.locator('.hub-bubble').count(), 0, 'A fresh conversation, not the busy one.');
-  assert.equal(await other.locator('[data-chat-model] option:checked').innerText(), 'Codex');
+  assert.equal(await other.locator('[data-chat-model] option:checked').innerText(), 'Codex 6 Sol');
   await other.goto(`${slow.url}#/~hub/needs`);
   await other.goto(`${slow.url}#/~hub/chat`);
   await other.locator('[data-chat-persona]').waitFor();

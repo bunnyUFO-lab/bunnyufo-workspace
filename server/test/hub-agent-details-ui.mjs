@@ -116,7 +116,7 @@ try {
 
   step('Teardown: an Edit link in the head and a Chat model row; Hermes has an Edit link for its model and no Chat model row');
   assert.equal(await teardown.locator('[data-edit-open="teardown"]').getAttribute('href'), '#/~hub/agent-edit/teardown');
-  assert.equal(flat(await teardown.locator('[data-details-chat-model]').innerText()), 'Codex');
+  assert.equal(flat(await teardown.locator('[data-details-chat-model]').innerText()), 'Codex 6 Sol');
   await visit(desk, fresh.url, 'hermes');
   assert.equal(await details(desk, 'hermes').locator('[data-edit-open]').innerText(), 'Edit the model');
   assert.equal(await details(desk, 'hermes').locator('[data-details-chat-model]').count(), 0);
