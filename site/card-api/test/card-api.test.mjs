@@ -1304,3 +1304,23 @@ test('inbox: the hermes-config token creates a change result once and reads the 
     await fake.close();
   }
 });
+
+test('inbox: chat/ (the queue and the stored lines) is the Hub\'s, so a limited writer is refused and the passphrase still may', async () => {
+  const { fake, call } = await setup();
+  try {
+    const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
+    for (const file of ['chat/queue/20261104-abcdef.json', 'chat/20261104-abcdef.jsonl', 'chat/20261104-abcdef/pic.png']) {
+      for (const token of ['tok-cloud', 'tok-hermes']) {
+        const refused = await put(token, file);
+        assert.equal(refused.status, 403, `${token} ${file}`);
+        assert.equal(refused.data.error, 'Only the Hub writes answers.');
+      }
+      assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-cloud', body: { files: [{ path: file }] } })).status, 403, `${file} by upload URL`);
+      assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-cloud' })).status, 403, `${file} delete`);
+    }
+    assert.equal(fake.text('sections/inbox/chat/queue/20261104-abcdef.json'), null, 'nothing was planted');
+    assert.equal((await put('tok-all', 'chat/queue/20261104-abcdef.json')).status, 200, 'The passphrase may.');
+  } finally {
+    await fake.close();
+  }
+});

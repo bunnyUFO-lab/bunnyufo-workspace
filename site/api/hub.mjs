@@ -1555,7 +1555,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   }
 
   const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), log: line => log(scrub(line, 400)) });
 
   const self = {
     enabled: on,
@@ -1575,11 +1575,13 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     personas: personaStore,
     agentEdit: agentEditFlow,
     hermes: hermesDispatch,
+    /** The chat module (its restart sweep), for the tests. */
+    chat,
     /** The Hermes approvals module (copy, answer), for the tests. */
     approvals: hermesApprovals,
     /** Stops the followers and the sweep (shutdown, tests). */
     policy,
-    close: async () => { policy.close(); sprints.close(); await routines.close(); await hermesDispatch.close(); },
+    close: async () => { chat.close(); policy.close(); sprints.close(); await routines.close(); await hermesDispatch.close(); },
     /** What this host tells the page about the Hub (merged into /api/capabilities). */
     capabilities({ signedIn = true, requireRemoteUser = false } = {}) {
       // approve: this host can sign an approval and the caller is signed in; policy lists the kinds approved without a tap (none yet).
