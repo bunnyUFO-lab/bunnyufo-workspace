@@ -308,6 +308,9 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
     const temp = `${file}.${process.pid}.tmp`;
     await writeFile(temp, `${JSON.stringify(result, null, 2)}\n`);
     await rename(temp, file);
+    // The bucket's list is now in this folder, so it is what both sides hold: save it as the base here, not at the
+    // end of a run that may fail or retry. The local file goes first, so a crash between them leaves the old base.
+    await saveBase(root, placeOf(bucket, prefix), { files: record.files, list: remote.value });
   }
   return { merged: true, added, etag: remote.etag, list: remote.value };
 }

@@ -1098,3 +1098,71 @@ for (const named of [true, false]) {
     }
   }
 }
+
+// A merge rewrites the local card list, so it must also save the bucket's list as the base, or a later
+// merge reads what it brought in as a local change and beats a newer site edit.
+const titleOf = list => list.entities.find(item => item.id === 'hub').title;
+const siteTitle = (fake, title) => { const list = fake.json(`${KEY}workspace.json`); list.entities.find(item => item.id === 'hub').title = title; fake.seed(`${KEY}workspace.json`, JSON.stringify(list), 'application/json'); };
+const addDesk = async site => {
+  const list = JSON.parse(await readFile(path.join(site, 'workspace.json'), 'utf8'));
+  list.entities.push({ id: 'desk', title: 'Desk', folder: 'desk', steps: [{ name: 'Page', path: 'index.md' }] });
+  await writeFile(path.join(site, 'workspace.json'), JSON.stringify(list, null, 2));
+};
+
+test('a site title changed again during the card list put is not replaced by the retry', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    siteTitle(fake, 'v1');
+    await addDesk(w.site);
+    const merge = await mergeCardList({ root: w.site, bucket: w.client, prefix: w.prefix });
+    let raced = false;
+    const client = { ...w.client, put: async (key, ...rest) => {
+      if (key === `${KEY}workspace.json` && !raced) { raced = true; siteTitle(fake, 'v2'); }
+      return w.client.put(key, ...rest);
+    } };
+    await syncUp({ root: w.site, bucket: client, prefix: w.prefix, scope: w.scope, listEtag: merge.etag, log: () => {} });
+    assert.ok(raced);
+    const list = fake.json(`${KEY}workspace.json`);
+    assert.equal(titleOf(list), 'v2');
+    assert.ok(list.entities.some(item => item.id === 'desk'), 'the local card went up');
+  } finally { await fake.close(); }
+});
+
+for (const desk of [false, true]) {
+  test(`a publish that fails after its merge does not let the next one replace a later site edit (${desk ? 'with' : 'no'} unpublished card)`, async () => {
+    const fake = await startFakeS3();
+    try {
+      const w = await published(fake);
+      const options = { content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+      if (desk) await addDesk(w.site);
+      siteTitle(fake, 'v1');
+      await writeFile(path.join(w.site, 'hub', 'secret-token.json'), '{}');
+      await assert.rejects(publish(options), /looks like a secret/);
+      await rm(path.join(w.site, 'hub', 'secret-token.json'));
+      siteTitle(fake, 'v2');
+      await publish(options);
+      const list = fake.json(`${KEY}workspace.json`);
+      assert.equal(titleOf(list), 'v2');
+      assert.equal(titleOf(JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'))), 'v2');
+      if (desk) assert.ok(list.entities.some(item => item.id === 'desk'), 'the unpublished card survived the interruption');
+      // After a real publish the record holds what both sides now have.
+      const record = Object.values(JSON.parse(await readFile(path.join(w.site, '.buw', 'sync.json'), 'utf8')))[0];
+      assert.deepEqual(record.list, list);
+    } finally { await fake.close(); }
+  });
+}
+
+test('a dry run leaves sync.json and workspace.json byte-identical, even with site changes to merge', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await addDesk(w.site);
+    siteTitle(fake, 'v1');
+    const files = [path.join(w.site, '.buw', 'sync.json'), path.join(w.site, 'workspace.json')];
+    const before = await Promise.all(files.map(file => readFile(file)));
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, dryRun: true, log: () => {} });
+    const after = await Promise.all(files.map(file => readFile(file)));
+    assert.deepEqual(after, before);
+  } finally { await fake.close(); }
+});
