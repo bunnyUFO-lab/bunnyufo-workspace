@@ -282,7 +282,15 @@ function ChatView({ id }: { id?: string }) {
   const [delegates, setDelegates] = useState<ChatDelegate[]>([])
   const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
   const [queued, setQueued] = useState<ChatQueued[]>([])   // sent while a reply ran; the Hub delivers them when it ends
+  // Every request about the queue is numbered when it starts; an answer older than one already shown is dropped, so a late answer never takes a row away.
+  const stamps = useRef({ next: 0, shown: 0 })
+  const stamp = useCallback(() => ++stamps.current.next, [])
   const [held, setHeld] = useState<ChatHeld | null>(null)   // why they are not going out by themselves
+  const takeView = useCallback((number: number, answer: { queued?: ChatQueued[]; held?: ChatHeld | null }) => {
+    if (number < stamps.current.shown) return
+    stamps.current.shown = number
+    setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+  }, [])
   // Messages the owner sent that the Hub has not answered for yet: shown as rows at once, then replaced by the Hub's own rows. One that was sent
   // before the new chat had a name waits (`posting` false) and goes out as soon as it has one.
   const [local, setLocal] = useState<{ key: string; text: string; posting: boolean }[]>([])
@@ -328,16 +336,17 @@ function ChatView({ id }: { id?: string }) {
     // A view that a finished turn handed its lines to has them already: it only looks at what the turn left behind (a queued message, a hold).
     if (initial) { const timer = window.setTimeout(() => void afterRef.current(id), 0); return () => window.clearTimeout(timer) }   // after the effects below have set the refs
     let stopped = false
+    const number = stamp()
     hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
       .then(answer => {
         if (stopped) return
         setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
-        setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+        takeView(number, answer)
         if (answer.running) void followRef.current(id, answer)   // opened while the reply is still coming: follow it live
       })
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
-  }, [id, initial, help])
+  }, [id, initial, help, stamp, takeView])
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [messages, pending])
   useEffect(() => {
@@ -388,11 +397,12 @@ function ChatView({ id }: { id?: string }) {
       looking = true
       window.clearTimeout(timer)
       try {
+        const number = stamp()
         const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
         if (stopped) return
         if (!recovering) {
           setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
-          setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+          takeView(number, answer)
           if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
         } else if (answer.running) { if (answer.run) run.current = answer.run }
         else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
@@ -409,7 +419,7 @@ function ChatView({ id }: { id?: string }) {
     window.addEventListener('online', onFront)
     timer = window.setTimeout(() => void look(), recovering ? 1000 : waitingQueue ? 2000 : nextLookMs(false, 0))
     return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onFront); window.removeEventListener('online', onFront) }
-  }, [watching, recovering, waitingQueue, id, reloadList])
+  }, [watching, recovering, waitingQueue, id, reloadList, stamp, takeView])
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
@@ -491,8 +501,9 @@ function ChatView({ id }: { id?: string }) {
     if (waitingKey === undefined) setDraft('')   // a row going out now that the chat has a name is not a new send: the box keeps what is being typed
     if (!name) return   // no name yet: the row waits, and goes out when the chat has one
     try {
+      const number = stamp()
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) }, undefined, true)
-      setQueued(answer.queued); setHeld(answer.held)
+      takeView(number, answer)
       setLocal(current => current.filter(item => item.key !== key))
       void afterRef.current(name)   // nothing was running after all: the turn has started, so follow it
     } catch (failure) {
@@ -526,8 +537,9 @@ function ChatView({ id }: { id?: string }) {
     if (!name) return
     setError(null)
     try {
+      const number = stamp()
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/send`, {}, undefined, true)
-      setQueued(answer.queued); setHeld(answer.held)
+      takeView(number, answer)
       void afterRef.current(name)
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'The messages were not sent.') }
   }
@@ -537,8 +549,9 @@ function ChatView({ id }: { id?: string }) {
     if (!name) return
     setError(null)
     try {
+      const number = stamp()
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/${encodeURIComponent(queuedId)}/cancel`, {}, undefined, true)
-      setQueued(answer.queued); setHeld(answer.held)
+      takeView(number, answer)
     } catch (failure) {
       // 409: the reply ended first and the message went out. Say so plainly; the thread shows it next.
       setError(failure instanceof HubError && failure.status === 409 ? 'It had already gone out, so it could not be cancelled.' : failure instanceof Error ? failure.message : 'The message was not cancelled.')
@@ -552,10 +565,11 @@ function ChatView({ id }: { id?: string }) {
    */
   const afterTurn = async (name: string) => {
     try {
+      const number = stamp()
       const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
       if (live.current) return
       setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
-      setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+      takeView(number, answer)
       if (answer.running) void followRef.current(name, answer)
       else setStopping(false)   // the reply has ended on the server: Stopping… is over
     } catch { setStopping(false) /* the watcher looks again while a message waits */ }
@@ -863,7 +877,8 @@ function ChatView({ id }: { id?: string }) {
             onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
           />
           {streaming && <button type="button" className="hub-btn" disabled={stopping} data-chat-stop onClick={stop}>Stop</button>}
-          <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>
+          {/* A press on Send keeps the focus in the field: a tap that blurred it closed the phone's keyboard, the page moved, and the click missed. */}
+          <button type="button" className="hub-btn pri" disabled={!canSend} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()} onClick={() => void send()}>Send</button>
         </div>
         {/* Until the list has answered the menu is not known: its row is held (min-height) so Send does not move when it arrives. */}
         {(speaks || models.length > 0 || (!list.data && !list.error)) && (
