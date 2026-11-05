@@ -36,3 +36,4 @@
 .hub-compose > textarea { min-width: 140px; }
 .hub-compose > .hub-btn { flex: none; min-height: 44px; min-width: 44px; padding-inline: 12px; }
 @media (max-width: 480px) { .hub-compose { gap: 6px; } .hub-compose > .hub-btn { padding-inline: 8px; } }
+.hub-queue-join { margin: 4px 0 0; font-size: 0.78rem; }

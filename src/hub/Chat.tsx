@@ -279,6 +279,10 @@ function ChatView({ id }: { id?: string }) {
   const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
   const [queued, setQueued] = useState<ChatQueued[]>([])   // sent while a reply ran; the Hub delivers them when it ends
   const [held, setHeld] = useState<ChatHeld | null>(null)   // why they are not going out by themselves
+  // Messages the owner sent that the Hub has not answered for yet: shown as rows at once, then replaced by the Hub's own rows. One that was sent
+  // before the new chat had a name waits (`posting` false) and goes out as soon as it has one.
+  const [local, setLocal] = useState<{ key: string; text: string; posting: boolean }[]>([])
+  const [stopping, setStopping] = useState(false)   // Stop was pressed: say so until the reply has ended
   const [known, setKnown] = useState(!!id && !parseHelpId(id))   // the conversation has a name, so a message can be queued in it
   const live = useRef(false)   // a turn is being read from a stream (sent here, or followed)
   const afterRef = useRef<(name: string) => Promise<void>>(async () => {})
@@ -326,7 +330,7 @@ function ChatView({ id }: { id?: string }) {
   // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
   // page returns to the front, because a phone stops timers in the background.
   const waitingQueue = queued.length > 0 && !held   // the Hub is about to deliver them: look soon, so a phone that wakes sees the rows move
-  const busy = streaming || recovering || queued.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
+  const busy = streaming || recovering || queued.length > 0 || local.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
   const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
   useEffect(() => {
@@ -358,7 +362,7 @@ function ChatView({ id }: { id?: string }) {
       misses += 1
       if (misses < MAX_MISSES) return
       if (cutTurn.current) land(cutTurn.current.fallback, LOST_NOTE)
-      else { setPending(null); setStreaming(false); setRecovering(false); setNote(null) }
+      else { setPending(null); setStreaming(false); setRecovering(false); setNote(null); setStopping(false) }
     }
     const look = async () => {
       if (stopped || looking) return
@@ -390,6 +394,7 @@ function ChatView({ id }: { id?: string }) {
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
+    setStopping(true)
     const id = run.current
     if (id) { void hubPost('/chat/stop', { run: id }).catch(() => {}); abort.current?.abort(); return }
     // Before `started` there is no run to name, and aborting now would leave it running on the server:
@@ -454,22 +459,35 @@ function ChatView({ id }: { id?: string }) {
     void addFiles(Array.from(event.dataTransfer.files))
   }
 
-  /** Puts a message in the queue of this conversation: it goes when the reply ends. The text stays in the draft when that fails. */
-  const queueMessage = async (text: string) => {
+  /**
+   * Puts a message in the queue of this conversation: it goes when the reply ends. The row shows at once and the Hub's answer replaces it.
+   * The text goes back to the draft when that fails. `key` is the row already shown for it (a message that waited for the chat's name).
+   */
+  const queueMessage = async (text: string, key = `l${Math.random().toString(36).slice(2, 8)}`) => {
     const name = conversation.current
-    if (!name) return
     setError(null)
+    setLocal(current => (current.some(item => item.key === key) ? current.map(item => (item.key === key ? { ...item, posting: !!name } : item)) : [...current, { key, text, posting: !!name }]))
     setDraft('')
+    if (!name) return   // no name yet: the row waits, and goes out when the chat has one
     try {
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) }, undefined, true)
       setQueued(answer.queued); setHeld(answer.held)
+      setLocal(current => current.filter(item => item.key !== key))
       void afterRef.current(name)   // nothing was running after all: the turn has started, so follow it
     } catch (failure) {
+      setLocal(current => current.filter(item => item.key !== key))
       setDraft(current => current || text)
       setError(failure instanceof Error ? failure.message : 'The message was not queued.')
       void afterRef.current(name)   // the answer may only have been lost: show what the Hub kept
     }
   }
+  // A message sent before the new chat had a name goes out now that it has one.
+  const queueRef = useRef(queueMessage)
+  useEffect(() => { queueRef.current = queueMessage })
+  useEffect(() => {
+    if (!known || !conversation.current) return
+    for (const item of local) if (!item.posting) void queueRef.current(item.text, item.key)
+  }, [known, local])
 
   /** Send now: the held messages go out as one turn. */
   const sendHeld = async () => {
@@ -491,7 +509,8 @@ function ChatView({ id }: { id?: string }) {
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/${encodeURIComponent(queuedId)}/cancel`, {}, undefined, true)
       setQueued(answer.queued); setHeld(answer.held)
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'The message was not cancelled.')
+      // 409: the reply ended first and the message went out. Say so plainly; the thread shows it next.
+      setError(failure instanceof HubError && failure.status === 409 ? 'It had already gone out, so it could not be cancelled.' : failure instanceof Error ? failure.message : 'The message was not cancelled.')
       void afterRef.current(name)   // it may have been sent meanwhile: show what is true
     }
   }
@@ -507,6 +526,7 @@ function ChatView({ id }: { id?: string }) {
       setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
       setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
       if (answer.running) void followRef.current(name, answer)
+      else setStopping(false)   // the reply has ended on the server: Stopping… is over
     } catch { /* the watcher looks again while a message waits */ }
   }
   useEffect(() => { afterRef.current = afterTurn })
@@ -642,13 +662,14 @@ function ChatView({ id }: { id?: string }) {
     // A reply is running here, or messages are waiting for it: this one waits too. Pictures cannot wait, so they stay in the tray.
     if (busy) {
       if (sending.length) { setTrayNote('Pictures cannot wait in the queue. Send them when the reply is done, or remove them.'); return }
-      if (!text || !known) return
-      await queueMessage(text)
+      if (!text) return
+      await queueMessage(text)   // before the chat has a name the row waits for it
       return
     }
     if (speaks) window.speechSynthesis.cancel()
     setError(null)
     setTrayNote(null)
+    setStopping(false)
     setStreaming(true)
     if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
     setTools([])
@@ -716,7 +737,7 @@ function ChatView({ id }: { id?: string }) {
   const banner = stored
     ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
     : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
-  const canSend = (!!draft.trim() || images.length > 0) && preparing === 0 && !(busy && !known)   // a new chat has no name to queue under until the server says started
+  const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
   return (
     <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
       <aside className="hub-chat-list" aria-label="Conversations">
@@ -759,7 +780,7 @@ function ChatView({ id }: { id?: string }) {
             </div>
           )}
         </div>
-        {queued.length > 0 && (
+        {(queued.length > 0 || local.length > 0) && (
           <div className="hub-queue" data-chat-queued role="group" aria-label="Messages waiting to be sent">
             {queued.map(item => (
               <div className={`hub-queued${held ? ' held' : ''}`} key={item.id} data-queued={item.id} data-queued-state={held ? 'held' : 'queued'}>
@@ -771,8 +792,19 @@ function ChatView({ id }: { id?: string }) {
                 </div>
               </div>
             ))}
+            {local.map(item => (
+              <div className="hub-queued" key={item.key} data-queued={item.key} data-queued-local data-queued-state="queued">
+                <span className="hub-queued-pill" data-queued-pill>Queued</span>
+                <p className="hub-queued-text">{item.text}</p>
+                <div className="hub-queued-a">
+                  <button type="button" className="hub-btn" data-queued-cancel disabled={item.posting} onClick={() => setLocal(current => current.filter(entry => entry.key !== item.key))}>Cancel</button>
+                </div>
+              </div>
+            ))}
+            {queued.length + local.length > 1 && <p className="hub-muted hub-queue-join" data-queued-join>{held ? 'These go together when you send them.' : 'These go together when the reply ends.'}</p>}
           </div>
         )}
+        {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {(images.length > 0 || preparing > 0 || trayNote) && (
@@ -794,7 +826,7 @@ function ChatView({ id }: { id?: string }) {
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"
             onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
           />
-          {streaming && <button type="button" className="hub-btn" onClick={stop}>Stop</button>}
+          {streaming && <button type="button" className="hub-btn" disabled={stopping} data-chat-stop onClick={stop}>Stop</button>}
           <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>
         </div>
         {/* Until the list has answered the menu is not known: its row is held (min-height) so Send does not move when it arrives. */}
