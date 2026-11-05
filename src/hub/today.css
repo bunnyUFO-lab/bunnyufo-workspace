@@ -13,6 +13,7 @@
 
 .today-project { margin: -8px 0 16px; }
 .today-project .hub-chips-wrap { margin-bottom: 0; }
+@media (max-width: 640px) { .today-project .hub-project-pick { margin-bottom: 0; } }
 .today-project .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
 .today-project .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
 .today-project .hub-chip.on .n { color: inherit; }

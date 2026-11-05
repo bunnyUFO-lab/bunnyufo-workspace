@@ -1,7 +1,8 @@
 // Run after npm run build. The project pickers that became Comboboxes, through a real browser: the Roadmap, Work, Activity and
 // Sketch project pickers over a list longer than ten projects, at desktop and phone width. Each one filters as you type, Enter
 // or a tap picks, Escape puts the chosen project back, nothing scrolls sideways, and an open list closes when the field scrolls
-// away. The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
+// away. With ten projects or fewer the pickers are chips at desktop width and one native select at 640 px or less
+// (ws-ubo.2.1; hub-phone-picker-ui.mjs covers that in depth). The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
 import { chromium, expect } from '@playwright/test';
 import { ms, SCALE } from './ui-timeouts.mjs';
 expect.configure({ timeout: 5000 * SCALE });
@@ -115,16 +116,34 @@ try {
     await page.locator('.work [role="listbox"]').waitFor({ state: 'detached' });
     await page.context().close();
   }
-  // Ten or fewer projects: the same pickers stay chips, one tap each. Activity's filter was a dropdown already and stays one.
+  // Ten or fewer projects: the same pickers stay chips (one tap each) at desktop width and are one native select at phone width.
+  // Activity's filter was a dropdown already: its list at desktop width, the select at phone width.
   const small = await startHubFixture({ work: true });
   try {
     small.fake.seed(`inbox/drawings/${DRAFT}/drawing.excalidraw`, JSON.stringify({ type: 'excalidraw', version: 2, elements: [], appState: {} }), 'application/json');
     await new Promise(resolve => setTimeout(resolve, 100));
     for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
       for (const picker of PICKERS.filter(item => item.name !== 'Activity')) {
-        step(`${picker.name} at ${label} with ten projects or fewer: chips, not a list`);
+        step(`${picker.name} at ${label} with ten projects or fewer: ${touch ? 'one native select' : 'chips, not a list'}`);
         const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
         await page.goto(`${small.url}${picker.hash}`);
+        if (touch) {
+          // Phone width: one native select, picked with selectOption.
+          const select = page.locator(picker.scope).getByRole('combobox', { name: 'Project' });
+          await select.waitFor();
+          assert.equal(await select.evaluate(node => node.tagName), 'SELECT', `${picker.name}: a native select at phone width.`);
+          assert.equal(await page.locator(`${picker.scope} [aria-label="Project"].hub-chips`).count(), 0, `${picker.name}: no chips at phone width.`);
+          const values = () => select.locator('option:not([hidden])').evaluateAll(list => list.map(item => item.value));
+          await expect.poll(async () => (await values()).length, { message: `${picker.name}: the projects arrive` }).toBeGreaterThan(1);
+          const chosen = await select.inputValue();
+          const target = (await values()).find(value => value !== chosen && value !== 'all');
+          await select.selectOption(target);
+          await expect(select).toHaveValue(target);
+          await expect(select).toHaveAttribute('data-value', target);
+          await noSideways(page, `${picker.name} select at ${label}`);
+          await page.context().close();
+          continue;
+        }
         const row = page.locator(`${picker.scope} [aria-label="Project"].hub-chips`);
         await row.waitFor();
         assert.equal(await page.locator(`${picker.scope} [role="combobox"][aria-label="Project"]`).count(), 0, `${picker.name}: no dropdown.`);
@@ -141,10 +160,12 @@ try {
         await noSideways(page, `${picker.name} chips at ${label}`);
         await page.context().close();
       }
-      step(`Activity at ${label} with ten projects or fewer: still a list`);
+      step(`Activity at ${label} with ten projects or fewer: a ${touch ? 'native select' : 'list'}`);
       const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
       await page.goto(`${small.url}#/~hub/activity`);
-      await page.locator('.hub-top').getByRole('combobox', { name: 'Project' }).waitFor();
+      const filter = page.locator('.hub-top').getByRole('combobox', { name: 'Project' });
+      await filter.waitFor();
+      assert.equal(await filter.evaluate(node => node.tagName), touch ? 'SELECT' : 'INPUT', 'Activity: select at phone width, typeable list above it.');
       await page.context().close();
     }
   } finally { await small.close().catch(() => {}); }
@@ -159,8 +180,10 @@ try {
       const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
       const press = locator => (touch ? locator.tap() : locator.click());
       await page.goto(`${todaySmall.url}#/~hub/today`);
-      const row = page.locator('[data-today-project] [aria-label="Project"].hub-chips');
+      // At 1280 the project is a chip row; at 390 one native select (ws-ubo.2.1).
+      const row = page.locator(touch ? '[data-today-project] select' : '[data-today-project] [aria-label="Project"].hub-chips');
       await row.waitFor();
+      const shows = (id, name) => (touch ? expect(row).toHaveValue(id) : row.locator('.hub-chip.on', { hasText: name }).waitFor());
       const kpi = key => page.locator(`.hub-kpi[data-kpi="${key}"] .hub-kpi-v`);
       const stored = () => page.evaluate(() => { try { return localStorage.getItem('hub-today-project'); } catch { return 'blocked'; } });
       await expect(kpi('needs-you')).toHaveText('5');
@@ -169,11 +192,11 @@ try {
       const badge = page.locator('[data-hub-badge]');
       const all = await badge.count() ? (await badge.innerText()).trim() : null;
       const lanes = row.locator('.hub-chip', { hasText: 'Lanes' });
-      await lanes.waitFor();
-      await press(lanes);
-      await row.locator('.hub-chip.on', { hasText: 'Lanes' }).waitFor();
+      if (touch) await row.selectOption('lanes'); else { await lanes.waitFor(); await press(lanes); }
+      await shows('lanes', 'Lanes');
       const waiting = 1;
-      assert.equal((await lanes.locator('.n').innerText()).trim(), '1', 'The chip says where the waiting item is.');
+      if (touch) assert.equal((await row.locator('option[value="lanes"]').textContent()).trim(), 'Lanes (1)', 'The option says where the waiting item is.');
+      else assert.equal((await lanes.locator('.n').innerText()).trim(), '1', 'The chip says where the waiting item is.');
       await expect(kpi('needs-you')).toHaveText(String(waiting));
       await expect(page.locator('.today-head p').first()).toContainText('1 thing waits on you.');
       assert.equal(await page.locator('[data-nrow]').count(), Math.min(waiting, 3), 'Needs you lists only that project.');
@@ -184,7 +207,7 @@ try {
       if (all !== null) assert.equal((await badge.innerText()).trim(), all, 'The sidebar badge keeps the true count.');
       await noSideways(page, `Today on a project at ${label}`);
       if (touch) {
-        const small = await page.locator('[data-today-project] button, [data-today-project] a').evaluateAll(list => list.map(node => node.getBoundingClientRect()).filter(box => box.width > 0 && box.height < 44).length);
+        const small = await page.locator('[data-today-project] select, [data-today-project] button, [data-today-project] a').evaluateAll(list => list.map(node => node.getBoundingClientRect()).filter(box => box.width > 0 && box.height < 44).length);
         assert.equal(small, 0, 'Targets are at least 44 px high.');
       }
 
@@ -197,19 +220,19 @@ try {
 
       // A reload keeps the choice; the Roadmap and Work keep their own.
       await page.reload();
-      await row.locator('.hub-chip.on', { hasText: 'Lanes' }).waitFor();
+      await shows('lanes', 'Lanes');
       await expect(kpi('needs-you')).toHaveText(String(waiting));
 
       // Show all goes back to All and clears the key.
       await press(page.locator('[data-today-elsewhere] button'));
-      await row.locator('.hub-chip.on', { hasText: 'All' }).waitFor();
+      await shows('all', 'All');
       await expect(kpi('needs-you')).toHaveText('5');
       assert.equal(await stored(), null);
 
       // A saved project that is gone counts as All, and the key is cleared.
       await page.evaluate(() => localStorage.setItem('hub-today-project', 'vanished'));
       await page.reload();
-      await row.locator('.hub-chip.on', { hasText: 'All' }).waitFor();
+      await shows('all', 'All');
       await expect(kpi('needs-you')).toHaveText('5');
       await page.waitForFunction(() => localStorage.getItem('hub-today-project') === null);
 

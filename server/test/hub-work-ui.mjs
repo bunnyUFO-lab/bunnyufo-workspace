@@ -142,8 +142,9 @@ try {
   await phone.locator('[data-lane-chip="done"]').tap();
   await phone.locator('[data-lane-chip="review"]').tap();
   assert.deepEqual(await visibleLanes(phone), ['review'], 'Review is reachable on a phone.');
-  const rows = await phone.locator('.work > .hub-chips-wrap .hub-chips').evaluate(el => ({ height: el.getBoundingClientRect().height, chip: el.querySelector('.hub-chip').getBoundingClientRect().height }));
-  assert.ok(rows.height <= rows.chip + 2, `The project chips are one row (${rows.height} vs ${rows.chip}).`);
+  // At phone width the project picker is one native select (ws-ubo.2.1), not a row of chips.
+  const pick = await phone.locator('.work').getByRole('combobox', { name: 'Project' }).boundingBox();
+  assert.ok(pick.height >= 44 && pick.height <= 56, `The project select is 44 to 56 px high (${pick.height}).`);
   await noSideways(phone, 'Work at 390 px');
   await go(phone, '#/~hub/work/all');
   await phone.locator('.wk-lane:visible .wk-card .wk-project').first().waitFor();
