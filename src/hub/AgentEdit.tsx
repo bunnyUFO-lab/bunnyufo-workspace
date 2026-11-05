@@ -3,6 +3,7 @@ import { ago, HubError, hubGet, hubPost } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
 import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, TeamAgent, TeamView } from '../lib/hubTeam'
+import { isOpus, opusNote } from './agentEditField'
 import './team/agentDetails.css'
 
 const LIMITS = { role: 200, prompt: 8000, note: 200 }
@@ -239,7 +240,9 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const nowChain = settings?.fallbacks ?? []
   // The select shows what the host offers, and also what is set now when the host no longer offers it (marked), so a row never goes blank.
   const choices: { ref: ModelRef; label: string }[] = options.map(ref => ({ ref, label: refName(ref) }))
+  const billed = (ref: ModelRef, label: string) => (isOpus(ref.model) ? `${label} · billed through the API` : label)
   for (const ref of [current, ...chain, ...nowChain, primary]) if (ref && !choices.some(choice => same(choice.ref, ref))) choices.push({ ref, label: `${refName(ref)} (not offered now)` })
+  const opusNoteText = opusNote(primary, chain)
   const indexOf = (ref: ModelRef | null) => String(choices.findIndex(choice => ref && same(choice.ref, ref)))
   const waiting = view.change?.state === 'waiting'
   const fresh = view.freshness.state === 'fresh'
@@ -247,6 +250,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const changed = !!primary && !!current && (!same(primary, current) || chain.length !== nowChain.length || chain.some((item, index) => !same(item, nowChain[index])))
   const off = noList ? 'The Hermes host has not published its model list yet.' : !fresh ? 'The last export from the Hermes host is old, so its settings may have changed. Changing the model is off until a new one arrives.' : waiting ? 'A change is already waiting for the Hermes host.' : null
   const unused = options.filter(ref => !(primary && same(ref, primary)) && !chain.some(item => same(item, ref)))
+  // "Add a fallback" is a default pick in the owner's hand, so it never adds Opus; choosing Opus in a row's select is the deliberate step.
+  const addable = unused.find(ref => !isOpus(ref.model))
   const move = (index: number, by: -1 | 1) => setChain(list => { const next = [...list]; [next[index], next[index + by]] = [next[index + by], next[index]]; return next })
 
   const send = async () => {
@@ -271,7 +276,7 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
         <label className="ae-field">
           <span>Primary model</span>
           <select value={indexOf(primary)} disabled={noList || busy} onChange={event => { const next = choices[Number(event.target.value)].ref; setPrimary(next); setChain(list => list.filter(item => !same(item, next))) }} data-profile-primary>
-            {choices.map((choice, index) => <option key={choice.label} value={String(index)}>{choice.label}</option>)}
+            {choices.map((choice, index) => <option key={choice.label} value={String(index)}>{billed(choice.ref, choice.label)}</option>)}
           </select>
         </label>
         <div className="ae-field" role="group" aria-label="Fallbacks, in the order they are tried">
@@ -281,7 +286,7 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
             {chain.map((item, index) => (
               <li key={refName(item)} className="ae-chain-row" data-profile-fallback={index}>
                 <select aria-label={`Fallback ${index + 1}`} value={indexOf(item)} disabled={busy} onChange={event => { const next = choices[Number(event.target.value)].ref; setChain(list => list.map((entry, at) => (at === index ? next : entry)).filter((entry, at, all) => all.findIndex(other => same(other, entry)) === at && !(primary && same(entry, primary)))) }}>
-                  {choices.filter(choice => same(choice.ref, item) || !(primary && same(choice.ref, primary)) && !chain.some(entry => same(entry, choice.ref))).map(choice => <option key={choice.label} value={String(choices.indexOf(choice))}>{choice.label}</option>)}
+                  {choices.filter(choice => same(choice.ref, item) || !(primary && same(choice.ref, primary)) && !chain.some(entry => same(entry, choice.ref))).map(choice => <option key={choice.label} value={String(choices.indexOf(choice))}>{billed(choice.ref, choice.label)}</option>)}
                 </select>
                 <button type="button" className="hub-btn" disabled={busy || index === 0} onClick={() => move(index, -1)} aria-label={`Move ${item.model} up`} data-fallback-up>Up</button>
                 <button type="button" className="hub-btn" disabled={busy || index === chain.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${item.model} down`} data-fallback-down>Down</button>
@@ -290,9 +295,10 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
             ))}
           </ol>
           <div className="ae-actions">
-            <button type="button" className="hub-btn" disabled={busy || noList || chain.length >= MAX_FALLBACKS || unused.length === 0} onClick={() => setChain(list => [...list, unused[0]])} data-fallback-add>Add a fallback</button>
+            <button type="button" className="hub-btn" disabled={busy || noList || chain.length >= MAX_FALLBACKS || !addable} onClick={() => { if (addable) setChain(list => [...list, addable]) }} data-fallback-add>Add a fallback</button>
           </div>
           <small className="team-dim">Up to {MAX_FALLBACKS}. Each model once.</small>
+          {opusNoteText && <p className="hub-banner ad-note" role="note" data-profile-opus-note>{opusNoteText}</p>}
         </div>
         <label className="ae-field">
           <span>Why (optional)</span>

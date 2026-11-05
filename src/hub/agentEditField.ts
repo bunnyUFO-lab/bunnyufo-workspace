@@ -29,3 +29,13 @@ export function profileEditOf(ask: Ask): ProfileEditField | null {
   if (!primary || !chain || chain.length > 4 || chain.some(item => !item)) return null
   return { profile: raw.profile, primary, fallbacks: chain as ModelRef[], why: typeof raw.why === 'string' ? raw.why : undefined }
 }
+
+/** True for an Opus model id. The same test as `isOpus` in site/api/chat-models.mjs: Opus bills through the API. */
+export const isOpus = (model: string): boolean => /(^|-)opus(-|$)/.test(String(model))
+
+/** The warning for an Opus pick, as primary or as a fallback; null when the order holds none. Said on the Edit page and on the Ask. */
+export function opusNote(primary: ModelRef | null | undefined, fallbacks: ModelRef[]): string | null {
+  if (primary && isOpus(primary.model)) return 'Opus is the primary: every reply on this profile bills through the Anthropic API.'
+  if (fallbacks.some(item => isOpus(item.model))) return 'Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking.'
+  return null
+}
