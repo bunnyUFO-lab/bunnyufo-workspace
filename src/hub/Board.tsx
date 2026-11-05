@@ -3,8 +3,10 @@ import type { Sign } from '../lib/hub'
 import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { rowMatches, snippetOf, words } from './beadSearch.ts'
 import type { SearchRow } from './beadSearch.ts'
-import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter, type WorkFilter, type WorkType } from './workFilter.ts'
+import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter, workFilterCount, type WorkFilter, type WorkType } from './workFilter.ts'
 import Combobox from './Combobox'
+import Dialog from '../components/Dialog'
+import { useIsPhone } from '../lib/chrome'
 import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
@@ -119,6 +121,14 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const change = (next: Partial<WorkFilter>) => { setFilter(value => ({ ...value, ...next })); setPicked(null) }
   const clearFilter = () => { setFilter(DEFAULT_WORK_FILTER); setPicked(null) }
   useEffect(() => { saveFilter(filter) }, [filter])
+  const phone = useIsPhone()
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersButton = useRef<HTMLButtonElement>(null)
+  // Rotation: no sheet is waiting when the phone comes back. Adjusted while rendering, as React advises for state that follows a changed value.
+  const [wasPhone, setWasPhone] = useState(phone)
+  if (phone !== wasPhone) { setWasPhone(phone); if (!phone) setFiltersOpen(false) }
+  const closeFilters = useCallback(() => { setFiltersOpen(false); filtersButton.current?.focus({ preventScroll: true }) }, [])
+  const filterCount = workFilterCount(filter)
   const hasQuery = words(filter.q).length > 0
   const filtering = !isDefaultWork(filter)
   // The text of the beads, read only while there is a query.
@@ -198,30 +208,45 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
     requestAnimationFrame(() => requestAnimationFrame(() => laneGrid.current?.querySelector(`[data-card="${CSS.escape(focusKey)}"]`)?.scrollIntoView({ block: 'center', inline: 'center' })))
   }, [focusKey, focusLane])
 
+  // An element constant, not a component: a component defined here would remount at each render and the search box would lose the focus.
+  const filterFields = data && (
+    <>
+      <div className="wk-search"><SearchField label="Search work" value={filter.q} onChange={q => change({ q })} onKeyDown={event => { if (event.key === 'Escape' && filter.q) { event.stopPropagation(); change({ q: '' }) } }} data={{ 'data-work-search': '' }} placeholder="Search id, title and description" /></div>
+      <div className="wk-filters" role="group" aria-label="Filters">
+        <button type="button" className={`hub-chip${filter.needsYou ? ' on' : ''}`} aria-pressed={filter.needsYou} data-filter="needs-you" onClick={() => change({ needsYou: !filter.needsYou })}>Needs you</button>
+        <button type="button" className={`hub-chip${filter.blocked ? ' on' : ''}`} aria-pressed={filter.blocked} data-filter="blocked" onClick={() => change({ blocked: !filter.blocked })}>Blocked</button>
+        <div className="hub-seg" role="group" aria-label="Type">
+          {(['task', 'feature', 'question'] as WorkType[]).map(type => <button key={type} type="button" className={filter.type === type ? 'on' : ''} aria-pressed={filter.type === type} data-filter-type={type} onClick={() => change({ type: filter.type === type ? null : type })}>{type}</button>)}
+        </div>
+        <Combobox className="cb-bar wk-label" id="hub-work-label" value={filter.label} options={labelOptions} onChange={label => change({ label })} openLabel="Show labels" inputAttrs={{ 'aria-label': 'Label', 'data-filter-label': '' }} />
+        <div className="hub-seg" role="group" aria-label="Updated">
+          {([[7, '7d'], [30, '30d'], [null, 'any']] as const).map(([within, label]) => <button key={label} type="button" className={filter.within === within ? 'on' : ''} aria-pressed={filter.within === within} data-filter-within={label} onClick={() => change({ within })}>{label}</button>)}
+        </div>
+      </div>
+    </>
+  )
+
   return (
     <div className="work" data-sheet={focus && !unknown ? 'open' : undefined}>
-      <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
+      {phone ? (
+        <div className="wk-phone-bar" data-work-bar>
+          <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} inRow />
+          <button type="button" ref={filtersButton} className={`hub-btn wk-filters-btn${filterCount ? ' on' : ''}`} data-work-filters disabled={!data} aria-haspopup="dialog" aria-expanded={filtersOpen} aria-label={filterCount ? `Filters, ${filterCount} on` : undefined} onClick={() => setFiltersOpen(true)}>{filterCount ? `Filters (${filterCount})` : 'Filters'}</button>
+          {project && host.write && <button type="button" className="hub-btn pri" data-spawn-open aria-label="Spawn work" onClick={() => openSpawn({ project })}>Spawn</button>}
+        </div>
+      ) : (
+        <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
+      )}
       {data && (
         <>
-          <div className="wk-search"><SearchField label="Search work" value={filter.q} onChange={q => change({ q })} onKeyDown={event => { if (event.key === 'Escape' && filter.q) { event.stopPropagation(); change({ q: '' }) } }} data={{ 'data-work-search': '' }} placeholder="Search id, title and description" /></div>
-          <div className="wk-filters" role="group" aria-label="Filters">
-            <button type="button" className={`hub-chip${filter.needsYou ? ' on' : ''}`} aria-pressed={filter.needsYou} data-filter="needs-you" onClick={() => change({ needsYou: !filter.needsYou })}>Needs you</button>
-            <button type="button" className={`hub-chip${filter.blocked ? ' on' : ''}`} aria-pressed={filter.blocked} data-filter="blocked" onClick={() => change({ blocked: !filter.blocked })}>Blocked</button>
-            <div className="hub-seg" role="group" aria-label="Type">
-              {(['task', 'feature', 'question'] as WorkType[]).map(type => <button key={type} type="button" className={filter.type === type ? 'on' : ''} aria-pressed={filter.type === type} data-filter-type={type} onClick={() => change({ type: filter.type === type ? null : type })}>{type}</button>)}
-            </div>
-            <Combobox className="cb-bar wk-label" id="hub-work-label" value={filter.label} options={labelOptions} onChange={label => change({ label })} openLabel="Show labels" inputAttrs={{ 'aria-label': 'Label', 'data-filter-label': '' }} />
-            <div className="hub-seg" role="group" aria-label="Updated">
-              {([[7, '7d'], [30, '30d'], [null, 'any']] as const).map(([within, label]) => <button key={label} type="button" className={filter.within === within ? 'on' : ''} aria-pressed={filter.within === within} data-filter-within={label} onClick={() => change({ within })}>{label}</button>)}
-            </div>
-          </div>
+          {!phone && filterFields}
           {filtering && (
             <p className="wk-count" role="status" data-work-count>{matching} of {loaded} on the board shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
           )}
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
       )}
-      {project && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button>}<ProjectLink id={project} label="Project" /></div>}
+      {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button>}<ProjectLink id={project} label="Project" /></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
@@ -275,6 +300,21 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
             </section>
           )}
         </>
+      )}
+      {phone && filtersOpen && data && (
+        <Dialog title="Filters" onClose={closeFilters}>
+          <div className="wk-filter-sheet" data-work-filter-sheet>
+            <div className="wk-filter-head">
+              <p role="status" data-work-sheet-count>{filtering ? `${matching} of ${loaded}` : `All ${loaded}`} on the board shown</p>
+              <button type="button" className="hub-filter-x" aria-label="Close filters" onClick={closeFilters}>×</button>
+            </div>
+            {filterFields}
+            <div className="hub-filter-foot">
+              <button type="button" className="hub-btn" data-work-clear-all onClick={clearFilter}>Clear all</button>
+              <button type="button" className="hub-btn pri" onClick={closeFilters}>Done</button>
+            </div>
+          </div>
+        </Dialog>
       )}
       {focus && !unknown && (
         <div className="wk-sheet">

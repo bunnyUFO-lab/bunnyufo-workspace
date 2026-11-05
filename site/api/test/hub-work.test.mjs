@@ -11,7 +11,7 @@ import { buildWork, reasonOf, unaskedOf } from '../hub-work.mjs';
 import { applyMarks, markEntry } from '../hub-marks.mjs';
 import { searchRows } from '../hub-beads.mjs';
 import { rowMatches, snippetOf, words } from '../../../src/hub/beadSearch.ts';
-import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter } from '../../../src/hub/workFilter.ts';
+import { DEFAULT_WORK_FILTER, cardPasses, isDefaultWork, parseWorkFilter, workFilterCount } from '../../../src/hub/workFilter.ts';
 import { validStatus } from '../hub-pc.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { beadsIssue, eventJson, iso, jsonl, minutesAgo, pcStatusJson, requestJson, seedPcStatus, seeder, workFixture } from './hub-fixtures.mjs';
@@ -356,4 +356,24 @@ test('cardPasses: the search, Needs you, Blocked, Type, Label and Updated', () =
   assert.deepEqual([ready, old].map(item => cardPasses(item, f({ within: 7 }), none, now)), [true, false]);
   assert.deepEqual([ready, old].map(item => cardPasses(item, f({ within: 30 }), none, now)), [true, true]);
   assert.equal(cardPasses(bead('ws-nodate', { updatedAt: '' }), f({ within: 30 }), none, now), false);
+});
+
+test('workFilterCount counts each control once and is zero exactly when the filter is the default', () => {
+  const on = { q: 'quokka', needsYou: true, blocked: true, type: 'task', label: 'area:feel', within: 7 };
+  const cases = [
+    [DEFAULT_WORK_FILTER, 0],
+    [{ ...DEFAULT_WORK_FILTER, q: '   ' }, 0],
+    [{ ...DEFAULT_WORK_FILTER, q: 'two words' }, 1],
+    [{ ...DEFAULT_WORK_FILTER, needsYou: true }, 1],
+    [{ ...DEFAULT_WORK_FILTER, blocked: true }, 1],
+    [{ ...DEFAULT_WORK_FILTER, type: 'feature' }, 1],
+    [{ ...DEFAULT_WORK_FILTER, label: 'area:feel' }, 1],
+    [{ ...DEFAULT_WORK_FILTER, within: 30 }, 1],
+    [on, 6],
+    [{ ...on, q: '' }, 5],
+  ];
+  for (const [filter, expected] of cases) {
+    assert.equal(workFilterCount(filter), expected, JSON.stringify(filter));
+    assert.equal(workFilterCount(filter) === 0, isDefaultWork(filter), `zero matches isDefaultWork for ${JSON.stringify(filter)}`);
+  }
 });

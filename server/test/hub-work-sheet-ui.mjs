@@ -224,7 +224,9 @@ try {
     const sp = await open(viewport);
     const keys = () => sp.evaluate(() => [...document.querySelectorAll('[data-card]')].map(element => element.getAttribute('data-card')));
     const count = () => sp.locator('[data-work-count]').innerText();
-    const search = async value => { await sp.locator('[data-work-search]').fill(value); };
+    // On a phone the search and the filters are in the Filters sheet (ws-ubo.2.4): open it for the step, close it after.
+    const inSheet = async fn => { if (phone) await sp.locator('[data-work-filters]').click(); await fn(); if (phone) await sp.getByRole('button', { name: 'Close filters' }).click(); };
+    const search = value => inSheet(async () => { await sp.locator('[data-work-search]').fill(value); });
     const stored = () => sp.evaluate(() => localStorage.getItem('hub-work-filter'));
     const clear = async () => { await sp.locator('[data-work-count] .wk-clear').click(); await sp.locator('[data-work-count]').waitFor({ state: 'detached' }); };
 
@@ -285,7 +287,7 @@ try {
     assert.ok(full >= 15, `The full board (${full}).`);
     assert.equal(await stored(), null, 'Clear removes the key.');
     const only = async (selector, expected, what) => {
-      await sp.locator(selector).click();
+      await inSheet(async () => { await sp.locator(selector).click(); });
       await sp.locator('[data-work-count]').waitFor();
       assert.deepEqual((await keys()).sort(), expected.map(id => `bead:${id}`).sort(), what);
       assert.match(await count(), new RegExp(`^${expected.length} of ${full} on the board shown`));
@@ -293,18 +295,22 @@ try {
     };
     await only('[data-filter="needs-you"]', ['ws-ask', 'ws-owner'], 'Needs you');
     await only('[data-filter="blocked"]', ['ws-stuck', 'ws-wait'], 'Blocked leaves out what needs the owner');
-    await sp.locator('[data-filter="needs-you"]').click();
-    await sp.locator('[data-filter="blocked"]').click();
+    await inSheet(async () => {
+      await sp.locator('[data-filter="needs-you"]').click();
+      await sp.locator('[data-filter="blocked"]').click();
+    });
     assert.equal((await keys()).length, 4, 'Both on is either.');
     await clear();
     await only('[data-filter-type="feature"]', ['ws-feat'], 'Type feature');
     await only('[data-filter-type="question"]', ['ws-ques'], 'Type question');
-    await sp.locator('[data-filter-label]').click();
-    await sp.getByRole('option', { name: 'area:feel' }).click();
+    await inSheet(async () => {
+      await sp.locator('[data-filter-label]').click();
+      await sp.getByRole('option', { name: 'area:feel' }).click();
+    });
     await sp.locator('[data-work-count]').waitFor();
     assert.deepEqual(await keys(), ['bead:ws-feat'], 'Label');
     await clear();
-    await sp.locator('[data-filter-within="7d"]').click();
+    await inSheet(async () => { await sp.locator('[data-filter-within="7d"]').click(); });
     await sp.locator('[data-work-count]').waitFor();
     const recent = await keys();
     assert.ok(recent.includes('bead:ws-rare') && recent.includes('bead:ws-fresh'), 'Updated in the last 7 days keeps the fresh ones.');
@@ -314,18 +320,20 @@ try {
 
     step(`${label}: the choice survives a reload, and a bad stored value is the default with no error`);
     await search('quokka');
-    await sp.locator('[data-filter-type="task"]').click();
+    await inSheet(async () => { await sp.locator('[data-filter-type="task"]').click(); });
     await sp.locator('.wk-snip').waitFor();
     await sp.reload();
     await sp.locator('.wk-snip').waitFor();
-    assert.equal(await sp.locator('[data-work-search]').inputValue(), 'quokka');
-    assert.equal(await sp.locator('[data-filter-type="task"]').getAttribute('aria-pressed'), 'true');
+    await inSheet(async () => {
+      assert.equal(await sp.locator('[data-work-search]').inputValue(), 'quokka');
+      assert.equal(await sp.locator('[data-filter-type="task"]').getAttribute('aria-pressed'), 'true');
+    });
     assert.match(await count(), /^1 of \d+ on the board shown/);
     for (const bad of ['{not json', '{"type":"epic","within":99,"q":5}', '[]', '"x"']) {
       await sp.evaluate(value => localStorage.setItem('hub-work-filter', value), bad);
       await sp.reload();
       await sp.locator('[data-card="bead:ws-ready"]').waitFor({ state: 'attached' });
-      assert.equal(await sp.locator('[data-work-search]').inputValue(), '', bad);
+      await inSheet(async () => { assert.equal(await sp.locator('[data-work-search]').inputValue(), '', bad); });
       assert.equal(await sp.locator('[data-work-count]').count(), 0, bad);
     }
 
@@ -343,17 +351,23 @@ try {
     if (phone) {
       step('phone: no sideways scroll, every control at least 44 px, the lane chip goes to the first lane with a match');
       await search('');
-      await sp.locator('[data-filter="needs-you"]').click();
-      await sp.locator('[data-filter-type="task"]').click();
+      await inSheet(async () => {
+        await sp.locator('[data-filter="needs-you"]').click();
+        await sp.locator('[data-filter-type="task"]').click();
+      });
       await search('ws');
       await noSideways(sp, 'Work filters at phone width');
-      const small = await sp.evaluate(() => [...document.querySelectorAll('.wk-search input, .wk-search button, .wk-filters button, .wk-filters input, [data-work-count] button, [data-lane-chip]')]
+      await sp.locator('[data-work-filters]').click();
+      await sp.locator('[data-work-filter-sheet]').waitFor();
+      await noSideways(sp, 'Work filters sheet at phone width');
+      const small = await sp.evaluate(() => [...document.querySelectorAll('.wk-search input, .wk-search button, .wk-filters button, .wk-filters input, [data-work-count] button, [data-lane-chip], [data-work-filters]')]
         .filter(element => element.getClientRects().length).map(element => ({ what: element.getAttribute('aria-label') ?? element.textContent, h: element.getBoundingClientRect().height })).filter(item => item.h < 43.5));
       assert.deepEqual(small, [], 'Every control is at least 44 px tall.');
+      await sp.getByRole('button', { name: 'Close filters' }).click();
       assert.equal(await sp.locator('[data-lane-chip="blocked"]').getAttribute('aria-pressed'), 'true', 'Needs you starts in Blocked.');
       if (process.env.BUW_SHOTS) await sp.screenshot({ path: `${process.env.BUW_SHOTS}-search-${label}.png` });
       await clear();
-      await sp.locator('[data-filter-type="feature"]').click();
+      await inSheet(async () => { await sp.locator('[data-filter-type="feature"]').click(); });
       assert.equal(await sp.locator('[data-lane-chip="ready"]').getAttribute('aria-pressed'), 'true');
       await sp.locator('[data-lane-chip="done"]').click();
       assert.equal(await sp.locator('[data-lane-chip="done"]').getAttribute('aria-pressed'), 'true', 'A lane the person taps stays, even at 0.');

@@ -21,6 +21,9 @@ export const DEFAULT_WORK_FILTER: WorkFilter = { q: '', needsYou: false, blocked
 
 export const isDefaultWork = (filter: WorkFilter) => !filter.q.trim() && !filter.needsYou && !filter.blocked && !filter.type && !filter.label && !filter.within
 
+/** How many filters are on; a whole search counts as one. Zero exactly when `isDefaultWork`. */
+export const workFilterCount = (filter: WorkFilter) => [filter.q.trim(), filter.needsYou, filter.blocked, filter.type, filter.label, filter.within].filter(Boolean).length
+
 const DAY = 86_400_000
 
 /** A stored value as a filter; anything bad falls back to the default. */
