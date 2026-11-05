@@ -27,9 +27,9 @@ async function fixture({ hermes = {}, refuseStarts = null } = {}) {
   const owner = { 'Remote-User': 'owner', Origin: 'https://site.example' };
   const servers = [];
   // Switches on Hermes's side of the wire: on (429 on every start), delay (ms before a start is sent), lose (Hermes takes the start, the answer is lost), ignoreStop (a stop is not passed on).
-  const refuse = { on: false, delay: 0, lose: false, ignoreStop: false, slowSave: 0 };
+  const refuse = { on: false, delay: 0, lose: false, ignoreStop: false, slowSave: 0, saving: false };
   const put = bucket.put.bind(bucket);
-  bucket.put = async (key, ...rest) => { if (refuse.slowSave && String(key).endsWith('.jsonl')) await wait(refuse.slowSave); return put(key, ...rest); };   // the lines of a reply take a moment to save
+  bucket.put = async (key, ...rest) => { if (refuse.slowSave && String(key).endsWith('.jsonl')) { refuse.saving = true; await wait(refuse.slowSave); } return put(key, ...rest); };   // the lines of a reply take a moment to save
   const fetchImpl = async (url, init) => {
     const starts = init?.method === 'POST' && /\/v1\/runs$/.test(String(url));
     if (starts && refuse.delay) await wait(refuse.delay);
@@ -595,7 +595,8 @@ test('second look A: a Stop pressed while the reply is being saved holds the que
     await queue(call, turn.conversation, 'Wait.');
     refuse.slowSave = 500;
     upstream.release(turn.run, 'It finished.');
-    await until(async () => (await call('POST', '/hub/chat/stop', { run: turn.run })).status === 404, 'the reply to end');   // the Stop that came in the save window
+    await until(() => refuse.saving, 'the Hub to be saving the reply');   // it has read run.completed: the turn is ending
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 404, 'The Stop that came in the save window.');
     refuse.slowSave = 0;
     const held = await until(async () => { const answer = await read(call, turn.conversation); return answer.held ? answer : null; }, 'the hold');
     assert.equal(held.held.reason, 'stopped');
