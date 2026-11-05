@@ -14,6 +14,14 @@
 .pp-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; margin-top: 4px; }
 .pp-tabs::-webkit-scrollbar { display: none; }
 .pp-tabs .wk-tab { min-height: 44px; display: inline-flex; align-items: center; flex: none; white-space: nowrap; }
+@media (max-width: 640px) {
+  .pp-tabs-row { display: flex; flex-wrap: wrap; align-items: stretch; margin: 4px 0 14px; border-bottom: 1px solid var(--line); }
+  .pp-tabs-row .pp-tabs { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; margin: 0; overflow: visible; border-bottom: 0; }
+  .pp-tabs-row .wk-tab { flex: 0 1 auto; min-width: 0; padding-inline: 10px; white-space: normal; overflow-wrap: anywhere; }
+  .item-menu-button.pp-more { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; max-width: 100%; margin-left: auto; padding: 8px 10px; font-size: 13px; font-weight: 500; line-height: normal; color: var(--t3); white-space: nowrap; }
+  .item-menu-button.pp-more:hover, .item-menu-button.pp-more[aria-expanded="true"] { color: var(--t1); background: none; }
+  .item-menu-button.pp-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
 
 .pp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .pp-body[data-side="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 340px); }
