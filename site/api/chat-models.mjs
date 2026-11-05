@@ -28,6 +28,9 @@ export const CHAT_CHAIN = ['codex', 'sonnet', 'deepseek-flash'];
 /** True for an Opus model id (`claude-opus-5-5`, `claude-opus-4-5-20251101`), in any form or case. Opus bills through the API, so nothing automatic may pick it. Deliberately broad: a missed form costs money, a false match costs one click. */
 export const isOpus = model => /opus/i.test(String(model));
 
+/** True for a model nothing automatic may pick: Opus, and Fable, which costs more than Opus. */
+export const isDear = model => /opus|fable/i.test(String(model));
+
 // Ids an earlier version of this PR listed, one per family now. A Map, so `__proto__` and `constructor` stay unknown ids.
 const RETIRED = new Map([['codex-6-1-sol', 'codex'], ['codex-sol', 'codex'], ['codex-6-1-terra', 'codex-terra'], ['codex-6-astra', 'codex-astra'], ['codex-6-luna', 'codex-luna']]);
 

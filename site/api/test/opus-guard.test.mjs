@@ -2,7 +2,7 @@
 // Nothing here reaches a provider: the fake Hermes and the stand-in S3 answer, and a pick is only checked as data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, CHAT_CHAIN, chatModelOf, isOpus, personaModelIds, spawnModelsForClient } from '../chat-models.mjs';
+import { CHAT_MODELS, CHAT_CHAIN, chatModelOf, isDear, isOpus, personaModelIds, spawnModelsForClient } from '../chat-models.mjs';
 import { CHAT_PERSONAS, PERSONA_TEMPLATES } from '../chat-personas.mjs';
 import { AGENTS } from '../hub-team.mjs';
 import { createAgentEdits } from '../hub-agent-edit.mjs';
@@ -10,7 +10,7 @@ import { changeState, validChange, validExport, validResult } from '../hub-agent
 import { loadSigningKey, parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
 import { PRESETS } from '../presets.mjs';
 import { chooseModel } from '../../../src/hub/chatModel.ts';
-import { isOpus as pageIsOpus } from '../../../src/hub/agentEditField.ts';
+import { isDear as pageIsDear, isOpus as pageIsOpus, opusNote } from '../../../src/hub/agentEditField.ts';
 import { agentConfigJson } from './hub-fixtures.mjs';
 import { KEY, approve, stack, until } from './hermes-stack.mjs';
 
@@ -19,6 +19,22 @@ const CODEX = { provider: 'openai-codex', model: 'gpt-6-sol' };
 const SONNET = { provider: 'anthropic', model: 'claude-sonnet-5-5' };
 const DEEPSEEK = { provider: 'deepseek', model: 'deepseek-v4-pro' };
 const OPUS = { provider: 'anthropic', model: 'claude-opus-5-5' };
+
+test('isDear: Opus and Fable, on the server and the page; each warns by name', () => {
+  for (const model of ['claude-fable-5-1', 'Claude-Fable-5-1', 'claude-opus-5-5']) {
+    assert.equal(isDear(model), true, model);
+    assert.equal(pageIsDear(model), true, `the page agrees: ${model}`);
+  }
+  for (const model of ['claude-sonnet-5-5', 'gpt-6-sol', 'claude-haiku-5-5', '', undefined, null]) {
+    assert.equal(isDear(model), false, String(model));
+    assert.equal(pageIsDear(model), false, `the page agrees: ${model}`);
+  }
+  const fable = { provider: 'anthropic', model: 'claude-fable-5-1' };
+  const sonnet = { provider: 'anthropic', model: 'claude-sonnet-5-5' };
+  assert.match(opusNote(fable, []), /^Fable is the primary/);
+  assert.match(opusNote(sonnet, [fable]), /^Fable is a fallback/);
+  assert.equal(opusNote(sonnet, []), null);
+});
 
 test('isOpus: Opus ids are, nothing else is', () => {
   for (const model of ['claude-opus-5-5', 'claude-opus-4-5-20251101', 'claude-3-opus-20240229', 'claude-opus-latest', 'opus', 'anthropic/claude-opus-5-5', 'anthropic.claude-opus-5-5', 'claude-opus-4-5@20251101', 'Claude-Opus-5-5', 'claude-opus5', 'claude.opus-5', 'anthropic/opus', 'claude_opus_5']) {
@@ -92,7 +108,7 @@ test('the quota retry goes to Sonnet when HERMES_RETRY_MODEL names Opus, logs on
       assert.equal(s.hermes.runs[1].body.model, expected, `HERMES_RETRY_MODEL=${wanted}`);
       assert.equal(s.hermes.runs[1].body.provider, 'anthropic');
       const refusals = lines.filter(line => /HERMES_RETRY_MODEL/.test(line));
-      assert.equal(refusals.length, isOpus(wanted) ? 1 : 0, 'one line for a refusal, none otherwise');
+      assert.equal(refusals.length, isDear(wanted) ? 1 : 0, 'one line for a refusal, none otherwise');
       for (const line of refusals) assert.doesNotMatch(line, /sk-|key|token/i);
       await until(() => s.resultOf(id), 'result.json');
     } finally { await s.close(); }

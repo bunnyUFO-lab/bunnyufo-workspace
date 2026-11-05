@@ -3,7 +3,7 @@ import { ago, HubError, hubGet, hubPost } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
 import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, TeamAgent, TeamView } from '../lib/hubTeam'
-import { isOpus, opusNote } from './agentEditField'
+import { isDear, opusNote } from './agentEditField'
 import './team/agentDetails.css'
 
 const LIMITS = { role: 200, prompt: 8000, note: 200 }
@@ -240,7 +240,7 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const nowChain = settings?.fallbacks ?? []
   // The select shows what the host offers, and also what is set now when the host no longer offers it (marked), so a row never goes blank.
   const choices: { ref: ModelRef; label: string }[] = options.map(ref => ({ ref, label: refName(ref) }))
-  const billed = (ref: ModelRef, label: string) => (isOpus(ref.model) ? `${label} · billed through the API` : label)
+  const billed = (ref: ModelRef, label: string) => (isDear(ref.model) ? `${label} · billed through the API` : label)
   for (const ref of [current, ...chain, ...nowChain, primary]) if (ref && !choices.some(choice => same(choice.ref, ref))) choices.push({ ref, label: `${refName(ref)} (not offered now)` })
   const opusNoteText = opusNote(primary, chain)
   const indexOf = (ref: ModelRef | null) => String(choices.findIndex(choice => ref && same(choice.ref, ref)))
@@ -250,8 +250,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const changed = !!primary && !!current && (!same(primary, current) || chain.length !== nowChain.length || chain.some((item, index) => !same(item, nowChain[index])))
   const off = noList ? 'The Hermes host has not published its model list yet.' : !fresh ? 'The last export from the Hermes host is old, so its settings may have changed. Changing the model is off until a new one arrives.' : waiting ? 'A change is already waiting for the Hermes host.' : null
   const unused = options.filter(ref => !(primary && same(ref, primary)) && !chain.some(item => same(item, ref)))
-  // "Add a fallback" is a default pick in the owner's hand, so it never adds Opus; choosing Opus in a row's select is the deliberate step.
-  const addable = unused.find(ref => !isOpus(ref.model))
+  // "Add a fallback" is a default pick in the owner's hand, so it never adds Opus or Fable; choosing one in a row's select is the deliberate step.
+  const addable = unused.find(ref => !isDear(ref.model))
   const move = (index: number, by: -1 | 1) => setChain(list => { const next = [...list]; [next[index], next[index + by]] = [next[index + by], next[index]]; return next })
 
   const send = async () => {
