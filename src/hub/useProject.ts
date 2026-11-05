@@ -9,6 +9,9 @@ const KEY = 'buw.hub.project'
  * The project Work and the Roadmap show: the one in the address (any project, so a link to one
  * without a Beads copy says so), else the last one chosen, else the first in the server's order (the project table's order, then alphabetical; nothing here re-sorts). Both draw from a Beads
  * copy, so the chips list only projects that have one (all of them while none has).
+ *
+ * `early` is the id to start fetching with while the list is out (the address's, else the remembered one). Its answer is not to
+ * be shown until `project` equals it: the server answers 200 for any valid id, so only the list can say the project exists.
  */
 export function useProject(wanted?: string) {
   const projects = useHubData<{ projects: HubProject[] }>('/projects')
@@ -17,5 +20,6 @@ export function useProject(wanted?: string) {
   const list = withBeads.length ? withBeads : all
   const project = all.find(item => item.id === wanted)?.id ?? list.find(item => item.id === remember(KEY))?.id ?? list.find(item => item.beads)?.id ?? list[0]?.id
   useEffect(() => { if (project) remember(KEY, project) }, [project])
-  return { list, project, error: projects.error, loading: projects.loading }
+  const early = !projects.data && !projects.error ? wanted || remember(KEY) || undefined : undefined
+  return { list, project, early, error: projects.error, loading: projects.loading }
 }
