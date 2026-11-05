@@ -1703,7 +1703,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       try {
         const { request } = await requestFiles.loadOne(id, at);
         const check = item.state === 'proposed' ? await requestFiles.jobApproval(id, at) : null;
-        rows.push(jobRow({ item, request, preset: presetOf(item.preset), check, verified: await verifyJobFile(id, request, windows.get(id)), persona, cardHref: item.finish?.card ? await cardHrefOf(item.finish.card) : undefined }));
+        rows.push(jobRow({ item, request, preset: presetOf(item.preset), check, verified: await verifyJobFile(id, request, windows.get(id)), persona, cardHref: item.finish?.card ? await cardHrefOf(item.finish.card) : undefined, cardSection: item.state === 'proposed' && item.project ? await cardSectionOf(item.project) : undefined }));
       } catch (error) { log(scrub(`[hub] chat job ${id} has no row: ${error.message}`, 200)); }
     }
     return rows;

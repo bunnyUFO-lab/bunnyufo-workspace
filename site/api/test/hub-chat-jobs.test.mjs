@@ -139,7 +139,7 @@ test('rows are built from the request files: the file\'s title and text, what it
     assert.equal(rows.length, 1);
     assert.deepEqual([rows[0].id, rows[0].title, rows[0].state, rows[0].approvable, rows[0].runsOn, rows[0].agent], [one.id, 'The real title', 'proposed', true, 'hermes', 'Researcher']);
     assert.match(rows[0].text, /^Research rows\./);
-    assert.match(rows[0].produces, /card/);
+    assert.equal(rows[0].produces, 'a card in assistant', 'probe has no Library section: the row names assistant, not a choice between two');
     assert.equal(rows[0].flag, undefined);
     // The line holds the id only: the words come from the request file.
     assert.equal((await call('GET', '/hub/chat/20260101-zzzzzz/jobs')).status, 404);
