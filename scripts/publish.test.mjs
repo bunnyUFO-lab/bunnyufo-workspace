@@ -1494,3 +1494,32 @@ test('Revert of an agent\'s edit to an HTML page clears the mark, and a publish 
     assert.equal(await readFile(path.join(w.site, 'hub', 'page.html'), 'utf8'), '<p>owner</p>\n');
   } finally { await fake.close(); }
 });
+
+test('a publish keeps an agent\'s mark on a step the owner renamed on the PC meanwhile', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const local = await localList(w.site);
+    local.entities[0].steps.push(step('Page', 'page.html'));
+    await putLocal(w.site, local);
+    await writeFile(path.join(w.site, 'hub', 'page.html'), '<p>owner</p>\n');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    // The owner renames the tab on the PC, not yet published; the agent edits that page meanwhile.
+    const renamed = await localList(w.site);
+    renamed.entities[0].steps[1].name = 'My page';
+    await putLocal(w.site, renamed);
+    const agent = agentWorld(fake, w.client);
+    await agent.file('hub/page.html', '<script>x</script>\n', EDIT_AS('<p>owner</p>\n', 'html0000002'));
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, true, 'the edit marked the step');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    const upStep = fake.json(LIST).entities[0].steps[1];
+    assert.equal(upStep.name, 'My page', 'the rename went up');
+    assert.equal(upStep.agentTab, true, 'the mark stayed: the agent script has no bridge');
+    assert.equal((await localList(w.site)).entities[0].steps[1].agentTab, true);
+    // A Revert still clears it, and the publish after that keeps it cleared.
+    await agent.revert('hub', 'html0000002');
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, undefined);
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, undefined, 'cleared by the Revert, and the untouched PC does not bring it back');
+  } finally { await fake.close(); }
+});
