@@ -20,3 +20,6 @@
 - **Publish keeps what was made on the site.** It merges the bucket's card list first, brings
   down files changed only there, and reports a file changed in both places instead of
   overwriting it (`.buw/sync.json` records the last sync; `--force` keeps this folder's copy).
+  Uploads and deletes are conditional, so a change written to the bucket during a publish is
+  never overwritten; the site's copy is saved under `.buw/conflicts`, the report says how to
+  settle each file, and a real publish that leaves conflicts exits with code 2.

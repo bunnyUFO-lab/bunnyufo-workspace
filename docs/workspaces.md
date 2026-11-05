@@ -107,12 +107,36 @@ What it does:
 3. Merges the bucket's card list into the local one first, so cards made on the site are kept
    and their folders come down.
 4. Uploads what changed here, brings down what changed on the site, and deletes what was removed
-   here. A file changed in both places is left alone and reported; `--force` uploads this
-   folder's copy anyway. The site serves the bucket, so the card is live when the command returns.
+   here. Every upload and delete is conditional on what the bucket held when it was listed, so a
+   change written to the bucket meanwhile is never overwritten. A file changed in both places is
+   left alone and reported (see below); `--force` uploads this folder's copy anyway. The site
+   serves the bucket, so the card is live when the command returns.
 
 Telling "changed here" from "changed on the site" needs a record of the last sync, which publish
-and pull keep in the workspace's `.buw/sync.json`. Before a workspace has one, this folder's copy
-wins, except where the bucket's copy is newer, which is reported instead.
+and pull keep in the workspace's `.buw/sync.json`. Only on a true first sync (no record for this
+bucket place at all) does this folder's copy win, except where the bucket's copy is newer, which is
+reported instead. With any record, a file that differs from the bucket and has no entry in it is a
+conflict, whichever is newer. A card published alone with `--card` builds a partial record, so a
+later whole-workspace publish can report a differing `_shared/` file once; settle it with `--force`.
+
+### When a publish reports a conflict
+
+The conflicting file is left alone, the rest of the publish goes ahead, and the site's copy is
+saved under `.buw/conflicts/<path>` in the workspace (never uploaded; a dry run saves nothing). The
+report lists both ways to settle each file:
+
+```bash
+npm run publish -- --content <id> --path "hub/index.md" --force          # keep this folder's
+npm run publish -- --content <id> --path "hub/index.md" --pull --force   # keep the site's
+```
+
+Copying the saved file over the local one and publishing also works. Settling a file clears its
+saved copy; a publish of one card never clears another card's. A named `--pull --force` leaves
+`workspace.json` alone. The exit code is **2** when a real publish left conflicts (the rest went
+up), 1 for an error and 0 otherwise; a dry run with conflicts exits 0.
+
+A file deleted here is deleted from the bucket only while the bucket still holds the version that
+was last synced. If it changed on the site meanwhile it stays, and comes down on the next publish.
 
 It needs AWS credentials that can write the bucket: the aws CLI's default profile
 (`~/.aws/credentials`), or `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the environment.

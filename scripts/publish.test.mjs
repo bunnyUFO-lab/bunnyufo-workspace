@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bucketFor, publish, publishAll } from './publish.mjs';
+import { bucketFor, exitCodeFor, publish, publishAll } from './publish.mjs';
 import { defaultScope, mergeCardList, syncUp } from './shared/s3-sync.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 
@@ -668,5 +668,335 @@ test('a rename or archive made on the site survives the next local publish', asy
     assert.equal(after.archived, true, 'Nor the archive.');
     assert.equal(after.entities[0].updated, '2026-10-20', 'The local edit still went up.');
     assert.equal(fake.text('sections/my-workspace/hub/index.md'), '# Hub, edited\n');
+  } finally { await fake.close(); }
+});
+
+// --- Safe publish: conditional writes, saved copies, conflict reports ---
+
+const KEY = 'sections/my-workspace/';
+/** Wrap a client so `act` runs right after the listing: someone else writes between the listing and the upload. */
+const racing = (client, act) => ({ ...client, list: async (...args) => { const out = await client.list(...args); await act(); return out; } });
+const exists = file => stat(file).then(() => true, () => false);
+const noBuw = fake => assert.deepEqual([...fake.objects.keys()].filter(key => key.includes('.buw')), [], 'nothing under .buw is ever uploaded');
+const putsOf = (fake, file) => fake.log.filter(entry => entry.method === 'PUT' && entry.key === `${KEY}${file}`);
+const copyOf = site => file => path.join(site, '.buw', 'conflicts', ...file.split('/'));
+
+/** A published workspace with a bucket client, ready for a direct syncUp. */
+async function published(fake) {
+  const setup = await workspace(fake);
+  await publish({ content: setup.site, registryFile: setup.registryFile, bucketOptions: setup.bucketOptions, log: () => {} });
+  const { client, prefix } = bucketFor(setup.entry, { env: {}, ...setup.bucketOptions });
+  return { ...setup, client, prefix, scope: await defaultScope(setup.site) };
+}
+
+test('a file the agent changed after the listing is a conflict: its text stays, the copy is saved, and the rest goes up', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    await writeFile(path.join(w.site, '_shared', 'report.css'), 'body{color:red}\n');
+    const client = racing(w.client, async () => fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown'));
+    const lines = [];
+    const result = await syncUp({ root: w.site, bucket: client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line) });
+    assert.deepEqual(result.conflicts, ['hub/index.md']);
+    assert.deepEqual(result.uploads, ['_shared/report.css']);
+    assert.deepEqual(result.saved, ['hub/index.md']);
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub, agent\n');
+    assert.equal(fake.text(`${KEY}_shared/report.css`), 'body{color:red}\n');
+    assert.equal(await readFile(copyOf(w.site)('hub/index.md'), 'utf8'), '# Hub, agent\n');
+    assert.match(lines.join('\n'), /kept hub\/index\.md/);
+    const again = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual(again.conflicts, ['hub/index.md'], 'the conflict is stable across runs');
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub, agent\n');
+    noBuw(fake);
+  } finally { await fake.close(); }
+});
+
+test('a new file the agent made under the same name after the listing is a conflict too', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await writeFile(path.join(w.site, 'hub', 'new.md'), '# New, desk\n');
+    const client = racing(w.client, async () => fake.seed(`${KEY}hub/new.md`, '# New, agent\n', 'text/markdown'));
+    const result = await syncUp({ root: w.site, bucket: client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual(result.conflicts, ['hub/new.md']);
+    assert.deepEqual(result.uploads, []);
+    assert.equal(fake.text(`${KEY}hub/new.md`), '# New, agent\n');
+    assert.equal(await readFile(copyOf(w.site)('hub/new.md'), 'utf8'), '# New, agent\n');
+    const again = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: () => {} });
+    assert.deepEqual(again.conflicts, ['hub/new.md']);
+    assert.equal(fake.text(`${KEY}hub/new.md`), '# New, agent\n');
+    noBuw(fake);
+  } finally { await fake.close(); }
+});
+
+test('uploads carry If-Match for a changed file and If-None-Match for a new one, and force carries neither', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, edited\n');
+    await writeFile(path.join(w.site, 'hub', 'new.md'), '# New\n');
+    fake.log.length = 0;
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.ok(putsOf(fake, 'hub/index.md')[0].headers['if-match']);
+    assert.equal(putsOf(fake, 'hub/new.md')[0].headers['if-none-match'], '*');
+    assert.equal(putsOf(fake, 'hub/new.md')[0].headers['if-match'], undefined);
+
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk again\n');
+    fake.log.length = 0;
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, force: true, log: () => {} });
+    const [put] = putsOf(fake, 'hub/index.md');
+    assert.equal(put.headers['if-match'], undefined);
+    assert.equal(put.headers['if-none-match'], undefined);
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# Hub, desk again\n', 'force overwrites the agent\'s copy');
+  } finally { await fake.close(); }
+});
+
+test('a lost race reported as 409 or 404 is a conflict; any other error still throws', async () => {
+  const fake = await startFakeS3();
+  try {
+    for (const status of [409, 404]) {
+      const w = await published(fake);
+      await writeFile(path.join(w.site, 'hub', 'index.md'), `# Hub, desk ${status}\n`);
+      const client = { ...w.client, put: async (key, ...rest) => { if (key.endsWith('hub/index.md')) throw Object.assign(new Error('lost'), { status }); return w.client.put(key, ...rest); } };
+      const result = await syncUp({ root: w.site, bucket: client, prefix: w.prefix, scope: w.scope, log: () => {} });
+      assert.deepEqual(result.conflicts, ['hub/index.md'], `status ${status}`);
+      assert.deepEqual(result.uploads, []);
+    }
+    const w = await published(fake);
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk 500\n');
+    const client = { ...w.client, put: async () => { throw Object.assign(new Error('boom'), { status: 500 }); } };
+    await assert.rejects(syncUp({ root: w.site, bucket: client, prefix: w.prefix, scope: w.scope, log: () => {} }), /boom/);
+  } finally { await fake.close(); }
+});
+
+test('a card list seen as missing is uploaded with If-None-Match, and the retry merges the list that appeared', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await workspace(fake);
+    const { client, prefix } = bucketFor(w.entry, { env: {}, ...w.bucketOptions });
+    const merge = await mergeCardList({ root: w.site, bucket: client, prefix });
+    assert.equal(merge.etag, null);
+    // The agent starts a list after the merge saw none, with a card of its own.
+    fake.seed(`${KEY}workspace.json`, JSON.stringify({ name: 'Mine', entities: [{ id: 'agent', title: 'Agent', folder: 'agent', steps: [{ name: 'Page', path: 'index.md' }] }] }), 'application/json');
+    const lines = [];
+    await syncUp({ root: w.site, bucket: client, prefix, scope: await defaultScope(w.site), listEtag: merge.etag, log: line => lines.push(line) });
+    assert.deepEqual(fake.json(`${KEY}workspace.json`).entities.map(item => item.id).sort(), ['agent', 'hub'], 'both sides\' cards are in the list');
+    const puts = putsOf(fake, 'workspace.json');
+    assert.equal(puts[0].headers['if-none-match'], '*');
+    assert.ok(puts.at(-1).headers['if-match'], 'the retry matches the merged list');
+    assert.match(lines.join('\n'), /changed on the site meanwhile/);
+  } finally { await fake.close(); }
+});
+
+test('a file the agent rewrote after the listing is not deleted, and comes down on the next publish', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await workspace(fake);
+    await writeFile(path.join(w.site, 'hub', 'stale.md'), 'old\n');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    await rm(path.join(w.site, 'hub', 'stale.md'));
+    const { client, prefix } = bucketFor(w.entry, { env: {}, ...w.bucketOptions });
+    const scope = await defaultScope(w.site);
+    fake.log.length = 0;
+    const lines = [];
+    const result = await syncUp({ root: w.site, bucket: racing(client, async () => fake.seed(`${KEY}hub/stale.md`, 'agent text\n')), prefix, scope, log: line => lines.push(line) });
+    assert.deepEqual(result.deletes, []);
+    assert.equal(fake.text(`${KEY}hub/stale.md`), 'agent text\n');
+    assert.ok(fake.log.find(entry => entry.method === 'DELETE' && entry.key === `${KEY}hub/stale.md`).headers['if-match']);
+    assert.match(lines.join('\n'), /kept hub\/stale\.md: changed on the site during this publish/);
+    const next = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.deepEqual(next.downloads, ['hub/stale.md']);
+    assert.equal(await readFile(path.join(w.site, 'hub', 'stale.md'), 'utf8'), 'agent text\n');
+
+    // Already gone by the time of the delete: counted as deleted.
+    await writeFile(path.join(w.site, 'hub', 'gone.md'), 'x\n');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    await rm(path.join(w.site, 'hub', 'gone.md'));
+    const plain = await syncUp({ root: w.site, bucket: racing(client, async () => fake.objects.delete(`${KEY}hub/gone.md`)), prefix, scope, log: () => {} });
+    assert.deepEqual(plain.deletes, ['hub/gone.md']);
+  } finally { await fake.close(); }
+});
+
+test('with a record, a file it has no entry for that differs is a conflict even when the folder is newer', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    await writeFile(path.join(w.site, 'hub', 'extra.md'), '# Extra, desk\n');
+    const future = new Date(Date.now() + 3_600_000);
+    await utimes(path.join(w.site, 'hub', 'extra.md'), future, future);
+    fake.seed(`${KEY}hub/extra.md`, '# Extra, agent\n', 'text/markdown');
+    const result = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.deepEqual(result.conflicts, ['hub/extra.md']);
+    assert.equal(fake.text(`${KEY}hub/extra.md`), '# Extra, agent\n');
+  } finally { await fake.close(); }
+});
+
+test('with no record at all, the newer side wins a differing file and the older one is a conflict', async () => {
+  const fake = await startFakeS3();
+  try {
+    for (const [offset, expected] of [[3_600_000, 'uploads'], [-86_400_000 * 365, 'conflicts']]) {
+      const w = await workspace(fake, { id: `first-${expected}` });
+      const key = `sections/first-${expected}/hub/index.md`;
+      fake.seed(key, '# Hub, bucket\n', 'text/markdown');
+      const when = new Date(Date.now() + offset);
+      await utimes(path.join(w.site, 'hub', 'index.md'), when, when);
+      const result = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+      assert.deepEqual(result[expected].filter(file => file === 'hub/index.md'), ['hub/index.md']);
+      assert.equal(fake.text(key), expected === 'uploads' ? '# Hub\n' : '# Hub, bucket\n');
+    }
+  } finally { await fake.close(); }
+});
+
+test('a named publish with only conflicts is not rejected, and names the copy and both ways to settle', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    const lines = [];
+    const result = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, cards: ['hub'], log: line => lines.push(line) });
+    const output = lines.join('\n');
+    assert.equal(result.published, false);
+    assert.deepEqual(result.conflicts, ['hub/index.md']);
+    assert.match(output, /changed here and on the site, left alone/);
+    assert.ok(output.includes(`${w.site.split(path.sep).join('/')}/.buw/conflicts/hub/index.md`));
+    assert.match(output, /npm run publish -- --content my-workspace --path "hub\/index\.md" --force/);
+    assert.match(output, /npm run publish -- --content my-workspace --path "hub\/index\.md" --pull --force/);
+    assert.match(output, /Nothing published in Mine: 1 file\(s\) need settling/);
+    assert.doesNotMatch(output, /nothing changed/);
+  } finally { await fake.close(); }
+});
+
+test('a dry run with a conflict saves no copy and says a real publish will', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    const lines = [];
+    const result = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, dryRun: true, log: line => lines.push(line) });
+    assert.deepEqual(result.conflicts, ['hub/index.md']);
+    assert.equal(await exists(path.join(w.site, '.buw', 'conflicts')), false);
+    assert.match(lines.join('\n'), /a real publish saves the site's copy/);
+    assert.doesNotMatch(lines.join('\n'), /the site's copy:/);
+  } finally { await fake.close(); }
+});
+
+test('both resolutions settle one file, clear its copy, and leave another conflict and its copy alone', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await workspace(fake);
+    await writeFile(path.join(w.site, 'hub', 'other.md'), '# Other\n');
+    const options = { registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+    await publish({ content: w.site, ...options });
+    const make = async () => {
+      for (const file of ['index.md', 'other.md']) {
+        fake.seed(`${KEY}hub/${file}`, `# ${file}, agent\n`, 'text/markdown');
+        await writeFile(path.join(w.site, 'hub', file), `# ${file}, desk\n`);
+      }
+    };
+    await make();
+    const first = await publish({ content: w.site, ...options });
+    assert.deepEqual(first.conflicts, ['hub/index.md', 'hub/other.md']);
+    assert.deepEqual(first.saved, ['hub/index.md', 'hub/other.md']);
+
+    // Keep this folder's index.md.
+    await publish({ content: 'my-workspace', paths: ['hub/index.md'], force: true, ...options });
+    assert.equal(fake.text(`${KEY}hub/index.md`), '# index.md, desk\n');
+    assert.equal(await exists(copyOf(w.site)('hub/index.md')), false);
+    assert.equal(await exists(copyOf(w.site)('hub/other.md')), true, 'the other conflict keeps its copy');
+    const afterOne = await publish({ content: w.site, ...options });
+    assert.deepEqual(afterOne.conflicts, ['hub/other.md'], 'the settled file is not reported again');
+
+    // Keep the site's other.md.
+    await publish({ content: 'my-workspace', paths: ['hub/other.md'], pull: true, force: true, ...options });
+    assert.equal(await readFile(path.join(w.site, 'hub', 'other.md'), 'utf8'), '# other.md, agent\n');
+    assert.equal(await exists(copyOf(w.site)('hub/other.md')), false);
+    const clean = await publish({ content: w.site, ...options });
+    assert.deepEqual(clean.conflicts, []);
+    noBuw(fake);
+  } finally { await fake.close(); }
+});
+
+test('a named --pull --force keeps a local card that is not published yet', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const options = { registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+    const local = JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
+    local.entities.push({ id: 'desk', title: 'Desk', folder: 'desk', steps: [{ name: 'Page', path: 'index.md' }] });
+    await writeFile(path.join(w.site, 'workspace.json'), JSON.stringify(local, null, 2));
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    await publish({ content: w.site, paths: ['hub/index.md'], pull: true, force: true, ...options });
+    assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub, agent\n');
+    const after = JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
+    assert.deepEqual(after.entities.map(item => item.id).sort(), ['desk', 'hub']);
+  } finally { await fake.close(); }
+});
+
+test('copying the saved file over the local one settles the conflict by hand', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const options = { content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    const conflicted = await publish(options);
+    await writeFile(path.join(w.site, 'hub', 'index.md'), await readFile(copyOf(w.site)('hub/index.md')));
+    const settled = await publish(options);
+    assert.equal(settled.unchanged, conflicted.unchanged + 1);
+    assert.deepEqual(settled.conflicts, []);
+    assert.equal(await exists(copyOf(w.site)('hub/index.md')), false);
+  } finally { await fake.close(); }
+});
+
+test('a publish naming another card keeps the first card\'s saved copy', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await workspace(fake);
+    await mkdir(path.join(w.site, 'notes'), { recursive: true });
+    await writeFile(path.join(w.site, 'notes', 'index.md'), '# Notes\n');
+    const list = JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
+    list.entities.push({ id: 'notes', title: 'Notes', folder: 'notes', steps: [{ name: 'Page', path: 'index.md' }] });
+    await writeFile(path.join(w.site, 'workspace.json'), JSON.stringify(list, null, 2));
+    const options = { registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+    await publish({ content: w.site, ...options });
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    await publish({ content: w.site, ...options });
+    assert.equal(await exists(copyOf(w.site)('hub/index.md')), true);
+    await writeFile(path.join(w.site, 'notes', 'index.md'), '# Notes, edited\n');
+    const named = await publish({ content: w.site, cards: ['notes'], ...options });
+    assert.equal(named.published, true);
+    assert.equal(await exists(copyOf(w.site)('hub/index.md')), true, 'another card\'s copy is not cleared');
+    noBuw(fake);
+  } finally { await fake.close(); }
+});
+
+test('exit codes: 1 for a failure, 2 for a real publish that left conflicts, 0 otherwise', () => {
+  assert.equal(exitCodeFor({ dryRun: false, conflicts: [], failed: [] }), 0);
+  assert.equal(exitCodeFor({ dryRun: false, conflicts: ['a'], failed: [] }), 2);
+  assert.equal(exitCodeFor({ dryRun: true, conflicts: ['a'], failed: [] }), 0);
+  assert.equal(exitCodeFor({ dryRun: false, conflicts: ['a'], failed: [new Error('x')] }), 1);
+  assert.equal(exitCodeFor({ dryRun: true, conflicts: [], failed: [new Error('x')] }), 1);
+  assert.equal(exitCodeFor({ dryRun: false, conflicts: 2 }), 2);
+  assert.equal(exitCodeFor(), 0);
+});
+
+test('publish --all reports workspaces with files to settle, and does not call them up to date', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    fake.seed(`${KEY}hub/index.md`, '# Hub, agent\n', 'text/markdown');
+    await writeFile(path.join(w.site, 'hub', 'index.md'), '# Hub, desk\n');
+    const lines = [];
+    const all = await publishAll({ registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: line => lines.push(line) });
+    assert.equal(all.conflicted.length, 1);
+    assert.equal(all.failed.length, 0);
+    assert.match(lines.join('\n'), /Mine: 1 to settle/);
+    assert.doesNotMatch(lines.join('\n'), /already up to date/);
   } finally { await fake.close(); }
 });

@@ -300,8 +300,12 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
       if (tag(text, 'Code')) throw new S3Error(tag(text, 'Message') || 'Copy failed', { status: 502, code: tag(text, 'Code'), key: toKey });
       return { etag: (tag(text, 'ETag') || '').replace(/^"|"$/g, '') || null };
     },
-    async del(key) {
-      await send('DELETE', key);
+    /**
+     * Delete an object. `ifMatch` (an ETag) deletes it only while it still has that ETag: S3 answers
+     * 412 for a different one, 409 for a write racing the delete, and 404 when it is already gone.
+     */
+    async del(key, { ifMatch } = {}) {
+      await send('DELETE', key, ifMatch ? { headers: { 'if-match': `"${ifMatch}"` } } : undefined);
     },
     /**
      * Every object under a prefix (paginated through), and with a delimiter the "folders" too.

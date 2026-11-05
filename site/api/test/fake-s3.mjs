@@ -87,6 +87,12 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     }
 
     if (request.method === 'DELETE') {
+      const ifMatch = request.headers['if-match'];
+      if (ifMatch) {
+        const existing = objects.get(key);
+        if (!existing) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
+        if (`"${existing.etag}"` !== ifMatch) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
+      }
       objects.delete(key);
       response.writeHead(204);
       return response.end();

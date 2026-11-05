@@ -12,10 +12,15 @@
 // workspace), which is what tells "changed here" from "changed on the site": a card made or a
 // section edited on the published site comes down on the next publish instead of being written
 // over, a file changed on both sides is reported and left alone, and the card list is merged card
-// by card. Without that record (a workspace's first sync) a publish keeps its old rule — this
+// by card. Without any record (a workspace's first sync) a publish keeps its old rule — this
 // folder wins — unless the bucket's copy is the newer one, which it reports instead.
+//
+// Every write to the bucket is conditional (If-Match the listed ETag, If-None-Match * for a new
+// key, If-Match on a delete), so a change someone writes between the listing and the upload is a
+// conflict, never overwritten. Only `force` uploads a file body without a condition. The site's
+// copy of a conflicted file is saved under .buw/conflicts, which is never uploaded.
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { contentTypeOf } from '../../site/api/s3.mjs';
 
@@ -95,6 +100,46 @@ async function saveBase(root, where, base) {
   const temp = `${file}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify(all, null, 2)}\n`);
   await rename(temp, file);
+}
+
+/** A conditional write that lost to someone else's: the precondition failed, raced a write, or the key was deleted first. */
+export const lostRace = error => [412, 409, 404].includes(error?.status);
+
+const CONFLICTS_DIR = path.join('.buw', 'conflicts');
+
+/** Save the bucket's copy of a file under .buw/conflicts. Never throws: the publish goes on without it. */
+async function saveCopy({ root, bucket, key, file, etag, log }) {
+  const target = path.join(root, CONFLICTS_DIR, ...file.split('/'));
+  try {
+    if (etag) {
+      const existing = await readFile(target).catch(() => null);
+      if (existing && md5(existing) === etag) return true;
+    }
+    const got = await bucket.getBytes(key);
+    if (!got?.buffer) { log(`  could not save the site's copy of ${file}: it is not on the site any more`); return false; }
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, got.buffer);
+    return true;
+  } catch (error) {
+    log(`  could not save the site's copy of ${file}: ${error.message}`);
+    return false;
+  }
+}
+
+/** Remove saved copies in this run's scope that are no longer in conflict, then empty folders. Best effort. */
+async function sweepCopies(root, scope, keep) {
+  const dir = path.join(root, CONFLICTS_DIR);
+  try {
+    const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+    const dirs = [];
+    for (const entry of entries) {
+      const parent = entry.parentPath ?? entry.path;
+      if (entry.isDirectory()) { dirs.push(path.join(parent, entry.name)); continue; }
+      const rel = toPosix(path.relative(dir, path.join(parent, entry.name)));
+      if (inScope(rel, scope) && !keep.has(rel)) await rm(path.join(parent, entry.name), { force: true });
+    }
+    for (const folder of dirs.sort((a, b) => b.length - a.length)) await rmdir(folder).catch(() => {});
+  } catch { /* nothing saved, or not readable: nothing to clear */ }
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -282,9 +327,12 @@ export const MAX_DELETES = 5;
  * most) and the publish then stops with a message rather than overwrite the change.
  *
  * A file changed only on the site comes down instead of being written over; one changed on both
- * sides is a conflict, left alone and reported, unless `force` (this folder's copy goes up).
+ * sides is a conflict, left alone and reported, unless `force` (this folder's copy goes up). Uploads
+ * and deletes are conditional on the listed ETag, so a change landing mid-publish is a conflict too
+ * (an upload) or keeps the file for the next publish (a delete).
  *
- * @returns {{ uploads: string[], downloads: string[], deletes: string[], conflicts: string[], unchanged: number, problems: string[] }}
+ * @returns {{ uploads: string[], downloads: string[], deletes: string[], conflicts: string[], saved: string[], unchanged: number, problems: string[] }}
+ *   (`saved`: the conflicted files whose site copy is under .buw/conflicts)
  */
 export async function syncUp({ root, bucket, prefix, scope, dryRun = false, force = false, allowDeletes = false, maxDeletes = MAX_DELETES, listEtag = null, log = () => {} }) {
   const base = prefix ? `${prefix.replace(/\/+$/, '')}/` : '';
@@ -294,6 +342,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
   const { objects } = await bucket.list(base);
   const remote = new Map(objects.map(object => [object.key.slice(base.length), object]));
 
+  const firstSync = !Object.keys(record.files).length;
   const problems = [];
   const uploads = [];
   const downloads = [];
@@ -312,9 +361,10 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
     if (!have || force || file === 'workspace.json' || (was && have.etag === was)) { uploads.push(file); continue; }
     // Changed only on the site: down.
     if (was && mine === was) { downloads.push(file); continue; }
-    // No record yet (a first sync): this folder wins as it always did, unless the bucket's copy is
-    // the newer one. That, or a change on both sides, is for a person to settle.
-    if (!was && !(Date.parse(have.lastModified) > info.mtimeMs)) { uploads.push(file); continue; }
+    // No record at all yet (a first sync): this folder wins as it always did, unless the bucket's
+    // copy is the newer one. With a record, a file it has no entry for is a conflict, whichever is
+    // newer, as is a change on both sides: for a person to settle.
+    if (firstSync && !was && !(Date.parse(have.lastModified) > info.mtimeMs)) { uploads.push(file); continue; }
     conflicts.push(file);
   }
   const deletes = [];
@@ -332,28 +382,49 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
     if (!dryRun) throw new Error(`Nothing published: ${message}\nCheck them, then publish again with --allow-deletes.`);
     log(`  Warning: ${message}\n  A real publish stops here unless it is run with --allow-deletes.`);
   }
-  if (conflicts.length) log(`  changed here and on the site, left alone (compare them, or publish with --force to keep this folder's):\n    ${conflicts.join('\n    ')}`);
 
+  const saved = [];
+  const sent = [];
+  const deleted = [];
   if (!dryRun) {
+    for (const file of conflicts) {
+      if (await saveCopy({ root, bucket, key: `${base}${file}`, file, etag: remote.get(file)?.etag, log })) saved.push(file);
+    }
     for (const file of uploads) {
       let body = await readFile(path.join(root, file));
-      if (file === 'workspace.json' && listEtag) {
-        let etag = listEtag;
-        for (let attempt = 0; ; attempt += 1) {
-          try {
-            await bucket.put(`${base}${toPosix(file)}`, body, { contentType: contentTypeOf(file), ifMatch: etag });
-            break;
-          } catch (error) {
-            if (error.status !== 412) throw error;
-            if (attempt >= 2) throw new Error('The card list changed on the site during the publish, so it was not uploaded. Run the publish again.');
-            log('  the card list changed on the site meanwhile; merging again');
-            etag = (await mergeCardList({ root, bucket, prefix, log })).etag;
-            body = await readFile(path.join(root, file));
+      const key = `${base}${toPosix(file)}`;
+      try {
+        if (file === 'workspace.json') {
+          // The card list is always conditional, even with force: it merges card by card. A null
+          // listEtag means the merge saw no list, so it is `If-None-Match: *`, never the listing's
+          // ETag (that version was never merged).
+          let etag = listEtag;
+          for (let attempt = 0; ; attempt += 1) {
+            try {
+              await bucket.put(key, body, { contentType: contentTypeOf(file), ...(etag ? { ifMatch: etag } : { ifNoneMatch: '*' }) });
+              break;
+            } catch (error) {
+              if (!lostRace(error)) throw error;
+              if (attempt >= 2) throw new Error('The card list changed on the site during the publish, so it was not uploaded. Run the publish again.');
+              log('  the card list changed on the site meanwhile; merging again');
+              etag = (await mergeCardList({ root, bucket, prefix, log })).etag;
+              body = await readFile(path.join(root, file));
+            }
           }
+        } else {
+          const have = remote.get(file);
+          const condition = force ? {} : have ? { ifMatch: have.etag } : { ifNoneMatch: '*' };
+          await bucket.put(key, body, { contentType: contentTypeOf(file), ...condition });
         }
-      } else {
-        await bucket.put(`${base}${toPosix(file)}`, body, { contentType: contentTypeOf(file) });
+      } catch (error) {
+        if (file === 'workspace.json' || !lostRace(error)) throw error;
+        conflicts.push(file);
+        conflicts.sort();
+        log(`  kept ${file}: changed on the site during this publish; left alone`);
+        if (await saveCopy({ root, bucket, key, file, log })) saved.push(file);
+        continue;
       }
+      sent.push(file);
       settled[file] = md5(body);
       log(`  up   ${file}`);
     }
@@ -367,15 +438,25 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
       log(`  down ${file}`);
     }
     for (const file of deletes) {
-      await bucket.del(`${base}${file}`);
+      try {
+        await bucket.del(`${base}${file}`, { ifMatch: remote.get(file).etag });
+      } catch (error) {
+        if (error.status === 412 || error.status === 409) {
+          log(`  kept ${file}: changed on the site during this publish; it comes down on the next publish`);
+          continue;
+        }
+        if (error.status !== 404) throw error;
+      }
       delete record.files[file];
+      deleted.push(file);
       log(`  gone ${file}`);
     }
     Object.assign(record.files, settled);
     if (settled['workspace.json']) record.list = JSON.parse(await readFile(path.join(root, 'workspace.json'), 'utf8'));
     await saveBase(root, where, record);
+    await sweepCopies(root, scope, new Set(conflicts));
   }
-  return { uploads, downloads, deletes, conflicts, unchanged, problems };
+  return { uploads: dryRun ? uploads : sent, downloads, deletes: dryRun ? deletes : deleted, conflicts, saved: saved.sort(), unchanged, problems };
 }
 
 /**
@@ -417,6 +498,7 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
   if (!dryRun) {
     if (record.files['workspace.json']) record.list = JSON.parse(await readFile(path.join(root, 'workspace.json'), 'utf8'));
     await saveBase(root, where, record);
+    await sweepCopies(root, scope, new Set(differs));
   }
   return { written, differs, unchanged };
 }
