@@ -282,6 +282,7 @@ function ChatView({ id }: { id?: string }) {
   // Messages the owner sent that the Hub has not answered for yet: shown as rows at once, then replaced by the Hub's own rows. One that was sent
   // before the new chat had a name waits (`posting` false) and goes out as soon as it has one.
   const [local, setLocal] = useState<{ key: string; text: string; posting: boolean }[]>([])
+  const [stopProblem, setStopProblem] = useState<string | null>(null)   // a Stop that did not reach Hermes: kept apart from `error`, which a followed turn clears
   const [stopping, setStopping] = useState(false)   // Stop was pressed: say so until the reply has ended
   const [known, setKnown] = useState(!!id && !parseHelpId(id))   // the conversation has a name, so a message can be queued in it
   const live = useRef(false)   // a turn is being read from a stream (sent here, or followed)
@@ -348,6 +349,7 @@ function ChatView({ id }: { id?: string }) {
       setPending(null)
       setDelegates([])
       setStreaming(false)
+      setStopping(false)
       setRecovering(false)
       setNote(null)
       setError(problem)
@@ -395,8 +397,9 @@ function ChatView({ id }: { id?: string }) {
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
     setStopping(true)
+    setStopProblem(null)
     const id = run.current
-    if (id) { void hubPost('/chat/stop', { run: id }).catch(() => {}); abort.current?.abort(); return }
+    if (id) { void hubPost('/chat/stop', { run: id }).catch(() => { setStopping(false); setStopProblem('Stop did not reach Hermes. The reply is still running; press Stop again.') }); abort.current?.abort(); return }
     // Before `started` there is no run to name, and aborting now would leave it running on the server:
     // hold the stop until onStarted, which sends it (or aborts, when the turn has no run).
     stopWanted.current = true
@@ -463,11 +466,12 @@ function ChatView({ id }: { id?: string }) {
    * Puts a message in the queue of this conversation: it goes when the reply ends. The row shows at once and the Hub's answer replaces it.
    * The text goes back to the draft when that fails. `key` is the row already shown for it (a message that waited for the chat's name).
    */
-  const queueMessage = async (text: string, key = `l${Math.random().toString(36).slice(2, 8)}`) => {
+  const queueMessage = async (text: string, waitingKey?: string) => {
+    const key = waitingKey ?? `l${Math.random().toString(36).slice(2, 8)}`
     const name = conversation.current
     setError(null)
     setLocal(current => (current.some(item => item.key === key) ? current.map(item => (item.key === key ? { ...item, posting: !!name } : item)) : [...current, { key, text, posting: !!name }]))
-    setDraft('')
+    if (waitingKey === undefined) setDraft('')   // a row going out now that the chat has a name is not a new send: the box keeps what is being typed
     if (!name) return   // no name yet: the row waits, and goes out when the chat has one
     try {
       const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) }, undefined, true)
@@ -476,7 +480,7 @@ function ChatView({ id }: { id?: string }) {
       void afterRef.current(name)   // nothing was running after all: the turn has started, so follow it
     } catch (failure) {
       setLocal(current => current.filter(item => item.key !== key))
-      setDraft(current => current || text)
+      setDraft(current => (current ? `${text}\n\n${current}` : text))   // the message comes back in front of what is being typed: nothing is lost
       setError(failure instanceof Error ? failure.message : 'The message was not queued.')
       void afterRef.current(name)   // the answer may only have been lost: show what the Hub kept
     }
@@ -488,6 +492,16 @@ function ChatView({ id }: { id?: string }) {
     if (!known || !conversation.current) return
     for (const item of local) if (!item.posting) void queueRef.current(item.text, item.key)
   }, [known, local])
+  // The first post of a new chat failed: nothing will name the chat, so the rows waiting for it go back into the box (after `first`, the message
+  // that failed, and before anything typed since). Nothing the owner wrote stays only in a row.
+  const localRef = useRef(local)
+  useEffect(() => { localRef.current = local })
+  const giveBack = (first?: string) => {
+    const waiting = localRef.current.filter(item => !item.posting).map(item => item.text)
+    if (waiting.length) setLocal(current => current.filter(item => item.posting))
+    const texts = [...(first ? [first] : []), ...waiting]
+    if (texts.length) setDraft(current => [...texts, current].filter(Boolean).join('\n\n'))
+  }
 
   /** Send now: the held messages go out as one turn. */
   const sendHeld = async () => {
@@ -527,7 +541,7 @@ function ChatView({ id }: { id?: string }) {
       setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
       if (answer.running) void followRef.current(name, answer)
       else setStopping(false)   // the reply has ended on the server: Stopping… is over
-    } catch { /* the watcher looks again while a message waits */ }
+    } catch { setStopping(false) /* the watcher looks again while a message waits */ }
   }
   useEffect(() => { afterRef.current = afterTurn })
 
@@ -615,6 +629,7 @@ function ChatView({ id }: { id?: string }) {
     setStreaming(false)
     if (swapped) release(previews)
     if (problem) setError(problem)
+    if (!conversation.current) { setStopping(false); giveBack() }   // no name came: nothing will send the waiting rows
     if (cut) list.reload()
     if (finished) {
       list.reload()
@@ -695,7 +710,8 @@ function ChatView({ id }: { id?: string }) {
         setStreaming(false)
         // This page thought the chat was idle, but a reply is running (another device, or the queue's own turn): the message waits its turn.
         if (failure instanceof HubError && failure.status === 409 && conversation.current && !sending.length) { void queueMessage(text); return }
-        if (asked === undefined) { setDraft(text); setImages(sending); slots.current = MAX_IMAGES - sending.length }
+        setStopping(false)
+        if (asked === undefined) { giveBack(text); setImages(sending); slots.current = MAX_IMAGES - sending.length } else giveBack()
         setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
       },
     })
@@ -804,6 +820,7 @@ function ChatView({ id }: { id?: string }) {
             {queued.length + local.length > 1 && <p className="hub-muted hub-queue-join" data-queued-join>{held ? 'These go together when you send them.' : 'These go together when the reply ends.'}</p>}
           </div>
         )}
+        {stopProblem && <p className="hub-error" role="alert" data-chat-stop-error>{stopProblem}</p>}
         {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
