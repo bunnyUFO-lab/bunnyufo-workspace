@@ -35,7 +35,8 @@ Parameters:
       limited to some sections or verbs, or revocable on its own. The scope is nothing (every
       verb on every section), section|section (every verb on those sections), or rights such as
       read=*;write=inbox|assistant (read, write, delete; each on * or on some sections; a verb not
-      listed is not allowed). Most setups leave this empty.
+      listed is not allowed). A write list may also name @library: add cards and tabs to any Library
+      section the owner has not turned off. Most setups leave this empty.
   AllowedOrigins:
     Type: CommaDelimitedList
     Default: ''

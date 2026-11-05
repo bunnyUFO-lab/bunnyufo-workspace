@@ -6,6 +6,11 @@
 //   npm run publish -- --pull       the other way: fetch what the bucket has and this folder lacks
 //   npm run publish -- --allow-deletes   publish even when more than 5 files would be deleted from the bucket
 //
+// Uploads and deletes are conditional, so a change someone else writes to the bucket is never
+// overwritten: the file is left alone, the site's copy is saved under .buw/conflicts, and the
+// publish prints how to settle it (--path <file> --force keeps this folder's, --path <file> --pull
+// --force keeps the site's). Exit code 2 means a real publish left such files; 1 is an error.
+//
 // Cards are written across several workspaces in a day, so publishing the active workspace only is
 // how the site ends up behind the app. --all walks the whole registry, and --card names a card in
 // any workspace: it publishes the workspace that holds it, not whichever one is active.
@@ -74,6 +79,40 @@ async function workspaceForCards({ cards, registryFile, env }) {
   return first.workspace;
 }
 
+/** What to tell a person about files changed here and on the site: where the site's copy is, and how to settle each. */
+function conflictReport({ conflicts, saved, root, id, dryRun }) {
+  const copies = new Set(saved);
+  const lines = [`  ${conflicts.length} file(s) changed here and on the site, left alone:`];
+  for (const file of conflicts) {
+    lines.push(`    ${file}`);
+    if (copies.has(file)) lines.push(`      the site's copy:    ${root.split(path.sep).join('/')}/.buw/conflicts/${file}`);
+    lines.push(`      keep this folder's: npm run publish -- --content ${id} --path "${file}" --force`);
+    lines.push(`      keep the site's:    npm run publish -- --content ${id} --path "${file}" --pull --force`);
+  }
+  if (dryRun) lines.push("  a real publish saves the site's copy");
+  return lines.join('\n');
+}
+
+/** Everything a run left for a person: files changed on both sides, and site keys that clash with a name here (case, a file where a folder is). */
+export const unsettledOf = result => [...(result?.conflicts ?? []), ...(result?.clashes ?? [])];
+
+/** What to tell a person about site keys this disk cannot hold: they stay on the site, untouched. */
+function clashReport({ clashes, dryRun }) {
+  return [
+    `  ${clashes.length} file(s) on the site clash with a name here (a case-only difference, or a file where a folder is), left alone${dryRun ? '' : ' and not touched'}:`,
+    ...clashes.map(file => `    ${file}`),
+    '  rename or remove one of each pair on the site (or here), then publish again',
+  ].join('\n');
+}
+
+/** The process exit code: 1 for a failure, 2 when a real publish left files unsettled, else 0. */
+export function exitCodeFor({ dryRun = false, conflicts = 0, failed = 0 } = {}) {
+  const count = value => (Array.isArray(value) ? value.length : Number(value) || 0);
+  if (count(failed)) return 1;
+  if (!dryRun && count(conflicts)) return 2;
+  return 0;
+}
+
 export async function publish({ content, message, cards = [], paths = [], dryRun = false, pull = false, force = false, allowDeletes = false, registryFile = defaultRegistryFile(), bucketOptions = {}, env = process.env, log = console.log } = {}) {
   const workspace = (!content && cards.length ? await workspaceForCards({ cards, registryFile, env }) : null)
     ?? await resolveWorkspace({ appRepo, content, registryFile, env });
@@ -100,13 +139,29 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
       const remote = await client.getJson(`${prefix}/workspace.json`).catch(() => null);
       for (const entity of remote?.value?.entities ?? []) if (entity?.folder && !scope.folders.includes(entity.folder)) scope.folders.push(entity.folder);
     }
-    const result = await syncDown({ root, bucket: client, prefix, scope, dryRun, force, log });
+    // A named --pull --force settles those files only: the card list was merged above, and the
+    // bucket's copy of it must not replace this folder's (it may hold cards not published yet).
+    if (force && named.length) scope.files = [];
+    const result = await syncDown({ root, bucket: client, prefix, scope, dryRun, force, remoteList: list.list, log });
+    if (result.clashes.length) log(clashReport({ clashes: result.clashes, dryRun }));
     log(`${workspace.name} (${root}) <- ${where}\n  ${result.written.length} file(s) ${dryRun ? 'to fetch' : 'fetched'}, ${result.unchanged} unchanged${result.differs.length ? `\n  left alone, different here: ${result.differs.join(', ')}  (publish them, or --force to take the bucket's)` : ''}`);
     return { published: false, pulled: !dryRun && result.written.length > 0, workspace, ...result };
   }
 
   const result = await syncUp({ root, bucket: client, prefix, scope, dryRun, force, allowDeletes, listEtag: list.etag, log });
   const total = result.uploads.length + result.downloads.length + result.deletes.length;
+  const clashed = result.clashes?.length ?? 0;
+  const conflicted = result.conflicts.length + clashed;
+  if (clashed) log(clashReport({ clashes: result.clashes, dryRun }));
+  if (result.conflicts.length) log(conflictReport({ conflicts: result.conflicts, saved: result.saved ?? [], root, id: workspace.id, dryRun }));
+  if (!total && conflicted) {
+    log(`Nothing ${dryRun ? 'to publish' : 'published'} in ${workspace.name}: ${conflicted} file(s) need settling; ${result.unchanged} already match.`);
+    return { published: false, workspace, ...result };
+  }
+  if (!total && result.kept?.length) {
+    log(`Nothing published in ${workspace.name}: ${result.kept.length} file(s) changed on the site during the publish and were kept; they come down on the next publish.`);
+    return { published: false, workspace, ...result };
+  }
   if (!total) {
     if (named.length) throw new Error(`Nothing published: nothing changed in ${named.join(', ')}.`);
     log(`Nothing to publish in ${workspace.name}: ${result.unchanged} file(s) already match ${where}.`);
@@ -116,6 +171,7 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
   log(`${workspace.name} (${root}) -> ${where}\n  ${subject}, ${result.unchanged} unchanged`);
   if (dryRun) { log('Dry run: nothing uploaded.'); return { published: false, workspace, subject, ...result }; }
   log(`Published.${workspace.site ? ` It is live now: ${workspace.site}` : ''}`);
+  if (conflicted) log(`${conflicted} file(s) were left out; settle them as described above.`);
   return { published: true, workspace, subject, ...result };
 }
 
@@ -142,12 +198,20 @@ export async function publishAll({ message, dryRun = false, pull = false, allowD
   }
 
   // A dry run never sets `published`; it reports what it would do by returning a subject.
-  const line = result => (result.error ? 'needs a hand' : result.published ? 'published' : result.pulled ? 'pulled' : result.subject ? 'would publish' : 'already up to date');
+  const settle = result => (unsettledOf(result).length ? `${unsettledOf(result).length} to settle` : '');
+  const line = result => {
+    if (result.error) return 'needs a hand';
+    const rest = settle(result);
+    const base = result.published ? 'published' : result.pulled ? 'pulled' : result.subject ? 'would publish' : '';
+    return base ? (rest ? `${base}, ${rest}` : base) : rest || 'already up to date';
+  };
   log(`\n${dryRun ? 'Dry run' : pull ? 'Pull' : 'Publish'} summary`);
   for (const result of results) log(`  ${result.workspace.name}: ${line(result)}`);
   const failed = results.filter(result => result.error);
+  const conflicted = results.filter(result => unsettledOf(result).length);
   if (failed.length) log(`\n${failed.length} workspace(s) did not publish; their messages are above.`);
-  return { results, failed };
+  if (conflicted.length) log(`\n${conflicted.length} workspace(s) have files to settle; the commands are above.`);
+  return { results, failed, conflicted };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -162,10 +226,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const allowDeletes = args.includes('--allow-deletes');
     if (args.includes('--all')) {
       if (value('--content') || every('--card').length || every('--path').length) throw new Error('--all publishes whole workspaces; drop --content, --card and --path.');
-      const { failed } = await publishAll({ message, dryRun, pull, allowDeletes });
-      if (failed.length) process.exit(1);
+      const { failed, conflicted } = await publishAll({ message, dryRun, pull, allowDeletes });
+      process.exitCode = exitCodeFor({ dryRun, failed, conflicts: conflicted });
     } else {
-      await publish({ content: value('--content'), message, dryRun, pull, force, allowDeletes, cards: every('--card'), paths: every('--path') });
+      const result = await publish({ content: value('--content'), message, dryRun, pull, force, allowDeletes, cards: every('--card'), paths: every('--path') });
+      process.exitCode = exitCodeFor({ dryRun, conflicts: unsettledOf(result) });
     }
   } catch (error) {
     console.error(error.message);

@@ -16,11 +16,24 @@ test('every research persona is a Team agent whose first preset is a Hermes rese
     assert.deepEqual(preset.targets, ['hermes']);
     assert.equal(preset.model, null, 'Hermes main: no provider of its own');
     assert.ok(entry.text.startsWith(`You are ${agent.name}`));
-    assert.ok(entry.text.includes('Write exactly one card to the `assistant` section'));
+    assert.ok(entry.text.includes('Write exactly one card to the `<section>` section'));
+    assert.doesNotMatch(entry.text, /\{\{/, 'every placeholder is filled');
+    assert.ok(entry.text.includes('--context chat') && entry.text.includes(`--agent "${agent.name}"`), 'a chat write says who and that it is a chat');
     assert.ok(preset.template.includes(entry.extra), 'the extra rules are the preset\'s');
     assert.ok(entry.text.length < 2500);
     assert.match(entry.text, /Never create requests or Asks/, `${entry.id} may not file anything`);
     assert.doesNotMatch(entry.text, /--changes/, entry.id);
+  }
+});
+
+test('a research persona quotes the card-write rules: the section from the chat, why recorded, a new tab before an edit, no script edits', () => {
+  for (const entry of CHAT_PERSONAS.filter(item => item.preset)) {
+    assert.ok(entry.text.includes('`<section>` is the project this chat is about, if it has a Library section, else `assistant`. Ask which one only if the chat points at two'), entry.id);
+    assert.ok(entry.text.includes('--why "<one line: what this is, which section and why>" --context chat'), entry.id);
+    assert.ok(entry.text.includes('prefer a new tab to editing an existing one'), entry.id);
+    assert.ok(entry.text.includes('(`.js`, `.mjs`, `.cjs`, `.wasm`)') && entry.text.includes("turns off that tab's saving until the owner reverts it"), entry.id);
+    assert.ok(entry.text.includes('Pass `--edit` only when the owner asked for that very card'), entry.id);
+    assert.ok(entry.text.length < 2500, `${entry.id} stays under the length check`);
   }
 });
 

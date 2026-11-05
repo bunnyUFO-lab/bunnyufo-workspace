@@ -1865,8 +1865,8 @@ test('GET /hub/project-cards: the cards of the section named for the project, ne
     assert.equal(big.cards.length, 20);
     assert.equal(big.total, 23);
     assert.equal(big.cards[0].title, 'Card 22');
-    assert.deepEqual((await get('/hub/project-cards?project=empty')).body, { section: 'empty', cards: [], total: 0 }, 'A section with no cards is still its Library.');
-    assert.deepEqual((await get('/hub/project-cards?project=nothing-here')).body, { section: null, cards: [], total: 0 });
+    assert.deepEqual((await get('/hub/project-cards?project=empty')).body, { section: 'empty', cards: [], total: 0, agents: true }, 'A section with no cards is still its Library.');
+    assert.deepEqual((await get('/hub/project-cards?project=nothing-here')).body, { section: null, cards: [], total: 0, agents: false });
     assert.equal((await get('/hub/project-cards?project=agent-plans')).body.section, null, 'agent-plans is not a project.');
     assert.equal((await get('/hub/project-cards?project=inbox')).body.section, null, 'The inbox is not a Library section.');
     assert.equal((await get('/hub/project-cards')).status, 400);

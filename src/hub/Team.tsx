@@ -15,6 +15,7 @@ import { startChat } from './chatStart'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import './team/team.css'
 import RefreshNote from './RefreshNote'
+import AgentCardSettings from './AgentCardSettings'
 import { useHubData } from './useHub'
 
 interface Toast { text: string; undo?: () => void }
@@ -181,6 +182,7 @@ export default function Team() {
             ))}
           </div>
         )}
+      {view === 'roster' && <AgentCardSettings />}
       {sheetAgent && (
         <SpriteSheet
           key={sheetAgent.id}

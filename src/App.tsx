@@ -10,6 +10,7 @@ import { downloadFile } from './lib/download'
 import BrandLogo from './components/BrandLogo'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
+import CardWritesStrip from './hub/CardWritesStrip'
 import HomeGrid from './components/HomeGrid'
 import UndoToast from './components/UndoToast'
 import { restore, trashOf } from './lib/trash'
@@ -679,6 +680,8 @@ export default function App() {
           liveAppUrl={liveUrl}
         />
 
+        {host.hub && entity && !route.hub && !entity.workspace.builtin && <CardWritesStrip key={`${entity.workspace.id}/${entity.folder}`} section={entity.workspace.id} folder={entity.folder} />}
+
         <div className="content">
           {route.hub && host.hub ? (
             <ReportBoundary key={hubKey(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
@@ -702,7 +705,7 @@ export default function App() {
             /></Suspense>
           ) : entity && reportUrl ? (
             <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><ReportViewer key={reportUrl} url={reportUrl} title={step?.name ?? entity.title} relativePath={cardFile(entity, step?.path ?? '')}
-              card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path } : undefined}
+              card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path, ...(step.agentTab ? { agentTab: true } : {}) } : undefined}
               stepIndex={stepIndex} onStep={index => selectStep(entity.id, index)} /></Suspense>
           ) : (
             <>

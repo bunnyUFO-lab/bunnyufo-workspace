@@ -27,7 +27,7 @@ try {
       const parts = [];
       if (uploads.length) parts.push(`${uploads.length} file(s) not uploaded`);
       if (downloads.length) parts.push(`${downloads.length} file(s) changed on the site, not brought down`);
-      if (conflicts.length) parts.push(`${conflicts.length} file(s) changed in both places`);
+      if (conflicts.length) parts.push(`${conflicts.length} file(s) changed in both places (publish saves the site's copy and says how to settle them)`);
       if (deletes.length) parts.push(`${deletes.length} removed file(s) still in the bucket`);
       if (parts.length) notes.push(`${workspace.name}: ${parts.join(', ')}`);
     } catch { /* no bucket, no credentials, no network, a secret in the tree: not this hook's business */ }
