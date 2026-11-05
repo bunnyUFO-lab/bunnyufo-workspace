@@ -127,3 +127,13 @@ test('main.mjs options: sign-in off and nothing set passes null, so a local run 
   const local = await fixture({ requireRemoteUser: false, allowedOrigins: writeOriginsFor({}) });
   try { assert.equal((await local.send('/workspace/pin', { headers: { ...json, Origin: 'http://localhost:5173' } })).status, 200); } finally { await local.close(); }
 });
+
+test('the site API service is reached through the proxy only: its container publishes no port', async () => {
+  // A published port would let anything on the LAN send Remote-User straight to the service. `expose` is for the proxy's network alone (ws-ubo.4).
+  const { readFileSync } = await import('node:fs');
+  const compose = readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8').replace(/\r/g, '');
+  const code = compose.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
+  const service = code.slice(code.indexOf('site-api:'));
+  assert.doesNotMatch(service, /^\s*ports:/m, 'no ports: on site-api');
+  assert.match(service, /^\s*expose:\s*\["8099"\]/m, 'expose, not ports');
+});

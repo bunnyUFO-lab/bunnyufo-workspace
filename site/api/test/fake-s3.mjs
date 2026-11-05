@@ -113,9 +113,9 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     text: key => objects.get(key)?.body.toString('utf8') ?? null,
     json: key => { const text = objects.get(key)?.body.toString('utf8'); return text === undefined ? null : JSON.parse(text); },
     /** Seed an object straight into the store. */
-    seed(key, body, contentType = 'application/octet-stream', metadata = {}) {
+    seed(key, body, contentType = 'application/octet-stream', metadata = {}, lastModified = new Date()) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-      objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata });
+      objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date(lastModified).toUTCString(), metadata });
     },
     // Drop keep-alive and stuck sockets too, so a close never waits on a client that is not coming back.
     close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }),

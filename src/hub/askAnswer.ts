@@ -25,7 +25,7 @@ export function avatarNotice(result: unknown): string | null {
       : `Approved again as ${text(rerun.request)}. It starts on the Gaming PC within a few minutes of the allow lines being in.`
   }
   const edit = (result as { agentEdit?: { applied?: boolean; why?: string; profile?: string } } | null)?.agentEdit
-  if (edit && typeof edit === 'object' && edit.applied === true && typeof edit.profile === 'string') return 'Applied. Signed and sent to the Hermes host, which changes the model within about 5 minutes and restarts the gateway. Details of the agent says when it is live.'
+  if (edit && typeof edit === 'object' && edit.applied === true && typeof edit.profile === 'string') return 'Sent to the Hermes host. Not running yet. Usually about a minute, at most 5. Details of the agent says when it is running.'
   if (edit && typeof edit === 'object') return edit.applied === true ? 'Applied. The persona has a new version; chats use it from their next message. You can revert it on the Edit page.' : `Not applied: ${text(edit.why)}`
   const avatar = (result as { avatar?: { started?: boolean; message?: string; chosen?: boolean; why?: string } } | null)?.avatar
   if (!avatar || typeof avatar !== 'object') return null
