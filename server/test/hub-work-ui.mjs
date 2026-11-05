@@ -137,8 +137,7 @@ try {
   assert.equal(await phone.locator('.wk-lane[data-lane="blocked"] .wk-card').count(), 4);
   const chip = await phone.locator('[data-lane-chip="done"]').boundingBox();
   assert.ok(chip.height >= 44, `A lane chip is at least 44 px high (${chip.height}).`);
-  await phone.waitForTimeout(250);
-  assert.match(await phone.locator('.wk-chips-wrap').getAttribute('data-overflow'), /end/, 'The lane chips fade at the cut edge.');
+  assert.ok(await phone.locator('.wk-lane-chips').evaluate(node => node.scrollWidth <= node.clientWidth), 'The lane chips wrap at phone width: no sideways scrolling.');
   await phone.locator('[data-lane-chip="done"]').tap();
   await phone.locator('[data-lane-chip="review"]').tap();
   assert.deepEqual(await visibleLanes(phone), ['review'], 'Review is reachable on a phone.');

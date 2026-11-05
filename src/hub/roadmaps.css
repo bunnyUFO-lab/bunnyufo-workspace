@@ -4,6 +4,13 @@
 .rm-crumbs::-webkit-scrollbar { display: none; }
 .rm-crumb, .rm-inside { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 6px; color: var(--text-dim); font-size: 0.85rem; text-decoration: none; }
 .rm-inside { padding: 0; gap: 2px; }
+/* A phone shows the whole path: the crumbs wrap and the bar grows with them. */
+@media (max-width: 640px) {
+  .hub-map-branchbar { height: auto; flex-wrap: wrap; }
+  .rm-crumbs { flex-wrap: wrap; overflow: visible; white-space: normal; }
+  .rm-crumb { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .rm-inside { flex: 0 1 auto; min-width: 0; flex-wrap: wrap; }
+}
 a.rm-crumb:hover { color: var(--text); text-decoration: underline; }
 a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 .rm-crumb.now { color: var(--text-bright); font-weight: 600; }
@@ -47,5 +54,5 @@ a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-
 }
 /* The bar is 44 px against about 30 px for the chips: a sheet in a project with roadmaps leaves the map the same room above it. */
 @media (max-width: 640px) {
-  .hub[data-screen="map"]:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 310px)); }
+  .hub[data-screen="map"]:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 386px)); }
 }

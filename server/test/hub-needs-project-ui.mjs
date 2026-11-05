@@ -181,11 +181,11 @@ try {
   await page.locator('.hub-top [data-project-chip="magic-loops"]').waitFor();
   await page.waitForFunction(() => document.querySelector('.hub-top [data-project-chip]')?.textContent?.trim() === 'Magic Loops');
 
-  step('at 390 px: the picker sits above the chips and nothing scrolls sideways');
+  step('at 390 px: the picker sits above the filter select and nothing scrolls sideways');
   const phone = await open({ width: 390, height: 844 });
   await phone.goto(`${fixture.url}#/~hub/needs`);
   await phone.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
-  const boxes = await phone.evaluate(() => ({ picker: document.querySelector('.needs-project').getBoundingClientRect().bottom, chips: document.querySelector('.needs-bar .hub-chips-wrap').getBoundingClientRect().top, scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+  const boxes = await phone.evaluate(() => ({ picker: document.querySelector('.needs-project').getBoundingClientRect().bottom, chips: document.querySelector('.needs-bar .needs-filter-select').getBoundingClientRect().top, scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(boxes.picker <= boxes.chips + 1, `The picker is above the chips (${boxes.picker} vs ${boxes.chips}).`);
   assert.ok(boxes.scroll <= boxes.inner, `The page scrolls sideways (${boxes.scroll} > ${boxes.inner}).`);
   await phone.goto(`${fixture.url}#/~hub/needs/all/magic-loops`);

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
 import { host } from '../lib/host'
+import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import type { NeedsKind } from '../lib/needsKinds'
 import { FILTER_SUBTYPES, KIND_LABEL, KIND_PLURAL, SUBTYPE_LABEL, canonicalFilter, isKnownFilter, splitFilter } from '../lib/needsKinds'
@@ -152,7 +153,9 @@ export default function Needs({ filter: address }: { filter?: string }) {
     ? <p className={className} data-project-empty>Nothing for {chosenName} waits on you. <a href={needsHref(active, '')} data-show-all-projects>Show all projects</a></p>
     : <p className={className}>{sub ? `No ${SUBTYPE_LABEL[kind]?.[sub]?.toLowerCase()} ${kind === 'steps' ? 'steps wait' : 'question waits'} on you.` : EMPTY[kind]}</p>
   const chipRow = useRef<HTMLDivElement>(null)
-  const overflow = useOverflowEdges(chipRow, [visible.length, active])
+  // Nine filters do not fit in two rows at 390 px, so a phone gets one native select with the same labels, counts and addresses (ws-ubo.2.3).
+  const phone = useIsPhone()
+  const overflow = useOverflowEdges(chipRow, [visible.length, active, phone])
   // Only the row scrolls, never the page: a scrollIntoView would undo the jump to a linked card.
   useEffect(() => {
     const row = chipRow.current
@@ -160,7 +163,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
     if (!row || !chip) return
     if (chip.offsetLeft < row.scrollLeft) row.scrollLeft = chip.offsetLeft
     else if (chip.offsetLeft + chip.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = chip.offsetLeft + chip.offsetWidth - row.clientWidth
-  }, [visible.length, active])
+  }, [visible.length, active, phone])
 
   return (
     <div className="needs" ref={root}>
@@ -186,6 +189,14 @@ export default function Needs({ filter: address }: { filter?: string }) {
           {project && <ProjectLink id={project} name={chosenName} />}
         </div>
       )}
+      {phone ? (
+        <select className="needs-filter-select" aria-label="Needs you filter" data-needs-filter-select="" value={kind} onChange={event => { window.location.hash = needsHref(event.target.value, project) }}>
+          {visible.map(([key, label]) => {
+            const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
+            return <option key={key} value={key}>{count === undefined ? label : `${label} (${count})`}</option>
+          })}
+        </select>
+      ) : (
       <div className="hub-chips-wrap" data-overflow={overflow}>
       <div className="hub-chips one-row" role="group" aria-label="Needs you filter" ref={chipRow}>
         {visible.map(([key, label]) => {
@@ -198,6 +209,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
         })}
       </div>
       </div>
+      )}
       </div>
       {FILTER_SUBTYPES[kind] && (
         <div className="hub-chips needs-subs" role="group" aria-label={`${KIND_LABEL[kind as NeedsKind]} kinds`} data-subs={kind}>

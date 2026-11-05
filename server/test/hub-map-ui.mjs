@@ -269,7 +269,7 @@ try {
   await between(wide, 'from horizontal');
   await wide.waitForTimeout(300);
   assert.equal(await axisOf(wide), 'x', 'A near-square window stays horizontal.');
-  await wide.setViewportSize({ width: 600, height: 1000 });
+  await wide.setViewportSize({ width: 600, height: 1200 });
   await axisIs(wide, 'y', 'A tall window is vertical.');
   const ratio = await between(wide, 'from vertical');
   await wide.waitForTimeout(300);
@@ -323,7 +323,7 @@ try {
   assert.equal(await desk.locator('.hub-runs').count(), 0, 'A project outside the table has no chip.');
 
   step('at phone width: short text, one line, nothing sideways');
-  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  const phone = await open({ width: 390, height: 888 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map`);
   await phone.locator('.hub-map-wrap').waitFor();
   // Phone width: the project is one native select (ws-ubo.2.1); its shown option is the chosen project.

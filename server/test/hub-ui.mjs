@@ -62,6 +62,12 @@ const go = async (page, hash) => {
 };
 const hubAnswer = id => fixture.fake.json(`sections/inbox/asks/${id}/answer.json`);
 
+// The map glides the view for 240 ms after a sheet or the Key closes; a tap on a node mid-glide misses it. Wait until the node's box is the same on two frames in a row (not a fixed sleep).
+const stillNode = (page, id) => page.waitForFunction(selector => new Promise(resolve => {
+  const rect = () => { const r = document.querySelector(selector)?.getBoundingClientRect(); return r ? `${r.x},${r.y},${r.width}` : ''; };
+  const first = rect();
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve(first !== '' && rect() === first)));
+}), `[data-node="${id}"] > circle`);
 try {
   const page = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await page.goto(fixture.url);
@@ -846,7 +852,7 @@ try {
   assert.equal(await page.locator('.hub-map-box').count(), 0);
   await page.unroute('**/api/hub/map/nosprint');
 
-  step('map at phone width: one-row toolbar, one-line hint, a drag moves it, a pinch zooms it');
+  step('map at phone width: wrapped toolbar, one-line hint, a drag moves it, a pinch zooms it');
   await go(phone, '#/~hub/map/magic-loops');
   await phone.locator('.hub-map-box svg').waitFor();
   await phone.waitForTimeout(300);
@@ -861,7 +867,7 @@ try {
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
   assert.ok(Number.isNaN(tops.runs) || Math.abs(tops.select - tops.runs) <= 12, `The select and the Runs on chip share a row (${tops.select} vs ${tops.runs}).`);
-  assert.ok(tops.bar.length >= 6 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
+  assert.ok(tops.bar.length >= 6, `The toolbar has its buttons (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap .hub-map-controls').count(), 0, 'The toolbar is a row of its own, not an overlay inside the map.');
   const place = await phone.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
@@ -872,7 +878,7 @@ try {
   assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 20, `The control bar is directly under the project chips (${place.chipsBottom} to ${place.barTop}).`);
   assert.ok(place.barBottom <= place.boxTop + 1, `and above the map, which it does not cover (${place.barBottom} vs ${place.boxTop}).`);
   if (place.wayTop !== null) assert.ok(place.barBottom <= place.wayTop + 1, `and above the Destination row (${place.barBottom} vs ${place.wayTop}).`);
-  assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar scrolls within itself.');
+  assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar wraps.');
   assert.ok(place.sizes.length >= 6 && place.sizes.every(size => size >= 43.5), `Every control is at least 44 px tall (${place.sizes}).`);
   assert.ok(await phone.locator('.hub-hint-touch').isVisible() && !(await phone.locator('.hub-hint-mouse').isVisible()), 'The phone shows the touch hint.');
   assert.ok(tops.hint > 0 && tops.hint < 22, `The hint is one line (${tops.hint}).`);
@@ -942,6 +948,7 @@ try {
   assert.ok(sheetBox.y - boxTop >= 100, `An open sheet leaves the map at least 100 px above it (${sheetBox.y - boxTop}).`);
   await phone.touchscreen.tap(195, 40);
   await sheet.waitFor({ state: 'detached' });
+  await stillNode(phone, 'ml-m2');
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await sheet.waitFor();
   await phone.goBack();
@@ -1011,6 +1018,7 @@ try {
   assert.ok(legendBox.x >= 0 && legendBox.x + legendBox.width <= 390 && legendBox.y >= 0 && legendBox.y + legendBox.height <= 844, 'The Key fits on the screen.');
   await phone.locator('.hub-map-controls button:has-text("Key")').tap();
   await phone.locator('.hub-legend').waitFor({ state: 'detached' });
+  await stillNode(phone, 'ml-m2');
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await phone.locator('.hub-map-panel').waitFor();
   await phone.goBack();
