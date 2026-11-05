@@ -245,7 +245,7 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
     }, ...(fetchImpl ? { fetchImpl } : {}) },
   });
   return {
-    url: service.urls.workspace, origin: service.origin, service, fake, hermes: upstream, seed, now, signingKey: signingPair?.privateKey ?? null,
+    url: service.urls.workspace, origin: service.origin, dir, service, fake, hermes: upstream, seed, now, signingKey: signingPair?.privateKey ?? null,
     async close() { await service.close(); await upstream?.close(); await fake.close(); },
   };
 }

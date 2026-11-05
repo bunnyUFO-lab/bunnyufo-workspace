@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Dialog from '../components/Dialog'
 import { ago, remember } from '../lib/hub'
 import { CardWriteRows } from './CardWrites'
-import { useCardWrites, verb } from './cardWriteText'
+import { NAME_NOTE, useCardWrites, verb } from './cardWriteText'
 
 const SEEN_KEY = 'buw:card-writes-note'
 
@@ -15,7 +15,7 @@ export default function CardWritesStrip({ section, folder }: { section: string; 
   const [older, setOlder] = useState(false)
   const more = useCardWrites(section, folder, undefined, true, older)
   const [open, setOpen] = useState(false)
-  // The line about names and tokens shows the first time the sheet opens, then stays out of the way.
+  // The line about the agent's name shows the first time the sheet opens, then stays out of the way.
   const [seen, setSeen] = useState(() => remember(SEEN_KEY) === '1')
   useEffect(() => { if (open) remember(SEEN_KEY, '1') }, [open])
   const groups = (older && more.data ? more.data.groups : data?.groups) ?? []
@@ -29,7 +29,7 @@ export default function CardWritesStrip({ section, folder }: { section: string; 
       </div>
       {open && (
         <Dialog title="Agent writes to this card" onClose={() => { setOpen(false); setSeen(true) }} wide>
-          {!seen && <p className="cw-note" data-cw-note>The name is what the agent says it is. The token is proven.</p>}
+          {!seen && <p className="cw-note" data-cw-note>{NAME_NOTE}</p>}
           <CardWriteRows section={section} groups={groups} />
           {!older && data?.more && <p className="cw-foot"><button type="button" className="cw-btn" onClick={() => setOlder(true)} data-cw-older>Show older</button></p>}
           <p className="cw-foot"><button type="button" className="cw-btn" onClick={() => { setOpen(false); setSeen(true) }}>Close</button></p>
