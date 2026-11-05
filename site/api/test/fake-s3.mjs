@@ -124,10 +124,10 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     text: key => objects.get(key)?.body.toString('utf8') ?? null,
     json: key => { const text = objects.get(key)?.body.toString('utf8'); return text === undefined ? null : JSON.parse(text); },
     /** Seed an object straight into the store. */
-    seed(key, body, contentType = 'application/octet-stream', metadata = {}) {
+    seed(key, body, contentType = 'application/octet-stream', metadata = {}, lastModified = new Date()) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
       const versionId = `v${(versionCounter += 1)}`;
-      const stored = { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata, versionId };
+      const stored = { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date(lastModified).toUTCString(), metadata, versionId };
       objects.set(key, stored);
       if (!versions.has(key)) versions.set(key, new Map());
       versions.get(key).set(versionId, stored);

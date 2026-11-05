@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ago, HubError, hubGet, hubPost } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, TeamAgent, TeamView } from '../lib/hubTeam'
+import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, ProfileChangeAnswer, TeamAgent, TeamView } from '../lib/hubTeam'
 import { isDear, opusNote } from './agentEditField'
+import { ChangeBanner } from './AgentDetails'
+import { AUTO_FOLLOWS_TEXT, BRIEFS_WAIT_TEXT, pressRestartText, restartText, REPLACED_WORD, STATE_WORDS } from './profileChangeWords'
+import { useWaitingPoll } from './useWaitingPoll'
 import './team/agentDetails.css'
 
 const LIMITS = { role: 200, prompt: 8000, note: 200 }
@@ -80,7 +83,7 @@ function RetireSection({ agent }: { agent: TeamAgent }) {
 }
 
 /** The role line, prompt and chat model of an agent's persona, with its versions. */
-function PersonaEdit({ id }: { id: string }) {
+function PersonaEdit({ id, hasProfile }: { id: string; hasProfile: boolean }) {
   const [view, setView] = useState<PersonaView | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -160,7 +163,7 @@ function PersonaEdit({ id }: { id: string }) {
           <select value={draft.model} onChange={event => setDraft({ ...draft, model: event.target.value })} data-edit-model>
             {view.models.map(model => <option key={model.id} value={model.id}>{model.label} · {model.note}</option>)}
           </select>
-          <small className="team-dim" data-edit-model-note>Chat only. Jobs use the profile&apos;s model.</small>
+          <small className="team-dim" data-edit-model-note>{hasProfile ? "Chat only, this agent only. Jobs and Auto use the profile's model below." : 'Chat only, this agent only.'}</small>
         </label>
         <label className="ae-field">
           <span>Note (optional)</span>
@@ -190,54 +193,83 @@ function PersonaEdit({ id }: { id: string }) {
 const MAX_FALLBACKS = 4
 const same = (a: ModelRef, b: ModelRef) => a.provider === b.provider && a.model === b.model
 const refName = (item: ModelRef) => `${item.provider} · ${item.model}`
-const STATE_WORDS: Record<ProfileChange['state'], string> = { waiting: 'Waiting for the host', applied: 'Applied, not in an export yet', live: 'Live', failed: 'Failed', late: 'Not picked up' }
 /** "claude-sonnet-5-5, then gpt-6-sol" */
 const chainText = (set: { provider: string; model: string; fallbacks: ModelRef[] }) => [set.model, ...set.fallbacks.map(item => item.model)].join(', then ')
 
-/** One row of the changes list: when, the order it asked for, and where it stands. */
-function ChangeRow({ change }: { change: ProfileChange }) {
+/** One row of the changes list: when, the order it asked for, and where it stands. `undo` is the way back, on the newest finished change only. */
+function ChangeRow({ change, undo }: { change: ProfileChange; undo?: ReactNode }) {
   return (
-    <li className="ae-version" data-profile-change={change.id} data-state={change.state}>
+    <li className="ae-version" data-profile-change={change.id} data-state={change.state} data-replaced={change.replaced ? '' : undefined}>
       <div className="ae-version-head">
         <span className="ae-version-who">{chainText(change.to)}</span>
-        <span className={`ad-tag${change.state === 'live' ? ' on' : ''}`} data-change-state>{STATE_WORDS[change.state]}</span>
+        <span className={`ad-tag${!change.replaced && (change.state === 'live' || change.state === 'applied') ? ' on' : ''}`} data-change-state>{change.replaced ? REPLACED_WORD : STATE_WORDS[change.state]}</span>
       </div>
       <p className="ae-version-note team-dim">Asked {ago(change.at)} by {change.by}. Before: {chainText(change.from)}.{change.reason ? ` ${change.reason}.` : ''}</p>
+      {undo}
     </li>
   )
 }
 
-/** The model of a Hermes profile and the order of its fallbacks. "Send for approval" opens an Ask only the owner's passkey answers; the Hermes host applies it. */
+const keyOf = (value: { primary: ModelRef | null; chain: ModelRef[] }) => JSON.stringify([value.primary, value.chain])
+
+/**
+ * The model of a Hermes profile and the order of its fallbacks. The signed-in owner's press on "Change and restart Hermes <profile>" signs the change at once
+ * (no Ask, no second look): the page shows what will happen above the button, and the newest finished change has a way back. The Hermes host applies it.
+ * An Opus or Fable pick is one press like any other; the billing note shows on the page before the press (the owner's decision). The page takes no draft from the URL, from storage or from an Ask, and Enter submits nothing.
+ * An agent's proposal is still an Ask that the owner answers Apply.
+ */
 function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
+  const hasPersona = !!agent.editable?.persona
   const profile = agent.profile
   const [view, setView] = useState<AgentDetailsView | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [primary, setPrimary] = useState<ModelRef | null>(null)
-  const [chain, setChain] = useState<ModelRef[]>([])
-  const [why, setWhy] = useState('')
+  const [draft, setDraft] = useState<{ primary: ModelRef | null; chain: ModelRef[] } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [sent, setSent] = useState<string | null>(null)
+  const [asked, setAsked] = useState(() => Date.now())
+  const primary = draft?.primary ?? null
+  const chain = draft?.chain ?? []
+  const setPrimary = (value: ModelRef | null) => setDraft(previous => ({ chain: previous?.chain ?? [], primary: value }))
+  const setChain = (update: ModelRef[] | ((list: ModelRef[]) => ModelRef[])) => setDraft(previous => ({ primary: previous?.primary ?? null, chain: typeof update === 'function' ? update(previous?.chain ?? []) : update }))
+  // What the form held when the host last gave it an order, or when it was sent: an owner who typed nothing since gets the new order when the change ends.
+  const baseline = useRef('')
+  const wasWaiting = useRef(false)
 
-  const load = useCallback((signal?: AbortSignal) => hubGet<AgentDetailsView>(`/team/${encodeURIComponent(agent.id)}/details`, signal).then(next => {
+  /** Reads the details and shows them. Throws when the read fails, so a poll can try again without an error on the page. */
+  const read = useCallback((signal?: AbortSignal) => hubGet<AgentDetailsView>(`/team/${encodeURIComponent(agent.id)}/details`, signal).then(next => {
     setView(next)
-    const model = next.settings?.model
-    setPrimary(previous => previous ?? (model?.provider && model.default ? { provider: model.provider, model: model.default } : null))
-    setChain(previous => (previous.length ? previous : next.settings?.fallbacks.map(item => ({ provider: item.provider, model: item.model })) ?? []))
-  }, problem => { if ((problem as { name?: string }).name !== 'AbortError') setError(problem instanceof Error ? problem.message : 'Could not load this.') }), [agent.id])
+    setAsked(Date.now())
+    const eff = next.settings?.effective ?? (next.settings?.model?.provider && next.settings.model.default ? { provider: next.settings.model.provider, model: next.settings.model.default, fallbacks: next.settings.fallbacks } : null)
+    const stillWaiting = next.change?.state === 'waiting'
+    const ended = wasWaiting.current && !stillWaiting
+    wasWaiting.current = stillWaiting
+    if (!eff) return
+    const fresh = { primary: { provider: eff.provider, model: eff.model }, chain: eff.fallbacks.map(item => ({ provider: item.provider, model: item.model })) }
+    setDraft(previous => {
+      if (previous && !(ended && keyOf(previous) === baseline.current)) return previous
+      baseline.current = keyOf(fresh)
+      return fresh
+    })
+  }), [agent.id])
+  const load = useCallback((signal?: AbortSignal) => read(signal).catch((problem: unknown) => { if ((problem as { name?: string }).name !== 'AbortError') setError(problem instanceof Error ? problem.message : 'Could not load this.') }), [read])
   useEffect(() => {
     const controller = new AbortController()
     void load(controller.signal)
     return () => controller.abort()
   }, [load])
+  // A change that waits for the host is read again every few seconds: the block clears and the row says Running with no reload.
+  useWaitingPoll(view?.change?.state === 'waiting', read)
 
   const shared = team.filter(item => item.profile === profile).map(item => item.name)
-  const heading = <><h3 id="ae-profile">Model and fallbacks</h3><p className="team-dim" data-profile-shared>Profile {profile}. Shared by {shared.length > 1 ? `${shared.slice(0, -1).join(', ')} and ${shared[shared.length - 1]}` : shared.join('')}</p></>
+  const sharedText = shared.length > 1 ? `${shared.slice(0, -1).join(', ')} and ${shared[shared.length - 1]}` : shared.join('')
+  const heading = <><h3 id="ae-profile">Model and fallbacks of profile {profile}</h3><p className="team-dim" data-profile-shared>Profile {profile}. Shared by {sharedText}</p>{profile === 'main' && <p className="team-dim" data-profile-auto>{AUTO_FOLLOWS_TEXT}</p>}</>
   if (!view) return <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>{heading}<p className={error ? 'hub-error' : 'hub-empty'} role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p></section>
 
   const settings = view.settings
   const options = settings?.modelOptions ?? []
-  const current = settings?.model?.provider && settings.model.default ? { provider: settings.model.provider, model: settings.model.default } : null
-  const nowChain = settings?.fallbacks ?? []
+  // What the profile runs now: the export's order, or the one the host confirmed after that export was made.
+  const eff = settings?.effective
+  const current = eff ? { provider: eff.provider, model: eff.model } : settings?.model?.provider && settings.model.default ? { provider: settings.model.provider, model: settings.model.default } : null
+  const nowChain = eff?.fallbacks ?? settings?.fallbacks ?? []
   // The select shows what the host offers, and also what is set now when the host no longer offers it (marked), so a row never goes blank.
   const choices: { ref: ModelRef; label: string }[] = options.map(ref => ({ ref, label: refName(ref) }))
   const billed = (ref: ModelRef, label: string) => (isDear(ref.model) ? `${label} · billed through the API` : label)
@@ -245,34 +277,46 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const opusNoteText = opusNote(primary, chain)
   const indexOf = (ref: ModelRef | null) => String(choices.findIndex(choice => ref && same(choice.ref, ref)))
   const waiting = view.change?.state === 'waiting'
+  const other = profile === 'main' ? 'briefs' : 'main'
+  const waitingOff = view.change ? `Hermes ${profile} is changing to ${view.change.to.model}. That covers ${sharedText}, so this order can be changed again once it finishes. Profile ${other} is not affected.${hasPersona ? ' Chat models above still save.' : ''}` : 'A change is already waiting for the Hermes host.'
   const fresh = view.freshness.state === 'fresh'
   const noList = options.length === 0
   const changed = !!primary && !!current && (!same(primary, current) || chain.length !== nowChain.length || chain.some((item, index) => !same(item, nowChain[index])))
-  const off = noList ? 'The Hermes host has not published its model list yet.' : !fresh ? 'The last export from the Hermes host is old, so its settings may have changed. Changing the model is off until a new one arrives.' : waiting ? 'A change is already waiting for the Hermes host.' : null
+  const off = noList ? 'The Hermes host has not published its model list yet.' : !fresh ? 'The last export from the Hermes host is old, so its settings may have changed. Changing the model is off until a new one arrives.' : waiting ? waitingOff : null
   const unused = options.filter(ref => !(primary && same(ref, primary)) && !chain.some(item => same(item, ref)))
   // "Add a fallback" is a default pick in the owner's hand, so it never adds Opus or Fable; choosing one in a row's select is the deliberate step.
   const addable = unused.find(ref => !isDear(ref.model))
   const move = (index: number, by: -1 | 1) => setChain(list => { const next = [...list]; [next[index], next[index + by]] = [next[index + by], next[index]]; return next })
 
-  const send = async () => {
-    if (!primary) return
+  // The order the page showed as current goes with every press: if the host's settings moved since, the server refuses (409) instead of signing over them.
+  const base = current ? { provider: current.provider, model: current.model, fallbacks: nowChain.map(item => ({ provider: item.provider, model: item.model })) } : null
+  const press = async (body: Record<string, unknown>, after: { primary: ModelRef | null; chain: ModelRef[] }) => {
     setBusy(true)
     setError(null)
-    setSent(null)
     try {
-      const made = await hubPost<{ ask: string }>(`/team/${encodeURIComponent(agent.id)}/profile-change`, { primary, fallbacks: chain, ...(why.trim() ? { why: why.trim() } : {}) })
-      setSent(made.ask)
-      setWhy('')
+      await hubPost<ProfileChangeAnswer>(`/team/${encodeURIComponent(agent.id)}/profile-change`, { ...body, base })
+      baseline.current = keyOf(after)
+      // The form holds what was signed (for a way back, the order gone back to), so when the wait ends nothing is left armed that the owner did not choose.
+      setDraft({ primary: after.primary, chain: after.chain })
       await load()
-    } catch (problem) { setError(problem instanceof Error ? problem.message : 'That did not work.') } finally { setBusy(false) }
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'That did not work.')
+      void load()
+    } finally { setBusy(false) }
   }
+  const send = () => { if (primary && base) void press({ primary, fallbacks: chain }, { primary, chain }) }
+  // The way back is on the newest change only, once the host confirmed it and while it still runs: a Replaced row (the host was edited since) has none.
+  const newest = view.changes?.[0]
+  const canUndo = !!newest && !newest.replaced && (newest.state === 'applied' || newest.state === 'live') && !waiting && fresh && !!base
+  const goBack = (change: ProfileChange) => void press({ undo: change.id }, { primary: { provider: change.from.provider, model: change.from.model }, chain: change.from.fallbacks.map(item => ({ provider: item.provider, model: item.model })) })
 
   return (
     <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>
       {heading}
       {profile === 'briefs' && <p className="team-dim" data-profile-briefs>The three weekly jobs are pinned to Sonnet and do not follow this.</p>}
+      {view.change && <ChangeBanner change={view.change} now={asked} />}
       {off && <p className="hub-banner ad-note" role="note" data-profile-off>{off}</p>}
-      <form className="ae-form" onSubmit={event => { event.preventDefault(); if (changed && !off && !busy) void send() }} data-profile-form>
+      <form className="ae-form" onSubmit={event => event.preventDefault()} data-profile-form>
         <label className="ae-field">
           <span>Primary model</span>
           <select value={indexOf(primary)} disabled={noList || busy} onChange={event => { const next = choices[Number(event.target.value)].ref; setPrimary(next); setChain(list => list.filter(item => !same(item, next))) }} data-profile-primary>
@@ -300,22 +344,35 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
           <small className="team-dim">Up to {MAX_FALLBACKS}. Each model once.</small>
           {opusNoteText && <p className="hub-banner ad-note" role="note" data-profile-opus-note>{opusNoteText}</p>}
         </div>
-        <label className="ae-field">
-          <span>Why (optional)</span>
-          <input type="text" value={why} maxLength={400} placeholder="Shown on the request" onChange={event => setWhy(event.target.value)} data-profile-why />
-        </label>
-        <p className="hub-muted" data-profile-restart>Applying restarts Hermes {profile} within about 5 minutes. A chat or job running then stops.</p>
+        {changed && !off ? (
+          <div className="hub-banner ad-note" role="note" data-profile-summary>
+            <p data-profile-summary-now>Now: {chainText({ provider: current?.provider ?? '', model: current?.model ?? '', fallbacks: nowChain })}.</p>
+            <p data-profile-summary-new>New: {primary ? chainText({ ...primary, fallbacks: chain }) : ''}.</p>
+            <p data-profile-summary-shared>This moves {sharedText}, who share profile {profile}.</p>
+            <p data-profile-summary-restart>{pressRestartText(profile ?? '')}</p>
+          </div>
+        ) : (
+          <p className="hub-muted" data-profile-restart>{restartText(profile ?? '')}</p>
+        )}
+        {profile === 'briefs' && <p className="hub-muted" data-profile-briefs-wait>{BRIEFS_WAIT_TEXT}</p>}
         {error && <p className="hub-error" role="alert" data-profile-error>{error}</p>}
-        {sent && <p className="hub-muted" role="status" data-profile-sent>Sent for approval. <a href={hubHash('ask', sent)} data-profile-ask>Open the request</a> and approve it with your passkey.</p>}
         <div className="ae-actions">
-          <button type="submit" className="hub-btn pri" disabled={!changed || !!off || busy || !primary} data-profile-send>Send for approval</button>
+          <button type="button" className="hub-btn pri" disabled={!changed || !!off || busy || !primary} onClick={send} data-profile-send>Change and restart Hermes {profile}</button>
           {changed && <button type="button" className="hub-btn" disabled={busy} onClick={() => { setPrimary(current); setChain(nowChain.map(item => ({ provider: item.provider, model: item.model }))) }} data-profile-discard>Discard changes</button>}
         </div>
       </form>
       {(view.changes?.length ?? 0) > 0 && (
         <>
           <h3 id="ae-changes">Changes</h3>
-          <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map(change => <ChangeRow key={change.id} change={change} />)}</ul>
+          <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map((change, index) => (
+            <ChangeRow key={change.id} change={change} undo={index === 0 && canUndo ? (
+              <div className="ae-undo">
+                {opusNote(change.from, change.from.fallbacks) && <p className="hub-banner ad-note" role="note" data-undo-opus-note>{opusNote(change.from, change.from.fallbacks)}</p>}
+                <button type="button" className="hub-btn" disabled={busy} onClick={() => goBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
+                <small className="team-dim" data-change-undo-restart>This restarts Hermes {profile} too.</small>
+              </div>
+            ) : undefined} />
+          ))}</ul>
         </>
       )}
     </section>
@@ -351,7 +408,7 @@ export default function AgentEdit({ id }: { id: string }) {
           <p className="team-dim">{agent.editable.persona ? 'The text every chat with this agent starts from, and the model it runs on. ' : 'The model it runs on. '}Toolsets, skills, SOUL.md and scheduled jobs stay view-only: see Details.</p>
         </div>
       </header>
-      {agent.editable.persona && <PersonaEdit id={id} />}
+      {agent.editable.persona && <PersonaEdit id={id} hasProfile={!!agent.editable.profile && !!agent.profile} />}
       {agent.editable.profile && agent.profile && <ProfileEdit agent={agent} team={team} />}
       {agent.custom && <RetireSection agent={agent} />}
     </div>
