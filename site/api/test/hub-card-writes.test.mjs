@@ -521,6 +521,15 @@ test('Revert never undoes a change it does not own: an owner edit between two wr
     assert.equal(other.status, 200, JSON.stringify(other.body));
     assert.equal(w.fake.text(key), '# a1');
     assert.equal(other.body.leftAlone, undefined, 'an unbroken chain leaves nothing out');
+    // The agent's first write was left alone, so it is still a live row with its own Revert, and it goes back to the owner's text.
+    const after = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
+    const live = after.filter(row => row.batch === 'batchalpha1' && !row.reverted);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].canRevert, true);
+    assert.deepEqual(live[0].files, [{ file: `${folder}/index.md`, kind: 'edit' }]);
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'batchalpha1' })).status, 200);
+    assert.equal(w.fake.text(key), '# Owner', 'nothing of the agent is left on the page');
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'batchalpha1' })).body.error, 'Already reverted.');
   } finally { await w.close(); }
 });
 
@@ -554,5 +563,63 @@ test('Revert says a refusal as it is, and only a lost race as a race', async () 
     assert.equal(refused.status, 409);
     assert.match(refused.body.error, /at least one section/);
     assert.doesNotMatch(refused.body.error, /changed while/);
+  } finally { await w.close(); }
+});
+
+const pageCard = { ...htmlCard, steps: [{ name: 'Page', path: 'page.html' }] };
+
+test('an HTML page keeps its mark while any agent text stays on it, whichever Revert comes first', async () => {
+  const w = await world({ sections: { html: { name: 'Html', entities: [pageCard] } } });
+  try {
+    const key = `sections/html/${pageCard.folder}/page.html`;
+    const step = () => w.listOf('html').entities[0].steps[0];
+    w.seed(key, '<p>owner</p>', 'text/html');
+    const X = { 'x-card-batch': 'labelxxxx' };
+    assert.equal((await w.put('html', `${pageCard.folder}/page.html`, '<script>one</script>', { ...EDIT(md5('<p>owner</p>')), ...X })).status, 200);
+    assert.equal(step().agentTab, true);
+    assert.equal((await w.put('html', `${pageCard.folder}/page.html`, '<script>two</script>', { ...EDIT(md5('<script>one</script>')), 'x-card-batch': 'otherbatch1' })).status, 200);
+    assert.equal((await w.put('html', `${pageCard.folder}/page.html`, '<script>three</script>', { ...EDIT(md5('<script>two</script>')), ...X })).status, 200);
+    const first = await w.post('/hub/card-writes/revert', { section: 'html', folder: pageCard.folder, batch: 'labelxxxx' });
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(w.fake.text(key), '<script>two</script>');
+    assert.equal(step().agentTab, true, 'agent code is on the page: no bridge');
+    assert.deepEqual(first.body.clearedMarks, []);
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'html', folder: pageCard.folder, batch: 'otherbatch1' })).status, 200);
+    assert.equal(w.fake.text(key), '<script>one</script>');
+    assert.equal(step().agentTab, true, 'still an agent page');
+    const last = await w.post('/hub/card-writes/revert', { section: 'html', folder: pageCard.folder, batch: 'labelxxxx' });
+    assert.equal(last.status, 200, JSON.stringify(last.body));
+    assert.equal(w.fake.text(key), '<p>owner</p>');
+    assert.equal(step().agentTab, undefined, 'the owner text only: the bridge comes back');
+    assert.deepEqual(last.body.clearedMarks, ['page.html']);
+  } finally { await w.close(); }
+});
+
+test('an owner edit between two writes that keeps the agent script keeps the mark too', async () => {
+  const w = await world({ sections: { html: { name: 'Html', entities: [pageCard] } } });
+  try {
+    const key = `sections/html/${pageCard.folder}/page.html`;
+    w.seed(key, '<p>owner</p>', 'text/html');
+    const X = { 'x-card-batch': 'labelxxxx' };
+    await w.put('html', `${pageCard.folder}/page.html`, '<script>one</script>', { ...EDIT(md5('<p>owner</p>')), ...X });
+    w.seed(key, '<script>one</script><p>owner edit</p>', 'text/html');
+    await w.put('html', `${pageCard.folder}/page.html`, '<script>one</script><p>owner edit</p><script>three</script>', { ...EDIT(md5('<script>one</script><p>owner edit</p>')), ...X });
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'html', folder: pageCard.folder, batch: 'labelxxxx' })).status, 200);
+    assert.equal(w.fake.text(key), '<script>one</script><p>owner edit</p>');
+    assert.equal(w.listOf('html').entities[0].steps[0].agentTab, true, 'the first script is still on the page');
+  } finally { await w.close(); }
+});
+
+test('revert records from before the list of undone ids still cover what they covered', async () => {
+  const w = await world();
+  try {
+    const folder = owned.folder;
+    await w.put('magic-loops', `${folder}/index.md`, '# one', { ...EDIT(md5('# Owner')), 'x-card-batch': 'legacybatch' });
+    const [record] = [...w.fake.objects.keys()].filter(item => item.includes(`card-writes/magic-loops/${folder}/`));
+    for (const extra of [{}, { through: w.fake.json(record).id }]) {
+      w.seed(`sections/inbox/card-writes/magic-loops/${folder}/20990101T000000000Z-aaaa-revert.json`, JSON.stringify({ v: 1, kind: 'revert', section: 'magic-loops', folder, of: 'legacybatch', by: 'owner', at: '2099-01-01T00:00:00.000Z', restored: [], ...extra }), 'application/json');
+      const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
+      assert.deepEqual(rows.map(row => [row.batch, row.canRevert, Boolean(row.reverted)]), [['legacybatch', false, true]], JSON.stringify(extra));
+    }
   } finally { await w.close(); }
 });
