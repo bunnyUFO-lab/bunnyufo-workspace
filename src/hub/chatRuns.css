@@ -23,3 +23,16 @@
 .hub-chat-approval pre { margin: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hub-chat-approval-a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 @media (max-width: 640px) { .hub-chat-approval-a .hub-btn { flex: 1 1 40%; } }
+/* Messages sent while a reply runs: dashed rows above the composer, until the Hub delivers them. */
+.hub-queue { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; max-height: 38vh; overflow-y: auto; }
+.hub-queued { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px dashed var(--hairline-strong); border-radius: var(--radius); background: transparent; min-width: 0; }
+.hub-queued.held { border-color: var(--amber); }
+.hub-queued-pill { align-self: flex-start; max-width: 100%; padding: 1px 8px; border-radius: var(--radius-pill); border: 1px solid var(--hairline-strong); font-size: 0.72rem; color: var(--text-dim); overflow-wrap: anywhere; }
+.hub-queued.held .hub-queued-pill { border-color: var(--amber); color: var(--amber); }
+.hub-queued-text { margin: 0; font-size: 0.88rem; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.hub-queued-a { display: flex; flex-wrap: wrap; gap: 8px; }
+.hub-queued-a .hub-btn { min-height: 44px; min-width: 44px; }
+/* The composer keeps Attach, the field, Stop and Send on one line down to 360 px: the field never shrinks under 140 px. */
+.hub-compose > textarea { min-width: 140px; }
+.hub-compose > .hub-btn { flex: none; min-height: 44px; min-width: 44px; padding-inline: 12px; }
+@media (max-width: 480px) { .hub-compose { gap: 6px; } .hub-compose > .hub-btn { padding-inline: 8px; } }

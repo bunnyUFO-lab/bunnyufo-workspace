@@ -796,6 +796,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (!CHAT_ID.test(id)) throw fail('No such conversation.', 404);
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
     const send = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
+    response.flushHeaders();   // the page waits for these: it asks again on a fresh connection when nothing comes
     const carried = carriedOf(id);
     if (!carried) { send('idle', {}); response.end(); return undefined; }
     let keepalive = null;

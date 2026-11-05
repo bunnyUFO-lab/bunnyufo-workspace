@@ -1,7 +1,7 @@
-import type { ChatLine } from '../lib/hub'
+import type { ChatHeld, ChatLine, ChatQueued } from '../lib/hub'
 
 /** What reading a conversation answers. `running`: a turn is still answering; the line is saved when it goes. `run`: the Hermes run, for who started it. */
-export interface ChatAnswer { messages: ChatLine[]; running?: boolean; run?: string | null }
+export interface ChatAnswer { messages: ChatLine[]; running?: boolean; run?: string | null; /** the message the running turn was asked, and when */ asking?: { text: string; at: string }; queued?: ChatQueued[]; held?: ChatHeld | null }
 
 /** Looks at the saved conversation that find nothing new before the page stops waiting: a turn that is not running may be saving for a moment. */
 export const MAX_MISSES = 3

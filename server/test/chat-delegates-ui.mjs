@@ -93,7 +93,10 @@ try {
   while (fixture.hermes.runs.length < 2) await page.waitForTimeout(50);
   await page.waitForFunction(() => typeof window.__cutStream === 'function');
   await page.reload();
-  await page.locator('[data-chat-note]', { hasText: 'still answering' }).waitFor();
+  // The page follows the running turn live now, so its question shows at once, with no waiting note.
+  await page.locator('.hub-bubble.user', { hasText: 'One more' }).waitFor();
+  await page.locator('[data-pending]').waitFor();
+  assert.equal(await page.locator('[data-chat-note]').count(), 0, 'Following a turn live needs no note.');
   fixture.hermes.release(fixture.hermes.runs[1].id);
   await page.locator('.hub-bubble.user', { hasText: 'One more' }).waitFor();   // the turn's lines come from the saved chat
   await page.locator('.hub-bubble.assistant:not([data-pending])').nth(1).waitFor();

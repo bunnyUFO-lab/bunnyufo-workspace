@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Send while Hermes answers.** A message sent during a reply waits as a dashed Queued row and goes out when the reply ends, as one turn when there are several. After a Stop or a failure the rows say Not sent, with Send now and Cancel, and nothing goes out by itself. The Hub delivers them, so a reload, a locked phone or a restart of the service loses nothing. Limited card-API tokens can no longer write under `chat/`.
 - First public version: a web app for project cards and reports, run locally with Docker or
   served from a published site. Ships two sample cards (Markdown and HTML) to show the formats.
 - **Make cards by hand, on the site or locally.** ＋ New card on the board, ＋ after a card's tabs

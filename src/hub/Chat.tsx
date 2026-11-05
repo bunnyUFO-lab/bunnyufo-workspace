@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatDelegate, ChatLine, ChatModel, ChatPersona, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatDelegate, ChatHeld, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
@@ -9,7 +9,8 @@ import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
 import { elapsedLabel } from './runLines'
-import { StreamCut, plainText, streamChat } from './chatStream'
+import { StreamCut, plainText, streamChat, streamLive } from './chatStream'
+import type { ChatHandlers } from './chatStream'
 import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
@@ -239,6 +240,8 @@ interface CutTurn { text: string; sentAt: string; fallback: Shown[]; previews: s
 
 const CUT_NOTE = 'The connection dropped. Hermes is still working, and the reply shows here when it is saved.'
 const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is saved.'
+/** What the rows of a held queue say: why nothing went out by itself. */
+const HELD_WHY: Record<ChatHeld['reason'], string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long' }
 const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
 function ChatView({ id }: { id?: string }) {
@@ -274,6 +277,12 @@ function ChatView({ id }: { id?: string }) {
   const [tools, setTools] = useState<ChatTool[]>([])
   const [delegates, setDelegates] = useState<ChatDelegate[]>([])
   const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
+  const [queued, setQueued] = useState<ChatQueued[]>([])   // sent while a reply ran; the Hub delivers them when it ends
+  const [held, setHeld] = useState<ChatHeld | null>(null)   // why they are not going out by themselves
+  const [known, setKnown] = useState(!!id && !parseHelpId(id))   // the conversation has a name, so a message can be queued in it
+  const live = useRef(false)   // a turn is being read from a stream (sent here, or followed)
+  const afterRef = useRef<(name: string) => Promise<void>>(async () => {})
+  const followRef = useRef<(name: string, answer: ChatAnswer) => Promise<void>>(async () => {})
   const [note, setNote] = useState<string | null>(null)
   const cutTurn = useRef<CutTurn | null>(null)
   const [approval, setApproval] = useState<ChatApproval | null>(null)
@@ -293,13 +302,16 @@ function ChatView({ id }: { id?: string }) {
 
   // The conversation in the address is the one on screen.
   useEffect(() => {
-    if (!id || initial || help) return undefined
+    if (!id || help) return undefined
+    // A view that a finished turn handed its lines to has them already: it only looks at what the turn left behind (a queued message, a hold).
+    if (initial) { const timer = window.setTimeout(() => void afterRef.current(id), 0); return () => window.clearTimeout(timer) }   // after the effects below have set the refs
     let stopped = false
     hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
       .then(answer => {
         if (stopped) return
         setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
-        if (answer.running) { run.current = answer.run ?? null; setPending(''); setStreaming(true); setNote(REOPEN_NOTE); setRecovering(true) }   // opened while the reply is still coming
+        setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+        if (answer.running) void followRef.current(id, answer)   // opened while the reply is still coming: follow it live
       })
       .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
     return () => { stopped = true }
@@ -313,7 +325,9 @@ function ChatView({ id }: { id?: string }) {
 
   // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
   // page returns to the front, because a phone stops timers in the background.
-  const watching = recovering || (!streaming && hasRunningDelegate(messages))
+  const waitingQueue = queued.length > 0 && !held   // the Hub is about to deliver them: look soon, so a phone that wakes sees the rows move
+  const busy = streaming || recovering || waitingQueue   // a message sent now waits its turn
+  const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
   useEffect(() => {
     const name = conversation.current
@@ -338,6 +352,7 @@ function ChatView({ id }: { id?: string }) {
       if (problem) return
       turn?.previews.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
       if (name !== id) { carry(name, lines, turn?.model ?? AUTO, turn?.persona ?? HERMES); window.location.assign(hubHash('chat', name)) }
+      else void afterRef.current(name)   // what the turn left behind: a queued message that started, a hold
     }
     const missed = () => {
       misses += 1
@@ -352,8 +367,11 @@ function ChatView({ id }: { id?: string }) {
       try {
         const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
         if (stopped) return
-        if (!recovering) setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
-        else if (answer.running) { if (answer.run) run.current = answer.run }
+        if (!recovering) {
+          setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+          setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+          if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
+        } else if (answer.running) { if (answer.run) run.current = answer.run }
         else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
         else missed()
       } catch (failure) {
@@ -361,14 +379,14 @@ function ChatView({ id }: { id?: string }) {
       } finally {
         looking = false
       }
-      if (!stopped) timer = window.setTimeout(() => void look(), nextLookMs(recovering, Date.now() - began))
+      if (!stopped) timer = window.setTimeout(() => void look(), waitingQueue && !recovering ? 4000 : nextLookMs(recovering, Date.now() - began))
     }
     const onFront = () => { if (document.visibilityState === 'visible') void look() }
     document.addEventListener('visibilitychange', onFront)
     window.addEventListener('online', onFront)
-    timer = window.setTimeout(() => void look(), recovering ? 1000 : nextLookMs(false, 0))
+    timer = window.setTimeout(() => void look(), recovering ? 1000 : waitingQueue ? 2000 : nextLookMs(false, 0))
     return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onFront); window.removeEventListener('online', onFront) }
-  }, [watching, recovering, id, reloadList])
+  }, [watching, recovering, waitingQueue, id, reloadList])
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
@@ -383,7 +401,7 @@ function ChatView({ id }: { id?: string }) {
 
 
   const addFiles = async (files: File[]) => {
-    if (streaming) { setTrayNote('Wait for the reply before adding pictures.'); return }
+    if (busy) { setTrayNote('Wait for the reply before adding pictures.'); return }
     const pictures = files.filter(isPicture)
     const note: string[] = []
     if (pictures.length < files.length) note.push('Only pictures can be attached.')
@@ -436,29 +454,72 @@ function ChatView({ id }: { id?: string }) {
     void addFiles(Array.from(event.dataTransfer.files))
   }
 
-  const send = async (asked?: string) => {
-    const text = (asked ?? draft).trim()
-    const sending = asked === undefined ? images : []
-    if ((!text && !sending.length) || streaming || preparing) return
-    if (speaks) window.speechSynthesis.cancel()
+  /** Puts a message in the queue of this conversation: it goes when the reply ends. The text stays in the draft when that fails. */
+  const queueMessage = async (text: string) => {
+    const name = conversation.current
+    if (!name) return
     setError(null)
-    setTrayNote(null)
-    setStreaming(true)
-    if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
-    setTools([])
-    setDelegates([])
-    setApproval(null)
-    setPending('')
-    const before = messages
-    const askedModel = model   // model: what this turn asks for
-    const askedPersona = persona   // persona: only a new chat names one; the server keeps it after that
-    const previews = sending.map(item => item.url)
-    const optimistic: Shown = { role: 'user', text, at: new Date().toISOString(), ...(previews.length ? { previews } : {}) }
-    setMessages([...before, optimistic])
+    setDraft('')
+    try {
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) })
+      setQueued(answer.queued); setHeld(answer.held)
+      void afterRef.current(name)   // nothing was running after all: the turn has started, so follow it
+    } catch (failure) {
+      setDraft(current => current || text)
+      setError(failure instanceof Error ? failure.message : 'The message was not queued.')
+    }
+  }
+
+  /** Send now: the held messages go out as one turn. */
+  const sendHeld = async () => {
+    const name = conversation.current
+    if (!name) return
+    setError(null)
+    try {
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/send`, {})
+      setQueued(answer.queued); setHeld(answer.held)
+      void afterRef.current(name)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'The messages were not sent.') }
+  }
+
+  const cancelQueued = async (queuedId: string) => {
+    const name = conversation.current
+    if (!name) return
+    setError(null)
+    try {
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/${encodeURIComponent(queuedId)}/cancel`, {})
+      setQueued(answer.queued); setHeld(answer.held)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The message was not cancelled.')
+      void afterRef.current(name)   // it may have been sent meanwhile: show what is true
+    }
+  }
+
+  /**
+   * What the Hub holds for this conversation after a turn: the saved lines, the queue and any hold; and a turn that has started on its own
+   * (the queued messages went out) is followed. Looks again by itself when this fails.
+   */
+  const afterTurn = async (name: string) => {
+    try {
+      const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
+      if (live.current) return
+      setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+      setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+      if (answer.running) void followRef.current(name, answer)
+    } catch { /* the watcher looks again while a message waits */ }
+  }
+  useEffect(() => { afterRef.current = afterTurn })
+
+  /**
+   * Reads one turn from a stream: the reply as it comes, its tools and delegates, and how it ends. For a turn this page sent (`streamChat`)
+   * and for one it only follows (`streamLive`: the queue's, or one started elsewhere). A stream that breaks leaves the reply to the saved chat.
+   */
+  const readTurn = async (turn: { start: (handlers: ChatHandlers, signal: AbortSignal) => Promise<void>; before: Shown[]; optimistic: Shown; previews: string[]; model: string; persona: string; refused: (failure: unknown) => void }) => {
+    const { start, before, optimistic, previews, model: askedModel, persona: askedPersona, refused } = turn
+    const text = optimistic.text
     const controller = new AbortController()
     abort.current = controller
-    run.current = null
-    stopWanted.current = false
+    live.current = true
     let reply = ''
     let created: Item[] = []
     let finished: string | null = null
@@ -466,13 +527,12 @@ function ChatView({ id }: { id?: string }) {
     let savedContext: ChatLine | undefined
     let problem: string | null = null
     let cut = false
+    let idle = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
     const used: string[] = []
     let started: ChatDelegate[] = []
     try {
-      const encoded = await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) })))
-      const gone = !!help && !!preview.error && preview.data === null
-      await streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES && !conversation.current && !help ? { persona: askedPersona } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(encoded.length ? { images: encoded } : {}) }, {
+      await start({
         onDelta: piece => { reply += piece; setPending(reply) },
         onCreated: items => { created = items },
         onTool: tool => {
@@ -482,13 +542,14 @@ function ChatView({ id }: { id?: string }) {
         onDelegates: items => { started = items; setDelegates(items) },
         onStarted: (id, name) => {
           run.current = id
-          if (name) conversation.current = name   // a resend joins this conversation, not a second one
+          if (name) { conversation.current = name; setKnown(true) }   // a resend joins this conversation, not a second one
           if (stopWanted.current) { stopWanted.current = false; if (id) stop(); else abort.current?.abort() }
         },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
         onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },
         onError: message => { problem = message },
+        onIdle: () => { idle = true },
       }, controller.signal)
     } catch (failure) {
       if (failure instanceof StreamCut) {
@@ -497,16 +558,20 @@ function ChatView({ id }: { id?: string }) {
         problem = failure.message
       } else if (!controller.signal.aborted) {
         unhold()
-        // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
-        setMessages(before)
-        if (asked === undefined) { setDraft(text); setImages(sending); slots.current = MAX_IMAGES - sending.length }
-        setPending(null)
-        setStreaming(false)
-        setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
+        live.current = false
+        refused(failure)
         return
       }
     }
     unhold()
+    live.current = false
+    if (idle) {
+      // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
+      setTools([])
+      setNote(REOPEN_NOTE)
+      setRecovering(true)
+      return
+    }
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }
@@ -534,8 +599,86 @@ function ChatView({ id }: { id?: string }) {
       list.reload()
       if (finished !== id) { carry(finished, lines, askedModel, askedPersona); window.location.assign(hubHash('chat', finished)) }
     }
+    if (!(finished && finished !== id) && conversation.current) void afterRef.current(conversation.current)   // the queue may have moved on, or been held
     if (!stopped && !problem && readAloud && speaks && reply.trim()) window.speechSynthesis.speak(new SpeechSynthesisUtterance(plainText(reply)))
   }
+
+  /** A turn that is running here and that this page did not start (the queue's own, or one begun on another device): read it live. */
+  const followLive = async (name: string, answer: ChatAnswer) => {
+    if (live.current) return
+    live.current = true   // before anything is awaited: two looks must not follow the same turn twice
+    cutTurn.current?.previews.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
+    cutTurn.current = null
+    setRecovering(false)
+    const asking = answer.asking
+    const before = answer.messages
+    const optimistic: Shown = { role: 'user', text: asking?.text ?? '', at: asking?.at ?? new Date().toISOString() }
+    conversation.current = name
+    setKnown(true)
+    run.current = answer.run ?? null
+    stopWanted.current = false
+    setError(null)
+    setNote(null)
+    setStreaming(true)
+    setTools([])
+    setDelegates([])
+    setApproval(null)
+    setPending('')
+    setQueued(answer.queued ?? []); setHeld(answer.held ?? null)
+    setMessages(asking?.text ? [...before, optimistic] : before)
+    await readTurn({
+      start: (handlers, signal) => streamLive(name, handlers, signal),
+      before, optimistic, previews: [], model, persona,
+      refused: () => { setNote(REOPEN_NOTE); setRecovering(true) },   // the stream would not open: the saved chat has the reply when it ends
+    })
+  }
+  useEffect(() => { followRef.current = followLive })
+
+  const send = async (asked?: string) => {
+    const text = (asked ?? draft).trim()
+    const sending = asked === undefined ? images : []
+    if ((!text && !sending.length) || preparing) return
+    // A reply is running here, or messages are waiting for it: this one waits too. Pictures cannot wait, so they stay in the tray.
+    if (busy) {
+      if (sending.length) { setTrayNote('Pictures cannot wait in the queue. Send them when the reply is done, or remove them.'); return }
+      if (!text || !known) return
+      await queueMessage(text)
+      return
+    }
+    if (speaks) window.speechSynthesis.cancel()
+    setError(null)
+    setTrayNote(null)
+    setStreaming(true)
+    if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
+    setTools([])
+    setDelegates([])
+    setApproval(null)
+    setPending('')
+    const before = messages
+    const askedModel = model   // model: what this turn asks for
+    const askedPersona = persona   // persona: only a new chat names one; the server keeps it after that
+    const previews = sending.map(item => item.url)
+    const optimistic: Shown = { role: 'user', text, at: new Date().toISOString(), ...(previews.length ? { previews } : {}) }
+    setMessages([...before, optimistic])
+    run.current = null
+    stopWanted.current = false
+    const gone = !!help && !!preview.error && preview.data === null
+    await readTurn({
+      start: async (handlers, signal) => streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES && !conversation.current && !help ? { persona: askedPersona } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(sending.length ? { images: await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) }))) } : {}) }, handlers, signal),
+      before, optimistic, previews, model: askedModel, persona: askedPersona,
+      refused: failure => {
+        // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
+        setMessages(before)
+        setPending(null)
+        setStreaming(false)
+        // This page thought the chat was idle, but a reply is running (another device, or the queue's own turn): the message waits its turn.
+        if (failure instanceof HubError && failure.status === 409 && conversation.current && !sending.length) { void queueMessage(text); return }
+        if (asked === undefined) { setDraft(text); setImages(sending); slots.current = MAX_IMAGES - sending.length }
+        setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
+      },
+    })
+  }
+
 
   // "Ask Hermes: <text>" from the palette: a new conversation that sends the text at once.
   const sendRef = useRef(send)
@@ -572,7 +715,7 @@ function ChatView({ id }: { id?: string }) {
   const banner = stored
     ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
     : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
-  const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
+  const canSend = (!!draft.trim() || images.length > 0) && preparing === 0 && !(busy && !known)   // a new chat has no name to queue under until the server says started
   return (
     <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
       <aside className="hub-chat-list" aria-label="Conversations">
@@ -615,6 +758,20 @@ function ChatView({ id }: { id?: string }) {
             </div>
           )}
         </div>
+        {queued.length > 0 && (
+          <div className="hub-queue" data-chat-queued role="group" aria-label="Messages waiting to be sent">
+            {queued.map(item => (
+              <div className={`hub-queued${held ? ' held' : ''}`} key={item.id} data-queued={item.id} data-queued-state={held ? 'held' : 'queued'}>
+                <span className="hub-queued-pill" data-queued-pill>{held ? `Not sent: ${HELD_WHY[held.reason]}` : 'Queued'}</span>
+                <p className="hub-queued-text">{item.text}</p>
+                <div className="hub-queued-a">
+                  {held && <button type="button" className="hub-btn pri" data-queued-send onClick={() => void sendHeld()}>Send now</button>}
+                  <button type="button" className="hub-btn" data-queued-cancel onClick={() => void cancelQueued(item.id)}>Cancel</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {(images.length > 0 || preparing > 0 || trayNote) && (
@@ -631,14 +788,13 @@ function ChatView({ id }: { id?: string }) {
         )}
         <div className="hub-compose">
           <input ref={picker} type="file" accept="image/*" multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-          <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={streaming} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
+          <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={busy} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
           <textarea
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"
             onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
           />
-          {streaming
-            ? <button type="button" className="hub-btn" onClick={stop}>Stop</button>
-            : <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>}
+          {streaming && <button type="button" className="hub-btn" onClick={stop}>Stop</button>}
+          <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>
         </div>
         {(speaks || models.length > 0) && (
           <div className="hub-chat-extras">

@@ -12,6 +12,8 @@ export interface ChatHandlers {
   onApprovalSettled?: () => void
   /** The server took the message. `run` is the Hermes run Stop can end, or null on a turn that has none. */
   onStarted?: (run: string | null, conversation: string) => void
+  /** /live found no turn running. */
+  onIdle?: () => void
 }
 
 /** The reply stream broke after the server had accepted the message, before `done` or `error`. */
@@ -33,12 +35,13 @@ export async function readChatStream(stream: ReadableStream<Uint8Array>, handler
       else if (line.startsWith('data:')) data.push(line.slice(5).trim())
     }
     if (!data.length) return
-    if (event === 'done' || event === 'error') ended = true
+    if (event === 'done' || event === 'error' || event === 'idle') ended = true
     let value: Record<string, unknown>
     try { value = JSON.parse(data.join('\n')) as Record<string, unknown> } catch { return }
     if (event === 'delta' && typeof value.text === 'string') handlers.onDelta(value.text)
     else if (event === 'created' && Array.isArray(value.items)) handlers.onCreated(value.items as Item[])
     else if (event === 'done' && typeof value.conversation === 'string') handlers.onDone(value.conversation, value.user && typeof value.user === 'object' ? value.user as ChatLine : undefined, value.context && typeof value.context === 'object' ? value.context as ChatLine : undefined)
+    else if (event === 'idle') handlers.onIdle?.()
     else if (event === 'started') handlers.onStarted?.(typeof value.run === 'string' ? value.run : null, typeof value.conversation === 'string' ? value.conversation : '')
     else if (event === 'tool' && typeof value.name === 'string') handlers.onTool?.(value as unknown as ChatTool)
     else if (event === 'delegates' && Array.isArray(value.items)) handlers.onDelegates?.(value.items as ChatDelegate[])
