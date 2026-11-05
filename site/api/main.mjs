@@ -46,6 +46,7 @@
 import { readFileSync } from 'node:fs';
 import { createSiteApi, originOf, writeOriginsFor } from './server.mjs';
 import { createHub } from './hub.mjs';
+import { DEFAULT_LIST_CACHE_MS } from './list-cache.mjs';
 import { createBucket } from './s3.mjs';
 
 /** KEY=VALUE lines; blanks and # comments ignored, surrounding quotes dropped. */
@@ -89,7 +90,7 @@ if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) {
 }
 const stateKey = env.BUW_STATE_KEY || 'state.json';
 const dev = env.BUW_DEV === '1' ? { writable: id => id.startsWith('dev-') } : null;
-const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox });
+const hub = createHub({ bucket, prefix, enabled: env.HUB === '1', env, inbox, listCacheMs: Number(env.HUB_LIST_CACHE_MS ?? DEFAULT_LIST_CACHE_MS) });
 const server = bucket
   ? createSiteApi({ bucket, prefix, requireRemoteUser, hub, siteUrl, allowedOrigins, cardApi, contentOrigin, stateKey, dev })
   : createSiteApi({ requireRemoteUser, siteUrl, allowedOrigins, cardApi, contentOrigin });
