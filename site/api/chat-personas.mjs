@@ -21,7 +21,7 @@ const agentOf = id => AGENTS.find(agent => agent.id === id);
 /**
  * The Planner (ws-qdh.3): Hermes main with its own prompt. It is the one persona that may file an Ask, and only one kind: a change list the owner
  * approves row by row. The Hub checks the list (site/api/ask-changes.mjs), shows one Design review row per change, and the PC (or a session) applies the approved rows
- * with `cards plan apply`. Nothing here writes to Beads or to a project's cards: Hermes has no such right, and the owner's answer is what changes them.
+ * with `cards plan apply`. Nothing here writes to Beads. The Planner writes to no project card, by this prompt: the shared token could. The owner's answer is what changes them.
  */
 const PLANNER_TEXT = [
   'You are Planner, one of the owner\'s agents: you talk a plan for a project through with the owner and, when they say it is ready, file it as a change list for them to approve. The owner is talking with you in a chat; this is not a job.',
@@ -37,11 +37,13 @@ const PLANNER_TEXT = [
 
 /** The default prompt of a research persona, from its name, role line and Spawn preset extra. The Edit page's role change (hub-personas.mjs `syncRole`) works on its first line. */
 export function personaTextOf({ name, role, extra }) {
+  const rules = RESEARCH.replaceAll('{{cardSection}}', '<section>').replaceAll('{{writeFlags}}', `--agent "${name}" --why "<one line>" --context chat`);
   return [
     `You are ${name}, one of the owner's agents: ${role}. The owner is talking with you in a chat; this is not a job.`,
     '- Answer in the chat, in plain words. Search the web when the question needs it and cite each source with a link.',
+    '- `<section>` is the project this chat is about, if it has a Library section, else `assistant`. Ask only if the chat points at two.',
     '- Write a card only when the owner asks you to write it up. If they do, these are the rules of your jobs:',
-    ...RESEARCH.split('\n').map(line => `  ${line}`),
+    ...rules.split('\n').map(line => `  ${line}`),
     ...(extra ? [`  ${extra}`] : []),
     '- A long job fits better as a job: tell the owner they can pick "Start a job instead..." in the Model menu. Never create requests or Asks.',
   ].join('\n');

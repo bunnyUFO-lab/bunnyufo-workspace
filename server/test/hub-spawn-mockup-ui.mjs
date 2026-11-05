@@ -54,7 +54,7 @@ try {
   assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · cheapest']);
   assert.match(await page.locator('[data-spawn-model-note]').innerText(), /Codex on your ChatGPT plan/);
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan · about 0\.5 M tokens/);
-  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /an assistant card with an HTML mockup and up to 3 pictures/);
+  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /a card in the project's section, or in assistant, with an HTML mockup and up to 3 pictures/);
   assert.equal(await page.locator('[data-spawn-model-claude]').count(), 0);
   await shot(page, 'spawn-mockup-desktop');
   await menu.selectOption('deepseek-flash');

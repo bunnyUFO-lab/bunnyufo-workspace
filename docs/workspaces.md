@@ -482,10 +482,13 @@ Hermes runs (`hermes-dispatch.mjs`, `hermes-follower.mjs`, `hermes-runs.mjs`, `r
 `hermes` request writes `taken.json` (`runner: hermes`), starts a run with `{ input: run.brief }` and the request id
 as idempotency key (no provider, no model: Hermes's own default and fallback chain apply), writes
 `hermes-run.json`, and follows the run in the site API process, so `report.md` and `result.json` are written even
-with no page open. A run that ends `completed` with a `CARD: assistant/<folder>` line is outcome `card`; without
-one it is `failed` ("finished without a card"). When Hermes drops a run's event buffer (a few minutes after the last
+with no page open. A run that ends `completed` with a `CARD: <section>/<folder>` line is outcome `card`; without
+one it is `failed` ("finished without a card"). The section is `assistant`, or the project's own section when the Hub signed that
+(`cardSectionOf` in `hub.mjs`, at approval: the project's section if it is a Library section that agent cards are not turned off for,
+else `assistant`; on the development copy only a `dev-` section). The brief carries `{{cardSection}}` and `--agent/--why/--context job:<id>`,
+filled from the Hub's choice and never from request text. A `CARD:` line naming any other section is not trusted. When Hermes drops a run's event buffer (a few minutes after the last
 reader) the follower polls the status instead; only a 404 on the status ends the request `unknown`
-(`hermes-forgot`, pointing at the newest `assistant` card made after the start). A run that fails with `429` or
+(`hermes-forgot`, pointing at the newest card made after the start in `assistant` or the signed project's section). A run that fails with `429` or
 `quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`, key
 `<id>-retry`), recorded in `hermes-retry.json` (with `until` when the error named a reset time); a second quota failure is `failed` with reason `usage-limit`. The
 follower stops a run at `limits.minutes` (`time-limit`). At most 3 Hermes runs go at a time: a fourth approval is
@@ -509,7 +512,7 @@ prompt, so a replayed event writes nothing and pings nothing. `#needs-you` gets 
 has a result, or at `expiresAt`, because Hermes denies it on its own after 300 seconds.
 
 Run questions: Hermes clarify stays off, so a run asks by ending its output with a question. When a run is `completed`
-with no `CARD: assistant/<folder>` line and its last paragraph (after the last blank line, Markdown emphasis removed)
+with no trusted `CARD: <section>/<folder>` line and its last paragraph (after the last blank line, Markdown emphasis removed)
 ends in `?` and is at most 600 characters, `result.json` has outcome `question` with that `question` and a `summary` (the
 first 500 characters of the output); the state is `asking` and the request is a Needs you row of kind
 `run-question` ("Hermes asks"). A `CARD:` line always wins, and Chat turns never use this rule.

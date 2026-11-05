@@ -290,7 +290,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const routineSet = loadRoutines(env);
   const dryRun = String(env.HUB_ROUTINE_DRY_RUN ?? '').trim() === '1';
   const hasCloud = repo => dryRun || (!!repo && !!routineFor(routineSet.routines, repo));
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, cardSectionOf, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
     cloudNever: String(env.HUB_CLOUD_NEVER ?? '').split(',').map(name => name.trim()).filter(Boolean),
     // The Bunnylink project's own repo, for the repo guard: null when there is no such section, '' when it tracks no repo, throws on a storage error.
     bunnylinkRepo: async () => { const got = await bucket.getJson(`${prefix}/bunnylink/workspace.json`); return got ? trackedRepo(got.value?.tracked?.repo) ?? '' : null; },
@@ -1272,14 +1272,19 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
 
   /** Every card of every card section: `sections/<id>/workspace.json` entities, with the section's tracked repo. */
   let lastSections = new Set();
+  // Each section's `hidden` and `archived` flags, from the same listing: a card list that is neither is a Library section (cardSectionOf).
+  let lastSectionFlags = new Map();
   async function allCards() {
     const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
     const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && !/^inbox(-[a-z0-9]+)?$/.test(id));
     lastSections = new Set(sections);
+    const flags = new Map();
+    lastSectionFlags = flags;
     const lists = await pool(6, sections, async section => {
       const got = await bucket.getJson(`${prefix}/${section}/workspace.json`).catch(() => null);
       const entities = got?.value?.entities;
       if (!Array.isArray(entities)) return [];
+      flags.set(section, { hidden: got.value.hidden === true, archived: got.value.archived === true });
       const repo = trackedRepo(got.value.tracked?.repo);
       return entities
         .filter(entity => entity && typeof entity.id === 'string' && typeof entity.title === 'string')
@@ -1292,7 +1297,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   }
 
   // The cards by `section/folder` and `section#id`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
-  let cardIndex = { at: 0, byRef: new Map(), rows: [], sections: new Set() };
+  let cardIndex = { at: 0, byRef: new Map(), rows: [], sections: new Set(), flags: new Map() };
   const cardRow = row => ({ title: row.title, href: `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}` });
   /** Make sure the index is no older than a minute (`maxAge` ms), listing the sections at most once per call. */
   async function refreshCardIndex(maxAge = 60000) {
@@ -1306,7 +1311,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         byRef.set(`${row.section}/${row.folder}`, cardRow(row));
         if (!byRef.has(`${row.section}#${row.id}`)) byRef.set(`${row.section}#${row.id}`, cardRow(row));
       }
-      cardIndex = { at, byRef, rows, sections: lastSections };
+      cardIndex = { at, byRef, rows, sections: lastSections, flags: lastSectionFlags };
     } catch { cardIndex = { ...cardIndex, at }; }
   }
   /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
@@ -1324,6 +1329,28 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const when = row => row.updated ?? row.created ?? '';
     const mine = cardIndex.rows.filter(row => row.section === project).sort((a, b) => when(b).localeCompare(when(a)));
     return { section: project, cards: mine.slice(0, 20).map(row => ({ ...cardRow(row), ...(when(row) ? { updated: when(row) } : {}) })), total: mine.length };
+  }
+  /**
+   * The section a job for `project` writes its card to, chosen when the Hub signs the brief and never from request text: the project's own
+   * section when it is a Library section (a card list, not hidden, not archived, not an inbox, not `agent-plans`) that the owner has not
+   * turned agent cards off for (`library-writes.json`), else `assistant`. On the development copy only a `dev-` section qualifies. A failed
+   * listing or setting read gives `assistant`: it never fails an approval.
+   */
+  async function cardSectionOf(project) {
+    try {
+      if (typeof project !== 'string' || project === 'assistant' || project === 'agent-plans' || /^inbox(-|$)/.test(project)) return 'assistant';
+      if (env.BUW_DEV === '1' && !project.startsWith('dev-')) return 'assistant';
+      await refreshCardIndex();
+      const flags = cardIndex.flags.get(project);
+      if (!flags || flags.hidden || flags.archived) return 'assistant';
+      // The same file the card API reads: `dev-` sections keep theirs in `inbox-dev`, so the two copies never see each other's.
+      const got = await bucket.getText(`${prefix}/${project.startsWith('dev-') ? 'inbox-dev' : 'inbox'}/library-writes.json`);
+      if (!got) return project;
+      if (got.metadata?.writer) return 'assistant';
+      const setting = JSON.parse(got.text);
+      if (!setting || setting.v !== 1 || !Array.isArray(setting.off) || !setting.off.every(item => typeof item === 'string')) return 'assistant';
+      return setting.off.includes(project) ? 'assistant' : project;
+    } catch { return 'assistant'; }
   }
   /** A resolver for the map: `section/folder` or `section#id` to `{ title, href }`, from the one-minute index (no listing of its own per request). */
   async function cardResolver() {

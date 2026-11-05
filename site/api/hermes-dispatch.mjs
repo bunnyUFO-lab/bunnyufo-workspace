@@ -141,6 +141,15 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     try { return await requests.loadOne(id, at); } catch { return null; }
   }
 
+  /**
+   * The sections a run's `CARD:` line may name: `assistant`, and the project of the signed approval (never request text), unless it is
+   * an inbox. The Hub signs the project's section only when the project has a Library section the owner left on.
+   */
+  const sectionsOf = approved => {
+    const project = approved?.project;
+    return ['assistant', ...(typeof project === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(project) && !/^inbox(-|$)/.test(project) && project !== 'assistant' ? [project] : [])];
+  };
+
   /** The follower's end: write report.md and result.json, or start the one quota retry. */
   async function onEnd(follower, { run, unknown }) {
     const context = follower.context;
@@ -151,12 +160,12 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     const stopped = names.has('stop.json');
     try {
       if (unknown) {
-        await writeResult(id, unknownOutcome({ card: await newestCardSince(context.startedAt), at: at.toISOString() }));
+        await writeResult(id, unknownOutcome({ card: await newestCardSince(context.startedAt, sectionsOf(context.approved)), at: at.toISOString() }));
       } else if (run.status === 'failed' && isQuotaError(run.error) && !context.approved?.run?.model && !context.retry && !names.has('hermes-retry.json') && !stopped && !follower.timedOut) {
         await startRetry(context, at, run);
         return;
       } else {
-        const outcome = outcomeOf({ run: { ...run, output: stripInlineImages(run.output), error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString() });
+        const outcome = outcomeOf({ run: { ...run, output: stripInlineImages(run.output), error: scrub(run.error) }, stopped, timedOut: follower.timedOut, retried: context.retry, at: at.toISOString(), sections: sectionsOf(context.approved) });
         // What the owner said that Hermes took and never read: kept in the result so the page can say "queued", not "sent".
         const pending = pendingOf(run);
         const unread = pending ? await requests.unreadSentIds(id, pending, at).catch(() => []) : [];
@@ -206,14 +215,14 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
     return { delivery, ...(reason ? { reason } : {}) };
   }
 
-  /** The newest assistant card made after the run started, or null. */
-  async function newestCardSince(startedAt) {
+  /** The newest card in `sections` made after the run started, as `<section>/<folder>`, or null. */
+  async function newestCardSince(startedAt, sections = ['assistant']) {
     const day = String(startedAt).slice(0, 10);
     let cards = [];
-    try { cards = (await allCards()).filter(card => card.section === 'assistant'); } catch { return null; }
+    try { cards = (await allCards()).filter(card => sections.includes(card.section)); } catch { return null; }
     const dated = cards.map(card => ({ card, when: String(card.created ?? card.updated ?? '') })).filter(row => row.when && (row.when.length > 10 ? row.when >= startedAt : row.when >= day));
     dated.sort((a, b) => (a.when < b.when ? 1 : -1));
-    return dated[0] ? `assistant/${dated[0].card.folder}` : null;
+    return dated[0] ? `${dated[0].card.section}/${dated[0].card.folder}` : null;
   }
 
   const followers = createFollowers({

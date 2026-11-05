@@ -16,7 +16,9 @@ test('every research persona is a Team agent whose first preset is a Hermes rese
     assert.deepEqual(preset.targets, ['hermes']);
     assert.equal(preset.model, null, 'Hermes main: no provider of its own');
     assert.ok(entry.text.startsWith(`You are ${agent.name}`));
-    assert.ok(entry.text.includes('Write exactly one card to the `assistant` section'));
+    assert.ok(entry.text.includes('Write exactly one card to the `<section>` section'));
+    assert.doesNotMatch(entry.text, /\{\{/, 'every placeholder is filled');
+    assert.ok(entry.text.includes('--context chat') && entry.text.includes(`--agent "${agent.name}"`), 'a chat write says who and that it is a chat');
     assert.ok(preset.template.includes(entry.extra), 'the extra rules are the preset\'s');
     assert.ok(entry.text.length < 2500);
     assert.match(entry.text, /Never create requests or Asks/, `${entry.id} may not file anything`);

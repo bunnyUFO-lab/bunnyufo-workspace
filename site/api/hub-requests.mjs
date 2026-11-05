@@ -199,7 +199,7 @@ export function rerunRequestId(requestId) {
  * @param hooks         `{ hermesLive(id) → boolean, pcBusy(session) → boolean }`; the Hermes follower and the PC report
  *                      plug in here (both default to false)
  */
-export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, bunnylinkRepo = async () => null, repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], neverRepos = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
+export function createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, hooks = {}, projectRepo = async () => undefined, bunnylinkRepo = async () => null, cardSectionOf = async () => 'assistant', repoProjects = [], extraRepos = [], cloudRepos = () => [], hasCloud = repo => cloudRepos().includes(repo), signingKey = null, approveReason = '', cloudNever = [], neverRepos = [], log = () => {}, scrub = text => String(text ?? '').replace(/https?:\/\/\S+/gi, '').slice(0, 80) }) {
   // handOff[target](id) starts an approved request (Hermes: 1.10, cloud: M3c) and may answer `{ waiting: '<reason>' }`;
   // stopRun(id) stops a Hermes run. Both are plugged in later and default to doing nothing.
   const live = { wakeOnApprove: async () => false, hermesLive: () => false, pcBusy: () => false, stopRun: async () => {}, steer: async () => ({ delivery: 'queued', reason: 'Hermes is not set up on this host.' }), retryFire: async () => { throw fail('Not found', 404); }, cloudStatus: async () => null, ...hooks, handOff: { hermes: async () => null, cloud: async () => null, ...(hooks.handOff ?? {}) } };
@@ -479,7 +479,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const { request } = await loadOne(query.get('request') ?? '', at);
       const preset = presetOf(request.preset);
       if (!preset || request.target !== 'at-pc') throw fail('Only a request you start at the PC has a brief to copy.', 400);
-      return { brief: renderBrief({ preset, request }) };
+      return { brief: renderBrief({ preset, request, cardSection: await cardSectionOf(request.project) }) };
     }
     throw fail('Not found', 404);
   }
@@ -611,7 +611,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       requestSha256: sha256Hex(stored.buffer), limits: { minutes: sprint ? sprint.minutes : minutesOf(preset) },
       expires: sprint ? sprint.expires : new Date(at.getTime() + 72 * 3600 * 1000).toISOString(), nonce: newNonce(), at: at.toISOString(), by: sprint ? sprint.by : by,
       run: {
-        ...runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier, ...(sprint ? { minutes: sprint.minutes } : {}) }),
+        ...runBlock({ preset, request: repo && !request.repo ? { ...request, repo } : request, earlier, cardSection: await cardSectionOf(request.project), ...(sprint ? { minutes: sprint.minutes } : {}) }),
         ...(sprint ? { sprint: { head: sprint.head, seq: sprint.seq, of: sprint.of, until: sprint.until, after: sprint.after } } : {}),
       },
     };
