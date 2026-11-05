@@ -24,7 +24,7 @@ import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } fr
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 import { foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
 import { JOB_LIMITS, SKEW_MS, idsIn, jobIdsOf, jobWindowsOf, splitCreated } from './chat-jobs.mjs';
-import { QUEUE_LIMITS, addItem, cancelItem, createQueueStore, holdFor, readQueue, restoreItems, takeItems, viewOf } from './chat-queue.mjs';
+import { QUEUE_LIMITS, STALE_MS_DEFAULT, addItem, cancelItem, createQueueStore, holdFor, holdQueue, readQueue, restoreItems, takeItems, tooOld, viewOf } from './chat-queue.mjs';
 
 const MB = 1024 * 1024;
 export const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
@@ -196,6 +196,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   const SWEEP_MS = env.HUB_CHAT_QUEUE_SWEEP_MS === undefined || env.HUB_CHAT_QUEUE_SWEEP_MS === '' ? 60_000 : Math.max(0, Number(env.HUB_CHAT_QUEUE_SWEEP_MS) || 0);
   const MAX_PUMPED = 2;   // turns the Hub started itself (from the queue or after a restart) that may run at once, across chats
   const NUDGE_MS = 30_000;
+  const STALE_MS = Number(env.HUB_CHAT_QUEUE_STALE_MS) > 0 ? Number(env.HUB_CHAT_QUEUE_STALE_MS) : STALE_MS_DEFAULT;   // an unheld message older than this is held, not delivered
+  const pumping = new Set();   // conversations whose queue is being turned into a turn: a sweep must not take them too
 
   const turnKeyFor = (id, kind = 't') => `${id}-${kind}-${randomId(6)}`;
   const carriedOf = id => { for (const carried of active.values()) if (carried.conversation === id) return carried; return null; };
@@ -268,7 +270,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
 
   /** Reads one run's events to its end, telling `emit` what it sees. Returns what the turn made; a failure is a sentence, never a throw. */
   async function carryRun({ carried, runId, choice, emit, signal, started, conversation }) {
-    void carried;
     let reply = '';
     let failure = null;
     const tools = [];
@@ -310,7 +311,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           }
         } else if (event.event === 'approval.settled') emit('approval-settled', { prompt: data.prompt_id ?? null });
         else if (event.event === 'run.completed') {
-          if (!reply && typeof data.output === 'string' && data.output) { reply = data.output; emit('delta', { text: reply }); }
+          // The events Hermes keeps are the last ones only: a long reply is whole in its output, so a longer output wins over what was read.
+          if (typeof data.output === 'string' && data.output.length > reply.length) { if (!reply) emit('delta', { text: data.output }); reply = data.output; }
           ended = true; finishedByHermes = true;
         } else if (event.event === 'run.failed') { failure = scrub(data.error, 200) || 'Hermes could not finish.'; ended = true; finishedByHermes = true; planPauses?.note(choice.provider ?? DEFAULT_PROVIDER, data.error); }   // pauses: a quota failure pauses the plan it ran on
         else if (event.event === 'run.cancelled' || event.event === 'run.interrupted') { failure = 'The run was stopped.'; ended = true; finishedByHermes = true; }
@@ -324,7 +326,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   }
 
   /** Saves a finished turn's lines (the picture files first) and announces what it created. Returns the lines and a failure when they could not be saved. */
-  async function saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, queued = [], seen = [] }) {
+  async function saveTurn({ carried = null, id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, queued = [], seen = [] }) {
+    if (carried) carried.ending = true;   // the run is over: a Stop now has nothing to stop, and none is waited for below
     let found = [];
     try { found = await createdSince(started); } catch { /* the reply is still worth saving */ }
     // The jobs of this reply (requests the run or the reply named; with a persona, every one found) are kept apart from the rest of what Hermes made.
@@ -372,8 +375,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   async function advanceQueue(id, carried, failure) {
     const { out } = await queueStore.update(id, queue => {
       const base = queue.turn?.key === carried.key ? { ...queue, turn: null } : queue;
-      if (failure) return { queue: queue.items.length ? { ...base, held: { reason: holdFor(failure, carried.stopAsked), at: now().toISOString() } } : base };
+      // A Stop that was accepted while the reply was ending counts as much as a failure: nothing goes out after a Stop.
+      if (failure || carried.stopAsked) return { queue: queue.items.length ? holdQueue(base, holdFor(failure, carried.stopAsked), now().toISOString()) : base };
       if (!queue.items.length || queue.held || base.turn || pumpedCount(carried) >= MAX_PUMPED) return { queue: base };
+      if (tooOld(queue.items, now().getTime(), STALE_MS)) return { queue: holdQueue(base, 'old', now().toISOString()) };
       return takeTurn(base, id);
     });
     return out ?? null;
@@ -412,13 +417,29 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const items = turn.taken?.length ? turn.taken : [{ id: `q${randomId(5)}`, text: turn.text, at: turn.at, ...(turn.by ? { by: turn.by } : {}), ...(turn.model ? { model: turn.model } : {}) }];
         const { tries: spent = 0, ...back } = restoreItems({ ...queue, turn: null }, items);
         const at = now().toISOString();
-        if (reason === 'long' || reason === 'lost') return { queue: { ...back, held: { reason, at } } };
+        if (reason === 'long' || reason === 'lost' || reason === 'old') return { queue: holdQueue(back, reason, at) };
+        if (reason === 'failed') return { queue: holdQueue(back, 'failed', at) };
         if (reason === 'busy') return { queue: { ...back, ...(spent ? { tries: spent } : {}) } };
         return { queue: spent + 1 >= QUEUE_LIMITS.tries ? { ...back, held: { reason: 'failed', at } } : { ...back, tries: spent + 1 } };
       });
     } catch (error) { log(`chat queue: could not put the messages back: ${error.message}`); }
     active.delete(carried.key);
     busFor(carried)('error', { error: reason === 'long' ? 'This conversation is long; start a new one.' : 'Hermes did not take the message.' });
+  }
+
+  /** A start whose outcome is unknown (the answer never came): Hermes may have the run. The turn stays in the file and is started again under the same key; after three tries the words go back, held. */
+  async function keepTurn(id, carried, turn) {
+    let spent = turn.tries ?? 0;
+    try {
+      await queueStore.update(id, queue => {
+        if (queue.turn?.key !== turn.key) return null;
+        spent = (queue.turn.tries ?? 0) + 1;
+        return spent >= QUEUE_LIMITS.tries ? null : { queue: { ...queue, turn: { ...queue.turn, tries: spent } } };
+      });
+    } catch (error) { log(`chat queue: could not note the try: ${error.message}`); }
+    active.delete(carried.key);
+    if (spent >= QUEUE_LIMITS.tries) { await releaseTurn(id, carried, turn, 'failed'); return; }
+    busFor(carried)('error', { error: 'Hermes did not answer; the Hub will try again.' });
   }
 
   const modelOf = id => { try { return chatModelOf(id); } catch { return chatModelOf(null); } };   // a model that is no longer listed falls back to Auto
@@ -433,6 +454,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const choice = modelOf(turn.model);
     let runId;
     let persona = null;
+    if (Date.now() - started > STALE_MS) { await releaseTurn(id, carried, turn, 'old'); return; }   // it waited too long (a long outage): the owner decides
     try {
       const got = await fresh(`chat/${id}.jsonl`);
       if (got && Buffer.byteLength(got.text) > MAX_FILE) { await releaseTurn(id, carried, turn, 'long'); return; }
@@ -442,7 +464,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       ({ runId } = await hermesRuns.start({ input: turn.text, history: earlier, idempotencyKey: turn.key, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));
     } catch (error) {
       log(`chat queue: Hermes did not take a queued turn (${error.status || error.code || 'unreachable'})`);
-      await releaseTurn(id, carried, turn, 'retry');
+      // No status: Hermes may have accepted it (a timeout is "I do not know"), so the same key is tried again. A status is a refusal.
+      if (!error.status) await keepTurn(id, carried, turn);
+      else await releaseTurn(id, carried, turn, 'retry');
       return;
     }
     carried.run = runId;
@@ -468,7 +492,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       }
       if (status) { ({ reply, failure } = settledBy(status, reply)); } else hermesRuns.stop(runId).catch(() => {});
     }
-    const saved = await saveTurn({ id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId, reply, failure, tools: ran.tools, delegates: ran.delegates, emit, queued: turn.queued ?? [], seen: ran.seen });
+    const saved = await saveTurn({ carried, id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId, reply, failure, tools: ran.tools, delegates: ran.delegates, emit, queued: turn.queued ?? [], seen: ran.seen });
     await endTurn({ carried, emit, id, ...saved });
   }
 
@@ -497,14 +521,24 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    * held (the owner sends it), nor when the host already carries its limit of such turns. Returns the turn, or null.
    */
   async function pump(id, { force = false } = {}) {
-    if (carriedOf(id) || (pumpedCount() >= MAX_PUMPED)) return null;
-    const { out } = await queueStore.update(id, queue => (queue.turn || !queue.items.length || (queue.held && !force) ? null : takeTurn(queue, id)));
-    if (!out) return null;
-    const carried = makeCarried({ key: out.key, user: out.by, conversation: id, text: out.text, at: out.at, pumped: true });
-    if (carriedOf(id)) { await releaseTurn(id, carried, out, 'busy'); return null; }   // a plain turn began in the meantime
-    active.set(carried.key, carried);
-    work(carried, () => startAndCarry({ id, carried, turn: out }));
-    return out;
+    if (carriedOf(id) || pumping.has(id) || (pumpedCount() >= MAX_PUMPED)) return null;
+    pumping.add(id);   // until the turn is in `active`: a sweep that reads the new `turn` in between must not recover it too
+    try {
+      // Messages with no saved chat behind them (a picture or help first turn that a restart lost) have nothing to be delivered into.
+      const exists = !!await fresh(`chat/${id}.jsonl`);
+      const { out } = await queueStore.update(id, queue => {
+        if (queue.turn || !queue.items.length || (queue.held && !force)) return null;
+        if (!exists) return { queue: holdQueue(queue, 'lost', now().toISOString()) };
+        if (!force && tooOld(queue.items, now().getTime(), STALE_MS)) return { queue: holdQueue(queue, 'old', now().toISOString()) };
+        return takeTurn(queue, id);
+      });
+      if (!out) return null;
+      const carried = makeCarried({ key: out.key, user: out.by, conversation: id, text: out.text, at: out.at, pumped: true });
+      if (carriedOf(id)) { await releaseTurn(id, carried, out, 'busy'); return null; }   // a plain turn began in the meantime
+      active.set(carried.key, carried);
+      work(carried, () => startAndCarry({ id, carried, turn: out }));
+      return out;
+    } finally { pumping.delete(id); }
   }
 
   /**
@@ -513,14 +547,14 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    * one Hermes forgot, so the words come back as a held message. Starts the work and returns.
    */
   function recoverTurn(id, turn) {
-    if (carriedOf(id)) return;
+    if (carriedOf(id) || pumping.has(id)) return;
     const carried = makeCarried({ key: turn.key, user: turn.by, conversation: id, run: turn.run ?? null, text: turn.text, at: turn.at, pumped: !!turn.pumped });
     active.set(carried.key, carried);
     work(carried, async () => {
       const emit = busFor(carried);
       if (!turn.run) { await startAndCarry({ id, carried, turn }); return; }
       let status;
-      try { status = await hermesRuns.get(turn.run); } catch { active.delete(carried.key); return; }   // Hermes is unreachable: the next sweep looks again
+      try { status = await hermesRuns.get(turn.run); } catch { active.delete(carried.key); emit('error', { error: 'Hermes did not answer; the Hub will look again.' }); return; }   // Hermes is unreachable: the next sweep looks again
       if (status === null) { await releaseTurn(id, carried, turn, 'lost'); return; }
       const started = Date.parse(turn.at) || Date.now();
       const choice = modelOf(turn.model);
@@ -529,17 +563,17 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       const persona = storedPersona(history.find(line => line.persona)?.persona ?? turn.persona, await tableNow());
       if (!TERMINAL.has(status.status)) { await carryOn({ id, carried, turn, runId: turn.run, choice, persona, emit, started, poll: true }); return; }
       const { reply, failure } = settledBy(status);
-      const lastUser = history.findLast(line => line.role === 'user');
-      const sameIds = !!turn.queued?.length && JSON.stringify(lastUser?.queued ?? []) === JSON.stringify(turn.queued);
-      if (lastUser && (sameIds || (!turn.queued?.length && lastUser.text === turn.text && lastUser.at === turn.at))) { await endTurn({ carried, emit, id, failure }); return; }   // saved already: only the turn goes
-      const saved = await saveTurn({ id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId: turn.run, reply, failure, tools: [], delegates: [], emit, queued: turn.queued ?? [] });
+      // Any user line, not only the last: the owner may have sent another turn since this one was saved.
+      const savedAlready = history.some(line => line.role === 'user' && ((!!turn.queued?.length && JSON.stringify(line.queued ?? []) === JSON.stringify(turn.queued)) || (!turn.queued?.length && line.text === turn.text && line.at === turn.at)));
+      if (savedAlready) { await endTurn({ carried, emit, id, failure }); return; }   // saved already: only the turn goes
+      const saved = await saveTurn({ carried, id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId: turn.run, reply, failure, tools: [], delegates: [], emit, queued: turn.queued ?? [] });
       await endTurn({ carried, emit, id, ...saved });
     });
   }
 
   /** Looks at one conversation's queue and moves it on when nothing carries it. Answers whether the file is idle (no turn, nothing deliverable). */
   async function sweepOne(id, queue = null) {
-    if (carriedOf(id)) return false;
+    if (carriedOf(id) || pumping.has(id)) return false;
     const current = queue ?? await queueStore.read(id);
     if (current.turn) { recoverTurn(id, current.turn); return false; }
     if (current.items.length && !current.held) { await pump(id); return false; }
@@ -634,6 +668,18 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
     const started = Date.now();
     const turnKey = turnKeyFor(id, runTurn ? 't' : 'p');
+    // Busy from here, before Hermes is asked: a message queued while it takes this one waits, instead of starting a second run beside it, and a
+    // second tab posting at once is told to wait. Every refusal below takes the entry out again.
+    if (asking && carriedOf(id)) throw fail('Hermes is still answering in this conversation; wait for the reply.', 409);
+    const carried = makeCarried({ key: turnKey, user, conversation: id, run: null, text, at: new Date(started).toISOString() });
+    active.set(turnKey, carried);
+    /** The turn did not start: what was queued while it was being started is held, as after a failed reply, and anyone following it is told. */
+    const dropTurn = async message => {
+      await advanceQueue(id, carried, message).catch(() => {});
+      active.delete(turnKey);
+      busFor(carried)('error', { error: message });
+    };
+    try {   // not indented: whatever throws below, the entry must not outlive the turn
 
     const abort = new AbortController();
     let idle;
@@ -650,9 +696,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (runTurn) {
       try {
         ({ runId } = await hermesRuns.start({ input: text, history: earlier, idempotencyKey: turnKey, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));   // model:
+        carried.run = runId;
       } catch (error) {
         finish();
-        throw fail(error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`, 502);
+        const message = error.status === 429 ? 'Hermes is busy; try again in a moment.' : `Hermes did not answer (${error.status || error.code || 'unreachable'}).`;
+        await dropTurn(message);
+        throw fail(message, 502);
       }
     } else try {
       upstream = await fetchImpl(`${hermesUrl}/v1/chat/completions`, {
@@ -663,10 +712,13 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       });
     } catch (error) {
       finish();
-      throw fail(`Hermes did not answer (${error.name === 'AbortError' ? 'timed out' : 'unreachable'}).`, 502);
+      const message = `Hermes did not answer (${error.name === 'AbortError' ? 'timed out' : 'unreachable'}).`;
+      await dropTurn(message);
+      throw fail(message, 502);
     }
     if (!runTurn && (!upstream.ok || !upstream.body)) {
       finish();
+      await dropTurn(`Hermes did not answer (${upstream.status}).`);
       let refusal = null;
       if (hasImages && [400, 413, 415].includes(upstream.status)) {
         const answer = await upstream.json().catch(() => null);
@@ -684,8 +736,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       Connection: 'keep-alive',
     });
     // A picture turn counts as busy too (it has no run to stop), so a message sent meanwhile is queued, not lost.
-    const carried = makeCarried({ key: turnKey, user, conversation: id, run: runTurn ? runId : null, text, at: new Date(started).toISOString() });
-    active.set(turnKey, carried);
     const emit = busFor(carried, response);
     emit('started', { conversation: id, run: runTurn ? runId : null });   // run is null on a turn that has none to stop
     // A restart must be able to finish this turn: its user line is saved only when it ends. A failed write only logs; it never fails the chat.
@@ -737,9 +787,18 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     finish();
     clearInterval(keepalive);
 
-    const saved = await saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, seen });
+    const saved = await saveTurn({ carried, id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, seen });
     // Only now: a page that reads `running: false` finds the reply saved, and a new turn cannot overtake it.
     await endTurn({ carried, response, emit, id, ...saved });
+    } finally {
+      // An unexpected throw must not leave the chat busy until the service restarts: hold the queue, tell followers, end the response.
+      if (active.get(turnKey) === carried) {
+        await advanceQueue(id, carried, 'The reply could not be finished.').catch(() => {});
+        active.delete(turnKey);
+        busFor(carried)('error', { error: 'The reply could not be finished.' });
+        if (response.headersSent && !response.writableEnded) response.end();
+      }
+    }
   }
 
   async function serveImage(response, id, file) {
@@ -861,7 +920,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (!CHAT_ID.test(id)) throw fail('No such conversation.', 404);
     response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
     const send = (event, value) => { if (!response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`); };
-    response.flushHeaders();   // the page waits for these: it asks again on a fresh connection when nothing comes
+    response.flushHeaders();
     const carried = carriedOf(id);
     if (!carried) { send('idle', {}); response.end(); return undefined; }
     let keepalive = null;
@@ -919,7 +978,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const run = typeof data.run === 'string' ? data.run : '';
         const carried = carriedByRun(run);
         if (!carried || carried.user !== (user ?? null)) throw fail('No such reply is running.', 404);
-        carried.stopAsked = true;
+        carried.stopAsked = true;   // noted even when the reply is already ending: the queue behind it must not go out after a Stop
+        if (carried.ending) throw fail('No such reply is running.', 404);   // a reply that has ended has nothing to stop
         await hermesRuns.stop(run).catch(() => {});
         return json(response, 200, { stopped: true });
       }

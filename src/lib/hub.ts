@@ -395,8 +395,9 @@ if (typeof window !== 'undefined') {
   window.addEventListener('bunnyufo-workspace-changed', () => clearHub('/project-cards'))
 }
 
-export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal): Promise<T> {
-  const changed = () => window.dispatchEvent(new Event(HUB_WROTE))
+/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. */
+export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false): Promise<T> {
+  const changed = () => { if (!quiet) window.dispatchEvent(new Event(HUB_WROTE)) }
   const release = holdReload()   // an update reload waits for this write
   try {
     const answer = await parse<T>(await fetch(`/api/hub${path}`, {
@@ -473,9 +474,9 @@ export interface ChatJob {
 export interface ChatJobResult { id: string; ok: boolean; state?: string; waiting?: string; error?: string }
 export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
 /** A message sent while a reply was running, waiting for it to end. */
-export interface ChatQueued { id: string; text: string; at: string; model?: string }
+export interface ChatQueued { id: string; text: string; at: string; model?: string; /** why this row is not going out: the hold's reason when it was held, or `joined` when it was typed during a hold */ why?: ChatHeld['reason'] | 'joined' }
 /** Why the waiting messages are not going out by themselves. */
-export interface ChatHeld { reason: 'stopped' | 'failed' | 'lost' | 'long'; at: string }
+export interface ChatHeld { reason: 'stopped' | 'failed' | 'lost' | 'long' | 'old'; at: string }
 /** What the queue routes answer. */
 export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
