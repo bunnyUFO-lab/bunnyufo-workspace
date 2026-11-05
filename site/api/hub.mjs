@@ -1370,7 +1370,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     for (const row of cardIndex.rows) if (row.section === section) titles[row.folder] = row.title;
     return titles;
   }
-  const cardWrites = createCardWrites({ bucket, prefix, key, fail, sections: librarySections, titleOf: cardTitlesOf, now, log: line => log(scrub(line, 400)) });
+  const cardWrites = createCardWrites({ bucket, prefix, key, fail, pool, sections: librarySections, titleOf: cardTitlesOf, now, log: line => log(scrub(line, 400)) });
   /** The development copy writes only `dev-` sections: the route restriction QA relies on (`mayWrite` in server.mjs does not cover Hub routes). */
   const writableSection = id => {
     if (env.BUW_DEV === '1' && !String(id ?? '').startsWith('dev-')) throw fail('The development copy writes only dev-… sections.', 403);

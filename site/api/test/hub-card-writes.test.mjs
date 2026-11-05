@@ -470,3 +470,25 @@ test('a Revert that loses a race with nothing yet put back says the file changed
     assert.match(list.body.error, /changed while it was being put back/);
   } finally { await w.close(); }
 });
+
+test('rows are cheap: a record is read once for good, a repeat or a poll lists and reads nothing more, and reads are pooled', async () => {
+  const w = await world();
+  try {
+    for (let n = 0; n < 30; n += 1) assert.equal((await w.put('magic-loops', `2026-11-05_c${n}/a.md`, 'x', CREATE(`cheapbat${String(n).padStart(2, '0')}`))).status, 200);
+    const reads = () => w.fake.log.filter(item => item.method === 'GET' && item.key.includes('card-writes/')).length;
+    const first = (await w.get('/hub/card-writes?section=magic-loops')).body.groups;
+    assert.equal(first.length, 20);
+    const afterFirst = reads();
+    assert.equal(afterFirst, 30, 'each of the 30 records read once');
+    // Poll again, and a card view and a smaller limit.
+    await w.get('/hub/card-writes?section=magic-loops');
+    await w.get('/hub/card-writes?section=magic-loops&limit=10');
+    await w.get('/hub/card-writes?section=magic-loops&folder=2026-11-05_c3');
+    assert.equal(reads(), 30, 'no record was read twice');
+    // A record overwritten with other bytes (same key, new etag) is read again, not served from memory.
+    const key = [...w.fake.objects.keys()].find(item => item.includes('card-writes/magic-loops/2026-11-05_c3/'));
+    w.seed(key, JSON.stringify({ ...w.fake.json(key), why: 'rewritten' }), 'application/json', { writer: 'card-api' });
+    const row = (await w.get('/hub/card-writes?section=magic-loops&folder=2026-11-05_c3')).body.groups[0];
+    assert.equal(row.why, 'rewritten');
+  } finally { await w.close(); }
+});

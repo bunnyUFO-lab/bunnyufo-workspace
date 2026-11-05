@@ -144,6 +144,20 @@ export function settingOf(got) {
   }
 }
 
+/** Run `fn` over `items`, at most `size` at a time, keeping the order (the Hub passes its own `pool`; this is the same, for a caller that has none). */
+async function defaultPool(size, items, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+  return results;
+}
+
 const stampOf = at => at.toISOString().replace(/[-:.]/g, '');
 
 /**
@@ -154,7 +168,7 @@ const stampOf = at => at.toISOString().replace(/[-:.]/g, '');
  * @param sections   `async () => [{ id, name }]`: the Library sections this Hub may set (the card index, filtered)
  * @param titleOf    `async (section) => { [folder]: card title }`, from the card index; never fails the read
  */
-export function createCardWrites({ bucket, prefix = 'sections', key, fail, sections, titleOf = async () => ({}), now = () => new Date(), log = () => {}, rand = () => Math.random().toString(16).slice(2, 6).padEnd(4, '0') }) {
+export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool = defaultPool, readPool = 8, sections, titleOf = async () => ({}), now = () => new Date(), log = () => {}, rand = () => Math.random().toString(16).slice(2, 6).padEnd(4, '0') }) {
   const dirKey = (section, folder) => key(`card-writes/${section}/${folder ? `${folder}/` : ''}x`).slice(0, -1);
   const checkSection = section => { if (typeof section !== 'string' || !SECTION_RE.test(section) || isInbox(section)) throw fail('Say which section.', 400); };
   const checkFolder = folder => { if (typeof folder !== 'string' || !FOLDER_RE.test(folder) || RESERVED.has(folder)) throw fail('Say which card folder.', 400); };
@@ -171,25 +185,39 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, secti
       const match = FILE_RE.exec(name);
       const at = folder ?? parts[0];
       if (!match || !FOLDER_RE.test(at)) continue;
-      found.push({ key: object.key, folder: at, name, stamp: match[1], revert: !!match[2] });
+      found.push({ key: object.key, etag: object.etag, folder: at, name, stamp: match[1], revert: !!match[2] });
     }
     return found.sort((a, b) => (a.stamp < b.stamp ? 1 : a.stamp > b.stamp ? -1 : 0));
   }
 
-  /** Read and check the files: a record only with the card API's mark, a revert record only without one. */
+  // Records and revert records are create-only, so what a key held at one ETag never changes: it is read once and kept by key and ETag
+  // (a file overwritten with other bytes has another ETag and is read again). A file that is no record is kept as null, so a forged one is not fetched again either.
+  const seen = new Map();
+  const SEEN_MAX = 3000;
+  const remember = (name, value) => {
+    seen.set(name, value);
+    while (seen.size > SEEN_MAX) seen.delete(seen.keys().next().value);
+  };
+
+  /** Read and check the files, at most `size` at a time: a record only with the card API's mark, a revert record only without one. */
   async function readFiles(files, section) {
-    const out = await Promise.all(files.map(async file => {
+    const out = await pool(readPool, files, async file => {
+      const name = `${file.key}|${file.etag ?? ''}`;
+      if (file.etag && seen.has(name)) return seen.get(name);
       const got = await bucket.getText(file.key).catch(error => { if (error?.status === 404) return null; throw error; });
       if (!got) return null;
       let value;
-      try { value = JSON.parse(got.text); } catch { return null; }
-      const marked = got.metadata?.writer === MARK;
+      try { value = JSON.parse(got.text); } catch { if (file.etag) remember(name, null); return null; }
+      let row;
       if (file.revert) {
-        const row = got.metadata?.writer ? null : checkRevert(value, { section, folder: file.folder });
-        return row ? { ...row, folder: file.folder } : null;
+        const checked = got.metadata?.writer ? null : checkRevert(value, { section, folder: file.folder });
+        row = checked ? { ...checked, folder: file.folder } : null;
+      } else {
+        row = got.metadata?.writer === MARK ? checkRecord(value, { section, folder: file.folder }) : null;
       }
-      return marked ? checkRecord(value, { section, folder: file.folder }) : null;
-    }));
+      if (file.etag) remember(name, row);
+      return row;
+    });
     return out.filter(Boolean);
   }
 
