@@ -38,7 +38,7 @@ function RevertButton({ section, group, onDone }: { section: string; group: Card
     try {
       const answer = await hubPost<CardRevert>('/card-writes/revert', { section, folder: group.folder, batch: group.batch })
       window.dispatchEvent(new Event('bunnyufo-workspace-changed'))
-      if (answer.leftAlone?.length) setNote(`Left alone, because it changed after the agent wrote it: ${answer.leftAlone.map(item => item.file.split('/').slice(1).join('/') || item.file).join(', ')}`)
+      if (answer.leftAlone?.length) setNote(`Left alone: ${answer.leftAlone.map(item => `${item.file.split('/').slice(1).join('/') || item.file} (${item.why.charAt(0).toLowerCase()}${item.why.slice(1)})`).join('; ')}`)
       setDone({ at: answer.reverted.at })
       onDone()
     } catch (problem) {

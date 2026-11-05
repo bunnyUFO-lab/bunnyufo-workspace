@@ -74,7 +74,7 @@ export function checkRevert(row, { section, folder }) {
   if (typeof row.of !== 'string' || !BATCH_RE.test(row.of)) return null;
   if (row.section !== undefined && row.section !== section) return null;
   if (row.folder !== undefined && row.folder !== folder) return null;
-  // `undone`: exactly the record ids this Revert undid. A record not listed is still live, whatever its batch label. A record from before the list existed (no `undone`) covers the label's records made before it.
+  // `undone`: exactly the record ids this Revert undid. A record not listed is still live, whatever its batch label. A file with no list undoes nothing.
   const ids = Array.isArray(row.undone) ? row.undone.filter(id => typeof id === 'string' && /^\d{8}T\d{9}Z-[0-9a-f]{4}$/.test(id)).slice(0, 600) : null;
   return { of: row.of, by: clip(row.by, 120), at: typeof row.at === 'string' ? row.at : null, partial: row.partial === true, undone: ids };
 }
@@ -85,14 +85,10 @@ const LABEL = { 'new-card': 'Added a card', 'new-tab': 'Added a tab', edit: 'Cha
  * Group records (oldest first) into the rows the page shows: by `batch`, or by the record's own id when it has none.
  * `reverts` are the checked revert records. Newest group first, at most `limit`.
  */
-/**
- * The Revert that undid `record`: one for the same batch label and folder that lists the record's id (an older one with no list covers the label's records made before
- * it). A record no Revert undid is live, and a batch label an agent reuses starts a new group.
- */
+/** The Revert that undid `record`: one for the same batch label and folder that lists the record's id. A revert file with no list undoes nothing. */
 export function revertOf(record, reverts) {
   const label = record.batch ?? record.id;
-  return reverts.find(item => item.of === label && item.folder === record.folder
-    && (item.undone ? item.undone.includes(record.id) : !item.at || !record.at || item.at >= record.at)) ?? null;
+  return reverts.find(item => item.of === label && item.folder === record.folder && item.undone?.includes(record.id)) ?? null;
 }
 
 export function groupRows(records, reverts, { limit = MAX_GROUPS, titles = {} } = {}) {
@@ -289,13 +285,19 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
         if (!file) throw fail(`${record.file} is not a file of this card.`, 409);
         perFile.set(file, [...(perFile.get(file) ?? []), record]);
       }
-      // Only the unbroken tail of a file's records is this batch's to undo: from the newest back while each record's previousEtag is the etag of the one before it. A break is
-      // someone else's change (the owner's edit, another agent's write) and the file keeps it: everything older is left alone, and said so.
+      // One rule: a Revert undoes only the newest live writes on a file. If a newer live record on the file is not this batch's, the file is left alone (Revert that one first). Going back from the
+      // newest, a record joins the tail only while the record just before it on the file is this batch's too and its etag leads on from it (an owner's edit leaves no record, but it changes the etag).
+      // Older records of the batch stay live, each its own row with its own Revert. The same bytes written again prove nothing: only the order of the records counts.
+      const live = records.filter(item => !item.entry && !revertOf(item, reverts));
       for (const [file, list] of perFile) {
-        let from = list.length - 1;
-        while (from > 0 && list[from].previousEtag && list[from].previousEtag === list[from - 1].etag) from -= 1;
-        const tail = list.slice(from);
-        if (from > 0) leftAlone.push({ file, why: 'changed by someone else after the first write of this batch' });
+        const onFile = live.filter(item => inside(item.file, folder) === file).sort((x, y) => (x.id < y.id ? -1 : 1));
+        const newest = onFile[onFile.length - 1];
+        if (!newest || newest.id !== list[list.length - 1].id) { leftAlone.push({ file, why: 'Revert the newer write first' }); continue; }
+        const ours = new Set(list.map(item => item.id));
+        let from = onFile.length - 1;
+        while (from > 0 && ours.has(onFile[from - 1].id) && onFile[from - 1].kind === 'edit' && onFile[from].previousEtag && onFile[from].previousEtag === onFile[from - 1].etag) from -= 1;
+        const tail = onFile.slice(from);
+        if (tail.length < list.length) leftAlone.push({ file, why: 'changed by someone else after the first write of this batch' });
         edits.set(file, { first: tail[0], last: tail[tail.length - 1], tail });
         tailIds.set(file, tail.map(item => item.id));
         for (const item of tail) undoneIds.add(item.id);
@@ -306,7 +308,7 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
     for (const entry of entries) for (const path of entry.steps) covered.add(`${folder}/${path}`);
     const allCovered = entries.some(entry => entry.kind === 'new-card');
     const skipped = mine.filter(item => !item.entry && item.kind !== 'edit' && !allCovered && !covered.has(item.file)).map(item => item.file);
-    if (!edits.size && !entries.length) throw fail('That write has nothing to undo.', 409);
+    if (!edits.size && !entries.length) throw fail(leftAlone.some(item => item.why === 'Revert the newer write first') ? 'Revert the newer write first.' : 'That write has nothing to undo.', 409);
 
     // 1. Check, and read every earlier version.
     const plan = [];

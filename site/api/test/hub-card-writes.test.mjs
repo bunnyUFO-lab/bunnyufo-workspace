@@ -163,7 +163,7 @@ test('Revert an edit after a later write: 409 and nothing changes; a missing ear
     assert.equal(newer.status, 200);
     const stale = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder: owned.folder, batch: 'editbatch1' });
     assert.equal(stale.status, 409);
-    assert.match(stale.body.error, /changed after this write/);
+    assert.match(stale.body.error, /Revert the newer write first/);
     assert.equal(w.fake.text(key), '# Owner, edited again');
     assert.equal(w.reverts().length, 0);
     // The newest write goes back, then the older one.
@@ -610,16 +610,55 @@ test('an owner edit between two writes that keeps the agent script keeps the mar
   } finally { await w.close(); }
 });
 
-test('revert records from before the list of undone ids still cover what they covered', async () => {
+test('Revert only undoes the newest live writes on a file: the same bytes written again do not let an older row through', async () => {
+  const w = await world();
+  try {
+    const key = `sections/magic-loops/${owned.folder}/index.md`;
+    const folder = owned.folder;
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# agent text', { ...EDIT(md5('# Owner')), 'x-card-batch': 'firstbatch' })).status, 200);
+    w.seed(key, '# OWNER WORK', 'text/markdown');
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# agent text', { ...EDIT(md5('# OWNER WORK')), 'x-card-batch': 'secondbat' })).status, 200);
+    const older = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'firstbatch' });
+    assert.equal(older.status, 409, JSON.stringify(older.body));
+    assert.match(older.body.error, /Revert the newer write first/);
+    assert.equal(w.fake.text(key), '# agent text', 'nothing moved');
+    assert.equal(w.reverts().length, 0);
+    const newer = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'secondbat' });
+    assert.equal(newer.status, 200, JSON.stringify(newer.body));
+    assert.equal(w.fake.text(key), '# OWNER WORK', 'the owner\'s work comes back');
+    // The older row was never undone, and now it cannot move the file either: the owner's text is there.
+    const stale = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'firstbatch' });
+    assert.equal(stale.status, 409);
+    assert.equal(w.fake.text(key), '# OWNER WORK');
+  } finally { await w.close(); }
+});
+
+test('Revert with another record between two of the label\'s: the older one is left alone and the other batch can still go back', async () => {
+  const w = await world();
+  try {
+    const key = `sections/magic-loops/${owned.folder}/index.md`;
+    const folder = owned.folder;
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# a', { ...EDIT(md5('# Owner')), 'x-card-batch': 'labelxxxx' })).status, 200);
+    w.seed(key, '# OWNER WORK', 'text/markdown');
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# a', { ...EDIT(md5('# OWNER WORK')), 'x-card-batch': 'zedbatch01' })).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# c', { ...EDIT(md5('# a')), 'x-card-batch': 'labelxxxx' })).status, 200);
+    const label = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'labelxxxx' });
+    assert.equal(label.status, 200, JSON.stringify(label.body));
+    assert.equal(w.fake.text(key), '# a', 'only the newest write went back');
+    assert.equal(label.body.leftAlone[0].file, `${folder}/index.md`);
+    const zed = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'zedbatch01' });
+    assert.equal(zed.status, 200, JSON.stringify(zed.body));
+    assert.equal(w.fake.text(key), '# OWNER WORK');
+  } finally { await w.close(); }
+});
+
+test('a revert file with no list of undone ids undoes nothing', async () => {
   const w = await world();
   try {
     const folder = owned.folder;
     await w.put('magic-loops', `${folder}/index.md`, '# one', { ...EDIT(md5('# Owner')), 'x-card-batch': 'legacybatch' });
-    const [record] = [...w.fake.objects.keys()].filter(item => item.includes(`card-writes/magic-loops/${folder}/`));
-    for (const extra of [{}, { through: w.fake.json(record).id }]) {
-      w.seed(`sections/inbox/card-writes/magic-loops/${folder}/20990101T000000000Z-aaaa-revert.json`, JSON.stringify({ v: 1, kind: 'revert', section: 'magic-loops', folder, of: 'legacybatch', by: 'owner', at: '2099-01-01T00:00:00.000Z', restored: [], ...extra }), 'application/json');
-      const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
-      assert.deepEqual(rows.map(row => [row.batch, row.canRevert, Boolean(row.reverted)]), [['legacybatch', false, true]], JSON.stringify(extra));
-    }
+    w.seed(`sections/inbox/card-writes/magic-loops/${folder}/20990101T000000000Z-aaaa-revert.json`, JSON.stringify({ v: 1, kind: 'revert', section: 'magic-loops', folder, of: 'legacybatch', by: 'owner', at: '2099-01-01T00:00:00.000Z', restored: [] }), 'application/json');
+    const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
+    assert.deepEqual(rows.map(row => [row.batch, row.canRevert, Boolean(row.reverted)]), [['legacybatch', true, false]]);
   } finally { await w.close(); }
 });
