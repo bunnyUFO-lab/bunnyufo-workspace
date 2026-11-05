@@ -152,6 +152,15 @@ export function createHermesRuns({ env = {}, fetchImpl = fetch, timeoutMs = TIME
       return { accepted: false, code, status: response.status };
     },
 
+    /** The newest messages of a session, which holds what arrives after its run ended: a run's session id is its run id. `[]` when Hermes does not know it. */
+    async sessionMessages(sessionId, { limit = 40 } = {}) {
+      const response = await call('GET', `/api/sessions/${encodeURIComponent(sessionId)}/messages?order=latest&limit=${limit}`);
+      if (response.status === 404) return [];
+      if (!response.ok) throw new HermesError((await reason(response)).message, { status: response.status });
+      const body = await response.json().catch(() => null);
+      return Array.isArray(body?.data) ? body.data : [];
+    },
+
     /** Ask Hermes to stop the run. A run that already ended answers with its status, which is fine. */
     async stop(runId) {
       const response = await call('POST', `/v1/runs/${encodeURIComponent(runId)}/stop`, {});

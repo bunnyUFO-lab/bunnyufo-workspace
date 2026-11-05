@@ -22,6 +22,7 @@ import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient } from './cha
 import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
+import { foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
 
 const MB = 1024 * 1024;
 export const CHAT_ID = /^\d{8}-[a-z0-9]{6}$/;
@@ -34,6 +35,7 @@ export const TOTAL_MS_DEFAULT = 600_000;
 export const IDLE_MS_DEFAULT = 300_000;
 const MAX_TOOLS = 20;
 const KEEPALIVE_MS = 15_000;
+const DELEGATE_LOOK_MS = 4_000;   // how long reading a conversation waits for Hermes's delegate results
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
@@ -182,6 +184,35 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   // Each maps to who started it and which conversation it writes to.
   const active = new Map();
 
+  /** The turn still answering in a conversation, as the page may see it: Stop names the run only for who started it. */
+  const answering = (id, user) => {
+    for (const [run, carried] of active) if (carried.conversation === id) return { running: true, run: carried.user === (user ?? null) ? run : null };
+    return null;
+  };
+
+  /**
+   * The saved lines of a conversation, with delegates that have finished since (Hermes saves their results in the run's own session, and
+   * nothing tells the Hub). Saved back when something changed; a lost race or a silent Hermes only means the next read looks again.
+   */
+  async function withDelegateResults(id, got) {
+    const lines = parse(got.text);
+    const waiting = lines.filter(line => line.role === 'assistant' && line.run && hasRunningDelegate(line)).slice(-3);
+    if (!waiting.length || !hermesRuns?.sessionMessages) return lines;
+    let changed = false;
+    await Promise.all(waiting.map(async line => {
+      let timer;
+      const rows = await Promise.race([
+        hermesRuns.sessionMessages(line.run).catch(() => null),
+        new Promise(resolve => { timer = setTimeout(() => resolve(null), DELEGATE_LOOK_MS); timer.unref?.(); }),
+      ]);
+      clearTimeout(timer);
+      const settled = settleDelegates(line.delegates, rows, now().getTime() - new Date(line.at).getTime());
+      if (settled !== line.delegates) { line.delegates = settled; changed = true; }
+    }));
+    if (changed) await bucket.put(key(`chat/${id}.jsonl`), `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, { contentType: 'application/x-ndjson', ifMatch: got.etag }).catch(() => {});
+    return lines;
+  }
+
   async function relay(request, response, user) {
     const data = await readJson(request, 7 * MB);
     const choice = chatModelOf(data.model);   // model: an id from the table, or a 400 before anything is written
@@ -295,6 +326,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let reply = '';
     let failure = null;
     const tools = [];
+    let delegates = [];
+    const noteDelegates = (name, data) => {
+      const next = foldDelegates(delegates, name, data);
+      if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
+    };
     let finishedByHermes = false;
     if (runTurn) {
       try {
@@ -306,7 +342,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
             const name = clip(data.tool, 80);
             if (name && !tools.includes(name) && tools.length < MAX_TOOLS) tools.push(name);
             emit('tool', { id: clip(data.tool_call_id, 80), name, summary: clip(data.preview, 160), state: 'running' });
-          } else if (event.event === 'tool.completed') emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
+          } else if (event.event === 'tool.completed') {
+            emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
+            noteDelegates(event.event, data);
+          } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
           else if (event.event === 'approval.request') {
             // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
             let stored = null;
@@ -334,7 +373,6 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       }
       // Any exit that is not Hermes ending the run (idle, a dropped Hermes stream, an unsaved ask): stop it.
       if (!finishedByHermes) hermesRuns.stop(runId).catch(() => {});
-      active.delete(runId);
     } else try {
       const reader = upstream.body.getReader();
       const decoder = new TextDecoder();
@@ -373,7 +411,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (created.length) emit('created', { items: created });
     const at = now().toISOString();
     const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
-    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     let contextLine = null;   // help:
     try {
@@ -390,10 +428,12 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           userLine.images.push({ file, type: picture.type, width: picture.width, height: picture.height });
         }
       }
-      await append(id, [...(contextLine ? [contextLine] : []), userLine, ...(failure && !reply ? [] : [assistant])]);
+      await append(id, [...(contextLine ? [contextLine] : []), userLine, ...(failure && !reply && !delegates.length ? [] : [assistant])]);
     } catch (error) {
       failure ??= 'The reply could not be saved.';
     }
+    // Only now: a page that reads `running: false` finds the reply saved, and a new turn cannot overtake it.
+    if (runId) active.delete(runId);
     if (failure) emit('error', { error: failure });
     else emit('done', { conversation: id, user: userLine, ...(contextLine ? { context: contextLine } : {}) });
     response.end();
@@ -443,8 +483,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);
-        if (!got) throw fail('No such conversation.', 404);
-        return json(response, 200, { id: match[1], messages: parse(got.text) });
+        const turn = answering(match[1], user);
+        if (!got && !turn) throw fail('No such conversation.', 404);   // a new chat has no file until its first reply is saved
+        return json(response, 200, { id: match[1], messages: got ? await withDelegateResults(match[1], got) : [], ...(turn ?? {}) });
       }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/images\/([^/]+)$/.exec(route))) return serveImage(response, match[1], match[2]);
       if (method === 'POST' && route === '/hub/chat') return relay(request, response, user);

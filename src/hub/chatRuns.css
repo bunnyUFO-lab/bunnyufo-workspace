@@ -4,6 +4,21 @@
 .hub-tool[data-state='running']::before { content: '… '; }
 .hub-tool[data-state='done']::before { content: '✓ '; }
 .hub-tool[data-state='failed']::before { content: '✕ '; }
+.hub-delegates { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.hub-delegates-head { font-size: 0.75rem; }
+.hub-delegate { padding: 8px 10px; border: 1px solid var(--hairline); border-left-width: 3px; border-radius: var(--radius); background: var(--surface-solid); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.hub-delegate[data-state='done'] { border-left-color: var(--green, var(--hairline)); }
+.hub-delegate[data-state='failed'], .hub-delegate[data-state='unknown'] { border-left-color: var(--amber); }
+.hub-delegate-goal { all: unset; cursor: pointer; font-size: 0.85rem; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.hub-delegate-goal.open { display: block; }
+.hub-delegate-goal:focus-visible { outline: 2px solid var(--pink, currentColor); outline-offset: 2px; }
+.hub-delegate-state { font-size: 0.75rem; color: var(--text-dim); }
+.hub-delegate[data-state='running'] .hub-delegate-state::before { content: '… '; }
+.hub-delegate[data-state='failed'] .hub-delegate-state, .hub-delegate[data-state='unknown'] .hub-delegate-state { color: var(--amber); }
+.hub-delegate-note { font-size: 0.75rem; }
+.hub-delegate-result { width: 100%; font-size: 0.85rem; }
+.hub-delegate-result > summary { cursor: pointer; font-size: 0.8rem; min-height: 24px; }
+.hub-chat-note { margin: 4px 0; font-size: 0.82rem; }
 .hub-chat-approval { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--surface-solid); display: flex; flex-direction: column; gap: 6px; }
 .hub-chat-approval pre { margin: 0; font-family: var(--mono, ui-monospace, monospace); font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hub-chat-approval-a { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
