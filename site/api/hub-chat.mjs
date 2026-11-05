@@ -22,7 +22,7 @@ import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient, currentModel
 import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
-import { foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
+import { delegatesNote, foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
 import { JOB_LIMITS, SKEW_MS, idsIn, jobIdsOf, jobWindowsOf, splitCreated } from './chat-jobs.mjs';
 import { QUEUE_LIMITS, STALE_MS_DEFAULT, addItem, cancelItem, createQueueStore, holdFor, holdQueue, readQueue, restoreItems, takeItems, tooOld, viewOf } from './chat-queue.mjs';
 
@@ -40,6 +40,8 @@ const KEEPALIVE_MS = 15_000;
 const DELEGATE_LOOK_MS = 4_000;   // how long reading a conversation waits for Hermes's delegate results
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
+/** A saved line as Hermes reads it in the history: its text, then what its finished delegates came back with. */
+const historyText = line => [stripInlineImages(line.text), delegatesNote(line)].filter(Boolean).join('\n\n');
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
@@ -131,7 +133,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    */
   async function historyMessages(id, lines, spent) {
     let left = HISTORY_IMAGE_BUDGET - spent;
-    const messages = lines.map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) }));   // help: the context line goes as the first user message
+    const messages = lines.map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: historyText(line) }));   // help: the context line goes as the first user message
     for (let at = lines.length - 1; at >= 0; at -= 1) {
       const pictures = (lines[at].role === 'user' || lines[at].role === 'context') && Array.isArray(lines[at].images) ? lines[at].images.filter(image => IMAGE_FILE.test(String(image?.file))) : [];
       if (!pictures.length) continue;
@@ -264,7 +266,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     // help: a help chat's context line is pinned at the front of the history, so a long chat never loses it.
     const recent = history[0]?.role === 'context' ? [history[0], ...history.slice(1).slice(-20)] : history.slice(-20);
     // Earlier pictures cannot ride in conversation_history (text only): they become the same note completions uses.
-    const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: stripInlineImages(line.text) || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
+    const earlier = [...(persona ? [{ role: 'user', text: persona.text }] : []), ...(context ? [{ role: 'user', text: context.text }] : []), ...recent].map(line => ({ role: line.role === 'context' ? 'user' : line.role, content: historyText(line) || (line.images?.length ? NO_PICTURE : '') })).filter(line => line.content);
     return { recent, earlier };
   }
 
@@ -458,7 +460,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     try {
       const got = await fresh(`chat/${id}.jsonl`);
       if (got && Buffer.byteLength(got.text) > MAX_FILE) { await releaseTurn(id, carried, turn, 'long'); return; }
-      const history = got ? parse(got.text) : [];
+      const history = got ? await withDelegateResults(id, got) : [];   // results saved since the chat was last read go with this turn
       persona = storedPersona(history.find(line => line.persona)?.persona ?? turn.persona, await tableNow());
       const { earlier } = historyFor({ history, persona, context: null });
       ({ runId } = await hermesRuns.start({ input: turn.text, history: earlier, idempotencyKey: turn.key, ...(choice.provider ? { provider: choice.provider, model: choice.model } : {}) }));
@@ -637,7 +639,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       const got = await fresh(`chat/${id}.jsonl`);
       if (!got) throw fail('No such conversation.', 404);
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
-      history = parse(got.text);
+      history = await withDelegateResults(id, got);   // results saved since the chat was last read go with this turn
       persona = storedPersona(history.find(line => line.persona)?.persona, table);   // persona: the one this conversation started with
     } else {
       id = `${day8(now())}-${randomId(6)}`;

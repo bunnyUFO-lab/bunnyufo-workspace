@@ -767,6 +767,74 @@ test('runs on: a Hermes that does not answer leaves the delegates running and th
   } finally { await close(); }
 });
 
+const DELEGATE_NOTE = '[Hub: results of the delegates this reply started. … marks one cut short.]\n- Read the mood board (done): Dusk colours.\n- Read the scenery cards (failed): (error: gone)';
+
+test('runs on: the next turn carries finished delegates on their reply, once they are back and without anyone reading the chat', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScripts: [['Started.', { delegate: { goals: DELEGATE_GOALS } }], ['Still going.'], ['Both back.']] } });
+  try {
+    const first = await chat(call, { text: 'review it' });
+    const id = first.events.at(-1).data.conversation;
+    await chat(call, { conversation: id, text: 'any news?' });
+    assert.deepEqual(upstream.runs[1].body.conversation_history, [{ role: 'user', content: 'review it' }, { role: 'assistant', content: 'Started.' }], 'Nothing is back yet, so no note.');
+    upstream.deliver(upstream.runs[0].id, DELEGATE_BATCH);
+    await chat(call, { conversation: id, text: 'what did they find?' });
+    assert.deepEqual(upstream.runs[2].body.conversation_history.map(line => line.content), ['review it', `Started.\n\n${DELEGATE_NOTE}`, 'any news?', 'Still going.']);
+    assert.equal(lines(fake, id)[1].text, 'Started.', 'The note is only for Hermes.');
+    assert.deepEqual(lines(fake, id)[1].delegates.map(item => item.state), ['done', 'failed'], 'Saved back.');
+  } finally { await close(); }
+});
+
+test('runs on: a queued message carries the results too', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS, hermes: { runScripts: [['Started.', { delegate: { goals: DELEGATE_GOALS } }], ['Both back.']] } });
+  try {
+    const first = await chat(call, { text: 'review it' });
+    upstream.deliver(upstream.runs[0].id, DELEGATE_BATCH);
+    assert.equal((await call('POST', `/hub/chat/${first.events.at(-1).data.conversation}/queue`, { text: 'what did they find?' })).status, 201);
+    for (let tries = 0; upstream.runs.length < 2 && tries < 300; tries += 1) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(upstream.runs[1].body.conversation_history[1].content, `Started.\n\n${DELEGATE_NOTE}`);
+  } finally { await close(); }
+});
+
+test('runs on: a picture turn on completions carries the results too', async () => {
+  const { upstream, call, close } = await fixture({ env: RUNS, hermes: { runScripts: [['Started.', { delegate: { goals: DELEGATE_GOALS } }]] } });
+  try {
+    const first = await chat(call, { text: 'review it' });
+    upstream.deliver(upstream.runs[0].id, DELEGATE_BATCH);
+    await chat(call, { conversation: first.events.at(-1).data.conversation, text: 'and this?', images: [picture(solidPng(8, 8), 'image/png')] });
+    assert.deepEqual(upstream.requests.at(-1).messages.slice(0, 2), [{ role: 'user', content: 'review it' }, { role: 'assistant', content: `Started.\n\n${DELEGATE_NOTE}` }]);
+  } finally { await close(); }
+});
+
+test('runs on: the note stays within its size, gives each result a part, skips what has not finished, and keeps a reply that was only delegates', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS, hermes: { runScript: ['Noted.'] } });
+  try {
+    const id = `${TODAY}-a1b2c3`;
+    const long = 'word\n'.repeat(1200).trim();
+    const at = new Date().toISOString();
+    const delegates = [
+      { id: 'd1', state: 'done', goal: `First ${'goal '.repeat(80)}`.trim(), summary: long },
+      { id: 'd2', state: 'done', goal: 'Second', summary: 'Short.' },
+      { id: 'd3', state: 'failed', goal: 'Third', summary: long },
+      { id: 'd4', state: 'unknown', goal: 'Fourth lost' },
+      { id: 'd5', state: 'running', goal: 'Fifth running' },
+    ];
+    const saved = [{ role: 'user', text: 'go', at }, { role: 'assistant', text: 'Sent them.', at, delegates }, { role: 'user', text: 'more', at }, { role: 'assistant', text: '', at, delegates: [{ id: 'd1', state: 'failed', goal: 'Alone' }] }];
+    fake.seed(`sections/inbox/chat/${id}.jsonl`, `${saved.map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+    await chat(call, { conversation: id, text: 'next' });
+    const history = upstream.runs[0].body.conversation_history;
+    const [header, ...rows] = history[1].content.replace(/^Sent them\.\n\n/, '').split('\n');
+    assert.match(header, /^\[Hub: /);
+    assert.equal(rows.length, 3, 'Only what finished.');
+    assert.ok(rows.join('').length <= 1200, `The rows are ${rows.join('').length} characters.`);
+    assert.match(rows[0], /^- First goal .* \(done\): word word .*…$/);
+    assert.ok(rows[0].length <= 400, 'A long result leaves room for the rest.');
+    assert.equal(rows[1], '- Second (done): Short.');
+    assert.match(rows[2], /^- Third \(failed\): word word .*…$/);
+    assert.ok(rows[2].length > 400, 'What a short result left over goes to the next.');
+    assert.deepEqual(history.slice(2, 4).map(line => line.content.split('\n').at(-1)), ['more', '- Alone (failed): no result']);
+  } finally { await close(); }
+});
+
 test('runs on: Stop ends the run through its own route, which needs a signed-in user and a run this relay is carrying', async () => {
   const { fake, upstream, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
   try {
