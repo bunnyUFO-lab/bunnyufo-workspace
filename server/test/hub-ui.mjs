@@ -62,6 +62,12 @@ const go = async (page, hash) => {
 };
 const hubAnswer = id => fixture.fake.json(`sections/inbox/asks/${id}/answer.json`);
 
+// The map glides the view for 240 ms after a sheet or the Key closes; a tap on a node mid-glide misses it. Wait until the node's box is the same on two frames in a row (not a fixed sleep).
+const stillNode = (page, id) => page.waitForFunction(selector => new Promise(resolve => {
+  const rect = () => { const r = document.querySelector(selector)?.getBoundingClientRect(); return r ? `${r.x},${r.y},${r.width}` : ''; };
+  const first = rect();
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve(first !== '' && rect() === first)));
+}), `[data-node="${id}"] > circle`);
 try {
   const page = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await page.goto(fixture.url);
@@ -942,7 +948,7 @@ try {
   assert.ok(sheetBox.y - boxTop >= 100, `An open sheet leaves the map at least 100 px above it (${sheetBox.y - boxTop}).`);
   await phone.touchscreen.tap(195, 40);
   await sheet.waitFor({ state: 'detached' });
-  await phone.waitForTimeout(400);
+  await stillNode(phone, 'ml-m2');
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await sheet.waitFor();
   await phone.goBack();
@@ -1012,7 +1018,7 @@ try {
   assert.ok(legendBox.x >= 0 && legendBox.x + legendBox.width <= 390 && legendBox.y >= 0 && legendBox.y + legendBox.height <= 844, 'The Key fits on the screen.');
   await phone.locator('.hub-map-controls button:has-text("Key")').tap();
   await phone.locator('.hub-legend').waitFor({ state: 'detached' });
-  await phone.waitForTimeout(400);
+  await stillNode(phone, 'ml-m2');
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });
   await phone.locator('.hub-map-panel').waitFor();
   await phone.goBack();
