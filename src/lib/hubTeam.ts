@@ -130,6 +130,14 @@ export interface ProfileChange {
   rolledBack?: boolean
 }
 
+/** What the owner's press on the Edit page answers (201): the change is signed and waits for the Hermes host. */
+export interface ProfileChangeAnswer {
+  change: string
+  state: 'waiting'
+  from: ModelSet
+  to: ModelSet
+}
+
 /** `fresh` under 7 h, `stale` from 7 h, `missing` when the host has published nothing usable, `none` for an agent without a profile. */
 export interface DetailsFreshness {
   state: 'fresh' | 'stale' | 'missing' | 'none'
