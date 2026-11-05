@@ -66,11 +66,17 @@ export function projectHash(id?: string, tab?: string): string {
   return tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base
 }
 
-/** The project id and the raw tab out of a project route id (`[<id>[/<tab>]]`); `tabOf` (projectPage.ts) turns the tab into one of the four. */
-export function parseProjectId(id: string | undefined): { project?: string; tab?: string } {
+/** The project id, the raw tab and, on the Roadmap tab, the node whose details are open, out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the four. */
+export function parseProjectId(id: string | undefined): { project?: string; tab?: string; node?: string } {
   if (!id) return {}
-  const [project, tab] = id.split('/')
-  return { ...(project ? { project } : {}), ...(tab ? { tab } : {}) }
+  const [project, tab, ...rest] = id.split('/')
+  const node = tab === 'roadmap' ? rest.join('/') : ''
+  return { ...(project ? { project } : {}), ...(tab ? { tab } : {}), ...(node ? { node } : {}) }
+}
+
+/** `#/~hub/project/<id>/roadmap/<node>`: the project's page with that milestone or task's details open over it. */
+export function projectNodeHash(id: string, node: string): string {
+  return `#/~hub/project/${encodeURIComponent(id)}/roadmap/${encodeURIComponent(node)}`
 }
 
 /** `#/~hub/map/<project>[/<node>]`: the map, and with a node its details panel open. */

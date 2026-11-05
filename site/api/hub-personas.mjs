@@ -11,7 +11,7 @@
 // also carries `name` and `template`, the first one `created: true`, and a retired persona's newest version is `{ v: 1, retired: true, name, at, by }`.
 // Bringing it back is a Revert to an earlier version. A made persona has no app text, so it has no `default` row. A folder with an avatar and no
 // readable named version is no persona.
-import { CHAT_MODELS } from './chat-models.mjs';
+import { CHAT_MODELS, currentModelId, personaModelIds } from './chat-models.mjs';
 import { CHAT_PERSONAS, PERSONA_TEMPLATES } from './chat-personas.mjs';
 import { redactSecrets } from './hub-agent-config.mjs';
 import { markStamp, randomId } from './hub-model.mjs';
@@ -68,7 +68,7 @@ export function checkPersonaEdit(raw) {
   };
   const role = text('role', 'The role line', PERSONA_LIMITS.role);
   const prompt = text('prompt', 'The prompt', PERSONA_LIMITS.prompt, { multiline: true });
-  if (typeof raw.model !== 'string' || !CHAT_MODELS.some(entry => entry.id === raw.model)) throw problem('That chat model is not in the list.');
+  if (typeof raw.model !== 'string' || !personaModelIds().includes(raw.model)) throw problem('That chat model is not in the list.');
   const note = text('note', 'The note', PERSONA_LIMITS.note, { required: false });
   if (typeof raw.base !== 'string' || !(raw.base === 'default' || VERSION_ID_RE.test(raw.base))) throw problem('Say which version you were looking at (base).');
   return { role, prompt, model: raw.model, ...(note ? { note } : {}), base: raw.base };
@@ -98,10 +98,11 @@ function readVersion(value) {
   const template = typeof value.template === 'string' && /^[a-z][a-z0-9-]{0,19}$/.test(value.template) ? value.template : '';
   if (value.retired === true) return name ? { ...common, retired: true, name } : null;
   if (value.default === true) return { ...common, default: true };
-  const { role, prompt, model } = value;
+  const { role, prompt } = value;
+  const model = currentModelId(value.model);   // an id an earlier version listed reads as its family's row
   if (typeof role !== 'string' || !role.trim() || role.length > PERSONA_LIMITS.role) return null;
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > PERSONA_LIMITS.prompt) return null;
-  if (!CHAT_MODELS.some(entry => entry.id === model)) return null;
+  if (!personaModelIds().includes(model)) return null;
   return {
     ...common, role, prompt, model,
     ...(name ? { name } : {}), ...(template ? { template } : {}), ...(value.created === true ? { created: true } : {}),
@@ -264,7 +265,7 @@ export function createPersonaStore({ bucket, key, folder, putCreateOnly, fail = 
   /** What the Edit page shows: the current text, the app's text, the versions (newest 50, with the app's own text last) and the models. A made persona has no app text. */
   async function versions(agentId) {
     const { made, entry } = await resolve(agentId);
-    const models = CHAT_MODELS.map(({ id, label, note }) => ({ id, label, note }));
+    const models = CHAT_MODELS.filter(entry => !entry.explicitOnly).map(({ id, label, note }) => ({ id, label, note }));
     const list = await valid(agentId, VERSIONS_SHOWN);
     if (made) {
       const rows = list.map(version => rowOf(entry, version));
