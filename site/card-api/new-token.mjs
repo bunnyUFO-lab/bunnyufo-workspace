@@ -8,6 +8,8 @@
 //
 //   node site/card-api/new-token.mjs <name> [--sections magic-loops,bunnylink] [--out <file>]
 //   node site/card-api/new-token.mjs <name> [--rights 'read=*;write=inbox|assistant'] [--out <file>]
+//   --rights may end its write list with @library (write=inbox|assistant|@library): add cards and tabs to any Library section
+//   the owner has not turned off. Deploy the card API before a token carries it: an older handler cannot parse it.
 //   then: site/card-api/deploy.sh <bucket>        (tokens work once the stack is updated)
 //
 // --sections lets the token do everything on those sections. --rights lists the verbs (read, write,

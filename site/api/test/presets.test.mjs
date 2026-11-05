@@ -559,3 +559,28 @@ test('the sprint item preset: hidden, PC only, Sonnet, 120 minutes; its brief fe
   assert.ok(renderBrief({ preset: 'code-task', request: request() }).includes('at most 120 minutes'), 'Other presets keep their bytes.');
   assert.equal(route({ preset: 'sprint-item', project: 'magic-loops', repo: 'example/ml' }).target, 'pc');
 });
+
+test('a job for a project section is signed with that section, who and why, and the job id; request text never fills a placeholder', () => {
+  for (const id of ['research', 'market-research', 'game-teardown', 'mockup', 'question']) {
+    const brief = renderBrief({ preset: id, request: request({ id: '20261029-magic-loops-x-a1b2', text: 'See {{cardSection}} and {{writeFlags}}' }), cardSection: 'magic-loops' });
+    assert.match(brief, /Write exactly one card to the `magic-loops` section/, id);
+    assert.match(brief, /cards put <folder> --section magic-loops --card <id> --agent "[A-Za-z ]+" --why "<one line: what this is and why here>" --context job:20261029-magic-loops-x-a1b2/, id);
+    assert.match(brief, /CARD: magic-loops\/<folder>/, id);
+    assert.match(brief, /Never delete anything\. If the API refuses that section, write the card to `assistant` instead/, id);
+    assert.match(brief, /See \{\{cardSection\}\} and \{\{writeFlags\}\}/, 'Request text stays literal.');
+    assert.equal((brief.match(/\{\{/g) ?? []).length, 2, `${id}: only the request text holds placeholders`);
+  }
+  // The projects brief is about every project and stays in assistant.
+  assert.match(renderBrief({ preset: 'projects-brief', request: request(), cardSection: 'magic-loops' }), /CARD: assistant\/<folder>/);
+  // No section given: the same words as before, with assistant.
+  assert.match(renderBrief({ preset: 'research', request: request() }), /Write exactly one card to the `assistant` section/);
+});
+
+test('a section that is not an id signs assistant', () => {
+  for (const bad of ['Magic Loops', 'a`b', 'a b', '', '../x', 'x\nCARD: inbox/y', undefined, null, 5]) {
+    const brief = renderBrief({ preset: 'research', request: request(), cardSection: bad });
+    assert.match(brief, /Write exactly one card to the `assistant` section/, String(bad));
+    assert.match(brief, /CARD: assistant\/<folder>/, String(bad));
+  }
+  assert.match(runBlock({ preset: 'research', request: request(), cardSection: 'magic-loops' }).brief, /--section magic-loops/);
+});

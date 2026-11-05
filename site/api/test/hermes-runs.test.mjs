@@ -14,6 +14,14 @@ test('outcomeOf: the CARD line wins, the rest is a failure with a reason', () =>
   assert.equal(cardOf('Text\nCARD: assistant/tug-games\n'), 'assistant/tug-games');
   assert.equal(cardOf('CARD: assistant/a\nmore\nCARD: assistant/b'), 'assistant/b', 'The last line counts.');
   assert.equal(cardOf('CARD: other/x'), null);
+  assert.equal(cardOf('CARD: demo/x', { sections: ['assistant', 'demo'] }), 'demo/x', 'the signed project is trusted');
+  assert.equal(cardOf('CARD: demo/a\nCARD: other/x', { sections: ['assistant', 'demo'] }), 'demo/a', 'a foreign line is skipped, an earlier good one counts');
+  assert.equal(cardOf('CARD: demo/a\nCARD: assistant/b', { sections: ['assistant', 'demo'] }), 'assistant/b', 'the last trusted line wins');
+  assert.equal(cardOf('CARD: demo/..', { sections: ['assistant', 'demo'] }), null, 'a dot folder is no card');
+  assert.equal(cardOf('CARD: assistant/.'), null);
+  assert.equal(cardOf('CARD: assistant/..'), null);
+  assert.equal(cardOf('CARD: demo/x'), null, 'no sections given: assistant only');
+  assert.equal(outcomeOf({ run: { status: 'completed', output: 'Done.\nCARD: inbox/x' }, sections: ['assistant', 'demo'], at: '2026-11-04T10:00:00.000Z' }).outcome, 'failed', 'an inbox card is no card');
   assert.equal(isQuotaError('Codex provider quota exhausted (429)'), true);
   assert.equal(isQuotaError('boom'), false);
   const done = outcomeOf({ run: { status: 'completed', output: 'Found it.\nCARD: assistant/x', usage: { total_tokens: 9 }, runtime: { provider: '', requested: { provider: 'anthropic' } } }, at });
@@ -314,6 +322,25 @@ test('a quota failure is retried once on Anthropic; the retry is recorded and it
     const detail = (await api.get(`/hub/requests/${id}`)).body;
     assert.equal(detail.retry.reason, 'quota');
     assert.equal(detail.state, 'done');
+  } finally { await s.close(); }
+});
+
+test('a run that started, hit the quota and only then could not start its retry is not a run that never started', async () => {
+  const s = await stack({ hermesOptions: { chain: [{ provider: 'openai-codex', model: 'gpt-6-sol' }], providerFailures: { 'openai-codex': 'Codex provider quota exhausted (429)' } } });
+  try {
+    let posts = 0;
+    const api = await s.addHub({
+      fetchImpl: async (url, init) => (init?.method === 'POST' && String(url).endsWith('/v1/runs') && ++posts === 2 ? jsonResponse(500, { error: { message: 'retry refused' } }) : fetch(url, init)),
+    });
+    const id = s.propose();
+    await approve(api, id);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(s.hermes.runs.length, 1, 'only the first run exists');
+    assert.equal(result.outcome, 'failed');
+    assert.notEqual(result.reason, 'start-failed', 'the first run started: it is not "could not start"');
+    assert.notEqual(result.reason, 'usage-limit', 'a cloud pause signal is not what this is');
+    assert.equal(result.reason, 'retry-failed');
+    assert.equal(result.summary, 'Codex quota reached; the retry on Anthropic could not start.');
   } finally { await s.close(); }
 });
 
@@ -907,4 +934,145 @@ test('steer: 200 is accepted; 409, 400, 404 and a 500 are "not accepted" with th
     await fake.close();
     await assert.rejects(() => runs.steer(runId, 'x'), error => error instanceof HermesError && error.code === 'unreachable');
   } finally { await refusing.close(); await old.close(); await broken.close(); await fake.close().catch(() => {}); }
+});
+
+// Jobs write to the project (2.4): the Hub picks the section when it signs, and only a CARD line naming it (or assistant) counts.
+const sectionList = (name, extra = {}) => JSON.stringify({ name, entities: [{ id: 'x', title: 'X', folder: 'x', created: new Date().toISOString().slice(0, 10) }], ...extra });
+
+test('a job for a project with a Library section is signed with it, and its CARD line is the result, linked', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Found it.\nCARD: demo/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    const api = await s.addHub();
+    const id = s.propose('demo', { project: 'demo' });
+    assert.equal((await approve(api, id)).status, 201);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.card], ['card', 'demo/x']);
+    const brief = s.file(id, 'approved.json').run.brief;
+    assert.match(brief, /Write exactly one card to the `demo` section/);
+    assert.match(brief, new RegExp(`--section demo --card <id> --agent "Researcher" --why "<one line: what this is and why here>" --context job:${id}`));
+    assert.match(brief, /CARD: demo\/<folder>/);
+    const detail = await api.get(`/hub/requests/${id}`);
+    assert.deepEqual([detail.body.state, detail.body.cardHref], ['done', '/demo#/x']);
+  } finally { await s.close(); }
+});
+
+test('a project with no section, a hidden or archived one, one the owner turned off, and agent-plans all sign assistant', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
+  try {
+    s.fake.seed('sections/hid/workspace.json', sectionList('Hid', { hidden: true }), 'application/json');
+    s.fake.seed('sections/old/workspace.json', sectionList('Old', { archived: true }), 'application/json');
+    s.fake.seed('sections/off/workspace.json', sectionList('Off'), 'application/json');
+    s.fake.seed('sections/agent-plans/workspace.json', sectionList('Plans'), 'application/json');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 1, off: ['off'], at: '2026-11-04T10:00:00.000Z', by: 'owner' }), 'application/json');
+    const api = await s.addHub();
+    for (const project of ['nosection', 'hid', 'old', 'off', 'agent-plans']) {
+      const id = s.propose(project, { project });
+      assert.equal((await approve(api, id)).status, 201, project);
+      const brief = s.file(id, 'approved.json').run.brief;
+      assert.match(brief, /Write exactly one card to the `assistant` section/, project);
+      assert.match(brief, /CARD: assistant\/<folder>/, project);
+    }
+  } finally { await s.close(); }
+});
+
+test('a setting that is marked, unreadable or not valid signs assistant, and so does a failed read; a missing file leaves the project on', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    const api = await s.addHub();
+    const sectionOf = async slug => {
+      const id = s.propose(slug, { project: 'demo' });
+      assert.equal((await approve(api, id)).status, 201);
+      return /Write exactly one card to the `(\w+)` section/.exec(s.file(id, 'approved.json').run.brief)[1];
+    };
+    assert.equal(await sectionOf('missing'), 'demo');
+    s.fake.seed('sections/inbox/library-writes.json', '{"v":1,"off":[', 'application/json');
+    assert.equal(await sectionOf('broken'), 'assistant');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 2, off: [] }), 'application/json');
+    assert.equal(await sectionOf('shape'), 'assistant');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 1, off: [] }), 'application/json', { writer: 'agent' });
+    assert.equal(await sectionOf('marked'), 'assistant');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 1, off: [] }), 'application/json');
+    assert.equal(await sectionOf('fine'), 'demo');
+  } finally { await s.close(); }
+});
+
+test('a job ending with a CARD line in a section it was not signed for fails', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: other/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    const api = await s.addHub();
+    const id = s.propose('demo', { project: 'demo' });
+    assert.equal((await approve(api, id)).status, 201);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.outcome, 'failed');
+    assert.equal(result.card, undefined);
+  } finally { await s.close(); }
+});
+
+test('a run Hermes no longer knows is pointed at the newest card of the project, not only assistant', async () => {
+  const s = await stack({ hermesOptions: { forgetRuns: true } });
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    s.fake.seed('sections/demo/workspace.json', JSON.stringify({ name: 'Demo', entities: [
+      { id: 'old', title: 'Old', folder: '2020-01-01_old', created: '2020-01-01' },
+      { id: 'new', title: 'New', folder: `${today}_tugs`, created: today },
+    ] }), 'application/json');
+    s.fake.seed('sections/other/workspace.json', JSON.stringify({ name: 'Other', entities: [{ id: 'z', title: 'Z', folder: `${today}_z`, created: today }] }), 'application/json');
+    const api = await s.addHub();
+    const id = s.propose('demo', { project: 'demo' });
+    await approve(api, id);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.card], ['unknown', `demo/${today}_tugs`], 'a foreign section is never pointed at');
+  } finally { await s.close(); }
+});
+
+test('a reattached run keeps the signed project: its CARD line is trusted after a restart', async () => {
+  const s = await stack({ hermesOptions: { runScript: ['start ', { hold: true }] } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    const first = await s.addHub();
+    const id = s.propose('demo', { project: 'demo' });
+    await approve(first, id);
+    await until(() => s.file(id, 'hermes-run.json'), 'hermes-run.json');
+    await first.stop();
+    const second = await s.addHub();
+    await until(() => second.hub.hermes.isLive(id), 'a follower after the restart');
+    s.hermes.release(s.hermes.runs[0].id, 'Back again.\nCARD: demo/x');
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.equal(result.card, 'demo/x');
+  } finally { await s.close(); }
+});
+
+test('on the development copy a real section signs assistant and a dev- project signs its own', async () => {
+  const s = await stack({ env: { BUW_DEV: '1' }, hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    s.fake.seed('sections/dev-demo/workspace.json', sectionList('Dev demo'), 'application/json');
+    const api = await s.addHub();
+    const sectionOf = async project => {
+      const id = s.propose(project, { project });
+      assert.equal((await approve(api, id)).status, 201, project);
+      return /Write exactly one card to the `([\w-]+)` section/.exec(s.file(id, 'approved.json').run.brief)[1];
+    };
+    assert.equal(await sectionOf('demo'), 'assistant');
+    assert.equal(await sectionOf('dev-demo'), 'dev-demo');
+  } finally { await s.close(); }
+});
+
+test('a job that fell back to assistant (section turned off) is still trusted with its project: the approval carries it', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: demo/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 1, off: ['demo'] }), 'application/json');
+    const api = await s.addHub();
+    const id = s.propose('fell-back', { project: 'demo' });
+    assert.equal((await approve(api, id)).status, 201);
+    const approved = s.file(id, 'approved.json');
+    assert.equal(approved.project, 'demo', 'the signed body names the project');
+    assert.match(approved.run.brief, /Write exactly one card to the `assistant` section/);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.card], ['card', 'demo/x'], 'the project stays trusted, as the brief decides');
+  } finally { await s.close(); }
 });

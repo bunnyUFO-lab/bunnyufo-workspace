@@ -23,11 +23,12 @@
 //
 // Files go up first and the entry last, so a card is never listed before its files are there. The
 // entry is written with If-Match on the ETag it read, so two writers never drop each other's card.
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { contentTypeOf, createBucket } from '../api/s3.mjs';
 import { validateChanges } from '../api/ask-changes.mjs';
 import { validateAgentEdit } from '../api/agent-edit.mjs';
+import { RESERVED } from '../api/card-purge.mjs';
 
 const CLIENT = new URL('./cards.mjs', import.meta.url);
 
@@ -38,6 +39,34 @@ const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub
 const INBOXES = new Set(['inbox', 'inbox-dev']);
 const SECTION_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const URL_TTL = 900;
+const SETTING_TTL = 30_000;
+
+// What a Library right may write. Project sections come down to the owner's Windows PC, so a path is checked for that too.
+const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,119}$/;
+const FOLDER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
+const DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const segmentOk = segment => SEGMENT.test(segment) && !/[. ]$/.test(segment) && !DEVICE_NAME.test(segment.split('.')[0]);
+/** A card folder: one segment, the stricter set a `CARD:` line accepts. */
+export const libraryFolderOk = folder => typeof folder === 'string' && FOLDER.test(folder) && segmentOk(folder);
+/** A file path inside a Library section: `<folder>/<file>`, every segment safe on Windows. */
+export const libraryPathOk = file => typeof file === 'string' && file.split('/').length >= 2 && libraryFolderOk(file.split('/')[0]) && file.split('/').every(segmentOk);
+/** A first path segment the site keeps for itself, in any case: Windows treats `Card-Responses` and `card-responses` as one folder. */
+const reservedName = name => RESERVED.has(String(name).toLowerCase());
+/**
+ * The names the publish and pull walk skips (SKIP_DIRS and SKIP_ROOT in scripts/shared/s3-sync.mjs; library-writes.test.mjs keeps the
+ * two equal), lower-cased. A card folder with one of them is never walked, so a pull would write over the owner's file of that name
+ * and the next publish would delete the agent's.
+ */
+export const SYNC_SKIPPED = new Set(['.git', '_site', '.jekyll-cache', 'node_modules', '.buw', 'gemfile', 'gemfile.lock', '_config.yml', 'docker-compose.yml', 'index.md', '.gitignore', 'readme.md', '_sass', 'categories']);
+const skippedName = name => SYNC_SKIPPED.has(String(name).toLowerCase());
+/** Script files an agent may add but not edit: an owner's page may load them, and they would run with the page's reach. */
+const SCRIPT_FILE = /\.(js|mjs|cjs|wasm)$/i;
+const lower = value => String(value).toLowerCase();
+const stepPathOk = value => typeof value === 'string' && value.split('/').every(segmentOk);
+const ENTRY_FIELDS = new Set(['id', 'title', 'description', 'type', 'category', 'created', 'updated', 'folder', 'steps', 'defaultStep', 'status']);
+const AGENT = /^[A-Za-z0-9][\w .-]{0,39}$/;
+const CONTEXT = /^(chat|job)(:[A-Za-z0-9._-]{1,120})?$/;
+const BATCH = /^[a-z0-9]{8,32}$/;
 const MAX_LISTED = 1000;
 
 class HttpError extends Error {
@@ -57,6 +86,7 @@ const VERBS = ['read', 'write', 'delete'];
  *   (none)                         every verb on every section
  *   `a|b`                          every verb, on those sections only
  *   `read=*;write=inbox|assistant` the listed verbs only, each on `*` (every section) or some sections
+ *   `write=inbox|assistant|@library` also adds cards and tabs to any Library section the owner has not turned off (write only)
  * Returns { read, write, delete }, each `null` (every section) or a Set of section ids (empty: none).
  */
 export function parseScope(scope) {
@@ -69,7 +99,8 @@ export function parseScope(scope) {
   const rights = Object.fromEntries(VERBS.map(verb => [verb, new Set()]));
   const seen = new Set();
   for (const part of text.split(';')) {
-    const match = /^(read|write|delete)=(\*|[a-z0-9-]+(?:\|[a-z0-9-]+)*)$/.exec(part);
+    // `@library` is one more member of the write set: "any Library section" (a section with cards the owner has not hidden or archived). No section id can hold `@`.
+    const match = (part.startsWith('write=') ? /^(write)=(\*|(?:[a-z0-9-]+|@library)(?:\|(?:[a-z0-9-]+|@library))*)$/ : /^(read|write|delete)=(\*|[a-z0-9-]+(?:\|[a-z0-9-]+)*)$/).exec(part);
     if (!match) throw new Error(`not a right: ${part}`);
     if (seen.has(match[1])) throw new Error(`${match[1]} is listed twice`);
     seen.add(match[1]);
@@ -85,7 +116,7 @@ export function parseScope(scope) {
  */
 export function parseTokens(value) {
   return String(value ?? '').split(',').map(item => item.trim()).filter(Boolean).map(item => {
-    const match = /^([\w.-]+)=([0-9a-f]{64})(?::([\w|*=;-]+))?$/i.exec(item);
+    const match = /^([\w.-]+)=([0-9a-f]{64})(?::([\w|*=;@-]+))?$/i.exec(item);
     let rights;
     try {
       if (!match) throw new Error('form');
@@ -140,8 +171,51 @@ const summary = entity => ({
  * @param tokens parseTokens() output
  * @param prefix where the sections are in the bucket
  */
-export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = URL_TTL, today = () => new Date().toISOString().slice(0, 10) }) {
+export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = URL_TTL, today = () => new Date().toISOString().slice(0, 10), now = () => Date.now() }) {
   const keyOf = (section, rest) => `${prefix}/${section}/${rest}`;
+
+  /**
+   * The hidden inbox that holds a section's records and its Library setting: `inbox-dev` for the development copy's
+   * `dev-*` sections, so QA there never touches real data, else `inbox`.
+   */
+  const inboxFor = section => (String(section).startsWith('dev-') ? 'inbox-dev' : 'inbox');
+  /** A Library section: a card list that is not hidden, not archived, and not an inbox. */
+  const isLibrary = (id, registry) => !/^inbox(-|$)/.test(id) && registry?.hidden !== true && registry?.archived !== true;
+
+  /**
+   * The owner's off-list for agent cards, `library-writes.json` at the root of an inbox, read at most every 30 s per inbox.
+   * No file: everything is on. A file with a writer mark (not the Hub's own), one that does not parse or a bad shape: everything
+   * is off, and logged. A storage error is a 503 and is not cached: never fail open.
+   */
+  const settingCache = new Map();
+  async function libraryState(inbox) {
+    const hit = settingCache.get(inbox);
+    if (hit && now() - hit.at < SETTING_TTL) return hit.state;
+    let state;
+    try {
+      const got = await bucket.getText(keyOf(inbox, 'library-writes.json'));
+      if (!got) {
+        state = { off: new Set() };
+      } else if (got.metadata?.writer) {
+        console.error(`[library-writes] ${inbox}/library-writes.json carries a writer mark; treating every section as off`);
+        state = { all: true };
+      } else {
+        const value = JSON.parse(got.text);
+        if (!value || typeof value !== 'object' || value.v !== 1 || !Array.isArray(value.off) || !value.off.every(item => typeof item === 'string')) throw new SyntaxError('bad shape');
+        state = { off: new Set(value.off) };
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw new HttpError(503, 'Could not check the section setting just now; try again.');
+      console.error(`[library-writes] ${inbox}/library-writes.json is not valid; treating every section as off`);
+      state = { all: true };
+    }
+    settingCache.set(inbox, { at: now(), state });
+    return state;
+  }
+  const libraryOn = async id => {
+    const state = await libraryState(inboxFor(id));
+    return !state.all && !state.off.has(id);
+  };
 
   function authenticate(headers) {
     const match = /^Bearer\s+(\S.*?)\s*$/i.exec(headers.authorization ?? ''); // a passphrase may have spaces
@@ -165,10 +239,73 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
 
   async function section(caller, id, verb, { hostChange = false } = {}) {
     if (!SECTION_ID.test(id ?? '')) throw new HttpError(400, 'A section id is lower-case letters, digits and dashes.');
-    if (!can(caller, verb, id) && !(hostChange && verb === 'read' && hostChangeReader(caller, id))) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
+    // A `@library` right is not a section: it adds a write to any Library section. A literal right wins, and a token with no right at all is refused before the list is read.
+    const viaLibrary = verb === 'write' && !can(caller, 'write', id) && Boolean(caller.rights.write?.has('@library'));
+    if (!can(caller, verb, id) && !viaLibrary && !(hostChange && verb === 'read' && hostChangeReader(caller, id))) throw new HttpError(403, `This token may not ${verb} section "${id}".`);
     const got = await bucket.getJson(keyOf(id, 'workspace.json'));
     if (!Array.isArray(got?.value?.entities)) throw new HttpError(404, `No section "${id}".`);
-    return { id, registry: got.value, etag: got.etag };
+    if (viaLibrary) {
+      if (!isLibrary(id, got.value)) throw new HttpError(403, `This token may not write section "${id}".`);
+      if (!await libraryOn(id)) throw new HttpError(403, `The owner has turned agent cards off for section "${id}". Write to assistant.`);
+    }
+    return { id, registry: got.value, etag: got.etag, library: viaLibrary };
+  }
+
+  /** Where this caller may write a section, so an agent can see it without trying: `direct`, `library` or `read`. */
+  async function accessOf(caller, id, registry) {
+    if (can(caller, 'write', id)) return 'direct';
+    if (!caller.rights.write?.has('@library') || !isLibrary(id, registry)) return 'read';
+    try { return (await libraryOn(id)) ? 'library' : 'read'; } catch { return 'read'; }
+  }
+
+  /**
+   * Who and why, from the `x-card-*` headers. For a Library right they are required (422); for a literal right they are optional and a
+   * value that does not fit reads as absent. `agent` and `context` are self-reported: personas share one token. The token is proven.
+   */
+  function writeInfo(headers = {}, { strict = false, needContext = false } = {}) {
+    const agent = headers['x-card-agent'];
+    let why = null;
+    if (headers['x-card-why'] !== undefined) {
+      try { why = decodeURIComponent(headers['x-card-why']).replace(/\s+/g, ' ').trim(); } catch { why = null; }
+      if (why !== null && (why.length < 1 || why.length > 300)) why = null;
+    }
+    const context = headers['x-card-context'];
+    const batch = headers['x-card-batch'];
+    const info = {
+      agent: typeof agent === 'string' && AGENT.test(agent) ? agent : null,
+      why,
+      context: typeof context === 'string' && CONTEXT.test(context) ? context : null,
+      batch: typeof batch === 'string' && BATCH.test(batch) ? batch : null,
+    };
+    if (strict) {
+      if (!info.agent) throw new HttpError(422, 'A write to a project section says who made it: send x-card-agent (letters, digits, spaces, dots and dashes, 40 at most).');
+      if (!info.why) throw new HttpError(422, 'A write to a project section says why: send x-card-why (URI-encoded, 1 to 300 characters).');
+      if (headers['x-card-context'] !== undefined && !info.context) throw new HttpError(422, 'x-card-context is "chat" or "job:<id>".');
+      if (headers['x-card-batch'] !== undefined && !info.batch) throw new HttpError(422, 'x-card-batch is 8 to 32 lower-case letters and digits.');
+      if (needContext && !info.context) throw new HttpError(422, 'An edit says which chat or job asked for it.');
+    }
+    return info;
+  }
+
+  /** `<stamp>-<rand4>`: one id per write, sortable by time. */
+  const writeId = () => `${new Date(now()).toISOString().replace(/[-:.]/g, '')}-${randomBytes(2).toString('hex')}`;
+
+  /**
+   * One create-only file per write in the section's inbox (never in the project section, which comes down to a PC): who, why and
+   * which version, for the Hub's rows and Revert. The file is already in place and cannot be pulled back without a delete, so a
+   * failed record is tried once more, then logged for the function log, and the write still answers 200 (`recorded: false`).
+   */
+  async function record(sectionId, folder, id, fields) {
+    const row = { v: 1, id, section: sectionId, folder, ...fields, at: new Date(now()).toISOString() };
+    const key = keyOf(inboxFor(sectionId), `card-writes/${sectionId}/${folder}/${id}.json`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await bucket.putJson(key, row, { ifNoneMatch: '*', metadata: { writer: 'card-api' } });
+        return true;
+      } catch { /* once more */ }
+    }
+    console.error('[card-writes] not recorded', JSON.stringify(row));
+    return false;
   }
 
   async function sectionIds(caller) {
@@ -177,7 +314,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   }
 
   /** In the inbox, anything nested below a checklist's folder (checklists/<id>/x/…), answers, snoozes, declines, checklist ticks, submissions and pictures, a sketch's deleted.json, an agent's avatar choice and persona edits (team/<agent>/avatar-*.json, persona-*.json), a request's approval, stop, Hermes run, retry, fire records and answers (requests/<id>/approved|stop|hermes-run|hermes-retry|allow-grant.json, fire-*.json, answer-*.json) everything under hermes-approvals/ and the owner's Roadmap marks (bead-marks/<project>/<bead>/<stamp>-done|not-needed|unblock|undo-<rand>.json) the owner's Not useful records (feedback/<project>/<kind>/<id>/not-useful.json) and the Away switch (presence.json at the root) are the Hub's: only an unrestricted writer (the passphrase) may put them. */
-  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/(avatar|persona)-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json|chat\/.*)$/i;
+  const OWNER_FILES = /^(asks\/[^/]+\/(answer\.[^/]+|snooze\.json)|requests\/[^/]+\/declined\.json|checklists\/[^/]+\/((tick|untick)-[^/]+\.json|submit\.json|(evidence|shot)-[^/]+)|checklists\/[^/]+\/[^/]+\/.*|drawings\/[^/]+\/deleted\.json|team\/[^/]+\/(avatar|persona)-[^/]+\.json|requests\/[^/]+\/(approved|stop|hermes-run|hermes-retry|allow-grant|continued|sprint|sprint-end)\.json|requests\/[^/]+\/(fire|answer|reply)-[^/]+\.json|hermes-approvals\/.*|bead-marks\/[^/]+\/[^/]+\/[^/]+-(done|not-needed|unblock|undo)-[^/]+\.json|feedback\/[^/]+\/[^/]+\/[^/]+\/not-useful\.json|presence\.json|library-writes\.json|chat\/.*)$/i;
   const ASK_FILE = /^(?:asks\/(?:[^/]+\/)*ask|(?:asks|checklists)\/[^/]+\/(?:delivered|watch-[^/]+)|checklists\/[^/]+\/checklist|requests\/[^/]+\/request)\.json$/i;
   /** The files a run writes: taken, progress, result and report. */
   const RUNNER_FILES = /^requests\/([^/]+)\/(taken\.json|run-[^/]+\.json|result\.json|report\.md)$/i;
@@ -271,6 +408,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (/^feedback\//i.test(file)) return { writer: 'card-api' };
     // The Away switch is the Hub's own file (it writes it with no mark): anything this API writes there carries one, and hub-hooks ignores it.
     if (file === 'presence.json') return { writer: 'card-api' };
+    // The owner's off-list for agent cards is the Hub's own file (no mark); anything this API writes there carries one.
+    if (file === 'library-writes.json') return { writer: 'card-api' };
     // An export the Hermes host published: the only provenance the Hub accepts for it.
     if (caller.rights.write !== null && caller.name === 'hermes-config' && AGENT_CONFIG_FILE.test(file)) return { writer: 'hermes-config' };
     if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
@@ -367,6 +506,13 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return new HttpError(status, `Card "${record.id}" is in the Trash of ${sectionId}; ${verb === 'write' ? 'restore it first' : 'restore it to read it'}.`);
   }
 
+  /** The retired record whose folder is `folder` in any case, or null. */
+  const retiredFolded = (registry, folder) => {
+    const records = registry.retired && typeof registry.retired === 'object' ? registry.retired : {};
+    const id = Object.keys(records).find(key => [records[key]?.folder, records[key]?.entity?.folder].some(name => typeof name === 'string' && lower(name) === lower(folder)));
+    return id ? { id, ...records[id] } : null;
+  };
+
   /** The retired card a write would collide with: one with this id, or one that owns this folder. Null when a live card has the id. */
   function retiredClaim(registry, id, folder) {
     if (registry.entities.some(item => item?.id === id)) return null;
@@ -379,20 +525,43 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     return objects.map(object => ({ path: object.key.slice(keyOf(sectionId, '').length), size: object.size, etag: object.etag, lastModified: object.lastModified }));
   }
 
+  /**
+   * Marks the step that shows `path` in `folder`'s card as an agent's tab (`agentTab: true`), so the viewer attaches no card bridge to
+   * it. Returns the path when it set the mark now, null when there was nothing to mark or it was already marked. The list write is
+   * conditional and retried; a list that cannot be written refuses the file write (nothing has changed yet).
+   */
+  async function markAgentTab(caller, sectionId, folder, stepPath) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { registry, etag } = await section(caller, sectionId, 'write');
+      const index = registry.entities.findIndex(item => item?.folder === folder);
+      const card = registry.entities[index];
+      const at = (card?.steps ?? []).findIndex(step => (step?.path ?? step?.file) === stepPath);
+      if (at < 0 || card.steps[at].agentTab === true) return null;
+      const entity = { ...card, steps: card.steps.with(at, { ...card.steps[at], agentTab: true }) };
+      try {
+        await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities: registry.entities.with(index, entity) }, { ifMatch: etag });
+        return stepPath;
+      } catch (error) {
+        if (error.status !== 412 && error.status !== 409) throw error;
+      }
+    }
+    throw new HttpError(409, 'The card list kept changing under this write; try again.');
+  }
+
   const routes = {
     async listSections(caller) {
       const ids = await sectionIds(caller);
       const sections = await Promise.all(ids.map(async id => {
         const got = await bucket.getJson(keyOf(id, 'workspace.json')).catch(() => null);
         if (!Array.isArray(got?.value?.entities)) return null;
-        return { id, name: got.value.name || id, cards: got.value.entities.length };
+        return { id, name: got.value.name || id, cards: got.value.entities.length, access: await accessOf(caller, id, got.value) };
       }));
       return { sections: sections.filter(Boolean) };
     },
 
     async getSection(caller, id) {
       const { registry } = await section(caller, id, 'read');
-      return { id, name: registry.name || id, cards: registry.entities.map(summary) };
+      return { id, name: registry.name || id, cards: registry.entities.map(summary), access: await accessOf(caller, id, registry) };
     },
 
     async getCard(caller, sectionId, ref) {
@@ -408,7 +577,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       return { section: sectionId, entity, files: withUrls, urlsExpireIn: urlTtl };
     },
 
-    async putCard(caller, sectionId, id, entity) {
+    async putCard(caller, sectionId, id, entity, headers = {}) {
       if (!entity || typeof entity !== 'object' || Array.isArray(entity)) throw new HttpError(400, 'Send the card entry as a JSON object.');
       if (entity.id !== id) throw new HttpError(400, `The entry's id must be "${id}", the id in the path.`);
       if (typeof entity.title !== 'string' || !entity.title.trim()) throw new HttpError(400, 'The entry needs a title.');
@@ -418,28 +587,108 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       }
       if (INBOXES.has(sectionId) && caller.rights.write !== null) throw new HttpError(403, 'The inbox holds files, not cards.');
       const first = await section(caller, sectionId, 'write');
-      const claimed = retiredClaim(first.registry, id, entity.folder);
+      const library = first.library;
+      const limited = caller.rights.write !== null;
+      const info = writeInfo(headers, { strict: library });
+      if (limited && reservedName(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
+      if (library && !first.registry.entities.some(item => item?.id === id) && skippedName(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
+      const existingFirst = library ? first.registry.entities.find(item => item?.id === id) : null;
+      const folder = existingFirst?.folder ?? entity.folder;
+      /** A step an agent adds is { name, path, viewer? }: no url (it would frame any web address). A posted `agentTab` is dropped; the server sets it. */
+      const checkStep = step => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) throw new HttpError(422, 'Each step is { name, path, viewer? }.');
+        const extra = Object.keys(step).filter(name => !['name', 'path', 'viewer', 'agentTab'].includes(name));
+        if (extra.length) throw new HttpError(422, `A step is { name, path, viewer? }; not: ${extra.join(', ')}.`, { fields: extra });
+        if (typeof step.name !== 'string' || !step.name.trim() || !stepPathOk(step.path) || (step.viewer !== undefined && typeof step.viewer !== 'string')) {
+          throw new HttpError(422, 'Each step is { name, path, viewer? }, with a name and a path to a file in the folder.');
+        }
+        return { name: step.name, path: step.path, ...(step.viewer !== undefined ? { viewer: step.viewer } : {}) };
+      };
+      let posted = [];
+      if (library && !existingFirst) {
+        // The server builds the entry. A Library right adds a card or appends tabs; it never sets pinned, tags, removedTabs and the like.
+        if (!libraryFolderOk(entity.folder)) throw new HttpError(422, 'The folder is letters, digits, dots, dashes and underscores, starting with a letter or digit, and is no Windows device name.');
+        const extra = Object.keys(entity).filter(name => !ENTRY_FIELDS.has(name));
+        if (extra.length) throw new HttpError(422, `A new card from an agent may not set: ${extra.join(', ')}.`, { fields: extra });
+        if (entity.status !== undefined && entity.status !== 'active') throw new HttpError(422, 'A new card from an agent is active.');
+        posted = entity.steps.map(checkStep);
+      }
+      const claimed = retiredClaim(first.registry, id, folder) ?? (library && !existingFirst ? retiredFolded(first.registry, folder) : null);
       if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
-      const files = await cardFiles(sectionId, entity.folder);
-      if (!files.length) throw new HttpError(409, `${entity.folder}/ has no files yet: upload them first, then add the card.`);
+      const files = await cardFiles(sectionId, folder);
+      if (!files.length) throw new HttpError(409, `${folder}/ has no files yet: upload them first, then add the card.`);
       const refused = files.filter(file => SECRET.test(file.path) || file.size > MAX_FILE).map(file => file.path);
       if (refused.length) throw new HttpError(422, 'Some files look like secrets or are over 50 MB; delete them first.', { files: refused });
+      const mustExist = steps => {
+        const missing = steps.filter(step => !files.some(file => file.path === `${folder}/${step.path}`)).map(step => step.path);
+        if (missing.length) throw new HttpError(422, `A step's path must be a file already in ${folder}/: ${missing.join(', ')}.`, { files: missing });
+      };
+      mustExist(posted);
 
-      const stored = { ...entity, updated: entity.updated ?? today() };
+      const stepKey = step => step?.path ?? step?.file ?? step?.name;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const { registry, etag } = await section(caller, sectionId, 'write');
-        const clash = registry.entities.find(item => item?.folder === entity.folder && item?.id !== id);
-        if (clash) throw new HttpError(409, `Folder ${entity.folder} already belongs to card "${clash.id}".`);
-        const index = registry.entities.findIndex(item => item?.id === id);
-        const taken = retiredClaim(registry, id, entity.folder);
-        if (taken) throw retiredError(caller, sectionId, taken, 'write');
-        const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
-        try {
-          await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities }, { ifMatch: etag });
-          return { section: sectionId, entity: stored, created: index < 0 };
-        } catch (error) {
-          if (error.status !== 412) throw error;
+        const clash = registry.entities.find(item => item?.folder === folder && item?.id !== id);
+        if (clash) throw new HttpError(409, `Folder ${folder} already belongs to card "${clash.id}".`);
+        if (library) {
+          const lower = registry.entities.find(item => item?.id !== id && typeof item?.folder === 'string' && item.folder.toLowerCase() === folder.toLowerCase());
+          if (lower) throw new HttpError(409, `Folder ${folder} is the same name as ${lower.folder} in another case; Windows would treat them as one.`);
         }
+        const index = registry.entities.findIndex(item => item?.id === id);
+        const taken = retiredClaim(registry, id, folder) ?? (library && index < 0 ? retiredFolded(registry, folder) : null);
+        if (taken) throw retiredError(caller, sectionId, taken, 'write');
+        const before = index >= 0 ? registry.entities[index] : null;
+        let stored;
+        const ignored = [];
+        if (library && before) {
+          // The stored entry stays, field by field; only steps with a new path are appended, marked as an agent's tab.
+          const known = new Set((before.steps ?? []).map(stepKey));
+          // A tab the owner took off (or Revert did) stays off: bringing it back would undo that.
+          const removed = new Set((Array.isArray(before.removedTabs) ? before.removedTabs : []).map(item => (typeof item === 'string' ? item : item?.path ?? item?.file)).filter(Boolean));
+          const added = [];
+          for (const raw of entity.steps) {
+            if (removed.has(raw?.path) && !known.has(raw?.path)) { if (!ignored.includes(`removed tab: ${raw.path}`)) ignored.push(`removed tab: ${raw.path}`); continue; }
+            if (known.has(raw?.path) || added.some(item => item.path === raw?.path)) continue;
+            added.push({ ...checkStep(raw), agentTab: true });
+          }
+          mustExist(added);
+          for (const [name, value] of Object.entries(entity)) {
+            if (['steps', 'updated', 'id'].includes(name)) continue;
+            if (JSON.stringify(value) !== JSON.stringify(before[name])) ignored.push(name);
+          }
+          const same = (before.steps ?? []).every(step => {
+            const match = entity.steps.find(item => item?.path === stepKey(step));
+            return match && match.name === (step.name ?? step.title) && (match.viewer ?? null) === (step.viewer ?? null);
+          });
+          if (!same) ignored.push('steps');
+          if (!added.length && before.updated === today()) return { section: sectionId, entity: before, created: false, unchanged: true, ignored };
+          stored = { ...before, steps: [...(before.steps ?? []), ...added], updated: today() };
+        } else {
+          stored = { ...entity, ...(library ? { steps: posted } : {}), updated: entity.updated ?? today() };
+        }
+        const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
+        let put;
+        try {
+          put = await bucket.putJson(keyOf(sectionId, 'workspace.json'), { ...registry, entities }, { ifMatch: etag });
+        } catch (error) {
+          // AWS can answer 409 as well as 412 for a write that raced another.
+          if (error.status !== 412 && error.status !== 409) throw error;
+          continue;
+        }
+        const answer = { section: sectionId, entity: stored, created: index < 0, ...(library ? { ignored } : {}) };
+        if (limited) {
+          const old = new Set((before?.steps ?? []).map(stepKey));
+          const added = (stored.steps ?? []).map(stepKey).filter(key => !old.has(key));
+          // A write that only moved `updated` has no row.
+          if (index < 0 || added.length) {
+            answer.recorded = await record(sectionId, folder, writeId(), {
+              file: 'workspace.json', kind: index < 0 ? 'new-card' : 'new-tab', entry: true, cardId: id, steps: added,
+              agent: info.agent ?? 'unknown', token: caller.name, versionId: put.versionId, previousVersionId: null,
+              etag: put.etag, previousEtag: etag, context: info.context, why: info.why ?? '', batch: info.batch,
+            });
+          }
+        }
+        return answer;
       }
       throw new HttpError(409, 'The card list kept changing under this write; try again.');
     },
@@ -481,10 +730,14 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       return { raw: body, contentType: got.contentType || contentTypeOf(file), etag: got.etag, ...(INBOXES.has(sectionId) ? { writer: got.metadata?.writer || 'none' } : {}) };
     },
 
-    async putFile(caller, sectionId, file, body, contentType, { ifNoneMatch, ifMatch } = {}) {
+    async putFile(caller, sectionId, file, body, contentType, { ifNoneMatch, ifMatch, headers = {} } = {}) {
       if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
       if (body.length > MAX_INLINE) throw new HttpError(413, 'Over 4 MB: ask POST /sections/{section}/uploads for an upload URL.');
-      await section(caller, sectionId, 'write');
+      const first = await section(caller, sectionId, 'write');
+      const limited = caller.rights.write !== null;
+      // The records of who wrote what are the card API's own: no token, the passphrase included, writes them through a route.
+      if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
+      if (limited && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
       ownerOnly(caller, sectionId, file);
       agentConfigOnly(caller, sectionId, file, { ifNoneMatch });
       markFiles(caller, sectionId, file, { ifNoneMatch });
@@ -495,18 +748,79 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       changesValid(caller, sectionId, file, body);
       agentEditValid(caller, sectionId, file, body);
       reviewNeedsAction(sectionId, file, body);
+      const key = keyOf(sectionId, file);
+      // A limited writer in a project section (not an inbox) leaves a record; a Library right also has to say who and why, and write conditionally.
+      const recorded = limited && !INBOXES.has(sectionId);
+      const folder = file.split('/')[0];
+      let info = null;
+      let id = null;
+      let previous = null;
+      if (first.library) {
+        if (!libraryPathOk(file)) throw new HttpError(422, `${file} is not a safe path: letters, digits, space, dot, dash, underscore and brackets in each part, no Windows device names, no trailing dot or space.`);
+        if (!ifNoneMatch && !ifMatch) throw new HttpError(428, 'Writes to a project section are conditional. Fetch the cards client again.');
+        info = writeInfo(headers, { strict: true, needContext: Boolean(ifMatch) });
+        const claimed = retiredBy(first.registry, folder);
+        if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
+        if (reservedName(folder) || skippedName(folder)) throw new HttpError(403, `"${folder}" is not a card folder here.`);
+        if (ifMatch && SCRIPT_FILE.test(file)) throw new HttpError(403, 'A script file is not edited by an agent: add a new tab with a new file name instead.');
+        const retiredVariant = retiredFolded(first.registry, folder);
+        if (retiredVariant) throw retiredError(caller, sectionId, retiredVariant, 'write');
+        const liveVariant = first.registry.entities.find(item => typeof item?.folder === 'string' && item.folder !== folder && lower(item.folder) === lower(folder));
+        if (liveVariant) throw new HttpError(409, `${folder} is the same name as the folder ${liveVariant.folder} in another case, and Windows would treat them as one.`);
+        // S3 allows a key below another key, and a folder spelled two ways; Windows allows neither: one such file would stop every publish and
+        // pull of the section, or land in the other spelling's folder. Every path part is compared without case.
+        const lowFile = lower(file);
+        const prefixesOf = value => value.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+        const mine = prefixesOf(file);
+        const clash = (await cardFiles(sectionId, folder)).find(item => {
+          if (item.path === file) return false;
+          const other = lower(item.path);
+          if (other === lowFile || lowFile.startsWith(`${other}/`) || other.startsWith(`${lowFile}/`)) return true;
+          const spelled = new Map(prefixesOf(item.path).map(prefix => [lower(prefix), prefix]));
+          return mine.some(prefix => spelled.has(lower(prefix)) && spelled.get(lower(prefix)) !== prefix);
+        });
+        if (clash) throw new HttpError(409, `${clash.path} is already there; ${file} would sit below it, on it, or have the same name in another case, and Windows cannot hold both.`);
+      } else if (recorded) {
+        info = writeInfo(headers);
+      }
+      if (recorded) id = writeId();
+      if (recorded && ifMatch) {
+        let head;
+        try { head = await bucket.head(key); } catch (error) { if (error.status !== 404) throw error; }
+        if (!head || head.etag !== ifMatch) throw new HttpError(412, 'That file changed since you read it.');
+        previous = head;
+      }
+      // An agent's edit of an owner's HTML page could keep calling the card bridge with the owner's sign-in: the step loses the bridge until Revert clears the mark.
+      const marked = first.library && ifMatch && /\.html?$/i.test(file) ? await markAgentTab(caller, sectionId, folder, file.slice(folder.length + 1)) : null;
       let put;
       try {
-        put = await bucket.put(keyOf(sectionId, file), body, { contentType: contentType || contentTypeOf(file), ifNoneMatch, ifMatch, metadata: writerMetadata(caller, sectionId, file) });
+        put = await bucket.put(key, body, {
+          contentType: first.library ? contentTypeOf(file) : contentType || contentTypeOf(file),
+          ifNoneMatch, ifMatch,
+          metadata: first.library ? { writer: caller.name, agent: info.agent, 'write-id': id } : writerMetadata(caller, sectionId, file),
+        });
       } catch (error) {
-        if (error.status === 412) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
+        // AWS can answer 409 as well as 412 for a write that raced another.
+        if (error.status === 412 || error.status === 409) throw new HttpError(412, ifNoneMatch ? 'That file already exists.' : 'That file changed since you read it.');
         throw error;
       }
-      return { path: file, size: body.length, etag: put.etag };
+      const answer = { path: file, size: body.length, etag: put.etag, ...(put.versionId ? { versionId: put.versionId } : {}) };
+      if (recorded) {
+        const owned = first.registry.entities.some(item => item?.folder === folder);
+        answer.recorded = await record(sectionId, folder, id, {
+          file, kind: ifMatch ? 'edit' : owned ? 'new-tab' : 'new-card', entry: false,
+          agent: info.agent ?? 'unknown', token: caller.name,
+          versionId: put.versionId, previousVersionId: previous?.versionId ?? null, etag: put.etag, previousEtag: previous?.etag ?? null,
+          context: info.context, why: info.why ?? '', batch: info.batch,
+          ...(marked ? { markedAgentTab: marked } : {}),
+        });
+      }
+      return answer;
     },
 
     async deleteFile(caller, sectionId, file) {
       await section(caller, sectionId, 'delete');
+      if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
       hubFilesStay(caller, sectionId, file);
       await bucket.del(keyOf(sectionId, file));
       return { path: file, deleted: true };
@@ -515,11 +829,15 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     async uploads(caller, sectionId, request) {
       const files = Array.isArray(request?.files) ? request.files : null;
       if (!files?.length || files.length > 50) throw new HttpError(400, 'Send { files: [{ path }] }, 1 to 50 of them.');
-      await section(caller, sectionId, 'write');
+      const first = await section(caller, sectionId, 'write');
+      // A presigned URL carries no condition, no metadata and no record.
+      if (first.library) throw new HttpError(403, 'A project section takes files through the API, at most 4 MB each.');
       const uploads = await Promise.all(files.map(async item => {
         const file = cardPath(item?.path);
         if (!file) throw new HttpError(400, `Not a card path: ${item?.path}`);
         if (SECRET.test(file)) throw new HttpError(422, `${file} looks like a secret; it is not uploaded.`);
+        if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
+        if (caller.rights.write !== null && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
         ownerOnly(caller, sectionId, file);
         // A presigned URL carries no metadata, so an upload there would land unmarked and count: refused for every caller, the passphrase too.
         if (INBOXES.has(sectionId) && /^team\/[^/]+\/persona-/i.test(file)) throw new HttpError(403, 'Persona files are written by the Hub only, never by upload URL.');
@@ -610,7 +928,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       } else if (root === 'sections' && kind === 'cards' && rest.length === 1 && method === 'GET') {
         result = await routes.getCard(caller, sectionId, rest[0]);
       } else if (root === 'sections' && kind === 'cards' && rest.length === 1 && method === 'PUT') {
-        result = await routes.putCard(caller, sectionId, rest[0], json());
+        result = await routes.putCard(caller, sectionId, rest[0], json(), headers);
       } else if (root === 'sections' && kind === 'uploads' && !rest.length && method === 'POST') {
         result = await routes.uploads(caller, sectionId, json());
       } else if (root === 'sections' && kind === 'files' && !rest.length && method === 'GET') {
@@ -623,6 +941,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (method === 'PUT') result = await routes.putFile(caller, sectionId, file, raw(), headers['content-type'], {
           ifNoneMatch: headers['if-none-match'] === '*' ? '*' : undefined,
           ifMatch: headers['if-match']?.replace(/^W\//, '').replace(/^"|"$/g, '') || undefined,
+          headers,
         });
         if (method === 'DELETE') result = await routes.deleteFile(caller, sectionId, file);
       } else {

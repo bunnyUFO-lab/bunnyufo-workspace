@@ -57,11 +57,12 @@ import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { createWake } from './pc-wake.mjs';
 import { createPresence } from './hub-presence.mjs';
+import { createCardWrites, isInbox, isLibrarySection, SETTING_FILE } from './hub-card-writes.mjs';
 import { PROJECT_DEFAULTS } from './project-defaults.mjs';
 import { checkOneImage } from './chat-images.mjs';
 import { createListCache } from './list-cache.mjs';
 
-const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config', 'feedback'];
+const FOLDERS = ['asks', 'checklists', 'requests', 'events', 'beads', 'drawings', 'chat', 'pc', 'team', 'hermes-approvals', 'bead-marks', 'agent-config', 'feedback', 'card-writes'];
 // Copied from site/card-api/handler.mjs (SECRET), applied to each segment on its own: the card API
 // applies it to a whole path, where an Ask whose id mentions a token would be refused as a file.
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
@@ -86,8 +87,8 @@ const fail = (message, status = 400, extra) => Object.assign(new Error(message),
 export function inboxKey(rel, prefix = 'sections', inbox = 'inbox') {
   if (!/^inbox(-[a-z0-9]+)?$/.test(inbox)) throw fail('That is not an inbox section.', 400);
   const text = String(rel ?? '');
-  // The one file at the root of the inbox: the Away switch (hub-presence).
-  if (text === 'presence.json') return `${prefix}/${inbox}/presence.json`;
+  // The two files at the root of the inbox, each the owner's alone: the Away switch (hub-presence) and the agent-cards setting (hub-card-writes). Exactly these names.
+  if (text === 'presence.json' || text === SETTING_FILE) return `${prefix}/${inbox}/${text}`;
   const segments = text.split('/');
   if (!text || segments.some(part => !part || part === '..' || part.startsWith('.') || part.startsWith('_') || /[\\\0]/.test(part))) {
     throw fail('That path is not in the inbox.', 400);
@@ -293,7 +294,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const routineSet = loadRoutines(env);
   const dryRun = String(env.HUB_ROUTINE_DRY_RUN ?? '').trim() === '1';
   const hasCloud = repo => dryRun || (!!repo && !!routineFor(routineSet.routines, repo));
-  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
+  const requestFiles = createRequests({ bucket, key, cached, putCreateOnly, listFolders, pool, fail, projectRepo, cardSectionOf, hasCloud, cloudRepos: () => [...routineSet.routines.keys()], signingKey, approveReason, log, scrub,
     cloudNever: String(env.HUB_CLOUD_NEVER ?? '').split(',').map(name => name.trim()).filter(Boolean),
     // The Bunnylink project's own repo, for the repo guard: null when there is no such section, '' when it tracks no repo, throws on a storage error.
     bunnylinkRepo: async () => { const got = await bucket.getJson(`${prefix}/bunnylink/workspace.json`); return got ? trackedRepo(got.value?.tracked?.repo) ?? '' : null; },
@@ -1359,14 +1360,19 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
 
   /** Every card of every card section: `sections/<id>/workspace.json` entities, with the section's tracked repo. */
   let lastSections = new Set();
+  // Each section's `hidden` and `archived` flags, from the same listing: a card list that is neither is a Library section (cardSectionOf).
+  let lastSectionFlags = new Map();
   async function allCards() {
     const { prefixes } = await bucket.list(`${prefix}/`, { delimiter: '/' });
     const sections = prefixes.map(name => name.slice(prefix.length + 1).replace(/\/$/, '')).filter(id => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id) && !/^inbox(-[a-z0-9]+)?$/.test(id));
     lastSections = new Set(sections);
+    const flags = new Map();
+    lastSectionFlags = flags;
     const lists = await pool(6, sections, async section => {
       const got = await bucket.getJson(`${prefix}/${section}/workspace.json`).catch(() => null);
       const entities = got?.value?.entities;
       if (!Array.isArray(entities)) return [];
+      flags.set(section, { hidden: got.value.hidden === true, archived: got.value.archived === true, name: typeof got.value.name === 'string' ? got.value.name : '' });
       const repo = trackedRepo(got.value.tracked?.repo);
       return entities
         .filter(entity => entity && typeof entity.id === 'string' && typeof entity.title === 'string')
@@ -1379,7 +1385,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   }
 
   // The cards by `section/folder` and `section#id`, kept for a minute: a run's card is linked by its id in its section, which the folder does not give.
-  let cardIndex = { at: 0, byRef: new Map(), rows: [], sections: new Set() };
+  let cardIndex = { at: 0, byRef: new Map(), rows: [], sections: new Set(), flags: new Map() };
   const cardRow = row => ({ title: row.title, href: `/${encodeURIComponent(row.section)}#/${encodeURIComponent(row.id)}` });
   /** Make sure the index is no older than a minute (`maxAge` ms), listing the sections at most once per call. */
   async function refreshCardIndex(maxAge = 60000) {
@@ -1393,7 +1399,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         byRef.set(`${row.section}/${row.folder}`, cardRow(row));
         if (!byRef.has(`${row.section}#${row.id}`)) byRef.set(`${row.section}#${row.id}`, cardRow(row));
       }
-      cardIndex = { at, byRef, rows, sections: lastSections };
+      cardIndex = { at, byRef, rows, sections: lastSections, flags: lastSectionFlags };
     } catch { cardIndex = { ...cardIndex, at }; }
   }
   /** The site path of a card named `section/folder` (what a finished run's result holds): `/<section>#/<card id>`. Undefined when no such card is listed. */
@@ -1412,6 +1418,50 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const mine = cardIndex.rows.filter(row => row.section === project).sort((a, b) => when(b).localeCompare(when(a)));
     return { section: project, cards: mine.slice(0, 20).map(row => ({ ...cardRow(row), ...(when(row) ? { updated: when(row) } : {}) })), total: mine.length };
   }
+  /**
+   * The section a job for `project` writes its card to, chosen when the Hub signs the brief and never from request text: the project's own
+   * section when it is a Library section (a card list, not hidden, not archived, not an inbox, not `agent-plans`) that the owner has not
+   * turned agent cards off for (`library-writes.json`), else `assistant`. On the development copy only a `dev-` section qualifies. A failed
+   * listing or setting read gives `assistant`: it never fails an approval.
+   */
+  async function cardSectionOf(project) {
+    try {
+      if (typeof project !== 'string' || project === 'assistant' || project === 'agent-plans' || /^inbox(-|$)/.test(project)) return 'assistant';
+      if (env.BUW_DEV === '1' && !project.startsWith('dev-')) return 'assistant';
+      await refreshCardIndex();
+      const flags = cardIndex.flags.get(project);
+      if (!flags || flags.hidden || flags.archived) return 'assistant';
+      // The same file the card API reads: `dev-` sections keep theirs in `inbox-dev`, so the two copies never see each other's.
+      const got = await bucket.getText(`${prefix}/${project.startsWith('dev-') ? 'inbox-dev' : 'inbox'}/library-writes.json`);
+      if (!got) return project;
+      if (got.metadata?.writer) return 'assistant';
+      const setting = JSON.parse(got.text);
+      if (!setting || setting.v !== 1 || !Array.isArray(setting.off) || !setting.off.every(item => typeof item === 'string')) return 'assistant';
+      return setting.off.includes(project) ? 'assistant' : project;
+    } catch { return 'assistant'; }
+  }
+  /**
+   * The Library sections this Hub may set agent cards for (the setting's panel and its POST): a card list that is not hidden, not archived and
+   * not an inbox. The development copy lists only `dev-` sections and the real one leaves them out, so neither can reach the other's.
+   */
+  async function librarySections() {
+    await refreshCardIndex(5000);
+    const dev = env.BUW_DEV === '1';
+    return [...cardIndex.flags].filter(([id, flags]) => id !== 'assistant' && isLibrarySection(id, flags) && !isInbox(id) && id.startsWith('dev-') === dev)
+      .map(([id, flags]) => ({ id, name: flags.name || id })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  /** Card titles by folder for one section, from the one-minute index: what a row says the write was in. */
+  async function cardTitlesOf(section) {
+    await refreshCardIndex();
+    const titles = {};
+    for (const row of cardIndex.rows) if (row.section === section) titles[row.folder] = row.title;
+    return titles;
+  }
+  const cardWrites = createCardWrites({ bucket, prefix, key, fail, pool, sections: librarySections, titleOf: cardTitlesOf, now, log: line => log(scrub(line, 400)) });
+  /** The development copy writes only `dev-` sections: the route restriction QA relies on (`mayWrite` in server.mjs does not cover Hub routes). */
+  const writableSection = id => {
+    if (env.BUW_DEV === '1' && !String(id ?? '').startsWith('dev-')) throw fail('The development copy writes only dev-… sections.', 403);
+  };
   /** A resolver for the map: `section/folder` or `section#id` to `{ title, href }`, from the one-minute index (no listing of its own per request). */
   async function cardResolver() {
     await refreshCardIndex();
@@ -1868,7 +1918,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           } else if (route === '/hub/project-cards') {
             const project = query.get('project');
             if (!validProject(project)) throw fail('Say which project.', 400);
-            reply(await projectCards(project));
+            reply({ ...await projectCards(project), agents: (await cardSectionOf(project)) === project });
+          } else if (route === '/hub/card-writes') {
+            reply(await cardWrites.rows({ section: query.get('section'), folder: query.get('folder'), limit: Number(query.get('limit')) || undefined, older: query.get('older') === '1' }));
+          } else if (route === '/hub/card-write-sections') {
+            reply(await cardWrites.settingView());
           } else if (route === '/hub/unasked') {
             const work = buildWork(await loadWorkInputs(null, at));
             reply({ items: unaskedOf(Object.values(work.lanes).flat()).map(card => ({ project: card.project, id: card.id, title: card.title, status: card.state, href: card.href, ...(card.reason ? { reason: card.reason } : {}), ...(card.mark ? { mark: card.mark } : {}) })) });
@@ -1976,6 +2030,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           send(await markBead(decodeURIComponent(match[1]), raw, user, at));
         } else if (route === '/hub/presence') {
           send(await presence.set(raw, user, at));
+        } else if (route === '/hub/card-writes/revert') {
+          if (!user) throw fail('Sign in to revert this.', 401);
+          writableSection(raw?.section);
+          send(await cardWrites.revert(raw, user));
+        } else if (route === '/hub/card-write-sections') {
+          if (!user) throw fail('Sign in to change this.', 401);
+          if (!raw?.save) writableSection(raw?.section);
+          send(await cardWrites.setSection(raw, user));
         } else if (route === '/hub/pc/wake') {
           if (!user) throw fail('Sign in to wake the PC.', 401);
           send(await wake.send({ by: user, at }));
