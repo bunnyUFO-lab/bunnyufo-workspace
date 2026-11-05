@@ -709,7 +709,7 @@ function ChatView({ id }: { id?: string }) {
         setPending(null)
         setStreaming(false)
         // This page thought the chat was idle, but a reply is running (another device, or the queue's own turn): the message waits its turn.
-        if (failure instanceof HubError && failure.status === 409 && conversation.current && !sending.length) { void queueMessage(text); return }
+        if (failure instanceof HubError && failure.status === 409 && conversation.current && !sending.length) { void queueMessage(text, `l${Math.random().toString(36).slice(2, 8)}`); return }   // a key: the sent text already left the box, so this must not clear what was typed since
         setStopping(false)
         if (asked === undefined) { giveBack(text); setImages(sending); slots.current = MAX_IMAGES - sending.length } else giveBack()
         setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
