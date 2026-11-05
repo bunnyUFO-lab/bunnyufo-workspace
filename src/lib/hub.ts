@@ -5,6 +5,7 @@ import { authHeaders } from '../local/client'
 import type { PcSummary, PcWake, WorkingItem } from './hubPc'
 import type { NeedsKind } from './needsKinds'
 import { clearHub } from './hubCache.mjs'
+import type { SpawnTarget } from './hubSpawn'
 import { holdReload } from './reloadGate'
 
 export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'review' | 'blocked' | 'session'
@@ -416,8 +417,9 @@ if (typeof window !== 'undefined') {
   window.addEventListener('bunnyufo-workspace-changed', () => clearHub('/project-cards'))
 }
 
-export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal): Promise<T> {
-  const changed = () => window.dispatchEvent(new Event(HUB_WROTE))
+/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. */
+export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false): Promise<T> {
+  const changed = () => { if (!quiet) window.dispatchEvent(new Event(HUB_WROTE)) }
   const release = holdReload()   // an update reload waits for this write
   try {
     const answer = await parse<T>(await fetch(`/api/hub${path}`, {
@@ -481,7 +483,37 @@ export const appUrl = (value: string | undefined): string | undefined => (value 
 export interface ChatImage { file: string; type: string; width: number; height: number }
 /** What a help chat is about: the stored kind of the item, its id, and the step in focus. */
 export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; id: string; step?: string; title: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string }
+/** A job a reply named (`GET /hub/chat/:id/jobs`), built from the request file. A proposal waits for the owner; the rest follow the run. */
+export interface ChatJob {
+  id: string; title: string; text: string; project: string; preset?: string; agent?: string; runsOn?: SpawnTarget; produces?: string
+  repo?: string; model?: string; minutes?: number; doneWhen?: string; estimate?: { cost: string; time: string }; tokens?: { low: number; high: number }
+  /** Who the file says wrote it, and whether the Hub could confirm it is Hermes's own proposal from this reply. */
+  writer: string; verified: boolean
+  state: string; stale?: string; approvable: boolean; why?: string; flag?: 'persona'; by: string; nothing?: boolean
+  finish?: { outcome: string; pr?: string; card?: string; cardHref?: string }
+}
+/** What one tap did to each id, in the order they were signed. Not atomic: a signed approval stands when a later one fails. */
+export interface ChatJobResult { id: string; ok: boolean; state?: string; waiting?: string; error?: string }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
+/** A message sent while a reply was running, waiting for it to end. */
+export interface ChatQueued { id: string; text: string; at: string; model?: string; /** why this row is not going out: the hold's reason when it was held, or `joined` when it was typed during a hold */ why?: ChatHeld['reason'] | 'joined' }
+/** Why the waiting messages are not going out by themselves. */
+export interface ChatHeld { reason: 'stopped' | 'failed' | 'lost' | 'long' | 'old'; at: string }
+/** One thing a job delivered, openable. A task is only a project and an id: the page builds its link. */
+export type Deliverable =
+  | { kind: 'card'; ref: string; section: string; title?: string; href?: string }
+  | { kind: 'pr'; href: string; label: string }
+  | { kind: 'ask' | 'checklist' | 'job'; id: string; title: string; state: string }
+  | { kind: 'task'; project: string; id: string; title?: string }
+export interface JobPill { text: string; tone: 'good' | 'warn' | 'quiet' }
+/** A row of `GET /hub/jobs`. `runner` is where it runs (`hermes`, `cloud`, `pc`); `at` is when it started, `finishedAt` when it ended. */
+export interface JobListRow {
+  id: string; title: string; project: string; preset: string; state: string; agent?: string; runner?: string; stale?: string
+  at: string; finishedAt?: string; nothing?: boolean; deliverables: Deliverable[]; pills: JobPill[]
+}
+export interface JobsView { counts: { running: number; finished: number }; jobs: JobListRow[]; window: string }
+/** What the queue routes answer. */
+export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
 export interface ChatDelegate { id: string; index?: number; count?: number; goal: string; state: 'running' | 'done' | 'failed' | 'unknown'; summary?: string; seconds?: number }
 export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }

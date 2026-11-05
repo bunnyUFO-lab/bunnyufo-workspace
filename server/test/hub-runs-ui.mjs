@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { openLog } from './run-log.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -63,6 +64,7 @@ try {
   await drawer.locator('[data-run-card]').waitFor();
   assert.equal(await drawer.locator('[data-run-card]').getAttribute('href'), '/assistant#/tug-games-card', 'The card is in the assistant section, under its id and not its folder');
   assert.equal((await drawer.locator('[data-run-state-chip]').innerText()).trim(), 'Done');
+  await openLog(drawer);
   assert.match(await drawer.locator('[data-run-by]').innerText(), /Approved by local/);
   assert.ok(await drawer.locator('[data-step]').count() >= 3, 'The timeline lists approved, the result and who wrote it.');
   assert.equal(await drawer.locator('[data-run-stop]').count(), 0, 'A finished run has no Stop.');
@@ -72,9 +74,11 @@ try {
 
   step('the request page shows the same view: a policy signature, a retry note, usage, and a question with Answer');
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.policy)}`);
+  await openLog(page);
   await page.locator('[data-run-by]', { hasText: 'Signed by policy' }).waitFor();
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.retry)}`);
   await page.locator('[data-run-retry]').waitFor();
+  await openLog(page);
   assert.equal(await page.locator('[data-run-retry]').innerText(), 'Codex quota reached; retried on Anthropic.');
   assert.match(await page.locator('[data-run-usage]').innerText(), /input tokens 1,200/);
   assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '/assistant#/retried-card');
@@ -171,6 +175,7 @@ try {
   assert.ok([...seen].filter(text => /running · \d+ s/.test(text)).length >= 3, `The time ticks (saw ${[...seen].join(' | ')}).`);
   slow.hermes.go('finish');
   const finished = waiter.locator('[data-run-drawer] [data-run-tool="done"]');
+  await openLog(waiter.locator('[data-run-drawer]'), { finished: true });
   await finished.waitFor();
   assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');
 

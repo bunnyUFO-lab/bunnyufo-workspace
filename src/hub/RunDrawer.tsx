@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { host } from '../lib/host'
 import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl } from '../lib/hub'
+import type { Deliverable } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
-import { hubHash } from '../lib/route'
+import { hubHash, mapHash } from '../lib/route'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
@@ -31,6 +32,10 @@ interface RunDetail extends RequestDetail {
   retry?: { runId: string; at: string; provider: string; model: string; reason: string }
   stop?: { reason?: string; at?: string; by?: string }
   report?: boolean
+  /** What the job delivered, read by the site API (a result page only); absent when that read failed. */
+  deliverables?: Deliverable[]
+  /** The preset's agent, as the job list shows it. */
+  agent?: string
   /** Where an approved cloud request stands, from the site API's fire queue. */
   cloud?: CloudState
   fires?: CloudFire[]
@@ -92,6 +97,8 @@ const runsOn = (target: string) => (target === 'at-pc' ? 'You start it at the PC
 /** A run's reason in words, for the timeline. */
 const reasonWord = (reason: string) => (reason === 'approval-refused' ? 'the approval was not accepted' : reason)
 
+/** A job in one of these states has a result page: the summary and what it delivered first, the log closed. */
+const FINISHED = new Set(['done', 'failed', 'stopped', 'asking'])
 const STOPPABLE = new Set(['approved', 'taken', 'running', 'lost', 'asking'])
 const AGAIN = new Set(['expired', 'failed', 'lost'])
 /** A queued reply the run will not carry on its own: the owner stopped it, it timed out or failed, or it finished before the Hub sent it. */
@@ -139,6 +146,60 @@ function Live({ lines, ended }: { lines: LiveLine[]; ended: boolean }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+const SITE_CARD = /^\/[\w%-]+#\/[\w%.~-]+$/
+const deliverableKey = (item: Deliverable) => (item.kind === 'card' ? `card:${item.ref}` : item.kind === 'pr' ? `pr:${item.href}` : item.kind === 'task' ? `task:${item.project}/${item.id}` : `${item.kind}:${item.id}`)
+
+/** The card and PR of a result, for a page whose deliverables did not come with the detail. */
+function fallbackDeliverables(card: string | undefined, cardHref: string | undefined, pr: string | undefined): Deliverable[] {
+  const out: Deliverable[] = []
+  if (card) out.push({ kind: 'card', ref: card, section: card.includes('/') ? card.split('/')[0] : '', ...(cardHref ? { href: cardHref } : {}) })
+  if (pr) out.push({ kind: 'pr', href: pr, label: 'Pull request' })
+  return out
+}
+
+const KIND_WORD: Record<string, string> = { ask: 'Ask', checklist: 'Checklist', job: 'Job' }
+
+/** One thing a job delivered, with a button that opens it. A card shows the section it is in, a PR opens in a new tab. */
+function DeliverableCard({ item }: { item: Deliverable }) {
+  if (item.kind === 'card') {
+    const href = item.href && SITE_CARD.test(item.href) ? item.href : undefined
+    return (
+      <div className="rd-dl" data-run-deliverable="card">
+        <b>{item.title ?? item.ref.split('/').pop()}</b>
+        <span className="hub-muted">Card{item.section ? ` · ${item.section}` : ''}</span>
+        {href ? <div className="rd-links"><a className="hub-btn pri" href={href} data-run-card>Open</a></div> : <span className="hub-muted" data-run-card-missing>Card not found yet: {item.ref.split('/').pop()}</span>}
+      </div>
+    )
+  }
+  if (item.kind === 'pr') {
+    const href = safeUrl(item.href)
+    return (
+      <div className="rd-dl" data-run-deliverable="pr">
+        <b>{item.label}</b>
+        <span className="hub-muted">Pull request</span>
+        {href && <div className="rd-links"><a className="hub-btn pri" href={href} target="_blank" rel="noopener noreferrer" data-run-pr>Open the PR</a></div>}
+      </div>
+    )
+  }
+  if (item.kind === 'task') {
+    return (
+      <div className="rd-dl" data-run-deliverable="task">
+        <b>{item.title ?? item.id}</b>
+        <span className="hub-muted">Task · {item.id}</span>
+        <div className="rd-links"><a className="hub-btn pri" href={mapHash(item.project, item.id)} data-run-task>Open</a></div>
+      </div>
+    )
+  }
+  const href = item.kind === 'ask' ? hubHash('ask', item.id) : item.kind === 'checklist' ? hubHash('checklist', item.id) : hubHash('request', item.id)
+  return (
+    <div className="rd-dl" data-run-deliverable={item.kind}>
+      <b>{item.title}</b>
+      <span className="hub-muted">{KIND_WORD[item.kind]} · {item.state.replace(/-/g, ' ')}</span>
+      <div className="rd-links"><a className="hub-btn pri" href={href} data-run-open-item>Open</a></div>
     </div>
   )
 }
@@ -226,37 +287,8 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const cardHref = result?.card ? cardLink(result.card, detail?.cardHref) : undefined
   const prHref = safeUrl(result?.pr)
 
-  return (
-    <div className="rd" data-run-view={id} data-run-state={state}>
-      <div className="rd-head">
-        {!page && <span className="hub-id" data-run-id>{request.id}</span>}
-        {!page && request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
-        <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
-      </div>
-      {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
-      {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
-      {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
-      {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
-      {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
-      {state === 'approved' && target === 'pc' && <PcStart />}
-      {cloudShown && (
-        <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
-          <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
-          <div className="rd-links">
-            {cloudShown.session && <a className="hub-btn" href={cloudShown.session} target="_blank" rel="noopener noreferrer" data-run-session>Open session</a>}
-            {cloudShown.retry && host.write && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/fire`, {}) })} data-run-fire-retry>Retry</button>}
-          </div>
-        </div>
-      )}
-      {retry && <p className="rd-note" data-run-retry>Codex quota reached; retried on Anthropic.</p>}
-      {state === 'asking' && (
-        <div className="rd-ask" data-run-asking>
-          <b>The run ended with a question</b>
-          {result?.question && <p>{result.question}</p>}
-          <a className="hub-btn pri" href={hubHash('needs', 'question')} onClick={() => setFocus(`run-question-${id}`)} data-run-answer-link>Answer</a>
-        </div>
-      )}
-
+  const timeline = (
+    <>
       <h4 className="rd-h">Timeline</h4>
       <ol className="rd-timeline" data-run-timeline>
         {detail.continued && <li data-step="continued"><b>Continued as</b> → <a href={hubHash('request', detail.continued.to)} data-run-continued>{detail.continued.to}</a>{detail.continued.at ? ` · ${clock(detail.continued.at)}` : ''}</li>}
@@ -284,14 +316,20 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         {request.continues && <li data-step="continues"><b>Continues</b> ← <a href={hubHash('request', request.continues.from)} data-run-continues>{request.continues.from}</a></li>}
         <li data-step="created"><b>Written</b> by {request.by ?? 'someone'} · {ago(request.createdAt)}</li>
       </ol>
-
+    </>
+  )
+  const liveBlock = (
+    <>
       {(live || lines.length > 0) && (
         <>
           <h4 className="rd-h">Run</h4>
           <Live lines={lines} ended={ended} />
         </>
       )}
-
+    </>
+  )
+  const resultBlock = (
+    <>
       {result && (result.outcome !== 'question' || result.summary) && (
         <>
           <h4 className="rd-h">Result</h4>
@@ -311,12 +349,120 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
           {hasReport && report && <div className="rd-report" data-run-report><Md text={report} /></div>}
         </>
       )}
+    </>
+  )
+  const delivered = !!result && FINISHED.has(state)
+  const dlist: Deliverable[] = detail.deliverables ?? fallbackDeliverables(result?.card, cardHref, prHref)
+  const agent = detail.agent
+  const where = taken?.runner ?? target
+  const kind = [agent, where && where !== 'at-pc' ? (MACHINE[where as SpawnTarget]?.name ?? where) : ''].filter(Boolean).join(' · ')
+  // A failed job leads with why it failed, from the record's own words; with none the page says so instead of staying quiet.
+  const failed = state === 'failed'
+  // A run that never started carries the raw error in its summary (it can be a program message): the owner reads a plain lead, the detail is under What it did.
+  const startFailed = result?.reason === 'start-failed'
+  const whyFailed = startFailed ? 'The run could not start.' : result?.summary?.trim() || stop?.reason?.trim() || 'Hermes gave no reason.'
+  // "What it did" holds the run's own record: a job that delivered nothing and ran nothing (a failure, a stop, nothing to change) would open it on bookkeeping only.
+  const didSomething = dlist.length > 0 || runs.length > 0 || fires.length > 0 || replies.length > 0 || lines.length > 0 || !!detail.continued || (startFailed && !!result?.summary) || !!usageLine(result?.usage) || (hasReport && !!report)
+  const failure = (
+    <>
+      <h4 className="rd-h">Why it failed</h4>
+      <div className="rd-result rd-failure" data-run-result data-run-failure>
+        {/* A refused approval has a plain sentence of its own: it comes first, the server's words follow it. */}
+        {result?.reason === 'approval-refused'
+          && <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>}
+        <p data-run-failure-text>{whyFailed}</p>
+      </div>
+    </>
+  )
+  const found = result && (failed ? failure : (
+    <>
+      <h4 className="rd-h">What it found</h4>
+      <div className="rd-result" data-run-result>
+        {detail.nothing && <p data-run-nothing><b>Done, nothing to change.</b></p>}
+        {result.reason === 'approval-refused'
+          && <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>}
+        {result.summary && <p data-run-summary>{result.summary}</p>}
+        {result.outcome === 'unknown' && <p className="hub-muted">Hermes forgot this run, so its outcome is not known. Check the card, if there is one.</p>}
+      </div>
+    </>
+  ))
+  const deliverablesBlock = (
+    <>
+      {/* A failed job with nothing to open has no Deliverables block at all: the failure above is the whole answer. */}
+      {(dlist.length > 0 || !failed) && <h4 className="rd-h">Deliverables</h4>}
+      {(dlist.length > 0 || !failed) && <div className="rd-dls" data-run-deliverables>
+        {dlist.map(item => <DeliverableCard key={deliverableKey(item)} item={item} />)}
+        {!dlist.length && (
+          <p className="hub-muted" data-run-no-deliverables>
+            {detail.nothing ? 'Done, nothing to change.' : 'This job delivered nothing you can open.'}
+          </p>
+        )}
+      </div>}
+      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={mapHash(request.project, request.bead)}>{request.bead}</a></p>}
+    </>
+  )
+  return (
+    <div className="rd" data-run-view={id} data-run-state={state}>
+      <div className="rd-head">
+        {!page && <span className="hub-id" data-run-id>{request.id}</span>}
+        {!page && request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
+        <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
+        {delivered && kind && <span className="ni-chip" data-run-agent>{kind}</span>}
+        {page && delivered && <a className="rd-back" href={hubHash('jobs', 'finished')} data-run-back>← Jobs</a>}
+      </div>
+      {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
+      {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
+      {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
+      {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
+      {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
+      {state === 'approved' && target === 'pc' && <PcStart />}
+      {cloudShown && (
+        <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
+          <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
+          <div className="rd-links">
+            {cloudShown.session && <a className="hub-btn" href={cloudShown.session} target="_blank" rel="noopener noreferrer" data-run-session>Open session</a>}
+            {cloudShown.retry && host.write && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/fire`, {}) })} data-run-fire-retry>Retry</button>}
+          </div>
+        </div>
+      )}
+      {retry && <p className="rd-note" data-run-retry>Codex quota reached; retried on Anthropic.</p>}
+      {state === 'asking' && (
+        <div className="rd-ask" data-run-asking>
+          <b>The run ended with a question</b>
+          {result?.question && <p>{result.question}</p>}
+          <a className="hub-btn pri" href={hubHash('needs', 'question')} onClick={() => setFocus(`run-question-${id}`)} data-run-answer-link>Answer</a>
+        </div>
+      )}
+
+      {delivered ? (
+        <>
+          {found}
+          {deliverablesBlock}
+        </>
+      ) : (
+        <>
+          {failed && !result && failure}
+          {timeline}
+          {liveBlock}
+          {resultBlock}
+        </>
+      )}
 
       <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
+      {delivered && didSomething && (
+        <details className="rd-did" data-run-did>
+          <summary>What it did</summary>
+          {startFailed && result?.summary && <p className="hub-muted" data-run-failure-detail>{result.summary}</p>}
+          {timeline}
+          {liveBlock}
+          {usageLine(result?.usage) && <p className="hub-muted" data-run-usage>{usageLine(result?.usage)}</p>}
+          {hasReport && report && <div className="rd-report" data-run-report><Md text={report} /></div>}
+        </details>
+      )}
       {problem && <p className="hub-error" role="alert" data-run-error>{problem}</p>}
       {(stoppable || again) && (
         <div className="ni-a rd-foot">
-          {stoppable && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) })} data-run-stop>Stop</button>}
+          {stoppable && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) })} data-run-stop>{state === 'asking' ? 'Stop this job' : 'Stop'}</button>}
           {again && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => {
             const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(id)}/again`, { target })
             onGone?.(made.id)

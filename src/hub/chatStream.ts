@@ -28,6 +28,19 @@ export async function streamChat(body: { conversation?: string; model?: string; 
   }
 }
 
+/**
+ * Follows the turn that is running in a conversation, one this page did not start (the queue's, or one begun on another device): the events
+ * so far are replayed, then new ones arrive, ending with done or error. With no turn running it says idle.
+ */
+export async function streamLive(conversation: string, handlers: ChatHandlers, signal: AbortSignal): Promise<void> {
+  const response = await fetch(`/api/hub/chat/${encodeURIComponent(conversation)}/live`, { headers: { ...authHeaders(), Accept: 'text/event-stream' }, cache: 'no-store', signal })   // like runStream: what asks for a stream says so
+  if (!response.ok || !response.body) {
+    const answer = await response.json().catch(() => null) as { error?: string } | null
+    throw new HubError(answer?.error ?? `The Hub answered ${response.status}.`, response.status, answer as Record<string, unknown> | null)
+  }
+  await readChatStream(response.body, handlers, signal)
+}
+
 /** Markdown reduced to what a voice should say: no code blocks, no link syntax, no emphasis marks. */
 export function plainText(markdown: string): string {
   return markdown

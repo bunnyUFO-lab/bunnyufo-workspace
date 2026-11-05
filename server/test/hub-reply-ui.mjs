@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { openLog, showInLog } from './run-log.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -83,6 +84,7 @@ try {
   assert.notEqual(next, ids.done);
   assert.equal(replies, 1, 'One Enter, one reply.');
   const link = page.locator('[data-run-continues]');
+  await openLog(page, { finished: true });
   await link.waitFor();
   assert.equal((await link.innerText()).trim(), ids.done);
   assert.match(await page.locator('[data-step="continues"]').innerText(), /Continues ← /);
@@ -93,6 +95,7 @@ try {
 
   step('the original says it was continued, links there, and its box is off with the reason');
   await link.click();
+  await showInLog(page, page.locator('[data-run-continued]'));
   await page.locator('[data-run-continued]').waitFor();
   assert.equal((await page.locator('[data-run-continued]').innerText()).trim(), next);
   assert.match(await page.locator('[data-step="continued"]').innerText(), /Continued as → /);
@@ -102,6 +105,7 @@ try {
   assert.equal(await off.locator('[data-reply-send]').isDisabled(), true);
   assert.equal((await off.locator('[data-reply-reason]').innerText()).trim(), `Continued as ${next}. Reply there.`);
   await off.locator('[data-reply-continued]').click();
+  await showInLog(page, page.locator('[data-run-continues]'));
   await page.locator('[data-run-continues]').waitFor();
   assert.equal((await page.locator('[data-run-view] [data-run-state-chip]').first().innerText()).trim().length > 0, true);
 
@@ -190,6 +194,7 @@ try {
   assert.equal(slow.hermes.steers[0].input, 'Message from the owner while you work: Look at the wooden one too');
   slow.hermes.go('end');
   await readView.locator('[data-run-state-chip]', { hasText: 'Done' }).waitFor({ timeout: ms(30000) });
+  await openLog(readView, { finished: true });
   assert.match(await readView.locator('[data-step="reply"]').innerText(), /^You: Look at the wooden one too · sent$/);
   assert.equal(await readView.locator('[data-step="continued"]').count(), 0, 'It was read, so no second run.');
 
@@ -214,6 +219,7 @@ try {
   assert.match(await refusedView.locator('[data-reply-note]').innerText(), /goes out as the next run when this one ends/);
   refuse.hermes.go('end');
   const nextLink = refusedView.locator('[data-run-reply-to]');
+  await openLog(refusedView, { finished: true });
   await nextLink.waitFor({ timeout: ms(30000) });
   assert.match(await refusedView.locator('[data-step="reply"]').innerText(), /^You: Also compare prices · sent as the next run → /);
   const nextRun = (await nextLink.innerText()).trim();
@@ -239,12 +245,14 @@ try {
   await stopper.locator(`[data-run-view="${steerIds.stopped}"][data-run-state="running"]`).waitFor();
   await held.locator('[data-run-stop]').click();
   await held.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
+  await openLog(held, { finished: true });
   const queuedRow = held.locator('[data-step="reply"]');
   await queuedRow.locator('[data-run-reply-queued]').waitFor();
   assert.match(await queuedRow.innerText(), /^You: Only the cheap ones · not sent: the run stopped\s+Send it now$/);
   assert.equal(hold.fake.objects.has(`sections/inbox/requests/${steerIds.stopped}/continued.json`), false, 'Nothing went out on its own.');
   await queuedRow.locator('[data-run-send-now]').click();
   await stopper.waitForFunction(original => !decodeURIComponent(window.location.hash).includes(original), steerIds.stopped);
+  await showInLog(stopper, stopper.locator('[data-run-continues]'));
   await stopper.locator('[data-run-continues]').waitFor();
   assert.equal(hold.hermes.runs.length, 2, 'Send it now started the next run.');
 
@@ -268,6 +276,7 @@ try {
   await askView.locator('[data-reply-send]').click();
   await askView.locator('[data-run-you="queued"]').waitFor();
   asking.hermes.go('end');
+  await openLog(askView, { finished: true });
   await askView.locator('[data-run-reply-to]').waitFor({ timeout: ms(30000) });
   assert.match(await askView.locator('[data-step="reply"]').innerText(), /^You: The wooden one · sent as the next run → /);
   assert.equal(await askView.locator('[data-run-send-now]').count(), 0, 'It was carried; there is nothing to send again.');

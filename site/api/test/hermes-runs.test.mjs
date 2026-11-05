@@ -61,6 +61,37 @@ test('approve starts a run with the brief and no provider; with nobody watching,
   } finally { await s.close(); }
 });
 
+test('a grilling run ends with ASKS and no card: done with its Asks, not failed', async () => {
+  const asks = ['20261105-colours-c3d3', '20261105-sizes-e5f5'];
+  const s = await stack({ hermesOptions: { endWith: `Two questions for you.
+ASKS: ${asks.join(' ')}` } });
+  try {
+    const api = await s.addHub();
+    const id = s.propose();
+    assert.equal((await approve(api, id)).status, 201);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.asks], ['asks', asks]);
+    const detail = (await api.get(`/hub/requests/${id}`)).body;
+    assert.equal(detail.state, 'done', 'Only failed fails.');
+    const row = (await api.get('/hub/jobs?tab=finished')).body.jobs.find(job => job.id === id);
+    assert.deepEqual(row.state, 'done');
+  } finally { await s.close(); }
+});
+
+test('ASKS plus a CARD line naming an untrusted section is failed, with the Asks kept; a trusted CARD is a card', () => {
+  const at = '2026-11-05T10:00:00.000Z';
+  const ids = ['20261105-colours-c3d3', '20261105-sizes-e5f5'];
+  const done = output => ({ status: 'completed', output });
+  const foreign = outcomeOf({ run: done(`Questions.\nASKS: ${ids.join(' ')}\nCARD: other/x`), at });
+  assert.deepEqual([foreign.outcome, foreign.asks], ['failed', ids], 'a foreign CARD line does not pass as done, even beside ASKS');
+  assert.doesNotMatch(foreign.summary, /without a card/, 'the card was named, so "finished without a card" would be untrue');
+  assert.match(foreign.summary, /section it may not write to/);
+  assert.equal(outcomeOf({ run: done('CARD: other/x'), at }).outcome, 'failed');
+  assert.equal(outcomeOf({ run: done(`ASKS: ${ids[0]}`), at }).outcome, 'asks', 'an honest grilling run is still done');
+  const trusted = outcomeOf({ run: done(`ASKS: ${ids[0]}\nCARD: other/x\nCARD: assistant/ok`), at });
+  assert.deepEqual([trusted.outcome, trusted.card], ['card', 'assistant/ok'], 'a trusted line beside a foreign one stays a card');
+});
+
 test('a run whose approval names a model starts with that provider and model; Auto is as before', async () => {
   const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
   try {
