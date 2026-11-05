@@ -7,7 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
-import { chatModelOf, chatModelsForClient } from './chat-models.mjs';
+import { chatModelOf, spawnModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createHash, createPublicKey, randomBytes } from 'node:crypto';
 import { AGENTS } from './hub-team.mjs';
@@ -89,6 +89,7 @@ export function checkRequest(raw, { fromOwner = false } = {}) {
   // without a choice keeps the bytes it always had.
   if (data.model !== undefined && data.model !== null && data.model !== '') {
     const picked = chatModelOf(data.model);
+    if (picked.explicitOnly) throw fail('That model can only be picked in a chat.');
     if (picked.provider) {
       if (!out.preset) throw fail('A model can be chosen for a preset job only.');
       out.model = picked.id;
@@ -462,7 +463,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
 
   /** `GET /hub/presets`, `/hub/presets/route?preset=&project=&repo=` and `/hub/presets/brief?request=<id>`. */
   async function presetRoutes(path, query, at) {
-    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES, models: chatModelsForClient().filter(entry => entry.id !== 'codex') };   // Spawn's menu is for pinning a paid model; Auto already tries Codex first, so Codex is a chat choice only
+    if (path === '/hub/presets') return { presets: presetsForClient(), rules: RULES, models: spawnModelsForClient() };   // Spawn's menu is for pinning a paid model: no Codex row (Auto tries Codex first) and no Opus (a chat-only pick)
     if (path === '/hub/presets/repos') {
       // The repos Spawn offers: each project's own (its section's tracked repo, in the project table's order), then the ones the host lists.
       return { repos: await knownRepos() };

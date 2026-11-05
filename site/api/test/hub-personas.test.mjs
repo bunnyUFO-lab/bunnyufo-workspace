@@ -16,6 +16,7 @@ import { agentConfigJson, askJson, seedAgentConfig, seeder } from './hub-fixture
 import { generateKeyPairSync } from 'node:crypto';
 import { parsePublicKey, publicKeyPem, sign, verify } from '../signing.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
+import { opusNote, profileEditOf } from '../../../src/hub/agentEditField.ts';
 
 const SITE = 'https://site.example';
 const NOW = new Date();
@@ -127,7 +128,7 @@ test('save keeps the old version: a new create-only file, listed newest first wi
     assert.deepEqual(first.versions.map(row => row.id), ['default']);
     assert.deepEqual(first.current, { version: 'default', role: TEARDOWN.role, prompt: TEARDOWN.text, model: 'codex' });
     assert.equal(first.default.prompt, TEARDOWN.text);
-    assert.deepEqual(first.models.map(model => model.id), ['auto', 'codex', 'sonnet', 'haiku', 'deepseek-flash']);
+    assert.deepEqual(first.models.map(model => model.id), ['auto', 'codex', 'codex-terra', 'codex-astra', 'codex-luna', 'sonnet', 'haiku', 'deepseek-flash'], 'the list has no Opus: the model of a persona is what a chat starts on');
 
     const one = await f.save('teardown', edit({ prompt: `${TEARDOWN.text}\n- Keep answers short.`, model: 'sonnet', note: 'Shorter.' }));
     assert.equal(one.status, 200, JSON.stringify(one.body));
@@ -149,13 +150,13 @@ test('save keeps the old version: a new create-only file, listed newest first wi
     assert.equal(view.versions[1].note, 'Shorter.');
 
     const team = (await f.call('GET', '/hub/team')).body.agents;
-    assert.equal(team.find(agent => agent.id === 'teardown').chatModel, 'Haiku');
+    assert.equal(team.find(agent => agent.id === 'teardown').chatModel, 'Haiku 5.5');
     assert.equal(team.find(agent => agent.id === 'researcher').chatModel, undefined);
     const details = (await f.call('GET', '/hub/team/teardown/details')).body;
     const prompt = details.prompts.find(item => item.id === 'persona');
     assert.equal(prompt.text, 'You are Teardown. Be terse.');
     assert.match(prompt.note, /^Edited \d{4}-\d{2}-\d{2} by owner\.$/);
-    assert.deepEqual([details.agent.chatModel, details.agent.editable, details.agent.role], ['Haiku', { persona: true, profile: true }, TEARDOWN.role]);
+    assert.deepEqual([details.agent.chatModel, details.agent.editable, details.agent.role], ['Haiku 5.5', { persona: true, profile: true }, TEARDOWN.role]);
     const job = details.prompts.find(item => item.id === 'job');
     assert.ok(job && !('note' in job && /Edited/.test(job.note)), 'the job template stays the app\'s');
   } finally { await f.close(); }
@@ -171,7 +172,9 @@ test('save refuses a stale base (409), a no-op, a secret, an unlisted model, and
     assert.equal(stale.body.error, 'This persona changed while you were looking.');
     assert.equal((await f.save('teardown', edit({ prompt: 'You are Teardown. One.', base: one.body.version }))).body.error, 'Nothing changed.');
     assert.equal((await f.save('teardown', edit({ prompt: `key: sk-ant-${'b'.repeat(30)}`, base: one.body.version }))).status, 400);
-    assert.equal((await f.save('teardown', edit({ model: 'opus', base: one.body.version }))).status, 400);
+    const refusedOpus = await f.save('teardown', edit({ model: 'opus', base: one.body.version }));
+    assert.equal(refusedOpus.status, 400);
+    assert.match(refusedOpus.body.error, /not in the list/, 'Opus is a chat pick only, never the model of a persona');
     for (const name of VIEW_ONLY) {
       const a = await f.save('teardown', { ...edit({ base: one.body.version }), [name]: ['x'] });
       assert.equal(a.status, 403, name);
@@ -241,6 +244,16 @@ test('Revert writes a new file that copies the chosen version, "Back to the app\
     // An older version can still be reverted to from there.
     const again = await f.revert('teardown', { to: two.body.version, base: defaulted.body.version });
     assert.equal(again.body.current.prompt, 'You are Teardown. Second.');
+  } finally { await f.close(); }
+});
+
+test('a stored version on an id an earlier version listed reads as its family row, not skipped', async () => {
+  const f = await fixture();
+  try {
+    f.fake.seed('sections/inbox/team/teardown/persona-20991231T000000000Z-zz98.json', JSON.stringify({ v: 1, role: 'r', prompt: 'You are old.', model: 'codex-6-1-sol', at: 'T', by: 'owner' }), 'application/json', {});
+    const view = (await f.call('GET', '/hub/team/teardown/persona')).body;
+    assert.equal(view.current.prompt, 'You are old.');
+    assert.equal(view.current.model, 'codex');
   } finally { await f.close(); }
 });
 
@@ -441,6 +454,43 @@ const hostResult = (f, id, outcome, code, extra = {}) => f.fake.seed(changeKey(i
 const detailsOf = async (f, agent = 'teardown') => (await f.call('GET', `/hub/team/${agent}/details`)).body;
 const postChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
 
+test('profile change: an owner\'s Opus pick is kept through the real routes, from the Edit page and from an agent\'s Ask, and the Ask it reads carries the warning', async () => {
+  const OPUS = { provider: 'anthropic', model: 'claude-opus-5-5' };
+  const options = { main: [...OPTIONS.main, OPUS], briefs: OPTIONS.briefs };
+  const warning = ask => { const edit = profileEditOf(ask); return opusNote(edit.primary, edit.fallbacks); };
+  const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
+  try {
+    putExport(f, { options, minutes: 0 });
+    const made = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [OPUS, CODEX] });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.match(warning((await f.call('GET', `/hub/asks/${made.body.ask}`)).body), /^Opus is a fallback/);
+    assert.equal((await answerWith(f, made.body.ask, 'apply')).body.agentEdit.applied, true);
+    assert.deepEqual(f.fake.json(changeKey(made.body.ask, 'approved.json')).to, { ...SONNET, fallbacks: [OPUS, CODEX] }, 'unchanged and in order');
+    f.clock.time += 120000;
+    hostResult(f, made.body.ask, 'applied', 'ok');
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, options, main: { ...SONNET, fallbacks: [OPUS, CODEX] } });
+    const live = await detailsOf(f);
+    assert.equal(live.change.state, 'live');
+    assert.deepEqual(live.settings.fallbacks, [OPUS, CODEX], 'the export round trip keeps it');
+    // A later change of this profile that keeps the pick: nothing strips it.
+    const other = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX, OPUS] });
+    assert.equal(other.status, 201, JSON.stringify(other.body));
+    assert.equal((await answerWith(f, other.body.ask, 'apply')).body.agentEdit.applied, true);
+    const reordered = f.fake.json(changeKey(other.body.ask, 'approved.json'));
+    assert.deepEqual([reordered.from.fallbacks, reordered.to.fallbacks], [[OPUS, CODEX], [CODEX, OPUS]]);
+    hostResult(f, other.body.ask, 'applied', 'ok');
+    // An agent's own Ask naming Opus as the primary: the page warns from the Ask itself, a skip writes nothing, Apply signs exactly that.
+    const before = approvals(f).length;
+    const filed = agentEditAsk(f, 'op01', { op: 'profile', profile: 'main', primary: OPUS, fallbacks: [SONNET], why: 'Try Opus.' });
+    assert.match(warning((await f.call('GET', `/hub/asks/${filed}`)).body), /^Opus is the primary/);
+    assert.equal((await answerWith(f, agentEditAsk(f, 'op02', { op: 'profile', profile: 'main', primary: OPUS, fallbacks: [] }), 'skip')).status, 201);
+    assert.equal(approvals(f).length, before, 'a skip signs nothing');
+    assert.equal((await answerWith(f, filed, 'apply')).body.agentEdit.applied, true);
+    assert.deepEqual(f.fake.json(changeKey(filed, 'approved.json')).to, { ...OPUS, fallbacks: [SONNET] });
+  } finally { await f.close(); }
+});
+
 test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, Apply signs, the host answers, a newer export shows it live', async () => {
   const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
   try {
@@ -508,7 +558,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.deepEqual(live.settings.fallbacks, [CODEX, FLASH]);
     assert.equal((await f.call('GET', '/hub/team')).body.agents.find(agent => agent.id === 'teardown').model, 'claude-sonnet-5-5 · then gpt-6-sol, deepseek-flash');
     f.clock.time += 31000;
-    assert.equal((await f.call('GET', '/hub/chat')).body.autoFirst, 'Sonnet');
+    assert.equal((await f.call('GET', '/hub/chat')).body.autoFirst, 'Sonnet 5.5');
   } finally { await f.close(); }
 });
 
@@ -973,5 +1023,14 @@ test('the profile Ask of a made persona is for Hermes main and names it among th
     assert.equal(made.status, 201, JSON.stringify(made.body));
     assert.match(f.fake.json(`sections/inbox/asks/${made.body.ask}/ask.json`).context, /shared by Hermes, Researcher, Market researcher, Teardown, Planner and Level reviewer\./);
     assert.equal((await postChange(f, 'claude', changeBody())).status, 404);
+  } finally { await f.close(); }
+});
+
+test('save allows a Codex version as the model of a persona', async () => {
+  const f = await fixture();
+  try {
+    const saved = await f.save('teardown', edit({ model: 'codex-terra' }));
+    assert.equal(saved.status, 200);
+    assert.equal((await f.call('GET', '/hub/team/teardown/persona')).body.current.model, 'codex-terra');
   } finally { await f.close(); }
 });

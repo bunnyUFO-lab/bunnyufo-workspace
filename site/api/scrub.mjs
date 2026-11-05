@@ -2,7 +2,7 @@
 // goes into `waiting`, a `start-failed` summary in result.json, a 409 body, a log line. It removes URLs, bearer
 // tokens and `Authorization` values, and the value of any secret the host holds in its environment, so an upstream
 // error body that echoes a request cannot carry them out.
-const SECRET_ENV = ['HERMES_API_KEY', 'HUB_SIGNING_KEY', 'HUB_DISCORD_NEEDS_YOU', 'HUB_DISCORD_TOKEN_SHA256'];
+const SECRET_ENV = ['HERMES_API_KEY', 'HUB_SIGNING_KEY', 'HUB_DISCORD_NEEDS_YOU', 'HUB_DISCORD_TOKEN_SHA256', 'HUB_APPLY_DISPATCH_TOKEN'];
 
 /** `createScrub(env)` → `(value, max?) → string`: flattened to one line, scrubbed, clipped to `max` (default 300). */
 export function createScrub(env = {}) {

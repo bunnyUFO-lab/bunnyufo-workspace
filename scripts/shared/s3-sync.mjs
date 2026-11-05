@@ -232,6 +232,10 @@ function mergeCard(base, local, remote, notes = []) {
   const wasStep = step => base?.steps?.find(item => stepKey(item) === stepKey(step));
   const theirSteps = Array.isArray(remote.steps) ? remote.steps : [];
   const onSite = new Set(theirSteps.map(stepKey));
+  // An agent's mark (`agentTab`: the page has no card bridge) set on the site is never lost to a local copy of the step, whatever else was changed here. A Revert that cleared it on the site
+  // while this folder's step is untouched comes through the first branch below, which takes the site's step whole.
+  const marked = new Set(theirSteps.filter(step => step?.agentTab === true).map(stepKey));
+  const withMarks = list => list.map(step => (marked.has(stepKey(step)) && step?.agentTab !== true ? { ...step, agentTab: true } : step));
   if (base && Array.isArray(base.steps) && same(local.steps, base.steps) && Array.isArray(remote.steps)) {
     out.steps = [...theirSteps];
     mergeRemovedTabs(out, local, remote);
@@ -247,7 +251,7 @@ function mergeCard(base, local, remote, notes = []) {
       if (base && same(steps[index], wasStep(step))) steps[index] = step;
     } else if (!(wasStep(step) && same(step, wasStep(step)))) steps.push(step);
   }
-  out.steps = steps;
+  out.steps = withMarks(steps);
   mergeRemovedTabs(out, local, remote);
   // Each side deleted a different tab of a card with two: it must keep one. The tab deleted here stays.
   if (!steps.length) {

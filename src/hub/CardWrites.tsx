@@ -30,7 +30,8 @@ function RevertButton({ section, group, onDone }: { section: string; group: Card
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [note, setNote] = useState('')
-  const [done, setDone] = useState<{ at: string | null; partial?: boolean } | null>(group.reverted ? { at: group.reverted.at, ...(group.reverted.partial ? { partial: true } : {}) } : null)
+  const [done, setDone] = useState<{ at: string | null; partial?: boolean; left?: boolean } | null>(group.reverted ? { at: group.reverted.at, ...(group.reverted.partial ? { partial: true } : {}), ...(group.reverted.left ? { left: true } : {}) } : null)
+  if (done?.left) return <p className="cw-done" data-cw-reverted>You changed this file after the agent, so it was left alone{done.at ? ` · ${ago(done.at)}` : ''}</p>
   if (done) return <p className="cw-done" data-cw-reverted>{done.partial ? 'Partly reverted' : 'Reverted'} by you{done.at ? ` · ${ago(done.at)}` : ''}{note ? <span data-cw-left-alone> · {note}</span> : null}</p>
   if (!group.canRevert || !host.write) return null
   const revert = async () => {
@@ -38,7 +39,7 @@ function RevertButton({ section, group, onDone }: { section: string; group: Card
     try {
       const answer = await hubPost<CardRevert>('/card-writes/revert', { section, folder: group.folder, batch: group.batch })
       window.dispatchEvent(new Event('bunnyufo-workspace-changed'))
-      if (answer.leftAlone?.length) setNote(`Left alone, because it changed after the agent wrote it: ${answer.leftAlone.map(item => item.file.split('/').slice(1).join('/') || item.file).join(', ')}`)
+      if (answer.leftAlone?.length) setNote(`Left alone: ${answer.leftAlone.map(item => `${item.file.split('/').slice(1).join('/') || item.file} (${item.why.charAt(0).toLowerCase()}${item.why.slice(1)})`).join('; ')}`)
       setDone({ at: answer.reverted.at })
       onDone()
     } catch (problem) {

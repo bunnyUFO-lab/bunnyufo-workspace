@@ -74,3 +74,8 @@ a.pp-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pp-map-link:hover { color: var(--text); }
 .pp-map-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pp-map-link::after { content: ''; position: absolute; inset: -7px 0; }
+
+/* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
+@media (min-width: 900px) {
+  .pp[data-sheet] { padding-right: 436px; }
+}
