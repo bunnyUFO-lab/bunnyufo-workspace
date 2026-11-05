@@ -184,10 +184,8 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   // While filtering, a phone shows the first lane with a match until the person taps another.
   const firstMatch = filtering && shownLanes ? LANES.find(([lane]) => shownLanes[lane].length)?.[0] : undefined
   const active = picked ?? focusLane ?? firstMatch ?? (data ? defaultLane(data.counts) : 'running')
-  // Each scroller that can hide something shows a fade at its cut edge (the Roadmap's pattern).
-  const laneChips = useRef<HTMLDivElement>(null)
+  // The lane grid can hide a lane sideways on a wide screen, so it shows a fade at its cut edge (the Roadmap's pattern).
   const laneGrid = useRef<HTMLDivElement>(null)
-  const laneChipEdges = useOverflowEdges(laneChips, [data])
   const laneEdges = useOverflowEdges(laneGrid, [project, data])
   // Open the lane that holds the item (a collapsed one too) and bring its card into view.
   // Once per link: a refresh of the board must not pull the person back from a lane they moved to.
@@ -199,7 +197,6 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
     setExpanded(value => ({ ...value, [focusLane]: true }))
     requestAnimationFrame(() => requestAnimationFrame(() => laneGrid.current?.querySelector(`[data-card="${CSS.escape(focusKey)}"]`)?.scrollIntoView({ block: 'center', inline: 'center' })))
   }, [focusKey, focusLane])
-  useEffect(() => { laneChips.current?.querySelector('.wk-lane-chip.on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }, [active, data])
 
   return (
     <div className="work" data-sheet={focus && !unknown ? 'open' : undefined}>
@@ -234,14 +231,12 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
       {data && unknown && <p className="hub-muted" role="status" data-board-note>{focus} is not on the board: it may be closed long ago, a group, or in another project.</p>}
       {data && (
         <>
-          <div className="wk-chips-wrap" data-overflow={laneChipEdges}>
-          <div className="wk-lane-chips" role="group" aria-label="Lane" ref={laneChips}>
+          <div className="wk-lane-chips" role="group" aria-label="Lane">
             {LANES.map(([lane, label]) => (
               <button key={lane} type="button" className={`wk-lane-chip${lane === active ? ' on' : ''}`} aria-pressed={lane === active} data-lane-chip={lane} onClick={() => setPicked(lane)}>
                 {label} <span className="n">{laneCount(lane)}</span>
               </button>
             ))}
-          </div>
           </div>
           <div className="wk-lanes-wrap" data-overflow={laneEdges}>
           <div className="wk-lanes" data-active={active} ref={laneGrid}>
