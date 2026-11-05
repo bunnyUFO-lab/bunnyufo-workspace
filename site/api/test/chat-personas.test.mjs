@@ -89,3 +89,12 @@ test('a retired entry stays in the table for an old chat but is no choice for a 
   assert.equal(chatPersonaOf('teardown', table).id, 'teardown');
   assert.deepEqual(chatPersonasForClient(table).map(entry => entry.id), CHAT_PERSONAS.map(entry => entry.id));
 });
+
+test('the Planner has the five stages and still starts nothing: one change list, no requests, no jobs', () => {
+  const { text } = CHAT_PERSONAS.find(entry => entry.id === 'planner');
+  for (const stage of ['1. Ask:', '2. Explore:', '3. Decide:', '4. Plan:', '5. Hand off:']) assert.ok(text.includes(stage), stage);
+  assert.match(text, /You start no jobs/);
+  assert.match(text, /Create no requests/);
+  assert.doesNotMatch(text, /request create|--preset|delegate_task/);
+  assert.match(text, /Never more than one change-list Ask per chat turn/);
+});
