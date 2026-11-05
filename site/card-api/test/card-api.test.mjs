@@ -1281,6 +1281,12 @@ test('inbox: the hermes-config token creates a change result once and reads the 
     for (const token of ['tok-hermes-main', 'tok-hermes', 'tok-agent', 'tok-pc-runner', 'tok-cloud', 'tok-deleter']) {
       assert.equal((await put(token, `agent-config/changes/20261103-profile-main-ab15/result.json`)).status, 403, token);
     }
+    // The owner's press signs through the site API only: no card token, the host's own included, may create or replace an approval (ws-ubo.4).
+    for (const token of ['tok-hermes-config', 'tok-hermes-main', 'tok-hermes', 'tok-agent', 'tok-pc-runner', 'tok-cloud', 'tok-deleter']) {
+      assert.equal((await put(token, `agent-config/changes/20261103-profile-main-ab16/approved.json`)).status, 403, `approved.json: ${token}`);
+      assert.equal((await put(token, `agent-config/changes/${id}/approved.json`, {})).status, 403, `approved.json, replace: ${token}`);
+    }
+    assert.equal(fake.objects.has(`sections/inbox/agent-config/changes/20261103-profile-main-ab16/approved.json`), false);
 
     // The narrow read: a listing under agent-config/changes/ shows approved.json and result.json files and nothing else.
     fake.seed(`sections/inbox/agent-config/changes/${id}/note.json`, '{}', 'application/json');
