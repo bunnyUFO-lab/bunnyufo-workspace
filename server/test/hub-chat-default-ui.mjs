@@ -28,29 +28,29 @@ try {
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-model]').waitFor();
   assert.equal(await selected(page), 'Auto · Codex first');
-  assert.deepEqual(await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent)), ['Auto · Codex first', 'Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
+  assert.deepEqual(await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent)), ['Auto · Codex first', 'Codex 6.1 Sol', 'Codex 6.1 Terra', 'Codex 6 Astra', 'Codex 6 Luna', 'Sonnet 5.5 · API', 'Haiku 5.5 · API', 'Opus 5.5 · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
   assert.match(await page.locator('[data-chat-model-note]').innerText(), /Codex on your ChatGPT plan, then Sonnet, then DeepSeek/);
 
   step('a research agent starts the chat on Codex, and switching the agent moves the default');
   await page.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(page), 'Codex');
+  assert.equal(await selected(page), 'Codex 6.1 Sol');
   assert.equal(await page.locator('[data-chat-model-note]').innerText(), 'ChatGPT plan, no API cost');
   await page.locator('[data-chat-persona]').selectOption('hermes');
   assert.equal(await selected(page), 'Auto · Codex first', 'back to Hermes: back to Auto');
   await page.locator('[data-chat-persona]').selectOption('teardown');
-  assert.equal(await selected(page), 'Codex');
+  assert.equal(await selected(page), 'Codex 6.1 Sol');
 
   step('an explicit pick stays when the agent changes');
   await page.locator('[data-chat-model]').selectOption('sonnet');
   await page.locator('[data-chat-persona]').selectOption('market-researcher');
-  assert.equal(await selected(page), 'Sonnet · API');
+  assert.equal(await selected(page), 'Sonnet 5.5 · API');
   await page.locator('[data-chat-persona]').selectOption('hermes');
-  assert.equal(await selected(page), 'Sonnet · API');
+  assert.equal(await selected(page), 'Sonnet 5.5 · API');
   await page.locator('[data-chat-model]').selectOption('auto');
   await page.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(page), 'Auto · Codex first', 'picking Auto is a pick too');
 
-  step('the default is what the run asks for: the openai-codex provider and gpt-6-sol');
+  step('the default is what the run asks for: the openai-codex provider and gpt-6.1-sol');
   await page.goto(`${fx.url}#/~hub/chat`);
   await page.locator('[data-chat-persona]').selectOption('researcher');
   await page.locator('textarea[aria-label="Message"]').fill('What is new in deckbuilders?');
@@ -58,13 +58,13 @@ try {
   await page.locator('.hub-bubble.assistant').first().waitFor();
   const body = fx.hermes.runs.at(-1).body;
   assert.equal(body.provider, 'openai-codex');
-  assert.equal(body.model, 'gpt-6-sol');
+  assert.equal(body.model, 'gpt-6.1-sol');
 
   step('390 px: the menu fits');
   const phone = await open({ width: 390, height: 800 });
   await phone.goto(`${fx.url}#/~hub/chat`);
   await phone.locator('[data-chat-persona]').selectOption('researcher');
-  assert.equal(await selected(phone), 'Codex');
+  assert.equal(await selected(phone), 'Codex 6.1 Sol');
   const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `the page scrolls sideways (${widths.scroll} > ${widths.inner})`);
   console.log('hub-chat-default-ui: passed');
