@@ -379,3 +379,15 @@ test('attach: only the bridged frame, from its own origin, is answered, and the 
     assert.equal(sent.length, 2, 'detached');
   } finally { await close(); }
 });
+
+test('the handler: a card cannot ask the app for a model change or any other Hub route; the app sends nothing for an operation outside the four', async () => {
+  const sent = [];
+  const handler = createBridgeHandler({ card: { workspace: 'games', id: 'sounds' }, enabled: true, call: async (path, body) => { sent.push([path, body]); return {}; } });
+  for (const op of ['profile-change', 'profile.change', 'hub.post', 'team.profile-change', '/hub/team/teardown/profile-change', 'post', '']) {
+    const answer = await handler.handle({ type: 'buw:bridge', v: 1, id: 'q', op, primary: { provider: 'x', model: 'y' }, fallbacks: [], base: {}, undo: 'z', route: '/hub/team/teardown/profile-change' });
+    if (answer !== null) assert.deepEqual([answer.ok, answer.status, answer.error], [false, 400, 'Unknown operation.'], op);
+  }
+  // Even the four known operations only reach the card's own /cards routes, whatever path or route a message names.
+  await handler.handle({ type: 'buw:bridge', v: 1, id: 'p', op: 'markdown.save', path: 'a.md', text: 'x', route: '/hub/team/teardown/profile-change' });
+  assert.deepEqual(sent.map(([path]) => path.split('?')[0]), ['/cards/markdown']);
+});
