@@ -11,7 +11,7 @@ const flat = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
  */
 export function cardOf(output, { sections = ['assistant'] } = {}) {
   const matches = [...String(output ?? '').matchAll(/^[ \t]*CARD:[ \t]*([a-z0-9][a-z0-9-]*\/[A-Za-z0-9._-]+)[ \t]*$/gm)]
-    .map(match => match[1]).filter(card => sections.includes(card.split('/')[0]));
+    .map(match => match[1]).filter(card => sections.includes(card.split('/')[0]) && !/^\.{1,2}$/.test(card.split('/')[1]));
   return matches.length ? matches.at(-1) : null;
 }
 

@@ -17,6 +17,9 @@ test('outcomeOf: the CARD line wins, the rest is a failure with a reason', () =>
   assert.equal(cardOf('CARD: demo/x', { sections: ['assistant', 'demo'] }), 'demo/x', 'the signed project is trusted');
   assert.equal(cardOf('CARD: demo/a\nCARD: other/x', { sections: ['assistant', 'demo'] }), 'demo/a', 'a foreign line is skipped, an earlier good one counts');
   assert.equal(cardOf('CARD: demo/a\nCARD: assistant/b', { sections: ['assistant', 'demo'] }), 'assistant/b', 'the last trusted line wins');
+  assert.equal(cardOf('CARD: demo/..', { sections: ['assistant', 'demo'] }), null, 'a dot folder is no card');
+  assert.equal(cardOf('CARD: assistant/.'), null);
+  assert.equal(cardOf('CARD: assistant/..'), null);
   assert.equal(cardOf('CARD: demo/x'), null, 'no sections given: assistant only');
   assert.equal(outcomeOf({ run: { status: 'completed', output: 'Done.\nCARD: inbox/x' }, sections: ['assistant', 'demo'], at: '2026-11-04T10:00:00.000Z' }).outcome, 'failed', 'an inbox card is no card');
   assert.equal(isQuotaError('Codex provider quota exhausted (429)'), true);
@@ -1005,5 +1008,21 @@ test('on the development copy a real section signs assistant and a dev- project 
     };
     assert.equal(await sectionOf('demo'), 'assistant');
     assert.equal(await sectionOf('dev-demo'), 'dev-demo');
+  } finally { await s.close(); }
+});
+
+test('a job that fell back to assistant (section turned off) is still trusted with its project: the approval carries it', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: demo/x' } });
+  try {
+    s.fake.seed('sections/demo/workspace.json', sectionList('Demo'), 'application/json');
+    s.fake.seed('sections/inbox/library-writes.json', JSON.stringify({ v: 1, off: ['demo'] }), 'application/json');
+    const api = await s.addHub();
+    const id = s.propose('fell-back', { project: 'demo' });
+    assert.equal((await approve(api, id)).status, 201);
+    const approved = s.file(id, 'approved.json');
+    assert.equal(approved.project, 'demo', 'the signed body names the project');
+    assert.match(approved.run.brief, /Write exactly one card to the `assistant` section/);
+    const result = await until(() => s.resultOf(id), 'result.json');
+    assert.deepEqual([result.outcome, result.card], ['card', 'demo/x'], 'the project stays trusted, as the brief decides');
   } finally { await s.close(); }
 });
