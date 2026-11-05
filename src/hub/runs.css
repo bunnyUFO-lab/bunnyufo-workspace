@@ -147,3 +147,12 @@
 .rd-you[data-run-you="read"] .rd-you-s { color: var(--green); }
 .rd-you[data-run-you="queued"] .rd-you-s { color: var(--amber); }
 .rd-timeline [data-run-send-now] { min-height: 36px; margin-left: 4px; }
+/* A finished job's page: what it delivered as cards, and the log in a closed fold. */
+.rd-back { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; text-decoration: none; color: var(--text-dim); }
+.rd-dls { display: flex; flex-direction: column; gap: 8px; }
+.rd-dl { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.rd-dl > b { overflow-wrap: anywhere; }
+.rd-dl .hub-muted { overflow-wrap: anywhere; }
+.rd-from { margin: 6px 0 0; font-size: 12.5px; }
+.rd-did { margin-top: 12px; }
+.rd-did > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--text-dim); font-size: 13px; }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **What jobs delivered.** Work has a Jobs tab: Running and Finished, with a project filter, and for each job who ran it, when, and a pill for what it delivered (a card, a PR, Asks, a list of steps, a task, a follow-up job) or how it ended. A finished job's page now leads with what it found and its deliverables, each with a button that opens it, and keeps the log in a closed fold. A grilling run that files Asks and ends with `ASKS:` now reads as done with its Asks, not as failed, and Asks and lists a run files remember which job made them.
 - **Jobs in a chat.** When Hermes proposes jobs in a reply, a Jobs block under it lists each one (what it is, who does it, where it runs, what it delivers) with Read the job, one Approve all button for the ones on screen, and Change to open the approval page. Each row then follows its job and opens the card or the PR when it finishes. Helpers Hermes starts inside the chat are now labelled as helpers, apart from jobs. A persona's proposals are flagged and have no one tap.
 - **Send while Hermes answers.** A message sent during a reply waits as a dashed Queued row and goes out when the reply ends, as one turn when there are several. After a Stop or a failure the rows say Not sent, with Send now and Cancel, and nothing goes out by itself. The Hub delivers them, so a reload, a locked phone or a restart of the service loses nothing. Limited card-API tokens can no longer write under `chat/`.
 - First public version: a web app for project cards and reports, run locally with Docker or

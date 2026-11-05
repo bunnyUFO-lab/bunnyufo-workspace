@@ -473,6 +473,19 @@ export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string
 export interface ChatQueued { id: string; text: string; at: string; model?: string }
 /** Why the waiting messages are not going out by themselves. */
 export interface ChatHeld { reason: 'stopped' | 'failed' | 'lost' | 'long'; at: string }
+/** One thing a job delivered, openable. A task is only a project and an id: the page builds its link. */
+export type Deliverable =
+  | { kind: 'card'; ref: string; section: string; title?: string; href?: string }
+  | { kind: 'pr'; href: string; label: string }
+  | { kind: 'ask' | 'checklist' | 'job'; id: string; title: string; state: string }
+  | { kind: 'task'; project: string; id: string; title?: string }
+export interface JobPill { text: string; tone: 'good' | 'warn' | 'quiet' }
+/** A row of `GET /hub/jobs`. `runner` is where it runs (`hermes`, `cloud`, `pc`); `at` is when it started, `finishedAt` when it ended. */
+export interface JobListRow {
+  id: string; title: string; project: string; preset: string; state: string; agent?: string; runner?: string; stale?: string
+  at: string; finishedAt?: string; nothing?: boolean; deliverables: Deliverable[]; pills: JobPill[]
+}
+export interface JobsView { counts: { running: number; finished: number }; jobs: JobListRow[]; window: string }
 /** What the queue routes answer. */
 export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
