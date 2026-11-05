@@ -18,7 +18,7 @@ import { randomId, day8 } from './hub-model.mjs';
 import { createScrub } from './scrub.mjs';
 import { stripInlineImages } from './inline-images.mjs';
 import { IMAGE_FILE, MAX_IMAGES, MAX_TOTAL_BYTES, checkChatImages, toDataUrl, typeOfFile } from './chat-images.mjs';
-import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient } from './chat-models.mjs';
+import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient, currentModelId } from './chat-models.mjs';
 import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
@@ -73,9 +73,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);
         const first = lines.find(line => line.role === 'user');
         const about = lines[0]?.role === 'context' ? helpAbout(lines[0].about) : null;   // help:
-        const asked = lines.findLast(line => line.role === 'user' && typeof line.model === 'string' && chatModelsForClient().some(entry => entry.id === line.model));   // model:
+        const asked = lines.findLast(line => line.role === 'user' && typeof line.model === 'string' && chatModelsForClient().some(entry => entry.id === currentModelId(line.model)));   // model:
         const talking = lines.find(line => line.persona && storedPersona(line.persona, table))?.persona;   // persona:
-        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && asked.model !== 'auto' ? { model: asked.model } : {}), ...(talking ? { persona: talking } : {}) };
+        info = { title: about ? clip(`Help: ${about.title}`, 60) : clip(first?.text, 60) || (first ? 'Picture' : 'New chat'), count: lines.length, ...(about ? { about } : {}), ...(asked && currentModelId(asked.model) !== 'auto' ? { model: currentModelId(asked.model) } : {}), ...(talking ? { persona: talking } : {}) };
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
@@ -211,6 +211,17 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     }));
     if (changed) await bucket.put(key(`chat/${id}.jsonl`), `${lines.map(line => JSON.stringify(line)).join('\n')}\n`, { contentType: 'application/x-ndjson', ifMatch: got.etag }).catch(() => {});
     return lines;
+  }
+
+  /** The lines as the page reads them (never written back): an id an earlier version listed gives its family's row, and an id no row has now loses its key, so the chat opens on Auto and can send. */
+  function currentModels(lines) {
+    const listed = new Set(CHAT_MODELS.map(entry => entry.id));
+    return lines.map(line => {
+      if (!line || typeof line !== 'object' || !('model' in line)) return line;
+      const { model, ...rest } = line;
+      const now = typeof model === 'string' ? currentModelId(model) : null;
+      return now && listed.has(now) ? { ...rest, model: now } : rest;
+    });
   }
 
   async function relay(request, response, user) {
@@ -485,7 +496,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const got = await fresh(`chat/${match[1]}.jsonl`);
         const turn = answering(match[1], user);
         if (!got && !turn) throw fail('No such conversation.', 404);   // a new chat has no file until its first reply is saved
-        return json(response, 200, { id: match[1], messages: got ? await withDelegateResults(match[1], got) : [], ...(turn ?? {}) });
+        return json(response, 200, { id: match[1], messages: got ? currentModels(await withDelegateResults(match[1], got)) : [], ...(turn ?? {}) });
       }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/images\/([^/]+)$/.exec(route))) return serveImage(response, match[1], match[2]);
       if (method === 'POST' && route === '/hub/chat') return relay(request, response, user);

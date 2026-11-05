@@ -76,7 +76,7 @@ function TaskRows({ tasks, onOpen, inboxBeads }: { tasks: MapTask[]; onOpen: (id
           <button type="button" className="hub-map-panel-link hub-map-panel-row-title" onClick={() => onOpen(task.id)}>{task.title}</button>
           <span className="hub-id">{task.id}</span>
           <SignGlyphs signs={task.signs} />
-          {task.state === 'you' && hasNeedsItem(task, inboxBeads) && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs')}>Open in Needs you</a>}
+          {task.state === 'you' && hasNeedsItem(task, inboxBeads) && <a className="hub-btn pri" href={task.ask ? hubHash('ask', task.ask) : hubHash('needs', 'all')}>Open in Needs you</a>}
         </li>
       ))}
     </ul>
@@ -128,7 +128,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
       {mine.map(item => <ItemRow key={`${item.kind}-${item.id}`} item={item} />)}
     </>
   )
-  const more = elsewhere > 0 && <p className="hub-muted"><a href={hubHash('needs')}>{elsewhere} more for this project in Needs you</a></p>
+  const more = elsewhere > 0 && <p className="hub-muted"><a href={hubHash('needs', 'all')}>{elsewhere} more for this project in Needs you</a></p>
 
   let body
   if (found.kind === 't') {
@@ -173,7 +173,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
               : task.checklist
                 ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('checklist', task.checklist)} data-needed-link="checklist">Open the checklist</a></div>
                 : hasNeedsItem(task, inboxBeads)
-                  ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs')} data-needed-link="needs">Open in Needs you</a></div>
+                  ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs', 'all')} data-needed-link="needs">Open in Needs you</a></div>
                   : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
             <MarkActions
               task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}

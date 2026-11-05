@@ -815,6 +815,51 @@ test('model: a text turn on Haiku names the pair on the run and stores the id on
   } finally { await close(); }
 });
 
+for (const [id, provider, model] of [['opus', 'anthropic', 'claude-opus-5-5'], ['codex-terra', 'openai-codex', 'gpt-6.1-terra']]) {
+  test(`model: a text turn on ${id} names the pair on the run, stores the id on both lines, and the next turn is Auto again`, async () => {
+    const { fake, upstream, call, close } = await fixture({ env: RUNS });
+    try {
+      const done = (await chatLive(call, { text: 'Pick me', model: id })).events.at(-1);
+      assert.equal(done.event, 'done');
+      assert.deepEqual([upstream.runs[0].body.provider, upstream.runs[0].body.model], [provider, model]);
+      assert.deepEqual(lines(fake, done.data.conversation).map(line => line.model), [id, id]);
+      await chatLive(call, { text: 'Again', conversation: done.data.conversation });
+      assert.equal(upstream.runs[1].body.provider, undefined, 'the next turn goes back to Auto');
+      assert.equal(upstream.runs[1].body.model, undefined);
+      // The pick stays with the conversation where it was made; a new chat does not inherit it.
+      const other = (await chatLive(call, { text: 'A new chat' })).events.at(-1).data.conversation;
+      const listed = await (await call('GET', '/hub/chat')).json();
+      const byId = new Map(listed.conversations.map(item => [item.id, item]));
+      assert.equal(byId.get(done.data.conversation).model, id);
+      assert.equal(byId.get(other).model, undefined);
+      assert.equal(upstream.runs[2].body.provider, undefined);
+    } finally { await close(); }
+  });
+}
+
+test('model: a chat saved on an id an earlier version listed keeps working; an unknown id no longer traps it', async () => {
+  const { fake, upstream, call, close } = await fixture({ env: RUNS });
+  try {
+    const at = new Date().toISOString();
+    const stored = [
+      { role: 'user', text: 'old pick', at, model: 'codex-6-1-sol' }, { role: 'assistant', text: 'ok', at, model: 'codex-6-1-sol' },
+      { role: 'user', text: 'gone', at, model: 'gone-model' }, { role: 'assistant', text: 'ok', at, model: 'gone-model' },
+    ];
+    const key = 'sections/inbox/chat/20261104-oldrw1.jsonl';
+    const bytes = `${stored.map(line => JSON.stringify(line)).join('\n')}\n`;
+    fake.seed(key, bytes, 'application/x-ndjson');
+    const got = await (await call('GET', '/hub/chat/20261104-oldrw1')).json();
+    assert.deepEqual(got.messages.map(line => line.model), ['codex', 'codex', undefined, undefined]);
+    assert.ok(!('model' in got.messages[2]), 'an unlisted id loses its key, so the page opens on Auto');
+    assert.equal(fake.text(key), bytes, 'the file is read, never rewritten');
+    const done = (await chatLive(call, { text: 'again', conversation: '20261104-oldrw1', model: 'codex-6-1-sol' })).events.at(-1);
+    assert.equal(done.event, 'done');
+    assert.deepEqual([upstream.runs[0].body.provider, upstream.runs[0].body.model], ['openai-codex', 'gpt-6.1-sol']);
+    assert.deepEqual(lines(fake, '20261104-oldrw1').slice(-2).map(line => line.model), ['codex', 'codex']);
+    assert.equal((await call('POST', '/hub/chat', { text: 'x', model: 'gone-model' })).status, 400, 'an id nobody lists is still a 400');
+  } finally { await close(); }
+});
+
 test('model: a picture turn on DeepSeek Flash names the pair on completions', async () => {
   const { upstream, call, close } = await fixture({ env: RUNS });
   try {
@@ -833,7 +878,7 @@ test('model: a picture turn on DeepSeek Flash names the pair on completions', as
 test('model: an unlisted model is a 400 with nothing written and no call to Hermes', async () => {
   const { fake, upstream, call, close } = await fixture({ env: RUNS });
   try {
-    for (const model of ['opus', 'anthropic/claude-opus-5', 7, {}]) {
+    for (const model of ['Opus', 'claude-opus-5-5', 'anthropic/claude-opus-5', 7, {}]) {
       const answer = await chat(call, { text: 'Hi', model });
       assert.equal(answer.status, 400);
       assert.equal(answer.body.error, 'Unknown model.');
@@ -864,8 +909,8 @@ test('model: GET /hub/chat lists the choices and a conversation last non-auto mo
     const second = (await chatLive(call, { text: 'Two' })).events.at(-1).data.conversation;
     await chatLive(call, { text: 'Three', conversation: first, model: 'haiku' });
     const listed = await (await call('GET', '/hub/chat')).json();
-    assert.deepEqual(listed.models.map(entry => entry.id), ['auto', 'codex', 'sonnet', 'haiku', 'deepseek-flash']);
-    assert.ok(listed.models.every(entry => !('provider' in entry) && !('model' in entry)));
+    assert.deepEqual(listed.models.map(entry => entry.id), ['auto', 'codex', 'codex-terra', 'codex-astra', 'codex-luna', 'sonnet', 'haiku', 'opus', 'deepseek-flash']);
+    assert.ok(listed.models.every(entry => Object.keys(entry).sort().join() === 'id,label,note'), 'no provider, no model string, no explicitOnly');
     const byId = new Map(listed.conversations.map(item => [item.id, item]));
     assert.equal(byId.get(first).model, 'haiku');
     assert.equal(byId.get(second).model, undefined);
@@ -888,13 +933,13 @@ test('pauses: a turn that fails on a usage limit pauses the plan it ran on, in t
   try {
     assert.equal((await chat(limited.call, { text: 'on Auto' })).events.at(-1).event, 'error');
     let pauses = (await (await limited.call('GET', '/hub/chat')).json()).pauses;
-    assert.deepEqual(pauses.map(pause => pause.model), ['codex'], 'Auto runs the default chain, which starts on Codex');
+    assert.deepEqual(pauses.map(pause => pause.model), ['codex', 'codex-terra', 'codex-astra', 'codex-luna'], 'Auto runs the default chain, which starts on Codex; a provider pause covers each Codex row');
     assert.equal(pauses[0].reported, true);
     assert.ok(new Date(pauses[0].until).getTime() > Date.now() + 80 * 60_000);
     assert.ok(!('provider' in pauses[0]));
     await chat(limited.call, { text: 'on Sonnet', model: 'sonnet' });
     pauses = (await (await limited.call('GET', '/hub/chat')).json()).pauses;
-    assert.deepEqual(pauses.map(pause => pause.model).sort(), ['codex', 'haiku', 'sonnet'], 'a provider pause covers each of its models');
+    assert.deepEqual(pauses.map(pause => pause.model).sort(), ['codex', 'codex-astra', 'codex-luna', 'codex-terra', 'haiku', 'opus', 'sonnet'], 'a provider pause covers each of its models');
   } finally { await limited.close(); }
 });
 

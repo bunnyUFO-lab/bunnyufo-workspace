@@ -50,7 +50,7 @@ try {
   const menu = page.locator('[data-spawn-model]');
   assert.equal(await menu.inputValue(), 'auto');
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/, 'Auto keeps the Codex plan text.');
-  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · cheapest']);
+  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet 5.5 · API', 'Haiku 5.5 · API', 'DeepSeek Flash · cheapest']);
   assert.equal(await page.locator('[data-spawn-model-note]').count(), 1);
   assert.equal(await menu.getAttribute('id') !== null, true);
   assert.equal(await page.locator('label', { hasText: /^Model$/ }).count(), 1, 'The menu has a label.');
@@ -85,7 +85,7 @@ try {
   await page.locator('[data-spawn-machine]', { hasText: 'Hermes' }).waitFor();
   await page.locator('[data-spawn-model]').selectOption('haiku');
   assert.match(await page.locator('[data-spawn-model-note]').innerText(), /Anthropic API/);
-  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Haiku · API key · 0.7–1.1 M tokens/);
+  assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Haiku 5.5 · API key · 0.7–1.1 M tokens/);
   assert.doesNotMatch(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan/);
   await page.locator('[data-spawn-text]').fill('A look at how card games teach their rules');
   const [created] = await Promise.all([
@@ -106,7 +106,7 @@ try {
   const id = haikuKey.split('/').at(-2);
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(id)}`);
   await page.locator('[data-approval-model]').waitFor();
-  assert.equal((await page.locator('[data-approval-model]').innerText()).trim(), 'Model: Haiku · API');
+  assert.equal((await page.locator('[data-approval-model]').innerText()).trim(), 'Model: Haiku 5.5 · API');
 
   step('Phone: the menu is there and the sheet does not scroll sideways');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
