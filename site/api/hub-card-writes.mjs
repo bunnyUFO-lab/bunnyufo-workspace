@@ -50,6 +50,8 @@ export function checkRecord(row, { section, folder }) {
     id: row.id, folder, file: row.file.slice(0, 400), kind: row.kind, entry,
     cardId: entry ? row.cardId.slice(0, 200) : null,
     steps: entry ? row.steps.filter(item => typeof item === 'string').slice(0, 200) : [],
+    // The step (a path inside the folder) whose agentTab mark this write set: Revert clears it again.
+    markedAgentTab: typeof row.markedAgentTab === 'string' ? row.markedAgentTab.slice(0, 400) : null,
     agent: clip(row.agent, 40) || 'unknown', token: clip(row.token, 80),
     versionId: typeof row.versionId === 'string' ? row.versionId : null,
     previousVersionId: typeof row.previousVersionId === 'string' ? row.previousVersionId : null,
@@ -67,7 +69,8 @@ export function checkRevert(row, { section, folder }) {
   if (typeof row.of !== 'string' || !BATCH_RE.test(row.of)) return null;
   if (row.section !== undefined && row.section !== section) return null;
   if (row.folder !== undefined && row.folder !== folder) return null;
-  return { of: row.of, by: clip(row.by, 120), at: typeof row.at === 'string' ? row.at : null, partial: row.partial === true };
+  // `through`: the newest record id this Revert covered. A record newer than it is a later write, even under the same batch label. An older revert record has none and covers every record made before it.
+  return { of: row.of, by: clip(row.by, 120), at: typeof row.at === 'string' ? row.at : null, partial: row.partial === true, through: typeof row.through === 'string' && /^\d{8}T\d{9}Z-[0-9a-f]{4}$/.test(row.through) ? row.through : null };
 }
 
 const LABEL = { 'new-card': 'Added a card', 'new-tab': 'Added a tab', edit: 'Changed a tab' };
@@ -76,12 +79,24 @@ const LABEL = { 'new-card': 'Added a card', 'new-tab': 'Added a tab', edit: 'Cha
  * Group records (oldest first) into the rows the page shows: by `batch`, or by the record's own id when it has none.
  * `reverts` are the checked revert records. Newest group first, at most `limit`.
  */
+/**
+ * The Revert that covers `record`: one for the same batch label and folder whose `through` is at or after the record's id (a Revert with no
+ * `through` covers everything made before it). A record no Revert covers is live, and a batch label an agent reuses starts a new group.
+ */
+export function revertOf(record, reverts) {
+  const label = record.batch ?? record.id;
+  return reverts.filter(item => item.of === label && item.folder === record.folder)
+    .sort((a, b) => ((a.through ?? '￿') < (b.through ?? '￿') ? -1 : 1))
+    .find(item => (item.through ? item.through >= record.id : !item.at || !record.at || item.at >= record.at)) ?? null;
+}
+
 export function groupRows(records, reverts, { limit = MAX_GROUPS, titles = {} } = {}) {
   const groups = new Map();
   for (const record of records) {
     const id = record.batch ?? record.id;
-    const at = `${record.folder}\0${id}`;
-    if (!groups.has(at)) groups.set(at, { batch: id, folder: record.folder, agent: record.agent, token: record.token, why: record.why, context: record.context, at: record.at, newest: record.id, records: [] });
+    const covered = revertOf(record, reverts);
+    const at = `${record.folder}\0${id}\0${covered ? `${covered.through ?? ''}|${covered.at}` : 'live'}`;
+    if (!groups.has(at)) groups.set(at, { batch: id, folder: record.folder, agent: record.agent, token: record.token, why: record.why, context: record.context, at: record.at, newest: record.id, records: [], covered });
     const group = groups.get(at);
     group.records.push(record);
     if (record.id > group.newest) group.newest = record.id;
@@ -91,7 +106,7 @@ export function groupRows(records, reverts, { limit = MAX_GROUPS, titles = {} } 
     const kinds = new Set(group.records.map(record => record.kind));
     const files = group.records.filter(record => !record.entry).map(record => ({ file: record.file, kind: record.kind }));
     const undo = group.records.some(record => record.entry || record.kind === 'edit');
-    const done = reverts.find(item => item.of === group.batch && item.folder === group.folder);
+    const done = group.covered;
     rows.push({
       batch: group.batch, folder: group.folder, agent: group.agent, token: group.token, why: group.why, context: group.context, at: group.at,
       files,
@@ -218,9 +233,11 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, secti
     if (typeof batch !== 'string' || !BATCH_RE.test(batch)) throw fail('Say which write.', 400);
     const files = (await listing(section, folder)).slice(0, REVERT_SCAN);
     const [records, reverts] = await Promise.all([readFiles(files.filter(file => !file.revert), section), readFiles(files.filter(file => file.revert), section)]);
-    const mine = records.filter(record => (record.batch ?? record.id) === batch).sort((a, b) => (a.id < b.id ? -1 : 1));
-    if (!mine.length) throw fail('No such write.', 404);
-    if (reverts.some(item => item.of === batch)) throw fail('Already reverted.', 409);
+    const labelled = records.filter(record => (record.batch ?? record.id) === batch).sort((a, b) => (a.id < b.id ? -1 : 1));
+    if (!labelled.length) throw fail('No such write.', 404);
+    // Only what no earlier Revert covered: a batch label the agent used again is a new write.
+    const mine = labelled.filter(record => !revertOf(record, reverts));
+    if (!mine.length) throw fail('Already reverted.', 409);
 
     // What the batch holds.
     const edits = new Map();
@@ -256,25 +273,33 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, secti
       plan.push({ file, target, etag: head.etag, old });
     }
     const writer = cardWriter(bucketStore(bucket, `${prefix}/${section}`), { section, now });
-    const done = { restored: [], removedTabs: [], trashed: [] };
+    const done = { restored: [], removedTabs: [], trashed: [], clearedMarks: [] };
     let current;
     if (entries.length) {
       try { current = (await writer.readList()).list; } catch (error) { if (error?.status === 404 || error?.status === 409) throw fail(error.message, 409); throw error; }
     }
 
     // 2. Do it. The first failure ends it; what went back is said.
-    const stop = async error => {
-      const any = done.restored.length || done.removedTabs.length || done.trashed.length;
-      if (!any) throw error;
-      await writeRevertRecord(section, folder, { of: batch, by: String(user).slice(0, 120), at: now().toISOString(), ...done, skipped, partial: true });
-      const message = error?.status === 412 ? 'A file changed while it was being put back.' : error.message;
+    const stop = async (error, what) => {
+      const any = done.restored.length || done.removedTabs.length || done.trashed.length || done.clearedMarks.length;
+      const raced = error?.status === 412 || error?.status === 409;
+      // A lost race is the owner's news about that file or card, not about the storage.
+      if (!any) throw raced ? fail(`${what} changed while it was being put back. Reload and look at it.`, 409) : error;
+      await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at: now().toISOString(), ...done, skipped, partial: true });
+      const message = raced ? `${what} changed while it was being put back.` : error.message;
       throw fail(`Only part of this went back (${[...done.restored, ...done.removedTabs, ...done.trashed].join(', ')}). ${message}`, 409, { partial: true, ...done });
     };
     for (const step of plan) {
       try {
         await bucket.put(step.target, step.old.buffer, { contentType: step.old.contentType ?? undefined, ifMatch: step.etag });
         done.restored.push(step.file);
-      } catch (error) { await stop(error); }
+      } catch (error) { await stop(error, step.file); }
+    }
+    // An HTML page the owner owns is theirs again: it gets its card bridge back. A new tab is not touched here (it leaves the steps below).
+    for (const record of mine.filter(item => !item.entry && item.kind === 'edit' && item.markedAgentTab)) {
+      try {
+        if ((await writer.clearAgentTab({ folder, path: record.markedAgentTab })).cleared) done.clearedMarks.push(record.markedAgentTab);
+      } catch (error) { await stop(error, 'The card list'); }
     }
     for (const entry of entries) {
       try {
@@ -294,10 +319,10 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, secti
             done.removedTabs.push(path);
           }
         }
-      } catch (error) { await stop(error); }
+      } catch (error) { await stop(error, 'The card list'); }
     }
     const at = now().toISOString();
-    const recorded = await writeRevertRecord(section, folder, { of: batch, by: String(user).slice(0, 120), at, ...done, skipped });
+    const recorded = await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at, ...done, skipped });
     return { status: 200, body: { ...done, skipped, reverted: { at, by: String(user).slice(0, 120) }, recorded } };
   }
 

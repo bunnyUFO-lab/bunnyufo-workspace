@@ -1470,3 +1470,27 @@ test('a real publish that leaves a clash exits as conflicts do, and a dry run do
     assert.equal(all.conflicted.length, 1);
   } finally { await fake.close(); }
 });
+
+test('Revert of an agent\'s edit to an HTML page clears the mark, and a publish keeps it cleared on both sides', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const local = await localList(w.site);
+    local.entities[0].steps.push(step('Page', 'page.html'));
+    await putLocal(w.site, local);
+    await writeFile(path.join(w.site, 'hub', 'page.html'), '<p>owner</p>\n');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    const agent = agentWorld(fake, w.client);
+    await agent.file('hub/page.html', '<p>agent</p>\n', EDIT_AS('<p>owner</p>\n', 'html0000001'));
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, true, 'the edit marked the step');
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.equal((await localList(w.site)).entities[0].steps[1].agentTab, true, 'the PC pulled the mark');
+    await agent.revert('hub', 'html0000001');
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, undefined);
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.equal(fake.json(LIST).entities[0].steps[1].agentTab, undefined, 'the bucket keeps it cleared');
+    assert.equal((await localList(w.site)).entities[0].steps[1].agentTab, undefined, 'the local list loses it');
+    assert.equal(await readFile(path.join(w.site, 'hub', 'page.html'), 'utf8'), '<p>owner</p>\n');
+  } finally { await fake.close(); }
+});

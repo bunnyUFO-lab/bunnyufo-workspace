@@ -80,5 +80,5 @@ function Row({ section, group, showCard, onDone }: { section: string; group: Car
 
 /** Rows as the card page's sheet and the project page's Library tab show them. Text only: an agent's words are never drawn as HTML. */
 export function CardWriteRows({ section, groups, showCard = false, onDone = () => {} }: { section: string; groups: CardWriteGroup[]; showCard?: boolean; onDone?: () => void }) {
-  return <ul className="cw-list" data-cw-list>{groups.map(group => <Row key={`${group.folder}/${group.batch}`} section={section} group={group} showCard={showCard} onDone={onDone} />)}</ul>
+  return <ul className="cw-list" data-cw-list>{groups.map(group => <Row key={`${group.folder}/${group.batch}/${group.reverted?.at ?? "live"}`} section={section} group={group} showCard={showCard} onDone={onDone} />)}</ul>
 }
