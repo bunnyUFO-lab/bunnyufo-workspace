@@ -1237,14 +1237,14 @@ try {
     assert.equal(chatFixture.fake.text(saved[0]).trim().split('\n').length, 2);
     assert.match(talk.url(), /#\/~hub\/chat\/\d{8}-[a-z0-9]{6}$/, 'The address names the conversation.');
 
-    step('chat: something Hermes filed shows as a card, and Open lands on Needs you / Requests');
+    step('chat: something Hermes filed shows as a card, and Open lands on that request\'s own page');
     await talk.locator('textarea[aria-label="Message"]').fill('Please file a request for me');
     await talk.locator('button:has-text("Send")').click();
     await talk.locator('[data-created="request"]').waitFor();
     await talk.locator('[data-created="request"] a:has-text("Open")').click();
-    await talk.locator('.hub[data-screen="needs"]').waitFor();
-    assert.match(talk.url(), /#\/~hub\/needs\/requests$/);
-    await talk.locator('.hub-row', { hasText: 'Hermes filed this request' }).waitFor();
+    await talk.locator('.hub[data-screen="request"]').waitFor();
+    assert.match(talk.url(), /#\/~hub\/request\/\d{8}-[a-z0-9-]+-[a-z0-9]{4}$/, 'The card opens that request, not the whole list.');
+    await talk.locator('text=Hermes filed this request').first().waitFor();
 
     step('chat pictures: attach, remove, attach again, send; Hermes sees an image part and the bubble shows the picture');
     await go(talk, '#/~hub/chat');
