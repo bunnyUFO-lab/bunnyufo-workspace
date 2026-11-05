@@ -1,6 +1,9 @@
 import type { CardWriteGroup, CardWrites } from '../lib/hub'
 import { useHubData } from './useHub'
 
+/** The tooltip and the History note on an agent's name: the agent chose it itself. */
+export const NAME_NOTE = 'The agent names itself, so treat the name as a claim.'
+
 /** `Added a tab` becomes `added a tab`; a mix of files reads `wrote 3 files`. */
 export const verb = (title: string) => (/^(Added|Changed) /.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : `wrote ${title}`)
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import Dialog from '../components/Dialog'
 import { ago, remember } from '../lib/hub'
-import { CardWriteRows, NAME_NOTE } from './CardWrites'
-import { useCardWrites, verb } from './cardWriteText'
+import { CardWriteRows } from './CardWrites'
+import { NAME_NOTE, useCardWrites, verb } from './cardWriteText'
 
 const SEEN_KEY = 'buw:card-writes-note'
 

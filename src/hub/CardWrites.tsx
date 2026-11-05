@@ -3,11 +3,8 @@ import type { CardRevert, CardWriteGroup } from '../lib/hub'
 import { HubError, ago, hubPost } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import { verb, willDo } from './cardWriteText'
+import { NAME_NOTE, verb, willDo } from './cardWriteText'
 import './cardWrites.css'
-
-/** The first word of a row: the agent's own name, which the agent chose for itself. */
-export const NAME_NOTE = 'The agent names itself, so treat the name as a claim.'
 
 /** `job:20261105-research-a1b2` is the request the run came from; its page is the Hub's request screen. */
 function Who({ group }: { group: CardWriteGroup }) {
