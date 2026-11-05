@@ -207,7 +207,7 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-project-tab="needs"]').textContent.includes('('));
   assert.deepEqual(await page.locator('[data-project-tab]').allInnerTexts(), ['Roadmap', 'Running (0)', 'Needs you (3)', 'Library']);
   assert.equal(await page.locator('.pp .hub-chips .hub-chip.on').innerText(), 'Magic Loops');
-  assert.deepEqual(await small(page, '[data-project-actions] .hub-btn, .pp-tabs .wk-tab, .pp .hub-chip, .pp select, .pp .hub-runs'), [], 'Every control is at least 44 px high.');
+  assert.deepEqual(await small(page, '[data-project-actions] .hub-btn, .pp-tabs .wk-tab, .pp-more, .pp .hub-chip, .pp select, .pp .hub-runs'), [], 'Every control is at least 44 px high.');
   assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator('[data-project-note]').count(), 0, 'Magic Loops runs on the PC: no note.');
   assert.equal(await page.locator('[data-hub-link="project"]').getAttribute('aria-current'), 'page', 'Projects is lit in the sidebar.');

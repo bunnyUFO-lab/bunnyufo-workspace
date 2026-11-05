@@ -3,6 +3,8 @@ import type { CSSProperties } from 'react'
 import type { HubProject, MapMilestone, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { host } from '../lib/host'
+import ItemMenu from '../components/ItemMenu'
+import { useIsPhone } from '../lib/chrome'
 import { needsHref } from '../lib/needsView.mjs'
 import { mapHash, parseProjectId, projectHash } from '../lib/route'
 import NeedsRows from './NeedsRows'
@@ -14,7 +16,7 @@ import WorkingNow from './WorkingNow'
 import { isLaterOnly, tallyFraction, tallyWords } from './mapCount.ts'
 import type { Tally } from './mapCount.ts'
 import { STATE_COLOR, STATE_LABEL } from './mapState'
-import { PROJECT_TABS, currentMilestone, milestoneRow, tabCounts, tabOf } from './projectPage.ts'
+import { PROJECT_TABS, currentMilestone, milestoneRow, moreCount, phoneTabs, tabCounts, tabOf } from './projectPage.ts'
 import type { ProjectTab } from './projectPage.ts'
 import { openSpawn } from './spawnStore'
 import { legacyRunning } from './Today'
@@ -28,6 +30,8 @@ import './project.css'
 const enc = encodeURIComponent
 const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', running: 'Running', needs: 'Needs you', library: 'Library' }
 const WIDE = '(min-width: 1000px)'
+
+function setHash(hash: string) { window.location.hash = hash }
 
 function useWide() {
   const [wide, setWide] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia(WIDE).matches)
@@ -195,7 +199,8 @@ export default function ProjectPage({ route }: { route?: string }) {
   const target = project ?? early
   const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known && target ? `/map/${enc(target)}` : null, !!project)
   const wide = useWide()
-  const go = (id: string) => { window.location.hash = projectHash(id, tab) }
+  const phone = useIsPhone()
+  const go = (id: string) => setHash(projectHash(id, tab))
 
   if (!known) {
     return (
@@ -215,6 +220,16 @@ export default function ProjectPage({ route }: { route?: string }) {
     const { data } = todayFor(today, project)
     return <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={data.counts.running} now={new Date(data.at).getTime()} />
   })()
+  const { row, more } = phone ? phoneTabs(tab) : { row: PROJECT_TABS, more: [] }
+  const tablist = (
+    <div className="wk-tabs pp-tabs" role="tablist" aria-label="Project">
+      {row.map(key => (
+        <a key={key} role="tab" className={`wk-tab${key === tab ? ' on' : ''}`} href={projectHash(project, key)} aria-selected={key === tab} data-project-tab={key}>{TAB_LABEL[key]}{numbered(key)}</a>
+      ))}
+    </div>
+  )
+  const hidden = more.map(key => TAB_LABEL[key] + numbered(key))
+  const held = moreCount(more, counts)
   const side = wide && tab === 'roadmap' && running
   return (
     <div className="pp today" data-project-page={project}>
@@ -229,11 +244,18 @@ export default function ProjectPage({ route }: { route?: string }) {
         </div>
       </header>
       <ProjectPicker id="hub-project-page" projects={list} value={project} onChange={go} href={id => projectHash(id, tab)} oneRow />
-      <div className="wk-tabs pp-tabs" role="tablist" aria-label="Project">
-        {PROJECT_TABS.map(key => (
-          <a key={key} role="tab" className={`wk-tab${key === tab ? ' on' : ''}`} href={projectHash(project, key)} aria-selected={key === tab} data-project-tab={key}>{TAB_LABEL[key]}{numbered(key)}</a>
-        ))}
-      </div>
+      {phone ? (
+        <div className="pp-tabs-row" data-pp-tabs-row>
+          {tablist}
+          <ItemMenu
+            label={`More project tabs: ${hidden.join(', ')}`}
+            className="pp-more"
+            items={more.map((key, index) => ({ label: hidden[index], onSelect: () => { window.location.hash = projectHash(project, key) } }))}
+          >
+            More{held > 0 ? ` (${held})` : ''} <span aria-hidden="true">▾</span>
+          </ItemMenu>
+        </div>
+      ) : tablist}
       <div className="pp-body" data-tab={tab} data-side={side ? 'true' : undefined}>
         <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
           {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} />}

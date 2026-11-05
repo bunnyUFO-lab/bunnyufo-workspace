@@ -32,6 +32,19 @@ export function tabCounts(today: Today, project: string): { running: number; nee
   return { running: counts.running, needs: counts.needsYou }
 }
 
+/** A phone's tab row: Roadmap, then the current tab (Needs you when Roadmap is current). The rest go behind More. Both lists keep PROJECT_TABS order. */
+export function phoneTabs(tab: ProjectTab): { row: ProjectTab[]; more: ProjectTab[] } {
+  const second = tab === 'roadmap' ? 'needs' : tab
+  return {
+    row: PROJECT_TABS.filter(key => key === 'roadmap' || key === second),
+    more: PROJECT_TABS.filter(key => key !== 'roadmap' && key !== second),
+  }
+}
+
+/** The number on a phone's More button: what the tabs behind it hold. */
+export const moreCount = (more: readonly ProjectTab[], counts: { running: number; needs: number } | null) =>
+  !counts ? 0 : more.reduce((sum, key) => sum + (key === 'running' ? counts.running : key === 'needs' ? counts.needs : 0), 0)
+
 /** A milestone's row on the Roadmap tab: its tally over every task, and the tasks to show as chips (open ones first, at most `limit`). */
 export function milestoneRow(milestone: MapMilestone, limit = 6): { tally: Tally; chips: MapTask[]; more: number } {
   const tasks = tasksOfMilestone(milestone)
