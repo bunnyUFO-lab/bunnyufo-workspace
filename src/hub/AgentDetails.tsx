@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ago, HubError, hubGet } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
@@ -6,15 +6,17 @@ import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileChange, 
 import { AgentSprite } from './team/AgentSprite'
 import { STATUS_DOT, STATUS_LABEL } from './team/teamModel'
 import { stateOf } from './team/spriteState'
+import { NOT_PICKED_UP_TEXT, replacedText, runningText, waitingText, WAITING_TOO_LONG_MS } from './profileChangeWords'
+import { useWaitingPoll } from './useWaitingPoll'
 import './team/agentDetails.css'
 
 const SOURCE_TAG: Record<DetailsPrompt['source'], string> = { 'hermes-host': 'Hermes host', app: 'App' }
 
-type Load<T> = { data: T | null; error: string | null; status: number | null }
+type Load<T> = { data: T | null; error: string | null; status: number | null; refresh: (signal: AbortSignal) => Promise<void> }
 
-/** One Hub route, fetched on mount. The status is kept so a 401 can say "sign in" instead of a bare error. */
+/** One Hub route, fetched on mount. The status is kept so a 401 can say "sign in" instead of a bare error. `refresh` reads it again and keeps what is shown when that fails. */
 function useRoute<T>(path: string): Load<T> {
-  const [state, setState] = useState<Load<T> & { path: string }>({ path, data: null, error: null, status: null })
+  const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null }>({ path, data: null, error: null, status: null })
   useEffect(() => {
     const controller = new AbortController()
     hubGet<T>(path, controller.signal).then(
@@ -26,7 +28,11 @@ function useRoute<T>(path: string): Load<T> {
     )
     return () => controller.abort()
   }, [path])
-  return state.path === path ? state : { data: null, error: null, status: null }
+  const refresh = useCallback(async (signal: AbortSignal) => {
+    const data = await hubGet<T>(path, signal)
+    if (!signal.aborted) setState({ path, data, error: null, status: 200 })
+  }, [path])
+  return state.path === path ? { ...state, refresh } : { data: null, error: null, status: null, refresh }
 }
 
 function Chips({ items, label }: { items: string[] | undefined; label: string }) {
@@ -46,8 +52,8 @@ function FreshnessNote({ freshness, hasPrompts }: { freshness: DetailsFreshness;
   )
 }
 
-/** What happened to the owner's last change of this profile's model, in words. A failure says the old settings stay. */
-export function ChangeBanner({ change }: { change: ProfileChange }) {
+/** What happened to the owner's last change of this profile's model, in words. A failure says the old settings stay. `now` is when the page last asked. */
+export function ChangeBanner({ change, now }: { change: ProfileChange; now: number }) {
   const model = change.to.model
   const when = ago(change.resultAt ?? change.at)
   if (change.state === 'failed') {
@@ -59,9 +65,11 @@ export function ChangeBanner({ change }: { change: ProfileChange }) {
     )
   }
   if (change.state === 'late') return <p className="hub-banner ad-note" role="note" data-details-change="late">The change to {model} was signed {ago(change.at)}. {change.reason ?? 'The Hermes host did not pick this up.'} The old settings stay.</p>
-  if (change.state === 'live') return <p className="ad-note" role="status" data-details-change="live">The change to {model} is live. The host applied it {when}.</p>
-  if (change.state === 'applied') return <p className="ad-note" role="status" data-details-change="applied">The Hermes host applied the change to {model} {when}. The settings below update with its next export.</p>
-  return <p className="ad-note" role="status" data-details-change="waiting">The change to {model} was approved {ago(change.at)} and is waiting for the Hermes host, which applies it within about 5 minutes.</p>
+  if (change.replaced) return <p className="ad-note" role="status" data-details-change={change.state} data-replaced>{replacedText(change, ago(change.runningAt ?? change.resultAt ?? change.at))}</p>
+  if (change.state === 'live') return <p className="ad-note" role="status" data-details-change="live">{runningText(change, true)}</p>
+  if (change.state === 'applied') return <p className="ad-note" role="status" data-details-change="applied">{runningText(change, false)}</p>
+  if (now - Date.parse(change.at) > WAITING_TOO_LONG_MS) return <p className="hub-banner ad-note" role="note" data-details-change="waiting" data-waiting-long>{NOT_PICKED_UP_TEXT}</p>
+  return <p className="ad-note" role="status" data-details-change="waiting">{waitingText(change, ago(change.at, now))}</p>
 }
 
 function Settings({ settings }: { settings: ProfileSettings }) {
@@ -124,6 +132,10 @@ export default function AgentDetails({ id }: { id: string }) {
   const body = details.data
   const live = team.data?.agents.find(agent => agent.id === id) ?? null
   const [now] = useState(() => Date.now())
+  const [asked, setAsked] = useState(() => Date.now())
+  // A change that waits for the host is read again every few seconds, so the page says Running when the result lands.
+  const refresh = details.refresh
+  useWaitingPoll(body?.change?.state === 'waiting', useCallback(async (signal: AbortSignal) => { await refresh(signal); setAsked(Date.now()) }, [refresh]))
 
   const back = <a className="ad-back" href={hubHash('team')} data-details-back>← Team</a>
   if (!body) {
@@ -156,7 +168,7 @@ export default function AgentDetails({ id }: { id: string }) {
         {agent.chatModel && <div><dt>Chat model</dt><dd data-details-chat-model>{agent.chatModel}</dd></div>}
       </dl>
       <FreshnessNote freshness={body.freshness} hasPrompts={body.prompts.length > 0} />
-      {body.change && <ChangeBanner change={body.change} />}
+      {body.change && <ChangeBanner change={body.change} now={asked} />}
       {body.settings && <Settings settings={body.settings} />}
       {body.prompts.length > 0 && (
         <section className="ad-section" aria-labelledby="ad-prompts" data-details-prompts>

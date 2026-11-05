@@ -373,7 +373,7 @@ export function createSiteApi({
       // The Hub (hub.mjs) reads its own bodies, because their limits differ per route.
       if (hub && route.startsWith('/hub/')) {
         const user = String(request.headers['remote-user'] ?? '').trim() || null;
-        if (await hub.handle({ request, response, method: request.method, route, query: url.searchParams, user, requireRemoteUser })) return;
+        if (await hub.handle({ request, response, method: request.method, route, query: url.searchParams, user, requireRemoteUser, contentOrigin })) return;
       }
 
       // What the page overlays onto the workspace.json files: one object, every card that has

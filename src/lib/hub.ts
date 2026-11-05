@@ -76,7 +76,7 @@ export interface Item {
 export interface Described { kind: NeedsKind; who: string; age: number; what: string; state: string; next: string; blocker: string }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged' | 'pr-closed'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'run-started' | 'run-finished' | 'session-items' | 'not-useful'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'run-started' | 'run-finished' | 'profile-change' | 'profile-change-sent' | 'session-items' | 'not-useful'
 export interface HubEvent {
   ts: string
   kind: EventKind
