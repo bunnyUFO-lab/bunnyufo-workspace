@@ -51,6 +51,7 @@ import { CHAT_MODELS } from './chat-models.mjs';
 import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow } from './chat-jobs.mjs';
+import { deliverablesOf, jobsList } from './job-deliverables.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -72,7 +73,7 @@ const EVENT_CAP = 2000;
 const POOL = 16;
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|projects|team|events|search-text|unasked|map\/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -1574,6 +1575,39 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
     return rows;
   }
+  /**
+   * The deliverables a job's linked work can be found in: Asks, lists of steps and requests (list rows), the events' `session-items`, and the
+   * card index. Built once per call; `of(item, result, reportText)` is one job's list. A Beads title is best effort and never fails the answer.
+   */
+  async function deliverableSource(at, projectsOf = () => []) {
+    const [asks, checklists, requests, window, cards] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), cardResolver()]);
+    const touched = touchedBySession(window.events);
+    const titles = new Map();
+    await pool(POOL, projectsOf(requests, touched).slice(0, 6), async project => {
+      const issues = (await loadBeads(project).catch(() => null))?.issues ?? [];
+      titles.set(project, new Map(issues.map(issue => [issue.id, issue.title])));
+    });
+    const input = { asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, card: ref => cards(ref) ?? undefined, taskTitle: (project, id) => titles.get(project)?.get(id) };
+    return { requests, of: (item, result, reportText) => deliverablesOf({ ...input, item, result, reportText, touched: touched.get(item.run?.session) ?? null }) };
+  }
+  /** `GET /hub/jobs?project=&tab=`: the jobs of the last two months with what each delivered. Reads no report. */
+  async function jobsView(query, at) {
+    const project = (query.get('project') ?? '').slice(0, 80);
+    const tab = query.get('tab') === 'running' ? 'running' : query.get('tab') === 'finished' ? 'finished' : '';
+    // Titles of tasks are read only for the projects of jobs whose session touched one.
+    const source = await deliverableSource(at, (requests, touched) => [...new Set(requests.filter(item => item.preset && (!project || item.project === project) && touched.get(item.run?.session)?.beads.length).map(item => item.project))]);
+    return jobsList({ requests: source.requests, project, tab, preset: presetOf, build: item => source.of(item) });
+  }
+  /** A request's detail with what it delivered, read with its report (older Hermes jobs name their Asks only there). */
+  async function requestDeliverables(detail, at) {
+    const { request, state, result } = detail;
+    if (!request.preset || !['done', 'failed', 'stopped', 'asking'].includes(state)) return null;
+    const report = detail.report ? await bucket.getBytes(key(`requests/${request.id}/report.md`)).then(found => found?.buffer.toString('utf8') ?? '', () => '') : '';
+    const source = await deliverableSource(at, () => [request.project]);
+    const item = source.requests.find(row => row.id === request.id);
+    if (!item) return null;
+    return source.of(item, result, report);
+  }
   /** One job of a chat's one tap: the one signing path, after the approval page's own checks. The list is read again afterwards. */
   async function approveJob(id, user, at) {
     try { return await requestFiles.approveProposed(id, { user, at }); } finally { mapRequests = null; }
@@ -1702,10 +1736,15 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             reply(await hermesApprovals.detail(decodeURIComponent(match[1]), at));
           } else if ((match = /^\/hub\/requests\/([^/]+)\/events$/.exec(route))) {
             await hermesDispatch.streamEvents(response, decodeURIComponent(match[1]));
+          } else if (route === '/hub/jobs') {
+            reply(await jobsView(query, at));
           } else if ((match = /^\/hub\/requests\/([^/]+)$/.exec(route))) {
             const detail = await requestFiles.detail(decodeURIComponent(match[1]), at);
             const cardHref = await cardHrefOf(detail.result?.card);
-            reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}) });
+            // What the job delivered is a read of linked work: a failure there leaves the page without the list, never without the page.
+            const deliverables = await requestDeliverables(detail, at).catch(error => { log(scrub(`[hub] deliverables of ${detail.request.id}: ${error.message}`, 200)); return null; });
+            const preset = detail.request.preset ? presetOf(detail.request.preset) : null;
+            reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
           } else if (route.startsWith('/hub/presets')) {
             reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {

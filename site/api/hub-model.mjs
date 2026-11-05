@@ -329,6 +329,7 @@ export function checklistItem(checklist, names) {
     ...(checklist.from?.host ? { host: checklist.from.host } : {}),
     ...(checklist.from?.tool ? { tool: clip(checklist.from.tool, 40) } : {}),
     ...(checklist.from?.session ? { session: checklist.from.session } : {}),
+    ...(validId(checklist.from?.request) ? { fromRequest: checklist.from.request } : {}),
   };
 }
 
@@ -435,6 +436,7 @@ export function askItem(ask, state) {
     ...(ask.from?.host ? { host: ask.from.host } : {}),
     ...(ask.from?.tool ? { tool: clip(ask.from.tool, 40) } : {}),
     ...(ask.from?.session ? { session: ask.from.session } : {}),
+    ...(validId(ask.from?.request) ? { fromRequest: ask.from.request } : {}),
   };
 }
 
@@ -509,7 +511,8 @@ function runParts(request, approved, taken, result, lastRunAt = null) {
   if (resultAt && typeof result.outcome === 'string') {
     const pr = httpsOnly(result.pr);
     const card = typeof result.card === 'string' && /^[a-z0-9-]+\/[A-Za-z0-9._-]+$/.test(result.card) ? result.card : undefined;
-    out.finish = { outcome: nothingToDo(result) ? 'nothing' : result.outcome.slice(0, 20), at: resultAt, ...(pr ? { pr } : {}), ...(card ? { card } : {}) };
+    const asks = Array.isArray(result.asks) ? [...new Set(result.asks.filter(id => typeof id === 'string' && ID_RE.test(id)))].slice(0, 12) : [];
+    out.finish = { outcome: nothingToDo(result) ? 'nothing' : result.outcome.slice(0, 20), at: resultAt, ...(pr ? { pr } : {}), ...(card ? { card } : {}), ...(asks.length ? { asks } : {}) };
   }
   return out;
 }

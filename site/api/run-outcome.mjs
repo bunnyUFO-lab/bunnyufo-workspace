@@ -1,6 +1,8 @@
 // What a finished Hermes request run means: the one place that turns Hermes's final status into a request's
 // `result.json`. A pure function, so the follower, the tests and (later) the question rule share one rule.
 
+import { ID_RE } from './hub-model.mjs';
+
 const clip = (value, length) => String(value ?? '').slice(0, length);
 const flat = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
 
@@ -8,6 +10,14 @@ const flat = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 export function cardOf(output) {
   const matches = [...String(output ?? '').matchAll(/^[ \t]*CARD:[ \t]*(assistant\/[A-Za-z0-9._-]+)[ \t]*$/gm)];
   return matches.length ? matches.at(-1)[1] : null;
+}
+
+/** The Ask ids on the last `ASKS:` line of a run's output (a grilling run files its questions and ends with them), at most 12, each a valid id. */
+export function asksOf(output) {
+  const lines = [...String(output ?? '').matchAll(/^[ 	]*ASKS:[ 	]*(.*)$/gm)];
+  if (!lines.length) return [];
+  const ids = lines.at(-1)[1].split(/[\s,]+/).map(word => word.replace(/^[`*_(\[]+|[`*_)\].;]+$/g, '')).filter(word => ID_RE.test(word));
+  return [...new Set(ids)].slice(0, 12);
 }
 
 /**
@@ -41,7 +51,10 @@ export function outcomeOf({ run, stopped = false, timedOut = false, retried = fa
   if (timedOut && run.status !== 'completed') return { ...base, outcome: 'failed', reason: 'time-limit', summary: 'The run reached its time limit and was stopped.' };
   if (run.status === 'completed') {
     const card = cardOf(output);
-    if (card) return { ...base, outcome: 'card', card, summary: clip(output, 500) };
+    const asks = asksOf(output);
+    if (card) return { ...base, outcome: 'card', card, ...(asks.length ? { asks } : {}), summary: clip(output, 500) };
+    // A grilling run files Asks and ends with `ASKS: <ids>` and no card: it delivered, so it is done, not failed.
+    if (asks.length) return { ...base, outcome: 'asks', asks, summary: clip(output, 500) };
     const question = questionOf(output);
     if (question) return { ...base, outcome: 'question', question, summary: clip(output, 500) };
     return { ...base, outcome: 'failed', summary: 'Hermes finished without a card.' };

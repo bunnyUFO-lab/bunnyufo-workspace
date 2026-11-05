@@ -882,9 +882,15 @@ async function mapLimit(items, limit, work) {
 const ASK_KINDS = ['approval', 'verify', 'design', 'decision'];
 const STEPS_KINDS = ['verify', 'setup', 'investigate', 'develop'];
 
+/** `{ request }` when a run's id is in the environment (`BUW_REQUEST_ID`), so what a job files names the job. A file's own `from.request` wins over it. */
+const requestEnv = () => {
+  const id = process.env.BUW_REQUEST_ID?.trim();
+  return id && /^[a-z0-9][a-z0-9-]{0,127}$/.test(id) ? { request: id } : {};
+};
+
 function askFromFile(raw, flags, id) {
   const now = new Date();
-  const from = { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}), ...(raw.from ?? {}) };
+  const from = { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}), ...requestEnv(), ...(raw.from ?? {}) };
   const ask = {
     id, project: flags.project,
     ...(flags.bead || raw.bead ? { bead: flags.bead || raw.bead } : {}),
@@ -1600,7 +1606,7 @@ function checklistFromInput(raw, flags, id) {
   const bead = flags.bead || raw.bead;
   return {
     id, project: flags.project, createdAt: isoNow(),
-    from: { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}) },
+    from: { host: hostName(), tool: flags.tool || 'claude-code', ...(sessionEnv() ? { session: sessionEnv() } : {}), ...requestEnv() },
     ...(bead ? { bead } : {}),
     title: raw.title.trim(),
     ...(raw.context ? { context: raw.context } : {}),
