@@ -916,7 +916,7 @@ test('checkRequest: a model is an id from the chat list; Auto is not stored; an 
     assert.throws(() => checkRequest({ ...base, model }), error => error.status === 400 && error.message === 'Unknown model.', String(model).slice(0, 20));
   }
   assert.throws(() => checkRequest({ ...base, model: 'opus' }), error => error.status === 400 && error.message === 'That model can only be picked in a chat.', 'Opus is a chat pick only');
-  assert.equal(checkRequest({ ...base, model: 'codex-6-1-sol' }).model, 'codex-6-1-sol', 'a Codex version is still a job model, as codex was');
+  assert.equal(checkRequest({ ...base, model: 'codex-6-1-sol' }).model, 'codex', 'an id an earlier version listed is stored as its family row');
   assert.throws(() => checkRequest({ project: 'probe', text: 'x', when: 'nightly', model: 'haiku' }), /preset job only/);
 });
 

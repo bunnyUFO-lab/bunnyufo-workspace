@@ -72,6 +72,18 @@ test('a run whose approval names a model starts with that provider and model; Au
   } finally { await s.close(); }
 });
 
+test('a signed run on an id an earlier version listed starts on its family row', async () => {
+  const s = await stack({ hermesOptions: { endWith: 'Done.\nCARD: assistant/x' } });
+  try {
+    const api = await s.addHub();
+    const old = s.propose('old', { model: 'codex-6-1-sol' });
+    assert.equal((await approve(api, old)).status, 201);
+    await until(() => s.resultOf(old), 'result');
+    const body = s.hermes.runs.find(run => run.key === old).body;
+    assert.deepEqual([body.provider, body.model], ['openai-codex', 'gpt-6.1-sol']);
+  } finally { await s.close(); }
+});
+
 test('a pinned run is not retried on Anthropic after a quota failure', async () => {
   const s = await stack({ hermesOptions: { failWith: 'Codex provider quota exhausted (429)' } });
   try {

@@ -11,7 +11,7 @@
 // also carries `name` and `template`, the first one `created: true`, and a retired persona's newest version is `{ v: 1, retired: true, name, at, by }`.
 // Bringing it back is a Revert to an earlier version. A made persona has no app text, so it has no `default` row. A folder with an avatar and no
 // readable named version is no persona.
-import { CHAT_MODELS, personaModelIds } from './chat-models.mjs';
+import { CHAT_MODELS, currentModelId, personaModelIds } from './chat-models.mjs';
 import { CHAT_PERSONAS, PERSONA_TEMPLATES } from './chat-personas.mjs';
 import { redactSecrets } from './hub-agent-config.mjs';
 import { markStamp, randomId } from './hub-model.mjs';
@@ -98,7 +98,8 @@ function readVersion(value) {
   const template = typeof value.template === 'string' && /^[a-z][a-z0-9-]{0,19}$/.test(value.template) ? value.template : '';
   if (value.retired === true) return name ? { ...common, retired: true, name } : null;
   if (value.default === true) return { ...common, default: true };
-  const { role, prompt, model } = value;
+  const { role, prompt } = value;
+  const model = currentModelId(value.model);   // an id an earlier version listed reads as its family's row
   if (typeof role !== 'string' || !role.trim() || role.length > PERSONA_LIMITS.role) return null;
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > PERSONA_LIMITS.prompt) return null;
   if (!personaModelIds().includes(model)) return null;
