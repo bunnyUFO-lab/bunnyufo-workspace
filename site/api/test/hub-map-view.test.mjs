@@ -7,7 +7,7 @@ import { clampView, fitScale, fitView, keepPoint, limitsFor, viewAt, zoomAround 
 import { LABEL_MAX, layoutMap } from '../../../src/hub/mapLayout.ts';
 import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
-import { currentMilestone, milestoneRow, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
+import { PROJECT_TABS, currentMilestone, milestoneRow, moreCount, phoneTabs, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
 import { parseProjectId, projectHash } from '../../../src/lib/route.ts';
 import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
 
@@ -557,4 +557,26 @@ test('"This branch" goes to the branch last in, else the current milestone, else
   assert.equal(branchTarget(quiet, null), 'r1', 'With no current milestone, the first roadmap.');
   assert.deepEqual(parseSaved({ view: 'full', branch: 'r2' }), { view: 'full', branch: 'r2' });
   for (const bad of [null, 5, 'x', {}, { view: 'branch' }, { view: 'side', branch: 'r1' }]) assert.equal(parseSaved(bad), null);
+});
+
+test('phoneTabs: Roadmap first, then the current tab (Needs you from Roadmap); the rest behind More', () => {
+  const want = {
+    roadmap: [['roadmap', 'needs'], ['running', 'library']],
+    running: [['roadmap', 'running'], ['needs', 'library']],
+    needs: [['roadmap', 'needs'], ['running', 'library']],
+    library: [['roadmap', 'library'], ['running', 'needs']],
+  };
+  for (const tab of PROJECT_TABS) {
+    const { row, more } = phoneTabs(tab);
+    assert.deepEqual([row, more], want[tab], tab);
+    assert.ok(row.includes(tab), `${tab}: the current tab is in the row.`);
+    assert.deepEqual([...row, ...more].sort(), [...PROJECT_TABS].sort(), `${tab}: all four, once each.`);
+  }
+});
+
+test('moreCount: what the hidden tabs hold, 0 until Today answers', () => {
+  assert.equal(moreCount(['running', 'library'], null), 0);
+  assert.equal(moreCount(['running', 'library'], { running: 5, needs: 3 }), 5);
+  assert.equal(moreCount(['running', 'needs'], { running: 5, needs: 3 }), 8);
+  assert.equal(moreCount(['library'], { running: 5, needs: 3 }), 0);
 });
