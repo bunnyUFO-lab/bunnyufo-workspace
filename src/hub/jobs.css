@@ -18,5 +18,6 @@
 .jb-pill { padding: 1px 9px; border-radius: var(--radius-pill); background: var(--surface-1); font-size: 0.75rem; color: var(--text-dim); overflow-wrap: anywhere; }
 .jb-pill.good { background: color-mix(in srgb, var(--st-done, var(--green, #5fd0a0)) 14%, transparent); color: var(--st-done, var(--green, #5fd0a0)); }
 .jb-pill.warn { background: color-mix(in srgb, var(--st-needs, var(--amber)) 14%, transparent); color: var(--st-needs, var(--amber)); }
+.jb-pill.bad { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
 .jb-pill.live { background: color-mix(in srgb, var(--st-working) 14%, transparent); color: var(--st-working); }
 .jb-foot { margin: 8px 0 0; font-size: 0.78rem; }

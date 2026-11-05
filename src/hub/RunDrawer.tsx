@@ -361,6 +361,8 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   // A run that never started carries the raw error in its summary (it can be a program message): the owner reads a plain lead, the detail is under What it did.
   const startFailed = result?.reason === 'start-failed'
   const whyFailed = startFailed ? 'The run could not start.' : result?.summary?.trim() || stop?.reason?.trim() || 'Hermes gave no reason.'
+  // "What it did" holds the run's own record: a job that delivered nothing and ran nothing (a failure, a stop, nothing to change) would open it on bookkeeping only.
+  const didSomething = dlist.length > 0 || runs.length > 0 || fires.length > 0 || replies.length > 0 || lines.length > 0 || !!detail.continued || (startFailed && !!result?.summary) || !!usageLine(result?.usage) || (hasReport && !!report)
   const failure = (
     <>
       <h4 className="rd-h">Why it failed</h4>
@@ -447,7 +449,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       )}
 
       <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
-      {delivered && (
+      {delivered && didSomething && (
         <details className="rd-did" data-run-did>
           <summary>What it did</summary>
           {startFailed && result?.summary && <p className="hub-muted" data-run-failure-detail>{result.summary}</p>}
@@ -460,7 +462,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       {problem && <p className="hub-error" role="alert" data-run-error>{problem}</p>}
       {(stoppable || again) && (
         <div className="ni-a rd-foot">
-          {stoppable && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) })} data-run-stop>Stop</button>}
+          {stoppable && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) })} data-run-stop>{state === 'asking' ? 'Stop this job' : 'Stop'}</button>}
           {again && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => {
             const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(id)}/again`, { target })
             onGone?.(made.id)

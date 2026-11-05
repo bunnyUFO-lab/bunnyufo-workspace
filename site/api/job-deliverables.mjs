@@ -88,9 +88,9 @@ export function pillsOf(job) {
   if (of('job').length) pills.push({ text: 'Job', tone: 'good' });
   const finished = FINISHED_STATES.includes(job.state);
   let ended = false;
-  if (job.state === 'asking') { pills.push({ text: 'Has a question', tone: 'warn' }); ended = true; }
+  if (job.state === 'asking') { pills.push({ text: 'Asking you', tone: 'warn' }); ended = true; }
   if (job.nothing) { pills.push({ text: 'Nothing to change', tone: 'quiet' }); ended = true; }
-  if (job.state === 'failed') { pills.push({ text: 'Failed', tone: 'warn' }); ended = true; }
+  if (job.state === 'failed') { pills.push({ text: 'Failed', tone: 'bad' }); ended = true; }
   if (job.state === 'stopped') { pills.push({ text: 'Stopped', tone: 'quiet' }); ended = true; }
   if (job.state === 'expired') { pills.push({ text: 'Expired', tone: 'quiet' }); ended = true; }
   if (job.stale) pills.push({ text: 'No word', tone: 'warn' });
