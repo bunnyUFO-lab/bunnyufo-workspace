@@ -97,6 +97,12 @@ export function useHubData<T>(path: string | null): HubData<T> {
   return { data, error, loading: !!path && data === null && error === null, reload, at, behind: current ? state.behind : false }
 }
 
+/** A read that may start before it can be shown: while `show` is false the answer, and any error, stay out of sight and the screen reads as loading. */
+export function useHeldHubData<T>(path: string | null, show: boolean): HubData<T> {
+  const read = useHubData<T>(path)
+  return show ? read : { ...read, data: null, error: null, at: null, behind: false, loading: !!path }
+}
+
 /**
  * The one `/today` poll. App makes it (the sidebar badge and the phone's tab bar need the count on
  * every screen) and the Today screen reads the same answer, so a poll sends one request.
@@ -109,12 +115,6 @@ export const TodayContext = createContext<HubData<Today> | null>(null)
  * shows: it reads as loading until the answer after the write lands. A write made on this screen does
  * not blank it. The sidebar badge reads the raw hook and keeps its number.
  */
-/** A read that may start before it can be shown: while `show` is false the answer, and any error, stay out of sight and the screen reads as loading. */
-export function useHeldHubData<T>(path: string | null, show: boolean): HubData<T> {
-  const read = useHubData<T>(path)
-  return show ? read : { ...read, data: null, error: null, at: null, behind: false, loading: !!path }
-}
-
 export function useTodayScreen(): HubData<Today> {
   const shared = useContext(TodayContext)
   const own = useHubData<Today>(shared ? null : '/today')
