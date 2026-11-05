@@ -263,7 +263,7 @@ try {
   await page.locator('.pp .nrow').first().click();
   await page.waitForFunction(() => location.hash === '#/~hub/needs/all/magic-loops');
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 3 && document.querySelector('.ni.flash'));
-  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'The page leaves Today\'s remembered project alone.');
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'A link does not change the choice.');
   await go('#/~hub/project/magic-loops/needs');
   assert.equal((await page.locator('[data-pp-all-needs]').innerText()).trim(), 'All in Needs you ›');
   await page.locator('[data-project-tab="running"]').click();
