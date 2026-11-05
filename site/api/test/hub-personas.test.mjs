@@ -16,6 +16,7 @@ import { agentConfigJson, askJson, seedAgentConfig, seeder } from './hub-fixture
 import { generateKeyPairSync } from 'node:crypto';
 import { parsePublicKey, publicKeyPem, sign, verify } from '../signing.mjs';
 import { listenOnGoodPort } from '../../../server/listen.mjs';
+import { opusNote, profileEditOf } from '../../../src/hub/agentEditField.ts';
 
 const SITE = 'https://site.example';
 const NOW = new Date();
@@ -452,6 +453,43 @@ const asksWritten = f => [...f.fake.objects.keys()].filter(name => /\/asks\/[^/]
 const hostResult = (f, id, outcome, code, extra = {}) => f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome, code, rolledBack: false, at: new Date(f.clock.time).toISOString(), ...extra }), 'application/json', { writer: 'hermes-config' });
 const detailsOf = async (f, agent = 'teardown') => (await f.call('GET', `/hub/team/${agent}/details`)).body;
 const postChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
+
+test('profile change: an owner\'s Opus pick is kept through the real routes, from the Edit page and from an agent\'s Ask, and the Ask it reads carries the warning', async () => {
+  const OPUS = { provider: 'anthropic', model: 'claude-opus-5-5' };
+  const options = { main: [...OPTIONS.main, OPUS], briefs: OPTIONS.briefs };
+  const warning = ask => { const edit = profileEditOf(ask); return opusNote(edit.primary, edit.fallbacks); };
+  const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
+  try {
+    putExport(f, { options, minutes: 0 });
+    const made = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [OPUS, CODEX] });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    assert.match(warning((await f.call('GET', `/hub/asks/${made.body.ask}`)).body), /^Opus is a fallback/);
+    assert.equal((await answerWith(f, made.body.ask, 'apply')).body.agentEdit.applied, true);
+    assert.deepEqual(f.fake.json(changeKey(made.body.ask, 'approved.json')).to, { ...SONNET, fallbacks: [OPUS, CODEX] }, 'unchanged and in order');
+    f.clock.time += 120000;
+    hostResult(f, made.body.ask, 'applied', 'ok');
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, options, main: { ...SONNET, fallbacks: [OPUS, CODEX] } });
+    const live = await detailsOf(f);
+    assert.equal(live.change.state, 'live');
+    assert.deepEqual(live.settings.fallbacks, [OPUS, CODEX], 'the export round trip keeps it');
+    // A later change of this profile that keeps the pick: nothing strips it.
+    const other = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX, OPUS] });
+    assert.equal(other.status, 201, JSON.stringify(other.body));
+    assert.equal((await answerWith(f, other.body.ask, 'apply')).body.agentEdit.applied, true);
+    const reordered = f.fake.json(changeKey(other.body.ask, 'approved.json'));
+    assert.deepEqual([reordered.from.fallbacks, reordered.to.fallbacks], [[OPUS, CODEX], [CODEX, OPUS]]);
+    hostResult(f, other.body.ask, 'applied', 'ok');
+    // An agent's own Ask naming Opus as the primary: the page warns from the Ask itself, a skip writes nothing, Apply signs exactly that.
+    const before = approvals(f).length;
+    const filed = agentEditAsk(f, 'op01', { op: 'profile', profile: 'main', primary: OPUS, fallbacks: [SONNET], why: 'Try Opus.' });
+    assert.match(warning((await f.call('GET', `/hub/asks/${filed}`)).body), /^Opus is the primary/);
+    assert.equal((await answerWith(f, agentEditAsk(f, 'op02', { op: 'profile', profile: 'main', primary: OPUS, fallbacks: [] }), 'skip')).status, 201);
+    assert.equal(approvals(f).length, before, 'a skip signs nothing');
+    assert.equal((await answerWith(f, filed, 'apply')).body.agentEdit.applied, true);
+    assert.deepEqual(f.fake.json(changeKey(filed, 'approved.json')).to, { ...OPUS, fallbacks: [SONNET] });
+  } finally { await f.close(); }
+});
 
 test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, Apply signs, the host answers, a newer export shows it live', async () => {
   const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });

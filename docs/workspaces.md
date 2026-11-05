@@ -456,7 +456,7 @@ with no page open. A run that ends `completed` with a `CARD: assistant/<folder>`
 one it is `failed` ("finished without a card"). When Hermes drops a run's event buffer (a few minutes after the last
 reader) the follower polls the status instead; only a 404 on the status ends the request `unknown`
 (`hermes-forgot`, pointing at the newest `assistant` card made after the start). A run that fails with `429` or
-`quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`, key
+`quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`; a value naming Opus is refused with one log line and the default is used; key
 `<id>-retry`), recorded in `hermes-retry.json` (with `until` when the error named a reset time); a second quota failure is `failed` with reason `usage-limit`. The
 follower stops a run at `limits.minutes` (`time-limit`). At most 3 Hermes runs go at a time: a fourth approval is
 signed and waits in `approved` (`waiting` in the answer); a run that ends, and a sweep every 60 s, start the oldest
