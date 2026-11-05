@@ -84,6 +84,8 @@ try {
     await page.goto(`${fixture.url}${ROWS.needs.hash}`);
     await page.locator(ROWS.needs.ready).waitFor();
     assert.equal(await page.locator('.hub-chips-wrap').count(), 0, 'No chip row is left to scroll.');
+    // The select paints before the counts land, and a filter with nothing in it is not listed until then.
+    await page.locator(`${ROWS.needs.row} option[value="pr"]`).waitFor({ state: 'attached' });
     const options = await page.locator(`${ROWS.needs.row} option`).evaluateAll(list => list.map(node => [node.value, node.textContent]));
     assert.deepEqual(options.map(item => item[0]), ['all', 'approvals', 'question', 'steps', 'design', 'playtest', 'unstick', 'pr', 'answered'], 'The fixture shows every filter.');
     assert.ok(options.slice(0, -1).every(item => /\(\d+\)$/.test(item[1])), `Every filter but Answered shows its count (${JSON.stringify(options)}).`);

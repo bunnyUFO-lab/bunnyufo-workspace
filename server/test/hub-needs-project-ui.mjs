@@ -213,7 +213,7 @@ try {
   assert.equal(await page.locator('[data-hub-link="project"]').getAttribute('aria-current'), 'page', 'Projects is lit in the sidebar.');
   assert.deepEqual(await page.locator('[data-hub-group="plan"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['project', 'map', 'chat']);
 
-  step('project page, Roadmap tab: one row per milestone with the map counts; finished ones fold; a chip opens that task on the map, and Back returns');
+  step('project page, Roadmap tab: one row per milestone with the map counts; finished ones fold; a chip opens that task over the page, and Back returns');
   const rows = page.locator('[data-pp-roadmap] [data-pp-milestone]');
   assert.equal(await rows.count(), 1);
   assert.equal(await rows.first().locator('.pp-ms-count').innerText(), '2 of 4 done');
@@ -222,7 +222,7 @@ try {
   assert.equal((await page.locator('[data-pp-finished] summary').innerText()).trim(), '1 finished');
   assert.equal(await page.locator('[data-pp-finished][open]').count(), 0);
   await rows.first().locator('[data-pp-task="ml-t3"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/map/magic-loops/ml-t3');
+  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/roadmap/ml-t3');
   await page.locator('.hub-map-panel').waitFor();
   await page.goBack();
   await page.locator('[data-project-page="magic-loops"] [data-pp-roadmap]').waitFor();
@@ -263,7 +263,7 @@ try {
   await page.locator('.pp .nrow').first().click();
   await page.waitForFunction(() => location.hash === '#/~hub/needs/all/magic-loops');
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 3 && document.querySelector('.ni.flash'));
-  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'The page leaves Today\'s remembered project alone.');
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'A link does not change the choice.');
   await go('#/~hub/project/magic-loops/needs');
   assert.equal((await page.locator('[data-pp-all-needs]').innerText()).trim(), 'All in Needs you ›');
   await page.locator('[data-project-tab="running"]').click();
@@ -308,7 +308,7 @@ try {
   await goPage(page, '#/~hub/project/magic-loops');
   const sprint = page.locator('a[data-project-action="sprint"]');
   await sprint.waitFor();
-  assert.equal(await sprint.getAttribute('href'), '#/~hub/map/magic-loops/ml-m1');
+  assert.equal(await sprint.getAttribute('href'), '#/~hub/project/magic-loops/roadmap/ml-m1');
   assert.equal(await page.locator('[data-project-note="sprint"]').count(), 0);
   await goPage(page, '#/~hub/project/workspace-app');
   await page.locator('[data-project-note="sprint"]').waitFor();
