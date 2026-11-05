@@ -24,7 +24,7 @@ const day = NOW.toISOString().slice(0, 10).replace(/-/g, '');
 const TEARDOWN = CHAT_PERSONAS.find(entry => entry.id === 'teardown');
 const edit = (extra = {}) => ({ role: TEARDOWN.role, prompt: TEARDOWN.text, model: TEARDOWN.model, base: 'default', ...extra });
 
-async function fixture({ requireRemoteUser = true, env = {} } = {}) {
+async function fixture({ requireRemoteUser = true, env = {}, allowedOrigins = [SITE], contentOrigin = '' } = {}) {
   const clock = { time: NOW.getTime() };
   const root = await mkdtemp(path.join(tmpdir(), 'buw-persona-'));
   const fake = await startFakeS3();
@@ -32,7 +32,7 @@ async function fixture({ requireRemoteUser = true, env = {} } = {}) {
   fake.seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const hub = createHub({ bucket, enabled: true, now: () => new Date(clock.time), env });
-  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, hub, allowedOrigins: [SITE] });
+  const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'c.json'), sectionsTtl: 0, requireRemoteUser, hub, allowedOrigins, contentOrigin });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, route, data, user = 'owner') => {
@@ -45,13 +45,21 @@ async function fixture({ requireRemoteUser = true, env = {} } = {}) {
     try { body = JSON.parse(text); } catch { /* not JSON */ }
     return { status: answered.status, body };
   };
+  /** A request with exactly the headers given: what a page, a script or another program would send. */
+  const raw = async (method, route, { headers = {}, body } = {}) => {
+    const answered = await fetch(`${origin}/api${route}`, { method, headers, body });
+    const text = await answered.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    return { status: answered.status, body: parsed };
+  };
   const files = agent => [...fake.objects.keys()].filter(name => name.startsWith(`sections/inbox/team/${agent}/persona-`)).sort();
   /** Moves the clock a second on, so two writes never share a stamp. */
   const tick = () => { clock.time += 1000; };
   const save = async (agent, data, user = 'owner') => { tick(); return call('POST', `/hub/team/${agent}/persona`, data, user); };
   const revert = async (agent, data, user = 'owner') => { tick(); return call('POST', `/hub/team/${agent}/persona/revert`, data, user); };
   const seed = seeder(fake);
-  return { clock, fake, hub, call, files, save, revert, seed, close: async () => { server.closeAllConnections?.(); server.close(); await fake.close(); } };
+  return { clock, fake, hub, call, raw, files, save, revert, seed, close: async () => { server.closeAllConnections?.(); server.close(); await fake.close(); } };
 }
 
 test('checkPersonaEdit: a good edit is cleaned; every other key, length, control character, model and secret is refused', () => {
@@ -447,15 +455,23 @@ function putExport(f, { minutes = 12, main, options = OPTIONS } = {}) {
   seedAgentConfig(f.fake, raw);
   return raw;
 }
-const changeBody = (extra = {}) => ({ primary: SONNET, fallbacks: [CODEX, FLASH], why: 'Codex is slow today.', ...extra });
+const changeBody = (extra = {}) => ({ primary: SONNET, fallbacks: [CODEX, FLASH], ...extra });
 const approvals = f => [...f.fake.objects.keys()].filter(name => name.includes('/agent-config/changes/') && name.endsWith('/approved.json'));
 const asksWritten = f => [...f.fake.objects.keys()].filter(name => /\/asks\/[^/]+\/ask\.json$/.test(name)).length;
 /** The host's result.json. It lands `landedAfterMs` after its own `at` (the tick start), which the bucket's last-modified time shows. */
 const hostResult = (f, id, outcome, code, { landedAfterMs = 0, ...extra } = {}) => f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome, code, rolledBack: false, at: new Date(f.clock.time).toISOString(), ...extra }), 'application/json', { writer: 'hermes-config' }, new Date(f.clock.time + landedAfterMs));
 const detailsOf = async (f, agent = 'teardown') => (await f.call('GET', `/hub/team/${agent}/details`)).body;
-const postChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
+/** The order the page would show as current for this agent (its `base`); a stand-in when the agent has none or the host has published nothing. */
+const baseOf = async (f, agent) => {
+  const settings = (await f.call('GET', `/hub/team/${agent}/details`)).body?.settings;
+  const set = settings?.effective ?? (settings?.model?.provider ? { provider: settings.model.provider, model: settings.model.default, fallbacks: settings.fallbacks } : null);
+  return set ?? { ...CODEX, fallbacks: [] };
+};
+/** The owner's press: the body gets the current order as `base`, as the page sends it, unless it names its own. */
+const postChange = async (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, 'base' in data ? data : { ...data, base: await baseOf(f, agent) }, user);
+const rawChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
 
-test('profile change: an owner\'s Opus pick is kept through the real routes, from the Edit page and from an agent\'s Ask, and the Ask it reads carries the warning', async () => {
+test('profile change: an owner\'s Opus pick is kept through the real routes, from the Edit page and from an agent\'s Ask', async () => {
   const OPUS = { provider: 'anthropic', model: 'claude-opus-5-5' };
   const options = { main: [...OPTIONS.main, OPUS], briefs: OPTIONS.briefs };
   const warning = ask => { const edit = profileEditOf(ask); return opusNote(edit.primary, edit.fallbacks); };
@@ -464,11 +480,10 @@ test('profile change: an owner\'s Opus pick is kept through the real routes, fro
     putExport(f, { options, minutes: 0 });
     const made = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [OPUS, CODEX] });
     assert.equal(made.status, 201, JSON.stringify(made.body));
-    assert.match(warning((await f.call('GET', `/hub/asks/${made.body.ask}`)).body), /^Opus is a fallback/);
-    assert.equal((await answerWith(f, made.body.ask, 'apply')).body.agentEdit.applied, true);
-    assert.deepEqual(f.fake.json(changeKey(made.body.ask, 'approved.json')).to, { ...SONNET, fallbacks: [OPUS, CODEX] }, 'unchanged and in order');
+    assert.equal(asksWritten(f), 0, 'the press writes no Ask');
+    assert.deepEqual(f.fake.json(changeKey(made.body.change, 'approved.json')).to, { ...SONNET, fallbacks: [OPUS, CODEX] }, 'unchanged and in order');
     f.clock.time += 120000;
-    hostResult(f, made.body.ask, 'applied', 'ok');
+    hostResult(f, made.body.change, 'applied', 'ok');
     f.clock.time += 60000;
     putExport(f, { minutes: 0, options, main: { ...SONNET, fallbacks: [OPUS, CODEX] } });
     const live = await detailsOf(f);
@@ -477,10 +492,9 @@ test('profile change: an owner\'s Opus pick is kept through the real routes, fro
     // A later change of this profile that keeps the pick: nothing strips it.
     const other = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX, OPUS] });
     assert.equal(other.status, 201, JSON.stringify(other.body));
-    assert.equal((await answerWith(f, other.body.ask, 'apply')).body.agentEdit.applied, true);
-    const reordered = f.fake.json(changeKey(other.body.ask, 'approved.json'));
+    const reordered = f.fake.json(changeKey(other.body.change, 'approved.json'));
     assert.deepEqual([reordered.from.fallbacks, reordered.to.fallbacks], [[OPUS, CODEX], [CODEX, OPUS]]);
-    hostResult(f, other.body.ask, 'applied', 'ok');
+    hostResult(f, other.body.change, 'applied', 'ok');
     // An agent's own Ask naming Opus as the primary: the page warns from the Ask itself, a skip writes nothing, Apply signs exactly that.
     const before = approvals(f).length;
     const filed = agentEditAsk(f, 'op01', { op: 'profile', profile: 'main', primary: OPUS, fallbacks: [SONNET], why: 'Try Opus.' });
@@ -492,7 +506,9 @@ test('profile change: an owner\'s Opus pick is kept through the real routes, fro
   } finally { await f.close(); }
 });
 
-test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, Apply signs, the host answers, a newer export shows it live', async () => {
+const sentEvents = f => [...f.fake.objects.keys()].filter(name => /\/events\/[^/]+\/[^/]*-hub-[^/]*\.json$/.test(name)).map(name => f.fake.json(name)).filter(event => event.kind === 'profile-change-sent');
+
+test('profile change, end to end from Teardown: the press signs at once with no Ask, the host answers, a newer export shows it live', async () => {
   const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
   try {
     putExport(f);
@@ -501,56 +517,43 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.deepEqual(before.settings.modelOptions, OPTIONS.main, 'the host\'s own list reaches the page');
     assert.equal(before.change, undefined);
 
-    // 1. The request makes one Ask, written by the Hub: its id, project, origin, kind and passkey flag are the Hub's.
+    // 1. The press signs at once: one approved.json, no Ask, no Needs you item, an event.
+    const needsBefore = JSON.stringify((await f.call('GET', '/hub/inbox')).body);
     const made = await postChange(f, 'teardown', changeBody());
     assert.equal(made.status, 201, JSON.stringify(made.body));
-    const id = made.body.ask;
+    const id = made.body.change;
     assert.match(id, new RegExp(`^${day}-profile-main-[a-z0-9]{4}$`));
+    assert.equal(made.body.state, 'waiting');
     assert.deepEqual(made.body.from, { ...CODEX, fallbacks: [SONNET, DEEPSEEK] });
     assert.deepEqual(made.body.to, { ...SONNET, fallbacks: [CODEX, FLASH] });
-    const stored = f.fake.json(`sections/inbox/asks/${id}/ask.json`);
-    assert.deepEqual([stored.project, stored.from, stored.kind, stored.requirePasskey, stored.options], ['workspace-app', { tool: 'hub' }, 'approval', true, AGENT_EDIT_OPTIONS]);
-    assert.deepEqual(validateAgentEdit(stored), []);
-    assert.match(stored.context, /Now: openai-codex · gpt-6-sol, then anthropic · claude-sonnet-5-5, then deepseek · deepseek-v4-pro\./);
-    assert.match(stored.context, /New: anthropic · claude-sonnet-5-5, then openai-codex · gpt-6-sol, then deepseek · deepseek-flash\./);
-    assert.match(stored.context, /shared by Hermes, Researcher, Market researcher, Teardown and Planner\./);
-    assert.match(stored.context, /Changing this restarts Hermes main\. Usually done in about a minute, at most 5 if the host's quick check is off\. A chat or job running then stops\./);
-    assert.equal(approvals(f).length, 0, 'asking signs nothing');
-
-    // 2. The Hub's own read of that file: the Ask folder, the id check and the state all accept it. It is open and the Discord path cannot answer it.
-    assert.equal(validId(id), true);
-    const open = (await f.call('GET', `/hub/asks/${id}`)).body;
-    assert.deepEqual([open.state, open.agentEdit.op, open.requirePasskey, open.agentEditBlocked], ['open', 'profile', true, undefined]);
-    assert.ok(JSON.stringify((await f.call('GET', '/hub/inbox')).body).includes(id), 'it is in the inbox, among the Asks');
-    assert.deepEqual(discordEligible(stored), { ok: false, reason: 'This Ask requires a passkey.' });
-    assert.equal(discordEligible({ ...stored, requirePasskey: false }).ok, false, 'and still not if the flag were missing');
-
-    // 3. Apply signs: one approved.json, create-only, with the old chain read from the export at this moment.
-    const done = await answerWith(f, id, 'apply');
-    assert.equal(done.status, 201, JSON.stringify(done.body));
-    assert.equal(done.body.agentEdit.applied, true);
+    assert.equal(asksWritten(f), 0, 'no Ask');
+    assert.equal(JSON.stringify((await f.call('GET', '/hub/inbox')).body), needsBefore, 'nothing new on Needs you');
     assert.deepEqual(approvals(f), [changeKey(id, 'approved.json')]);
     const signed = f.fake.json(changeKey(id, 'approved.json'));
-    assert.deepEqual(Object.keys(signed).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'signature', 'to', 'v']);
+    assert.deepEqual(Object.keys(signed).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'signature', 'to', 'v'], 'the host\'s exact keys');
     assert.deepEqual([signed.v, signed.kind, signed.change, signed.ask, signed.profile, signed.by], [1, 'profile-change', id, id, 'main', 'owner']);
     assert.deepEqual([signed.from, signed.to], [made.body.from, made.body.to]);
     assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 70 * 60 * 1000, 'a press means now: 70 minutes cover a 60 minute Briefs wait and the tick after it');
     assert.equal(verify(signed, publicKey), true, 'the Hub\'s signature verifies with the public key');
     assert.equal(verify({ ...signed, to: { ...signed.to, model: 'claude-haiku-5-5' } }, publicKey), false);
-    assert.equal((await answerWith(f, id, 'apply')).status, 409, 'answered twice');
-    assert.equal(approvals(f).length, 1, 'one Ask makes one approval');
+    const sent = sentEvents(f);
+    assert.equal(sent.length, 1);
+    assert.deepEqual([sent[0].change, sent[0].profile, sent[0].title, sent[0].by, sent[0].host, sent[0].source, sent[0].undoOf], [id, 'main', 'Model change sent: Hermes main to claude-sonnet-5-5', 'owner', 'hub', 'hub', undefined]);
 
-    // 4. Waiting: Details of any agent on the profile says so, and a second request for the profile is refused until the host answers.
+    // 2. Waiting: Details of any agent on the profile says so, and a second press for the profile is refused until the host answers.
     f.clock.time += 60000;
     const waiting = await detailsOf(f, 'hermes');
     assert.deepEqual([waiting.change.state, waiting.change.id, waiting.change.to.model], ['waiting', id, 'claude-sonnet-5-5']);
-    assert.equal((await postChange(f, 'planner', changeBody({ fallbacks: [] }))).status, 409);
+    const second = await postChange(f, 'planner', changeBody({ fallbacks: [] }));
+    assert.equal(second.status, 409);
+    assert.match(second.body.error, /still waiting for the Hermes host/);
+    assert.equal(approvals(f).length, 1);
 
-    // 5. The host applied it: a result with the card API's mark. The export does not show it yet.
+    // 3. The host applied it: a result with the card API's mark. The export does not show it yet.
     f.clock.time += 120000;
     hostResult(f, id, 'applied', 'ok');
     assert.equal((await detailsOf(f)).change.state, 'applied');
-    // 6. A newer export, made at or after the result, with the new settings: live in Details, on the Team card and in Auto's label.
+    // 4. A newer export, made at or after the result, with the new settings: live in Details, on the Team card and in Auto's label.
     f.clock.time += 60000;
     putExport(f, { minutes: 0, main: { ...SONNET, fallbacks: [CODEX, FLASH] } });
     const live = await detailsOf(f);
@@ -563,7 +566,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
   } finally { await f.close(); }
 });
 
-test('profile change: signed out, no key, no list, a model the host does not offer, no change and every other bad body are refused before an Ask is written', async () => {
+test('profile change: signed out, no key, no list, a model the host does not offer, no change and every other bad body are refused before anything is signed', async () => {
   const f = await fixture({ env: SIGNING });
   const keyless = await fixture();
   try {
@@ -586,7 +589,21 @@ test('profile change: signed out, no key, no list, a model the host does not off
     await refused(changeBody({ fallbacks: [HAIKU, DEEPSEEK, FLASH, CODEX, { provider: 'x', model: 'y' }] }), 400, /0 to 4/);
     await refused(changeBody({ primary: { provider: 'anthropic' } }), 400, /primary is/);
     await refused(changeBody({ primary: { ...SONNET, key: 'x' } }), 400, /primary is/);
-    await refused(changeBody({ why: `key: sk-ant-${'c'.repeat(30)}` }), 400, /looks like a secret/);
+    // The old page's body (a `why`, no `base`) and a body with a `why` of its own: the page is out of date. A stale or malformed base is refused.
+    const bare = await rawChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX], why: 'Codex is slow.' });
+    assert.deepEqual([bare.status, bare.body.error], [400, 'This page is out of date. Reload it.']);
+    assert.equal((await rawChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX] })).status, 400, 'no base');
+    await refused(changeBody({ why: 'x', base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] } }), 400, /out of date/);
+    await refused(changeBody({ base: { ...CODEX, fallbacks: [SONNET] } }), 409, /changed while you were looking/);
+    await refused(changeBody({ base: { ...SONNET, fallbacks: [CODEX, DEEPSEEK] } }), 409, /changed while you were looking/);
+    await refused(changeBody({ base: { provider: 'openai-codex' } }), 400, /out of date/);
+    await refused(changeBody({ base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK], extra: 1 } }), 400, /out of date/);
+    await refused(changeBody({ base: 'x' }), 400, /out of date/);
+    // An undo and a new order together, an undo of a change that is not there, and the model list is not widened by a body.
+    await refused({ undo: `${day}-profile-main-zz99`, primary: SONNET, fallbacks: [], base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] } }, 400, /not both/);
+    await refused({ undo: `${day}-profile-main-zz99`, base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] } }, 409, /newest change/);
+    await refused({ undo: 'not an id', base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] } }, 400, /not a change id/);
+    await refused(changeBody({ also: [{ provider: 'anthropic', model: 'claude-opus-5' }], primary: { provider: 'anthropic', model: 'claude-opus-5' } }), 400, /no field also/);
     await refused(changeBody({ profile: 'briefs' }), 400, /no field profile/);
     await refused(changeBody({ model: 'x' }), 400, /no field model/);
     for (const name of ['toolsets', 'platformToolsets', 'skills', 'soul', 'cron', 'jobs', 'terminal', 'provider']) await refused(changeBody({ [name]: 'x' }), 403, /view-only/);
@@ -594,7 +611,7 @@ test('profile change: signed out, no key, no list, a model the host does not off
     await refused(changeBody(), 404, /No such agent/, 'nobody');
     // Briefs cannot pick Codex: the host's list for briefs has none.
     await refused(changeBody({ primary: CODEX, fallbacks: [] }), 409, /not a model the Hermes host offers/, 'briefs');
-    assert.equal(asksWritten(f), 0, 'nothing was written');
+    assert.equal(asksWritten(f) + approvals(f).length, 0, 'nothing was written');
     // An export 8 hours old: the settings may have changed since.
     f.clock.time += 8 * 3600 * 1000;
     const old = await postChange(f, 'teardown', changeBody());
@@ -605,7 +622,7 @@ test('profile change: signed out, no key, no list, a model the host does not off
     const off = await postChange(keyless, 'teardown', changeBody());
     assert.equal(off.status, 409);
     assert.match(off.body.error, /no signing key/);
-    assert.equal(asksWritten(f) + asksWritten(keyless), 0);
+    assert.equal(asksWritten(f) + asksWritten(keyless) + approvals(f).length + approvals(keyless).length, 0);
   } finally { await f.close(); await keyless.close(); }
 });
 
@@ -685,7 +702,7 @@ test('profile change: the old settings are read at Apply, not when the Ask was w
 
 test('profile change: after the host confirms, before any export, the next change starts from the new order; runningAt is the landing; one event per result, with fixed words', async () => {
   const f = await fixture({ env: SIGNING });
-  const hubEventNames = () => [...f.fake.objects.keys()].filter(name => /\/events\/[^/]+\/[^/]*-hub-[^/]*\.json$/.test(name) && f.fake.json(name).change);
+  const hubEventNames = () => [...f.fake.objects.keys()].filter(name => /\/events\/[^/]+\/[^/]*-hub-[^/]*\.json$/.test(name) && f.fake.json(name).change && f.fake.json(name).kind !== 'profile-change-sent');
   /** The Hub's own change events, parsed, once `count` of them exist (the sweep runs after the answer, so wait for it). */
   const hubEvents = async count => {
     for (let attempt = 0; attempt < 40 && hubEventNames().length < count; attempt += 1) await new Promise(resolve => setTimeout(resolve, 25));
@@ -694,9 +711,8 @@ test('profile change: after the host confirms, before any export, the next chang
   try {
     putExport(f);
     const first = await postChange(f, 'teardown', changeBody());
-    assert.equal((await answerWith(f, first.body.ask, 'apply')).body.agentEdit.applied, true);
     f.clock.time += 120000;
-    hostResult(f, first.body.ask, 'applied', 'ok', { landedAfterMs: 33000 });
+    hostResult(f, first.body.change, 'applied', 'ok', { landedAfterMs: 33000 });
     const ranAt = new Date(Math.floor((f.clock.time + 33000) / 1000) * 1000).toISOString(); // S3 times have whole seconds
     f.clock.time += 40000;
     const details = await detailsOf(f);
@@ -711,7 +727,7 @@ test('profile change: after the host confirms, before any export, the next chang
     // One event for the result.
     const one = await hubEvents(1);
     assert.equal(one.length, 1);
-    assert.deepEqual([one[0].kind, one[0].change, one[0].title, one[0].ts, one[0].host, one[0].source], ['profile-change', first.body.ask, 'Hermes main is running claude-sonnet-5-5', ranAt, 'hub', 'hub']);
+    assert.deepEqual([one[0].kind, one[0].change, one[0].title, one[0].ts, one[0].host, one[0].source], ['profile-change', first.body.change, 'Hermes main is running claude-sonnet-5-5', ranAt, 'hub', 'hub']);
     assert.ok(JSON.stringify((await f.call('GET', '/hub/today')).body).includes('Hermes main is running claude-sonnet-5-5'), 'Today shows it');
     // Repeated page loads, past the throttle, write nothing more.
     for (let load = 0; load < 3; load += 1) {
@@ -722,8 +738,7 @@ test('profile change: after the host confirms, before any export, the next chang
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(hubEventNames().length, 1, 'one event per change across repeated loads');
     // A failed change makes an alert with fixed words only, and the rollback failure says Hermes may be down.
-    assert.equal((await answerWith(f, next.body.ask, 'apply')).body.agentEdit.applied, true);
-    hostResult(f, next.body.ask, 'failed', 'rollback-failed', { rolledBack: false });
+    hostResult(f, next.body.change, 'failed', 'rollback-failed', { rolledBack: false });
     f.clock.time += 31000;
     await detailsOf(f);
     const events = await hubEvents(2);
@@ -739,8 +754,7 @@ test('profile change: a result counts only with the host\'s mark and beside a go
   try {
     putExport(f);
     const made = await postChange(f, 'teardown', changeBody());
-    const id = made.body.ask;
-    assert.equal((await answerWith(f, id, 'apply')).body.agentEdit.applied, true);
+    const id = made.body.change;
     f.clock.time += 60000;
     // No mark, or the passphrase's: ignored.
     f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date(f.clock.time).toISOString() }), 'application/json');
@@ -762,7 +776,7 @@ test('profile change: Apply signs the Ask file the page showed; a changed file, 
   const f = await fixture({ env: SIGNING });
   try {
     putExport(f);
-    const id = (await postChange(f, 'teardown', changeBody())).body.ask;
+    const id = agentEditAsk(f, 'rv01', { op: 'profile', profile: 'main', primary: SONNET, fallbacks: [CODEX] });
     const shown = (await f.call('GET', `/hub/asks/${id}`)).body;
     assert.match(shown.rev, /^[0-9a-f]{16}$/);
     // Someone with the passphrase overwrites ask.json (no writer mark) after the page loaded: another model.
@@ -1065,7 +1079,7 @@ test('an agent-edit Ask for a made persona applies through the same table; an ag
   } finally { await f.close(); }
 });
 
-test('the profile Ask of a made persona is for Hermes main and names it among those who share the profile', async () => {
+test('a made persona is on Hermes main: its press changes that profile', async () => {
   const f = await fixture({ env: { ...SIGNING, HERMES_URL: 'http://127.0.0.1:9', HERMES_API_KEY: 'k' } });
   try {
     putExport(f);
@@ -1073,7 +1087,7 @@ test('the profile Ask of a made persona is for Hermes main and names it among th
     assert.equal((await f.call('GET', '/hub/team/level-reviewer/details')).body.agent.editable.profile, true);
     const made = await postChange(f, 'level-reviewer', changeBody());
     assert.equal(made.status, 201, JSON.stringify(made.body));
-    assert.match(f.fake.json(`sections/inbox/asks/${made.body.ask}/ask.json`).context, /shared by Hermes, Researcher, Market researcher, Teardown, Planner and Level reviewer\./);
+    assert.equal(f.fake.json(changeKey(made.body.change, 'approved.json')).profile, 'main');
     assert.equal((await postChange(f, 'claude', changeBody())).status, 404);
   } finally { await f.close(); }
 });
@@ -1084,5 +1098,196 @@ test('save allows a Codex version as the model of a persona', async () => {
     const saved = await f.save('teardown', edit({ model: 'codex-terra' }));
     assert.equal(saved.status, 200);
     assert.equal((await f.call('GET', '/hub/team/teardown/persona')).body.current.model, 'codex-terra');
+  } finally { await f.close(); }
+});
+
+// --- the owner's press (ws-ubo.4): signs at once, and nothing an agent holds reaches it ---
+
+const CONTENT = 'https://content.example';
+/** Nothing was signed, no Ask was written, no event was made: the mark of a refused press. */
+const nothingHappened = (f, label = '') => {
+  assert.deepEqual(approvals(f), [], `no approved.json ${label}`);
+  assert.equal(asksWritten(f), 0, `no Ask ${label}`);
+  assert.deepEqual(sentEvents(f), [], `no event ${label}`);
+};
+const pressBody = (extra = {}) => ({ primary: SONNET, fallbacks: [CODEX], base: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] }, ...extra });
+const PAGE = { Origin: SITE, 'Content-Type': 'application/json', 'Remote-User': 'owner' };
+
+test('press, the attackers: a card page, a form, a script from another site and a bearer token get nothing signed', async () => {
+  const f = await fixture({ env: SIGNING, contentOrigin: CONTENT });
+  try {
+    putExport(f);
+    const post = (headers, body = JSON.stringify(pressBody())) => f.raw('POST', '/hub/team/teardown/profile-change', { headers, body });
+    // A card an agent wrote, fetching with the owner's cookie: its Origin is the content origin (layer 5).
+    const card = await post({ ...PAGE, Origin: CONTENT });
+    assert.equal(card.status, 403);
+    assert.match(card.body.error, /own pages/);
+    // A form post or text/plain from any page (layer 6), and no Origin at all (layer 5).
+    for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x']) assert.equal((await post({ ...PAGE, 'Content-Type': type })).status, 415, type);
+    assert.equal((await post({ 'Content-Type': 'application/json', 'Remote-User': 'owner' })).status, 403, 'no Origin');
+    for (const origin of ['null', 'https://evil.example', 'http://site.example']) assert.equal((await post({ ...PAGE, Origin: origin })).status, 403, origin);
+    // The card API's token, or any bearer, used at the site API: no Remote-User, so layer 4 (401), with a valid Origin.
+    assert.equal((await post({ Origin: SITE, 'Content-Type': 'application/json', Authorization: 'Bearer x' })).status, 401);
+    // A request the browser says is cross-site, same-site or a navigation (layer 8). Software that sends no such header meets layers 4 to 6.
+    for (const site of ['cross-site', 'same-site', 'none']) assert.equal((await post({ ...PAGE, 'Sec-Fetch-Site': site })).status, 403, site);
+    // Strict bodies: the old page's body, a view-only key.
+    assert.equal((await post(PAGE, JSON.stringify({ primary: SONNET, fallbacks: [CODEX], why: 'x' }))).status, 400);
+    assert.equal((await post(PAGE, JSON.stringify(pressBody({ skills: [] })))).status, 403);
+    nothingHappened(f, 'after every refusal');
+    // A GET to the route is not a route at all, and signs nothing.
+    assert.equal((await f.raw('GET', '/hub/team/teardown/profile-change', { headers: { 'Remote-User': 'owner' } })).status, 404);
+    nothingHappened(f, 'after a GET');
+    // The same request from the page itself is signed, with Sec-Fetch-Site: same-origin and without any (an older phone browser sends none).
+    const ok = await post({ ...PAGE, 'Sec-Fetch-Site': 'same-origin' });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+    assert.equal(approvals(f).length, 1);
+    f.fake.objects.delete(changeKey(ok.body.change, 'approved.json'));
+    const old = await post(PAGE);
+    assert.equal(old.status, 201, JSON.stringify(old.body));
+  } finally { await f.close(); }
+});
+
+test('press, a card page with the content origin wrongly in the allowed list is still refused', async () => {
+  const f = await fixture({ env: SIGNING, contentOrigin: CONTENT, allowedOrigins: [SITE, CONTENT] });
+  try {
+    putExport(f);
+    const post = headers => f.raw('POST', '/hub/team/teardown/profile-change', { headers, body: JSON.stringify(pressBody()) });
+    const card = await post({ ...PAGE, Origin: CONTENT });
+    assert.equal(card.status, 403);
+    assert.match(card.body.error, /card page cannot change a model/);
+    nothingHappened(f, 'from the content origin');
+    // The list is not what stops it: the same list lets that origin through to other routes, which is why this route has its own check.
+    assert.notEqual((await f.raw('POST', '/hub/asks/x/snooze', { headers: { ...PAGE, Origin: CONTENT }, body: '{}' })).status, 403);
+    // And the page's own origin still works on this fixture.
+    assert.equal((await post(PAGE)).status, 201);
+  } finally { await f.close(); }
+});
+
+test('press, two presses at once: one is signed, the other is a 409, and one approved.json exists', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const base = { ...CODEX, fallbacks: [SONNET, DEEPSEEK] };
+    const both = await Promise.all([postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX], base }), postChange(f, 'planner', { primary: HAIKU, fallbacks: [], base })]);
+    assert.deepEqual(both.map(item => item.status).sort(), [201, 409], JSON.stringify(both.map(item => item.body)));
+    assert.match(both.find(item => item.status === 409).body.error, /still waiting for the Hermes host/);
+    assert.equal(approvals(f).length, 1);
+    // A second tab pressing the same order after the first has landed: the profile waits, so 409 as well.
+    assert.equal((await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX], base })).status, 409);
+    assert.equal(approvals(f).length, 1);
+  } finally { await f.close(); }
+});
+
+test('press, an agent\'s Ask for the same change stays an Ask: nothing is signed until the owner\'s Apply, and an id that looks like a press gives no rights', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f);
+    const edit = { op: 'profile', profile: 'main', primary: SONNET, fallbacks: [CODEX] };
+    const filed = agentEditAsk(f, 'ag01', edit);
+    // An id shaped like the ones a press makes.
+    const lookalike = { ...askJson({ id: `${day}-profile-main-abcd`, project: 'workspace-app', now: NOW, options: AGENT_EDIT_OPTIONS, question: 'Change the model?', allowDrawing: false, kind: 'approval' }), requirePasskey: true, agentEdit: edit };
+    f.seed.ask(lookalike);
+    for (const id of [filed, lookalike.id]) {
+      const open = (await f.call('GET', `/hub/asks/${id}`)).body;
+      assert.equal(open.state, 'open', id);
+      assert.deepEqual(discordEligible(open), { ok: false, reason: 'This Ask requires a passkey.' }, 'and the Discord path cannot answer it');
+    }
+    assert.deepEqual(approvals(f), [], 'filing signs nothing');
+    // A look at the lists, the details and the day does not sign either.
+    for (const route of ['/hub/inbox', '/hub/today', '/hub/team/teardown/details']) await f.call('GET', route);
+    assert.deepEqual(approvals(f), []);
+    // A skip signs nothing; an Apply over the web signs exactly the Ask, once, under the Ask's own id.
+    assert.equal((await answerWith(f, lookalike.id, 'skip')).body.agentEdit, undefined);
+    assert.deepEqual(approvals(f), []);
+    assert.equal((await answerWith(f, filed, 'apply')).body.agentEdit.applied, true);
+    assert.deepEqual(approvals(f), [changeKey(filed, 'approved.json')]);
+    assert.deepEqual(sentEvents(f), [], 'an Apply is not a press: no press event');
+  } finally { await f.close(); }
+});
+
+test('press, a normal press never reaches past the host\'s model list; only a way back adds the models of its own signed `from`', async () => {
+  const GONE = { provider: 'openai-codex', model: 'gpt-6-sol-old' };
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f, { minutes: 0 });
+    const first = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX] });
+    assert.equal(first.status, 201, JSON.stringify(first.body));
+    // A signed history in which the order before it used a model the host no longer lists: signed with the Hub's own key, as a past press would have.
+    const id = first.body.change;
+    f.fake.objects.delete(changeKey(id, 'approved.json'));
+    const past = sign({ v: 1, kind: 'profile-change', change: id, profile: 'main', from: { ...GONE, fallbacks: [SONNET] }, to: { ...CODEX, fallbacks: [SONNET, DEEPSEEK] },
+      expires: new Date(f.clock.time + 3600000).toISOString(), nonce: 'AAAAAAAAAAAAAAAAAAAAAA', at: new Date(f.clock.time).toISOString(), by: 'owner', ask: id }, keyPair.privateKey);
+    f.fake.seed(changeKey(id, 'approved.json'), JSON.stringify(past), 'application/json');
+    f.clock.time += 120000;
+    hostResult(f, id, 'applied', 'ok');
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0 });
+    const current = { ...CODEX, fallbacks: [SONNET, DEEPSEEK] };
+    // A body that names the gone model is refused.
+    const named = await postChange(f, 'teardown', { primary: GONE, fallbacks: [SONNET], base: current });
+    assert.equal(named.status, 409);
+    assert.match(named.body.error, /not a model the Hermes host offers/);
+    assert.equal(approvals(f).length, 1);
+    // The way back signs exactly the signed `from`, off the list as it is. The host's own list check then decides.
+    const back = await postChange(f, 'teardown', { undo: id, base: current });
+    assert.equal(back.status, 201, JSON.stringify(back.body));
+    assert.deepEqual([back.body.to, back.body.from], [{ ...GONE, fallbacks: [SONNET] }, current]);
+    const signed = f.fake.json(changeKey(back.body.change, 'approved.json'));
+    assert.deepEqual([signed.to, signed.from], [{ ...GONE, fallbacks: [SONNET] }, current]);
+    assert.equal(verify(signed, publicKey), true);
+    const sent = sentEvents(f);
+    assert.deepEqual(sent.map(event => event.undoOf), [undefined, id]);
+    assert.equal(sent[1].title, 'Model change sent: Hermes main to gpt-6-sol-old');
+    // While it waits, nothing else is signed, and the same undo again is a 409.
+    assert.equal((await postChange(f, 'teardown', { undo: id, base: current })).status, 409);
+    assert.equal((await postChange(f, 'teardown', { primary: HAIKU, fallbacks: [], base: current })).status, 409);
+    assert.equal(approvals(f).length, 2);
+  } finally { await f.close(); }
+});
+
+test('press, the way back: only the newest change, finished with ok, and still what runs; a host edit after it, a failure or an older change are 409s', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f, { minutes: 0 });
+    const start = { ...CODEX, fallbacks: [SONNET, DEEPSEEK] };
+    const one = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [CODEX] });
+    const oneNow = { ...SONNET, fallbacks: [CODEX] };
+    // Still waiting: nothing to go back from.
+    assert.equal((await postChange(f, 'teardown', { undo: one.body.change, base: start })).status, 409);
+    f.clock.time += 120000;
+    hostResult(f, one.body.change, 'applied', 'ok');
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, main: oneNow });
+    // A body with both an undo and a new order is a 400; an id that is not the newest is a 409; a stale base is a 409.
+    assert.equal((await postChange(f, 'teardown', { undo: one.body.change, primary: HAIKU, fallbacks: [], base: oneNow })).status, 400);
+    assert.equal((await postChange(f, 'teardown', { undo: `${day}-profile-main-zz00`, base: oneNow })).status, 409);
+    assert.equal((await postChange(f, 'teardown', { undo: one.body.change, base: start })).status, 409, 'the page showed another order');
+    assert.equal(approvals(f).length, 1);
+    // The other profile's way back with this id is refused too.
+    assert.equal((await postChange(f, 'briefs', { undo: one.body.change, base: { ...SONNET, fallbacks: [] } })).status, 409);
+    // The way back works and finishes; then the older change is no longer the newest.
+    const back = await postChange(f, 'teardown', { undo: one.body.change, base: oneNow });
+    assert.equal(back.status, 201, JSON.stringify(back.body));
+    assert.deepEqual(back.body.to, start);
+    f.clock.time += 120000;
+    hostResult(f, back.body.change, 'applied', 'ok');
+    f.clock.time += 60000;
+    putExport(f, { minutes: 0, main: start });
+    assert.equal((await postChange(f, 'teardown', { undo: one.body.change, base: start })).status, 409, 'the older change');
+    // A host edit after the newest change replaced it: its way back would undo the edit, so it is refused.
+    const edited = { ...HAIKU, fallbacks: [DEEPSEEK] };
+    f.clock.time += 120000;
+    putExport(f, { minutes: 0, main: edited });
+    const stale = await postChange(f, 'teardown', { undo: back.body.change, base: edited });
+    assert.equal(stale.status, 409);
+    assert.match(stale.body.error, /no longer runs/);
+    // A change the host failed has nothing to go back from.
+    const failedOne = await postChange(f, 'teardown', { primary: SONNET, fallbacks: [] });
+    assert.equal(failedOne.status, 201, JSON.stringify(failedOne.body));
+    hostResult(f, failedOne.body.change, 'failed', 'missing-key', { rolledBack: false });
+    const none = await postChange(f, 'teardown', { undo: failedOne.body.change, base: edited });
+    assert.equal(none.status, 409);
+    assert.match(none.body.error, /did not finish/);
+    assert.equal(approvals(f).length, 3);
   } finally { await f.close(); }
 });

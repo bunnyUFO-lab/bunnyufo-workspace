@@ -309,13 +309,12 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const personaStore = createPersonaStore({ bucket, key, folder, putCreateOnly, fail, now, live: fn => listCache.liveReads(fn) });
   // An agent's proposal to edit a persona: only the owner's Apply answer, over the web, writes a version (hub-agent-edit.mjs).
   const agentEditFlow = createAgentEdits({
-    personas: personaStore, log, agents: () => allAgents(),
+    personas: personaStore, log,
     profiles: {
       signingKey,
       exported: at => loadAgentConfig(at),
       changes: (profile, at) => loadProfileChanges(profile, at),
-      putApproval: (id, doc) => putCreateOnly(`agent-config/changes/${id}/approved.json`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', Object.assign(new Error('That change was already signed.'), { status: 409 })),
-      putAsk: (id, ask) => putCreateOnly(`asks/${id}/ask.json`, `${JSON.stringify(ask, null, 2)}\n`, 'application/json', Object.assign(new Error('That Ask exists.'), { status: 409, conflict: true })),
+      putApproval: (id, doc) => putCreateOnly(`agent-config/changes/${id}/approved.json`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', Object.assign(new Error('That change was already signed.'), { status: 409, conflict: true })),
     },
   });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
@@ -646,26 +645,64 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     return { status: 200, body: { ok: true, ...choice } };
   }
 
+  /** `https://host/path` -> `https://host`, or '' for something that is not an address. */
+  const originOfAddress = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
+
   /**
-   * "Send for approval" on the Edit page: a change of the model and fallback order of the agent's Hermes profile. Strict body `{ primary, fallbacks, why? }`;
-   * a view-only key is a 403 and any other unknown key a 400. Writes the Ask (hub-agent-edit.mjs) and answers `{ ask, state, from, to }`; nothing is signed
-   * until the owner answers Apply on that Ask, behind the passkey.
+   * The signed-in owner's press on the Edit page (ws-ubo.4): "Change and restart Hermes <profile>". It signs at once and writes no Ask. Strict body, one of
+   *   `{ primary, fallbacks, base }`   a new order, `base` being the order the page showed as current
+   *   `{ undo: '<change id>', base }`  back to the order that change replaced
+   * a view-only key is a 403 and any other unknown key a 400. Answers 201 `{ change, state: 'waiting', from, to }`.
+   *
+   * This route is the only caller of `applyDirect` and `undo`. Before it, server.mjs has already refused a write with no Remote-User (401), an Origin that is not
+   * in the allowed list (403) and a body that is not JSON (415). Here the request must also not come from the content origin whatever the list says
+   * (an agent's card page is served there and the session cookie reaches it), and `Sec-Fetch-Site`, when the browser sends it, must be same-origin. The user is
+   * `Remote-User` only: `Authorization` is never read here.
    */
-  async function requestProfileChange(agentId, raw, user, at) {
+  async function requestProfileChange(agentId, raw, user, at, { headers = {}, contentOrigin = '' } = {}) {
     if (!user) throw fail('Sign in to change a model.', 401);
+    const origin = String(headers.origin ?? '');
+    const content = originOfAddress(contentOrigin || env.BUW_CONTENT_ORIGIN || '');
+    if (content && originOfAddress(origin) === content) throw fail('A card page cannot change a model.', 403);
+    const site = headers['sec-fetch-site'];
+    if (site !== undefined && String(site).toLowerCase() !== 'same-origin') throw fail('A model is changed from this site\'s own page.', 403);
     const agent = (await allAgents()).find(item => item.id === agentId);
     if (!agent) throw fail('No such agent.', 404);
     if (!agent.profile) throw fail('This agent has no Hermes profile to change.', 404);
     if (Object.keys(raw).some(name => name !== 'fallbacks' && VIEW_ONLY.includes(name))) throw fail(VIEW_ONLY_MESSAGE, 403);
-    const extra = Object.keys(raw).filter(name => !['primary', 'fallbacks', 'why'].includes(name));
+    const OUT_OF_DATE = 'This page is out of date. Reload it.';
+    if (raw.base === undefined || raw.why !== undefined) throw fail(OUT_OF_DATE, 400);
+    const undoing = raw.undo !== undefined;
+    const allowed = undoing ? ['undo', 'base'] : ['primary', 'fallbacks', 'base'];
+    if (undoing && (raw.primary !== undefined || raw.fallbacks !== undefined)) throw fail('Send a new order or an undo, not both.', 400);
+    const extra = Object.keys(raw).filter(name => !allowed.includes(name));
     if (extra.length) throw fail(`A model change has no field ${extra.slice(0, 3).join(', ')}.`, 400);
-    const edit = { op: 'profile', profile: agent.profile, primary: raw.primary, fallbacks: raw.fallbacks, ...(raw.why === undefined ? {} : { why: typeof raw.why === 'string' ? raw.why.replace(/\s+/g, ' ').trim() : raw.why }) };
-    const problems = validateAgentEdit({ agentEdit: edit, requirePasskey: true, options: AGENT_EDIT_OPTIONS });
-    if (problems.length) throw fail(`${problems.slice(0, 2).join('; ')}.`, 400);
-    for (const item of [edit.primary, ...edit.fallbacks]) if (!cleanId(item.provider) || !cleanId(item.model)) throw fail('That is not a model id.', 400);
-    if (edit.why !== undefined && redactSecrets(edit.why).count > 0) throw fail('That text looks like a secret.', 400);
-    const made = await agentEditFlow.createProfileAsk({ edit, user, at });
-    return { status: 201, body: { ask: made.ask, state: 'open', from: made.from, to: made.to } };
+    const base = raw.base;
+    const refOk = item => item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 2 && cleanId(item.provider) && cleanId(item.model);
+    if (!base || typeof base !== 'object' || Array.isArray(base) || Object.keys(base).length !== 3 || !refOk({ provider: base.provider, model: base.model })
+      || !Array.isArray(base.fallbacks) || base.fallbacks.length > 4 || !base.fallbacks.every(refOk)) throw fail(OUT_OF_DATE, 400);
+    const baseSet = { provider: base.provider, model: base.model, fallbacks: base.fallbacks.map(item => ({ provider: item.provider, model: item.model })) };
+    let made;
+    if (undoing) {
+      if (typeof raw.undo !== 'string' || !/^[0-9]{8}-profile-[a-z]+-[a-z0-9]{4}$/.test(raw.undo)) throw fail('That is not a change id.', 400);
+      made = await agentEditFlow.undo({ profile: agent.profile, changeId: raw.undo, base: baseSet, user, at });
+    } else {
+      const edit = { op: 'profile', profile: agent.profile, primary: raw.primary, fallbacks: raw.fallbacks };
+      const problems = validateAgentEdit({ agentEdit: edit, requirePasskey: true, options: AGENT_EDIT_OPTIONS });
+      if (problems.length) throw fail(`${problems.slice(0, 2).join('; ')}.`, 400);
+      for (const item of [edit.primary, ...edit.fallbacks]) if (!cleanId(item.provider) || !cleanId(item.model)) throw fail('That is not a model id.', 400);
+      made = await agentEditFlow.applyDirect({ edit, base: baseSet, user, at });
+    }
+    // The record of the press, beside the result event the sweep writes later. A failed write is logged and does not fail the press: the change is signed.
+    try {
+      await putHubEvent({
+        ts: at.toISOString(), kind: 'profile-change-sent', change: made.change, profile: agent.profile, title: `Model change sent: Hermes ${agent.profile} to ${made.to.model}`,
+        host: 'hub', source: 'hub', by: user, ...(made.undoOf ? { undoOf: made.undoOf } : {}),
+      }, at);
+    } catch (error) {
+      log(`[hub] the event for ${made.change} was not written: ${String(error.message).slice(0, 120)}`);
+    }
+    return { status: 201, body: { change: made.change, state: 'waiting', from: made.from, to: made.to } };
   }
 
   const stale = what => fail(`This ${what} changed while you were looking; reload and try again.`, 409);
@@ -1661,7 +1698,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       }
       return true;
     },
-    async handleRoute({ request, response, method, route, query = new URLSearchParams(), user = null, requireRemoteUser = false }) {
+    async handleRoute({ request, response, method, route, query = new URLSearchParams(), user = null, requireRemoteUser = false, contentOrigin = '' }) {
       if (!String(route).startsWith('/hub/')) return false;
       try {
         if (!on) throw fail('The Hub is off on this host.', 404);
@@ -1887,7 +1924,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);
           send({ status: 200, body: match[2] ? await personaStore.revert(match[1], raw, user, at) : await personaStore.save(match[1], raw, user, at) });
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/profile-change$/.exec(route))) {
-          send(await requestProfileChange(match[1], raw, user, at));
+          send(await requestProfileChange(match[1], raw, user, at, { headers: request.headers, contentOrigin }));
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {
           send(await chooseAvatar(match[1], raw, user, at));
         } else {
