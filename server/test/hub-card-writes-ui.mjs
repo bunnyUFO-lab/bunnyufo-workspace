@@ -177,7 +177,19 @@ try {
   await noSideways(phone, 'the Team panel');
   await expect(panel.locator('[data-card-write-unsaved]')).toBeVisible();
   assert.equal(fixture.fake.text('sections/inbox/library-writes.json'), null, 'nothing is saved until the owner changes it');
+  // A save that fails says why and puts the box back; the list stays "not saved yet".
+  fixture.fake.fail = (key, method) => method === 'PUT' && key.endsWith('library-writes.json') && 500;
   await lanes.uncheck();
+  await expect(panel.locator('[data-card-write-error]')).toContainText('Not saved');
+  await expect(panel.locator('[data-card-write-error]')).toContainText('back as it was');
+  await expect(lanes).toBeChecked();
+  await expect(panel.locator('[data-card-write-unsaved]')).toBeVisible();
+  assert.equal(await panel.locator('[data-card-write-saved]').count(), 0);
+  fixture.fake.fail = null;
+  await lanes.uncheck();
+  await expect(panel.locator('[data-card-write-saved]')).toHaveText('Saved. Takes effect within 30 seconds.');
+  await expect(panel.locator('[data-card-write-unsaved]')).toHaveCount(0);
+  assert.ok((await lanes.boundingBox()).height >= 24, 'the box itself is big enough to hit');
   await expect(lanes).not.toBeChecked();
   await expect.poll(() => fixture.fake.json('sections/inbox/library-writes.json')?.off).toEqual(['lanes']);
   await expect(panel.locator('[data-card-write-unsaved]')).toHaveCount(0);
