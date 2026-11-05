@@ -38,7 +38,11 @@ export function Menu({ items, label, anchor, onClose }: MenuProps) {
     setAt({ left, top })
   }, [anchor, asSheet])
   useEffect(() => {
-    const outside = (event: PointerEvent) => { if (!box.current?.contains(event.target as Node)) onClose() }
+    // The scrim closes on its click, not on pointerdown: removing it on pointerdown lets the tap's click land on what is underneath.
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Element
+      if (!box.current?.contains(target) && !target.classList?.contains('item-menu-scrim')) onClose()
+    }
     // Capture, so Esc closes the menu before App reads it as "back to the cards".
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.stopImmediatePropagation(); event.preventDefault(); onClose() }
@@ -64,7 +68,7 @@ export function Menu({ items, label, anchor, onClose }: MenuProps) {
   }
   return createPortal(
     <>
-      {asSheet && <div className="item-menu-scrim" aria-hidden="true" />}
+      {asSheet && <div className="item-menu-scrim" aria-hidden="true" onClick={onClose} />}
       <div
         ref={box}
         className={`item-menu${asSheet ? ' sheet' : ''}`}
