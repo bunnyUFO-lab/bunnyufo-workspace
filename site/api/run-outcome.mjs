@@ -71,5 +71,11 @@ export function unknownOutcome({ card, at }) {
 /** The result when a run could not be started at all. */
 export const startFailedOutcome = ({ reason, at }) => ({ v: 1, outcome: 'failed', reason: 'start-failed', summary: `Hermes did not start: ${flat(reason, 300) || 'no reason given'}`, by: 'hub', at });
 
+/**
+ * The result when the first run started, hit the plan's quota, and only the retry on Anthropic could not start. Not `start-failed` (the run did
+ * start) and not `usage-limit` (`routines.mjs` reads that as a cloud pause signal).
+ */
+export const retryFailedOutcome = ({ at }) => ({ v: 1, outcome: 'failed', reason: 'retry-failed', summary: 'Codex quota reached; the retry on Anthropic could not start.', by: 'hub', at });
+
 /** `report.md` is the run's output, at most 256 KB. */
 export const reportOf = output => clip(output, 256 * 1024);
