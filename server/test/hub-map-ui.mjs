@@ -326,22 +326,24 @@ try {
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map`);
   await phone.locator('.hub-map-wrap').waitFor();
-  assert.equal(await phone.locator('.hub-chip.on').innerText(), 'Magic Loops');
+  // Phone width: the project is one native select (ws-ubo.2.1); its shown option is the chosen project.
+  const shown = () => phone.locator('.hub-map-chips select').evaluate(select => select.selectedOptions[0]?.textContent);
+  assert.equal(await shown(), 'Magic Loops');
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs on PC');
   assert.equal(await phone.locator('.hub-runs').getAttribute('title'), 'Work for this project runs on the PC by default.');
   assert.match(await phone.locator('.hub-runs').getAttribute('aria-label'), /^Runs on: Gaming PC/);
   await noSideways(phone, 'Roadmap at 390');
-  const heights = await phone.evaluate(() => ({ row: document.querySelector('.hub-map-chips').getBoundingClientRect().height, chips: document.querySelector('.hub-map-chips .hub-chips-wrap').getBoundingClientRect().height }));
-  console.log(`  chips row height at 390: ${heights.row} (the project chips alone, as on main: ${heights.chips})`);
-  assert.ok(heights.row <= heights.chips + 0.5, `The chips row is no taller than on main (${heights.row} > ${heights.chips}).`);
-  await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
-  await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
+  const heights = await phone.evaluate(() => ({ row: document.querySelector('.hub-map-chips').getBoundingClientRect().height, chips: document.querySelector('.hub-map-chips select').getBoundingClientRect().height }));
+  console.log(`  chips row height at 390: ${heights.row} (the select alone: ${heights.chips})`);
+  assert.ok(Math.abs(heights.row - heights.chips) <= 1, `The row stays one line, the height of the select (${heights.row} vs ${heights.chips}).`);
+  await phone.locator('.hub-map-chips select').selectOption({ label: 'Workspace app' });
+  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Workspace app');
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs in cloud');
   await noSideways(phone, 'Roadmap at 390 with the longer chip');
 
   step('a tap on the Runs on chip shows the rule; a second tap, Escape and a tap outside hide it');
-  await phone.locator('.hub-chip', { hasText: 'Magic Loops' }).click();
-  await phone.locator('.hub-chip.on', { hasText: 'Magic Loops' }).waitFor();
+  await phone.locator('.hub-map-chips select').selectOption({ label: 'Magic Loops' });
+  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Magic Loops');
   const ruleText = 'Work for this project runs on the PC by default.';
   const rule = phone.locator('.hub-runs-rule');
   assert.equal(await rule.count(), 0);
@@ -358,8 +360,8 @@ try {
   await phone.locator('.hub-runs').tap();
   await phone.touchscreen.tap(20, 600);
   assert.equal(await rule.count(), 0, 'A tap outside hides it.');
-  await phone.locator('.hub-chip', { hasText: 'Workspace app' }).click();
-  await phone.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
+  await phone.locator('.hub-map-chips select').selectOption({ label: 'Workspace app' });
+  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Workspace app');
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');

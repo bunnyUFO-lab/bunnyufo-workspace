@@ -854,11 +854,13 @@ try {
   assert.ok(tall.axis === 'y' && tall.h > tall.w, `The map is taller than it is wide, and vertical (${tall.axis}, ${tall.w} x ${tall.h}).`);
   await noSideways(phone, 'Progress map');
   const tops = await phone.evaluate(() => ({
-    chips: [...document.querySelectorAll('.hub-chips a')].map(item => Math.round(item.getBoundingClientRect().top)),
+    // At phone width the project picker is one native select (ws-ubo.2.1): it shares its top with the Runs on chip.
+    select: Math.round(document.querySelector('.hub-map-chips select').getBoundingClientRect().top),
+    runs: Math.round(document.querySelector('.hub-map-chips .hub-runs')?.getBoundingClientRect().top ?? NaN),
     bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
-  assert.ok(tops.chips.length > 1 && new Set(tops.chips).size === 1, `The project chips share one row (${tops.chips}).`);
+  assert.ok(Number.isNaN(tops.runs) || Math.abs(tops.select - tops.runs) <= 12, `The select and the Runs on chip share a row (${tops.select} vs ${tops.runs}).`);
   assert.ok(tops.bar.length >= 6 && new Set(tops.bar).size === 1, `The toolbar is one row (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap .hub-map-controls').count(), 0, 'The toolbar is a row of its own, not an overlay inside the map.');
   const place = await phone.evaluate(() => {
