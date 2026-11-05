@@ -614,6 +614,8 @@ try {
     // The note names the billing before the press, and one press signs.
     assert.match(flat(await row.locator('[data-undo-opus-note]').innerText()), /^Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking\.$/);
     assert.equal(await row.locator('[data-undo-opus-yes], [data-undo-opus-no], [data-undo-opus-confirm]').count(), 0, 'no second step');
+    // Above the button, so it cannot sit behind the phone's bottom bar while the button is on screen.
+    assert.ok((await row.locator('[data-undo-opus-note]').boundingBox()).y < (await undo.boundingBox()).y, 'the note comes before the button');
     await undo.click();
     await row.locator('[data-profile-off]').waitFor();
     assert.equal(signedCount(), signedBefore + 1, 'one press signs');

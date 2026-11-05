@@ -367,8 +367,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
           <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map((change, index) => (
             <ChangeRow key={change.id} change={change} undo={index === 0 && canUndo ? (
               <div className="ae-undo">
-                <button type="button" className="hub-btn" disabled={busy} onClick={() => goBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
                 {opusNote(change.from, change.from.fallbacks) && <p className="hub-banner ad-note" role="note" data-undo-opus-note>{opusNote(change.from, change.from.fallbacks)}</p>}
+                <button type="button" className="hub-btn" disabled={busy} onClick={() => goBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
                 <small className="team-dim" data-change-undo-restart>This restarts Hermes {profile} too.</small>
               </div>
             ) : undefined} />
