@@ -2,7 +2,7 @@
 // select on every screen that has the picker; 641 px and up keeps the chips; more than ten projects keeps the typeable list above 640 px
 // only: a phone gets the select however many projects there are (ws-2vh.27).
 // Checks: the field is 44 px high and inside the screen, nothing scrolls sideways (the page, .content and .hub), a pick changes the
-// screen, the choice is kept across Work, the Roadmap and Project (Today keeps its own), "All" is reachable, an unknown project reads
+// screen, the choice is kept across Today, Needs you, Work, the Roadmap and Project, "All" is reachable, an unknown project reads
 // "Choose a project", Back restores the old project, rotation swaps the control with the choice intact, and both themes read.
 // The real iOS and Android lists and the zoom behaviour cannot be checked here: they wait for the owner's play test.
 import { chromium, expect } from '@playwright/test';
@@ -122,6 +122,10 @@ try {
     await go(page, '#/~hub/today');
     select = await ready(page, '[data-today-project]');
     const kpi = page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v');
+    // The last pick (lanes, on the Project page) is what Today shows.
+    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
+    await expect(kpi).toHaveText('1');
+    await select.selectOption('all');
     await expect(kpi).toHaveText('5');
     await select.selectOption('lanes');
     await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
@@ -131,7 +135,7 @@ try {
     await page.context().close();
   }
 
-  step('The choice is kept on Work, the Roadmap and Project, and survives a reload; Today keeps its own');
+  step('The choice is kept on Work, the Roadmap, Project and Today, and survives a reload; a pick on Today reaches Work');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
@@ -147,16 +151,15 @@ try {
 
     await go(page, '#/~hub/today');
     const today = await ready(page, '[data-today-project]');
-    await today.selectOption('probe');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'probe');
-    assert.equal(await stored(page, 'hub-today-project'), 'probe');
-    assert.equal(await stored(page, 'buw.hub.project'), 'lanes', 'Today does not write the shared key.');
+    await expect(today).toHaveValue('lanes');
+    assert.equal(await stored(page, 'hub-today-project'), 'lanes', 'A pick on Work is what Today shows.');
     await page.reload();
-    await expect(await ready(page, '[data-today-project]')).toHaveValue('probe');
+    await expect(await ready(page, '[data-today-project]')).toHaveValue('lanes');
+    await (await ready(page, '[data-today-project]')).selectOption('magic-loops');
+    assert.equal(await stored(page, 'hub-today-project'), 'magic-loops');
+    assert.equal(await stored(page, 'buw.hub.project'), 'magic-loops', 'A pick on Today is the shared choice.');
     await go(page, '#/~hub/work');
-    await expect(await ready(page, '.work')).toHaveValue('lanes');
-    await go(page, '#/~hub/today');
-    await expect(await ready(page, '[data-today-project]')).toHaveValue('probe');
+    await expect(await ready(page, '.work')).toHaveValue('magic-loops');
     await page.context().close();
   }
 

@@ -201,7 +201,7 @@ try {
       await expect(page.locator('.today-head p').first()).toContainText('1 thing waits on you.');
       assert.equal(await page.locator('[data-nrow]').count(), Math.min(waiting, 3), 'Needs you lists only that project.');
       assert.equal(await stored(), 'lanes');
-      assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), null, 'Today does not write the project Work and the Roadmap share.');
+      assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), 'lanes', 'A pick on Today is the shared choice: Work and the Roadmap follow it.');
       const elsewhere = page.locator('[data-today-elsewhere]');
       await expect(elsewhere).toContainText('4 more wait in other projects');
       if (all !== null) assert.equal((await badge.innerText()).trim(), all, 'The sidebar badge keeps the true count.');
@@ -218,7 +218,7 @@ try {
       await page.goBack();
       await expect(kpi('needs-you')).toHaveText(String(waiting));
 
-      // A reload keeps the choice; the Roadmap and Work keep their own.
+      // A reload keeps the choice.
       await page.reload();
       await shows('lanes', 'Lanes');
       await expect(kpi('needs-you')).toHaveText(String(waiting));
