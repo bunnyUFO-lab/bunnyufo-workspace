@@ -229,6 +229,7 @@ try {
 
   step('Work shows Loading before its lanes, and never Nothing here before the data arrives');
   await desk.route('**/api/hub/work*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
+  await desk.reload();   // a reload makes this a first visit: the last answer is kept in memory
   await go(desk, '#/~hub/work/nosprint');
   await go(desk, '#/~hub/work/magic-loops');
   await desk.locator('.hub-empty', { hasText: 'Loading…' }).waitFor();
