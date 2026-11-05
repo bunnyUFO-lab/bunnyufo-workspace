@@ -87,9 +87,11 @@ try {
     assert.equal(await pills(J.card), 'Card|Ask|Checklist|Task|Job', 'The card job also filed an Ask, a list, a follow-up job and touched a task.');
     assert.equal(await pills(J.pr), 'PR');
     assert.equal(await pills(J.asks), 'Ask');
-    assert.equal(await pills(J.asking), 'Has a question');
+    assert.equal(await pills(J.asking), 'Asking you', 'The list says what the job page says.');
     assert.equal(await pills(J.nothing), 'Nothing to change');
     assert.equal(await pills(J.failed), 'Failed');
+    assert.equal(await page.locator(`[data-job-row="${J.failed}"] [data-job-pill]`).evaluate(node => getComputedStyle(node).color), await page.locator(`[data-job-row="${J.failed}"]`).evaluate(node => { const probe = document.createElement('span'); probe.style.color = 'var(--red)'; node.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; }), 'Failed uses the red of the job page.');
+    assert.notEqual(await page.locator(`[data-job-row="${J.failed}"] [data-job-pill]`).evaluate(node => getComputedStyle(node).color), await page.locator(`[data-job-row="${J.asking}"] [data-job-pill]`).evaluate(node => getComputedStyle(node).color), 'Failed does not look like Asking you.');
     assert.equal(await pills(J.stopped), 'Stopped');
     assert.equal(await pills(J.empty), 'Nothing delivered');
     assert.match(await page.locator('[data-jobs-foot]').innerText(), /last two months/);
@@ -182,6 +184,13 @@ try {
     assert.equal(await result.locator('[data-run-no-deliverables]').count(), 0, 'A failure is not "delivered nothing".');
     assert.equal(await result.locator('[data-run-deliverables]').count(), 0);
     assert.match(await result.locator('.rd .rd-h').first().innerText(), /why it failed/i, 'The failure comes first.');
+    step(`${label}: "What it did" is not shown when nothing is under it`);
+    for (const empty of [J.nothing, J.failed, J.stopped, J.silent]) {
+      await result.goto(`${fx.url}#/~hub/request/${empty}`);
+      await result.locator('.rd').waitFor();
+      assert.equal(await result.locator('[data-run-did]').count(), 0, `${empty}: no empty "What it did"`);
+      assert.equal(await result.getByText('What it did', { exact: true }).count(), 0);
+    }
     await result.goto(`${fx.url}#/~hub/request/${J.noStart}`);
     await result.locator('[data-run-failure]').waitFor();
     assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'The run could not start.');
@@ -197,6 +206,7 @@ try {
     await result.goto(`${fx.url}#/~hub/request/${J.asking}`);
     await result.locator('[data-run-asking]').waitFor();
     assert.match(await result.locator('[data-run-asking]').innerText(), /Which palette do you want/);
+    assert.equal((await result.locator('[data-run-stop]').innerText()).trim(), 'Stop this job', 'Stopping a question that waits closes the job: the button says so.');
 
     step(`${label}: a job still running keeps the old layout, with its timeline in view`);
     await result.goto(`${fx.url}#/~hub/request/${J.running}`);

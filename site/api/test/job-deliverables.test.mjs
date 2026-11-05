@@ -80,9 +80,10 @@ test('pills: each deliverable, then how it ended', () => {
   assert.deepEqual(texts({ state: 'done', deliverables: some('card') }), ['Card']);
   assert.deepEqual(texts({ state: 'done', deliverables: some('pr', 'card', 'ask', 'ask', 'checklist', 'task', 'job') }), ['Card', 'PR', '2 Asks', 'Checklist', 'Task', 'Job']);
   assert.deepEqual(texts({ state: 'done', deliverables: some('ask') }), ['Ask']);
-  assert.deepEqual(texts({ state: 'asking', deliverables: [] }), ['Has a question']);
+  assert.deepEqual(texts({ state: 'asking', deliverables: [] }), ['Asking you']);
   assert.deepEqual(texts({ state: 'done', nothing: true, deliverables: [] }), ['Nothing to change']);
   assert.deepEqual(texts({ state: 'failed', deliverables: [] }), ['Failed']);
+  assert.equal(pillsOf({ state: 'failed', deliverables: [] })[0].tone, 'bad', 'Failed is red, not the amber of Asking you');
   assert.deepEqual(texts({ state: 'stopped', deliverables: [] }), ['Stopped']);
   assert.deepEqual(texts({ state: 'expired', deliverables: [] }), ['Expired']);
   assert.deepEqual(texts({ state: 'running', stale: at, deliverables: [] }), ['No word']);
