@@ -122,6 +122,29 @@ try {
     await page.context().close();
   }
 
+  step('5. a send that gets a 409 keeps what was typed while it was in flight');
+  {
+    const page = await open();
+    const field = page.locator('textarea[aria-label="Message"]');
+    const send = page.getByRole('button', { name: 'Send', exact: true });
+    await page.goto(`${fx.url}#/~hub/chat`);
+    await field.fill('Name this chat');
+    await send.tap();
+    await page.locator('[data-chat-stop]').waitFor();
+    await page.waitForFunction(() => !document.querySelector('[data-chat-stop]'), null, { timeout: 15000 });
+    await page.route(POST_CHAT, async route => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await new Promise(resolve => setTimeout(resolve, 800));
+      return route.fulfill({ status: 409, contentType: 'application/json', body: '{"error":"A reply is running."}' });
+    });
+    await field.fill('Sent into a 409');
+    await send.tap();
+    await field.fill('Typed while it was in flight');
+    await page.waitForTimeout(2000);   // the 409 has come and the message has gone to the queue (it starts at once: the chat is idle)
+    assert.equal(await field.inputValue(), 'Typed while it was in flight', 'only the sent text goes; what was typed since stays');
+    await page.context().close();
+  }
+
   console.log('chat-queue-failures-ui: passed');
 } finally {
   await browser.close();
