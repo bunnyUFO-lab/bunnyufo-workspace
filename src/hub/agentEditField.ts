@@ -31,7 +31,7 @@ export function profileEditOf(ask: Ask): ProfileEditField | null {
 }
 
 /** True for an Opus model id. The same test as `isOpus` in site/api/chat-models.mjs: Opus bills through the API. */
-export const isOpus = (model: string): boolean => /(^|-)opus(-|$)/.test(String(model))
+export const isOpus = (model: string): boolean => /opus/i.test(String(model))
 
 /** The warning for an Opus pick, as primary or as a fallback; null when the order holds none. Said on the Edit page and on the Ask. */
 export function opusNote(primary: ModelRef | null | undefined, fallbacks: ModelRef[]): string | null {

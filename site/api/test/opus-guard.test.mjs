@@ -8,7 +8,9 @@ import { AGENTS } from '../hub-team.mjs';
 import { createAgentEdits } from '../hub-agent-edit.mjs';
 import { changeState, validChange, validExport, validResult } from '../hub-agent-config.mjs';
 import { loadSigningKey, parsePublicKey, publicKeyPem, verify } from '../signing.mjs';
+import { PRESETS } from '../presets.mjs';
 import { chooseModel } from '../../../src/hub/chatModel.ts';
+import { isOpus as pageIsOpus } from '../../../src/hub/agentEditField.ts';
 import { agentConfigJson } from './hub-fixtures.mjs';
 import { KEY, approve, stack, until } from './hermes-stack.mjs';
 
@@ -19,8 +21,18 @@ const DEEPSEEK = { provider: 'deepseek', model: 'deepseek-v4-pro' };
 const OPUS = { provider: 'anthropic', model: 'claude-opus-5-5' };
 
 test('isOpus: Opus ids are, nothing else is', () => {
-  for (const model of ['claude-opus-5-5', 'claude-opus-4-5-20251101']) assert.equal(isOpus(model), true, model);
-  for (const model of ['claude-sonnet-5-5', 'gpt-6-sol', 'deepseek-v4-pro', 'claude-haiku-5-5', 'opusculum', '', undefined, null]) assert.equal(isOpus(model), false, String(model));
+  for (const model of ['claude-opus-5-5', 'claude-opus-4-5-20251101', 'claude-3-opus-20240229', 'claude-opus-latest', 'opus', 'anthropic/claude-opus-5-5', 'anthropic.claude-opus-5-5', 'claude-opus-4-5@20251101', 'Claude-Opus-5-5', 'claude-opus5', 'claude.opus-5', 'anthropic/opus', 'claude_opus_5']) {
+    assert.equal(isOpus(model), true, model);
+    assert.equal(pageIsOpus(model), true, `the page agrees: ${model}`);
+  }
+  for (const model of ['claude-sonnet-5-5', 'gpt-6-sol', 'deepseek-v4-pro', 'claude-haiku-5-5', '', undefined, null]) {
+    assert.equal(isOpus(model), false, String(model));
+    assert.equal(pageIsOpus(model), false, `the page agrees: ${model}`);
+  }
+});
+
+test('no preset pins an Opus model', () => {
+  for (const preset of PRESETS) assert.equal(isOpus(chatModelOf(preset.model).model), false, preset.id);
 });
 
 test('CHAT_CHAIN holds no Opus, and every id in it is a listed model', () => {
