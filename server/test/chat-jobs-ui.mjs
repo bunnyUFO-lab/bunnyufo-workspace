@@ -9,16 +9,16 @@ import { requestJson } from '../../site/api/test/hub-fixtures.mjs';
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-const SOON = () => new Date(Date.now() + 60_000);   // filed after the turn began
 const id = (slug, tail) => `${day}-probe-${slug}-${tail}`;
 const [ONE, TWO, DONE_CARD, DONE_DEV] = [id('research-one', 'a111'), id('research-two', 'a222'), id('finished-assistant', 'b111'), id('finished-project', 'b222')];
-const agentJob = (jobId, title, text) => ({ ...requestJson({ id: jobId, project: 'probe', by: 'hermes-main', text, now: SOON() }), title, preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' } });
+const agentJob = (jobId, title, text) => ({ ...requestJson({ id: jobId, project: 'probe', by: 'hermes-main', text, now: new Date() }), title, preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' } });
 const GOAL = 'Check the two scenery cards for the same canvas size.';
 const REPLY = `Two jobs, nothing runs until you approve.\n1. ${ONE}: Researcher, one assistant card\n2. ${TWO}: Researcher, one assistant card\n`;
 
+let filing = async () => {};   // Hermes files the two jobs through the card API while the reply runs, dated now
 const fixture = await startHubFixture({
   hermes: true, chatRuns: true, signing: true, seedData: false,
-  hermesOptions: { runScripts: [[REPLY, { delegate: { goals: [GOAL] } }], [{ hold: true }], [{ hold: true }]] },
+  hermesOptions: { runScripts: [[{ call: () => filing() }, REPLY, { delegate: { goals: [GOAL] } }], [{ hold: true }], [{ hold: true }]] },
 });
 const browser = await chromium.launch({ headless: true, channel });
 try {
@@ -26,8 +26,10 @@ try {
     fixture.seed.request(request, { writer: 'agent' });
     for (const [name, body] of Object.entries(files)) fixture.seed.put(`requests/${request.id}/${name}`, body);
   };
-  put(agentJob(ONE, 'Compare two roguelike run summaries', 'Research how two roguelikes show a run summary. The plan card is assistant/plan.'));
-  put(agentJob(TWO, 'Market scan for tug-of-war card games', 'Market research on tug-of-war card games. The plan card is assistant/plan.'));
+  filing = async () => {
+    put({ ...agentJob(ONE, 'Compare two roguelike run summaries', 'Research how two roguelikes show a run summary. The plan card is assistant/plan.'), createdAt: new Date().toISOString() });
+    put({ ...agentJob(TWO, 'Market scan for tug-of-war card games', 'Market research on tug-of-war card games. The plan card is assistant/plan.'), createdAt: new Date().toISOString() });
+  };
   // Two finished jobs, one with a card in assistant and one in a project section, in a conversation the fixture holds already.
   const finished = (jobId, title, card) => put({ ...agentJob(jobId, title, `Finished job: ${title}`), createdAt: new Date(Date.now() - 3_600_000).toISOString() }, {
     'approved.json': { v: 1, request: jobId, target: 'hermes', limits: { minutes: 30 }, expires: new Date(Date.now() + 3_600_000).toISOString(), at: new Date(Date.now() - 3_000_000).toISOString(), by: 'owner' },
@@ -78,12 +80,25 @@ try {
   step('one tap approves the ids on screen, and each row moves on by itself');
   const approve = card.locator('[data-jobs-approve]');
   assert.equal((await approve.textContent()).trim(), 'Approve all 2');
+  assert.match(await card.locator('[data-jobs-estimate]').textContent(), /^Estimated 1\.4–2\.2 M tokens in all$/, 'the cost is on screen before the tap');
+  assert.match(await rows.first().locator('[data-job-facts]').textContent(), /^Project probe · Up to 30 minutes · Codex plan/, 'the facts the approval page shows');
   await approve.click();
   await rows.first().locator('[data-job-status]', { hasText: /^(Approved, waiting to start|Taken|Running)/ }).waitFor();
   await page.waitForFunction(() => [...document.querySelectorAll('[data-chat-jobs] [data-job-row]')].every(row => row.getAttribute('data-job-state') !== 'proposed'));
   assert.equal(await card.locator('[data-jobs-approve]').count(), 0, 'Nothing is left to approve.');
   for (const jobId of [ONE, TWO]) assert.ok(fixture.fake.objects.has(`sections/inbox/requests/${jobId}/approved.json`), `${jobId} is signed`);
   await page.waitForFunction(() => [...document.querySelectorAll('[data-chat-jobs] [data-job-row]')].every(row => ['taken', 'running'].includes(row.getAttribute('data-job-state'))), null, { timeout: ms(60000) });
+
+  step('more than 3 proposals get no one tap: each row has its own Approve');
+  const FOUR = ['c111', 'c222', 'c333', 'c444'].map(tail => id('many', tail));
+  FOUR.forEach((jobId, index) => put({ ...agentJob(jobId, `Many ${index + 1}`, `Research ${index + 1}.`), createdAt: new Date().toISOString() }));
+  const MANY = `${day}-man123`;
+  fixture.fake.seed(`sections/inbox/chat/${MANY}.jsonl`, `${[{ role: 'user', text: 'Many', at: new Date().toISOString() }, { role: 'assistant', text: 'Four jobs.', at: new Date().toISOString(), jobs: FOUR }].map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+  await page.goto(`${fixture.url}#/~hub/chat/${MANY}`);
+  await page.locator('[data-job-row]').nth(3).waitFor();
+  assert.equal(await page.locator('[data-jobs-approve]').count(), 0);
+  assert.equal(await page.locator('[data-job-approve]').count(), 4);
+  assert.match(await page.locator('[data-jobs-many]').textContent(), /more than 3/);
 
   step('a finished job opens its card, in assistant and in a project section');
   await page.goto(`${fixture.url}#/~hub/chat/${CHAT}`);
