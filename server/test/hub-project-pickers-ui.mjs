@@ -1,8 +1,8 @@
 // Run after npm run build. The project pickers that became Comboboxes, through a real browser: the Roadmap, Work, Activity and
 // Sketch project pickers over a list longer than ten projects, at desktop and phone width. Each one filters as you type, Enter
 // or a tap picks, Escape puts the chosen project back, nothing scrolls sideways, and an open list closes when the field scrolls
-// away. With ten projects or fewer the pickers are chips at desktop width and one native select at 640 px or less
-// (ws-ubo.2.1; hub-phone-picker-ui.mjs covers that in depth). The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
+// away. At 640 px or less every picker is one native select, whatever the number of projects (ws-ubo.2.1, ws-2vh.27; hub-phone-picker-ui.mjs
+// and hub-today-picker-phone-ui.mjs cover that in depth); with ten projects or fewer they are chips at desktop width. The Library's pickers (Move to workspace, Merge into) are in library-manage-ui.mjs.
 import { chromium, expect } from '@playwright/test';
 import { ms, SCALE } from './ui-timeouts.mjs';
 expect.configure({ timeout: 5000 * SCALE });
@@ -52,12 +52,23 @@ try {
 
   for (const [label, viewport, touch] of [['1280', { width: 1280, height: 800 }, false], ['390', { width: 390, height: 844 }, true]]) {
     for (const picker of PICKERS) {
-      step(`${picker.name} at ${label}: the project list filters as you type, and a pick changes the project`);
+      step(touch ? `${picker.name} at ${label} above ten projects: one native select, and a pick changes the project` : `${picker.name} at ${label}: the project list filters as you type, and a pick changes the project`);
       const page = await open(viewport, touch ? { hasTouch: true, isMobile: true } : {});
       await page.goto(`${fixture.url}${picker.hash}`);
       const field = page.locator(picker.scope).getByRole('combobox', { name: 'Project' });
       await field.waitFor();
-      if (touch) await field.tap(); else await field.click();
+      if (touch) {
+        // Phone width: a select however many projects there are; no text field and no list to filter.
+        assert.equal(await field.evaluate(node => node.tagName), 'SELECT', `${picker.name}: a native select at phone width.`);
+        await expect.poll(() => field.locator('option:not([hidden])').count(), { message: `${picker.name}: the list passes ten projects` }).toBeGreaterThan(10);
+        await field.selectOption('maple');
+        await expect(field).toHaveValue('maple');
+        await expect(field).toHaveAttribute('data-value', 'maple');
+        await noSideways(page, `${picker.name} select at ${label}`);
+        await page.context().close();
+        continue;
+      }
+      await field.click();
       const options = page.locator(`${picker.scope} [role="option"]`);
       await options.first().waitFor();
       // The list opens before /projects has answered on a slow run: wait for the projects, not for the first row.
@@ -66,7 +77,7 @@ try {
       assert.deepEqual(await options.evaluateAll(list => list.map(item => item.dataset.value)), ['maple'], `${picker.name}: typing filters.`);
       const box = await page.locator(`${picker.scope} [role="listbox"]`).boundingBox();
       assert.ok(box.x >= 0 && box.x + box.width <= viewport.width, `${picker.name}: the list fits the screen (${JSON.stringify(box)}).`);
-      if (touch) await options.first().tap(); else await page.keyboard.press('Enter');
+      await page.keyboard.press('Enter');
       await picker.after(page);
       // The screen may redraw for the new project: wait until the picker shows it before using it again.
       await expect(field).toHaveValue('Maple');
@@ -83,25 +94,14 @@ try {
     }
   }
 
-  step('The chevron opens the roadmap list without the keyboard: the input is not focused');
-  {
-    const page = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
-    await page.goto(`${fixture.url}#/~hub/map`);
-    await page.getByRole('combobox', { name: 'Project' }).waitFor();
-    await page.getByRole('button', { name: 'Show projects' }).tap();
-    await page.locator('.hub-map-chips [role="listbox"]').waitFor();
-    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role') === 'combobox'), false);
-    await page.context().close();
-  }
-
   step('An open list closes when its field scrolls out of the page');
   {
-    const page = await open({ width: 390, height: 600 }, { hasTouch: true, isMobile: true });
+    const page = await open({ width: 1280, height: 600 });
     await page.goto(`${fixture.url}#/~hub/work`);
     const field = page.locator('.work').getByRole('combobox', { name: 'Project' });
     await field.waitFor();
     await page.locator('.wk-lane:visible .wk-card').first().waitFor();
-    await field.tap();
+    await field.click();
     await page.locator('.work [role="listbox"]').waitFor();
     await page.evaluate(() => {
       const spacer = document.createElement('div');

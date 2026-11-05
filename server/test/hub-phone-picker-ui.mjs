@@ -1,5 +1,6 @@
 // Run after npm run build. The Hub's project picker on a phone (ws-ubo.2.1): with ten projects or fewer, 640 px or less is one native
-// select on every screen that has the picker; 641 px and up keeps the chips; more than ten projects keeps the typeable list at any width.
+// select on every screen that has the picker; 641 px and up keeps the chips; more than ten projects keeps the typeable list above 640 px
+// only: a phone gets the select however many projects there are (ws-2vh.27).
 // Checks: the field is 44 px high and inside the screen, nothing scrolls sideways (the page, .content and .hub), a pick changes the
 // screen, the choice is kept across Work, the Roadmap and Project (Today keeps its own), "All" is reachable, an unknown project reads
 // "Choose a project", Back restores the old project, rotation swaps the control with the choice intact, and both themes read.
@@ -260,24 +261,23 @@ try {
     assert.notEqual(seen.dark.background, seen.light.background, 'The background differs between themes.');
   }
 
-  // More than ten projects: the typeable list stays at phone width, with 44 px options.
+  // More than ten projects: a phone still gets the native select, 44 px high, holding every project.
   many = await startHubFixture({ work: true });
   for (const tree of TREES) {
     many.seed.beads(tree, [beadsIssue({ id: `${tree.slice(0, 2)}-1`, title: `${tree} task`, created: '2026-10-01T10:00:00Z' })], { pushedAt: minutesAgo(many.now, 5).toISOString(), host: 'pc.example.test', count: 1, repo: `example/${tree}` });
   }
   await new Promise(resolve => setTimeout(resolve, 100));
-  step('Above ten projects at 390 px: the typeable list stays, with options 44 px high');
+  step('Above ten projects at 390 px: still one native select, 44 px high, with every project');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${many.url}#/~hub/map`);
-    const input = page.locator('.hub-map-chips input[role="combobox"]');
-    await input.waitFor();
-    assert.equal(await page.locator('select.hub-project-select').count(), 0, 'No select above ten projects.');
-    await input.tap();
-    const options = page.locator('.hub-map-chips [role="option"]');
-    await expect.poll(() => options.count()).toBeGreaterThan(10);
-    const heights = await options.evaluateAll(list => list.map(node => node.getBoundingClientRect().height));
-    assert.ok(heights.every(height => height >= 44), `Every option is at least 44 px high (${Math.min(...heights)}).`);
+    const select = await ready(page, '.hub-map-chips');
+    assert.equal(await select.evaluate(node => node.tagName), 'SELECT', 'A select above ten projects.');
+    assert.equal(await page.locator('.hub-map-chips input[role="combobox"]').count(), 0, 'No text field above ten projects.');
+    await expect.poll(() => select.locator('option:not([hidden])').count()).toBeGreaterThan(11);
+    const box = await select.boundingBox();
+    assert.ok(box.height >= 44, `The field is at least 44 px high (${box.height}).`);
+    await none(page, 'Roadmap above ten projects');
     await page.context().close();
   }
   console.log('hub-phone-picker-ui: passed');

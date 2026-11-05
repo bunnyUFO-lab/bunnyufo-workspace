@@ -66,7 +66,7 @@
 .alert-row .alert-retry { min-height: 44px; margin-left: auto; }
 .alert-row [data-alert-retry-error] { flex-basis: 100%; }
 
-.today .rise { animation: today-rise 0.2s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
+.today .rise { animation: today-rise 0.2s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 40ms); }
 @keyframes today-rise { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .today .rise { animation: none; } .today .hub-kpi { transition: none; } }
 
