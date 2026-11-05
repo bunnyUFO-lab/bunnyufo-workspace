@@ -25,6 +25,9 @@ export const CHAT_MODELS = [
 /** The order Auto tries, and so the order a paused default falls down: Codex, then Sonnet, then DeepSeek. Never Opus. */
 export const CHAT_CHAIN = ['codex', 'sonnet', 'deepseek-flash'];
 
+/** True for an Opus model id (`claude-opus-5-5`, `claude-opus-4-5-20251101`). Opus bills through the API, so nothing automatic may pick it. */
+export const isOpus = model => /(^|-)opus(-|$)/.test(String(model));
+
 // Ids an earlier version of this PR listed, one per family now. A Map, so `__proto__` and `constructor` stay unknown ids.
 const RETIRED = new Map([['codex-6-1-sol', 'codex'], ['codex-sol', 'codex'], ['codex-6-1-terra', 'codex-terra'], ['codex-6-astra', 'codex-astra'], ['codex-6-luna', 'codex-luna']]);
 

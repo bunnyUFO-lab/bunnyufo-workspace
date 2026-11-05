@@ -11,7 +11,7 @@
 //    that ends, and a 60-second sweep, start the oldest waiting one.
 //  - Every file written is create-only. A 412 means another follower or process got there first.
 import { TERMINAL, createFollowers } from './hermes-follower.mjs';
-import { chatModelOf } from './chat-models.mjs';
+import { chatModelOf, isOpus } from './chat-models.mjs';
 import { createHermesRuns } from './hermes-runs.mjs';
 import { createScrub } from './scrub.mjs';
 import { resetOf } from './plan-pauses.mjs';
@@ -38,7 +38,10 @@ export function createHermesDispatch({ env = {}, fetchImpl = fetch, requests, li
   const runs = createHermesRuns({ env, fetchImpl, timeoutMs: timing.timeoutMs, idleMs: timing.idleMs });
   const byRequest = new Map(); // request id -> the run id being followed
   const sweepMs = timing.sweepMs ?? 60_000;
-  const retryModel = String(env.HERMES_RETRY_MODEL ?? '').trim() || 'claude-sonnet-5-5';
+  // The quota retry is automatic and bills through the Anthropic API, so an env var nobody remembers must not put Opus there: Opus is only ever the owner's own pick.
+  const wantedRetry = String(env.HERMES_RETRY_MODEL ?? '').trim() || 'claude-sonnet-5-5';
+  const retryModel = isOpus(wantedRetry) ? 'claude-sonnet-5-5' : wantedRetry;
+  if (retryModel !== wantedRetry) rawLog('[hermes] HERMES_RETRY_MODEL names an Opus model, which is never used for an automatic retry; using claude-sonnet-5-5.');
 
   // Starts are serialised so the cap is counted against a stable picture.
   let chain = Promise.resolve();
