@@ -215,7 +215,7 @@ const keyOf = (value: { primary: ModelRef | null; chain: ModelRef[] }) => JSON.s
 /**
  * The model of a Hermes profile and the order of its fallbacks. The signed-in owner's press on "Change and restart Hermes <profile>" signs the change at once
  * (no Ask, no second look): the page shows what will happen above the button, and the newest finished change has a way back. The Hermes host applies it.
- * An Opus or Fable pick takes one extra tap, since it bills through the API. The page takes no draft from the URL, from storage or from an Ask, and Enter submits nothing.
+ * An Opus or Fable pick is one press like any other; the billing note shows on the page before the press (the owner's decision). The page takes no draft from the URL, from storage or from an Ask, and Enter submits nothing.
  * An agent's proposal is still an Ask that the owner answers Apply.
  */
 function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
@@ -225,10 +225,6 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState<{ primary: ModelRef | null; chain: ModelRef[] } | null>(null)
   const [busy, setBusy] = useState(false)
-  // The order the extra tap was asked for: any other order starts over.
-  const [confirmFor, setConfirmFor] = useState<string | null>(null)
-  // The way back to an order with Opus or Fable asks the same extra tap: the id of the change whose way back waits for Yes.
-  const [confirmUndo, setConfirmUndo] = useState<string | null>(null)
   const [asked, setAsked] = useState(() => Date.now())
   const primary = draft?.primary ?? null
   const chain = draft?.chain ?? []
@@ -294,12 +290,9 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
 
   // The order the page showed as current goes with every press: if the host's settings moved since, the server refuses (409) instead of signing over them.
   const base = current ? { provider: current.provider, model: current.model, fallbacks: nowChain.map(item => ({ provider: item.provider, model: item.model })) } : null
-  const confirming = confirmFor !== null && confirmFor === keyOf({ primary, chain })
-  const setConfirming = (on: boolean) => setConfirmFor(on ? keyOf({ primary, chain }) : null)
   const press = async (body: Record<string, unknown>, after: { primary: ModelRef | null; chain: ModelRef[] }) => {
     setBusy(true)
     setError(null)
-    setConfirming(false)
     try {
       await hubPost<ProfileChangeAnswer>(`/team/${encodeURIComponent(agent.id)}/profile-change`, { ...body, base })
       baseline.current = keyOf(after)
@@ -312,14 +305,10 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
     } finally { setBusy(false) }
   }
   const send = () => { if (primary && base) void press({ primary, fallbacks: chain }, { primary, chain }) }
-  /** The first press of an order with Opus or Fable asks once more; the second signs. */
-  const onSend = () => { if (opusNoteText && !confirming) setConfirming(true); else send() }
   // The way back is on the newest change only, once the host confirmed it and while it still runs: a Replaced row (the host was edited since) has none.
   const newest = view.changes?.[0]
   const canUndo = !!newest && !newest.replaced && (newest.state === 'applied' || newest.state === 'live') && !waiting && fresh && !!base
-  const goBack = (change: ProfileChange) => { setConfirmUndo(null); void press({ undo: change.id }, { primary: { provider: change.from.provider, model: change.from.model }, chain: change.from.fallbacks.map(item => ({ provider: item.provider, model: item.model })) }) }
-  /** The first press of a way back to an order with Opus or Fable asks once more; the second signs. */
-  const onGoBack = (change: ProfileChange) => { if (opusNote(change.from, change.from.fallbacks)) setConfirmUndo(change.id); else goBack(change) }
+  const goBack = (change: ProfileChange) => void press({ undo: change.id }, { primary: { provider: change.from.provider, model: change.from.model }, chain: change.from.fallbacks.map(item => ({ provider: item.provider, model: item.model })) })
 
   return (
     <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>
@@ -367,17 +356,9 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
         )}
         {profile === 'briefs' && <p className="hub-muted" data-profile-briefs-wait>{BRIEFS_WAIT_TEXT}</p>}
         {error && <p className="hub-error" role="alert" data-profile-error>{error}</p>}
-        {confirming && opusNoteText && <p className="hub-banner ad-note" role="note" data-profile-opus-confirm>{opusNoteText}</p>}
         <div className="ae-actions">
-          {confirming ? (
-            <>
-              <button type="button" className="hub-btn pri" disabled={busy} onClick={send} data-profile-opus-yes>Yes, bill it through the API</button>
-              <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirming(false)} data-profile-opus-no>Not now</button>
-            </>
-          ) : (
-            <button type="button" className="hub-btn pri" disabled={!changed || !!off || busy || !primary} onClick={onSend} data-profile-send>Change and restart Hermes {profile}</button>
-          )}
-          {changed && !confirming && <button type="button" className="hub-btn" disabled={busy} onClick={() => { setPrimary(current); setChain(nowChain.map(item => ({ provider: item.provider, model: item.model }))) }} data-profile-discard>Discard changes</button>}
+          <button type="button" className="hub-btn pri" disabled={!changed || !!off || busy || !primary} onClick={send} data-profile-send>Change and restart Hermes {profile}</button>
+          {changed && <button type="button" className="hub-btn" disabled={busy} onClick={() => { setPrimary(current); setChain(nowChain.map(item => ({ provider: item.provider, model: item.model }))) }} data-profile-discard>Discard changes</button>}
         </div>
       </form>
       {(view.changes?.length ?? 0) > 0 && (
@@ -386,17 +367,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
           <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map((change, index) => (
             <ChangeRow key={change.id} change={change} undo={index === 0 && canUndo ? (
               <div className="ae-undo">
-                {confirmUndo === change.id ? (
-                  <>
-                    <p className="hub-banner ad-note" role="note" data-undo-opus-confirm>{opusNote(change.from, change.from.fallbacks)}</p>
-                    <div className="ae-actions">
-                      <button type="button" className="hub-btn pri" disabled={busy} onClick={() => goBack(change)} data-undo-opus-yes>Yes, bill it through the API</button>
-                      <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirmUndo(null)} data-undo-opus-no>Not now</button>
-                    </div>
-                  </>
-                ) : (
-                  <button type="button" className="hub-btn" disabled={busy} onClick={() => onGoBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
-                )}
+                <button type="button" className="hub-btn" disabled={busy} onClick={() => goBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
+                {opusNote(change.from, change.from.fallbacks) && <p className="hub-banner ad-note" role="note" data-undo-opus-note>{opusNote(change.from, change.from.fallbacks)}</p>}
                 <small className="team-dim" data-change-undo-restart>This restarts Hermes {profile} too.</small>
               </div>
             ) : undefined} />

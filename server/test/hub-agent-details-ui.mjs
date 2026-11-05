@@ -557,20 +557,11 @@ try {
   await noSideways(desk, 'Edit with the Opus note at 1280');
   const signedCount = () => [...fresh.fake.objects.keys()].filter(name => /\/agent-config\/changes\/[^/]+\/approved\.json$/.test(name)).length;
   const signedBefore = signedCount();
+  // One press for every model (the owner's decision): the note is on the page before the press, and the press signs.
+  assert.equal(await opus.locator('[data-profile-opus-confirm], [data-profile-opus-yes], [data-profile-opus-no]').count(), 0, 'no second step');
   await opus.locator('[data-profile-send]').click();
-  await opus.locator('[data-profile-opus-confirm]').waitFor();
-  assert.equal(flat(await opus.locator('[data-profile-opus-confirm]').innerText()), 'Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking.');
-  assert.equal(flat(await opus.locator('[data-profile-opus-yes]').innerText()), 'Yes, bill it through the API');
-  assert.equal(flat(await opus.locator('[data-profile-opus-no]').innerText()), 'Not now');
-  assert.equal(signedCount(), signedBefore, 'the first press signs nothing');
-  await noSideways(desk, 'Opus confirmation at 1280');
-  await opus.locator('[data-profile-opus-no]').click();
-  await opus.locator('[data-profile-send]').waitFor();
-  assert.equal(signedCount(), signedBefore, 'Not now signs nothing');
-  await opus.locator('[data-profile-send]').click();
-  await opus.locator('[data-profile-opus-yes]').click();
   await opus.locator('[data-profile-off]').waitFor();
-  assert.equal(signedCount(), signedBefore + 1, 'the second press signs');
+  assert.equal(signedCount(), signedBefore + 1, 'one press signs');
   const opusId = await opus.locator('[data-profile-change]').first().getAttribute('data-profile-change');
   assert.ok(fresh.fake.json(`sections/inbox/agent-config/changes/${opusId}/approved.json`).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the pick is kept as chosen');
   // An agent's Ask that names Opus still carries the warning on the Ask page.
@@ -590,7 +581,7 @@ try {
   await phone.goto(`${fresh.url}#/~hub/ask/${OPUS_ASK}`);
   await phone.locator('[data-profile-ask-opus]').waitFor();
   await noSideways(phone, 'Opus Ask at 390');
-  step('Opus way back: going back to an order with Opus asks for the same extra tap, names the billing, and signs nothing until Yes');
+  step('Opus way back: the note names the billing before the press, and one press goes back');
   {
     const reload = async () => {
       await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
@@ -620,18 +611,12 @@ try {
     const undo = row.locator('[data-change-undo]');
     await undo.waitFor({ timeout: ms(20000) });
     const signedBefore = signedCount();
+    // The note names the billing before the press, and one press signs.
+    assert.match(flat(await row.locator('[data-undo-opus-note]').innerText()), /^Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking\.$/);
+    assert.equal(await row.locator('[data-undo-opus-yes], [data-undo-opus-no], [data-undo-opus-confirm]').count(), 0, 'no second step');
     await undo.click();
-    await row.locator('[data-undo-opus-confirm]').waitFor();
-    assert.match(flat(await row.locator('[data-undo-opus-confirm]').innerText()), /^Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking\.$/);
-    assert.equal(flat(await row.locator('[data-undo-opus-yes]').innerText()), 'Yes, bill it through the API');
-    assert.equal(signedCount(), signedBefore, 'the first press of Go back signs nothing');
-    await row.locator('[data-undo-opus-no]').click();
-    await undo.waitFor();
-    assert.equal(signedCount(), signedBefore, 'Not now signs nothing');
-    await undo.click();
-    await row.locator('[data-undo-opus-yes]').click();
     await row.locator('[data-profile-off]').waitFor();
-    assert.equal(signedCount(), signedBefore + 1, 'Yes signs');
+    assert.equal(signedCount(), signedBefore + 1, 'one press signs');
     const goneBack = await row.locator('[data-profile-change]').first().getAttribute('data-profile-change');
     assert.ok(signedOf(goneBack).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the way back is to the Opus order');
   }
