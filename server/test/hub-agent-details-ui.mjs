@@ -391,7 +391,7 @@ try {
 
   step('Way back: a Replaced row has no button; once the host runs the change again, one press goes back to the order it replaced, signed the same way');
   assert.equal(await desk.locator('[data-change-undo]').count(), 0, 'a Replaced row offers no way back: it would undo the host edit');
-  const again = agentConfigJson({ now: new Date(), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
+  const again = agentConfigJson({ now: new Date(Date.now() + 1500), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
   again.profiles.main.model = { provider: 'anthropic', default: 'claude-sonnet-5-5' };
   again.profiles.main.fallbacks = [ref('anthropic', 'claude-haiku-5-5'), ref('openai-codex', 'gpt-6-sol')];
   seedAgentConfig(fresh.fake, again);
@@ -411,12 +411,16 @@ try {
   assert.equal(await desk.locator('[data-change-undo]').count(), 0, 'no way back while the way back waits');
   const undoEvent = [...fresh.fake.objects.keys()].map(name => (/\/events\/.*-hub-.*\.json$/.test(name) ? fresh.fake.json(name) : null)).find(event => event?.undoOf === changeId);
   assert.equal(undoEvent?.title, 'Model change sent: Hermes main to gpt-6-sol');
-  await desk.waitForTimeout(ms(1500)); // the host's answer lands after the export above, by whole seconds
+  await desk.waitForTimeout(ms(2500)); // the host's answer lands after the export above, by whole seconds
   fresh.fake.seed(`sections/inbox/agent-config/changes/${backId}/result.json`, JSON.stringify({ v: 1, change: backId, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date().toISOString() }), 'application/json', { writer: 'hermes-config' });
   await desk.locator('[data-profile-off]').waitFor({ state: 'detached', timeout: ms(12000) });
   await desk.locator(`[data-profile-change="${changeId}"][data-replaced]`).waitFor();
   assert.equal(await desk.locator(`[data-profile-change="${backId}"] [data-change-state]`).innerText(), 'Running');
   assert.equal(await desk.locator(`[data-profile-change="${changeId}"] [data-change-state]`).innerText(), 'Replaced', 'the change it undid is not running any more');
+  // The form shows the order the way back restored, not the one just undone, and nothing is armed: a stray press changes nothing.
+  assert.equal(flat(await desk.locator('[data-profile-primary] option:checked').innerText()), 'openai-codex · gpt-6-sol', 'the form holds the order gone back to');
+  assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'the button is off: the owner picked nothing');
+  assert.equal(await desk.locator('[data-profile-summary]').count(), 0, 'no summary for an order nobody chose');
 
   step('Failed: Details says the change failed with the reason in words and that the old settings stay; a failed rollback says Hermes may be down');
   const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
@@ -586,6 +590,51 @@ try {
   await phone.goto(`${fresh.url}#/~hub/ask/${OPUS_ASK}`);
   await phone.locator('[data-profile-ask-opus]').waitFor();
   await noSideways(phone, 'Opus Ask at 390');
+  step('Opus way back: going back to an order with Opus asks for the same extra tap, names the billing, and signs nothing until Yes');
+  {
+    const reload = async () => {
+      await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+      await desk.locator('[data-edit-profile="main"] [data-profile-form]').waitFor();
+    };
+    const confirmed = async (id, order) => {
+      fresh.fake.seed(`sections/inbox/agent-config/changes/${id}/result.json`, JSON.stringify({ v: 1, change: id, outcome: 'applied', code: 'ok', rolledBack: false, at: new Date().toISOString() }), 'application/json', { writer: 'hermes-config' });
+      await desk.waitForTimeout(ms(2500));
+      const live = agentConfigJson({ now: new Date(), exportedMinutesAgo: 0, modelOptions: { main: [ref('anthropic', 'claude-opus-5-5'), ref('openai-codex', 'gpt-6-sol'), ref('anthropic', 'claude-sonnet-5-5'), ref('anthropic', 'claude-haiku-5-5')], briefs: MODEL_OPTIONS.briefs } });
+      live.profiles.main.model = { provider: order.provider, default: order.model };
+      live.profiles.main.fallbacks = order.fallbacks.map(item => ({ provider: item.provider, model: item.model }));
+      seedAgentConfig(fresh.fake, live);
+    };
+    const signedOf = id => fresh.fake.json(`sections/inbox/agent-config/changes/${id}/approved.json`);
+    // The Opus change from above is confirmed and runs; then a plain change drops Opus; its way back is to the Opus order.
+    await confirmed(opusId, signedOf(opusId).to);
+    await reload();
+    const row = desk.locator('[data-edit-profile="main"]');
+    await row.locator('[data-profile-off]').waitFor({ state: 'detached', timeout: ms(15000) });
+    await row.locator('[data-profile-fallback]').filter({ has: desk.locator('option:checked', { hasText: 'claude-opus-5-5' }) }).locator('[data-fallback-remove]').click();
+    await row.locator('[data-profile-send]').click();
+    await row.locator('[data-profile-off]').waitFor();
+    const plainId = await row.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+    assert.ok(!signedOf(plainId).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the plain change drops Opus');
+    await confirmed(plainId, signedOf(plainId).to);
+    await reload();
+    const undo = row.locator('[data-change-undo]');
+    await undo.waitFor({ timeout: ms(20000) });
+    const signedBefore = signedCount();
+    await undo.click();
+    await row.locator('[data-undo-opus-confirm]').waitFor();
+    assert.match(flat(await row.locator('[data-undo-opus-confirm]').innerText()), /^Opus is a fallback: when the models before it fail, replies bill through the Anthropic API without asking\.$/);
+    assert.equal(flat(await row.locator('[data-undo-opus-yes]').innerText()), 'Yes, bill it through the API');
+    assert.equal(signedCount(), signedBefore, 'the first press of Go back signs nothing');
+    await row.locator('[data-undo-opus-no]').click();
+    await undo.waitFor();
+    assert.equal(signedCount(), signedBefore, 'Not now signs nothing');
+    await undo.click();
+    await row.locator('[data-undo-opus-yes]').click();
+    await row.locator('[data-profile-off]').waitFor();
+    assert.equal(signedCount(), signedBefore + 1, 'Yes signs');
+    const goneBack = await row.locator('[data-profile-change]').first().getAttribute('data-profile-change');
+    assert.ok(signedOf(goneBack).to.fallbacks.some(item => item.model === 'claude-opus-5-5'), 'the way back is to the Opus order');
+  }
 } finally {
   for (const context of contexts) await context.close();
   await browser.close();

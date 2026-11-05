@@ -227,6 +227,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   const [busy, setBusy] = useState(false)
   // The order the extra tap was asked for: any other order starts over.
   const [confirmFor, setConfirmFor] = useState<string | null>(null)
+  // The way back to an order with Opus or Fable asks the same extra tap: the id of the change whose way back waits for Yes.
+  const [confirmUndo, setConfirmUndo] = useState<string | null>(null)
   const [asked, setAsked] = useState(() => Date.now())
   const primary = draft?.primary ?? null
   const chain = draft?.chain ?? []
@@ -301,6 +303,8 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
     try {
       await hubPost<ProfileChangeAnswer>(`/team/${encodeURIComponent(agent.id)}/profile-change`, { ...body, base })
       baseline.current = keyOf(after)
+      // The form holds what was signed (for a way back, the order gone back to), so when the wait ends nothing is left armed that the owner did not choose.
+      setDraft({ primary: after.primary, chain: after.chain })
       await load()
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : 'That did not work.')
@@ -313,7 +317,9 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
   // The way back is on the newest change only, once the host confirmed it and while it still runs: a Replaced row (the host was edited since) has none.
   const newest = view.changes?.[0]
   const canUndo = !!newest && !newest.replaced && (newest.state === 'applied' || newest.state === 'live') && !waiting && fresh && !!base
-  const goBack = (change: ProfileChange) => void press({ undo: change.id }, { primary: { provider: change.from.provider, model: change.from.model }, chain: change.from.fallbacks.map(item => ({ provider: item.provider, model: item.model })) })
+  const goBack = (change: ProfileChange) => { setConfirmUndo(null); void press({ undo: change.id }, { primary: { provider: change.from.provider, model: change.from.model }, chain: change.from.fallbacks.map(item => ({ provider: item.provider, model: item.model })) }) }
+  /** The first press of a way back to an order with Opus or Fable asks once more; the second signs. */
+  const onGoBack = (change: ProfileChange) => { if (opusNote(change.from, change.from.fallbacks)) setConfirmUndo(change.id); else goBack(change) }
 
   return (
     <section className="ad-section" aria-labelledby="ae-profile" data-edit-profile={profile}>
@@ -380,7 +386,17 @@ function ProfileEdit({ agent, team }: { agent: TeamAgent; team: TeamAgent[] }) {
           <ul className="ae-versions" data-profile-changes aria-labelledby="ae-changes">{view.changes?.map((change, index) => (
             <ChangeRow key={change.id} change={change} undo={index === 0 && canUndo ? (
               <div className="ae-undo">
-                <button type="button" className="hub-btn" disabled={busy} onClick={() => goBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
+                {confirmUndo === change.id ? (
+                  <>
+                    <p className="hub-banner ad-note" role="note" data-undo-opus-confirm>{opusNote(change.from, change.from.fallbacks)}</p>
+                    <div className="ae-actions">
+                      <button type="button" className="hub-btn pri" disabled={busy} onClick={() => goBack(change)} data-undo-opus-yes>Yes, bill it through the API</button>
+                      <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirmUndo(null)} data-undo-opus-no>Not now</button>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" className="hub-btn" disabled={busy} onClick={() => onGoBack(change)} data-change-undo>Go back to {chainText(change.from)}</button>
+                )}
                 <small className="team-dim" data-change-undo-restart>This restarts Hermes {profile} too.</small>
               </div>
             ) : undefined} />
