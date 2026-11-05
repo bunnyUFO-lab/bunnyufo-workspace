@@ -136,12 +136,16 @@ const SAFE_CARD = /^\/[\w%-]+#\/[\w%.~-]+$/
 
 /** The newest agent writes in the project's section: who added what, and Revert. Nothing when there are none. */
 function AgentWrites({ section }: { section: string }) {
-  const { data } = useCardWrites(section, undefined, 10)
+  const [older, setOlder] = useState(false)
+  const recent = useCardWrites(section, undefined, 10)
+  const all = useCardWrites(section, undefined, undefined, true, older)
+  const data = older && all.data ? all.data : recent.data
   if (!data?.groups.length) return null
   return (
     <div className="cw-writes" data-pp-agent-writes>
       <h3>Agent writes</h3>
       <CardWriteRows section={section} groups={data.groups} showCard />
+      {!older && data.more && <p className="pp-foot"><button type="button" className="cw-btn" onClick={() => setOlder(true)} data-cw-older>Show older</button></p>}
     </div>
   )
 }

@@ -1755,7 +1755,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             if (!validProject(project)) throw fail('Say which project.', 400);
             reply({ ...await projectCards(project), agents: (await cardSectionOf(project)) === project });
           } else if (route === '/hub/card-writes') {
-            reply(await cardWrites.rows({ section: query.get('section'), folder: query.get('folder'), limit: Number(query.get('limit')) || undefined }));
+            reply(await cardWrites.rows({ section: query.get('section'), folder: query.get('folder'), limit: Number(query.get('limit')) || undefined, older: query.get('older') === '1' }));
           } else if (route === '/hub/card-write-sections') {
             reply(await cardWrites.settingView());
           } else if (route === '/hub/unasked') {

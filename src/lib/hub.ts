@@ -364,9 +364,9 @@ export interface CardWriteGroup {
   canRevert: boolean
   reverted?: { at: string | null; by: string; partial?: boolean }
 }
-export interface CardWrites { groups: CardWriteGroup[] }
+export interface CardWrites { groups: CardWriteGroup[]; /** There are older writes than these (`?older=1` reads them). */ more?: boolean }
 /** The answer to a Revert. */
-export interface CardRevert { restored: string[]; removedTabs: string[]; trashed: string[]; skipped: string[]; reverted: { at: string; by: string }; recorded: boolean }
+export interface CardRevert { restored: string[]; removedTabs: string[]; trashed: string[]; skipped: string[]; /** Files of the batch the Revert did not touch, because someone else changed them after the agent's first write. */ leftAlone?: { file: string; why: string }[]; reverted: { at: string; by: string }; recorded: boolean }
 /** `GET /hub/card-write-sections`: where agents may add cards. `saved` is false until the owner has saved the list once. */
 export interface CardWriteSections { sections: { id: string; name: string; on: boolean; locked?: boolean }[]; saved: boolean; unreadable?: boolean }
 export interface ProgressMap {

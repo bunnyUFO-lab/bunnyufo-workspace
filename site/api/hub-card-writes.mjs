@@ -27,6 +27,9 @@ const BATCH_RE = /^[a-z0-9]{8,32}$|^\d{8}T\d{9}Z-[0-9a-f]{4}$/;
 const MARK = 'card-api';
 const READ_RECORDS = 60;
 const READ_REVERTS = 40;
+const READ_RECORDS_OLDER = 300;
+const READ_REVERTS_OLDER = 120;
+export const MAX_OLDER_GROUPS = 150;
 const REVERT_SCAN = 300;
 export const MAX_GROUPS = 20;
 /** The largest earlier version Revert writes back: the Hub holds the bytes in memory while it checks and puts them. */
@@ -56,6 +59,8 @@ export function checkRecord(row, { section, folder }) {
     versionId: typeof row.versionId === 'string' ? row.versionId : null,
     previousVersionId: typeof row.previousVersionId === 'string' ? row.previousVersionId : null,
     etag: typeof row.etag === 'string' ? row.etag : null,
+    // The etag the file had just before this write: a record whose previousEtag is not the etag of the one before it follows a change that is not in this batch.
+    previousEtag: typeof row.previousEtag === 'string' ? row.previousEtag : null,
     context: /^(chat|job)(:[A-Za-z0-9._-]{1,120})?$/.test(row.context ?? '') ? row.context : null,
     why: clip(row.why, 300),
     batch: typeof row.batch === 'string' && /^[a-z0-9]{8,32}$/.test(row.batch) ? row.batch : null,
@@ -222,18 +227,22 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
   }
 
   /** Up to 20 groups, newest first, for a section or one of its card folders. */
-  async function rows({ section, folder, limit }) {
+  async function rows({ section, folder, limit, older = false }) {
     checkSection(section);
     if (folder !== undefined && folder !== null && folder !== '') checkFolder(folder);
     else folder = null;
-    const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_GROUPS) : MAX_GROUPS;
+    const top = older ? MAX_OLDER_GROUPS : MAX_GROUPS;
+    const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, top) : top;
     const files = await listing(section, folder);
-    const records = files.filter(file => !file.revert).slice(0, READ_RECORDS);
-    const reverts = files.filter(file => file.revert).slice(0, READ_REVERTS);
+    const allRecords = files.filter(file => !file.revert);
+    const records = allRecords.slice(0, older ? READ_RECORDS_OLDER : READ_RECORDS);
+    const reverts = files.filter(file => file.revert).slice(0, older ? READ_REVERTS_OLDER : READ_REVERTS);
     const [read, undone] = await Promise.all([readFiles(records, section), readFiles(reverts, section)]);
     // The card index is read only when there is something to title.
     const titles = read.length ? await titleOf(section).catch(() => ({})) : {};
-    return { groups: groupRows(read.sort((a, b) => (a.id < b.id ? -1 : 1)), undone, { limit: cap, titles }) };
+    const all = groupRows(read.sort((a, b) => (a.id < b.id ? -1 : 1)), undone, { limit: Infinity, titles });
+    // `more`: there is something older than what is shown (groups past the cap, or records not read).
+    return { groups: all.slice(0, cap), more: all.length > cap || allRecords.length > records.length };
   }
 
   const sectionKey = (section, file) => `${prefix}/${section}/${file}`;
@@ -269,10 +278,23 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
 
     // What the batch holds.
     const edits = new Map();
-    for (const record of mine.filter(item => !item.entry && item.kind === 'edit')) {
-      const file = inside(record.file, folder);
-      if (!file) throw fail(`${record.file} is not a file of this card.`, 409);
-      edits.set(file, { first: edits.get(file)?.first ?? record, last: record });
+    const leftAlone = [];
+    {
+      const perFile = new Map();
+      for (const record of mine.filter(item => !item.entry && item.kind === 'edit')) {
+        const file = inside(record.file, folder);
+        if (!file) throw fail(`${record.file} is not a file of this card.`, 409);
+        perFile.set(file, [...(perFile.get(file) ?? []), record]);
+      }
+      // Only the unbroken tail of a file's records is this batch's to undo: from the newest back while each record's previousEtag is the etag of the one before it. A break is
+      // someone else's change (the owner's edit, another agent's write) and the file keeps it: everything older is left alone, and said so.
+      for (const [file, list] of perFile) {
+        let from = list.length - 1;
+        while (from > 0 && list[from].previousEtag && list[from].previousEtag === list[from - 1].etag) from -= 1;
+        const tail = list.slice(from);
+        if (from > 0) leftAlone.push({ file, why: 'changed by someone else after the first write of this batch' });
+        edits.set(file, { first: tail[0], last: tail[tail.length - 1] });
+      }
     }
     const entries = mine.filter(item => item.entry);
     const covered = new Set();
@@ -310,10 +332,11 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
     // 2. Do it. The first failure ends it; what went back is said.
     const stop = async (error, what) => {
       const any = done.restored.length || done.removedTabs.length || done.trashed.length || done.clearedMarks.length;
-      const raced = error?.status === 412 || error?.status === 409;
+      // Only the storage's own refusal is a lost race; a refusal of ours ("a card needs at least one section") is said as it is.
+      const raced = error instanceof S3Error && (error.status === 412 || error.status === 409);
       // A lost race is the owner's news about that file or card, not about the storage.
       if (!any) throw raced ? fail(`${what} changed while it was being put back. Reload and look at it.`, 409) : error;
-      await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at: now().toISOString(), ...done, skipped, partial: true });
+      await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at: now().toISOString(), ...done, skipped, leftAlone, partial: true });
       const message = raced ? `${what} changed while it was being put back.` : error.message;
       throw fail(`Only part of this went back (${[...done.restored, ...done.removedTabs, ...done.trashed].join(', ')}). ${message}`, 409, { partial: true, ...done });
     };
@@ -350,8 +373,8 @@ export function createCardWrites({ bucket, prefix = 'sections', key, fail, pool 
       } catch (error) { await stop(error, 'The card list'); }
     }
     const at = now().toISOString();
-    const recorded = await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at, ...done, skipped });
-    return { status: 200, body: { ...done, skipped, reverted: { at, by: String(user).slice(0, 120) }, recorded } };
+    const recorded = await writeRevertRecord(section, folder, { of: batch, through: mine[mine.length - 1].id, by: String(user).slice(0, 120), at, ...done, skipped, leftAlone });
+    return { status: 200, body: { ...done, skipped, ...(leftAlone.length ? { leftAlone } : {}), reverted: { at, by: String(user).slice(0, 120) }, recorded } };
   }
 
   const settingKey = () => key(SETTING_FILE);

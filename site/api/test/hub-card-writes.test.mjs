@@ -492,3 +492,67 @@ test('rows are cheap: a record is read once for good, a repeat or a poll lists a
     assert.equal(row.why, 'rewritten');
   } finally { await w.close(); }
 });
+
+test('Revert never undoes a change it does not own: an owner edit between two writes under one label, or another agent\'s write, stays', async () => {
+  const w = await world();
+  try {
+    const key = `sections/magic-loops/${owned.folder}/index.md`;
+    const folder = owned.folder;
+    const label = { 'x-card-batch': 'labelxxxx' };
+    // Agent v0 -> v1, the owner v1 -> v2 (no record), the agent v2 -> v3, all under one label.
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# v1 agent', { ...EDIT(md5('# Owner')), ...label })).status, 200);
+    w.seed(key, '# v2 OWNER', 'text/markdown');
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# v3 agent', { ...EDIT(md5('# v2 OWNER')), ...label })).status, 200);
+    const rows = (await w.get(`/hub/card-writes?section=magic-loops&folder=${folder}`)).body.groups;
+    assert.equal(rows.length, 1);
+    const answer = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'labelxxxx' });
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.equal(w.fake.text(key), '# v2 OWNER', 'the owner\'s edit is still there');
+    assert.deepEqual(answer.body.leftAlone, [{ file: `${folder}/index.md`, why: 'changed by someone else after the first write of this batch' }]);
+
+    // Another agent's write between the two.
+    w.seed(key, '# Owner', 'text/markdown');
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# a1', { ...EDIT(md5('# Owner')), 'x-card-batch': 'batchalpha1' })).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# other', { ...EDIT(md5('# a1')), 'x-card-batch': 'otherbatch1' })).status, 200);
+    assert.equal((await w.put('magic-loops', `${folder}/index.md`, '# a3', { ...EDIT(md5('# other')), 'x-card-batch': 'batchalpha1' })).status, 200);
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'batchalpha1' })).status, 200);
+    assert.equal(w.fake.text(key), '# other', 'the other agent\'s write stays');
+    const other = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder, batch: 'otherbatch1' });
+    assert.equal(other.status, 200, JSON.stringify(other.body));
+    assert.equal(w.fake.text(key), '# a1');
+    assert.equal(other.body.leftAlone, undefined, 'an unbroken chain leaves nothing out');
+  } finally { await w.close(); }
+});
+
+test('rows: a flood of small writes does not hide an older one, which "older" reaches', async () => {
+  const w = await world();
+  try {
+    await seedWrites(w);
+    for (let n = 0; n < 25; n += 1) assert.equal((await w.put('magic-loops', `2026-11-05_f${n}/a.md`, 'x', CREATE(`flood${String(n).padStart(3, '0')}`))).status, 200);
+    const recent = (await w.get('/hub/card-writes?section=magic-loops')).body;
+    assert.equal(recent.groups.length, 20);
+    assert.equal(recent.more, true);
+    assert.ok(!recent.groups.some(group => group.batch === 'editbatch1'), 'the first edit is off the short list');
+    const older = (await w.get('/hub/card-writes?section=magic-loops&older=1')).body;
+    assert.equal(older.groups.length, 28);
+    assert.equal(older.more, false);
+    assert.equal(older.groups.find(group => group.batch === 'editbatch1').canRevert, true);
+    assert.equal((await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder: owned.folder, batch: 'editbatch1' })).status, 200);
+    assert.equal((await w.get(`/hub/card-writes?section=magic-loops&folder=${owned.folder}`)).body.more, false);
+  } finally { await w.close(); }
+});
+
+test('Revert says a refusal as it is, and only a lost race as a race', async () => {
+  const w = await world();
+  try {
+    await seedWrites(w);
+    // The owner takes the first tab off, so the agent's tab is the card's last one.
+    const list = w.listOf('magic-loops');
+    list.entities[0].steps = list.entities[0].steps.filter(step => step.path !== 'index.md');
+    w.seed('sections/magic-loops/workspace.json', JSON.stringify(list), 'application/json');
+    const refused = await w.post('/hub/card-writes/revert', { section: 'magic-loops', folder: owned.folder, batch: 'tabbatch1' });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /at least one section/);
+    assert.doesNotMatch(refused.body.error, /changed while/);
+  } finally { await w.close(); }
+});

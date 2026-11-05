@@ -15,7 +15,7 @@ export function willDo(group: CardWriteGroup): string {
 }
 
 /** The rows of a section, or of one card folder; `limit` caps the groups. Every Hub write reloads them (useHubData). */
-export function useCardWrites(section: string, folder?: string, limit?: number) {
-  const query = `section=${encodeURIComponent(section)}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}${limit ? `&limit=${limit}` : ''}`
-  return useHubData<CardWrites>(`/card-writes?${query}`)
+export function useCardWrites(section: string, folder?: string, limit?: number, older = false, enabled = true) {
+  const query = `section=${encodeURIComponent(section)}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}${limit ? `&limit=${limit}` : ''}${older ? '&older=1' : ''}`
+  return useHubData<CardWrites>(enabled ? `/card-writes?${query}` : null)
 }
