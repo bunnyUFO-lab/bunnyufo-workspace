@@ -534,7 +534,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.deepEqual(Object.keys(signed).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'signature', 'to', 'v']);
     assert.deepEqual([signed.v, signed.kind, signed.change, signed.ask, signed.profile, signed.by], [1, 'profile-change', id, id, 'main', 'owner']);
     assert.deepEqual([signed.from, signed.to], [made.body.from, made.body.to]);
-    assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 3600 * 1000, 'a press means now: the host has one hour');
+    assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 70 * 60 * 1000, 'a press means now: 70 minutes cover a 60 minute Briefs wait and the tick after it');
     assert.equal(verify(signed, publicKey), true, 'the Hub\'s signature verifies with the public key');
     assert.equal(verify({ ...signed, to: { ...signed.to, model: 'claude-haiku-5-5' } }, publicKey), false);
     assert.equal((await answerWith(f, id, 'apply')).status, 409, 'answered twice');

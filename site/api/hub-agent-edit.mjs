@@ -19,10 +19,10 @@ import { newNonce, sign } from './signing.mjs';
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const HOUR = 3600 * 1000;
 /**
- * How long the host has to apply a signed change: a press means now. Covers the host's 5-minute tick and a `briefs` wait, except a press in the first minutes of the hour-long Monday and Thursday wait, which ends `expired`;
- * the host accepts any lifetime up to 24 h 5 min and reports `expired` for a change it finds late.
+ * How long the host has to apply a signed change: a press means now. 70 minutes cover the longest `briefs` wait (60 minutes on Monday and Thursday)
+ * and the 5-minute tick after it; the host accepts any lifetime up to 24 h 5 min (`MAX_LIFETIME` in its `check_shape`) and reports `expired` for a change it finds late.
  */
-export const CHANGE_VALID_MS = HOUR;
+export const CHANGE_VALID_MS = 70 * 60 * 1000;
 const ASK_VALID_MS = 24 * HOUR;
 /** How long a change takes, in the words of the Edit page, the Ask page and the Ask text (the page keeps a copy in src/hub/profileChangeWords.ts). */
 export const CHANGE_TIME_TEXT = "Usually done in about a minute, at most 5 if the host's quick check is off.";
