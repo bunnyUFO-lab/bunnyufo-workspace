@@ -121,6 +121,9 @@ npm run cards -- get https://workspaces.example.net/magic-loops#/loops-plan --in
 npm run cards -- get "Loops plan" --into ./ws          # or section/card, or the id
 # edit ./ws/<card folder>/…, or make a new card folder and add its entry to ./ws/workspace.json
 npm run cards -- put ./ws --section magic-loops --card loops-plan [--dry-run]
+# in a project section a token may only add to (`cards sections` says `add`), say who and why:
+npm run cards -- put ./ws --section magic-loops --card loops-plan --agent Researcher --why "Notes for the owner" [--context chat|job:<id>] [--edit]
+npm run cards -- request card <id>                         # <section>/<folder> of the card a finished request made, or exit 3
 ```
 
 ### The inbox commands
@@ -176,8 +179,19 @@ question or the checklist's title and step count (200 characters) and, with `sit
 timeout) the message is appended to the shared spool as a `discord` line for the hub-hooks mod to
 replay; the address is never stored, and the exit code stays 0.
 
-`put` uploads only what differs (by md5), removes files that are gone, and only then adds or
-updates the card's entry in the section's `workspace.json`. That way a card never shows up on
+`put` uploads only what differs (by md5) and only then adds or updates the card's entry in the
+section's `workspace.json`. **It removes nothing unless you pass `--remove`**, in every section: a file gone from the
+folder is kept in the bucket and listed as `kept`. (Before, `put` removed such files. A script that relied on that now
+needs `--remove`; the output says so.) A new file goes up create-only (`If-None-Match: *`); a changed one is conditional
+on the version `get` read, which `get` keeps in `<folder>/.cards-base.json` (never uploaded). A write that lost a race
+(412 or 409) stops the run with exit 3 and says what already went up; running it again skips what matches.
+
+In a section `cards sections` marks `add` (a token with the `@library` right), `put` also needs `--agent` and `--why`
+(a dry run does not) and sends `x-card-agent`, `x-card-why`, `x-card-context` (`chat` unless `--context job:<id>`) and
+one `x-card-batch` per run. Only new files go up: a file that differs from the bucket is refused before any write unless
+`--edit` is given, and then it needs the version `get` recorded (run `get` into a fresh folder first). `--remove` and a
+file over 4 MB are refused. If the answer says `recorded: false` the client warns on stderr; that write has no row and no
+Revert in the Hub. That way a card never shows up on
 the site before its files do. The entry is written conditionally on the ETag it read, so a
 card added from another device at the same moment is never lost.
 

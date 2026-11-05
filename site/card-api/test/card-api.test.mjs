@@ -743,8 +743,19 @@ test('scripts/cards.mjs: get a card by link into an empty folder, change it, put
     assert.equal(fake.text('sections/magic-loops/2026-10-01_loops-plan/media/note.txt'), 'new');
 
     await rm(path.join(folder, 'media'), { recursive: true });
-    assert.match((await run('put', dir, '--section', 'magic-loops', '--card', 'loops-plan')).stdout, /0 to upload, 1 to remove, 1 unchanged/);
+    // put removes nothing without --remove, in every section (it said "1 to remove" and removed before); it says so.
+    const kept = (await run('put', dir, '--section', 'magic-loops', '--card', 'loops-plan')).stdout;
+    assert.match(kept, /0 to upload, 0 to remove, 1 unchanged, 1 kept/);
+    assert.match(kept, /put removes nothing without --remove/);
+    assert.equal(fake.text('sections/magic-loops/2026-10-01_loops-plan/media/note.txt'), 'new');
+    assert.match((await run('put', dir, '--section', 'magic-loops', '--card', 'loops-plan', '--remove')).stdout, /0 to upload, 1 to remove, 1 unchanged/);
     assert.equal(fake.text('sections/magic-loops/2026-10-01_loops-plan/media/note.txt'), null);
+    // The uploads were conditional: a new file create-only, a changed one on the version `get` read; the base file stays here.
+    const puts = fake.log.filter(entry => entry.method === 'PUT' && entry.key.startsWith('sections/magic-loops/2026-10-01_loops-plan/'));
+    assert.equal(puts.find(entry => entry.key.endsWith('media/note.txt')).headers['if-none-match'], '*');
+    assert.match(puts.find(entry => entry.key.endsWith('index.md')).headers['if-match'], /^"[0-9a-f]{32}"$/);
+    assert.equal([...fake.objects.keys()].some(key => key.includes('.cards-base')), false);
+    assert.ok(JSON.parse(await readFile(path.join(dir, '.cards-base.json'), 'utf8'))['magic-loops/2026-10-01_loops-plan/index.md']);
   } finally {
     server.close();
     await fake.close();
@@ -1302,5 +1313,228 @@ test('inbox: the hermes-config token creates a change result once and reads the 
     assert.equal((await call('GET', url(approved), { token: 'tok-devbot' })).status, 200, 'read=* includes the inbox, as before');
   } finally {
     await fake.close();
+  }
+});
+
+// ---- cards.mjs against a project section a token may only add to (the `@library` right) ----
+
+const ownerCard = { id: 'owner-card', folder: '2026-11-01_owner', title: 'Owner card', description: 'Mine.', category: 'plan', created: '2026-11-01', status: 'active', type: 'standalone', steps: [{ name: 'Notes', path: 'index.md' }] };
+
+async function libraryClient() {
+  const fake = await startFakeS3();
+  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
+  const list = (id, body) => fake.seed(`sections/${id}/workspace.json`, JSON.stringify(body), 'application/json');
+  list('magic-loops', { name: 'Magic Loops', entities: [ownerCard] });
+  fake.seed(`sections/magic-loops/${ownerCard.folder}/index.md`, '# Owner', 'text/markdown');
+  fake.seed(`sections/magic-loops/${ownerCard.folder}/extra.txt`, 'extra', 'text/plain');
+  list('assistant', { name: 'Assistant', entities: [] });
+  list('inbox', { name: 'Inbox', hidden: true, entities: [] });
+  const tokens = parseTokens([
+    `all=${sha('tok-all')}`,
+    `lib=${sha('tok-lib')}:read=*;write=inbox|assistant|@library`,
+    `reader=${sha('tok-reader')}:read=*`,
+  ].join(', '));
+  const server = await serve(createCardApi({ bucket, tokens, today: () => '2026-11-05' }));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cards-lib-'));
+  /** Runs cards.mjs; never rejects: { code, stdout, stderr }. */
+  const run = (token, ...args) => new Promise(resolve => {
+    execFile(process.execPath, [path.join(repo, 'scripts/cards.mjs'), ...args], {
+      env: { ...process.env, BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: token, BUW_CARDS_VIA: 'api' },
+    }, (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr }));
+  });
+  const lib = (...args) => run('tok-lib', ...args);
+  const written = (key = ownerCard.folder) => [...fake.objects.keys()].filter(item => item.includes(key));
+  const puts = () => fake.log.filter(entry => entry.method === 'PUT').length;
+  const records = () => [...fake.objects.keys()].filter(key => key.startsWith('sections/inbox/card-writes/')).sort().map(key => fake.json(key));
+  /** A new card folder in dir, with its entry in dir/workspace.json. */
+  const newCard = async (files = { 'index.md': '# Agent note' }, id = 'agent-note') => {
+    const folder = `2026-11-05_${id}`;
+    await mkdir(path.join(dir, folder), { recursive: true });
+    for (const [name, body] of Object.entries(files)) await writeFile(path.join(dir, folder, name), body);
+    const registry = JSON.parse(await readFile(path.join(dir, 'workspace.json'), 'utf8').catch(() => '{"entities":[]}'));
+    registry.entities.push({ id, folder, title: 'Agent note', description: 'Notes.', category: 'plan', created: '2026-11-05', type: 'standalone', steps: [{ name: 'Notes', path: 'index.md' }] });
+    await writeFile(path.join(dir, 'workspace.json'), JSON.stringify(registry));
+    return folder;
+  };
+  const finish = async () => { server.close(); await fake.close(); await rm(dir, { recursive: true, force: true }); };
+  return { fake, lib, run, dir, written, puts, records, newCard, finish };
+}
+const WHO = ['--agent', 'Researcher', '--why', 'Notes for the owner'];
+
+test('cards put in a project section: a new card needs who and why, and leaves records', async () => {
+  const t = await libraryClient();
+  try {
+    assert.match((await t.lib('sections')).stdout, /^magic-loops\t1 card\(s\)\tMagic Loops\tadd$/m);
+    assert.match((await t.lib('sections')).stdout, /^assistant\t0 card\(s\)\tAssistant\twrite$/m);
+    const folder = await t.newCard();
+    const before = t.puts();
+    const none = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'agent-note');
+    assert.equal(none.code, 2);
+    assert.match(none.stderr, /--agent <name> is needed/);
+    assert.equal(t.puts(), before, 'nothing was written');
+    const dry = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'agent-note', '--dry-run');
+    assert.equal(dry.code, 0, 'a dry run needs no agent');
+    assert.match(dry.stdout, /1 new, 0 edit, 0 unchanged, 0 kept/);
+    assert.equal(t.puts(), before);
+
+    const done = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'agent-note', ...WHO);
+    assert.equal(done.code, 0, done.stderr);
+    assert.match(done.stdout, /\+ 2026-11-05_agent-note\/index\.md/);
+    assert.match(done.stdout, /Added magic-loops\/agent-note as Researcher\./);
+    assert.equal(done.stderr.includes('not recorded'), false);
+    assert.deepEqual(t.fake.json('sections/magic-loops/workspace.json').entities.map(item => item.id), ['owner-card', 'agent-note']);
+    const rows = t.records().filter(row => !row.entry);
+    assert.deepEqual(rows.map(row => [row.kind, row.agent, row.token, row.context, row.file]), [['new-card', 'Researcher', 'lib', 'chat', `${folder}/index.md`]]);
+    const put = t.fake.log.find(entry => entry.method === 'PUT' && entry.key.endsWith(`${folder}/index.md`));
+    assert.equal(put.headers['if-none-match'], '*');
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards put in a project section: a changed file needs --edit and the version get read', async () => {
+  const t = await libraryClient();
+  const key = `sections/magic-loops/${ownerCard.folder}/index.md`;
+  try {
+    await t.lib('get', 'magic-loops/owner-card', '--into', t.dir);
+    const file = path.join(t.dir, ownerCard.folder, 'index.md');
+    await writeFile(file, '# Owner, edited');
+    const before = t.puts();
+    const plain = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'owner-card', ...WHO);
+    assert.equal(plain.code, 2);
+    assert.match(plain.stderr, /needs --edit[\s\S]*index\.md/);
+    assert.equal(t.puts(), before);
+    assert.equal(t.fake.text(key), '# Owner');
+
+    // The owner changes the file meanwhile: the edit is refused (exit 3) and the owner's version stays.
+    t.fake.seed(key, '# Owner, changed by the owner', 'text/markdown');
+    const lost = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'owner-card', '--edit', '--context', 'chat', ...WHO);
+    assert.equal(lost.code, 3);
+    assert.match(lost.stderr, /Stopped: .*index\.md changed in the bucket/);
+    assert.equal(t.fake.text(key), '# Owner, changed by the owner');
+
+    // Read again, edit, put: it goes up, and the record names the version it replaced.
+    const again = await mkdtemp(path.join(os.tmpdir(), 'cards-lib2-'));
+    try {
+      await t.lib('get', 'magic-loops/owner-card', '--into', again);
+      await writeFile(path.join(again, ownerCard.folder, 'index.md'), '# Owner, then the agent');
+      const ok = await t.lib('put', again, '--section', 'magic-loops', '--card', 'owner-card', '--edit', '--context', 'job:20261105-x', ...WHO);
+      assert.equal(ok.code, 0, ok.stderr);
+      assert.equal(t.fake.text(key), '# Owner, then the agent');
+      const edit = t.records().find(row => row.kind === 'edit');
+      assert.equal(edit.context, 'job:20261105-x');
+      assert.ok(edit.previousVersionId, 'the earlier version is recorded');
+    } finally {
+      await rm(again, { recursive: true, force: true });
+    }
+
+    // A folder with no .cards-base.json cannot be edited: there is no version to be conditional on.
+    const bare = await mkdtemp(path.join(os.tmpdir(), 'cards-lib3-'));
+    try {
+      await t.lib('get', 'magic-loops/owner-card', '--into', bare);
+      await rm(path.join(bare, '.cards-base.json'));
+      await writeFile(path.join(bare, ownerCard.folder, 'index.md'), '# Without a base');
+      const none = await t.lib('put', bare, '--section', 'magic-loops', '--card', 'owner-card', '--edit', ...WHO);
+      assert.equal(none.code, 2);
+      assert.match(none.stderr, /get did not record the version/);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards put in a project section: a file gone here stays, --remove is refused, a big file is refused first', async () => {
+  const t = await libraryClient();
+  const extra = `sections/magic-loops/${ownerCard.folder}/extra.txt`;
+  try {
+    await t.lib('get', 'magic-loops/owner-card', '--into', t.dir);
+    await rm(path.join(t.dir, ownerCard.folder, 'extra.txt'));
+    const kept = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'owner-card', ...WHO);
+    assert.equal(kept.code, 0, kept.stderr);
+    assert.match(kept.stdout, /0 new, 0 edit, 1 unchanged, 1 kept \(in the bucket, not here\)/);
+    assert.match(kept.stdout, /= .*extra\.txt/);
+    assert.equal(t.fake.text(extra), 'extra');
+    const before = t.puts();
+    const removed = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'owner-card', '--remove', ...WHO);
+    assert.equal(removed.code, 2);
+    assert.match(removed.stderr, /--remove is not allowed/);
+    assert.equal(t.fake.text(extra), 'extra');
+    assert.equal(t.fake.log.some(entry => entry.method === 'DELETE'), false);
+    assert.equal(t.puts(), before);
+
+    await t.newCard({ 'index.md': '# Big', 'big.bin': Buffer.alloc(5 * 1024 * 1024, 1) }, 'big-card');
+    const uploadsBefore = t.fake.log.length;
+    const big = await t.lib('put', t.dir, '--section', 'magic-loops', '--card', 'big-card', ...WHO);
+    assert.equal(big.code, 2);
+    assert.match(big.stderr, /at most 4 MB[\s\S]*big\.bin/);
+    assert.equal(t.written('big-card').length, 0, 'not even the small file went up');
+    assert.equal(t.fake.log.slice(uploadsBefore).some(entry => entry.method === 'PUT'), false);
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards put: a token that may only read is refused before any write', async () => {
+  const t = await libraryClient();
+  try {
+    await t.newCard();
+    const refused = await t.run('tok-reader', 'put', t.dir, '--section', 'magic-loops', '--card', 'agent-note', ...WHO);
+    assert.equal(refused.code, 2);
+    assert.match(refused.stderr, /may not add to magic-loops/);
+    assert.equal(t.puts(), 0);
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards put in assistant (a literal right): headers are optional, and it still removes nothing without --remove', async () => {
+  const t = await libraryClient();
+  try {
+    await t.newCard({ 'index.md': '# A', 'b.txt': 'b' });
+    const first = await t.lib('put', t.dir, '--section', 'assistant', '--card', 'agent-note');
+    assert.equal(first.code, 0, first.stderr);
+    assert.match(first.stdout, /2 to upload, 0 to remove, 0 unchanged/);
+    assert.equal(t.fake.log.filter(entry => entry.method === 'PUT' && entry.key.includes('agent-note/')).every(entry => entry.headers['if-none-match'] === '*'), true);
+    await rm(path.join(t.dir, '2026-11-05_agent-note', 'b.txt'));
+    const again = await t.lib('put', t.dir, '--section', 'assistant', '--card', 'agent-note');
+    assert.match(again.stdout, /1 kept/);
+    assert.equal(t.fake.text('sections/assistant/2026-11-05_agent-note/b.txt'), 'b');
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards request card prints the card a finished request made, or exits 3', async () => {
+  const t = await libraryClient();
+  try {
+    const id = '20261105-demo-note-ab12';
+    t.fake.seed(`sections/inbox/requests/${id}/request.json`, JSON.stringify({ project: 'magic-loops' }), 'application/json');
+    const none = await t.run('tok-all', 'request', 'card', id);
+    assert.equal(none.code, 3);
+    assert.match(none.stderr, /No card yet\./);
+    assert.equal(none.stdout, '');
+    t.fake.seed(`sections/inbox/requests/${id}/result.json`, JSON.stringify({ v: 1, outcome: 'card', card: 'magic-loops/2026-11-05_note' }), 'application/json');
+    const done = await t.run('tok-all', 'request', 'card', id);
+    assert.equal(done.code, 0, done.stderr);
+    assert.equal(done.stdout.trim(), 'magic-loops/2026-11-05_note');
+  } finally {
+    await t.finish();
+  }
+});
+
+test('cards put --via s3: the handler runs here with an unrestricted caller, so access is direct', async () => {
+  const t = await libraryClient();
+  try {
+    await t.newCard();
+    const env = { ...process.env, HOME: t.dir, USERPROFILE: t.dir, BUW_REGISTRY: path.join(t.dir, 'none.json'), BUW_CARD_API: '', BUW_CARDS_PASSWORD: '', BUW_CARDS_VIA: '', AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test', BUW_S3_BUCKET: t.fake.bucket, BUW_S3_ENDPOINT: t.fake.endpoint, BUW_S3_REGION: 'us-east-1' };
+    delete env.AWS_PROFILE;
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, [path.join(repo, 'scripts/cards.mjs'), 'put', t.dir, '--section', 'magic-loops', '--card', 'agent-note', '--via', 's3'], { env });
+    assert.match(stderr, /via s3:\/\/test-bucket/);
+    assert.match(stdout, /1 to upload, 0 to remove, 0 unchanged/);
+    assert.equal(t.fake.text('sections/magic-loops/2026-11-05_agent-note/index.md'), '# Agent note');
+  } finally {
+    await t.finish();
   }
 });

@@ -865,6 +865,12 @@ npm run cards -- get https://<your-site>/my-workspace#/my-card --into ./ws
 npm run cards -- put ./ws --section my-workspace --card my-card
 ```
 
+`put` removes nothing unless you pass `--remove`: a file gone from the folder stays in the section and is listed as kept
+(it used to be removed). In a project section an agent may only add to, `put` also takes `--agent`, `--why`,
+`--context chat|job:<id>` and `--edit` (a changed file needs `--edit` and the version `get` recorded in
+`.cards-base.json`); `cards sections` shows `write`, `add` or `read` for each section, and `cards request card <id>`
+prints the card a finished request made.
+
 Setup, where to put the passphrase for each kind of agent, and the routes are in
 [site/card-api/README.md](../site/card-api/README.md).
 
