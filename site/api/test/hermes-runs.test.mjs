@@ -59,12 +59,14 @@ test('a run whose approval names a model starts with that provider and model; Au
     const api = await s.addHub();
     const haiku = s.propose('haiku', { model: 'haiku' });
     const flash = s.propose('flash', { model: 'deepseek-flash' });
+    const sonnet = s.propose('sonnet', { model: 'sonnet' });
     const auto = s.propose('auto');
-    for (const id of [haiku, flash, auto]) assert.equal((await approve(api, id)).status, 201);
-    await until(() => [haiku, flash, auto].every(id => s.resultOf(id)), 'three results');
+    for (const id of [haiku, flash, sonnet, auto]) assert.equal((await approve(api, id)).status, 201);
+    await until(() => [haiku, flash, sonnet, auto].every(id => s.resultOf(id)), 'four results');
     const bodyOf = id => s.hermes.runs.find(run => run.key === id).body;
     assert.deepEqual([bodyOf(haiku).provider, bodyOf(haiku).model], ['anthropic', 'claude-haiku-5-5']);
     assert.deepEqual([bodyOf(flash).provider, bodyOf(flash).model], ['deepseek', 'deepseek-flash']);
+    assert.deepEqual([bodyOf(sonnet).provider, bodyOf(sonnet).model], ['anthropic', 'claude-sonnet-5-5'], 'an approved sonnet still starts');
     assert.deepEqual(Object.keys(bodyOf(auto)), ['input'], 'Auto names no provider and no model.');
     assert.equal(s.file(haiku, 'approved.json').run.model, 'haiku');
   } finally { await s.close(); }

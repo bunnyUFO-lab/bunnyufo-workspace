@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAT_MODELS, chatModelOf, chatModelsForClient } from '../chat-models.mjs';
+import { CHAT_CHAIN, CHAT_MODELS, chatModelOf, chatModelsForClient, personaModelIds, spawnModelsForClient } from '../chat-models.mjs';
 
 test('every id is unique and plain; auto is first and names no provider', () => {
   const ids = CHAT_MODELS.map(entry => entry.id);
@@ -20,16 +20,31 @@ test('chatModelOf maps ids, defaults to auto and refuses everything else with 40
   }
 });
 
-test('no entry names an Opus or Pro model (cost guard), and the client list carries no provider or model string', () => {
-  for (const entry of CHAT_MODELS) assert.doesNotMatch(`${entry.id} ${entry.model ?? ''}`, /opus|pro\b/i, entry.id);
+test('cost guard: only the opus row names Opus and it is explicitOnly; no Pro model; Codex rows say no API cost; the client list carries only id, label and note', () => {
+  const opus = CHAT_MODELS.filter(entry => /opus/i.test(`${entry.id} ${entry.model ?? ''}`));
+  assert.deepEqual(opus.map(entry => entry.id), ['opus']);
+  assert.equal(opus[0].explicitOnly, true);
+  assert.deepEqual([opus[0].provider, opus[0].model], ['anthropic', 'claude-opus-5-5']);
+  for (const entry of CHAT_MODELS) assert.doesNotMatch(`${entry.id} ${entry.model ?? ''}`, /pro\b/i, entry.id);
+  for (const entry of CHAT_MODELS.filter(item => item.provider === 'openai-codex')) assert.match(entry.note, /no API cost/, entry.id);
   for (const entry of chatModelsForClient()) assert.deepEqual(Object.keys(entry).sort(), ['id', 'label', 'note']);
+  assert.ok(CHAT_CHAIN.every(id => CHAT_MODELS.some(entry => entry.id === id && !entry.explicitOnly)), 'the chain holds no Opus and only listed ids');
+  assert.deepEqual(CHAT_CHAIN, ['codex', 'sonnet', 'deepseek-flash']);
+});
+
+test('the menu order, and the persona and Spawn lists leave out what they must', () => {
+  assert.deepEqual(CHAT_MODELS.map(entry => entry.id), ['auto', 'codex', 'codex-6-1-sol', 'codex-6-1-terra', 'codex-6-astra', 'codex-6-luna', 'sonnet', 'haiku', 'opus', 'deepseek-flash']);
+  assert.deepEqual(personaModelIds(), ['auto', 'codex', 'codex-6-1-sol', 'codex-6-1-terra', 'codex-6-astra', 'codex-6-luna', 'sonnet', 'haiku', 'deepseek-flash']);
+  assert.deepEqual(spawnModelsForClient().map(entry => entry.id), ['auto', 'sonnet', 'haiku', 'deepseek-flash'], 'what Spawn offered before, unchanged');
 });
 
 test('Codex is listed: the ChatGPT plan, no API cost, Hermes main\'s own provider and model', () => {
   const codex = CHAT_MODELS.find(entry => entry.id === 'codex');
-  assert.deepEqual({ ...codex }, { id: 'codex', label: 'Codex', note: 'ChatGPT plan, no API cost', provider: 'openai-codex', model: 'gpt-6-sol' });
+  assert.deepEqual({ ...codex }, { id: 'codex', label: 'Codex 6 Sol', note: 'ChatGPT plan, no API cost', provider: 'openai-codex', model: 'gpt-6-sol' });
   assert.equal(chatModelOf('codex'), codex);
-  assert.deepEqual(chatModelsForClient().find(entry => entry.id === 'codex'), { id: 'codex', label: 'Codex', note: 'ChatGPT plan, no API cost' });
+  assert.deepEqual(chatModelsForClient().find(entry => entry.id === 'codex'), { id: 'codex', label: 'Codex 6 Sol', note: 'ChatGPT plan, no API cost' });
+  const versions = Object.fromEntries(CHAT_MODELS.filter(entry => entry.provider === 'openai-codex').map(entry => [entry.id, entry.model]));
+  assert.deepEqual(versions, { codex: 'gpt-6-sol', 'codex-6-1-sol': 'gpt-6.1-sol', 'codex-6-1-terra': 'gpt-6.1-terra', 'codex-6-astra': 'gpt-6-astra', 'codex-6-luna': 'gpt-6-luna' });
   assert.equal(CHAT_MODELS[0].id, 'auto', 'Auto stays first');
   assert.match(CHAT_MODELS[0].note, /^Codex on your ChatGPT plan/, 'and names Codex first');
 });

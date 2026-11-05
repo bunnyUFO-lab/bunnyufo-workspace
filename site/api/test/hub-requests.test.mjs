@@ -912,9 +912,11 @@ test('checkRequest: a model is an id from the chat list; Auto is not stored; an 
   assert.equal(checkRequest({ ...base, model: 'deepseek-flash' }).model, 'deepseek-flash');
   for (const none of [undefined, null, '', 'auto']) assert.equal('model' in checkRequest({ ...base, model: none }), false, `${none} is Auto and is not stored.`);
   assert.deepEqual(checkRequest(base), checkRequest({ ...base, model: 'auto' }), 'Auto leaves the request as it was.');
-  for (const model of ['opus', 'claude-opus-5', 'anthropic/claude-haiku-5-5', 'Haiku', 7, {}, 'x'.repeat(2000)]) {
+  for (const model of ['claude-opus-5', 'anthropic/claude-haiku-5-5', 'Haiku', 7, {}, 'x'.repeat(2000)]) {
     assert.throws(() => checkRequest({ ...base, model }), error => error.status === 400 && error.message === 'Unknown model.', String(model).slice(0, 20));
   }
+  assert.throws(() => checkRequest({ ...base, model: 'opus' }), error => error.status === 400 && error.message === 'That model can only be picked in a chat.', 'Opus is a chat pick only');
+  assert.equal(checkRequest({ ...base, model: 'codex-6-1-sol' }).model, 'codex-6-1-sol', 'a Codex version is still a job model, as codex was');
   assert.throws(() => checkRequest({ project: 'probe', text: 'x', when: 'nightly', model: 'haiku' }), /preset job only/);
 });
 
@@ -933,10 +935,10 @@ test('create: a model rides on a Hermes job; Opus, a PC or cloud target and a ro
     assert.equal('model' in fake.json(`sections/inbox/requests/${auto.body.id}/request.json`), false, 'Auto stores no field.');
 
     const before = [...fake.objects.keys()].length;
-    for (const bad of ['opus', 'claude-opus-5', 'anthropic/claude-haiku-5-5']) {
+    for (const bad of ['opus', 'claude-opus-5', 'anthropic/claude-haiku-5-5']) {   // Opus: the chat-only 400; the rest: Unknown model
       const refused = await post('/hub/requests', { ...body, model: bad });
       assert.equal(refused.status, 400, bad);
-      assert.match(JSON.stringify(refused.body), /Unknown model/);
+      assert.match(JSON.stringify(refused.body), bad === 'opus' ? /only be picked in a chat/ : /Unknown model/);
     }
     for (const target of ['pc', 'cloud']) assert.equal((await post('/hub/requests', { ...body, model: 'haiku', target })).status, 400, `${target} takes no model`);
     // A job that routes to the PC (a code task) takes no model, with or without a target.

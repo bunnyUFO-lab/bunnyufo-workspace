@@ -127,7 +127,7 @@ test('save keeps the old version: a new create-only file, listed newest first wi
     assert.deepEqual(first.versions.map(row => row.id), ['default']);
     assert.deepEqual(first.current, { version: 'default', role: TEARDOWN.role, prompt: TEARDOWN.text, model: 'codex' });
     assert.equal(first.default.prompt, TEARDOWN.text);
-    assert.deepEqual(first.models.map(model => model.id), ['auto', 'codex', 'sonnet', 'haiku', 'deepseek-flash']);
+    assert.deepEqual(first.models.map(model => model.id), ['auto', 'codex', 'codex-6-1-sol', 'codex-6-1-terra', 'codex-6-astra', 'codex-6-luna', 'sonnet', 'haiku', 'deepseek-flash'], 'the list has no Opus: the model of a persona is what a chat starts on');
 
     const one = await f.save('teardown', edit({ prompt: `${TEARDOWN.text}\n- Keep answers short.`, model: 'sonnet', note: 'Shorter.' }));
     assert.equal(one.status, 200, JSON.stringify(one.body));
@@ -171,7 +171,9 @@ test('save refuses a stale base (409), a no-op, a secret, an unlisted model, and
     assert.equal(stale.body.error, 'This persona changed while you were looking.');
     assert.equal((await f.save('teardown', edit({ prompt: 'You are Teardown. One.', base: one.body.version }))).body.error, 'Nothing changed.');
     assert.equal((await f.save('teardown', edit({ prompt: `key: sk-ant-${'b'.repeat(30)}`, base: one.body.version }))).status, 400);
-    assert.equal((await f.save('teardown', edit({ model: 'opus', base: one.body.version }))).status, 400);
+    const refusedOpus = await f.save('teardown', edit({ model: 'opus', base: one.body.version }));
+    assert.equal(refusedOpus.status, 400);
+    assert.match(refusedOpus.body.error, /not in the list/, 'Opus is a chat pick only, never the model of a persona');
     for (const name of VIEW_ONLY) {
       const a = await f.save('teardown', { ...edit({ base: one.body.version }), [name]: ['x'] });
       assert.equal(a.status, 403, name);
@@ -973,5 +975,14 @@ test('the profile Ask of a made persona is for Hermes main and names it among th
     assert.equal(made.status, 201, JSON.stringify(made.body));
     assert.match(f.fake.json(`sections/inbox/asks/${made.body.ask}/ask.json`).context, /shared by Hermes, Researcher, Market researcher, Teardown, Planner and Level reviewer\./);
     assert.equal((await postChange(f, 'claude', changeBody())).status, 404);
+  } finally { await f.close(); }
+});
+
+test('save allows a Codex version as the model of a persona', async () => {
+  const f = await fixture();
+  try {
+    const saved = await f.save('teardown', edit({ model: 'codex-6-1-terra' }));
+    assert.equal(saved.status, 200);
+    assert.equal((await f.call('GET', '/hub/team/teardown/persona')).body.current.model, 'codex-6-1-terra');
   } finally { await f.close(); }
 });
