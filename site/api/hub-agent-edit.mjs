@@ -19,7 +19,7 @@ import { newNonce, sign } from './signing.mjs';
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const HOUR = 3600 * 1000;
 /**
- * How long the host has to apply a signed change: a press means now. Covers the host's 5-minute tick and the longest `briefs` wait (30 minutes);
+ * How long the host has to apply a signed change: a press means now. Covers the host's 5-minute tick and a `briefs` wait, except a press in the first minutes of the hour-long Monday and Thursday wait, which ends `expired`;
  * the host accepts any lifetime up to 24 h 5 min and reports `expired` for a change it finds late.
  */
 export const CHANGE_VALID_MS = HOUR;

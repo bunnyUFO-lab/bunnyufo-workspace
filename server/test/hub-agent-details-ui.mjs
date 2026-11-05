@@ -258,7 +258,7 @@ try {
   // Briefs is its own profile: the same change does not block it, and its page says how long its wait can be.
   await desk.goto(`${fresh.url}#/~hub/agent-edit/briefs`);
   await desk.locator('[data-edit-profile="briefs"]').waitFor();
-  assert.equal(flat(await desk.locator('[data-profile-briefs-wait]').innerText()), 'If the weekly jobs are running, it waits until they end, up to 30 minutes.');
+  assert.equal(flat(await desk.locator('[data-profile-briefs-wait]').innerText()), 'If the weekly jobs are running, it waits until they end, up to an hour.');
   assert.equal(await desk.locator('[data-profile-off]').count(), 0, 'a main change does not block briefs');
   // Teardown has a persona section: its chat model is not blocked, and the banner on its profile section says so.
   await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);

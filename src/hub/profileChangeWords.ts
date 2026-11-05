@@ -1,5 +1,5 @@
 // The words about a change of a Hermes profile's model, in one place: the Edit page, Details and the Ask use the same ones (ws-ubo.6).
-// The server keeps a copy of the time text in site/api/hub-agent-edit.mjs for the Ask text; a test compares the two.
+// The server keeps a copy of the time text in site/api/hub-agent-edit.mjs for the Ask text; the UI and Hub tests pin each copy's exact words.
 import type { ProfileChange } from '../lib/hubTeam'
 
 /** How long a change takes. */
@@ -7,7 +7,7 @@ export const CHANGE_TIME_TEXT = "Usually done in about a minute, at most 5 if th
 
 export const restartText = (profile: string) => `Changing this restarts Hermes ${profile}. ${CHANGE_TIME_TEXT} A chat or job running then stops.`
 
-export const BRIEFS_WAIT_TEXT = 'If the weekly jobs are running, it waits until they end, up to 30 minutes.'
+export const BRIEFS_WAIT_TEXT = 'If the weekly jobs are running, it waits until they end, up to an hour.'
 export const AUTO_FOLLOWS_TEXT = 'A chat set to Auto follows this. A chat set to a named model stays on that model.'
 
 /** `applied` and `live` are one word: the host said the gateway came up on the new model. `data-state` keeps the four states apart. */
