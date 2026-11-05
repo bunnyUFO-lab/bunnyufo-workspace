@@ -21,6 +21,14 @@ test('copyIdOf: host, then 10 hex of the lower-cased, forward-slash root', () =>
   assert.doesNotMatch(id, /token|secret|password|credential/);
 });
 
+test('mergeCopies: the server copy is the only one that counts, even with older rows beside it', () => {
+  const fromServer = copy('server', '2026-10-10T10:00:00Z', [issue('x-1', '2026-10-01T00:00:00Z', 'on the server')]);
+  const other = copy('a', '2026-10-20T10:00:00Z', [issue('x-1', '2026-10-19T00:00:00Z', 'in an old copy'), issue('x-2', '2026-10-19T00:00:00Z', 'deleted on the server')]);
+  const { meta, issues } = mergeCopies([other, fromServer]);
+  assert.deepEqual(issues.map(row => [row.id, row.title]), [['x-1', 'on the server']]);
+  assert.deepEqual(meta.copies.map(row => row.copy), ['server']);
+});
+
 test('mergeCopies: the older push with a newer updated_at wins that issue; an issue only in the stale copy stays', () => {
   const fresh = copy('a', '2026-10-20T10:00:00Z', [issue('x-1', '2026-10-18T09:00:00Z', 'new push, old edit'), issue('x-2', '2026-10-20T09:00:00Z')]);
   const stale = copy('b', '2026-10-10T10:00:00Z', [issue('x-1', '2026-10-19T09:00:00Z', 'old push, newer edit'), issue('x-3', '2026-10-01T00:00:00Z')]);

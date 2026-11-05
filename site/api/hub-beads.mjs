@@ -10,6 +10,8 @@ import { REQUEST_LIMITS } from './hub-requests.mjs';
 
 export const MAX_COPIES = 30;
 export const LEGACY_COPY = 'legacy';
+/** The Dolt server's export. When a project has one it is the only copy that counts: the server is the source of truth, so older copies cannot bring back a deleted row. */
+export const SERVER_COPY = 'server';
 
 /** A copy name the client could have written: what `--copy` accepts. Anything else in the folder is ignored. */
 export const validCopyName = name => /^[a-z0-9][a-z0-9-]*$/.test(name) && name !== LEGACY_COPY && !/token|secret|password|credential/.test(name);
@@ -48,7 +50,9 @@ const time = value => {
  * and `repo` beside `pushedAt`, `count` and the copy list.
  */
 export function mergeCopies(copies) {
-  const rows = (copies ?? []).filter(row => row && Array.isArray(row.issues));
+  const all = (copies ?? []).filter(row => row && Array.isArray(row.issues));
+  const server = all.find(row => row.copy === SERVER_COPY);
+  const rows = server ? [server] : all;
   const legacy = rows.filter(row => row.copy === LEGACY_COPY);
   const others = rows.filter(row => row.copy !== LEGACY_COPY).sort((a, b) => time(b.meta?.pushedAt) - time(a.meta?.pushedAt)).slice(0, MAX_COPIES);
   const kept = [...others, ...legacy];
@@ -131,7 +135,8 @@ export function createBeadsReader({ bucket, key }) {
         return { copy: row.copy, row, meta: { ...(meta ?? {}), ...(meta?.pushedAt || row.copy === LEGACY_COPY ? {} : row.data.lastModified ? { pushedAt: new Date(row.data.lastModified).toISOString() } : {}) } };
       }));
       // Only the newest MAX_COPIES (and the legacy file) are downloaded.
-      const chosen = loaded.filter(item => item.copy !== LEGACY_COPY).sort((a, b) => time(b.meta.pushedAt) - time(a.meta.pushedAt)).slice(0, MAX_COPIES)
+      const fromServer = loaded.find(item => item.copy === SERVER_COPY);
+      const chosen = fromServer ? [fromServer] : loaded.filter(item => item.copy !== LEGACY_COPY).sort((a, b) => time(b.meta.pushedAt) - time(a.meta.pushedAt)).slice(0, MAX_COPIES)
         .concat(loaded.filter(item => item.copy === LEGACY_COPY));
       const full = await Promise.all(chosen.map(async item => ({ copy: item.copy, meta: item.meta, issues: (await readIssues(item.row.data)) ?? [] })));
       return mergeCopies(full);
