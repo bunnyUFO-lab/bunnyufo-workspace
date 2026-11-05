@@ -26,10 +26,19 @@ async function fixture({ hermes = {}, refuseStarts = null } = {}) {
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
   const owner = { 'Remote-User': 'owner', Origin: 'https://site.example' };
   const servers = [];
-  const refuse = { on: false };
-  const fetchImpl = (url, init) => (refuse.on && init?.method === 'POST' && /\/v1\/runs$/.test(String(url)) ? Promise.resolve(new Response('{"error":{"message":"busy"}}', { status: 429, headers: { 'content-type': 'application/json' } })) : fetch(url, init));
+  // Switches on Hermes's side of the wire: on (429 on every start), delay (ms before a start is sent), lose (Hermes takes the start, the answer is lost), ignoreStop (a stop is not passed on).
+  const refuse = { on: false, delay: 0, lose: false, ignoreStop: false };
+  const fetchImpl = async (url, init) => {
+    const starts = init?.method === 'POST' && /\/v1\/runs$/.test(String(url));
+    if (starts && refuse.delay) await wait(refuse.delay);
+    if (starts && refuse.on) return new Response('{"error":{"message":"busy"}}', { status: 429, headers: { 'content-type': 'application/json' } });
+    if (init?.method === 'POST' && refuse.ignoreStop && /\/v1\/runs\/[^/]+\/stop$/.test(String(url))) return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    const answer = await fetch(url, init);
+    if (starts && refuse.lose) throw new TypeError('the answer was lost');
+    return answer;
+  };
   const serve = async () => {
-    const hub = createHub({ bucket, enabled: true, env: { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', ...ENV }, fetchImpl: refuseStarts ? fetchImpl : fetch });
+    const hub = createHub({ bucket, enabled: true, env: { HERMES_URL: upstream.url, HERMES_API_KEY: 'k1', ...ENV }, fetchImpl });
     const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, `c${servers.length}.json`), sectionsTtl: 0, requireRemoteUser: true, allowedOrigins: ['https://site.example'], hub });
     await listenOnGoodPort(server, '127.0.0.1');
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -398,5 +407,181 @@ test('a picture turn counts as busy (it has no run), so a message sent meanwhile
     const held = await until(async () => { const next = await read(call, started.conversation); return next.held ? next : null; }, 'the hold');
     assert.equal(held.held.reason, 'failed');
     assert.equal(held.queued[0].text, 'Text meanwhile.', 'Nothing was lost.');
+  } finally { await close(); }
+});
+
+// --- Review 3.1 -------------------------------------------------------------------------------------------------------
+
+test('review 2: a message queued while a turn is still being accepted by Hermes waits, and does not start a second run', async () => {
+  const { fake, upstream, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [['Hi.'], [{ hold: true }], ['Then the third.']] } });
+  try {
+    const first = await startTurn(origin, owner, { text: 'first' });
+    await until(() => fake.text(`sections/inbox/chat/${first.conversation}.jsonl`) && lines(fake, first.conversation).length >= 2, 'the first reply');
+    await until(async () => !(await read(call, first.conversation)).running, 'the end');
+    refuse.delay = 400;   // Hermes takes 400 ms to accept the next start
+    const slow = fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: first.conversation, text: 'second' }) });
+    await wait(100);
+    assert.equal((await queue(call, first.conversation, 'queued during the start')).status, 201);
+    await wait(700);
+    const answer = await slow;
+    assert.equal(answer.status, 200);
+    assert.equal(upstream.runs.length, 2, 'Only the second turn runs; the queued message waits for it.');
+    assert.equal(upstream.runs[1].body.input, 'second');
+    upstream.release(upstream.runs[1].id, 'Second done.');
+    await until(() => lines(fake, first.conversation).length >= 6, 'the queued turn');
+    assert.deepEqual(lines(fake, first.conversation).map(line => line.text).slice(2), ['second', 'Second done.', 'queued during the start', 'Then the third.']);
+    await answer.body?.cancel().catch(() => {});
+  } finally { await close(); }
+});
+
+test('review 3: a start whose answer was lost is retried under the same key, so Hermes starts one run', async () => {
+  const { fake, upstream, hub, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [[{ hold: true }], ['Sent once.']] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await queue(call, turn.conversation, 'Do not send me twice.');
+    refuse.lose = true;
+    upstream.release(turn.run, 'Ok.');
+    const stuck = await until(() => { const file = queueFile(fake, turn.conversation); return file.turn && file.turn.run === null && file.turn.tries === 1 ? file : null; }, 'the unknown start to be kept');
+    assert.equal(stuck.items.length, 0, 'The turn keeps the words; they are not put back as new ones.');
+    refuse.lose = false;
+    await hub.chat.sweep();
+    await until(() => lines(fake, turn.conversation).some(line => line.text === 'Sent once.'), 'the retry');
+    assert.equal(upstream.runs.length, 2, 'One run for the message.');
+    assert.equal(new Set(upstream.runs.map(run => run.key)).size, 2, 'Each turn has its own key; the retry reused the second one.');
+    assert.equal(lines(fake, turn.conversation).filter(line => line.text === 'Do not send me twice.').length, 1);
+  } finally { await close(); }
+});
+
+test('review 3: an unknown start three times in a row is held as failed, with the words back', async () => {
+  const { fake, upstream, hub, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [[{ hold: true }], ['x']] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await queue(call, turn.conversation, 'Never accepted.');
+    refuse.lose = true;
+    upstream.release(turn.run, 'Ok.');
+    await until(() => queueFile(fake, turn.conversation).turn?.tries === 1, 'try 1');
+    await hub.chat.sweep();
+    await until(() => queueFile(fake, turn.conversation).turn?.tries === 2, 'try 2');
+    await hub.chat.sweep();
+    const file = await until(() => { const next = queueFile(fake, turn.conversation); return next.held ? next : null; }, 'the hold');
+    assert.equal(file.held.reason, 'failed');
+    assert.deepEqual(file.items.map(item => item.text), ['Never accepted.']);
+    assert.equal(file.turn, null);
+  } finally { await close(); }
+});
+
+test('review 4: a Stop that Hermes did not act on, because the run was ending, still holds the queue', async () => {
+  const { fake, upstream, call, origin, owner, refuse, close } = await fixture({ hermes: { runScripts: [[{ hold: true }], ['Must not go.']] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await queue(call, turn.conversation, 'Wait.');
+    refuse.ignoreStop = true;   // the stop reaches the Hub, and the run completes anyway
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    upstream.release(turn.run, 'It finished.');
+    const held = await until(async () => { const answer = await read(call, turn.conversation); return answer.held ? answer : null; }, 'the hold');
+    assert.equal(held.held.reason, 'stopped');
+    await wait(150);
+    assert.equal(upstream.runs.length, 1, 'Nothing goes out after a Stop.');
+    assert.deepEqual(held.queued.map(item => item.text), ['Wait.']);
+    assert.ok(fake.text(`sections/inbox/chat/${turn.conversation}.jsonl`).includes('It finished.'));
+  } finally { await close(); }
+});
+
+test('review 4: a reply that has ended cannot be stopped, even before its lines are all saved', async () => {
+  const { upstream, call, origin, owner, close } = await fixture({ hermes: { runScripts: [[{ hold: true }]] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    upstream.release(turn.run, 'Done.');
+    await until(async () => (await call('POST', '/hub/chat/stop', { run: turn.run })).status === 404, 'a 404 for a finished turn');
+    assert.deepEqual(upstream.stops, [], 'Hermes was never asked to stop a finished run.');
+  } finally { await close(); }
+});
+
+const hoursAgo = hours => new Date(Date.now() - hours * 3600_000).toISOString();
+
+test('review 5: messages that waited more than an hour are held as old, not delivered, at the sweep after a restart', async () => {
+  const { fake, upstream, serve, close } = await fixture({ hermes: { runScripts: [[{ hold: true }], ['Must not go.']] } });
+  try {
+    const run = await orphanRun(upstream);
+    const id = '20261104-old001';
+    seedQueue(fake, id, { items: [{ id: 'qold', text: 'Written days ago.', at: hoursAgo(50), by: 'owner' }], turn: { key: `${id}-t-dead05`, run, text: 'first', at: hoursAgo(50), by: 'owner', queued: [], pumped: false, tries: 0 } });
+    upstream.release(run, 'The reply finished.');
+    const second = await serve();
+    await second.hub.chat.sweep();
+    const file = await until(() => { const next = queueFile(fake, id); return next.held ? next : null; }, 'the hold');
+    assert.equal(file.held.reason, 'old');
+    assert.equal(file.items[0].why, 'old', 'The row says why itself.');
+    await wait(150);
+    assert.equal(upstream.runs.length, 1, 'Nothing was sent.');
+    // Send now is the owner's choice and delivers it.
+    assert.equal((await second.call('POST', `/hub/chat/${id}/queue/send`, {})).status, 200);
+    await until(() => upstream.runs.length === 2, 'Send now');
+  } finally { await close(); }
+});
+
+test('review 5: opening a chat nudges the queue, and an old waiting message is held, not delivered', async () => {
+  const { fake, upstream, call, close } = await fixture({ hermes: { runScript: ['Must not go.'] } });
+  try {
+    const id = '20261104-old002';
+    fake.seed(`sections/inbox/chat/${id}.jsonl`, `${JSON.stringify({ role: 'user', text: 'earlier', at: hoursAgo(80) })}\n${JSON.stringify({ role: 'assistant', text: 'Reply.', at: hoursAgo(80) })}\n`, 'application/x-ndjson');
+    seedQueue(fake, id, { items: [{ id: 'qold', text: 'Left over.', at: hoursAgo(80), by: 'owner' }] });
+    const answer = await read(call, id);
+    assert.equal(answer.queued.length, 1);
+    const held = await until(async () => { const next = await read(call, id); return next.held ? next : null; }, 'the hold');
+    assert.equal(held.held.reason, 'old');
+    assert.equal(upstream.runs.length, 0);
+  } finally { await close(); }
+});
+
+test('a message that waits with no saved chat behind it (a picture or help first turn lost to a restart) is held as lost', async () => {
+  const { fake, upstream, hub, close } = await fixture();
+  try {
+    const id = '20261104-nofile';
+    seedQueue(fake, id, { items: [{ id: 'q1', text: 'Into nothing.', at: new Date().toISOString(), by: 'owner' }] });
+    await hub.chat.sweep();
+    const file = await until(() => { const next = queueFile(fake, id); return next.held ? next : null; }, 'the hold');
+    assert.equal(file.held.reason, 'lost');
+    assert.equal(upstream.runs.length, 0);
+  } finally { await close(); }
+});
+
+test('a message typed while a hold exists joins it, and each row says why itself', async () => {
+  const { call, upstream, origin, owner, close } = await fixture({ hermes: { runScripts: [[{ hold: true }]] } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await queue(call, turn.conversation, 'Held one.');
+    await call('POST', '/hub/chat/stop', { run: turn.run });
+    await until(async () => (await read(call, turn.conversation)).held, 'the hold');
+    const joined = await (await queue(call, turn.conversation, 'Typed later.')).json();
+    assert.equal(joined.held.reason, 'stopped');
+    assert.deepEqual(joined.queued.map(item => item.why), ['stopped', 'joined']);
+    await wait(100);
+    assert.equal(upstream.runs.length, 1, 'It did not go out by itself.');
+  } finally { await close(); }
+});
+
+test('recovery does not save a turn twice when the owner has sent another since', async () => {
+  const { fake, upstream, serve, close } = await fixture({ hermes: { runScript: [{ hold: true }] } });
+  try {
+    const run = await orphanRun(upstream);
+    upstream.release(run, 'Late.');
+    const id = '20261104-twice1';
+    const at = new Date().toISOString();
+    fake.seed(`sections/inbox/chat/${id}.jsonl`, [{ role: 'user', text: 'question', at }, { role: 'assistant', text: 'Late.', at }, { role: 'user', text: 'a newer one', at: new Date(Date.now() + 5).toISOString() }, { role: 'assistant', text: 'ok', at }].map(line => JSON.stringify(line)).join('\n') + '\n', 'application/x-ndjson');
+    seedQueue(fake, id, { turn: { key: `${id}-t-dead06`, run, text: 'question', at, by: 'owner', queued: [], pumped: false, tries: 0 } });
+    const second = await serve();
+    await second.hub.chat.sweep();
+    await until(() => queueFile(fake, id).turn === null, 'the turn to clear');
+    assert.equal(lines(fake, id).filter(line => line.text === 'question').length, 1, 'Not appended again.');
+  } finally { await close(); }
+});
+
+test('a long reply keeps its start: the run output wins over the events when it is longer', async () => {
+  const { fake, call, origin, owner, close } = await fixture({ hermes: { runScript: ['the tail only.'], endWith: 'The whole reply, with the part the buffer lost, and the tail only.' } });
+  try {
+    const turn = await startTurn(origin, owner, { text: 'first' });
+    await until(() => fake.text(`sections/inbox/chat/${turn.conversation}.jsonl`) && lines(fake, turn.conversation).length >= 2, 'the reply');
+    assert.equal(lines(fake, turn.conversation)[1].text, 'The whole reply, with the part the buffer lost, and the tail only.');
+    void call;
   } finally { await close(); }
 });

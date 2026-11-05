@@ -15,8 +15,9 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
-  // Headless Edge holds the page's first /live request for about half a minute after a burst of Hub refetches (a Node client gets it at once), so
-  // the two steps that follow a turn this page did not start can take 30 s each. Nothing is lost: the replay at the end has every event.
+  // Headless Edge holds a /live request for about half a minute after the first reply ends (a Node client gets it at once; ordinary GETs from the same
+  // page are instant meanwhile; not the HUB_WROTE burst, which queue posts no longer send), so the steps that follow a turn this page did not start can
+  // take 30 s each. Nothing is lost: the replay has every event.
   const field = page.locator('textarea[aria-label="Message"]');
   const rows = page.locator('[data-queued]');
   const send = async text => { await field.fill(text); await page.keyboard.press('Enter'); };

@@ -241,7 +241,7 @@ interface CutTurn { text: string; sentAt: string; fallback: Shown[]; previews: s
 const CUT_NOTE = 'The connection dropped. Hermes is still working, and the reply shows here when it is saved.'
 const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is saved.'
 /** What the rows of a held queue say: why nothing went out by itself. */
-const HELD_WHY: Record<ChatHeld['reason'], string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long' }
+const HELD_WHY: Record<NonNullable<ChatQueued['why']>, string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long', old: 'this waited too long', joined: 'it joined messages that were held' }
 const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
 function ChatView({ id }: { id?: string }) {
@@ -326,7 +326,7 @@ function ChatView({ id }: { id?: string }) {
   // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
   // page returns to the front, because a phone stops timers in the background.
   const waitingQueue = queued.length > 0 && !held   // the Hub is about to deliver them: look soon, so a phone that wakes sees the rows move
-  const busy = streaming || recovering || waitingQueue   // a message sent now waits its turn
+  const busy = streaming || recovering || queued.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
   const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
   useEffect(() => {
@@ -461,12 +461,13 @@ function ChatView({ id }: { id?: string }) {
     setError(null)
     setDraft('')
     try {
-      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) })
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue`, { text, ...(model !== AUTO ? { model } : {}) }, undefined, true)
       setQueued(answer.queued); setHeld(answer.held)
       void afterRef.current(name)   // nothing was running after all: the turn has started, so follow it
     } catch (failure) {
       setDraft(current => current || text)
       setError(failure instanceof Error ? failure.message : 'The message was not queued.')
+      void afterRef.current(name)   // the answer may only have been lost: show what the Hub kept
     }
   }
 
@@ -476,7 +477,7 @@ function ChatView({ id }: { id?: string }) {
     if (!name) return
     setError(null)
     try {
-      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/send`, {})
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/send`, {}, undefined, true)
       setQueued(answer.queued); setHeld(answer.held)
       void afterRef.current(name)
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'The messages were not sent.') }
@@ -487,7 +488,7 @@ function ChatView({ id }: { id?: string }) {
     if (!name) return
     setError(null)
     try {
-      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/${encodeURIComponent(queuedId)}/cancel`, {})
+      const answer = await hubPost<ChatQueueView>(`/chat/${encodeURIComponent(name)}/queue/${encodeURIComponent(queuedId)}/cancel`, {}, undefined, true)
       setQueued(answer.queued); setHeld(answer.held)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The message was not cancelled.')
@@ -762,7 +763,7 @@ function ChatView({ id }: { id?: string }) {
           <div className="hub-queue" data-chat-queued role="group" aria-label="Messages waiting to be sent">
             {queued.map(item => (
               <div className={`hub-queued${held ? ' held' : ''}`} key={item.id} data-queued={item.id} data-queued-state={held ? 'held' : 'queued'}>
-                <span className="hub-queued-pill" data-queued-pill>{held ? `Not sent: ${HELD_WHY[held.reason]}` : 'Queued'}</span>
+                <span className="hub-queued-pill" data-queued-pill>{held ? `Not sent: ${HELD_WHY[item.why ?? held.reason]}` : 'Queued'}</span>
                 <p className="hub-queued-text">{item.text}</p>
                 <div className="hub-queued-a">
                   {held && <button type="button" className="hub-btn pri" data-queued-send onClick={() => void sendHeld()}>Send now</button>}
