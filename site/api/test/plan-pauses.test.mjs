@@ -73,7 +73,7 @@ test('an unreadable folder is no pause, not an error', async () => {
 
 test('the page gets model ids, not providers: a provider pause covers each of its models', () => {
   const rows = pausesForClient(pausesFrom([{ provider: 'anthropic', seen: ago(5) }, { provider: 'openai-codex', seen: ago(5), until: '2026-11-01T14:20:00.000Z' }], at), CHAT_MODELS);
-  assert.deepEqual(rows.map(row => row.model).sort(), ['codex', 'haiku', 'sonnet']);
+  assert.deepEqual(rows.map(row => row.model).sort(), ['codex', 'codex-6-1-sol', 'codex-6-1-terra', 'codex-6-astra', 'codex-6-luna', 'haiku', 'opus', 'sonnet']);
   assert.ok(rows.every(row => !('provider' in row)));
 });
 
