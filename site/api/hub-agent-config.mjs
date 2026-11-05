@@ -341,9 +341,11 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
   if (preset?.template) prompts.push({ id: 'job', title: `Job template (${preset.label})`, source: 'app', text: preset.template, note: 'Placeholders are filled in when a job starts.' });
 
   // A change is shown while it waits, and for 24 hours after it ended: after the host's result, or after it ran out with none (`late`).
-  const recent = profile ? changes.filter(item => at.getTime() - Date.parse(item.result?.at ?? item.change.expires) < CHANGE_WINDOW_MS).map(item => changeView({ ...item, exported, at })) : [];
   // Where the order stands now: the export, or a change the host confirmed after that export was made.
   const effective = settings && profile ? effectiveSet(exported, profile, changes) : null;
+  // `applied` and `live` say the host confirmed a change, not that it still runs: after a way back or a host edit another order is in use, so that row is `replaced`.
+  const inUse = view => !effective || (view.state !== 'applied' && view.state !== 'live') || sameModels({ model: { provider: effective.provider, default: effective.model }, fallbacks: effective.fallbacks }, view.to);
+  const recent = profile ? changes.filter(item => at.getTime() - Date.parse(item.result?.at ?? item.change.expires) < CHANGE_WINDOW_MS).map(item => changeView({ ...item, exported, at })).map(view => (inUse(view) ? view : { ...view, replaced: true })) : [];
   if (settings && effective) settings = { ...settings, effective };
   return { agent: who, freshness, settings, prompts, jobs: block?.cron ?? [], ...(recent.length ? { change: recent[0], changes: recent } : {}) };
 }

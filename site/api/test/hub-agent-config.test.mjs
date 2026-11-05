@@ -331,6 +331,26 @@ test('changeView: runningAt is when the result landed for a confirmed change, fa
   assert.equal('runningAt' in changeView({ change, at }), false);
 });
 
+test('agentDetails: a confirmed change whose order is no longer the one in use is replaced, after a way back (A to B, B to A) and after a host edit (A to B, then C)', () => {
+  const A = { ...CODEX, fallbacks: [SONNET] };
+  const B = { ...FLASH, fallbacks: [] };
+  const C = { provider: 'deepseek', model: 'deepseek-v4-pro', fallbacks: [] };
+  const doc = (n, from, to, at, ran) => ({ change: validChange(approvedDoc({ change: `20261101-profile-main-${n}`, ask: `20261101-profile-main-${n}`, from, to, at, expires: '2026-11-01T23:00:00.000Z' })), result: validResult(resultDoc({ change: `20261101-profile-main-${n}`, at: ran })), landedAt: ran.replace(':30.000Z', ':45.000Z') });
+  const there = doc('aaaa', A, B, '2026-11-01T10:00:00.000Z', '2026-11-01T10:01:30.000Z');
+  const back = doc('bbbb', B, A, '2026-11-01T10:30:00.000Z', '2026-11-01T10:31:30.000Z');
+  const exportShowing = set => validExport({ ...agentConfigJson({ now: NOW }), exportedAt: '2026-11-01T11:00:00Z', profiles: { main: { model: { provider: set.provider, default: set.model }, fallbacks: set.fallbacks } } });
+  const view = (exported, changes) => agentDetails({ agent: agentOf('hermes'), exported, at: NOW, changes });
+
+  const wayBack = view(exportShowing(A), [back, there]);
+  assert.deepEqual(wayBack.changes.map(item => [item.to.model, item.state, item.replaced === true]), [['gpt-6-sol', 'live', false], ['deepseek-flash', 'applied', true]], 'only the order in use is running');
+  assert.equal(wayBack.change.replaced, undefined, 'the newest is the one in use');
+
+  const edited = view(exportShowing(C), [there]);
+  assert.equal(edited.settings.effective.model, 'deepseek-v4-pro');
+  assert.deepEqual([edited.change.state, edited.change.replaced], ['applied', true], 'the host was changed since: state stays, and it is marked');
+  assert.equal(view(exportShowing(B), [there]).change.replaced, undefined, 'while it is the order in use it is not replaced');
+});
+
 test('agentDetails: a change shows while it waits and for a day after it ended; Briefs and the research agents share their profile\'s; Claude Code has none', () => {
   const exported = exportAt(NOW.toISOString());
   const change = validChange(approvedDoc({ at: '2026-11-01T11:30:00.000Z', expires: '2026-11-02T11:30:00.000Z' }));

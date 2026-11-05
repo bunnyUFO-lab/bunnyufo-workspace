@@ -6,7 +6,7 @@ import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileChange, 
 import { AgentSprite } from './team/AgentSprite'
 import { STATUS_DOT, STATUS_LABEL } from './team/teamModel'
 import { stateOf } from './team/spriteState'
-import { NOT_PICKED_UP_TEXT, runningText, waitingText, WAITING_TOO_LONG_MS } from './profileChangeWords'
+import { NOT_PICKED_UP_TEXT, replacedText, runningText, waitingText, WAITING_TOO_LONG_MS } from './profileChangeWords'
 import { useWaitingPoll } from './useWaitingPoll'
 import './team/agentDetails.css'
 
@@ -65,6 +65,7 @@ export function ChangeBanner({ change, now }: { change: ProfileChange; now: numb
     )
   }
   if (change.state === 'late') return <p className="hub-banner ad-note" role="note" data-details-change="late">The change to {model} was signed {ago(change.at)}. {change.reason ?? 'The Hermes host did not pick this up.'} The old settings stay.</p>
+  if (change.replaced) return <p className="ad-note" role="status" data-details-change={change.state} data-replaced>{replacedText(change, ago(change.runningAt ?? change.resultAt ?? change.at))}</p>
   if (change.state === 'live') return <p className="ad-note" role="status" data-details-change="live">{runningText(change, true)}</p>
   if (change.state === 'applied') return <p className="ad-note" role="status" data-details-change="applied">{runningText(change, false)}</p>
   if (now - Date.parse(change.at) > WAITING_TOO_LONG_MS) return <p className="hub-banner ad-note" role="note" data-details-change="waiting" data-waiting-long>{NOT_PICKED_UP_TEXT}</p>

@@ -123,6 +123,8 @@ export interface ProfileChange {
   resultAt?: string
   /** When the host's result landed in the bucket: after the new model was confirmed. Falls back to `resultAt` on the page. */
   runningAt?: string
+  /** The host confirmed this change, but another order is in use now (a way back, or an edit on the host): it does not say Running. */
+  replaced?: boolean
   code?: string
   reason?: string
   rolledBack?: boolean

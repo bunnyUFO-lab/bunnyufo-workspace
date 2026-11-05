@@ -5,7 +5,7 @@ import { host } from '../lib/host'
 import type { AgentDetailsView, ModelRef, PersonaVersion, PersonaView, ProfileChange, TeamAgent, TeamView } from '../lib/hubTeam'
 import { isDear, opusNote } from './agentEditField'
 import { ChangeBanner } from './AgentDetails'
-import { AUTO_FOLLOWS_TEXT, BRIEFS_WAIT_TEXT, restartText, STATE_WORDS } from './profileChangeWords'
+import { AUTO_FOLLOWS_TEXT, BRIEFS_WAIT_TEXT, restartText, REPLACED_WORD, STATE_WORDS } from './profileChangeWords'
 import { useWaitingPoll } from './useWaitingPoll'
 import './team/agentDetails.css'
 
@@ -199,10 +199,10 @@ const chainText = (set: { provider: string; model: string; fallbacks: ModelRef[]
 /** One row of the changes list: when, the order it asked for, and where it stands. */
 function ChangeRow({ change }: { change: ProfileChange }) {
   return (
-    <li className="ae-version" data-profile-change={change.id} data-state={change.state}>
+    <li className="ae-version" data-profile-change={change.id} data-state={change.state} data-replaced={change.replaced ? '' : undefined}>
       <div className="ae-version-head">
         <span className="ae-version-who">{chainText(change.to)}</span>
-        <span className={`ad-tag${change.state === 'live' || change.state === 'applied' ? ' on' : ''}`} data-change-state>{STATE_WORDS[change.state]}</span>
+        <span className={`ad-tag${!change.replaced && (change.state === 'live' || change.state === 'applied') ? ' on' : ''}`} data-change-state>{change.replaced ? REPLACED_WORD : STATE_WORDS[change.state]}</span>
       </div>
       <p className="ae-version-note team-dim">Asked {ago(change.at)} by {change.by}. Before: {chainText(change.from)}.{change.reason ? ` ${change.reason}.` : ''}</p>
     </li>

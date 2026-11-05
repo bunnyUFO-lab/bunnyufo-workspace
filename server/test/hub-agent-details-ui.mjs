@@ -307,6 +307,21 @@ try {
   assert.equal(await desk.locator('[data-profile-change][data-state="live"]').count(), 1, 'the Edit page lists it as live');
   assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'and there is nothing new to send');
 
+  step('Replaced: the host is edited after the change, so the row and the banner stop saying Running although data-state stays');
+  const edited = agentConfigJson({ now: new Date(Date.now() + 1000), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
+  edited.profiles.main.model = { provider: 'deepseek', default: 'deepseek-v4-pro' };
+  edited.profiles.main.fallbacks = [];
+  seedAgentConfig(fresh.fake, edited);
+  await desk.goto(`${fresh.url}#/~hub/agent/teardown`);
+  await details(desk, 'teardown').locator('[data-details-change][data-replaced]').waitFor();
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^The change to claude-sonnet-5-5 was confirmed .+\. The host has been changed since, so it no longer runs\. The settings below are what it has now\.$/);
+  assert.equal(await details(desk, 'teardown').locator('[data-details-change]').getAttribute('data-details-change'), 'applied', 'data-state keeps its value');
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await desk.locator('[data-profile-change][data-replaced]').waitFor();
+  assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state]').innerText(), 'Replaced');
+  assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state].on').count(), 0, 'no green tag');
+  assert.doesNotMatch(await desk.locator('[data-profile-change]').innerText(), /Running/);
+
   step('Failed: Details says the change failed with the reason in words and that the old settings stay; a failed rollback says Hermes may be down');
   const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
   const briefsAt = new Date(Date.now() - 600000);

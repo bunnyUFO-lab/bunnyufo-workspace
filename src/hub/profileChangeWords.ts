@@ -13,6 +13,10 @@ export const AUTO_FOLLOWS_TEXT = 'A chat set to Auto follows this. A chat set to
 /** `applied` and `live` are one word: the host said the gateway came up on the new model. `data-state` keeps the four states apart. */
 export const STATE_WORDS: Record<ProfileChange['state'], string> = { waiting: 'Sent, not running yet', applied: 'Running', live: 'Running', failed: 'Failed', late: 'Not picked up' }
 
+/** A confirmed change is replaced when another order is in use now (a way back, or an edit on the host). */
+export const REPLACED_WORD = 'Replaced'
+export const replacedText = (change: Pick<ProfileChange, 'to'>, when: string) => `The change to ${change.to.model} was confirmed ${when}. The host has been changed since, so it no longer runs. The settings below are what it has now.`
+
 /** After this long with no answer, the host is probably off. */
 export const WAITING_TOO_LONG_MS = 10 * 60 * 1000
 /** The details are read this often while a change waits. */
