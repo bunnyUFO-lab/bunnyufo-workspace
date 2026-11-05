@@ -2337,7 +2337,7 @@ function folderSection() {
 
 const BEADS_COPY_MAX = 30;
 
-/** Every copy of a project's Beads export, merged as the Hub does: per issue the greatest updated_at wins, a tie goes to the copy pushed later. */
+/** Every copy of a project's Beads export, merged as the Hub does: the Dolt server's copy alone when there is one, else per issue the greatest updated_at wins and a tie goes to the copy pushed later. */
 async function mergedBeads(project) {
   const files = (await listInbox('beads/')).filter(file => file.startsWith(`beads/${project}/`) || file === `beads/${project}.jsonl` || file === `beads/${project}.meta.json`);
   const copies = new Map();
@@ -2361,7 +2361,8 @@ async function mergedBeads(project) {
     }
     return { copy, pushed: time(meta?.pushedAt), issues };
   });
-  const kept = rows.filter(Boolean).sort((a, b) => b.pushed - a.pushed).slice(0, BEADS_COPY_MAX);
+  const fromServer = rows.find(row => row?.copy === 'server');
+  const kept = fromServer ? [fromServer] : rows.filter(Boolean).sort((a, b) => b.pushed - a.pushed).slice(0, BEADS_COPY_MAX);
   const best = new Map();
   for (const row of kept) {
     for (const issue of row.issues) {
