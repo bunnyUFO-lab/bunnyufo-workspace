@@ -797,8 +797,9 @@ function ChatView({ id }: { id?: string }) {
           {streaming && <button type="button" className="hub-btn" onClick={stop}>Stop</button>}
           <button type="button" className="hub-btn pri" disabled={!canSend} onClick={() => void send()}>Send</button>
         </div>
-        {(speaks || models.length > 0) && (
-          <div className="hub-chat-extras">
+        {/* Until the list has answered the menu is not known: its row is held (min-height) so Send does not move when it arrives. */}
+        {(speaks || models.length > 0 || (!list.data && !list.error)) && (
+          <div className={`hub-chat-extras${list.data || list.error ? '' : ' hub-chat-extras-hold'}`}>
             {models.length > 0 && (
               <>
                 <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
