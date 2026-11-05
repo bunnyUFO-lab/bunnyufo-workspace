@@ -94,6 +94,8 @@ export interface DetailsJob {
 export interface ProfileSettings {
   model?: { provider?: string; default?: string }
   fallbacks: { provider: string; model: string }[]
+  /** The order the profile runs on now: the export's, or the last change the host confirmed when no export shows it yet. Absent when the host did not say. */
+  effective?: ModelSet
   /** The models the Hermes host would apply for this profile; none until its exporter publishes the list. */
   modelOptions?: ModelRef[]
   toolsets?: string[]
@@ -119,9 +121,21 @@ export interface ProfileChange {
   from: ModelSet
   to: ModelSet
   resultAt?: string
+  /** When the host's result landed in the bucket: after the new model was confirmed. Falls back to `resultAt` on the page. */
+  runningAt?: string
+  /** The host confirmed this change, but another order is in use now (a way back, or an edit on the host): it does not say Running. */
+  replaced?: boolean
   code?: string
   reason?: string
   rolledBack?: boolean
+}
+
+/** What the owner's press on the Edit page answers (201): the change is signed and waits for the Hermes host. */
+export interface ProfileChangeAnswer {
+  change: string
+  state: 'waiting'
+  from: ModelSet
+  to: ModelSet
 }
 
 /** `fresh` under 7 h, `stale` from 7 h, `missing` when the host has published nothing usable, `none` for an agent without a profile. */
