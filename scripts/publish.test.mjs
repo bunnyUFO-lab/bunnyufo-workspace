@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bucketFor, exitCodeFor, publish, publishAll } from './publish.mjs';
-import { defaultScope, mergeCardList, syncUp } from './shared/s3-sync.mjs';
+import { defaultScope, mergeCardList, safeKey, syncDown, syncUp } from './shared/s3-sync.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1164,5 +1164,38 @@ test('a dry run leaves sync.json and workspace.json byte-identical, even with si
     await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, dryRun: true, log: () => {} });
     const after = await Promise.all(files.map(file => readFile(file)));
     assert.deepEqual(after, before);
+  } finally { await fake.close(); }
+});
+
+test('safeKey refuses what would leave the folder or break on Windows, and keeps ordinary names', () => {
+  for (const key of ['hub/..\\evil.txt', 'hub/a:b.txt', 'hub/con.txt', 'hub/NUL', 'hub/com1.md', 'hub/x.', 'hub/x ', 'hub/../x', 'hub/./x', 'hub/a\u0001b', '', 'C:/x']) assert.equal(safeKey(key), false, JSON.stringify(key));
+  for (const key of ['hub/index.md', 'hub/Notes (v2).md', 'hub/sub dir/a.b.txt', 'hub/ünï.md', 'hub/!weird,name#1.md', 'hub/console.md']) assert.equal(safeKey(key), true, key);
+});
+
+test('a key on the site that is not a safe path here is skipped, logged and never written or deleted, by syncDown and syncUp', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const evil = ['hub/..\\evil.txt', 'hub/a:b.txt', 'hub/con.txt', 'hub/trailing.'];
+    for (const key of evil) fake.seed(`${KEY}${key}`, 'bad', 'text/plain');
+    const before = [...fake.objects.keys()].sort();
+    const lines = [];
+    const down = await syncDown({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line) });
+    assert.deepEqual(down.written, []);
+    const up = await syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line) });
+    assert.deepEqual(up.downloads, []);
+    assert.deepEqual(up.deletes, []);
+    for (const key of evil) assert.equal(lines.filter(line => line === `  left on the site: ${key} is not a safe path here`).length, 2, key);
+    assert.deepEqual([...fake.objects.keys()].sort(), before, 'nothing was deleted or added on the site');
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+    // Nothing landed in the workspace folder or next to it.
+    assert.equal(await exists(path.join(w.site, 'evil.txt')), false);
+    assert.equal(await exists(path.join(w.site, 'hub', '..\\evil.txt')), false);
+    assert.equal(await exists(path.join(w.base, 'evil.txt')), false);
+    assert.deepEqual((await readdir(path.join(w.site, 'hub'))).sort(), ['index.md']);
+    // A dry run logs them too and still writes nothing.
+    const dryLines = [];
+    await syncDown({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, dryRun: true, log: line => dryLines.push(line) });
+    assert.equal(dryLines.filter(line => line.includes('not a safe path')).length, evil.length);
   } finally { await fake.close(); }
 });

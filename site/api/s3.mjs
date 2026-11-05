@@ -227,6 +227,8 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     contentType: response.headers.get('content-type') || null,
     size: Number(response.headers.get('content-length')) || 0,
     lastModified: response.headers.get('last-modified') || null,
+    // Set when the bucket is versioned: the version this response is about (a PUT's answer names the one it made).
+    versionId: response.headers.get('x-amz-version-id') || null,
     // User metadata (`x-amz-meta-*`), by name: who wrote an object is recorded here, never in its body.
     metadata: Object.fromEntries([...response.headers.entries()].filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value])),
   });
@@ -242,6 +244,16 @@ export function createBucket({ bucket, region, endpoint, credentials, fetchImpl 
     async head(key) {
       const response = await send('HEAD', key, { stream: true });
       return meta(response);
+    },
+    /** One earlier version of an object, as bytes (a Buffer); null when that version is not there. Needs `s3:GetObjectVersion`. */
+    async getVersion(key, versionId) {
+      try {
+        const response = await send('GET', key, { stream: true, query: { versionId } });
+        return { ...meta(response), buffer: Buffer.from(await response.arrayBuffer()) };
+      } catch (error) {
+        if (error.status === 404) return null;
+        throw error;
+      }
     },
     /** Whole object as text; null when it is not there. */
     async getText(key) {

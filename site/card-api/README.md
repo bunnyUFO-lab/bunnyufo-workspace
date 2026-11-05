@@ -255,9 +255,49 @@ What it refuses:
   listing shows only `approved.json` and `result.json` files) and get `agent-config/changes/<id>/approved.json` or `result.json`. Reading an export, an ask or anything else is still 403. A file it creates is stored with the object metadata
   `x-amz-meta-writer: hermes-config`, set only by the handler; the passphrase's files there carry no mark, and the site API ignores an export without it
 - files that look like secrets (`.env`, keys, `*token*.json` and the like)
+- for a limited writer outside the inboxes, a first path segment the site keeps for itself (`card-responses`, `_shared`, `workspace.json`, `state.json`, `sections`, `inbox`), on put, upload and as an entry `folder` (403)
+- `library-writes.json` and `card-writes/` in an inbox, for every caller, the passphrase included (the setting and the records are not written through a route; reading `card-writes/` needs only `read`)
 - paths outside a card folder (`workspace.json`, `_shared/`, dot-files)
 - registering a card whose folder holds a file over 50 MB
 - a folder that already belongs to another card
+
+## The `@library` right
+
+A `write` list may end with `@library`: `read=*;write=inbox|assistant|@library`. It lets the token add to any
+**Library section**: a section with a card list that is not `hidden`, not `archived`, and whose id is not `inbox` or
+`inbox-*`. A literal right still wins, so `assistant` behaves as before. The right never deletes (`delete` has no
+`@library`), and an older handler answers 500 to every caller when it sees `@library`, so deploy the handler before
+changing a token.
+
+What a Library write must do:
+- send `If-None-Match: *` (create) or `If-Match: "<etag>"` (edit), else 428
+- send `x-card-agent` (name), `x-card-why` (URI-encoded, 1 to 300 characters) and for an edit `x-card-context` (`chat` or `job:<id>`), else 422. `x-card-batch` (8 to 32 lower-case letters and digits) groups the writes of one `put`. `agent`, `why` and `context` are what the agent says; the token is proven
+- use paths every part of which is safe on Windows (project sections come down to the owner's PC): letters, digits, space, dot, dash, underscore and brackets, no device names (`con`, `nul`, `com1`), no trailing dot or space; a card `folder` is stricter: letters, digits, dot, dash, underscore
+- stay under 4 MB per file: no upload URLs for a Library section (403)
+- not write into a Trash or moved card's folder (409), or a name that differs only by case from a file there (409)
+
+The entry route keeps its shape, but the server builds the entry. A **new card** may set `id, title, description, type, category,
+created, updated, folder, steps, defaultStep, status` only (422 names any other field); `status` is `active`; a step is
+`{ name, path, viewer? }` with the `path` of a file already in the folder (no `url` step). For an **existing card** everything
+posted is ignored except steps with a new `path`, which are appended with `agentTab: true` (set by the server). The answer
+names the ignored fields (`ignored`), or `{ unchanged: true }` when nothing was added. The list is written with the `If-Match` it
+read, so `retired` and every other top-level field are untouched. 409 and 412 are both a lost race and retried.
+
+`GET /sections` and `GET /sections/{id}` carry `access`: `direct` (a literal or unrestricted write right), `library`, or `read`
+(also a Library section the owner turned off).
+
+**The setting.** `library-writes.json` at the root of the inbox, `{ "v": 1, "off": ["<section>"], "at", "by" }`, written
+by the Hub. No file means every section is on. A file with a writer mark, one that does not parse or has a bad shape turns every
+Library section off (logged); a storage error answers 503. It is read at most every 30 seconds. Sections that start with `dev-`
+use `inbox-dev` for the setting and the records.
+
+**The record.** Each write by a limited token outside the inboxes (a Library right or a literal one such as `assistant`)
+leaves one create-only file, `card-writes/<section>/<folder>/<stamp>-<rand>.json` in the inbox, marked `writer: card-api`:
+`{ v, id, section, folder, file, kind (new-card | new-tab | edit), entry, agent, token, versionId, previousVersionId, etag,
+previousEtag, context, why, batch, at }`. An entry write adds a record with `entry: true`, `cardId` and `steps`. The passphrase
+leaves none. If a record cannot be written (tried twice), the file is already in place: the answer is 200 with
+`recorded: false` and the function log keeps the row for 30 days. **Known limit:** such a write has no row and no Revert; the
+object's own `x-amz-meta-writer` and `x-amz-meta-agent` still name the writer.
 
 ## Develop
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Agent card writes, gated.** The card API gains a `@library` write right for agents: they add cards and tabs to project sections, never delete, say who and why, and each write leaves a record in the inbox. Publish and pull now skip a site key that is not a safe path on this PC.
 - First public version: a web app for project cards and reports, run locally with Docker or
   served from a published site. Ships two sample cards (Markdown and HTML) to show the formats.
 - **Make cards by hand, on the site or locally.** ＋ New card on the board, ＋ after a card's tabs

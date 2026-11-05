@@ -200,6 +200,12 @@ A section whose `workspace.json` carries `"hidden": true` holds data, not cards 
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
 
+A card API token whose `write` list holds `@library` may add cards and tabs (never delete) to any section that has a card list
+and is not hidden, archived or an inbox, with a name, a reason and conditional writes; each write leaves a record in the
+inbox. The owner's off-list is `library-writes.json` at the root of the inbox. See `site/card-api/README.md`, "The `@library` right".
+`npm run publish` skips a key on the site that is not a safe path on this PC (a backslash, a colon, a device name, a trailing
+dot or space) and says `left on the site: <key> is not a safe path here`; it never writes or deletes it.
+
 A small service (`site/api`, container `buw-site-api`, port 8099) is the only thing that reads
 it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and `/api/*` to it:
 

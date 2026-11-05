@@ -57,6 +57,20 @@ export const inScope = (file, scope) =>
   scope.prefixes.some(prefix => file.startsWith(prefix)) ||
   scope.folders.some(folder => file === folder || file.startsWith(`${folder}/`)));
 
+const DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+/**
+ * Whether a key that came from the bucket may be written under the local folder. This PC is Windows, and
+ * `path.join(root, ...key.split('/'))` would walk out of the folder for a key like `a/` + backslash + `..` + backslash + `x.txt`. Refused: a backslash, a
+ * colon, a control character, a `.` or `..` segment, a segment ending in a dot or a space, and a Windows
+ * device name (`con`, `nul`, `com1`, with or without an extension). Older keys may hold other characters.
+ */
+export function safeKey(file) {
+  if (typeof file !== 'string' || !file) return false;
+  if (/[\\:\u0000-\u001f\u007f]/.test(file)) return false;
+  return file.split('/').every(segment => segment !== '.' && segment !== '..' && !/[. ]$/.test(segment) && !DEVICE_NAME.test(segment.split('.')[0]));
+}
+
 /** Every file under root worth considering, as posix paths relative to root. */
 async function walk(root) {
   const found = [];
@@ -373,6 +387,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
   const deletes = [];
   for (const [file, object] of remote) {
     if (!file || file.endsWith('/') || !inScope(file, scope) || local.includes(file)) continue;
+    if (!safeKey(file)) { log(`  left on the site: ${file} is not a safe path here`); continue; }
     // Removed here since the last sync and untouched there: remove it there too. Anything else
     // missing here is new on the site (a card's page, an added section) and comes down.
     if (record.files[file] && record.files[file] === object.etag) deletes.push(file);
@@ -483,6 +498,7 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
   for (const object of objects) {
     const file = object.key.slice(base.length);
     if (!file || file.endsWith('/') || !inScope(file, scope)) continue;
+    if (!safeKey(file)) { log(`  left on the site: ${file} is not a safe path here`); continue; }
     const target = path.join(root, ...file.split('/'));
     const info = await stat(target).catch(() => null);
     if (info) {

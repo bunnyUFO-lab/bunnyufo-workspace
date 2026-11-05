@@ -11,6 +11,9 @@ const escapeXml = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt
 export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {}) {
   /** key -> { body: Buffer, etag, contentType, lastModified } */
   const objects = new Map();
+  /** key -> Map(versionId -> object): every body ever put, for `?versionId=` reads. */
+  const versions = new Map();
+  let versionCounter = 0;
   const log = [];
   const faults = { fail: null };
   const error = (response, status, code, message = code) => {
@@ -52,9 +55,10 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     }
 
     if (request.method === 'GET' || request.method === 'HEAD') {
-      const object = objects.get(key);
-      if (!object) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
-      const headers = { 'Content-Type': object.contentType, 'Content-Length': object.body.length, ETag: `"${object.etag}"`, 'Last-Modified': object.lastModified, ...Object.fromEntries(Object.entries(object.metadata ?? {}).map(([name, value]) => [`x-amz-meta-${name}`, value])) };
+      const wanted = url.searchParams.get('versionId');
+      const object = wanted ? versions.get(key)?.get(wanted) : objects.get(key);
+      if (!object) return error(response, 404, wanted ? 'NoSuchVersion' : 'NoSuchKey', wanted ? 'The specified version does not exist.' : 'The specified key does not exist.');
+      const headers = { 'x-amz-version-id': object.versionId, 'Content-Type': object.contentType, 'Content-Length': object.body.length, ETag: `"${object.etag}"`, 'Last-Modified': object.lastModified, ...Object.fromEntries(Object.entries(object.metadata ?? {}).map(([name, value]) => [`x-amz-meta-${name}`, value])) };
       if (request.headers['if-none-match'] === `"${object.etag}"`) { response.writeHead(304, headers); return response.end(); }
       response.writeHead(200, headers);
       return response.end(request.method === 'HEAD' ? undefined : object.body);
@@ -64,7 +68,10 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       const source = decodeURIComponent(request.headers['x-amz-copy-source']).replace(/^\//, '');
       const origin = objects.get(source.slice(bucket.length + 1));
       if (!source.startsWith(`${bucket}/`) || !origin) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
-      objects.set(key, { ...origin, lastModified: new Date().toUTCString() });
+      const copied = { ...origin, lastModified: new Date().toUTCString(), versionId: `v${(versionCounter += 1)}` };
+      objects.set(key, copied);
+      if (!versions.has(key)) versions.set(key, new Map());
+      versions.get(key).set(copied.versionId, copied);
       const xml = `<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult><LastModified>${new Date().toISOString()}</LastModified><ETag>&quot;${origin.etag}&quot;</ETag></CopyObjectResult>`;
       response.writeHead(200, { 'Content-Type': 'application/xml', 'Content-Length': Buffer.byteLength(xml) });
       return response.end(xml);
@@ -82,8 +89,12 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       if (ifNoneMatch === '*' && existing) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
       const etag = createHash('md5').update(body).digest('hex');
       const metadata = Object.fromEntries(Object.entries(request.headers).filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value]));
-      objects.set(key, { body, etag, contentType: request.headers['content-type'] || 'binary/octet-stream', lastModified: new Date().toUTCString(), metadata });
-      response.writeHead(200, { ETag: `"${etag}"`, 'Content-Length': 0 });
+      const versionId = `v${(versionCounter += 1)}`;
+      const stored = { body, etag, contentType: request.headers['content-type'] || 'binary/octet-stream', lastModified: new Date().toUTCString(), metadata, versionId };
+      objects.set(key, stored);
+      if (!versions.has(key)) versions.set(key, new Map());
+      versions.get(key).set(versionId, stored);
+      response.writeHead(200, { ETag: `"${etag}"`, 'x-amz-version-id': versionId, 'Content-Length': 0 });
       return response.end();
     }
 
@@ -115,7 +126,11 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
     /** Seed an object straight into the store. */
     seed(key, body, contentType = 'application/octet-stream', metadata = {}) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-      objects.set(key, { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata });
+      const versionId = `v${(versionCounter += 1)}`;
+      const stored = { body: buffer, etag: createHash('md5').update(buffer).digest('hex'), contentType, lastModified: new Date().toUTCString(), metadata, versionId };
+      objects.set(key, stored);
+      if (!versions.has(key)) versions.set(key, new Map());
+      versions.get(key).set(versionId, stored);
     },
     // Drop keep-alive and stuck sockets too, so a close never waits on a client that is not coming back.
     close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }),
