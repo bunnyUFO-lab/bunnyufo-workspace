@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
-import { createCardApi, libraryFolderOk, libraryPathOk, parseScope, parseTokens } from '../handler.mjs';
+import { SYNC_SKIPPED, createCardApi, libraryFolderOk, libraryPathOk, parseScope, parseTokens } from '../handler.mjs';
+import { SKIP_DIRS, SKIP_ROOT } from '../../../scripts/shared/s3-sync.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const WHO = { 'x-card-agent': 'Researcher', 'x-card-why': encodeURIComponent('Notes for the owner') };
@@ -14,11 +15,11 @@ const CREATE = { 'if-none-match': '*', ...WHO };
 const EDIT = etag => ({ 'if-match': `"${etag}"`, 'x-card-context': 'chat', ...WHO });
 const md5 = text => createHash('md5').update(text).digest('hex');
 
-const owned = { id: 'owner-card', folder: '2026-11-01_owner', title: 'Owner card', description: 'Mine.', category: 'plan', created: '2026-11-01', status: 'active', type: 'standalone', steps: [{ name: 'Notes', path: 'index.md' }], pinned: true, tags: ['keep'] };
+const owned = { id: 'owner-card', folder: '2026-11-01_owner', title: 'Owner card', description: 'Mine.', category: 'plan', created: '2026-11-01', status: 'active', type: 'standalone', steps: [{ name: 'Notes', path: 'index.md' }], pinned: true, tags: ['keep'], removedTabs: [{ name: 'Old', path: 'old.md', at: '2026-11-01' }] };
 
-async function setup({ clock = { at: 1_800_000_000_000 } } = {}) {
+async function setup({ clock = { at: 1_800_000_000_000 }, wrap = bucket => bucket } = {}) {
   const fake = await startFakeS3();
-  const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
+  const bucket = wrap(createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' }));
   const list = (id, body) => fake.seed(`sections/${id}/workspace.json`, JSON.stringify(body), 'application/json');
   list('magic-loops', { name: 'Magic Loops', entities: [owned], retired: { gone: { kind: 'trashed', folder: '2026-11-01_gone', entity: { id: 'gone', folder: '2026-11-01_gone' } } } });
   fake.seed(`sections/magic-loops/${owned.folder}/index.md`, '# Owner', 'text/markdown');
@@ -452,5 +453,130 @@ test('a lost race on the list (409 or 412) is retried for every caller', async (
     assert.equal(answer.status, 200, JSON.stringify(answer.data));
     assert.equal(t.listOf('magic-loops').name, 'Renamed', 'the retry kept the other writer\'s change');
     assert.ok(t.listOf('magic-loops').entities.some(item => item.id === 'q'));
+  } finally { await finish(t); }
+});
+
+test('a file may not go below a file or where a folder is, in any case', async () => {
+  const t = await setup();
+  try {
+    await t.put('magic-loops', `${owned.folder}/sub/a.md`, 'a');
+    for (const file of [`${owned.folder}/index.md/evil.txt`, `${owned.folder}/INDEX.md/evil.txt`, `${owned.folder}/sub`, `${owned.folder}/Sub`, `${owned.folder}/sub/a.md/x`]) {
+      const answer = await t.put('magic-loops', file, 'x');
+      assert.equal(answer.status, 409, `${file}: ${JSON.stringify(answer.data)}`);
+    }
+    assert.equal((await t.put('magic-loops', `${owned.folder}/sub/b.md`, 'b')).status, 200, 'a sibling in an existing folder is fine');
+    assert.equal((await t.put('magic-loops', `${owned.folder}/index.md/evil.txt`, 'x', EDIT(md5('# Owner')))).status, 409, 'an edit cannot do it either');
+    assert.deepEqual([...t.fake.objects.keys()].filter(key => /index\.md\/|\/sub$|\/Sub$/i.test(key)), []);
+  } finally { await finish(t); }
+});
+
+test('reserved and retired names ignore case, and so does a live folder', async () => {
+  const t = await setup();
+  try {
+    for (const name of ['Card-Responses', 'CARD-RESPONSES', 'Workspace.json', 'STATE.JSON', 'Inbox', 'Sections']) {
+      assert.equal((await t.put('magic-loops', `${name}/a/b.json`, 'x')).status, 403, name);
+      assert.equal((await t.put('assistant', `${name}/a/b.json`, 'x', { 'if-none-match': '*' }, 'tok-main')).status, 403, `assistant ${name}`);
+      assert.equal((await t.call('POST', '/sections/magic-loops/uploads', { body: { files: [{ path: `${name}/a.json` }] } })).status, 403, `upload ${name}`);
+      assert.equal((await t.entry('magic-loops', 'bad', { id: 'bad', title: 'B', folder: name, steps: [] })).status, 403, `entry ${name}`);
+    }
+    assert.equal((await t.put('magic-loops', '_Shared/a.css', 'x')).status, 400, 'cardPath refuses an underscore');
+    assert.equal((await t.put('magic-loops', '2026-11-01_GONE/x.md', 'x')).status, 409, 'a variant of a trashed folder');
+    assert.equal((await t.entry('magic-loops', 'g2', { id: 'g2', title: 'G', folder: '2026-11-01_GONE', steps: [] })).status, 409);
+    assert.equal((await t.put('magic-loops', '2026-11-01_OWNER/index.md', 'x')).status, 409, 'a variant of a live folder');
+    assert.equal([...t.fake.objects.keys()].some(key => /GONE|OWNER|Card-Responses|CARD-RESPONSES|Workspace\.json\/|STATE|\/Inbox|Sections/.test(key)), false);
+  } finally { await finish(t); }
+});
+
+test('an agent cannot bring back a tab the owner removed', async () => {
+  const t = await setup();
+  try {
+    t.fake.seed(`sections/magic-loops/${owned.folder}/old.md`, 'old', 'text/markdown');
+    const answer = await t.entry('magic-loops', 'owner-card', { ...owned, steps: [...owned.steps, { name: 'Old', path: 'old.md' }] });
+    assert.equal(answer.status, 200, JSON.stringify(answer.data));
+    assert.ok(answer.data.ignored.some(item => item.includes('old.md')), JSON.stringify(answer.data.ignored));
+    const after = t.listOf('magic-loops').entities[0];
+    assert.deepEqual(after.steps.map(step => step.path), ['index.md']);
+    assert.deepEqual(after.removedTabs.map(item => item.path), ['old.md']);
+    assert.equal(t.records().length, 0, 'nothing was added');
+  } finally { await finish(t); }
+});
+
+test('a 409 from S3 on a file put is a lost race (412), not a 500', async () => {
+  const t = await setup({ wrap: bucket => ({ ...bucket, put: async (key, ...rest) => { if (key.endsWith('/race.md')) throw Object.assign(new Error('conflict'), { status: 409 }); return bucket.put(key, ...rest); } }) });
+  try {
+    const answer = await t.put('magic-loops', '2026-11-05_r/race.md', 'x');
+    assert.equal(answer.status, 412);
+    assert.match(answer.data.error, /already exists/);
+  } finally { await finish(t); }
+});
+
+test('an If-Match edit of an existing html tab marks the step agentTab, and the record names it', async () => {
+  const t = await setup();
+  try {
+    t.fake.seed(`sections/magic-loops/${owned.folder}/page.html`, '<p>mine</p>', 'text/html');
+    const list = t.listOf('magic-loops');
+    list.entities[0].steps.push({ name: 'Page', path: 'page.html' });
+    t.fake.seed('sections/magic-loops/workspace.json', JSON.stringify(list), 'application/json');
+    const md = await t.put('magic-loops', `${owned.folder}/index.md`, '# Edited', EDIT(md5('# Owner')));
+    assert.equal(md.status, 200);
+    assert.deepEqual(t.listOf('magic-loops').entities[0].steps.map(step => step.agentTab), [undefined, undefined], 'a Markdown edit marks nothing');
+    const stale = await t.put('magic-loops', `${owned.folder}/page.html`, '<p>x</p>', EDIT('0'.repeat(32)));
+    assert.equal(stale.status, 412);
+    assert.equal(t.listOf('magic-loops').entities[0].steps[1].agentTab, undefined, 'a refused edit marks nothing');
+    const done = await t.put('magic-loops', `${owned.folder}/page.html`, '<p>agent</p>', EDIT(md5('<p>mine</p>')));
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    const steps = t.listOf('magic-loops').entities[0].steps;
+    assert.deepEqual(steps[1], { name: 'Page', path: 'page.html', agentTab: true });
+    assert.equal(steps[0].agentTab, undefined);
+    const row = t.records().find(item => item.file.endsWith('page.html'));
+    assert.equal(row.kind, 'edit');
+    assert.equal(row.markedAgentTab, 'page.html');
+    // A second edit finds it marked and writes no list.
+    const writes = () => t.fake.log.filter(entry => entry.method === 'PUT' && entry.key === 'sections/magic-loops/workspace.json').length;
+    const before = writes();
+    t.clock.at += 1000; // records sort by their time stamp
+    await t.put('magic-loops', `${owned.folder}/page.html`, '<p>again</p>', EDIT(md5('<p>agent</p>')));
+    assert.equal(writes(), before);
+    assert.equal(t.records().filter(item => item.file.endsWith('page.html')).pop().markedAgentTab, undefined);
+  } finally { await finish(t); }
+});
+
+test('a folder spelled differently from a folder in the card is refused', async () => {
+  const t = await setup();
+  try {
+    await t.put('magic-loops', `${owned.folder}/assets/logo.png`, 'logo');
+    const answer = await t.put('magic-loops', `${owned.folder}/Assets/x.png`, 'x');
+    assert.equal(answer.status, 409, JSON.stringify(answer.data));
+    assert.equal((await t.put('magic-loops', `${owned.folder}/assets/x.png`, 'x')).status, 200);
+    assert.equal(t.fake.objects.has(`sections/magic-loops/${owned.folder}/Assets/x.png`), false);
+  } finally { await finish(t); }
+});
+
+test('a card folder the sync skips is refused in any case, and the API list equals the sync list', async () => {
+  const t = await setup();
+  try {
+    assert.deepEqual([...SYNC_SKIPPED].sort(), [...SKIP_DIRS, ...SKIP_ROOT].map(name => name.toLowerCase()).sort(), 'handler.mjs keeps its own copy of the names s3-sync.mjs skips');
+    for (const name of ['categories', 'Categories', 'GEMFILE', 'Gemfile.lock', 'README.md', 'Index.md', 'node_modules', 'Docker-Compose.yml', 'docker-compose.yml']) {
+      assert.equal((await t.put('magic-loops', `${name}/a.md`, 'x')).status, 403, `put ${name}`);
+      assert.equal((await t.entry('magic-loops', 'bad', { id: 'bad', title: 'B', folder: name, steps: [] })).status, 403, `entry ${name}`);
+    }
+    assert.equal((await t.put('magic-loops', 'category/a.md', 'x')).status, 200, 'a near name is fine');
+    assert.equal(t.fake.objects.has('sections/magic-loops/categories/a.md'), false);
+  } finally { await finish(t); }
+});
+
+test('a Library right does not edit an existing script file, but may add a new one', async () => {
+  const t = await setup();
+  try {
+    for (const ext of ['js', 'mjs', 'cjs', 'wasm', 'JS']) {
+      const key = `sections/magic-loops/${owned.folder}/app.${ext}`;
+      t.fake.seed(key, 'owner code', 'text/javascript');
+      const refused = await t.put('magic-loops', `${owned.folder}/app.${ext}`, 'agent code', EDIT(md5('owner code')));
+      assert.equal(refused.status, 403, ext);
+      assert.match(refused.data.error, /new tab/);
+      assert.equal(t.fake.text(key), 'owner code');
+    }
+    assert.equal(t.records().length, 0);
+    assert.equal((await t.put('magic-loops', `${owned.folder}/new-app.js`, 'new code')).status, 200);
   } finally { await finish(t); }
 });
