@@ -31,6 +31,8 @@ const enc = encodeURIComponent
 const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', running: 'Running', needs: 'Needs you', library: 'Library' }
 const WIDE = '(min-width: 1000px)'
 
+function setHash(hash: string) { window.location.hash = hash }
+
 function useWide() {
   const [wide, setWide] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia(WIDE).matches)
   useEffect(() => {
@@ -198,7 +200,7 @@ export default function ProjectPage({ route }: { route?: string }) {
   const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known && target ? `/map/${enc(target)}` : null, !!project)
   const wide = useWide()
   const phone = useIsPhone()
-  const go = (id: string) => { window.location.hash = projectHash(id, tab) }
+  const go = (id: string) => setHash(projectHash(id, tab))
 
   if (!known) {
     return (
