@@ -56,21 +56,25 @@ try {
 
   step('the Steps chip lists the open list with "1 of 4", the submitted one is history, and the Needs you badge counts it');
   assert.equal(await page.locator('[data-hub-tab-badge]').innerText(), '4', 'Three things wait in the fixture, and the list is a fourth.');
-  await page.locator('.hub-chips .hub-chip').first().waitFor();
-  await page.locator('.hub-chip[data-filter="steps"] .n').waitFor();
-  assert.deepEqual(await page.locator('.hub-chips .hub-chip').evaluateAll(list => list.map(item => item.getAttribute('data-filter'))), ['all', 'question', 'steps', 'unstick', 'pr', 'answered'], 'Chips with nothing in them hide.');
+  // At phone width the filter is a native select (one option per filter), not a row of chips.
+  const filter = page.locator('[data-needs-filter-select]');
+  await filter.waitFor();
+  await filter.locator('option[value="steps"]').waitFor({ state: 'attached' });
+  await page.waitForFunction(() => /\(\d+\)/.test(document.querySelector('[data-needs-filter-select] option[value="steps"]')?.textContent ?? ''));
+  assert.deepEqual(await filter.locator('option').evaluateAll(list => list.map(item => item.getAttribute('value'))), ['all', 'question', 'steps', 'unstick', 'pr', 'answered'], 'Filters with nothing in them hide.');
+  assert.match(await filter.locator('option[value="steps"]').textContent(), /^Steps \(1\)$/, 'The count is on Steps.');
   assert.ok(await page.locator('.ni', { hasText: 'Finish the Discord bot setup' }).count() >= 1, 'The list is in Needs you too.');
-  await page.locator('.hub-chip[data-filter="steps"]').tap();
+  await filter.selectOption('steps');
   const row = page.locator('.ni', { hasText: 'Finish the Discord bot setup' });
   await row.waitFor();
   assert.match(await row.locator('[data-four]').innerText(), /1 of 4 done/);
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 1);
   assert.deepEqual(await page.locator('.ni .ni-t').allInnerTexts(), ['Finish the Discord bot setup'], 'Only open lists wait on you.');
-  await page.locator('.hub-chip[data-filter="answered"]').tap();
+  await filter.selectOption('answered');
   const history = page.locator('.hub-row', { hasText: 'Update the router settings' });
   await history.waitFor();
   assert.match(await history.locator('.hub-row-meta').innerText(), /^Steps · probe · Submitted · 1 open · /);
-  await page.locator('.hub-chip[data-filter="steps"]').tap();
+  await filter.selectOption('steps');
   await row.waitFor();
   await noSideways(page, 'Steps');
 
@@ -203,7 +207,7 @@ try {
   await go(page, '#/~hub/needs');
   await page.locator('.ni').first().waitFor();
   assert.equal(await page.locator('.ni', { hasText: 'Finish the Discord bot setup' }).count(), 0, 'Gone from Needs you.');
-  await page.locator('.hub-chip[data-filter="answered"]').tap();
+  await filter.selectOption('answered');
   const submittedRow = page.locator('.hub-row', { hasText: 'Finish the Discord bot setup' });
   await submittedRow.waitFor();
   assert.match(await submittedRow.locator('.hub-row-meta').innerText(), /^Steps · probe · Submitted · 2 open · /);
@@ -233,7 +237,8 @@ try {
   assert.deepEqual(await page.locator('.hub-cl-group').allTextContents(), ['Router', 'After']);
   await noSideways(page, 'the second list');
   await go(page, '#/~hub/checklist');
-  await page.locator('.hub-chip.on[data-filter="steps"]').waitFor();
+  await page.locator('[data-needs-filter-select]').waitFor();
+  assert.equal(await page.locator('[data-needs-filter-select]').inputValue(), 'steps');
 
   step('a read-only host shows the list, says "Sign in to tick items." and sends nothing');
   const dist = path.join(root, 'dist');
