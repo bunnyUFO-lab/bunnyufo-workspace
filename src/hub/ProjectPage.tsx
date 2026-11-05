@@ -20,7 +20,7 @@ import { openSpawn } from './spawnStore'
 import { legacyRunning } from './Today'
 import { todayFor } from './todayFilter.ts'
 import RefreshNote from './RefreshNote'
-import { useHubData, useTodayScreen } from './useHub'
+import { useHeldHubData, useHubData, useTodayScreen } from './useHub'
 import { useProject } from './useProject'
 import './today.css'
 import './project.css'
@@ -190,9 +190,10 @@ export default function ProjectPage({ route }: { route?: string }) {
   const all = useHubData<{ projects: HubProject[] }>('/projects')
   const known = !wanted || !all.data || all.data.projects.some(item => item.id === wanted)
   // useProject would fall back to another project for an id the list does not have; the page says so instead.
-  const { list, project } = useProject(known ? wanted : undefined)
+  const { list, project, early } = useProject(known ? wanted : undefined)
   const today = useTodayScreen().data
-  const { data: model, error, loading, at: modelAt } = useHubData<MapModel>(known && project ? `/map/${enc(project)}` : null)
+  const target = project ?? early
+  const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known && target ? `/map/${enc(target)}` : null, !!project)
   const wide = useWide()
   const go = (id: string) => { window.location.hash = projectHash(id, tab) }
 

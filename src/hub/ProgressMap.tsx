@@ -19,7 +19,7 @@ import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { tallyFraction } from './mapCount.ts'
 import RefreshNote from './RefreshNote'
-import { useHubData } from './useHub'
+import { useHeldHubData, useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { useProject } from './useProject'
 import RoadmapRows, { RoadmapBar } from './RoadmapRows'
@@ -63,8 +63,9 @@ const splitId = (id?: string): [string | undefined, string | undefined] => {
 
 export default function ProgressMap({ project: routeId }: { project?: string }) {
   const [wanted, nodeId] = splitId(routeId)
-  const { list, project, loading: listing } = useProject(wanted)
-  const { data: model, error, loading: mapping, at } = useHubData<MapModel>(project ? `/map/${encodeURIComponent(project)}` : null)
+  const { list, project, early, loading: listing } = useProject(wanted)
+  const target = project ?? early
+  const { data: model, error, loading: mapping, at } = useHeldHubData<MapModel>(target ? `/map/${encodeURIComponent(target)}` : null, !!project)
   return (
     <>
       <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>

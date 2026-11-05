@@ -14,7 +14,7 @@ import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
 import RefreshNote from './RefreshNote'
-import { useHubData } from './useHub'
+import { useHeldHubData, useHubData } from './useHub'
 import ProjectPicker from './ProjectPicker'
 import { ProjectLink } from './ProjectChip'
 import { useProject } from './useProject'
@@ -101,15 +101,17 @@ function SheetWaiting({ error, onClose }: { error: string | null; onClose: () =>
 export default function Board(props: { project?: string; focus?: string }) {
   // The board's own state (lane, folds, scroll) restarts with the board it shows, never with the item a sheet is open on:
   // the bare `work` address and the default board's own address are the same board.
-  const { project } = useProject(props.project === 'all' ? undefined : props.project)
-  return <BoardView key={props.project === 'all' ? 'all' : project ?? ''} {...props} />
+  // The key falls back to the early guess, so it does not change when the list confirms it (a remount would fetch twice).
+  const { project, early } = useProject(props.project === 'all' ? undefined : props.project)
+  return <BoardView key={props.project === 'all' ? 'all' : project ?? early ?? ''} {...props} />
 }
 
 function BoardView({ project: wanted, focus }: { project?: string; focus?: string }) {
   const all = wanted === 'all'
-  const { list, project: chosen, loading: listing, error: listError } = useProject(all ? undefined : wanted)
+  const { list, project: chosen, early, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen
-  const work = useHubData<WorkLanes>(all || project ? `/work${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
+  const target = all ? undefined : chosen ?? early
+  const work = useHeldHubData<WorkLanes>(all || target ? `/work${target ? `?project=${encodeURIComponent(target)}` : ''}` : null, all || !!project)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [picked, setPicked] = useState<WorkLane | null>(null)
   // Read in the initializer: the board re-mounts per project and must not fall back to the default.
