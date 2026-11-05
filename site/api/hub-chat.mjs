@@ -23,6 +23,7 @@ import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 import { foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
+import { JOB_LIMITS, idsIn, jobIdsOf, splitCreated } from './chat-jobs.mjs';
 import { QUEUE_LIMITS, addItem, cancelItem, createQueueStore, holdFor, readQueue, restoreItems, takeItems, viewOf } from './chat-queue.mjs';
 
 const MB = 1024 * 1024;
@@ -42,7 +43,7 @@ const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, scrub = createScrub(env), log = () => {} }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, jobRows = null, approveJob = null, scrub = createScrub(env), log = () => {} }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
@@ -266,6 +267,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let failure = null;
     const tools = [];
     let delegates = [];
+    const seen = new Set();   // request ids this run showed in a tool preview: a job is one the run named
+    const see = text => { for (const id of idsIn(text)) seen.add(id); };
     const noteDelegates = (name, data) => {
       const next = foldDelegates(delegates, name, data);
       if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
@@ -279,9 +282,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         else if (event.event === 'tool.started') {
           const name = clip(data.tool, 80);
           if (name && !tools.includes(name) && tools.length < MAX_TOOLS) tools.push(name);
+          see(data.preview);
           emit('tool', { id: clip(data.tool_call_id, 80), name, summary: clip(data.preview, 160), state: 'running' });
         } else if (event.event === 'tool.completed') {
           emit('tool', { id: clip(data.tool_call_id, 80), name: clip(data.tool, 80), state: data.error ? 'failed' : 'done' });
+          see(data.preview);
           noteDelegates(event.event, data);
         } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
         else if (event.event === 'approval.request') {
@@ -309,17 +314,20 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     } catch (error) {
       failure = signal.aborted ? 'Hermes stopped answering.' : error?.code === 'idle' ? 'Hermes stopped answering.' : 'The connection to Hermes broke.';
     }
-    return { reply, failure, tools, delegates, finishedByHermes };
+    return { reply, failure, tools, delegates, finishedByHermes, seen: [...seen] };
   }
 
   /** Saves a finished turn's lines (the picture files first) and announces what it created. Returns the lines and a failure when they could not be saved. */
-  async function saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, queued = [] }) {
-    let created = [];
-    try { created = await createdSince(started); } catch { /* the reply is still worth saving */ }
+  async function saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, queued = [], seen = [] }) {
+    let found = [];
+    try { found = await createdSince(started); } catch { /* the reply is still worth saving */ }
+    // The jobs of this reply (requests the run or the reply named; with a persona, every one found) are kept apart from the rest of what Hermes made.
+    const { jobs, created } = splitCreated(found, { seen: [...seen, ...idsIn(reply)], persona });
     if (created.length) emit('created', { items: created });
+    if (jobs.length) emit('jobs', { ids: jobs });
     const at = now().toISOString();
     const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
-    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
+    const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(jobs.length ? { jobs } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
     const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}), ...(queued.length ? { queued } : {}) };   // model: persona: queued: the ids of the messages a queued turn joined
     let contextLine = null;   // help:
     try {
@@ -454,7 +462,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       }
       if (status) { ({ reply, failure } = settledBy(status, reply)); } else hermesRuns.stop(runId).catch(() => {});
     }
-    const saved = await saveTurn({ id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId, reply, failure, tools: ran.tools, delegates: ran.delegates, emit, queued: turn.queued ?? [] });
+    const saved = await saveTurn({ id, user: turn.by, text: turn.text, started, pictures: [], context: null, choice, persona, runId, reply, failure, tools: ran.tools, delegates: ran.delegates, emit, queued: turn.queued ?? [], seen: ran.seen });
     await endTurn({ carried, emit, id, ...saved });
   }
 
@@ -685,8 +693,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     let tools = [];
     let delegates = [];
     let finishedByHermes = false;
+    let seen = [];
     if (runTurn) {
-      ({ reply, failure, tools, delegates, finishedByHermes } = await carryRun({ carried, runId, choice, emit, signal: abort.signal, started, conversation: id }));
+      ({ reply, failure, tools, delegates, finishedByHermes, seen } = await carryRun({ carried, runId, choice, emit, signal: abort.signal, started, conversation: id }));
       // Any exit that is not Hermes ending the run (idle, a dropped Hermes stream, an unsaved ask): stop it.
       if (!finishedByHermes) hermesRuns.stop(runId).catch(() => {});
     } else try {
@@ -722,7 +731,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     finish();
     clearInterval(keepalive);
 
-    const saved = await saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit });
+    const saved = await saveTurn({ id, user, text, started, pictures, context, choice, persona, runId, reply, failure, tools, delegates, emit, seen });
     // Only now: a page that reads `running: false` finds the reply saved, and a new turn cannot overtake it.
     await endTurn({ carried, response, emit, id, ...saved });
   }
@@ -791,6 +800,54 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     return queueView(id);
   }
 
+  /** The conversation's job ids (oldest first) and its persona, for the jobs routes. 404 when there is no such conversation. */
+  async function jobsOfChat(id) {
+    if (!CHAT_ID.test(id)) throw fail('No such conversation.', 404);
+    const got = await fresh(`chat/${id}.jsonl`);
+    if (!got) throw fail('No such conversation.', 404);
+    const history = parse(got.text);
+    const persona = storedPersona(history.find(line => line.persona)?.persona, await tableNow());
+    return { ids: jobIdsOf(history), persona };
+  }
+
+  /** GET /jobs: one row per job named on the newest lines, built from the request files (never from the line's own words). */
+  async function jobsView(id) {
+    const { ids, persona } = await jobsOfChat(id);
+    if (!ids.length || !jobRows) return { jobs: [] };
+    return { jobs: await jobRows(ids, { persona: persona ? { id: persona.id, name: persona.name } : null }, now()) };
+  }
+
+  /**
+   * POST /jobs/approve { ids }: one tap for several. HIGH RISK: this signs. It adds no way to sign: each id goes through `approveJob`, which is
+   * the one signing path (approveRequest) after the approval page's own checks, one signature per request, oldest first, each checked again at
+   * that moment. Only ids the conversation names in `jobs` are taken (a persona chat has no one-tap), at most 6. It is not atomic: an approval
+   * that is signed stands when a later one fails, and the answer says which is which.
+   */
+  async function approveJobs(id, data, user) {
+    if (!user) throw fail('Sign in to approve.', 401);
+    if (!approveJob) throw fail('Approving from a chat is not available on this host.', 503);
+    const asked = data?.ids;
+    if (!Array.isArray(asked) || !asked.length || asked.length > JOB_LIMITS.approve || asked.some(item => typeof item !== 'string')) throw fail(`Send 1 to ${JOB_LIMITS.approve} job ids.`);
+    if (new Set(asked).size !== asked.length) throw fail('Each job id once.');
+    const { ids, persona } = await jobsOfChat(id);
+    if (persona) throw fail(`${persona.name} is not meant to propose jobs, so there is no one tap here. Open each one to decline or approve.`, 409);
+    if (asked.some(item => !ids.includes(item))) throw fail('That job is not in this chat.', 404);   // nothing is signed
+    const wanted = new Set(asked);
+    const results = [];
+    for (const jobId of ids.filter(item => wanted.has(item))) {
+      try {
+        const done = await approveJob(jobId, user, now());
+        results.push({ id: jobId, ok: true, state: done.state, ...(done.waiting ? { waiting: done.waiting } : {}) });
+      } catch (error) {
+        // Nothing signed yet and the host cannot sign (no key, or a storage check that failed): that is the whole call's answer.
+        if (!results.length && error?.status === 503) throw error;
+        if (!error?.status) log(`chat jobs: approving ${jobId} failed: ${clip(error?.message, 120)}`);
+        results.push({ id: jobId, ok: false, error: error?.status ? clip(error.message, 300) : 'It could not be approved just now.' });
+      }
+    }
+    return { results };
+  }
+
   /** GET /live: the running turn's events, replayed from its log and then followed; one `idle` event when nothing runs. */
   function live(response, id) {
     if (!CHAT_ID.test(id)) throw fail('No such conversation.', 404);
@@ -842,6 +899,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         return json(response, 200, { id: match[1], messages: got ? currentModels(await withDelegateResults(match[1], got)) : [], ...viewOf(waiting), ...(turn ?? {}) });
       }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/live$/.exec(route))) return live(response, match[1]);
+      if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/jobs$/.exec(route))) return json(response, 200, await jobsView(match[1]));
+      if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/jobs\/approve$/.exec(route))) return json(response, 200, await approveJobs(match[1], await readJson(request, 8 * 1024), user));
       if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/queue$/.exec(route))) return json(response, 201, await queueMessage(match[1], await readJson(request, 64 * 1024), user));
       if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/queue\/([^/]+)\/cancel$/.exec(route))) return json(response, 200, await cancelQueued(match[1], match[2]));
       if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/queue\/send$/.exec(route))) return json(response, 200, await sendQueued(match[1]));

@@ -50,6 +50,7 @@ import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
+import { jobRow } from './chat-jobs.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -1555,7 +1556,30 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   }
 
   const planPauses = createPlanPauses({ listFolders, cached, now, log: line => log(scrub(line, 400)) });
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), log: line => log(scrub(line, 400)) });
+  /**
+   * The rows of a chat's jobs, built from the request files (30 s list, cleared by writes through this process). A proposed one carries what
+   * one tap would do (`jobApproval`, read-only); a finished one the site path of its card.
+   */
+  async function jobRows(ids, { persona }, at) {
+    const byId = new Map((await loadMapRequests(at)).map(item => [item.id, item]));
+    const rows = [];
+    for (const id of ids) {
+      const item = byId.get(id);
+      if (!item || item.kind === 'ask') continue;
+      try {
+        const { request } = await requestFiles.loadOne(id, at);
+        const check = item.state === 'proposed' ? await requestFiles.jobApproval(id, at) : null;
+        rows.push(jobRow({ item, request, preset: presetOf(item.preset), check, persona, cardHref: item.finish?.card ? await cardHrefOf(item.finish.card) : undefined }));
+      } catch (error) { log(scrub(`[hub] chat job ${id} has no row: ${error.message}`, 200)); }
+    }
+    return rows;
+  }
+  /** One job of a chat's one tap: the one signing path, after the approval page's own checks. The list is read again afterwards. */
+  async function approveJob(id, user, at) {
+    try { return await requestFiles.approveProposed(id, { user, at }); } finally { mapRequests = null; }
+  }
+
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), jobRows, approveJob, log: line => log(scrub(line, 400)) });
 
   const self = {
     enabled: on,
