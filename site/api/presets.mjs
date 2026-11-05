@@ -32,7 +32,7 @@ Done when: {{doneWhen}}
 {{followUp}}`;
 
 /** How a job or a chat files its card. `{{cardSection}}` and `{{writeFlags}}` are filled when a job is approved, and by personaTextOf for a chat. */
-export const CARD_WRITE = 'Upload it with `cards put <folder> --section {{cardSection}} --card <id> {{writeFlags}}`. Add new cards and tabs only. Pass `--edit` only when the owner asked for that very card. Never delete anything. If the API refuses that section, write the card to `assistant` instead and name `assistant` in the CARD line.';
+export const CARD_WRITE = 'Upload it with `cards put <folder> --section {{cardSection}} --card <id> {{writeFlags}}`. Add new cards and tabs only, and prefer a new tab to editing an existing one: you cannot edit a script file (`.js`, `.mjs`, `.cjs`, `.wasm`) that already exists, even on a card you made, and editing an owner\'s HTML tab turns off that tab\'s saving until the owner reverts it. Pass `--edit` only when the owner asked for that very card. Never delete anything. If the API refuses that section, write the card to `assistant` instead and name `assistant` in the CARD line.';
 
 /** The research rules of the three Hermes research presets; chat personas (chat-personas.mjs) quote them. */
 export const RESEARCH = `Research the question below with web search. The project named above is context only; do not pull its cards unless the question is about that project. Write exactly one card to the \`{{cardSection}}\` section with the cards tool. ${CARD_WRITE} Cite every source with a link.

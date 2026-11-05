@@ -26,6 +26,17 @@ test('every research persona is a Team agent whose first preset is a Hermes rese
   }
 });
 
+test('a research persona quotes the card-write rules: the section from the chat, why recorded, a new tab before an edit, no script edits', () => {
+  for (const entry of CHAT_PERSONAS.filter(item => item.preset)) {
+    assert.ok(entry.text.includes('`<section>` is the project this chat is about, if it has a Library section, else `assistant`. Ask which one only if the chat points at two'), entry.id);
+    assert.ok(entry.text.includes('--why "<one line: what this is, which section and why>" --context chat'), entry.id);
+    assert.ok(entry.text.includes('prefer a new tab to editing an existing one'), entry.id);
+    assert.ok(entry.text.includes('(`.js`, `.mjs`, `.cjs`, `.wasm`)') && entry.text.includes("turns off that tab's saving until the owner reverts it"), entry.id);
+    assert.ok(entry.text.includes('Pass `--edit` only when the owner asked for that very card'), entry.id);
+    assert.ok(entry.text.length < 2500, `${entry.id} stays under the length check`);
+  }
+});
+
 test('the Planner is the one persona that may file an Ask, and only a change list: its own text names --changes and the rules of the list, and never says "Never create requests or Asks"', () => {
   const planner = CHAT_PERSONAS.find(entry => entry.id === 'planner');
   const agent = AGENTS.find(item => item.id === 'planner');

@@ -486,7 +486,7 @@ with no page open. A run that ends `completed` with a `CARD: <section>/<folder>`
 one it is `failed` ("finished without a card"). The section is `assistant`, or the project's own section when the Hub signed that
 (`cardSectionOf` in `hub.mjs`, at approval: the project's section if it is a Library section that agent cards are not turned off for,
 else `assistant`; on the development copy only a `dev-` section). The brief carries `{{cardSection}}` and `--agent/--why/--context job:<id>`,
-filled from the Hub's choice and never from request text. A `CARD:` line naming any other section is not trusted. When Hermes drops a run's event buffer (a few minutes after the last
+filled from the Hub's choice and never from request text. A `CARD:` line naming any other section is not trusted. The brief and the chat personas (`CARD_WRITE` in `site/api/presets.mjs`) also tell the agent to prefer a new tab: an existing script file (`.js`, `.mjs`, `.cjs`, `.wasm`) cannot be edited by an agent, and editing an owner's HTML tab turns off that tab's saving until the owner reverts it. A chat persona picks the section from the chat (the project it is about, else `assistant`) and says which and why in `--why`. When Hermes drops a run's event buffer (a few minutes after the last
 reader) the follower polls the status instead; only a 404 on the status ends the request `unknown`
 (`hermes-forgot`, pointing at the newest card made after the start in `assistant` or the signed project's section). A run that fails with `429` or
 `quota` in its error is started once more on Anthropic (`HERMES_RETRY_MODEL`, default `claude-sonnet-5-5`, key

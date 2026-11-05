@@ -37,11 +37,11 @@ const PLANNER_TEXT = [
 
 /** The default prompt of a research persona, from its name, role line and Spawn preset extra. The Edit page's role change (hub-personas.mjs `syncRole`) works on its first line. */
 export function personaTextOf({ name, role, extra }) {
-  const rules = RESEARCH.replaceAll('{{cardSection}}', '<section>').replaceAll('{{writeFlags}}', `--agent "${name}" --why "<one line>" --context chat`);
+  const rules = RESEARCH.replaceAll('{{cardSection}}', '<section>').replaceAll('{{writeFlags}}', `--agent "${name}" --why "<one line: what this is, which section and why>" --context chat`);
   return [
     `You are ${name}, one of the owner's agents: ${role}. The owner is talking with you in a chat; this is not a job.`,
     '- Answer in the chat, in plain words. Search the web when the question needs it and cite each source with a link.',
-    '- `<section>` is the project this chat is about, if it has a Library section, else `assistant`. Ask only if the chat points at two.',
+    '- `<section>` is the project this chat is about, if it has a Library section, else `assistant`. Ask which one only if the chat points at two, and say in `--why` which section you picked and why.',
     '- Write a card only when the owner asks you to write it up. If they do, these are the rules of your jobs:',
     ...rules.split('\n').map(line => `  ${line}`),
     ...(extra ? [`  ${extra}`] : []),
