@@ -52,6 +52,15 @@ export const libraryFolderOk = folder => typeof folder === 'string' && FOLDER.te
 export const libraryPathOk = file => typeof file === 'string' && file.split('/').length >= 2 && libraryFolderOk(file.split('/')[0]) && file.split('/').every(segmentOk);
 /** A first path segment the site keeps for itself, in any case: Windows treats `Card-Responses` and `card-responses` as one folder. */
 const reservedName = name => RESERVED.has(String(name).toLowerCase());
+/**
+ * The names the publish and pull walk skips (SKIP_DIRS and SKIP_ROOT in scripts/shared/s3-sync.mjs; library-writes.test.mjs keeps the
+ * two equal), lower-cased. A card folder with one of them is never walked, so a pull would write over the owner's file of that name
+ * and the next publish would delete the agent's.
+ */
+export const SYNC_SKIPPED = new Set(['.git', '_site', '.jekyll-cache', 'node_modules', '.buw', 'gemfile', 'gemfile.lock', '_config.yml', 'docker-compose.yml', 'index.md', '.gitignore', 'readme.md', '_sass', 'categories']);
+const skippedName = name => SYNC_SKIPPED.has(String(name).toLowerCase());
+/** Script files an agent may add but not edit: an owner's page may load them, and they would run with the page's reach. */
+const SCRIPT_FILE = /\.(js|mjs|cjs|wasm)$/i;
 const lower = value => String(value).toLowerCase();
 const stepPathOk = value => typeof value === 'string' && value.split('/').every(segmentOk);
 const ENTRY_FIELDS = new Set(['id', 'title', 'description', 'type', 'category', 'created', 'updated', 'folder', 'steps', 'defaultStep', 'status']);
@@ -582,6 +591,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       const limited = caller.rights.write !== null;
       const info = writeInfo(headers, { strict: library });
       if (limited && reservedName(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
+      if (library && !first.registry.entities.some(item => item?.id === id) && skippedName(entity.folder)) throw new HttpError(403, `"${entity.folder}" is not a card folder here.`);
       const existingFirst = library ? first.registry.entities.find(item => item?.id === id) : null;
       const folder = existingFirst?.folder ?? entity.folder;
       /** A step an agent adds is { name, path, viewer? }: no url (it would frame any web address). A posted `agentTab` is dropped; the server sets it. */
@@ -751,16 +761,23 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         info = writeInfo(headers, { strict: true, needContext: Boolean(ifMatch) });
         const claimed = retiredBy(first.registry, folder);
         if (claimed) throw retiredError(caller, sectionId, claimed, 'write');
-        if (reservedName(folder)) throw new HttpError(403, `"${folder}" is not a card folder here.`);
+        if (reservedName(folder) || skippedName(folder)) throw new HttpError(403, `"${folder}" is not a card folder here.`);
+        if (ifMatch && SCRIPT_FILE.test(file)) throw new HttpError(403, 'A script file is not edited by an agent: add a new tab with a new file name instead.');
         const retiredVariant = retiredFolded(first.registry, folder);
         if (retiredVariant) throw retiredError(caller, sectionId, retiredVariant, 'write');
         const liveVariant = first.registry.entities.find(item => typeof item?.folder === 'string' && item.folder !== folder && lower(item.folder) === lower(folder));
         if (liveVariant) throw new HttpError(409, `${folder} is the same name as the folder ${liveVariant.folder} in another case, and Windows would treat them as one.`);
-        // S3 allows a key below another key and Windows does not: one such file would stop every publish and pull of the section.
+        // S3 allows a key below another key, and a folder spelled two ways; Windows allows neither: one such file would stop every publish and
+        // pull of the section, or land in the other spelling's folder. Every path part is compared without case.
         const lowFile = lower(file);
+        const prefixesOf = value => value.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+        const mine = prefixesOf(file);
         const clash = (await cardFiles(sectionId, folder)).find(item => {
+          if (item.path === file) return false;
           const other = lower(item.path);
-          return item.path !== file && (other === lowFile || lowFile.startsWith(`${other}/`) || other.startsWith(`${lowFile}/`));
+          if (other === lowFile || lowFile.startsWith(`${other}/`) || other.startsWith(`${lowFile}/`)) return true;
+          const spelled = new Map(prefixesOf(item.path).map(prefix => [lower(prefix), prefix]));
+          return mine.some(prefix => spelled.has(lower(prefix)) && spelled.get(lower(prefix)) !== prefix);
         });
         if (clash) throw new HttpError(409, `${clash.path} is already there; ${file} would sit below it, on it, or have the same name in another case, and Windows cannot hold both.`);
       } else if (recorded) {

@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createBucket } from '../../api/s3.mjs';
 import { startFakeS3 } from '../../api/test/fake-s3.mjs';
-import { createCardApi, libraryFolderOk, libraryPathOk, parseScope, parseTokens } from '../handler.mjs';
+import { SYNC_SKIPPED, createCardApi, libraryFolderOk, libraryPathOk, parseScope, parseTokens } from '../handler.mjs';
+import { SKIP_DIRS, SKIP_ROOT } from '../../../scripts/shared/s3-sync.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const WHO = { 'x-card-agent': 'Researcher', 'x-card-why': encodeURIComponent('Notes for the owner') };
@@ -537,5 +538,45 @@ test('an If-Match edit of an existing html tab marks the step agentTab, and the 
     await t.put('magic-loops', `${owned.folder}/page.html`, '<p>again</p>', EDIT(md5('<p>agent</p>')));
     assert.equal(writes(), before);
     assert.equal(t.records().filter(item => item.file.endsWith('page.html')).pop().markedAgentTab, undefined);
+  } finally { await finish(t); }
+});
+
+test('a folder spelled differently from a folder in the card is refused', async () => {
+  const t = await setup();
+  try {
+    await t.put('magic-loops', `${owned.folder}/assets/logo.png`, 'logo');
+    const answer = await t.put('magic-loops', `${owned.folder}/Assets/x.png`, 'x');
+    assert.equal(answer.status, 409, JSON.stringify(answer.data));
+    assert.equal((await t.put('magic-loops', `${owned.folder}/assets/x.png`, 'x')).status, 200);
+    assert.equal(t.fake.objects.has(`sections/magic-loops/${owned.folder}/Assets/x.png`), false);
+  } finally { await finish(t); }
+});
+
+test('a card folder the sync skips is refused in any case, and the API list equals the sync list', async () => {
+  const t = await setup();
+  try {
+    assert.deepEqual([...SYNC_SKIPPED].sort(), [...SKIP_DIRS, ...SKIP_ROOT].map(name => name.toLowerCase()).sort(), 'handler.mjs keeps its own copy of the names s3-sync.mjs skips');
+    for (const name of ['categories', 'Categories', 'GEMFILE', 'Gemfile.lock', 'README.md', 'Index.md', 'node_modules', 'Docker-Compose.yml', 'docker-compose.yml']) {
+      assert.equal((await t.put('magic-loops', `${name}/a.md`, 'x')).status, 403, `put ${name}`);
+      assert.equal((await t.entry('magic-loops', 'bad', { id: 'bad', title: 'B', folder: name, steps: [] })).status, 403, `entry ${name}`);
+    }
+    assert.equal((await t.put('magic-loops', 'category/a.md', 'x')).status, 200, 'a near name is fine');
+    assert.equal(t.fake.objects.has('sections/magic-loops/categories/a.md'), false);
+  } finally { await finish(t); }
+});
+
+test('a Library right does not edit an existing script file, but may add a new one', async () => {
+  const t = await setup();
+  try {
+    for (const ext of ['js', 'mjs', 'cjs', 'wasm', 'JS']) {
+      const key = `sections/magic-loops/${owned.folder}/app.${ext}`;
+      t.fake.seed(key, 'owner code', 'text/javascript');
+      const refused = await t.put('magic-loops', `${owned.folder}/app.${ext}`, 'agent code', EDIT(md5('owner code')));
+      assert.equal(refused.status, 403, ext);
+      assert.match(refused.data.error, /new tab/);
+      assert.equal(t.fake.text(key), 'owner code');
+    }
+    assert.equal(t.records().length, 0);
+    assert.equal((await t.put('magic-loops', `${owned.folder}/new-app.js`, 'new code')).status, 200);
   } finally { await finish(t); }
 });

@@ -25,9 +25,9 @@ import path from 'node:path';
 import { contentTypeOf } from '../../site/api/s3.mjs';
 
 /** Folders never uploaded from anywhere in the tree. */
-const SKIP_DIRS = new Set(['.git', '_site', '.jekyll-cache', 'node_modules', '.buw']);
+export const SKIP_DIRS = new Set(['.git', '_site', '.jekyll-cache', 'node_modules', '.buw']);
 /** The Just the Docs scaffolding at a workspace root: `npm run docs` wants it, the site does not. */
-const SKIP_ROOT = new Set(['Gemfile', 'Gemfile.lock', '_config.yml', 'docker-compose.yml', 'index.md', '.gitignore', 'README.md', '_sass', 'categories']);
+export const SKIP_ROOT = new Set(['Gemfile', 'Gemfile.lock', '_config.yml', 'docker-compose.yml', 'index.md', '.gitignore', 'README.md', '_sass', 'categories']);
 const SECRET = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519)(\.pub)?|.*(secret|credential|password|token).*\.(json|txt|ya?ml))$/i;
 export const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -76,7 +76,53 @@ export function safeKey(file) {
  * with one of these codes; the key is left on the site, never written and never deleted, and the rest of the run goes on.
  */
 const clashes = error => ['EEXIST', 'ENOTDIR', 'EISDIR'].includes(error?.code);
-const leftClash = (file, log) => log(`  left on the site: ${file} clashes with a file or folder here`);
+
+/**
+ * The one rule for names this disk cannot hold apart from the bucket's. The bucket is case-sensitive and a Windows disk is not, and
+ * a key can sit below a file or on a folder, so some keys cannot come down as they are spelled. Comparing the keys in scope with
+ * every local file without case (and, among themselves, without case), a key is a CLASH when
+ *   - it, or a folder in its path, is spelled differently from a local file or folder of the same name, or from another key's,
+ *   - it sits below a local file or another key (a file cannot hold a folder), or
+ *   - it is the name of a local folder.
+ * A clash is never downloaded, never uploaded over, never deleted and never recorded as settled, whatever the sync record says: it
+ * is reported with the conflicts, and a dry run reports the same ones. (`toLowerCase` is close to NTFS and errs toward skipping.)
+ *
+ * @param localFiles every file under the folder, posix paths
+ * @param keys       the keys in scope, without the bucket prefix
+ * @returns {Map<string, string>} key -> why
+ */
+export function findClashes({ localFiles, keys }) {
+  const fold = value => value.toLowerCase();
+  const prefixesOf = file => { const parts = file.split('/'); return parts.map((_, index) => parts.slice(0, index + 1).join('/')); };
+  const spellings = (files, map = new Map()) => {
+    for (const file of files) for (const prefix of prefixesOf(file)) (map.get(fold(prefix)) ?? map.set(fold(prefix), new Set()).get(fold(prefix))).add(prefix);
+    return map;
+  };
+  const local = spellings(localFiles);
+  const remote = spellings(keys);
+  const localFileNames = new Set(localFiles.map(fold));
+  const localFolders = new Set(localFiles.flatMap(file => prefixesOf(file).slice(0, -1).map(fold)));
+  const keyNames = new Set(keys.map(fold));
+  const found = new Map();
+  for (const key of keys) {
+    const parts = prefixesOf(key);
+    for (const [index, prefix] of parts.entries()) {
+      const name = fold(prefix);
+      const mine = local.get(name);
+      if (mine && !mine.has(prefix)) { found.set(key, `differs only by case from ${[...mine][0]} here`); break; }
+      if (!mine && remote.get(name).size > 1) { found.set(key, `differs only by case from another key on the site (${[...remote.get(name)].find(other => other !== prefix)})`); break; }
+      if (index < parts.length - 1) {
+        if (localFileNames.has(name)) { found.set(key, `would sit below the file ${prefix} here`); break; }
+        // A key that is a local file spelled the same is the settled one; the key it sits below is the clash.
+        if (keyNames.has(name) && !localFileNames.has(fold(key))) { found.set(key, `would sit below the key ${prefix}, a file`); break; }
+      } else if (localFolders.has(name)) {
+        found.set(key, 'is the name of a folder here');
+      }
+    }
+  }
+  return found;
+}
+const leftClash = (file, log, why = 'clashes with a file or folder here') => log(`  left on the site: ${file} ${why}`);
 
 /** Every file under root worth considering, as posix paths relative to root. */
 async function walk(root) {
@@ -362,9 +408,12 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
   const base = prefix ? `${prefix.replace(/\/+$/, '')}/` : '';
   const where = placeOf(bucket, prefix);
   const record = await loadBase(root, where);
-  const local = (await walk(root)).filter(file => inScope(file, scope));
+  const everyLocal = await walk(root);
+  const local = everyLocal.filter(file => inScope(file, scope));
   const { objects } = await bucket.list(base);
   const remote = new Map(objects.map(object => [object.key.slice(base.length), object]));
+  const clashing = findClashes({ localFiles: everyLocal, keys: [...remote.keys()].filter(file => file && !file.endsWith('/') && inScope(file, scope) && safeKey(file)) });
+  for (const [file, why] of [...clashing].sort(([a], [b]) => (a < b ? -1 : 1))) leftClash(file, log, why);
 
   const firstSync = !Object.keys(record.files).length;
   const problems = [];
@@ -395,6 +444,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
   for (const [file, object] of remote) {
     if (!file || file.endsWith('/') || !inScope(file, scope) || local.includes(file)) continue;
     if (!safeKey(file)) { log(`  left on the site: ${file} is not a safe path here`); continue; }
+    if (clashing.has(file)) continue;
     // Removed here since the last sync and untouched there: remove it there too. Anything else
     // missing here is new on the site (a card's page, an added section) and comes down.
     if (record.files[file] && record.files[file] === object.etag) deletes.push(file);
@@ -464,6 +514,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
       } catch (error) {
         if (!clashes(error)) throw error;
         leftClash(file, log);
+        clashing.set(file, 'clashes with a file or folder here');
         downloads.splice(downloads.indexOf(file), 1);
         continue;
       }
@@ -490,7 +541,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
     await saveBase(root, where, record);
     await sweepCopies(root, scope, new Set(conflicts));
   }
-  return { uploads: dryRun ? uploads : sent, downloads, deletes: dryRun ? deletes : deleted, conflicts, kept, saved: saved.sort(), unchanged, problems };
+  return { uploads: dryRun ? uploads : sent, downloads, deletes: dryRun ? deletes : deleted, conflicts, clashes: [...clashing.keys()].sort(), kept, saved: saved.sort(), unchanged, problems };
 }
 
 /**
@@ -509,13 +560,17 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
   const written = [];
   const differs = [];
   let unchanged = 0;
+  const wanted = objects.map(object => object.key.slice(base.length)).filter(file => file && !file.endsWith('/') && inScope(file, scope) && safeKey(file));
+  const clashing = findClashes({ localFiles: await walk(root), keys: wanted });
+  for (const [file, why] of [...clashing].sort(([a], [b]) => (a < b ? -1 : 1))) leftClash(file, log, why);
   for (const object of objects) {
     const file = object.key.slice(base.length);
     if (!file || file.endsWith('/') || !inScope(file, scope)) continue;
     if (!safeKey(file)) { log(`  left on the site: ${file} is not a safe path here`); continue; }
+    if (clashing.has(file)) continue;
     const target = path.join(root, ...file.split('/'));
     const info = await stat(target).catch(() => null);
-    if (info?.isDirectory()) { leftClash(file, log); continue; }
+    if (info?.isDirectory()) { leftClash(file, log); clashing.set(file, 'is the name of a folder here'); continue; }
     if (info) {
       const mine = md5(await readFile(target));
       if (object.etag === mine) { unchanged += 1; record.files[file] = mine; continue; }
@@ -531,6 +586,7 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
       } catch (error) {
         if (!clashes(error)) throw error;
         leftClash(file, log);
+        clashing.set(file, 'clashes with a file or folder here');
         continue;
       }
       record.files[file] = md5(body);
@@ -548,5 +604,5 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
     await saveBase(root, where, record);
     await sweepCopies(root, scope, new Set(differs));
   }
-  return { written, differs, unchanged };
+  return { written, differs, unchanged, clashes: [...clashing.keys()].sort() };
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bucketFor, exitCodeFor, publish, publishAll } from './publish.mjs';
+import { bucketFor, exitCodeFor, publish, publishAll, unsettledOf } from './publish.mjs';
 import { defaultScope, mergeCardList, safeKey, syncDown, syncUp } from './shared/s3-sync.mjs';
 import { startFakeS3 } from '../site/api/test/fake-s3.mjs';
 
@@ -1218,5 +1218,123 @@ test('a site key that would sit below a local file, or on a local folder, is lef
     assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub\n');
     assert.ok(fake.objects.has(`${KEY}hub/index.md/evil.txt`), 'nothing was deleted on the site');
     assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+  } finally { await fake.close(); }
+});
+
+/** A published workspace with extra local files, and keys seeded on the site as an agent (or a cloud writer) would leave them. */
+async function clashSetup(fake, { local = {}, site = {} } = {}) {
+  const w = await published(fake);
+  for (const [file, text] of Object.entries(local)) {
+    await mkdir(path.dirname(path.join(w.site, ...file.split('/'))), { recursive: true });
+    await writeFile(path.join(w.site, ...file.split('/')), text);
+  }
+  for (const [file, text] of Object.entries(site)) fake.seed(`${KEY}${file}`, text, 'text/plain');
+  return w;
+}
+const runUp = (w, extra = {}) => { const lines = []; return syncUp({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line), ...extra }).then(result => ({ result, lines })); };
+const runDown = (w, extra = {}) => { const lines = []; return syncDown({ root: w.site, bucket: w.client, prefix: w.prefix, scope: w.scope, log: line => lines.push(line), ...extra }).then(result => ({ result, lines })); };
+
+test('a bucket key that differs only by case from an unpublished local file is never downloaded, over-written or deleted', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, { local: { 'hub/notes.md': 'owner unpublished work' }, site: { 'hub/Notes.md': 'agent text' } });
+    for (let round = 0; round < 3; round += 1) {
+      const { result, lines } = await runUp(w);
+      assert.deepEqual(result.clashes, ['hub/Notes.md'], `round ${round}`);
+      assert.deepEqual(result.downloads, []);
+      assert.deepEqual(result.deletes, []);
+      assert.equal(lines.filter(line => line.startsWith('  left on the site: hub/Notes.md ')).length, 1);
+      assert.equal(await readFile(path.join(w.site, 'hub', 'notes.md'), 'utf8'), 'owner unpublished work');
+    }
+    assert.equal(fake.text(`${KEY}hub/Notes.md`), 'agent text', 'the agent\'s key is intact');
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+    const base = JSON.parse(await readFile(path.join(w.site, '.buw', 'sync.json'), 'utf8'));
+    assert.equal(JSON.stringify(base).includes('Notes.md'), false, 'never recorded as settled');
+  } finally { await fake.close(); }
+});
+
+test('a key in a folder spelled differently from a local folder is a clash, so the next publish does not delete it', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, { local: { 'hub/assets/logo.png': 'logo' }, site: { 'hub/Assets/x.png': 'agent png' } });
+    for (let round = 0; round < 3; round += 1) {
+      const { result } = await runUp(w);
+      assert.deepEqual(result.clashes, ['hub/Assets/x.png'], `round ${round}`);
+      assert.deepEqual(result.deletes, []);
+    }
+    assert.equal(await exists(path.join(w.site, 'hub', 'assets', 'x.png')), false);
+    assert.equal(fake.text(`${KEY}hub/Assets/x.png`), 'agent png');
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+    assert.equal(fake.text(`${KEY}hub/assets/logo.png`), 'logo', 'the owner\'s own key still publishes');
+  } finally { await fake.close(); }
+});
+
+test('a pull does not treat a case-only key as the local file, and the next publish does not delete it', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, { local: { 'hub/notes.md': 'same bytes' }, site: { 'hub/Notes.md': 'same bytes' } });
+    const { result } = await runDown(w);
+    assert.deepEqual(result.clashes, ['hub/Notes.md']);
+    assert.deepEqual(result.written, []);
+    assert.equal(result.unchanged >= 1, true);
+    const base = JSON.parse(await readFile(path.join(w.site, '.buw', 'sync.json'), 'utf8'));
+    assert.equal(JSON.stringify(base).includes('Notes.md'), false, 'not recorded as settled');
+    const up = await runUp(w);
+    assert.deepEqual(up.result.deletes, []);
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+  } finally { await fake.close(); }
+});
+
+test('two keys on the site that differ only by case are both left alone', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, { site: { 'hub/A.md': 'one', 'hub/a.md': 'two' } });
+    const { result } = await runUp(w);
+    assert.deepEqual(result.clashes, ['hub/A.md', 'hub/a.md']);
+    assert.deepEqual(result.downloads, []);
+    assert.equal(await exists(path.join(w.site, 'hub', 'a.md')), false);
+    const down = await runDown(w);
+    assert.deepEqual(down.result.clashes, ['hub/A.md', 'hub/a.md']);
+    assert.deepEqual(down.result.written, []);
+  } finally { await fake.close(); }
+});
+
+test('keys that cannot be written here are clashes too, and a dry run reports the same as the real run', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, {
+      local: { 'hub/sub/a.md': 'a' },
+      site: { 'hub/index.md/evil.txt': 'bad', 'hub/sub': 'a file where a folder is', 'hub/Notes.md': 'x', 'hub/notes.md': 'y' },
+    });
+    const wanted = ['hub/Notes.md', 'hub/index.md/evil.txt', 'hub/notes.md', 'hub/sub'];
+    const dry = await runUp(w, { dryRun: true });
+    const real = await runUp(w);
+    assert.deepEqual(dry.result.clashes, wanted);
+    assert.deepEqual(real.result.clashes, wanted);
+    assert.deepEqual(dry.result.downloads, real.result.downloads);
+    assert.deepEqual(dry.lines.filter(line => line.startsWith('  left on the site')), real.lines.filter(line => line.startsWith('  left on the site')));
+    const downDry = await runDown(w, { dryRun: true });
+    const downReal = await runDown(w);
+    assert.deepEqual(downDry.result.clashes, wanted);
+    assert.deepEqual(downReal.result.clashes, wanted);
+    assert.deepEqual(downDry.result.written, downReal.result.written);
+    assert.equal(fake.log.some(entry => entry.method === 'DELETE'), false);
+  } finally { await fake.close(); }
+});
+
+test('a real publish that leaves a clash exits as conflicts do, and a dry run does not', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await clashSetup(fake, { site: { 'hub/Index.md': 'x' } });
+    const result = await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} });
+    assert.deepEqual(result.clashes, ['hub/Index.md']);
+    assert.equal(exitCodeFor({ conflicts: unsettledOf(result) }), 2);
+    assert.equal(exitCodeFor({ dryRun: true, conflicts: unsettledOf(result) }), 0);
+    const lines = [];
+    await publish({ content: w.site, registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: line => lines.push(line) });
+    assert.match(lines.join('\n'), /1 file\(s\) on the site clash/);
+    assert.match(lines.join('\n'), /1 file\(s\) need settling/);
+    const all = await publishAll({ registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: line => lines.push(line) });
+    assert.equal(all.conflicted.length, 1);
   } finally { await fake.close(); }
 });
