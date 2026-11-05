@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { AGENTS } from '../hub-team.mjs';
 import { CHAT_PERSONAS } from '../chat-personas.mjs';
 import { presetOf } from '../presets.mjs';
-import { agentDetails, CHANGE_CODES, changeState, EXPORT_MAX_BYTES, SECRET_PATTERNS, SOUL_MAX_BYTES, STALE_SECONDS, validChange, validExport, validResult, WRITER, redactSecrets } from '../hub-agent-config.mjs';
+import { agentDetails, CHANGE_CODES, changeState, changeView, effectiveSet, EXPORT_MAX_BYTES, SECRET_PATTERNS, SOUL_MAX_BYTES, STALE_SECONDS, validChange, validExport, validResult, WRITER, redactSecrets } from '../hub-agent-config.mjs';
 import { agentConfigJson } from './hub-fixtures.mjs';
 
 // The vectors are a copy of scripts/assistant/config-export/secret-vectors.json in the homelab repo (proxmox-bunnylink), where the
@@ -293,6 +293,62 @@ test('changeState: waiting, late, failed, applied and live, and a result for ano
   // The primary alone is not enough: the order of the fallbacks counts.
   const swapped = validExport({ ...agentConfigJson({ now: NOW }), exportedAt: '2026-11-01T10:05:00Z', profiles: { main: { model: { provider: 'anthropic', default: 'claude-sonnet-5-5' }, fallbacks: [FLASH, CODEX] } } });
   assert.equal(changeState({ change, result: validResult(resultDoc()), exported: swapped, at: at('2026-11-01T11:00:00Z') }), 'applied');
+});
+
+test('effectiveSet: a result in beats an older export; a newer export wins, with the new order or with a host edit; a failed result changes nothing', () => {
+  const change = validChange(approvedDoc());
+  const oldBlock = { model: { provider: 'openai-codex', default: 'gpt-6-sol' }, fallbacks: [SONNET] };
+  const newBlock = { model: { provider: 'anthropic', default: 'claude-sonnet-5-5' }, fallbacks: [CODEX, FLASH] };
+  const hostEdit = { model: { provider: 'deepseek', default: 'deepseek-flash' }, fallbacks: [] };
+  const exportOf = (stamp, block) => validExport({ ...agentConfigJson({ now: NOW }), exportedAt: stamp, profiles: { main: block } });
+  const ok = { change, result: validResult(resultDoc()), landedAt: '2026-11-01T10:03:33.000Z' };
+  const failed = { change, result: validResult(resultDoc({ outcome: 'failed', code: 'health', rolledBack: true })), landedAt: '2026-11-01T10:03:33.000Z' };
+  const to = { ...SONNET, fallbacks: [CODEX, FLASH] };
+  const old = exportOf('2026-11-01T09:55:00Z', oldBlock);
+  assert.deepEqual(effectiveSet(old, 'main', [ok]), to, 'the result is in and the export is older: the order it asked for');
+  assert.deepEqual(effectiveSet(old, 'main', []), { ...CODEX, fallbacks: [SONNET] }, 'no change: the export');
+  assert.deepEqual(effectiveSet(exportOf('2026-11-01T10:04:00Z', newBlock), 'main', [ok]), to, 'a newer export that shows it');
+  assert.deepEqual(effectiveSet(exportOf('2026-11-01T10:04:00Z', hostEdit), 'main', [ok]), { ...FLASH, fallbacks: [] }, 'a newer export with something else: somebody changed the host');
+  assert.deepEqual(effectiveSet(exportOf('2026-11-01T10:03:00Z', oldBlock), 'main', [ok]), to, 'made before it landed (the tick start is not the landing)');
+  assert.deepEqual(effectiveSet(old, 'main', [failed]), { ...CODEX, fallbacks: [SONNET] }, 'a failed result: the export');
+  assert.deepEqual(effectiveSet(old, 'briefs', [ok]), null, 'another profile has its own order (this export has no briefs block here)');
+  assert.deepEqual(effectiveSet(old, 'main', [{ change, result: null, landedAt: '' }]), { ...CODEX, fallbacks: [SONNET] }, 'a waiting change is not confirmed');
+  const noLanding = { change, result: validResult(resultDoc()), landedAt: '' };
+  assert.deepEqual(effectiveSet(exportOf('2026-11-01T10:02:59Z', oldBlock), 'main', [noLanding]), to, 'with no landing time, its own time stands in');
+  assert.equal(effectiveSet(null, 'main', [ok]).model, 'claude-sonnet-5-5', 'no export at all: the confirmed change');
+  // The newest confirmed change wins over an older one.
+  const later = { change: validChange(approvedDoc({ change: '20261101-profile-main-cd34', ask: '20261101-profile-main-cd34', at: '2026-11-01T12:00:00.000Z', expires: '2026-11-01T13:00:00.000Z', to: { ...FLASH, fallbacks: [] } })), result: validResult(resultDoc({ change: '20261101-profile-main-cd34', at: '2026-11-01T12:03:00.000Z' })), landedAt: '2026-11-01T12:03:30.000Z' };
+  assert.deepEqual(effectiveSet(old, 'main', [ok, later]), { ...FLASH, fallbacks: [] });
+});
+
+test('changeView: runningAt is when the result landed for a confirmed change, falling back to its own time; a failed or waiting one has none', () => {
+  const change = validChange(approvedDoc());
+  const at = new Date('2026-11-01T11:00:00Z');
+  const done = changeView({ change, result: validResult(resultDoc()), landedAt: '2026-11-01T10:03:33.000Z', at });
+  assert.deepEqual([done.resultAt, done.runningAt], ['2026-11-01T10:03:00.000Z', '2026-11-01T10:03:33.000Z']);
+  assert.equal(changeView({ change, result: validResult(resultDoc()), at }).runningAt, '2026-11-01T10:03:00.000Z');
+  assert.equal('runningAt' in changeView({ change, result: validResult(resultDoc({ outcome: 'failed', code: 'health' })), landedAt: '2026-11-01T10:03:33.000Z', at }), false);
+  assert.equal('runningAt' in changeView({ change, at }), false);
+});
+
+test('agentDetails: a confirmed change whose order is no longer the one in use is replaced, after a way back (A to B, B to A) and after a host edit (A to B, then C)', () => {
+  const A = { ...CODEX, fallbacks: [SONNET] };
+  const B = { ...FLASH, fallbacks: [] };
+  const C = { provider: 'deepseek', model: 'deepseek-v4-pro', fallbacks: [] };
+  const doc = (n, from, to, at, ran) => ({ change: validChange(approvedDoc({ change: `20261101-profile-main-${n}`, ask: `20261101-profile-main-${n}`, from, to, at, expires: '2026-11-01T23:00:00.000Z' })), result: validResult(resultDoc({ change: `20261101-profile-main-${n}`, at: ran })), landedAt: ran.replace(':30.000Z', ':45.000Z') });
+  const there = doc('aaaa', A, B, '2026-11-01T10:00:00.000Z', '2026-11-01T10:01:30.000Z');
+  const back = doc('bbbb', B, A, '2026-11-01T10:30:00.000Z', '2026-11-01T10:31:30.000Z');
+  const exportShowing = set => validExport({ ...agentConfigJson({ now: NOW }), exportedAt: '2026-11-01T11:00:00Z', profiles: { main: { model: { provider: set.provider, default: set.model }, fallbacks: set.fallbacks } } });
+  const view = (exported, changes) => agentDetails({ agent: agentOf('hermes'), exported, at: NOW, changes });
+
+  const wayBack = view(exportShowing(A), [back, there]);
+  assert.deepEqual(wayBack.changes.map(item => [item.to.model, item.state, item.replaced === true]), [['gpt-6-sol', 'live', false], ['deepseek-flash', 'applied', true]], 'only the order in use is running');
+  assert.equal(wayBack.change.replaced, undefined, 'the newest is the one in use');
+
+  const edited = view(exportShowing(C), [there]);
+  assert.equal(edited.settings.effective.model, 'deepseek-v4-pro');
+  assert.deepEqual([edited.change.state, edited.change.replaced], ['applied', true], 'the host was changed since: state stays, and it is marked');
+  assert.equal(view(exportShowing(B), [there]).change.replaced, undefined, 'while it is the order in use it is not replaced');
 });
 
 test('agentDetails: a change shows while it waits and for a day after it ended; Briefs and the research agents share their profile\'s; Claude Code has none', () => {
