@@ -3,6 +3,7 @@ import type { Ask } from '../lib/hub'
 import { hubGet } from '../lib/hub'
 import type { AgentDetailsView, ModelRef, PersonaView } from '../lib/hubTeam'
 import { text } from './askAnswer'
+import { restartText } from './profileChangeWords'
 import { agentEditOf, opusNote, profileEditOf } from './agentEditField'
 import './team/agentDetails.css'
 
@@ -52,11 +53,11 @@ function ProfileEditAsk({ ask }: { ask: Ask }) {
       <p>Changes the model and the fallback order of the Hermes profile <b>{edit.profile}</b>.</p>
       {failed && <p className="hub-muted" role="note">The order the host has now could not be loaded.</p>}
       <div className="ae-ask-pair">
-        <div><h4>Now</h4>{details ? <Chain primary={now?.model?.provider && now.model.default ? { provider: now.model.provider, model: now.model.default } : undefined} fallbacks={now?.fallbacks ?? []} field="old" /> : <p className="team-dim" data-profile-ask-chain="old">(loading)</p>}</div>
+        <div><h4>Now</h4>{details ? <Chain primary={now?.effective ? { provider: now.effective.provider, model: now.effective.model } : now?.model?.provider && now.model.default ? { provider: now.model.provider, model: now.model.default } : undefined} fallbacks={now?.effective?.fallbacks ?? now?.fallbacks ?? []} field="old" /> : <p className="team-dim" data-profile-ask-chain="old">(loading)</p>}</div>
         <div><h4>Proposed</h4><Chain primary={edit.primary} fallbacks={edit.fallbacks} field="new" /></div>
       </div>
       {opus && <p className="hub-banner ad-note" role="note" data-profile-ask-opus>{opus}</p>}
-      {open && !ask.agentEditBlocked && <p className="hub-muted" data-profile-ask-restart>Apply signs the change. The Hermes host applies it within about 5 minutes and restarts the {edit.profile} gateway: a chat or job running then stops. If anything fails, the old settings are put back.</p>}
+      {open && !ask.agentEditBlocked && <p className="hub-muted" data-profile-ask-restart>Apply signs the change and sends it to the Hermes host. {restartText(edit.profile)} If anything fails, the old settings are put back.</p>}
     </section>
   )
 }

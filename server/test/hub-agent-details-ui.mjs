@@ -144,7 +144,7 @@ try {
   assert.equal(await desk.locator('[data-hub-link="team"]').getAttribute('aria-current'), 'page', 'Team stays the current row in the sidebar.');
   assert.match(await edit.locator('[data-edit-prompt]').inputValue(), /^You are Teardown, one of the owner's agents: how a public game works/);
   assert.equal(await edit.locator('[data-edit-model]').inputValue(), 'codex');
-  assert.equal(flat(await edit.locator('[data-edit-model-note]').innerText()), "Chat only. Jobs use the profile's model.");
+  assert.equal(flat(await edit.locator('[data-edit-model-note]').innerText()), "Chat only, this agent only. Jobs and Auto use the profile's model below.");
   assert.equal(await edit.locator('[data-edit-save]').isDisabled(), true);
   assert.deepEqual(await edit.locator('[data-version]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-version'))), ['default']);
   assert.equal(await edit.locator('[data-revert]').count(), 0, 'The only version is the current one.');
@@ -201,7 +201,10 @@ try {
   assert.deepEqual((await model.locator('[data-profile-fallbacks] select option:checked').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'deepseek · deepseek-v4-pro']);
   assert.equal(await model.locator('[data-profile-send]').isDisabled(), true);
   assert.equal(await model.locator('[data-profile-nochain]').count(), 0);
-  assert.match(flat(await model.locator('[data-profile-restart]').innerText()), /restarts Hermes main within about 5 minutes\. A chat or job running then stops\./);
+  assert.equal(flat(await model.locator('[data-profile-restart]').innerText()), "Changing this restarts Hermes main. Usually done in about a minute, at most 5 if the host's quick check is off. A chat or job running then stops.");
+  assert.equal(flat(await model.locator('h3').first().textContent()), 'Model and fallbacks of profile main');
+  assert.equal(flat(await model.locator('[data-profile-auto]').innerText()), 'A chat set to Auto follows this. A chat set to a named model stays on that model.');
+  assert.equal(await model.locator('[data-profile-briefs-wait]').count(), 0, 'the weekly-jobs wait is Briefs only');
   await noSideways(desk, 'Edit with the model section at 1280');
 
   step('Profile: a new primary leaves the chain; Remove empties it and says what that means; Add and Down reorder; Send opens an Ask');
@@ -233,28 +236,55 @@ try {
   assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="old"] li').allInnerTexts()).map(flat), ['openai-codex · gpt-6-sol', 'then anthropic · claude-sonnet-5-5', 'then deepseek · deepseek-v4-pro']);
   assert.deepEqual((await modelAsk.locator('[data-profile-ask-chain="new"] li').allInnerTexts()).map(flat), ['anthropic · claude-sonnet-5-5', 'then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
   assert.equal(flat(await modelAsk.locator('[data-edit-ask-why]').innerText()), 'Why: Codex is slow today.');
-  assert.match(flat(await modelAsk.locator('[data-profile-ask-restart]').innerText()), /within about 5 minutes and restarts the main gateway: a chat or job running then stops/);
+  assert.match(flat(await modelAsk.locator('[data-profile-ask-restart]').innerText()), /^Apply signs the change and sends it to the Hermes host\. Changing this restarts Hermes main\. Usually done in about a minute, at most 5 if the host's quick check is off\. A chat or job running then stops\. If anything fails, the old settings are put back\.$/);
   assert.equal(await modelAsk.locator('script, img, a').count(), 0, 'the text is plain text');
   await noSideways(desk, 'Model Ask at 1280');
   await desk.locator('[data-option="apply"] button').click();
   await desk.locator('[data-send]').click();
   // Answering leaves the Ask page for the next item, so the line under Send is gone within a moment; the same line stays in the note there.
   await desk.locator('[data-next-detail]').waitFor();
-  assert.match(await desk.locator('[data-next-detail]').innerText(), /^Applied\. Signed and sent to the Hermes host/);
+  assert.match(await desk.locator('[data-next-detail]').innerText(), /^Sent to the Hermes host\. Not running yet\. Usually about a minute, at most 5\. Details of the agent says when it is running\.$/);
 
   step('Waiting: Details of any agent on the profile says the change is waiting for the host, and a second request is off');
   await visit(desk, fresh.url, 'teardown');
-  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change="waiting"]').innerText()), /^The change to claude-sonnet-5-5 was approved .* and is waiting for the Hermes host, which applies it within about 5 minutes\.$/);
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change="waiting"]').innerText()), /^Changing Hermes main to claude-sonnet-5-5\. Sent .*\. Not running yet: the old model answers until the restart, usually within 40 seconds of pressing\. This says Running when the new model is confirmed\.$/);
   await desk.goto(`${fresh.url}#/~hub/agent-edit/hermes`);
   await desk.locator('[data-edit-profile="main"]').waitFor();
-  assert.equal(flat(await desk.locator('[data-profile-off]').innerText()), 'A change is already waiting for the Hermes host.');
+  assert.equal(flat(await desk.locator('[data-profile-off]').innerText()), 'Hermes main is changing to claude-sonnet-5-5. That covers Hermes, Researcher, Market researcher, Teardown and Planner, so this order can be changed again once it finishes. Profile briefs is not affected.');
   assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true);
-  assert.equal(await desk.locator('[data-profile-change] [data-change-state]').innerText(), 'Waiting for the host');
+  assert.equal(await desk.locator('[data-profile-change] [data-change-state]').innerText(), 'Sent, not running yet');
   assert.equal(await desk.locator('[data-edit-profile="main"] [data-edit-form], [data-edit-versions]').count(), 0, 'Hermes has no persona form');
+  assert.doesNotMatch(await desk.locator('[data-agent-edit]').innerText(), /Applied/, 'nothing says Applied for a change the host has not confirmed');
+  // Briefs is its own profile: the same change does not block it, and its page says how long its wait can be.
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/briefs`);
+  await desk.locator('[data-edit-profile="briefs"]').waitFor();
+  assert.equal(flat(await desk.locator('[data-profile-briefs-wait]').innerText()), 'If the weekly jobs are running, it waits until they end, up to an hour.');
+  assert.equal(await desk.locator('[data-profile-off]').count(), 0, 'a main change does not block briefs');
+  // Teardown has a persona section: its chat model is not blocked, and the banner on its profile section says so.
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await desk.locator('[data-edit-profile="main"] [data-profile-off]').waitFor();
+  assert.match(flat(await desk.locator('[data-profile-off]').innerText()), / Profile briefs is not affected\. Chat models above still save\.$/);
+  assert.equal(await desk.locator('[data-edit-save]').count(), 1, 'the chat model form is there');
+  await desk.locator('[data-edit-model]').selectOption('sonnet');
+  assert.equal(await desk.locator('[data-edit-save]').isEnabled(), true, 'a chat model still saves while the profile waits');
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/hermes`);
+  await desk.locator('[data-profile-off]').waitFor();
+
+  step('The host answers while the page is open: within a few seconds, with no reload, the block is gone and the row says Running; then the page stops asking');
+  const resultAt = new Date();
+  const detailsReads = [];
+  desk.on('request', request => { if (request.url().includes('/api/hub/team/hermes/details')) detailsReads.push(Date.now()); });
+  fresh.fake.seed(`sections/inbox/agent-config/changes/${changeId}/result.json`, JSON.stringify({ v: 1, change: changeId, outcome: 'applied', code: 'ok', rolledBack: false, at: resultAt.toISOString() }), 'application/json', { writer: 'hermes-config' });
+  await desk.locator('[data-profile-off]').waitFor({ state: 'detached', timeout: ms(12000) });
+  await desk.locator('[data-profile-change][data-state="applied"] [data-change-state]').waitFor();
+  assert.equal(await desk.locator('[data-profile-change] [data-change-state]').innerText(), 'Running');
+  assert.match(flat(await desk.locator('[data-details-change="applied"]').innerText()), /^Running: claude-sonnet-5-5, since .+\. The settings below catch up within seconds\.$/);
+  assert.doesNotMatch(await desk.locator('[data-agent-edit]').innerText(), /Applied/);
+  const settled = detailsReads.length;
+  await desk.waitForTimeout(ms(6500));
+  assert.equal(detailsReads.length, settled, 'no more reads once the change is no longer waiting');
 
   step('The host answers: applied, then a newer export shows the new order and Details says live; the Team card follows');
-  const resultAt = new Date()
-  fresh.fake.seed(`sections/inbox/agent-config/changes/${changeId}/result.json`, JSON.stringify({ v: 1, change: changeId, outcome: 'applied', code: 'ok', rolledBack: false, at: resultAt.toISOString() }), 'application/json', { writer: 'hermes-config' });
   await visit(desk, fresh.url, 'teardown');
   await details(desk, 'teardown').locator('[data-details-change="applied"]').waitFor();
   const after = agentConfigJson({ now: new Date(resultAt.getTime() + 2000), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
@@ -263,7 +293,7 @@ try {
   seedAgentConfig(fresh.fake, after);
   await visit(desk, fresh.url, 'teardown');
   await details(desk, 'teardown').locator('[data-details-change="live"]').waitFor();
-  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^The change to claude-sonnet-5-5 is live\./);
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^Running: claude-sonnet-5-5, since .+\.$/);
   assert.equal(flat(await details(desk, 'teardown').locator('[data-model-primary]').innerText()), 'anthropic · claude-sonnet-5-5');
   assert.deepEqual((await details(desk, 'teardown').locator('[data-model-fallbacks] li').allInnerTexts()).map(flat), ['then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
   await desk.goto(`${fresh.url}#/~hub/team`);
@@ -276,6 +306,21 @@ try {
   await desk.locator('[data-profile-change][data-state="live"]').waitFor();
   assert.equal(await desk.locator('[data-profile-change][data-state="live"]').count(), 1, 'the Edit page lists it as live');
   assert.equal(await desk.locator('[data-profile-send]').isDisabled(), true, 'and there is nothing new to send');
+
+  step('Replaced: the host is edited after the change, so the row and the banner stop saying Running although data-state stays');
+  const edited = agentConfigJson({ now: new Date(Date.now() + 1000), exportedMinutesAgo: 0, modelOptions: MODEL_OPTIONS });
+  edited.profiles.main.model = { provider: 'deepseek', default: 'deepseek-v4-pro' };
+  edited.profiles.main.fallbacks = [];
+  seedAgentConfig(fresh.fake, edited);
+  await desk.goto(`${fresh.url}#/~hub/agent/teardown`);
+  await details(desk, 'teardown').locator('[data-details-change][data-replaced]').waitFor();
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^The change to claude-sonnet-5-5 was confirmed .+\. The host has been changed since, so it no longer runs\. The settings below are what it has now\.$/);
+  assert.equal(await details(desk, 'teardown').locator('[data-details-change]').getAttribute('data-details-change'), 'applied', 'data-state keeps its value');
+  await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
+  await desk.locator('[data-profile-change][data-replaced]').waitFor();
+  assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state]').innerText(), 'Replaced');
+  assert.equal(await desk.locator('[data-profile-change][data-replaced] [data-change-state].on').count(), 0, 'no green tag');
+  assert.doesNotMatch(await desk.locator('[data-profile-change]').innerText(), /Running/);
 
   step('Failed: Details says the change failed with the reason in words and that the old settings stay; a failed rollback says Hermes may be down');
   const failedId = `${changeId.slice(0, 8)}-profile-briefs-f1f1`;
