@@ -803,6 +803,7 @@ test('a file the agent rewrote after the listing is not deleted, and comes down 
     const lines = [];
     const result = await syncUp({ root: w.site, bucket: racing(client, async () => fake.seed(`${KEY}hub/stale.md`, 'agent text\n')), prefix, scope, log: line => lines.push(line) });
     assert.deepEqual(result.deletes, []);
+    assert.deepEqual(result.kept, ['hub/stale.md']);
     assert.equal(fake.text(`${KEY}hub/stale.md`), 'agent text\n');
     assert.ok(fake.log.find(entry => entry.method === 'DELETE' && entry.key === `${KEY}hub/stale.md`).headers['if-match']);
     assert.match(lines.join('\n'), /kept hub\/stale\.md: changed on the site during this publish/);
@@ -934,6 +935,29 @@ test('a named --pull --force keeps a local card that is not published yet', asyn
     assert.equal(await readFile(path.join(w.site, 'hub', 'index.md'), 'utf8'), '# Hub, agent\n');
     const after = JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
     assert.deepEqual(after.entities.map(item => item.id).sort(), ['desk', 'hub']);
+    // The card is only lost one publish later if the pull recorded the unsynced list as synced.
+    await publish({ content: w.site, ...options });
+    const ids = list => list.entities.map(item => item.id).sort();
+    assert.deepEqual(ids(JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'))), ['desk', 'hub']);
+    assert.deepEqual(ids(fake.json(`${KEY}workspace.json`)), ['desk', 'hub']);
+  } finally { await fake.close(); }
+});
+
+test('a plain --pull keeps a local card that is not published yet through the next publish', async () => {
+  const fake = await startFakeS3();
+  try {
+    const w = await published(fake);
+    const options = { registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+    const local = JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
+    local.entities.push({ id: 'desk', title: 'Desk', folder: 'desk', steps: [{ name: 'Page', path: 'index.md' }] });
+    await writeFile(path.join(w.site, 'workspace.json'), JSON.stringify(local, null, 2));
+    fake.seed(`${KEY}hub/extra.md`, '# Extra\n', 'text/markdown');
+    await publish({ content: w.site, pull: true, ...options });
+    assert.equal(await readFile(path.join(w.site, 'hub', 'extra.md'), 'utf8'), '# Extra\n');
+    await publish({ content: w.site, ...options });
+    const ids = list => list.entities.map(item => item.id).sort();
+    assert.deepEqual(ids(JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'))), ['desk', 'hub']);
+    assert.deepEqual(ids(fake.json(`${KEY}workspace.json`)), ['desk', 'hub']);
   } finally { await fake.close(); }
 });
 

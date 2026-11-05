@@ -143,6 +143,10 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
     log(`Nothing ${dryRun ? 'to publish' : 'published'} in ${workspace.name}: ${conflicted} file(s) need settling; ${result.unchanged} already match.`);
     return { published: false, workspace, ...result };
   }
+  if (!total && result.kept?.length) {
+    log(`Nothing published in ${workspace.name}: ${result.kept.length} file(s) changed on the site during the publish and were kept; they come down on the next publish.`);
+    return { published: false, workspace, ...result };
+  }
   if (!total) {
     if (named.length) throw new Error(`Nothing published: nothing changed in ${named.join(', ')}.`);
     log(`Nothing to publish in ${workspace.name}: ${result.unchanged} file(s) already match ${where}.`);

@@ -77,7 +77,8 @@ export async function startFakeS3({ bucket = 'test-bucket', maxKeys = 1000 } = {
       const existing = objects.get(key);
       const ifMatch = request.headers['if-match'];
       const ifNoneMatch = request.headers['if-none-match'];
-      if (ifMatch && (!existing || `"${existing.etag}"` !== ifMatch)) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
+      if (ifMatch && !existing) return error(response, 404, 'NoSuchKey', 'The specified key does not exist.');
+      if (ifMatch && `"${existing.etag}"` !== ifMatch) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
       if (ifNoneMatch === '*' && existing) return error(response, 412, 'PreconditionFailed', 'At least one of the pre-conditions you specified did not hold');
       const etag = createHash('md5').update(body).digest('hex');
       const metadata = Object.fromEntries(Object.entries(request.headers).filter(([name]) => name.startsWith('x-amz-meta-')).map(([name, value]) => [name.slice('x-amz-meta-'.length), value]));

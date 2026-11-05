@@ -386,6 +386,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
   const saved = [];
   const sent = [];
   const deleted = [];
+  const kept = [];
   if (!dryRun) {
     for (const file of conflicts) {
       if (await saveCopy({ root, bucket, key: `${base}${file}`, file, etag: remote.get(file)?.etag, log })) saved.push(file);
@@ -443,6 +444,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
       } catch (error) {
         if (error.status === 412 || error.status === 409) {
           log(`  kept ${file}: changed on the site during this publish; it comes down on the next publish`);
+          kept.push(file);
           continue;
         }
         if (error.status !== 404) throw error;
@@ -456,7 +458,7 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
     await saveBase(root, where, record);
     await sweepCopies(root, scope, new Set(conflicts));
   }
-  return { uploads: dryRun ? uploads : sent, downloads, deletes: dryRun ? deletes : deleted, conflicts, saved: saved.sort(), unchanged, problems };
+  return { uploads: dryRun ? uploads : sent, downloads, deletes: dryRun ? deletes : deleted, conflicts, kept, saved: saved.sort(), unchanged, problems };
 }
 
 /**
@@ -496,7 +498,8 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
     written.push(file);
   }
   if (!dryRun) {
-    if (record.files['workspace.json']) record.list = JSON.parse(await readFile(path.join(root, 'workspace.json'), 'utf8'));
+    // The list was synced only if the local one is what the record holds; a pull that left it out of scope must not claim it was.
+    if (record.files['workspace.json'] && md5(await readFile(path.join(root, 'workspace.json'))) === record.files['workspace.json']) record.list = JSON.parse(await readFile(path.join(root, 'workspace.json'), 'utf8'));
     await saveBase(root, where, record);
     await sweepCopies(root, scope, new Set(differs));
   }
