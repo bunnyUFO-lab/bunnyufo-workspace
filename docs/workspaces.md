@@ -248,6 +248,14 @@ configured) answers read-only, with no controls that would fail when pressed.
    validates it, copies it to `$CADDY_DIR/Caddyfile` and restarts Caddy when it changed. The
    compose file that runs Caddy there is not part of this repository; it must set `NPM_IP` (below).
 
+   Caddy compresses (zstd, or gzip over plain HTTP) HTML, CSS, JavaScript, JSON, Markdown, CSV, YAML, XML, SVG and WASM of 1 KB or more,
+   named type by type in the `encode` block. It never uses `text/*`: that would take in `text/event-stream`, the Hub's chat and
+   run streams, which must reach the browser piece by piece. Images, video, audio, fonts and archives are already compressed,
+   and a range (206) or conditional (304) answer passes through as before. Vite's hashed `assets/<name>-<hash>.js|css` files
+   are sent `private, max-age=31536000, immutable`; a missing name still falls back to the shell with `no-cache`.
+   `site/caddy/test/caddyfile.test.mjs` runs this Caddyfile in a capped `caddy:2-alpine` container (it skips without Docker, and
+   fails under `CI`).
+
 Run the two scripts from any CI or by hand, from the repository root, with these variables:
 
 | Variable | Default | Purpose |
