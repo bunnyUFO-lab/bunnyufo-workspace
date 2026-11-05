@@ -80,7 +80,7 @@ try {
   step('one tap approves the ids on screen, and each row moves on by itself');
   const approve = card.locator('[data-jobs-approve]');
   assert.equal((await approve.textContent()).trim(), 'Approve all 2');
-  assert.match(await card.locator('[data-jobs-estimate]').textContent(), /^Estimated 1\.4–2\.2 M tokens in all$/, 'the cost is on screen before the tap');
+  assert.match(await card.locator('[data-jobs-estimate]').textContent(), /^Estimated for all 2: 1\.4–2\.2 M tokens · if Codex is paused it may use paid models$/, 'the cost is on screen before the tap');
   assert.match(await rows.first().locator('[data-job-facts]').textContent(), /^Project probe · Up to 30 minutes · Codex plan/, 'the facts the approval page shows');
   await approve.click();
   await rows.first().locator('[data-job-status]', { hasText: /^(Approved, waiting to start|Taken|Running)/ }).waitFor();
@@ -93,7 +93,7 @@ try {
   const FOUR = ['c111', 'c222', 'c333', 'c444'].map(tail => id('many', tail));
   FOUR.forEach((jobId, index) => put({ ...agentJob(jobId, `Many ${index + 1}`, `Research ${index + 1}.`), createdAt: new Date().toISOString() }));
   const MANY = `${day}-man123`;
-  fixture.fake.seed(`sections/inbox/chat/${MANY}.jsonl`, `${[{ role: 'user', text: 'Many', at: new Date().toISOString() }, { role: 'assistant', text: 'Four jobs.', at: new Date().toISOString(), jobs: FOUR }].map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
+  fixture.fake.seed(`sections/inbox/chat/${MANY}.jsonl`, `${[{ role: 'user', text: 'Many', at: new Date().toISOString() }, { role: 'assistant', text: `Four jobs: ${FOUR.join(' ')}`, at: new Date().toISOString(), jobs: FOUR }].map(line => JSON.stringify(line)).join('\n')}\n`, 'application/x-ndjson');
   await page.goto(`${fixture.url}#/~hub/chat/${MANY}`);
   await page.locator('[data-job-row]').nth(3).waitFor();
   assert.equal(await page.locator('[data-jobs-approve]').count(), 0);

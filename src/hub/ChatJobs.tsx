@@ -104,13 +104,13 @@ export default function JobsCard({ conversation, ids, jobs, onChanged }: { conve
       {ready.length > 1 && !many && canApprove && (
         <div className="hub-jobs-a">
           <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void approve(ready)} data-jobs-approve>Approve all {ready.length}</button>
-          {estimateOf(ready) && <span className="hub-muted hub-jobs-cost" data-jobs-estimate>Estimated {estimateOf(ready)} in all</span>}
+          {estimateOf(ready) && <span className="hub-muted hub-jobs-cost" data-jobs-estimate>Estimated for all {ready.length}: {estimateOf(ready)}</span>}
         </div>
       )}
       {ready.length === 1 && canApprove && (
         <div className="hub-jobs-a">
           <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void approve(ready)} data-jobs-approve>Approve</button>
-          {estimateOf(ready) && <span className="hub-muted hub-jobs-cost" data-jobs-estimate>Estimated {estimateOf(ready)}</span>}
+          {estimateOf(ready) && <span className="hub-muted hub-jobs-cost" data-jobs-estimate>Estimated: {estimateOf(ready)}</span>}
         </div>
       )}
       {ready.length > 0 && host.write && !host.approve && <p className="hub-muted" data-jobs-off>{host.approveReason ?? 'Approving needs a signed-in session on a host that can sign.'}</p>}

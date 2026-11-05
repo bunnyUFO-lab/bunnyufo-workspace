@@ -53,7 +53,8 @@ export function jobWindowsOf(lines) {
     const before = recent[index - 1];
     const from = before?.role === 'user' ? Date.parse(before.at) : to - 600_000;
     if (!Number.isFinite(to) || !Number.isFinite(from)) return;
-    for (const id of line.jobs) if (typeof id === 'string' && !windows.has(id)) windows.set(id, { from, to });
+    const said = idsIn(line.text);   // the reply's own words: an id only a tool preview showed is not in them
+    for (const id of line.jobs) if (typeof id === 'string' && !windows.has(id)) windows.set(id, { from, to, named: said.includes(id) });
   });
   return windows;
 }
@@ -67,6 +68,8 @@ export function verifyJob({ by, createdAt, modifiedMs, window }) {
   if (!HERMES_BY.test(String(by ?? ''))) return { ok: false, why: `It was filed as ${String(by ?? 'someone').slice(0, 40) || 'someone'}, not as Hermes. Open it to approve.` };
   const inside = time => Number.isFinite(time) && !!window && time >= window.from - SKEW_MS && time <= window.to + SKEW_MS;
   if (!inside(Date.parse(createdAt)) || !inside(modifiedMs)) return { ok: false, why: 'Its dates do not match this reply, so it may not have been made in it. Open it to approve.' };
+  // One tap is for what the reply itself names. A preview can carry text Hermes never chose to say (a fetched page, a card).
+  if (window.named === false) return { ok: false, why: 'It was not named in the reply, only in a tool preview. Open it to approve.' };
   return { ok: true };
 }
 

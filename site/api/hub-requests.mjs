@@ -684,6 +684,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const preset = presetOf(request.preset);
       if (!preset) return no('Only a request made from a preset can be approved.', 400);
       if (preset.hidden) return no('That job is started by the Hub, so it is not approved from a chat.', 400);
+      if (preset.opensWindows) return no('It opens windows on the PC where you work. Open it to approve.', 400);
       if (request.sprint || request.continues || request.followUp) return no('That job belongs to a sprint, a reply or a follow-up. Open it to approve.', 400);
       if (request.origin?.kind === 'owner') return no('You wrote this request yourself. Open it to approve.', 400);
       if (request.origin?.kind === 'run') return no('A run filed this, not Hermes in this chat. Open it to approve.', 400);

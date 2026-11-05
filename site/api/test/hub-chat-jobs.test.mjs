@@ -55,7 +55,7 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true, key = 
 
 /** A proposal the way an agent files it: written by the agent token, not the owner. */
 const job = (slug, extra = {}) => ({ ...requestJson({ id: rid(slug), project: 'probe', by: 'hermes-main', text: `Research ${slug}. The plan card is assistant/plan.`, now: new Date() }), preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' }, ...extra });
-const assistant = (jobs, extra = {}) => ({ role: 'assistant', text: 'Here are the jobs.', at: new Date().toISOString(), jobs, ...extra });
+const assistant = (jobs, extra = {}) => ({ role: 'assistant', text: `Here are the jobs: ${jobs.join(' ')}`, at: new Date().toISOString(), jobs, ...extra });
 const user = text => ({ role: 'user', text, at: new Date().toISOString() });
 
 /** POST /hub/chat and read the whole event stream. */
@@ -358,6 +358,37 @@ test('a request dated ahead, by an unexpected name, or from a run is never a ver
     const refused = await approve(call, id, [spoof.id, viaRun.id]);
     assert.deepEqual(refused.body.results.map(item => item.ok), [false, false]);
     assert.equal(signed(fake, spoof.id) || signed(fake, viaRun.id), false);
+  } finally { await close(); }
+});
+
+test('one tap only for ids named in the reply\'s text: an id seen only in a tool preview gets a row, with Open it to approve', async () => {
+  const said = job('said');
+  const previewed = job('previewed');
+  let filing = async () => {};
+  const { fake, call, put, close } = await fixture({ hermes: { runScript: [{ call: () => filing() }, { tool: 'web_fetch', preview: `see ${previewed.id}` }, `Proposed: ${said.id}`] } });
+  try {
+    filing = async () => { for (const request of [said, previewed]) put({ ...request, createdAt: new Date().toISOString() }); };
+    const id = (await send(call, { text: 'Plan' })).events.at(-1).data.conversation;
+    const rows = Object.fromEntries((await call('GET', `/hub/chat/${id}/jobs`)).body.jobs.map(row => [row.id, row]));
+    assert.deepEqual([rows[said.id].approvable, rows[previewed.id].approvable], [true, false]);
+    assert.match(rows[previewed.id].why, /not named in the reply/i);
+    const answer = await approve(call, id, [previewed.id]);
+    assert.equal(answer.body.results[0].ok, false);
+    assert.equal(signed(fake, previewed.id), false);
+  } finally { await close(); }
+});
+
+test('a job that opens windows on the PC gets no one tap, and the server refuses it too', async () => {
+  const windows = job('windows', { preset: 'playtest-build', target: 'pc' });
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    put(windows);
+    chatFile(CHAT, [user('go'), assistant([windows.id], { text: `Proposed: ${windows.id}` })]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual([rows[0].approvable, rows[0].verified], [false, true]);
+    assert.match(rows[0].why, /windows/i);
+    assert.equal((await approve(call, CHAT, [windows.id])).body.results[0].ok, false);
+    assert.equal(signed(fake, windows.id), false);
   } finally { await close(); }
 });
 
