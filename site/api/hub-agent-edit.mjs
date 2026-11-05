@@ -11,16 +11,22 @@
 // host's own published list for a profile). The answer is already stored when `afterAnswer` runs; nothing here can undo or fail it. Only the web
 // route calls it. The Discord route never does, and discordEligible refuses these Asks outright.
 import { AGENT_EDIT_OPTIONS, validateAgentEdit } from './agent-edit.mjs';
-import { exportFreshness, changeState } from './hub-agent-config.mjs';
+import { effectiveSet, exportFreshness, changeState } from './hub-agent-config.mjs';
 import { AGENTS } from './hub-team.mjs';
 import { day8, randomId } from './hub-model.mjs';
 import { newNonce, sign } from './signing.mjs';
 
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const HOUR = 3600 * 1000;
-/** How long the host has to apply a signed change. */
-export const CHANGE_VALID_MS = 24 * HOUR;
+/**
+ * How long the host has to apply a signed change: a press means now. Covers the host's 5-minute tick and the longest `briefs` wait (30 minutes);
+ * the host accepts any lifetime up to 24 h 5 min and reports `expired` for a change it finds late.
+ */
+export const CHANGE_VALID_MS = HOUR;
 const ASK_VALID_MS = 24 * HOUR;
+/** How long a change takes, in the words of the Edit page, the Ask page and the Ask text (the page keeps a copy in src/hub/profileChangeWords.ts). */
+export const CHANGE_TIME_TEXT = "Usually done in about a minute, at most 5 if the host's quick check is off.";
+export const restartText = profile => `Changing this restarts Hermes ${profile}. ${CHANGE_TIME_TEXT} A chat or job running then stops.`;
 const problem = (message, status = 409) => Object.assign(new Error(message), { status });
 
 const refOf = item => `${item.provider} · ${item.model}`;
@@ -53,18 +59,20 @@ export function createAgentEdits({ personas, profiles = null, agents = async () 
     if (!exported || !block) throw problem('The Hermes host has not published its settings yet.');
     if (exportFreshness(exported, at) !== 'fresh') throw problem('The last export from the Hermes host is old, so its settings may have changed. Wait for a new one.');
     if (!block.model?.provider || !block.model?.default) throw problem('The Hermes host did not say which model this profile uses now.');
+    const changes = await profiles.changes(edit.profile, at);
     const options = block.modelOptions;
     if (!options?.length) throw problem('The Hermes host has not published its model list yet.');
     const to = { ...edit.primary, fallbacks: edit.fallbacks.map(item => ({ ...item })) };
     for (const item of [to, ...to.fallbacks]) {
       if (!options.some(option => option.provider === item.provider && option.model === item.model)) throw problem(`${refOf(item)} is not a model the Hermes host offers for this profile.`);
     }
-    const from = { provider: block.model.provider, model: block.model.default, fallbacks: block.fallbacks.map(item => ({ provider: item.provider, model: item.model })) };
+    // What the profile runs now: the export, or a change the host confirmed after that export was made.
+    const from = effectiveSet(exported, edit.profile, changes);
     if (from.fallbacks.length > 4) throw problem('The profile has more than four fallbacks now, which this page does not change.');
     // The old order is signed too, and Details shows it: a model listed twice there would be signed and never shown.
     if (new Set([from, ...from.fallbacks].map(refOf)).size !== from.fallbacks.length + 1) throw problem('The profile lists a model twice now, which this page does not change. Fix it on the host first.');
     if (sameSet(from, to)) throw problem('That is what the profile uses already.');
-    const waiting = (await profiles.changes(edit.profile, at)).find(item => changeState({ change: item.change, result: item.result, exported, at }) === 'waiting');
+    const waiting = changes.find(item => changeState({ change: item.change, result: item.result, exported, at }) === 'waiting');
     if (waiting) throw problem(`A change of the ${edit.profile} profile is still waiting for the Hermes host (${waiting.change.change}).`);
     return { from, to, exported };
   }
@@ -79,7 +87,7 @@ export function createAgentEdits({ personas, profiles = null, agents = async () 
       context: [
         `Now: ${chainOf(from)}.`, `New: ${chainOf(to)}.`,
         `The profile ${edit.profile} is shared by ${listed(sharedBy(edit.profile, sharers))}.`,
-        `Hermes ${edit.profile} restarts within about 5 minutes. A chat or job running then stops.`,
+        restartText(edit.profile),
         ...(user ? [`Asked by ${user}.`] : []),
       ].join('\n'),
       options: AGENT_EDIT_OPTIONS.map(option => ({ ...option })), allowNote: false, allowDrawing: false, kind: 'approval', requirePasskey: true,

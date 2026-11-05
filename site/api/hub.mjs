@@ -48,7 +48,7 @@ import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
-import { agentDetails, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
+import { agentDetails, CHANGE_CODES, PROFILES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
@@ -479,7 +479,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * The signed changes of one Hermes profile with the host's results, newest first (at most 20 are read). The Hub wrote each `approved.json`
    * (create-only, `agent-config/changes/<ask id>/`; no token but the Hermes host's writes under agent-config/, and only a result); a
    * `result.json` counts only with the card API's mark `writer: hermes-config`, from a head and never from the body, and only beside an approval.
-   * @returns {Promise<{ change: object, result: object | null }[]>}
+   * `landedAt` is the listing's last-modified time of `result.json` (S3 sets it, after the host's health check), '' without a result.
+   * @returns {Promise<{ change: object, result: object | null, landedAt: string }[]>}
    */
   async function loadProfileChanges(profile, at) {
     const found = new Map();
@@ -489,8 +490,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         const parts = object.key.slice(folder('agent-config').length).split('/');
         // Exactly changes/<id>/<file>.
         if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
-        if (!found.has(parts[1])) found.set(parts[1], new Set());
-        found.get(parts[1]).add(parts[2]);
+        if (!found.has(parts[1])) found.set(parts[1], new Map());
+        found.get(parts[1]).set(parts[2], object.lastModified ? new Date(object.lastModified).toISOString() : '');
       }
     }
     const out = [];
@@ -502,15 +503,52 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const change = validChange(doc);
       if (!change || change.change !== id || change.profile !== profile) continue;
       let result = null;
+      let landedAt = '';
       if (names.has('result.json')) {
         const rel = `agent-config/changes/${id}/result.json`;
         const head = await bucket.head(key(rel)).catch(error => { if (error.status === 404) return null; throw error; });
         const read = head?.metadata?.writer === CONFIG_WRITER && head.size <= 4096 ? validResult(await cached(rel)) : null;
-        if (read?.change === id) result = read;
+        if (read?.change === id) { result = read; landedAt = names.get('result.json'); }
       }
-      out.push({ change, result });
+      out.push({ change, result, landedAt });
     }
     return out.sort((a, b) => (a.change.at < b.change.at ? 1 : a.change.at > b.change.at ? -1 : 0));
+  }
+
+  /**
+   * One event for each profile change whose result is in (ws-ubo.6), so the owner hears of it with no page open: `profile-change` when the host
+   * confirmed it, an `alert` when it failed. Run from the page loads that already sweep (Today, Inbox, Work) and from the details route, at most
+   * every 30 s and never twice at once. A change that has an event is skipped (`change` names it). It never fails a request, and its words are
+   * fixed: CHANGE_CODES, never text from the host. A race may write one event twice, which is harmless.
+   */
+  let noteChanges = { last: 0, running: false };
+  async function noteChangeResults(at) {
+    if (noteChanges.running || (at.getTime() >= noteChanges.last && at.getTime() - noteChanges.last < 30_000)) return;
+    noteChanges = { last: at.getTime(), running: true };
+    try {
+      const rows = (await Promise.all(PROFILES.map(profile => loadProfileChanges(profile, at)))).flat()
+        .filter(item => item.result && at.getTime() - Date.parse(item.landedAt || item.result.at) < 24 * 3600 * 1000);
+      if (!rows.length) return;
+      const { events } = await loadEvents(at);
+      for (const { change, result, landedAt } of rows) {
+        if (events.some(event => event.change === change.change && (event.kind === 'profile-change' || event.kind === 'alert'))) continue;
+        const ts = landedAt || result.at;
+        const model = change.to.model;
+        let event;
+        if (result.outcome === 'applied') {
+          event = { ts, kind: 'profile-change', change: change.change, profile: change.profile, title: `Hermes ${change.profile} is running ${model}`, host: 'hub', source: 'hub', by: change.by };
+        } else {
+          const words = String(CHANGE_CODES[result.code]).replace(/\.$/, '');
+          const tail = result.code === 'rollback-failed' ? 'Hermes may be down.' : 'The old settings stay.';
+          event = { ts, kind: 'alert', change: change.change, profile: change.profile, title: `The change to ${model} failed: ${words}. ${tail}`, host: 'hub', source: 'hub', by: change.by };
+        }
+        await putHubEvent(event, new Date(ts));
+      }
+    } catch (error) {
+      log(`[hub] profile change events were not written: ${String(error.message).slice(0, 120)}`);
+    } finally {
+      noteChanges.running = false;
+    }
   }
 
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
@@ -1630,7 +1668,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); });
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); });
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen, status] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at), loadPcStatus(at)]);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
@@ -1764,6 +1802,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             const agent = (await allAgents()).find(item => item.id === match[1]);
             if (!agent) throw fail('No such agent.', 404);
             const exported = agent.profile ? await loadAgentConfig(at) : null;
+            if (agent.profile) void noteChangeResults(at);
             reply(agentDetails({
               agent, exported, at, changes: agent.profile ? await loadProfileChanges(agent.profile, at) : [],
               persona: (await personaStore.table()).find(item => item.id === agent.id) ?? null,

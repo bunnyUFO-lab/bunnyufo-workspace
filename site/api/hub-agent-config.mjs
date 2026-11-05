@@ -254,16 +254,46 @@ export function changeState({ change, result = null, exported = null, at }) {
   return at.getTime() > Date.parse(change.expires) ? 'late' : 'waiting';
 }
 
-/** One change as the page gets it. */
-export function changeView({ change, result = null, exported = null, at }) {
+/**
+ * One change as the page gets it. `landedAt` is when the host's result.json landed in the bucket (the listing's last-modified time, set by S3
+ * after the health check): the page shows it as "running since", because `result.at` is the start of the host's tick, up to a minute earlier.
+ */
+export function changeView({ change, result = null, landedAt = '', exported = null, at }) {
   const state = changeState({ change, result, exported, at });
   const mine = result && result.change === change.change ? result : null;
   return {
     id: change.change, profile: change.profile, state, at: change.at, by: change.by, from: change.from, to: change.to,
     ...(mine ? { resultAt: mine.at } : {}),
+    ...(mine?.outcome === 'applied' ? { runningAt: landedAt || mine.at } : {}),
     ...(state === 'failed' ? { code: mine.code, reason: CHANGE_CODES[mine.code], rolledBack: mine.rolledBack } : {}),
     ...(state === 'late' ? { reason: 'The Hermes host did not pick this up.' } : {}),
   };
+}
+
+const setOf = block => (block?.model?.provider && block.model.default
+  ? { provider: block.model.provider, model: block.model.default, fallbacks: block.fallbacks.map(item => ({ provider: item.provider, model: item.model })) }
+  : null);
+
+/**
+ * The order a profile runs on now, for the next change's `from` and for the form's "current". The export says what the host's file held when it
+ * was made; a change the host confirmed (`ok` result) can be newer than that export. So: take the newest change of the profile with an `ok` result;
+ * when the export does not show its `to` and was made before the result landed, the order is that `to`. Otherwise the export's: an export made
+ * after the landing wins even when it differs (somebody changed the host), and a failed result changes nothing.
+ * `changes` is `[{ change, result, landedAt? }]`; `landedAt` falls back to `result.at`. Null when the export has no readable order for the profile.
+ * The host still checks `from`, so a wrong answer here costs a `stale` result and changes nothing.
+ */
+export function effectiveSet(exported, profile, changes = []) {
+  const block = exported?.profiles?.[profile] ?? null;
+  const fromExport = setOf(block);
+  const win = changes
+    .filter(item => item.change.profile === profile && item.result?.change === item.change.change && item.result.outcome === 'applied')
+    .sort((a, b) => (a.change.at < b.change.at ? 1 : a.change.at > b.change.at ? -1 : 0))[0];
+  if (!win) return fromExport;
+  if (block && sameModels(block, win.change.to)) return fromExport;
+  const landed = Date.parse(win.landedAt || win.result.at);
+  const made = exported ? Date.parse(exported.exportedAt) : NaN;
+  if (exported && made >= landed) return fromExport;
+  return { provider: win.change.to.provider, model: win.change.to.model, fallbacks: win.change.to.fallbacks.map(item => ({ provider: item.provider, model: item.model })) };
 }
 
 /** 'fresh' for an export the host made lately, else 'stale' (the exporter stopped, or the export is stamped in the future). The same rule as the details page. */
@@ -278,7 +308,7 @@ const KB = 1024;
  * The details page's answer for one agent.
  * - `agent`: an AGENTS entry (hub-team.mjs); `exported`: `validExport(...)` or null; `at`: a Date.
  * - `persona`: the agent's CHAT_PERSONAS entry, `preset`: the Spawn preset it takes (presetOf(agent.presets[0])); both optional.
- * - `changes`: the signed changes of the agent's profile with their results, newest first (`[{ change, result }]`, hub.mjs); the answer carries the recent ones as `changes` (waiting, or ended in the last 24 hours), and the newest as `change`.
+ * - `changes`: the signed changes of the agent's profile with their results, newest first (`[{ change, result, landedAt }]`, hub.mjs); the answer carries the recent ones as `changes` (waiting, or ended in the last 24 hours), and the newest as `change`.
  */
 export function agentDetails({ agent, exported = null, at, persona = null, preset = null, changes = [] }) {
   const profile = agent.profile ?? null;
@@ -312,5 +342,8 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
 
   // A change is shown while it waits, and for 24 hours after it ended: after the host's result, or after it ran out with none (`late`).
   const recent = profile ? changes.filter(item => at.getTime() - Date.parse(item.result?.at ?? item.change.expires) < CHANGE_WINDOW_MS).map(item => changeView({ ...item, exported, at })) : [];
+  // Where the order stands now: the export, or a change the host confirmed after that export was made.
+  const effective = settings && profile ? effectiveSet(exported, profile, changes) : null;
+  if (settings && effective) settings = { ...settings, effective };
   return { agent: who, freshness, settings, prompts, jobs: block?.cron ?? [], ...(recent.length ? { change: recent[0], changes: recent } : {}) };
 }

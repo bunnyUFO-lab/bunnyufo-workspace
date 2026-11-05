@@ -450,7 +450,8 @@ function putExport(f, { minutes = 12, main, options = OPTIONS } = {}) {
 const changeBody = (extra = {}) => ({ primary: SONNET, fallbacks: [CODEX, FLASH], why: 'Codex is slow today.', ...extra });
 const approvals = f => [...f.fake.objects.keys()].filter(name => name.includes('/agent-config/changes/') && name.endsWith('/approved.json'));
 const asksWritten = f => [...f.fake.objects.keys()].filter(name => /\/asks\/[^/]+\/ask\.json$/.test(name)).length;
-const hostResult = (f, id, outcome, code, extra = {}) => f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome, code, rolledBack: false, at: new Date(f.clock.time).toISOString(), ...extra }), 'application/json', { writer: 'hermes-config' });
+/** The host's result.json. It lands `landedAfterMs` after its own `at` (the tick start), which the bucket's last-modified time shows. */
+const hostResult = (f, id, outcome, code, { landedAfterMs = 0, ...extra } = {}) => f.fake.seed(changeKey(id, 'result.json'), JSON.stringify({ v: 1, change: id, outcome, code, rolledBack: false, at: new Date(f.clock.time).toISOString(), ...extra }), 'application/json', { writer: 'hermes-config' }, new Date(f.clock.time + landedAfterMs));
 const detailsOf = async (f, agent = 'teardown') => (await f.call('GET', `/hub/team/${agent}/details`)).body;
 const postChange = (f, agent, data, user = 'owner') => f.call('POST', `/hub/team/${agent}/profile-change`, data, user);
 
@@ -513,7 +514,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.match(stored.context, /Now: openai-codex · gpt-6-sol, then anthropic · claude-sonnet-5-5, then deepseek · deepseek-v4-pro\./);
     assert.match(stored.context, /New: anthropic · claude-sonnet-5-5, then openai-codex · gpt-6-sol, then deepseek · deepseek-flash\./);
     assert.match(stored.context, /shared by Hermes, Researcher, Market researcher, Teardown and Planner\./);
-    assert.match(stored.context, /Hermes main restarts within about 5 minutes\. A chat or job running then stops\./);
+    assert.match(stored.context, /Changing this restarts Hermes main\. Usually done in about a minute, at most 5 if the host's quick check is off\. A chat or job running then stops\./);
     assert.equal(approvals(f).length, 0, 'asking signs nothing');
 
     // 2. The Hub's own read of that file: the Ask folder, the id check and the state all accept it. It is open and the Discord path cannot answer it.
@@ -533,7 +534,7 @@ test('profile change, end to end from Teardown: Edit, an Ask the Hub writes, App
     assert.deepEqual(Object.keys(signed).sort(), ['ask', 'at', 'by', 'change', 'expires', 'from', 'kind', 'nonce', 'profile', 'signature', 'to', 'v']);
     assert.deepEqual([signed.v, signed.kind, signed.change, signed.ask, signed.profile, signed.by], [1, 'profile-change', id, id, 'main', 'owner']);
     assert.deepEqual([signed.from, signed.to], [made.body.from, made.body.to]);
-    assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 24 * 3600 * 1000);
+    assert.equal(Date.parse(signed.expires) - Date.parse(signed.at), 3600 * 1000, 'a press means now: the host has one hour');
     assert.equal(verify(signed, publicKey), true, 'the Hub\'s signature verifies with the public key');
     assert.equal(verify({ ...signed, to: { ...signed.to, model: 'claude-haiku-5-5' } }, publicKey), false);
     assert.equal((await answerWith(f, id, 'apply')).status, 409, 'answered twice');
@@ -668,8 +669,8 @@ test('profile change: the old settings are read at Apply, not when the Ask was w
     // The briefs profile is its own: a change there is not blocked by the main one.
     const other = await postChange(f, 'briefs', { primary: SONNET, fallbacks: [DEEPSEEK] });
     assert.equal(other.status, 201, JSON.stringify(other.body));
-    // Past its 24 hours with no result the first is late: Details says so, and it no longer blocks a new request.
-    f.clock.time += 25 * 3600 * 1000;
+    // Past its hour with no result the first is late: Details says so, and it no longer blocks a new request.
+    f.clock.time += 2 * 3600 * 1000;
     putExport(f, { minutes: 0, main: { ...HAIKU, fallbacks: [DEEPSEEK] } });
     const lateDetails = await detailsOf(f);
     assert.deepEqual([lateDetails.change.state, lateDetails.change.reason], ['late', 'The Hermes host did not pick this up.']);
@@ -679,6 +680,57 @@ test('profile change: the old settings are read at Apply, not when the Ask was w
     assert.equal((await detailsOf(f)).change, undefined);
     const retry = await postChange(f, 'teardown', changeBody({ primary: FLASH, fallbacks: [] }));
     assert.equal(retry.status, 201, JSON.stringify(retry.body));
+  } finally { await f.close(); }
+});
+
+test('profile change: after the host confirms, before any export, the next change starts from the new order; runningAt is the landing; one event per result, with fixed words', async () => {
+  const f = await fixture({ env: SIGNING });
+  const hubEventNames = () => [...f.fake.objects.keys()].filter(name => /\/events\/[^/]+\/[^/]*-hub-[^/]*\.json$/.test(name) && f.fake.json(name).change);
+  /** The Hub's own change events, parsed, once `count` of them exist (the sweep runs after the answer, so wait for it). */
+  const hubEvents = async count => {
+    for (let attempt = 0; attempt < 40 && hubEventNames().length < count; attempt += 1) await new Promise(resolve => setTimeout(resolve, 25));
+    return hubEventNames().map(name => f.fake.json(name));
+  };
+  try {
+    putExport(f);
+    const first = await postChange(f, 'teardown', changeBody());
+    assert.equal((await answerWith(f, first.body.ask, 'apply')).body.agentEdit.applied, true);
+    f.clock.time += 120000;
+    hostResult(f, first.body.ask, 'applied', 'ok', { landedAfterMs: 33000 });
+    const ranAt = new Date(Math.floor((f.clock.time + 33000) / 1000) * 1000).toISOString(); // S3 times have whole seconds
+    f.clock.time += 40000;
+    const details = await detailsOf(f);
+    assert.deepEqual([details.change.state, details.change.runningAt], ['applied', ranAt], 'the landing, not the start of the tick');
+    assert.notEqual(details.change.runningAt, details.change.resultAt);
+    assert.equal(details.settings.model.default, 'gpt-6-sol', 'the export still shows the old model');
+    assert.deepEqual(details.settings.effective, { ...SONNET, fallbacks: [CODEX, FLASH] }, 'the page gets the confirmed order to start from');
+    // The next change signs the confirmed order as `from`, not the export's.
+    const next = await postChange(f, 'teardown', changeBody({ fallbacks: [FLASH] }));
+    assert.equal(next.status, 201, JSON.stringify(next.body));
+    assert.deepEqual(next.body.from, { ...SONNET, fallbacks: [CODEX, FLASH] });
+    // One event for the result.
+    const one = await hubEvents(1);
+    assert.equal(one.length, 1);
+    assert.deepEqual([one[0].kind, one[0].change, one[0].title, one[0].ts, one[0].host, one[0].source], ['profile-change', first.body.ask, 'Hermes main is running claude-sonnet-5-5', ranAt, 'hub', 'hub']);
+    assert.ok(JSON.stringify((await f.call('GET', '/hub/today')).body).includes('Hermes main is running claude-sonnet-5-5'), 'Today shows it');
+    // Repeated page loads, past the throttle, write nothing more.
+    for (let load = 0; load < 3; load += 1) {
+      f.clock.time += 31000;
+      await f.call('GET', '/hub/today');
+      await detailsOf(f);
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(hubEventNames().length, 1, 'one event per change across repeated loads');
+    // A failed change makes an alert with fixed words only, and the rollback failure says Hermes may be down.
+    assert.equal((await answerWith(f, next.body.ask, 'apply')).body.agentEdit.applied, true);
+    hostResult(f, next.body.ask, 'failed', 'rollback-failed', { rolledBack: false });
+    f.clock.time += 31000;
+    await detailsOf(f);
+    const events = await hubEvents(2);
+    const alert = events.find(event => event.kind === 'alert');
+    assert.equal(alert.title, 'The change to claude-sonnet-5-5 failed: The host could not put the old settings back. Hermes may be down.');
+    assert.equal(events.length, 2);
+    assert.ok((await f.call('GET', '/hub/today')).body.alerts.some(item => item.title === alert.title), 'the alert reaches the alerts of Today');
   } finally { await f.close(); }
 });
 
