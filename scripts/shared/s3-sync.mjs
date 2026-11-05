@@ -273,7 +273,7 @@ export function mergeCardLists(base, local, remote, notes = []) {
  * Bring the bucket's card list and this folder's together before anything else is compared, so a
  * card made on the site is in the scope (its folder comes down) and in what goes back up.
  *
- * @returns {{ merged: boolean, added: string[], etag: string|null }} whether the local list changed, the cards it gained,
+ * @returns {{ merged: boolean, added: string[], etag: string|null, list: object|null }} whether the local list changed, the cards it gained,
  *   and the ETag of the bucket's list that was merged (the upload is conditional on it)
  */
 export async function mergeCardList({ root, bucket, prefix, dryRun = false, log = () => {} }) {
@@ -281,7 +281,7 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
   const file = path.join(root, 'workspace.json');
   const localText = await readFile(file, 'utf8');
   const remote = await bucket.getJson(`${base}workspace.json`);
-  if (!remote || remote.etag === md5(Buffer.from(localText))) return { merged: false, added: [], etag: remote?.etag ?? null };
+  if (!remote || remote.etag === md5(Buffer.from(localText))) return { merged: false, added: [], etag: remote?.etag ?? null, list: remote?.value ?? null };
   const record = await loadBase(root, placeOf(bucket, prefix));
   const local = JSON.parse(localText);
   const notes = [];
@@ -295,7 +295,7 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
     throw new Error(`Nothing published: ${clash.map(item => `the card "${item.id}" made here reuses an id that was ${what(item).replace('is in', 'put in')} on the site`).join('; ')}. Give it another id (or restore the old card on the site), then publish again.`);
   }
   for (const note of notes) log(note);
-  if (same(result, local)) return { merged: false, added: [], etag: remote.etag };
+  if (same(result, local)) return { merged: false, added: [], etag: remote.etag, list: remote.value };
   const known = new Set((local.entities ?? []).map(item => item?.id));
   const added = (result.entities ?? []).filter(item => item?.id && !known.has(item.id)).map(item => item.id);
   const kept = new Set((result.entities ?? []).map(item => item?.id));
@@ -309,7 +309,7 @@ export async function mergeCardList({ root, bucket, prefix, dryRun = false, log 
     await writeFile(temp, `${JSON.stringify(result, null, 2)}\n`);
     await rename(temp, file);
   }
-  return { merged: true, added, etag: remote.etag };
+  return { merged: true, added, etag: remote.etag, list: remote.value };
 }
 
 /** More deletes than this in one publish of one workspace is refused without --allow-deletes. */
@@ -465,10 +465,11 @@ export async function syncUp({ root, bucket, prefix, scope, dryRun = false, forc
  * Bring the bucket's copy of the scope down into the folder. Missing files are written, and so is
  * one that changed only on the site since the last sync; one changed here (or on both sides, or
  * with no record to tell) is reported and left, unless `force`. Nothing local is deleted.
+ * `remoteList` is the bucket's card list that `mergeCardList` merged, recorded as the shared base when the local list is not.
  *
  * @returns {{ written: string[], differs: string[], unchanged: number }}
  */
-export async function syncDown({ root, bucket, prefix, scope, dryRun = false, force = false, log = () => {} }) {
+export async function syncDown({ root, bucket, prefix, scope, dryRun = false, force = false, remoteList = null, log = () => {} }) {
   const base = prefix ? `${prefix.replace(/\/+$/, '')}/` : '';
   const where = placeOf(bucket, prefix);
   const record = await loadBase(root, where);
@@ -498,8 +499,12 @@ export async function syncDown({ root, bucket, prefix, scope, dryRun = false, fo
     written.push(file);
   }
   if (!dryRun) {
-    // The list was synced only if the local one is what the record holds; a pull that left it out of scope must not claim it was.
+    // What both sides held of the card list: the local one when it matches the record (it was synced
+    // or pulled whole), else the bucket's list that mergeCardList merged and handed in (a pull that left
+    // the list out of scope or unsettled). Never the local list then, and never a second read of the
+    // bucket's: a version that arrived after the merge was not merged.
     if (record.files['workspace.json'] && md5(await readFile(path.join(root, 'workspace.json'))) === record.files['workspace.json']) record.list = JSON.parse(await readFile(path.join(root, 'workspace.json'), 'utf8'));
+    else if (remoteList) record.list = remoteList;
     await saveBase(root, where, record);
     await sweepCopies(root, scope, new Set(differs));
   }

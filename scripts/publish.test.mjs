@@ -1024,3 +1024,77 @@ test('publish --all reports workspaces with files to settle, and does not call t
     assert.doesNotMatch(lines.join('\n'), /already up to date/);
   } finally { await fake.close(); }
 });
+
+// A pull that leaves the card list unsettled must record the bucket's merged list as the shared base,
+// or a later publish reads what the pull brought in as a local change and beats newer site edits.
+for (const named of [true, false]) {
+  for (const desk of [false, true]) {
+    for (const pretty of [false, true]) {
+      const label = `${named ? 'named --pull --force' : 'plain --pull'}, ${desk ? 'with' : 'no'} unpublished card, ${pretty ? 'pretty' : 'compact'} list`;
+      const setup = async () => {
+        const fake = await startFakeS3();
+        const w = await published(fake);
+        const options = { registryFile: w.registryFile, bucketOptions: w.bucketOptions, log: () => {} };
+        const site = list => fake.seed(`${KEY}workspace.json`, pretty ? `${JSON.stringify(list, null, 2)}\n` : JSON.stringify(list), 'application/json');
+        const edit = change => { const list = fake.json(`${KEY}workspace.json`); change(list); site(list); };
+        const pull = () => publish({ content: w.site, ...(named ? { paths: ['hub/index.md'], force: true } : {}), pull: true, ...options });
+        const again = () => publish({ content: w.site, ...options });
+        const local = async () => JSON.parse(await readFile(path.join(w.site, 'workspace.json'), 'utf8'));
+        if (desk) {
+          const list = await local();
+          list.entities.push({ id: 'desk', title: 'Desk', folder: 'desk', steps: [{ name: 'Page', path: 'index.md' }] });
+          await writeFile(path.join(w.site, 'workspace.json'), JSON.stringify(list, null, 2));
+        }
+        const ids = list => list.entities.map(item => item.id).sort();
+        const keepsDesk = async () => { if (desk) { assert.ok(ids(await local()).includes('desk')); assert.ok(ids(fake.json(`${KEY}workspace.json`)).includes('desk')); } };
+        return { fake, site, edit, pull, again, local, ids, keepsDesk };
+      };
+
+      test(`a site title edited again after a pull is kept by the next publish (${label})`, async () => {
+        const t = await setup();
+        try {
+          t.edit(list => { list.entities.find(item => item.id === 'hub').title = 'v1'; });
+          await t.pull();
+          t.edit(list => { list.entities.find(item => item.id === 'hub').title = 'v2'; });
+          await t.again();
+          assert.equal(t.fake.json(`${KEY}workspace.json`).entities.find(item => item.id === 'hub').title, 'v2');
+          assert.equal((await t.local()).entities.find(item => item.id === 'hub').title, 'v2');
+          await t.keepsDesk();
+        } finally { await t.fake.close(); }
+      });
+
+      test(`a card added on the site, pulled, then removed there stays removed (${label})`, async () => {
+        const t = await setup();
+        try {
+          t.edit(list => { list.entities.push({ id: 's', title: 'S', folder: 's', steps: [{ name: 'Page', path: 'index.md' }] }); });
+          t.fake.seed(`${KEY}s/index.md`, '# S\n', 'text/markdown');
+          await t.pull();
+          t.edit(list => { list.entities = list.entities.filter(item => item.id !== 's'); });
+          await t.again();
+          assert.ok(!t.ids(t.fake.json(`${KEY}workspace.json`)).includes('s'), 'the removed card did not come back');
+          assert.ok(!t.ids(await t.local()).includes('s'));
+          await t.keepsDesk();
+        } finally { await t.fake.close(); }
+      });
+
+      test(`a card added on the site, pulled, then put in the Trash there gives no false id clash (${label})`, async () => {
+        const t = await setup();
+        try {
+          t.edit(list => { list.entities.push({ id: 's', title: 'S', folder: 's', steps: [{ name: 'Page', path: 'index.md' }] }); });
+          t.fake.seed(`${KEY}s/index.md`, '# S\n', 'text/markdown');
+          await t.pull();
+          t.edit(list => {
+            const card = list.entities.find(item => item.id === 's');
+            list.entities = list.entities.filter(item => item.id !== 's');
+            list.retired = { s: { kind: 'deleted', at: '2026-11-04', entity: card } };
+          });
+          await t.again();
+          const after = t.fake.json(`${KEY}workspace.json`);
+          assert.ok(!t.ids(after).includes('s'));
+          assert.equal(after.retired.s.kind, 'deleted');
+          await t.keepsDesk();
+        } finally { await t.fake.close(); }
+      });
+    }
+  }
+}

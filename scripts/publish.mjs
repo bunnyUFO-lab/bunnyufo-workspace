@@ -130,7 +130,7 @@ export async function publish({ content, message, cards = [], paths = [], dryRun
     // A named --pull --force settles those files only: the card list was merged above, and the
     // bucket's copy of it must not replace this folder's (it may hold cards not published yet).
     if (force && named.length) scope.files = [];
-    const result = await syncDown({ root, bucket: client, prefix, scope, dryRun, force, log });
+    const result = await syncDown({ root, bucket: client, prefix, scope, dryRun, force, remoteList: list.list, log });
     log(`${workspace.name} (${root}) <- ${where}\n  ${result.written.length} file(s) ${dryRun ? 'to fetch' : 'fetched'}, ${result.unchanged} unchanged${result.differs.length ? `\n  left alone, different here: ${result.differs.join(', ')}  (publish them, or --force to take the bucket's)` : ''}`);
     return { published: false, pulled: !dryRun && result.written.length > 0, workspace, ...result };
   }
