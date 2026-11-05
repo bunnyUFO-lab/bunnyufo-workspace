@@ -97,8 +97,11 @@ try {
     await row.locator('[data-wn-links]').waitFor();
     assert.equal(await row.locator('[data-card-chip="hub"]').getAttribute('href'), '/one#/hub');
     await row.locator('[data-card-chip="hub"]').click();
-    // The section's page is the site's; the local service has none, so the address is what counts.
-    await page.waitForURL(/\/one#\/hub$/);
+    // The section's page is the site's; the local service has none. The app says so in a banner and stays where it is, instead of showing the service's raw error.
+    const banner = page.locator('[data-hub-no-site]');
+    await banner.waitFor();
+    assert.match(await banner.innerText(), /section "one".*cannot open/, 'A site card link says why it did not open.');
+    assert.match(page.url(), /#\/~hub\/today$/, 'The click did not leave the app.');
     await page.close();
   }
 

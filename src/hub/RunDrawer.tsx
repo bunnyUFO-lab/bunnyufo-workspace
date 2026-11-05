@@ -365,9 +365,10 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
     <>
       <h4 className="rd-h">Why it failed</h4>
       <div className="rd-result rd-failure" data-run-result data-run-failure>
-        <p data-run-failure-text>{whyFailed}</p>
+        {/* A refused approval has a plain sentence of its own: it comes first, the server's words follow it. */}
         {result?.reason === 'approval-refused'
           && <p data-run-refused>The cloud run did not accept the approval, so it did not start. Approve it again to make a new one.</p>}
+        <p data-run-failure-text>{whyFailed}</p>
       </div>
     </>
   )
