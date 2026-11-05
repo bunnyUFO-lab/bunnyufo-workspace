@@ -17,13 +17,15 @@ export default function AgentCardSettings() {
   // It belongs to the list it was tapped on: when a newer list arrives it no longer counts.
   const [tapped, setTapped] = useState<{ on: Record<string, boolean>; list: CardWriteSections | null }>({ on: {}, list: null })
   const [failure, setFailure] = useState('')
+  // The Hub's list can be a few seconds behind a save: this page remembers that it saved, so the "not saved yet" line does not come back.
+  const [saved, setSaved] = useState(false)
   const shown = tapped.list === data ? tapped.on : {}
   if (!data) return error ? <p className="hub-error" role="alert">{error}</p> : null
   const send = async (key: string, body: object, on?: boolean) => {
-    setBusy(key); setFailure('')
+    setBusy(key); setFailure(''); setSaved(false)
     if (on !== undefined) setTapped({ on: { ...shown, [key]: on }, list: data })
-    try { await hubPost('/card-write-sections', body); reload() } catch (problem) {
-      setFailure(problem instanceof Error ? problem.message : 'The setting was not saved.')
+    try { await hubPost('/card-write-sections', body); setSaved(true); reload() } catch (problem) {
+      setFailure(`Not saved: ${problem instanceof Error ? problem.message : 'the setting was not saved.'} The box is back as it was.`)
       setTapped({ on: {}, list: null })
     } finally { setBusy(null) }
   }
@@ -44,11 +46,12 @@ export default function AgentCardSettings() {
           </li>
         ))}
       </ul>
-      {owner && !data.saved && !data.unreadable && (
+      {owner && !data.saved && !saved && !data.unreadable && (
         <p className="cw-setting-note" data-card-write-unsaved>
           Not saved yet, so every section is on. <button type="button" className="cw-btn" disabled={busy !== null} onClick={() => void send('save', { save: true })} data-card-write-save>Save this list</button>
         </p>
       )}
+      {saved && <p className="cw-setting-note" role="status" data-card-write-saved>Saved. Takes effect within 30 seconds.</p>}
       {failure && <p className="hub-error" role="alert" data-card-write-error>{failure}</p>}
       <p className="cw-setting-note">Turning one off takes up to 30 seconds. Cards already there stay.</p>
     </section>
