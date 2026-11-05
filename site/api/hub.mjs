@@ -48,7 +48,7 @@ import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
-import { agentDetails, CHANGE_CODES, PROFILES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
+import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
@@ -483,6 +483,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * @returns {Promise<{ change: object, result: object | null, landedAt: string }[]>}
    */
   async function loadProfileChanges(profile, at) {
+    return (await loadAllChanges(at)).filter(item => item.change.profile === profile);
+  }
+
+  /** Every signed change of both profiles with its result, newest first (the work of loadProfileChanges, listed once). */
+  async function loadAllChanges(at) {
     const found = new Map();
     for (const month of monthPrefixes(at)) {
       const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
@@ -501,7 +506,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const doc = await cached(`agent-config/changes/${id}/approved.json`);
       if (!signingKey || !verifySigned(doc, createPublicKey(signingKey))) continue;
       const change = validChange(doc);
-      if (!change || change.change !== id || change.profile !== profile) continue;
+      if (!change || change.change !== id) continue;
       let result = null;
       let landedAt = '';
       if (names.has('result.json')) {
@@ -526,7 +531,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     if (noteChanges.running || (at.getTime() >= noteChanges.last && at.getTime() - noteChanges.last < 30_000)) return;
     noteChanges = { last: at.getTime(), running: true };
     try {
-      const rows = (await Promise.all(PROFILES.map(profile => loadProfileChanges(profile, at)))).flat()
+      const rows = (await loadAllChanges(at))
         .filter(item => item.result && at.getTime() - Date.parse(item.landedAt || item.result.at) < 24 * 3600 * 1000);
       if (!rows.length) return;
       const { events } = await loadEvents(at);
