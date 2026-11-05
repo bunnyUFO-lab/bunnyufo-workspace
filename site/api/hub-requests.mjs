@@ -684,13 +684,19 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const preset = presetOf(request.preset);
       if (!preset) return no('Only a request made from a preset can be approved.', 400);
       if (preset.hidden) return no('That job is started by the Hub, so it is not approved from a chat.', 400);
+      if (preset.opensWindows) return no('It opens windows on the PC where you work. Open it to approve.', 400);
       if (request.sprint || request.continues || request.followUp) return no('That job belongs to a sprint, a reply or a follow-up. Open it to approve.', 400);
       if (request.origin?.kind === 'owner') return no('You wrote this request yourself. Open it to approve.', 400);
+      if (request.origin?.kind === 'run') return no('A run filed this, not Hermes in this chat. Open it to approve.', 400);
+      // What the row cannot show in a line and the owner has not looked at: a pinned model costs money, and a repo other than the project's own is a choice to make on the page.
+      if (request.model) return no('It pins a model, which costs money. Open it to approve.', 400);
+      const tracked = await projectRepo(request.project).catch(() => undefined);
+      if (request.repo && normRepo(request.repo) !== normRepo(tracked ?? '')) return no(`It names a repo (${request.repo}) other than the project's own. Open it to approve.`, 400);
       // What /hub/presets/route gives the approval page: the repo it passes is the request's own, else the project's tracked repo for a preset that takes one.
       const repo = request.repo || (preset.fields.includes('repo') ? await projectRepo(request.project) : undefined) || undefined;
       const target = request.target ?? route({ preset, project: request.project, repo, cloudRepos: hasCloud }).target;
       await refuseUnapprovable(request, preset, target, await resolveRepo(request, target));
-      return { ok: true, target };
+      return { ok: true, target, ...(repo ? { repo } : {}) };
     } catch (error) {
       if (!error?.status) { log(`[hub] could not check ${id} for a one-tap approval: ${scrub(error?.message, 120)}`); return no('It could not be checked just now.', 503); }
       return no(error.message, error.status);

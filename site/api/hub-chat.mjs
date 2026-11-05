@@ -23,7 +23,7 @@ import { DEFAULT_PROVIDER, pausesForClient } from './plan-pauses.mjs';
 import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } from './chat-personas.mjs';
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 import { foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
-import { JOB_LIMITS, idsIn, jobIdsOf, splitCreated } from './chat-jobs.mjs';
+import { JOB_LIMITS, SKEW_MS, idsIn, jobIdsOf, jobWindowsOf, splitCreated } from './chat-jobs.mjs';
 import { QUEUE_LIMITS, addItem, cancelItem, createQueueStore, holdFor, readQueue, restoreItems, takeItems, viewOf } from './chat-queue.mjs';
 
 const MB = 1024 * 1024;
@@ -104,9 +104,15 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   /** Items Hermes made during a turn: requests it filed and Asks it raised. */
   async function createdSince(since) {
     const floor = Math.floor(since / 1000) * 1000;
+    const ceiling = now().getTime() + SKEW_MS;   // a request cannot be made after now: a date ahead is no claim to this turn
     const [requests, asks] = await Promise.all([loadRequests(now()), loadAsks(now())]);
     const items = [];
-    for (const item of requests) if (new Date(item.at).getTime() >= floor && String(item.by ?? '').includes('hermes')) items.push(item);
+    const claimed = requests.filter(item => { const at = new Date(item.at).getTime(); return at >= floor && at <= ceiling && String(item.by ?? '').includes('hermes'); });
+    // The date and the name are the body's own words. The object's last-modified time is the store's: it must fall inside the turn too.
+    const stamped = await Promise.all(claimed.map(async item => {
+      try { const head = await bucket.head(key(`requests/${item.id}/request.json`)); const at = Date.parse(head.lastModified); return Number.isFinite(at) && at >= floor - SKEW_MS && at <= ceiling ? item : null; } catch { return null; }
+    }));
+    for (const item of stamped) if (item) items.push(item);
     for (const row of asks) if (new Date(row.ask.createdAt).getTime() >= floor && row.ask.from?.tool === 'hermes') items.push(row.item);
     return items;
   }
@@ -806,15 +812,17 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const got = await fresh(`chat/${id}.jsonl`);
     if (!got) throw fail('No such conversation.', 404);
     const history = parse(got.text);
-    const persona = storedPersona(history.find(line => line.persona)?.persona, await tableNow());
-    return { ids: jobIdsOf(history), persona };
+    // A conversation that names a persona is a persona chat even when the table no longer lists it: it is never treated as main Hermes.
+    const named = history.find(line => line.persona)?.persona;
+    const persona = typeof named === 'string' && named ? (storedPersona(named, await tableNow()) ?? { id: named, name: 'This agent' }) : null;
+    return { ids: jobIdsOf(history), windows: jobWindowsOf(history), persona };
   }
 
   /** GET /jobs: one row per job named on the newest lines, built from the request files (never from the line's own words). */
   async function jobsView(id) {
-    const { ids, persona } = await jobsOfChat(id);
+    const { ids, windows, persona } = await jobsOfChat(id);
     if (!ids.length || !jobRows) return { jobs: [] };
-    return { jobs: await jobRows(ids, { persona: persona ? { id: persona.id, name: persona.name } : null }, now()) };
+    return { jobs: await jobRows(ids, { persona: persona ? { id: persona.id, name: persona.name } : null, windows }, now()) };
   }
 
   /**
@@ -829,14 +837,14 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const asked = data?.ids;
     if (!Array.isArray(asked) || !asked.length || asked.length > JOB_LIMITS.approve || asked.some(item => typeof item !== 'string')) throw fail(`Send 1 to ${JOB_LIMITS.approve} job ids.`);
     if (new Set(asked).size !== asked.length) throw fail('Each job id once.');
-    const { ids, persona } = await jobsOfChat(id);
+    const { ids, windows, persona } = await jobsOfChat(id);
     if (persona) throw fail(`${persona.name} is not meant to propose jobs, so there is no one tap here. Open each one to decline or approve.`, 409);
     if (asked.some(item => !ids.includes(item))) throw fail('That job is not in this chat.', 404);   // nothing is signed
     const wanted = new Set(asked);
     const results = [];
     for (const jobId of ids.filter(item => wanted.has(item))) {
       try {
-        const done = await approveJob(jobId, user, now());
+        const done = await approveJob(jobId, user, now(), { window: windows.get(jobId) });
         results.push({ id: jobId, ok: true, state: done.state, ...(done.waiting ? { waiting: done.waiting } : {}) });
       } catch (error) {
         // Nothing signed yet and the host cannot sign (no key, or a storage check that failed): that is the whole call's answer.

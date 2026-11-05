@@ -463,6 +463,9 @@ export interface ChatAbout { kind: 'ask' | 'checklist' | 'review' | 'blocked'; i
 /** A job a reply named (`GET /hub/chat/:id/jobs`), built from the request file. A proposal waits for the owner; the rest follow the run. */
 export interface ChatJob {
   id: string; title: string; text: string; project: string; preset?: string; agent?: string; runsOn?: SpawnTarget; produces?: string
+  repo?: string; model?: string; minutes?: number; doneWhen?: string; estimate?: { cost: string; time: string }; tokens?: { low: number; high: number }
+  /** Who the file says wrote it, and whether the Hub could confirm it is Hermes's own proposal from this reply. */
+  writer: string; verified: boolean
   state: string; stale?: string; approvable: boolean; why?: string; flag?: 'persona'; by: string; nothing?: boolean
   finish?: { outcome: string; pr?: string; card?: string; cardHref?: string }
 }

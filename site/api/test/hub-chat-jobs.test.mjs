@@ -20,7 +20,7 @@ const keyPair = generateKeyPairSync('ed25519');
 const KEY_ENV = { HUB_SIGNING_KEY: keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') };
 const PUB = parsePublicKey(publicKeyPem(keyPair.privateKey));
 const DAY = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-const SOON = () => new Date(Date.now() + 60_000);   // filed "during" the turn: a request made after the turn started
+const HOUR = 3_600_000;
 const rid = (slug, n = 'a1b2') => `${DAY}-probe-${slug}-${n}`;
 const CHAT = `${DAY}-abc123`;
 
@@ -54,8 +54,8 @@ async function fixture({ hermes = {}, env = {}, requireRemoteUser = true, key = 
 }
 
 /** A proposal the way an agent files it: written by the agent token, not the owner. */
-const job = (slug, extra = {}) => ({ ...requestJson({ id: rid(slug), project: 'probe', by: 'hermes-main', text: `Research ${slug}. The plan card is assistant/plan.`, now: SOON() }), preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' }, ...extra });
-const assistant = (jobs, extra = {}) => ({ role: 'assistant', text: 'Here are the jobs.', at: new Date().toISOString(), jobs, ...extra });
+const job = (slug, extra = {}) => ({ ...requestJson({ id: rid(slug), project: 'probe', by: 'hermes-main', text: `Research ${slug}. The plan card is assistant/plan.`, now: new Date() }), preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' }, ...extra });
+const assistant = (jobs, extra = {}) => ({ role: 'assistant', text: `Here are the jobs: ${jobs.join(' ')}`, at: new Date().toISOString(), jobs, ...extra });
 const user = text => ({ role: 'user', text, at: new Date().toISOString() });
 
 /** POST /hub/chat and read the whole event stream. */
@@ -99,11 +99,12 @@ test('a run that names two ids gets jobs on its line; a request it filed but did
   const fromPreview = job('preview', {});
   const unnamed = job('unnamed', {});
   const elsewhere = job('elsewhere', { by: 'someone-else' });   // filed by another writer in the same window: createdSince never sees it
+  let filing = async () => {};
   const { fake, call, put, close } = await fixture({
-    hermes: { runScript: [`1. ${named.id} researcher\n`, { tool: 'terminal', preview: `cards request state ${fromPreview.id}` }, 'Nothing runs until you approve.'] },
+    hermes: { runScript: [{ call: () => filing() }, `1. ${named.id} researcher\n`, { tool: 'terminal', preview: `cards request state ${fromPreview.id}` }, 'Nothing runs until you approve.'] },
   });
   try {
-    for (const request of [named, fromPreview, unnamed, elsewhere]) put(request);
+    filing = async () => { for (const request of [named, fromPreview, unnamed, elsewhere]) put({ ...request, createdAt: new Date().toISOString() }); };   // filed during the turn, dated now, as the card API would
     const result = await send(call, { text: 'Plan the thing' });
     assert.equal(result.status, 200);
     assert.deepEqual(result.events.find(item => item.event === 'jobs').data.ids.sort(), [named.id, fromPreview.id].sort());
@@ -158,9 +159,10 @@ test('a finished job\'s row carries its outcome and the site path of its card, i
 
 test('a persona chat flags every request it finds, with no one tap; Approve is refused with nothing signed', async () => {
   const filed = job('persona');
-  const { fake, call, put, close } = await fixture({ hermes: { runScript: ['I filed something but never said its id.'] } });
+  let filing = async () => {};
+  const { fake, call, put, close } = await fixture({ hermes: { runScript: [{ call: () => filing() }, 'I filed something but never said its id.'] } });
   try {
-    put(filed);
+    filing = async () => put({ ...filed, createdAt: new Date().toISOString() });
     const result = await send(call, { text: 'Hello', persona: 'market-researcher' });
     const id = result.events.at(-1).data.conversation;
     assert.deepEqual(linesOf(fake, id)[1].jobs, [filed.id]);
@@ -182,6 +184,7 @@ test('one tap signs each id on its own, through the one path: verifying signatur
   const { fake, call, put, chatFile, close } = await fixture();
   try {
     put(a); put(b);
+    fake.seed('sections/probe/workspace.json', JSON.stringify({ entities: [], tracked: { repo: 'owner/repo' } }), 'application/json');   // the project's own repo
     chatFile(CHAT, [user('go'), assistant([a.id, b.id])]);
     const shown = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
     const page = (await call('GET', '/hub/presets/route?preset=docs&project=probe&repo=owner/repo')).body;
@@ -223,9 +226,11 @@ test('what the approval page refuses, one tap refuses: hidden preset, Bunnylink,
     chatFile(CHAT, [user('go'), assistant(all.map(request => request.id).slice(0, 6)), assistant([done.id])]);
     const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
     assert.ok(rows.filter(row => row.state === 'proposed').every(row => row.approvable === false && row.why), 'every one of them shows why it has no tap');
-    const answer = await approve(call, CHAT, all.slice(0, 6).map(request => request.id));
-    assert.equal(answer.status, 200, answer.text);
-    assert.ok(answer.body.results.every(item => item.ok === false && item.error), JSON.stringify(answer.body));
+    for (const part of [all.slice(0, 3), all.slice(3, 6)]) {
+      const answer = await approve(call, CHAT, part.map(request => request.id));
+      assert.equal(answer.status, 200, answer.text);
+      assert.ok(answer.body.results.every(item => item.ok === false && item.error), JSON.stringify(answer.body));
+    }
     for (const request of all) assert.equal(signed(fake, request.id) && request !== done, false, request.id);
     assert.equal((await approve(call, CHAT, [done.id])).body.results[0].ok, false, 'an approved one is refused');
   } finally { await close(); }
@@ -299,5 +304,170 @@ test('one failure among three leaves the other two signed, and the answer says w
     assert.equal(rows[1].state, 'proposed');
     assert.match(rows[0].state, /^(approved|taken|running)$/);   // the fake Hermes may already have taken it
     assert.match(rows[2].state, /^(approved|taken|running)$/);
+  } finally { await close(); }
+});
+
+// --- after review: what the row shows, which requests reach it, and how many one tap takes ---
+
+const track = (fake, repo = 'owner/repo') => fake.seed('sections/probe/workspace.json', JSON.stringify({ entities: [], tracked: { repo } }), 'application/json');
+const backdate = (fake, id, ms) => { fake.objects.get(`sections/inbox/requests/${id}/request.json`).lastModified = new Date(Date.now() - ms).toUTCString(); };
+
+test('the row shows the project, repo and model, and a repo that is not the project\'s or a pinned model gets no one tap', async () => {
+  const other = job('other-repo', { preset: 'code-task', target: 'pc', repo: 'someone/other-repo' });
+  const own = job('own-repo', { preset: 'code-task', target: 'pc', repo: 'owner/repo' });
+  const pinned = job('pinned', { model: 'haiku' });
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    track(fake);
+    for (const request of [other, own, pinned]) put(request);
+    chatFile(CHAT, [user('go'), assistant([other.id, own.id, pinned.id])]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual(rows.map(row => [row.project, row.repo, row.model, row.approvable]), [['probe', 'someone/other-repo', undefined, false], ['probe', 'owner/repo', undefined, true], ['probe', undefined, 'haiku', false]]);
+    assert.match(rows[0].why, /repo/i);
+    assert.match(rows[2].why, /model/i);
+    const answer = await approve(call, CHAT, [other.id, pinned.id]);
+    assert.deepEqual(answer.body.results.map(item => item.ok), [false, false]);
+    assert.equal(signed(fake, other.id) || signed(fake, pinned.id), false);
+    assert.equal((await approve(call, CHAT, [own.id])).body.results[0].ok, true);
+  } finally { await close(); }
+});
+
+test('a request dated ahead, by an unexpected name, or from a run is never a verified one-tap proposal; a future or backdated file is kept out of the turn\'s jobs', async () => {
+  const ahead = job('ahead', { createdAt: new Date(Date.now() + 365 * 24 * HOUR).toISOString() });
+  const backdated = job('backdated');
+  const spoof = job('spoof', { by: 'hermes-spoof' });
+  const viaRun = job('via-run', { origin: { kind: 'run', name: 'some-run' } });
+  const good = job('good');
+  let filing = async () => {};
+  const { fake, call, put, close } = await fixture({ hermes: { runScript: [{ call: () => filing() }, `Open proposals: ${ahead.id} ${backdated.id} ${spoof.id} ${viaRun.id} ${good.id}`] } });
+  try {
+    filing = async () => {
+      for (const request of [ahead, backdated, spoof, viaRun, good]) put({ ...request, createdAt: request.createdAt > new Date().toISOString() ? request.createdAt : new Date().toISOString() });
+      backdate(fake, backdated.id, HOUR);   // the body claims now; the object says an hour ago
+    };
+    const result = await send(call, { text: 'What is open?' });
+    const id = result.events.at(-1).data.conversation;
+    const saved = linesOf(fake, id)[1];
+    assert.deepEqual([...saved.jobs].sort(), [spoof.id, viaRun.id, good.id].sort(), 'the dated-ahead and the backdated file never reach the turn');
+    assert.ok(!(saved.created ?? []).some(item => [ahead.id, backdated.id].includes(item.id)));
+    const rows = Object.fromEntries((await call('GET', `/hub/chat/${id}/jobs`)).body.jobs.map(row => [row.id, row]));
+    assert.deepEqual([rows[good.id].verified, rows[good.id].approvable], [true, true]);
+    assert.deepEqual([rows[spoof.id].verified, rows[spoof.id].approvable], [false, false]);
+    assert.equal(rows[viaRun.id].approvable, false);
+    assert.equal(rows[spoof.id].writer, 'hermes');
+    const refused = await approve(call, id, [spoof.id, viaRun.id]);
+    assert.deepEqual(refused.body.results.map(item => item.ok), [false, false]);
+    assert.equal(signed(fake, spoof.id) || signed(fake, viaRun.id), false);
+  } finally { await close(); }
+});
+
+test('one tap only for ids named in the reply\'s text: an id seen only in a tool preview gets a row, with Open it to approve', async () => {
+  const said = job('said');
+  const previewed = job('previewed');
+  let filing = async () => {};
+  const { fake, call, put, close } = await fixture({ hermes: { runScript: [{ call: () => filing() }, { tool: 'web_fetch', preview: `see ${previewed.id}` }, `Proposed: ${said.id}`] } });
+  try {
+    filing = async () => { for (const request of [said, previewed]) put({ ...request, createdAt: new Date().toISOString() }); };
+    const id = (await send(call, { text: 'Plan' })).events.at(-1).data.conversation;
+    const rows = Object.fromEntries((await call('GET', `/hub/chat/${id}/jobs`)).body.jobs.map(row => [row.id, row]));
+    assert.deepEqual([rows[said.id].approvable, rows[previewed.id].approvable], [true, false]);
+    assert.match(rows[previewed.id].why, /not named in the reply/i);
+    const answer = await approve(call, id, [previewed.id]);
+    assert.equal(answer.body.results[0].ok, false);
+    assert.equal(signed(fake, previewed.id), false);
+  } finally { await close(); }
+});
+
+test('a job that opens windows on the PC gets no one tap, and the server refuses it too', async () => {
+  const windows = job('windows', { preset: 'playtest-build', target: 'pc' });
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    put(windows);
+    chatFile(CHAT, [user('go'), assistant([windows.id], { text: `Proposed: ${windows.id}` })]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual([rows[0].approvable, rows[0].verified], [false, true]);
+    assert.match(rows[0].why, /windows/i);
+    assert.equal((await approve(call, CHAT, [windows.id])).body.results[0].ok, false);
+    assert.equal(signed(fake, windows.id), false);
+  } finally { await close(); }
+});
+
+test('a row is checked again when it is read: a file dated ahead, or whose object is older than the reply, has no one tap', async () => {
+  const ahead = job('row-ahead', { createdAt: new Date(Date.now() + 365 * 24 * HOUR).toISOString() });
+  const old = job('row-old');
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    put(ahead); put(old);
+    backdate(fake, old.id, 2 * HOUR);
+    chatFile(CHAT, [user('go'), assistant([ahead.id, old.id])]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual(rows.map(row => [row.verified, row.approvable]), [[false, false], [false, false]]);
+    assert.ok(rows.every(row => row.why));
+    const answer = await approve(call, CHAT, [ahead.id, old.id]);
+    assert.deepEqual(answer.body.results.map(item => item.ok), [false, false]);
+    assert.equal(signed(fake, ahead.id) || signed(fake, old.id), false);
+  } finally { await close(); }
+});
+
+test('a job filed after the list was cached still gets its row when a new reply names it', async () => {
+  const first = job('cache-one');
+  const second = job('cache-two');
+  const { call, put, chatFile, close } = await fixture({ env: { HUB_MAP_REQUESTS_MS: '30000' } });
+  try {
+    put(first);
+    chatFile(CHAT, [user('go'), assistant([first.id])]);
+    assert.equal((await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs.length, 1);
+    put(second);   // filed by the card API, another process: nothing clears this process's list
+    chatFile(CHAT, [user('go'), assistant([first.id]), user('more'), assistant([second.id])]);
+    assert.deepEqual((await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs.map(row => row.id), [first.id, second.id]);
+  } finally { await close(); }
+});
+
+test('Open the PR is only a github.com pull request link', async () => {
+  const good = job('pr-good');
+  const evil = job('pr-evil');
+  const { call, put, chatFile, close } = await fixture();
+  try {
+    const finished = (request, pr) => put({ ...request, createdAt: new Date(Date.now() - HOUR).toISOString() }, {
+      'approved.json': { v: 1, request: request.id, target: 'hermes', limits: { minutes: 30 }, expires: new Date(Date.now() + HOUR).toISOString(), at: new Date(Date.now() - HOUR).toISOString(), by: 'owner' },
+      'taken.json': { runner: 'hermes', at: new Date(Date.now() - HOUR).toISOString() },
+      'result.json': { at: new Date().toISOString(), by: 'hermes', outcome: 'pr', pr },
+    });
+    finished(good, 'https://github.com/example/repo/pull/9');
+    finished(evil, 'https://evil.example/login');
+    chatFile(CHAT, [user('go'), assistant([good.id, evil.id])]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.equal(rows[0].finish.pr, 'https://github.com/example/repo/pull/9');
+    assert.equal(rows[1].finish.pr, undefined);
+  } finally { await close(); }
+});
+
+test('a chat whose persona is not in the table is still a persona chat: flagged, no one tap', async () => {
+  const filed = job('gone');
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    put(filed);
+    chatFile(CHAT, [{ ...user('go'), persona: 'gone-persona' }, { ...assistant([filed.id]), persona: 'gone-persona' }]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual([rows[0].flag, rows[0].approvable], ['persona', false]);
+    assert.equal((await approve(call, CHAT, [filed.id])).status, 409);
+    assert.equal(signed(fake, filed.id), false);
+  } finally { await close(); }
+});
+
+test('one tap takes at most 3 ids, and each row carries the estimate the total is made of', async () => {
+  const four = ['t1', 't2', 't3', 't4'].map((slug, index) => job(`cap-${slug}`, index === 3 ? { preset: 'code-task', target: 'pc', repo: 'owner/repo' } : {}));
+  const { fake, call, put, chatFile, close } = await fixture();
+  try {
+    track(fake);
+    four.forEach(request => put(request));
+    chatFile(CHAT, [user('go'), assistant(four.map(request => request.id))]);
+    const rows = (await call('GET', `/hub/chat/${CHAT}/jobs`)).body.jobs;
+    assert.deepEqual(rows[0].tokens, { low: 0.7, high: 1.1 });
+    assert.match(rows[0].estimate.cost, /tokens/);
+    assert.equal(rows[3].tokens, undefined);
+    assert.equal((await approve(call, CHAT, four.map(request => request.id))).status, 400);
+    assert.equal(four.some(request => signed(fake, request.id)), false);
+    assert.equal((await approve(call, CHAT, four.slice(0, 3).map(request => request.id))).status, 200);
   } finally { await close(); }
 });
