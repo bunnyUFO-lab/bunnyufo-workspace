@@ -684,7 +684,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const baseSet = { provider: base.provider, model: base.model, fallbacks: base.fallbacks.map(item => ({ provider: item.provider, model: item.model })) };
     let made;
     if (undoing) {
-      if (typeof raw.undo !== 'string' || !/^[0-9]{8}-profile-[a-z]+-[a-z0-9]{4}$/.test(raw.undo)) throw fail('That is not a change id.', 400);
+      // Any change id: one the owner's Apply signed for an agent's Ask has that Ask's id. `undo` itself takes only the newest signed change of this profile.
+      if (!validId(raw.undo)) throw fail('That is not a change id.', 400);
       made = await agentEditFlow.undo({ profile: agent.profile, changeId: raw.undo, base: baseSet, user, at });
     } else {
       const edit = { op: 'profile', profile: agent.profile, primary: raw.primary, fallbacks: raw.fallbacks };

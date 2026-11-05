@@ -1245,6 +1245,25 @@ test('press, a normal press never reaches past the host\'s model list; only a wa
   } finally { await f.close(); }
 });
 
+test('press, the way back also works from a change made by Apply on an Ask, whose id is the Ask id; a body naming no signed change is still refused', async () => {
+  const f = await fixture({ env: SIGNING });
+  try {
+    putExport(f, { minutes: 0 });
+    const filed = agentEditAsk(f, 'op77', { op: 'profile', profile: 'main', primary: SONNET, fallbacks: [CODEX] });
+    assert.equal((await answerWith(f, filed, 'apply')).body.agentEdit.applied, true);
+    f.clock.time += 120000;
+    hostResult(f, filed, 'applied', 'ok');
+    f.clock.time += 60000;
+    const now = { ...SONNET, fallbacks: [CODEX] };
+    putExport(f, { minutes: 0, main: now });
+    assert.equal((await postChange(f, 'teardown', { undo: '../../x', base: now })).status, 400);
+    assert.equal((await postChange(f, 'teardown', { undo: `${day}-other-change-ab12`, base: now })).status, 409);
+    const back = await postChange(f, 'teardown', { undo: filed, base: now });
+    assert.equal(back.status, 201, JSON.stringify(back.body));
+    assert.deepEqual(back.body.to, { ...CODEX, fallbacks: [SONNET, DEEPSEEK] });
+  } finally { await f.close(); }
+});
+
 test('press, the way back: only the newest change, finished with ok, and still what runs; a host edit after it, a failure or an older change are 409s', async () => {
   const f = await fixture({ env: SIGNING });
   try {
