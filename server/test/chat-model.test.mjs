@@ -47,3 +47,12 @@ test('the note: a reported time says until, a guessed one says when it was seen;
   assert.equal(pauseNote('Codex', pause('codex', { reported: false }), when, 'Sonnet'), 'Codex is paused by its usage limit (seen 12:40) · using Sonnet');
   assert.equal(pauseNote('Codex', pause('codex'), when), 'Codex is paused by its usage limit until 14:20');
 });
+
+test('an Opus pick under an Anthropic pause stays Opus, and the chain never moves a default onto it', () => {
+  const sonnet = pause('sonnet');
+  assert.deepEqual(chooseModel({ picked: 'opus', preferred: 'codex', chain, pauses: [pause('opus'), sonnet], now }), { model: 'opus', pause: pause('opus') });
+  for (const paused of [[], [pause('codex')], [pause('codex'), sonnet], [pause('codex'), sonnet, pause('deepseek-flash')]]) {
+    assert.notEqual(chooseModel({ picked: null, preferred: 'codex', chain, pauses: paused, now }).model, 'opus');
+  }
+  assert.equal(nextModel('sonnet', chain, [pause('deepseek-flash')], now), null, 'and a chain with nothing free does not reach for it');
+});

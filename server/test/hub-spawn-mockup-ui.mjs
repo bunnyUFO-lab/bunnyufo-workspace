@@ -51,7 +51,7 @@ try {
   assert.match(await page.locator('[data-spawn-agent]').innerText(), /Researcher/);
   const menu = page.locator('[data-spawn-model]');
   assert.equal(await menu.inputValue(), 'auto', 'No model is pinned: Hermes starts on Codex.');
-  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet · API', 'Haiku · API', 'DeepSeek Flash · cheapest']);
+  assert.deepEqual(await menu.locator('option').allInnerTexts(), ['Codex', 'Sonnet 5.5 · API', 'Haiku 5.5 · API', 'DeepSeek Flash · cheapest']);
   assert.match(await page.locator('[data-spawn-model-note]').innerText(), /Codex on your ChatGPT plan/);
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /Codex plan · about 0\.5 M tokens/);
   assert.match(await page.locator('[data-spawn-estimate]').innerText(), /a card in the project's section, or in assistant, with an HTML mockup and up to 3 pictures/);
