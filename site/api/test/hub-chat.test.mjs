@@ -785,6 +785,34 @@ test('runs on: Stop ends the run through its own route, which needs a signed-in 
   } finally { await close(); }
 });
 
+test('runs on: a Stop before any text keeps the owner message marked stopped, and the history for Hermes stays what it was', async () => {
+  const { fake, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: [{ hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me early');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const after = lines(fake, turn.conversation);
+    assert.equal(after.length, 1, 'No assistant line is added: the history keeps its turns.');
+    assert.equal(saved[0].role, 'user');
+    assert.equal(saved[0].stopped, true, 'The owner message says its reply was stopped before any text.');
+    const read = await (await call('GET', `/hub/chat/${turn.conversation}`)).json();
+    assert.equal(read.messages[0].stopped, true, 'A reload still has the note.');
+  } finally { await close(); }
+});
+
+test('runs on: a Stop after some text saves no stopped mark (the reply says it was interrupted)', async () => {
+  const { fake, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me late', /Working/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.ok(!('stopped' in saved[0]));
+  } finally { await close(); }
+});
+
 // --- Model choice ---------------------------------------------------------------------------------------------------
 
 test('model: no model in the request leaves the run body and the stored lines as they were (Auto)', async () => {

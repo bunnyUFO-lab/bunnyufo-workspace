@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
 import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
@@ -633,6 +633,7 @@ function ChatView({ id }: { id?: string }) {
     }
     unhold()
     live.current = false
+    stopWanted.current = false   // a Stop held for this turn's run id ends with the turn: it must never fire on a later message
     if (idle) {
       // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
       setTools([])
@@ -643,7 +644,10 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(named.length ? { jobs: named } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
+    // A Stop before any text: the note sits on the owner's line, as the saved chat has it, and no reply line is made.
+    const stoppedEmpty = stopped && !cut && !reply.trim() && !started.length
+    const shownUser: Shown = stoppedEmpty ? { ...userLine, stopped: true } : userLine
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, shownUser, ...(stoppedEmpty ? [] : [{ role: 'assistant' as const, text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(named.length ? { jobs: named } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }])]
     // Hermes goes on without the page, so the reply comes from the saved chat: the turn stays open until it is there.
     if (cut && conversation.current) {
       cutTurn.current = { text, sentAt: optimistic.at, fallback: lines, previews, model: askedModel, persona: askedPersona }
@@ -819,7 +823,17 @@ function ChatView({ id }: { id?: string }) {
         {banner}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">{who ? `Ask ${who.name} anything: ${who.role}. It writes a card when you ask for one.` : 'Ask the assistant anything, or tell it what to do.'}</p>}
-          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />))}
+          {messages.map((line, index) => (line.role === 'context' ? null : (
+            <Fragment key={index}>
+              <Bubble line={line} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />
+              {line.role === 'user' && line.stopped && (
+                <p className="hub-muted hub-chat-note" role="status" data-chat-stopped>
+                  Stopped before it replied.
+                  {index === messages.length - 1 && !streaming && !recovering && !!line.text.trim() && <> <button type="button" className="hub-btn" data-chat-resend onClick={() => void send(line.text)}>Send again</button></>}
+                </p>
+              )}
+            </Fragment>
+          )))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
               {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}

@@ -335,9 +335,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (created.length) emit('created', { items: created });
     if (jobs.length) emit('jobs', { ids: jobs });
     const at = now().toISOString();
+    // A Stop that ended the turn with nothing to show: the note lives on the owner's line (no extra line, so the history Hermes gets and the turn count stay as they were).
+    const stoppedEmpty = !!failure && !reply.trim() && !delegates.length && (!!carried?.stopAsked || failure === 'The run was stopped.');
     const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
     const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(jobs.length ? { jobs } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
-    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}), ...(queued.length ? { queued } : {}) };   // model: persona: queued: the ids of the messages a queued turn joined
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}), ...(queued.length ? { queued } : {}), ...(stoppedEmpty ? { stopped: true } : {}) };   // model: persona: queued: the ids of the messages a queued turn joined; stopped: a Stop ended the turn before any text, so there is no reply line to say so
     let contextLine = null;   // help:
     try {
       if (context) {

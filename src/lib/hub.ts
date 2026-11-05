@@ -494,7 +494,7 @@ export interface ChatJob {
 }
 /** What one tap did to each id, in the order they were signed. Not atomic: a signed approval stands when a later one fails. */
 export interface ChatJobResult { id: string; ok: boolean; state?: string; waiting?: string; error?: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[]; /** a Stop ended the turn before any text: the owner's line carries the note, the history has no extra line */ stopped?: boolean }
 /** A message sent while a reply was running, waiting for it to end. */
 export interface ChatQueued { id: string; text: string; at: string; model?: string; /** why this row is not going out: the hold's reason when it was held, or `joined` when it was typed during a hold */ why?: ChatHeld['reason'] | 'joined' }
 /** Why the waiting messages are not going out by themselves. */
