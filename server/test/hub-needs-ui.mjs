@@ -348,10 +348,10 @@ try {
   assert.equal(widthOfFour, 2, 'The four cells are two by two under 760 px.');
   await tall(phone.locator('.ni .hub-option-pick'), 'options');
   await tall(phone.locator('.ni .hub-actions .hub-btn, .ni .ni-a .hub-btn'), 'buttons');
-  await tall(phone.locator('.hub-chips .hub-chip'), 'chips');
+  await tall(phone.locator('.needs-filter-select'), 'filter select');
   await go(phone, '#/~hub/needs');
-  await phone.locator('.hub-chips-wrap[data-overflow~="end"]').waitFor();
-  assert.equal(await phone.locator('.hub-chips-wrap').getAttribute('data-overflow'), 'end', 'The chip row fades at the cut edge.');
+  await phone.locator('.needs-filter-select').waitFor();
+  assert.equal(await phone.locator('.hub-chips-wrap').count(), 0, 'At phone width the filter is one select, not a row that scrolls.');
   await tall(phone.locator('.ni [data-box]'), 'step boxes');
   await tall(phone.locator('.ni [data-attach]'), 'camera buttons');
   await phone.locator('.ni [data-item="02"] [data-evidence] img').waitFor();
@@ -593,11 +593,11 @@ try {
   assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs');
   await endPage.locator('.needs-empty', { hasText: 'No design review waits on you.' }).waitFor();
   // The chip counts come from the list the page fetched; wait for them rather than reading them the moment the empty note shows.
-  await expect(endPage.locator('.hub-chip[data-filter="all"] .n')).toHaveText('1', { timeout: ms(15000) });
-  assert.equal(await endPage.locator('.hub-chip[data-filter="all"] .n').textContent(), '1', 'The All chip counts what All lists next.');
+  await expect(endPage.locator('.needs-filter-select option[value="all"]')).toHaveText('All (1)', { timeout: ms(15000) });
+  assert.equal(await endPage.locator('.needs-filter-select option[value="all"]').textContent(), 'All (1)', 'The All option counts what All lists next.');
   await noSideways(endPage, 'the end-of-chip note at 375 px');
   await endNote.locator('[data-next-all]').tap();
-  await endPage.locator('.hub-chip.on[data-filter="all"]').waitFor();
+  await expect(endPage.locator('.needs-filter-select')).toHaveValue('all');
   await endPage.locator('.ni').first().waitFor();
   assert.equal(await endPage.locator('.ni').count(), 1, 'All lists the one question the note counted.');
   assert.equal(await endPage.locator('[data-next-note]').count(), 0, 'The note belongs to the chip it was left on.');
