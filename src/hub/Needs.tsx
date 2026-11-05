@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
+import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
 import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
@@ -22,6 +23,7 @@ import { itemKey, rememberFilter, takeFocus } from './needsFocus'
 import { openSpawn } from './spawnStore'
 import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
+import { chooseProject, savedScope, saveScope } from './useProject'
 import './needs.css'
 
 interface Inbox { items: Item[]; counts?: Record<string, number>; subCounts?: Record<string, number>; projects?: Record<string, number> }
@@ -49,28 +51,41 @@ const reducedMotion = () => typeof window.matchMedia === 'function' && window.ma
  * Needs you: one list of cards, one per thing that waits on the owner, each answered where it stands. A chip narrows
  * the list to one kind; the old filter names in links still land on the right chip.
  */
+const BARE_NEEDS = hubHash('needs')
+
 export default function Needs({ filter: address }: { filter?: string }) {
   // The address is `<filter>[/<project>]`, or the name of one item to focus where a filter would go.
   const route = parseNeedsRoute(address, isKnownFilter)
   const filter = route.filter
-  const project = route.project
+  const names = useProjectNames()
+  const wanted = useRef<string | null>(null)
+  // A bare address (the tab, the sidebar) shows the project last picked, else All. A pending focus opens on All so its item is not filtered away.
+  // Taken once on mount, before the effect below consumes it.
+  const [pending] = useState(takeFocus)
+  const opensOnItem = !!pending
+  if (wanted.current === null) wanted.current = pending
+  const saved = !address && !opensOnItem ? savedScope() : ''
+  const gone = !!saved && !!names && !(saved in names)
+  const project = route.project || (gone ? '' : saved)
   const active = canonicalFilter(filter)
   // `question:verify` is the Question chip with its Verify sub-chip: `kind` is the chip, `sub` the second row's.
   const [kind, sub] = splitFilter(active)
   const isHistory = kind === 'answered' || kind === 'requests'
   const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${encodeURIComponent(active)}${project ? `&project=${encodeURIComponent(project)}` : ''}${isHistory ? '' : '&detail=1'}`)
-  const names = useProjectNames()
   // The note after the last action: from this list, or handed over by the page the owner settled an item on.
   const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
   const [settled, setSettled] = useState<ReadonlySet<string>>(new Set())
   const [leaving, setLeaving] = useState<{ item: Item; index: number }[]>([])
   const root = useRef<HTMLDivElement>(null)
-  const wanted = useRef<string | null>(null)
-  if (wanted.current === null) wanted.current = takeFocus()
   // A link to one item (#/~hub/needs/<event file>, from Working now) names it where a filter would go: the list opens on All, focused on it.
   const linked = useRef(route.linked)
 
   useEffect(() => { rememberFilter(active, project) }, [active, project])
+  // A remembered project that no longer exists is forgotten once the project list has answered.
+  useEffect(() => { if (gone) saveScope('') }, [gone])
+  // A bare arrival on a remembered project settles on its address, so Back after picking All shows it again. replace adds no history entry.
+  // Only while the address is still bare: a link followed just now has moved it, and the route has not caught up, so a replace here would undo that link.
+  useEffect(() => { if (!address && project && names && window.location.hash === BARE_NEEDS) window.location.replace(needsHref('all', project)) }, [address, project, names])
 
   // The note belongs to the list it was left on: another chip starts clean.
   const listKey = `${active}/${project}`
@@ -150,7 +165,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
   const chosenName = names?.[project] || project
   // With a project chosen the empty list says so and offers the way out; the link keeps the kind chip.
   const empty = (className: string) => project
-    ? <p className={className} data-project-empty>Nothing for {chosenName} waits on you. <a href={needsHref(active, '')} data-show-all-projects>Show all projects</a></p>
+    ? <p className={className} data-project-empty>Nothing for {chosenName} waits on you. <a href={needsHref(active, '')} data-show-all-projects onClick={() => chooseProject(null)}>Show all projects</a></p>
     : <p className={className}>{sub ? `No ${SUBTYPE_LABEL[kind]?.[sub]?.toLowerCase()} ${kind === 'steps' ? 'steps wait' : 'question waits'} on you.` : EMPTY[kind]}</p>
   const chipRow = useRef<HTMLDivElement>(null)
   // Nine filters do not fit in two rows at 390 px, so a phone gets one native select with the same labels, counts and addresses (ws-ubo.2.3).

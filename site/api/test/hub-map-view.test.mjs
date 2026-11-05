@@ -8,7 +8,7 @@ import { LABEL_MAX, layoutMap } from '../../../src/hub/mapLayout.ts';
 import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../../../src/hub/semanticZoom.ts';
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 import { PROJECT_TABS, currentMilestone, milestoneRow, moreCount, phoneTabs, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
-import { parseProjectId, projectHash } from '../../../src/lib/route.ts';
+import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/route.ts';
 import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
 
 const box = { w: 390, h: 300 };
@@ -467,6 +467,11 @@ test('the project address: no id, an id, and a tab; the Roadmap tab has no segme
   assert.deepEqual(parseProjectId(undefined), {});
   assert.deepEqual(parseProjectId('magic-loops'), { project: 'magic-loops' });
   assert.deepEqual(parseProjectId('magic-loops/library'), { project: 'magic-loops', tab: 'library' });
+  assert.deepEqual(parseProjectId('magic-loops/roadmap/ml-m1'), { project: 'magic-loops', tab: 'roadmap', node: 'ml-m1' });
+  assert.deepEqual(parseProjectId('magic-loops/library/ml-m1'), { project: 'magic-loops', tab: 'library' }, 'Only the Roadmap tab has a node.');
+  assert.deepEqual(parseProjectId('magic-loops/roadmap/'), { project: 'magic-loops', tab: 'roadmap' });
+  assert.equal(projectNodeHash('magic-loops', 'ml-m1'), '#/~hub/project/magic-loops/roadmap/ml-m1');
+  assert.equal(projectNodeHash('a b', '~other'), '#/~hub/project/a%20b/roadmap/~other');
 });
 
 test('currentMilestone: a sprint that has not ended wins, else the first milestone with open work that is not later work', () => {

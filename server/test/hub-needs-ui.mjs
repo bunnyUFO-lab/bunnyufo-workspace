@@ -590,7 +590,7 @@ try {
   assert.match(endText, /No more design reviews\./);
   assert.match(endText, /1 more wait in All/);
   assert.doesNotMatch(endText, /Nothing else waits/);
-  assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs');
+  assert.equal(await endNote.locator('[data-next-all]').getAttribute('href'), '#/~hub/needs/all');
   await endPage.locator('.needs-empty', { hasText: 'No design review waits on you.' }).waitFor();
   // The chip counts come from the list the page fetched; wait for them rather than reading them the moment the empty note shows.
   await expect(endPage.locator('.needs-filter-select option[value="all"]')).toHaveText('All (1)', { timeout: ms(15000) });
