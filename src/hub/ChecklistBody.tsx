@@ -5,7 +5,7 @@ import { HubError, clock, hubPost, safeUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import HubImage from './HubImage'
 import Md, { CodeBlock } from './Md'
-import { prepareImage, toBase64 } from './chatImages'
+import { PICTURE_TYPES, prepareImage, toBase64 } from './chatImages'
 import { hasFiles, hasText, isTextField, pictureFiles } from '../lib/pastePictures.mjs'
 import { clearTarget, getTarget, setTarget, useTarget } from './stepTarget'
 import PlaytestReport from './PlaytestReport'
@@ -255,10 +255,10 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </span>
                 )}
                 {live && !playtest && (
-                  <label className="hub-cl-cam" title={finePointer() ? 'Attach a picture, or paste one (Ctrl+V) after tapping a step' : 'Attach a photo'} data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
+                  <label className="hub-cl-cam" title={finePointer() ? 'Attach a picture, or paste one (Ctrl+V) after tapping a step' : 'Attach a photo or a screenshot'} data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
                     <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
                     <input
-                      type="file" accept="image/jpeg,image/png,image/*" capture="environment" data-attach-input
+                      type="file" accept={PICTURE_TYPES} data-attach-input
                       aria-label={`Attach evidence for step ${Number(item.id)}`} disabled={!!uploading[item.id]}
                       onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void attach(item, file) }}
                     />
