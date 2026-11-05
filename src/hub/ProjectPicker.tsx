@@ -3,6 +3,7 @@ import type { HubProject } from '../lib/hub'
 import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import Combobox from './Combobox'
+import { chooseProject } from './useProject'
 
 /** Up to this many projects the picker is a row of chips (one tap) on a desktop; past it, a typeable list. A phone always gets one native select. "All" does not count. */
 export const CHIP_LIMIT = 10
@@ -27,13 +28,17 @@ type Props = {
   /** How many items each project has (and `allCount` the "All" row): shown beside the name. */
   counts?: Record<string, number>
   allCount?: number
+  /** The pick is this view's own filter or a form field, not the app's project: it does not re-scope the other screens. */
+  local?: boolean
 }
 
 /**
  * The Hub's project picker: at phone width always one native select (no keyboard, nothing scrolls sideways, whatever the number of projects);
  * on a desktop chips while the owner has ten or fewer projects, a typeable list once there are more. Matches the name or the id.
  */
-export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList, counts, allCount }: Props) {
+export default function ProjectPicker({ projects, value, onChange, id, allValue, allLabel = 'All', href, oneRow, inRow, alwaysList, counts, allCount, local }: Props) {
+  const record = (next: string) => { if (!local && next) chooseProject(next === allValue ? null : next) }
+  const pick = (next: string) => { record(next); onChange(next) }
   const options = useMemo(() => [
     ...(allValue === undefined ? [] : [{ value: allValue, label: allLabel }]),
     ...projects.map(item => ({ value: item.id, label: item.name, keywords: [item.id] })),
@@ -53,7 +58,7 @@ export default function ProjectPicker({ projects, value, onChange, id, allValue,
     const known = options.some(option => option.value === value)
     const field = (
       <select id={id} className="hub-project-select" aria-label="Project" data-project-picker="" data-value={value}
-        value={known ? value : ''} disabled={!options.length} onChange={event => onChange(event.target.value)}>
+        value={known ? value : ''} disabled={!options.length} onChange={event => pick(event.target.value)}>
         {!known && <option value="" disabled hidden>Choose a project</option>}
         {listOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
@@ -66,13 +71,13 @@ export default function ProjectPicker({ projects, value, onChange, id, allValue,
         {options.map(option => {
           const cls = `hub-chip${option.value === value ? ' on' : ''}`
           return href
-            ? <a key={option.value} className={cls} href={href(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</a>
-            : <button key={option.value} type="button" className={cls} onClick={() => onChange(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</button>
+            ? <a key={option.value} className={cls} href={href(option.value)} onClick={() => record(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</a>
+            : <button key={option.value} type="button" className={cls} onClick={() => pick(option.value)}>{option.label}{countOf(option.value) !== undefined && <span className="n">{countOf(option.value)}</span>}</button>
         })}
       </div>
     )
     return oneRow ? <div className="hub-chips-wrap" data-overflow={edges}>{list}</div> : list
   }
-  const field = <Combobox className="cb-bar" id={id} value={value} options={listOptions} onChange={onChange} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
+  const field = <Combobox className="cb-bar" id={id} value={value} options={listOptions} onChange={pick} openLabel="Show projects" inputAttrs={{ 'aria-label': 'Project', 'data-project-picker': '' }} />
   return inRow ? field : <div className="hub-project-pick">{field}</div>
 }
