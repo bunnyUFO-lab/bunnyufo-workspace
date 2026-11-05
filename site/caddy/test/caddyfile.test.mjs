@@ -25,12 +25,13 @@ const skip = hasDocker ? false : 'Docker is not available here, so the Caddyfile
 const json = 'x'.repeat(100) + JSON.stringify(Array.from({ length: 800 }, (_, i) => ({ i, name: `row${i}` })));
 const small = '{"ok":true}';
 const bytes = Buffer.alloc(5000, 7);
-let workDir; let upstream; let hostPort; let child; let removed = false;
-const upstreamSaw = { inm: undefined };
+let workDir; let upstream; let hostPort; let gatePort; let child; let gateChild; let removed = false;
+const GATE_NAME = `${NAME}-gate`;
+const upstreamSaw = { inm: undefined, writes: [], remoteUser: undefined };
 const streams = {}; // route -> { timedOut, ack(n) }
 
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
-const removeContainer = () => { if (removed) return; removed = true; try { execFileSync('docker', ['rm', '-f', NAME], { stdio: 'ignore', timeout: 30_000 }); } catch { /* already gone */ } };
+const removeContainer = () => { if (removed) return; removed = true; for (const name of [NAME, GATE_NAME]) { try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore', timeout: 30_000 }); } catch { /* already gone */ } } };
 
 /** An event stream that writes the next event only once the test has seen the previous one: a proxy that buffers or compresses it in blocks makes the wait run out. */
 function lockstepStream(response, route) {
@@ -48,9 +49,9 @@ function lockstepStream(response, route) {
 }
 
 /** One request; `onChunk` sees each chunk as it arrives. */
-function ask(url, headers = {}, { method = 'GET', body, onChunk } = {}) {
+function ask(url, headers = {}, { method = 'GET', body, onChunk, port = hostPort } = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: hostPort, path: url, method, headers: { ...HEADERS, ...headers } }, res => {
+    const req = http.request({ host: '127.0.0.1', port, path: url, method, headers: { ...HEADERS, ...headers } }, res => {
       let size = 0; const chunks = [];
       res.on('data', chunk => { size += chunk.length; chunks.push(chunk); onChunk?.(chunk); });
       res.on('end', () => resolve({ status: res.statusCode, h: res.headers, size, body: Buffer.concat(chunks) }));
@@ -78,6 +79,8 @@ before(async () => {
     const url = req.url;
     if (url.startsWith('/api/hub/requests/r1/events')) return lockstepStream(res, 'run');
     if (url === '/api/hub/chat' && req.method === 'POST') { req.resume(); return lockstepStream(res, 'chat'); }
+    if (req.method === 'POST' && url.startsWith('/api/hub/team/')) { upstreamSaw.writes.push(url); req.resume(); res.writeHead(201, { 'Content-Type': 'application/json' }); return res.end('{"reached":true}'); }
+    if (url === '/api/whoami') { upstreamSaw.remoteUser = req.headers['remote-user']; res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{}'); }
     if (url === '/api/json') { res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(json), 'Cache-Control': 'no-store' }); return res.end(json); }
     if (url === '/api/small') { res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': small.length }); return res.end(small); }
     if (url.startsWith('/w/x/a.json')) {
@@ -106,11 +109,23 @@ before(async () => {
     up = await ask('/index.html').then(() => true, () => false);
   }
   if (!up) throw new Error(`Caddy did not start: ${err.slice(-800)}`);
+  // A second, smaller one in which the login proxy is a peer this test is not: the write gate. Both go in `after`, and removeContainer sweeps both.
+  gatePort = await freePort();
+  gateChild = spawn('docker', ['run', '--rm', '--name', GATE_NAME, '--cpus=0.5', '--memory=128m', '-p', `127.0.0.1:${gatePort}:4000`, '--add-host=host.docker.internal:host-gateway',
+    '-e', `BUW_SITE_API=host.docker.internal:${upstream.address().port}`, '-e', 'NPM_IP=203.0.113.9', '-e', 'BUW_CONTENT_HOST=content.test',
+    '--mount', `type=bind,src=${CADDYFILE},dst=/etc/caddy/Caddyfile,readonly`, '--mount', `type=bind,src=${ui},dst=/srv/buw-docs/_app/ui,readonly`, IMAGE], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let up2 = false;
+  for (let i = 0; i < 160 && !up2; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    up2 = await ask('/index.html', {}, { port: gatePort }).then(() => true, () => false);
+  }
+  if (!up2) throw new Error('The gate Caddy did not start.');
 }, { timeout: 90_000 });
 
 after(() => {
   removeContainer();
   child?.kill();
+  gateChild?.kill();
   upstream?.closeAllConnections?.();
   upstream?.close();
   if (workDir) rmSync(workDir, { recursive: true, force: true });
@@ -199,3 +214,34 @@ test('hashed JS and CSS are kept for a year; a missing hashed name, the worker, 
 });
 
 test('sizes (plain, compressed)', { skip }, t => { t.diagnostic(JSON.stringify(sizes)); });
+
+// --- the write gate (ws-ubo.4): a model change signs at once, so who may send it matters ---
+
+test('a write from a peer that is not the login proxy is refused before the service sees it, and a forged Remote-User never reaches the service', { skip, timeout: 30_000 }, async () => {
+  upstreamSaw.writes.length = 0;
+  const forged = { 'Remote-User': 'owner', Origin: 'https://site.example', 'Content-Type': 'application/json', Connection: 'close' };
+  const body = JSON.stringify({ primary: { provider: 'a', model: 'b' }, fallbacks: [], base: { provider: 'a', model: 'c', fallbacks: [] } });
+  for (const route of ['/api/hub/team/teardown/profile-change', '/api/hub/team/briefs/profile-change']) {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const refused = await ask(route, forged, { method, body, port: gatePort });
+      assert.equal(refused.status, 403, `${method} ${route}`);
+      assert.match(refused.body.toString(), /Read-only here/);
+    }
+  }
+  assert.deepEqual(upstreamSaw.writes, [], 'the service saw none of them');
+  // Where the peer is the proxy, the same request reaches the service: the gate is the peer, not the path.
+  const through = await ask('/api/hub/team/teardown/profile-change', forged, { method: 'POST', body });
+  assert.equal(through.status, 201);
+  assert.deepEqual(upstreamSaw.writes, ['/api/hub/team/teardown/profile-change']);
+  // A forged Remote-User on a read from anyone but the proxy is stripped on the way.
+  upstreamSaw.remoteUser = 'unset';
+  assert.equal((await ask('/api/whoami', { 'Remote-User': 'owner' }, { port: gatePort })).status, 200);
+  assert.equal(upstreamSaw.remoteUser, undefined, 'the header did not reach the service');
+});
+
+test('the app shell cannot be framed or scripted from a card: frame-ancestors none, X-Frame-Options and a same-origin opener policy', { skip, timeout: 30_000 }, async () => {
+  const shell = await ask('/index.html');
+  assert.match(shell.h['content-security-policy'] ?? '', /frame-ancestors 'none'/);
+  assert.equal(shell.h['x-frame-options'], 'DENY');
+  assert.equal(shell.h['cross-origin-opener-policy'], 'same-origin');
+});
