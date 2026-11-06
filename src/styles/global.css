@@ -212,6 +212,21 @@ a.crumb-link { text-decoration: none; color: inherit; }
   border-radius: 999px;
   color: var(--text);
 }
+/* Where Back goes: a desktop keeps its small pill (arrow and word); below 900 px, where the tab bar takes the rail's place, it is a
+   chevron and the screen's name in a button 44 px or more each way, the whole of it the link. The hairline of the old pill was so faint that
+   only the 13 px word read, which is why it looked small even at 44 px high. */
+.crumb-back-phone { display: none; }
+@media (max-width: 899px) {
+  .crumb-back-wide { display: none; }
+  .crumb-back-phone { display: inline-flex; align-items: center; gap: 2px; }
+  .crumb-back { flex: none; justify-content: center; min-width: var(--tap); min-height: var(--tap); padding: 0 16px 0 8px; margin-left: -4px; background: var(--s3); border-color: var(--line2); font-size: 16px; font-weight: 600; }
+  /* One line: Back, the title (it gives way, with an ellipsis), then the buttons. The project is one tap away in the Library. */
+  .breadcrumb { flex-wrap: nowrap; }
+  .breadcrumb > * { flex: none; }
+  .breadcrumb > .crumb-current { flex: 0 1 auto; min-width: 0; font-size: 15px; }
+  .breadcrumb .crumb-sep, .breadcrumb .crumb-sep + .crumb-link, .breadcrumb .crumb-sep + .crumb-link + .crumb-sep { display: none; }
+  .app-layout:has([data-buw-editing]) .ui-tabs { display: none; }
+}
 /* Inside .topbar-tools, which already sits at the far right: a second auto margin here would
    split the free space and park the tools in the middle. */
 .crumb-keys { margin-left: 0; font-size: 0.9rem; }
@@ -966,9 +981,7 @@ button.open-ext {
   .topbar {
     padding: 10px 14px;
     gap: 8px;
-    transition: margin-top 0.25s var(--ease);
   }
-  html[data-chrome-hidden] .topbar { margin-top: calc(-1 * var(--topbar-height, 0px)); }
   /* Room on the first row for the round buttons in both corners: the menu's and the tools'. */
   .breadcrumb { min-height: 40px; }
   .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) { gap: 8px; }

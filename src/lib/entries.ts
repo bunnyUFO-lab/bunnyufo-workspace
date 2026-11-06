@@ -17,6 +17,9 @@ let nextSerial = 1
 let firstSerial = 0
 let currentSerial = 0
 let previousSerial = 0
+/** Where each entry is (its address without a sheet's tail), and the entry it was opened from. In memory, so a reload starts over. */
+const hashOf = new Map<number, string>()
+const parentOf = new Map<number, number>()
 
 const read = (key: string): number => {
   try { return Number(sessionStorage.getItem(key)) || 0 } catch { return 0 }
@@ -35,10 +38,13 @@ function stamp() {
   if (!serial) {
     serial = nextSerial++
     write(NEXT_KEY, nextSerial)
+    // A new entry is pushed after the one we were on: that one is what Back returns to.
+    if (currentSerial) parentOf.set(serial, currentSerial)
     try { window.history.replaceState({ ...(window.history.state ?? {}), hubEntry: serial }, '') } catch { /* memory only */ }
   }
   if (serial !== currentSerial) { previousSerial = currentSerial; currentSerial = serial }
   nextSerial = Math.max(nextSerial, serial + 1)
+  hashOf.set(serial, withoutOverlay(window.location.hash))
 }
 
 /** The number of `/~o` segments at the end of a hash: the sheets open over the screen. */
@@ -88,11 +94,29 @@ export function swap(hash: string, path?: string, notify = true) {
   const url = (path ?? window.location.pathname) + window.location.search + normal(hash)
   if (url === window.location.pathname + window.location.search + window.location.hash) return
   window.history.replaceState(window.history.state, '', url)
+  if (currentSerial) hashOf.set(currentSerial, withoutOverlay(window.location.hash))
   if (notify) window.dispatchEvent(new Event(ROUTE_EVENT))
 }
 
 /** Where the tab's history has something of ours behind this entry. */
 export const hasBehind = () => currentSerial > firstSerial
+
+/** The address of the entry Back returns to, when this tab opened this one from it (not after a reload, nor a link opened in a new tab). */
+export const behindHash = (): string | null => hashOf.get(parentOf.get(currentSerial) ?? 0) ?? null
+
+/** How many entries back the nearest earlier screen with this address is, along the way this one was opened; 0 when there is none. */
+export function stepsBackTo(match: (hash: string) => boolean): number {
+  let serial = currentSerial
+  for (let steps = 1; parentOf.has(serial) && steps < MEMO_KEEP; steps++) {
+    serial = parentOf.get(serial)!
+    if (match(hashOf.get(serial) ?? '')) return steps
+  }
+  return 0
+}
+
+let carryUntil = 0
+/** The next screen that asks (`useEntryMemo` with `carry`) and finds nothing kept for its entry starts from what it last had, for a moment. */
+export const carryStateOnce = () => { carryUntil = Date.now() + 2000 }
 
 /** Every in-app Back: one browser step when something of ours is behind, else the parent screen. Never leaves the app. */
 export function back(parent: string) {
@@ -116,6 +140,8 @@ export const entryBelowSerial = () => previousSerial
 
 const MEMO_KEEP = 100
 const memo = new Map<string, unknown>()
+/** The last value set for each key, on any entry: what `carry` starts from. */
+const lastKept = new Map<string, unknown>()
 const memoOrder: number[] = []
 
 function remember(serial: number) {
@@ -129,18 +155,27 @@ function remember(serial: number) {
 }
 
 /** State kept in memory against this entry: search text, a chip, a scroll position. Back to the entry finds it again; a reload loses it. */
-export function useEntryMemo<T>(key: string, init: T | (() => T)): [T, (value: T | ((current: T) => T)) => void] {
+export function useEntryMemo<T>(key: string, init: T | (() => T), carry = false): [T, (value: T | ((current: T) => T)) => void] {
   const [serial] = useState(() => currentSerial)
   const id = `${serial}\u0000${key}`
-  const [value, set] = useState<T>(() => (memo.has(id) ? (memo.get(id) as T) : typeof init === 'function' ? (init as () => T)() : init))
+  const [value, set] = useState<T>(() => {
+    if (memo.has(id)) return memo.get(id) as T
+    if (carry && Date.now() < carryUntil && lastKept.has(key)) {
+      // Kept against this entry too, so Back to it later finds the same.
+      memo.set(id, lastKept.get(key)); remember(serial)
+      return lastKept.get(key) as T
+    }
+    return typeof init === 'function' ? (init as () => T)() : init
+  })
   const latest = useRef(value)
   const update = useCallback((next: T | ((current: T) => T)) => {
     const resolved = typeof next === 'function' ? (next as (current: T) => T)(latest.current) : next
     latest.current = resolved
     memo.set(id, resolved)
+    lastKept.set(key, resolved)
     remember(serial)
     set(resolved)
-  }, [id, serial])
+  }, [id, serial, key])
   return [value, update]
 }
 

@@ -149,9 +149,9 @@ export function navScreen(screen: HubScreen | undefined): NavId | null {
   }
 }
 
-/** The phone shows its tab bar on a tab's own list, and on no other screen: not on an item, a thread, a project, Work, Team, Sketch or Settings. */
+/** The phone shows its tab bar on a tab's own list and on an open card (Library lit, so the way out is under the thumb), and on no other screen: not on an item, a thread, a project, Work, Team, Sketch or Settings. */
 export function showsTabs(route: Route): boolean {
-  if (route.id) return false
+  if (route.id) return true
   const hub = route.hub
   if (!hub) return true
   if (hub.screen === 'today' || hub.screen === 'library' || hub.screen === 'search') return true

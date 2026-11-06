@@ -1,12 +1,16 @@
 /* The Library screen. Tokens only. Phone first: one column; the list pane is 384 px beside a card (ui.css .ui-pane-list). */
-.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: clip; }
 .lib .ui-top { padding-right: 4px; }
 .lib .workspace-switcher { min-width: 0; margin-left: auto; }
 .lib .workspace-switcher-button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: var(--tap); padding-top: 0; padding-bottom: 0; }
 .lib .workspace-switcher + .ui-icobtn { margin-left: 0; }
 .lib-new { flex: none; padding: 0 16px 8px; }
 .lib-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); color: var(--t3); border: 1px solid var(--line); }
-.lib-search:focus-within { border-color: var(--line2); }
+.lib-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+/* One ring, on the rounded field. The shell draws a square outline on every focused input (local.css); this one is inside the field, so it draws none. */
+.app-shell .lib-search input:focus, .app-shell .lib-search input:focus-visible { outline: none; box-shadow: none; }
+/* Below 16 px a phone's browser zooms the page in when a field takes focus and leaves it panned sideways (the title cut off, everything shifted). */
+@media (max-width: 899px), (pointer: coarse) { .app-shell .lib-search input { font-size: 16px; } }
 /* .app-shell input draws a field; the label around this one is the field, so its input draws nothing (the same weight, so the longer selector). */
 .app-shell .lib-search input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); padding: 0; border: 0; border-radius: 0; background: none; color: var(--t1); font: inherit; outline: none; }
 .lib-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px calc(24px + var(--safe-b)); overscroll-behavior: contain; }

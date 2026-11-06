@@ -51,10 +51,10 @@ export interface LibraryProps {
 export default function LibraryScreen({ workspaces, cards, projects, onProjects, arrange, onArrange, active, offline, lastSync, notice, searchRef, onCollapse }: LibraryProps) {
   const { order } = useOrder()
   const canWrite = useCanWrite()
-  const [view, setView] = useEntryMemo<LibraryView>('lib.view', 'all')
-  const [query, setQuery] = useEntryMemo('lib.query', '')
-  const [limit, setLimit] = useEntryMemo('lib.limit', PAGE)
-  const [scroll, setScroll] = useEntryMemo('lib.scroll', 0)
+  const [view, setView] = useEntryMemo<LibraryView>('lib.view', 'all', true)
+  const [query, setQuery] = useEntryMemo('lib.query', '', true)
+  const [limit, setLimit] = useEntryMemo('lib.limit', PAGE, true)
+  const [scroll, setScroll] = useEntryMemo('lib.scroll', 0, true)
   const [newCard, setNewCard] = useState(false)
   const box = useRef<HTMLDivElement>(null)
 

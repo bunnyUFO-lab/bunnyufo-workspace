@@ -29,7 +29,7 @@ import LibraryScreen from './library/LibraryScreen'
 import { isArchived, orderedSections, pickedProjects, type Arrange } from './library/libraryModel'
 import { setArchived, setPinned } from './library/cardActions'
 import { Button } from './ui/Controls'
-import { useAutoHideHeader, useIsDesktop, useMedia } from './lib/chrome'
+import { useIsDesktop, useKeyboardUp, useMedia } from './lib/chrome'
 import { cardFile, cardUrl, reportError } from './local/client'
 
 const PICKS_KEY = 'buw.projects'
@@ -188,8 +188,8 @@ export default function App() {
   const step = entity?.steps[stepIndex]
   const reportUrl = entity && step ? cardUrl(entity, step.path) : null
   const liveUrl = step?.url && /^https?:\/\//i.test(step.url) ? step.url : null
-  // A phone's header slides away while you read down the page (lib/chrome).
-  useAutoHideHeader(`${entity?.id ?? ''}:${stepIndex}`)
+  // The tab bar steps aside for the on-screen keyboard, and while a page is being edited (global.css).
+  const keyboard = useKeyboardUp()
 
   // The address says what is open: a folder link is rewritten to the card's id.
   const openId = entity?.id
@@ -502,7 +502,7 @@ export default function App() {
           />
         ) : body}
       </main>
-      {!desktop && host.hub && showsTabs(route) && <Tabs lit={lit} needsYou={needsYou} />}
+      {!desktop && host.hub && showsTabs(route) && !keyboard && <Tabs lit={lit} needsYou={needsYou} />}
     </div>
     </TodayContext.Provider>
     </LibraryContext.Provider>
