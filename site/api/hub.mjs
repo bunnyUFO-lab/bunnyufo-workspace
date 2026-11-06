@@ -77,7 +77,7 @@ const POOL = 16;
 const APPLY_WRITER = 'apply-action';
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^/hub/(?:today|inbox|work|jobs|projects|team(?:/skills)?|events|search-text|chat/search|unasked|map/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team(?:\/skills)?|events|search-text|chat\/search|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
