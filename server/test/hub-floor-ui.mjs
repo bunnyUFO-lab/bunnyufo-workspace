@@ -64,13 +64,20 @@ const floorOf = page => page.locator('[data-team-floor]');
 const tickerText = page => page.locator('[data-floor-ticker]').innerText().then(text => text.replace(/\s+/g, ' ').trim());
 
 try {
-  step('Roster is the default; Floor puts every agent in its room, unknown rooms in Ops, and the choice survives a reload');
+  step('Floor is the default and puts every agent in its room, unknown rooms in Ops; List is a switch, and the choice survives a reload');
   const { page: desk, errors } = await open({ width: 1920, height: 1080 });
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-row').first().waitFor();
-  assert.equal(await desk.locator('[data-team-view="roster"]').getAttribute('aria-pressed'), 'true');
-  assert.equal(await floorOf(desk).count(), 0);
+  await floorOf(desk).waitFor();
+  assert.equal(await desk.locator('[data-team-view="floor"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await desk.locator('.team-row').count(), 0);
+  assert.equal(await desk.evaluate(() => localStorage.getItem('hub.team.view')), null, 'Nothing has been chosen yet.');
   const steps = await desk.evaluate(() => history.length);
+  await desk.locator('[data-team-view="roster"]').click();
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await floorOf(desk).count(), 0);
+  assert.equal(await desk.locator('[data-team-view="roster"]').getAttribute('aria-pressed'), 'true');
+  await desk.reload();
+  await desk.locator('.team-row').first().waitFor();
   await desk.locator('[data-team-view="floor"]').click();
   await floorOf(desk).waitFor();
   assert.equal(await desk.evaluate(() => history.length), steps, 'Floor is a view, not a step: no back entry.');

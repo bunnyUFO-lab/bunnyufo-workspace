@@ -17,6 +17,8 @@ const contexts = [];
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 const open = async options => {
   const context = await browser.newContext({ serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  // Team opens on the Floor; this file is about the list, so the browser starts with the list chosen (unless the test chose).
+  await context.addInitScript(() => { try { if (!localStorage.getItem('hub.team.view')) localStorage.setItem('hub.team.view', 'roster'); } catch { /* storage off */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
