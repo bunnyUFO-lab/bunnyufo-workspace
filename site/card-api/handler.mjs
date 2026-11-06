@@ -867,7 +867,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         for (const entity of registry.entities) {
           if (!entity) continue;
           const hit = wanted.folder
-            ? entity.folder === wanted.folder
+            ? entity.folder === wanted.folder || entity.id === wanted.folder
             : entity.id === wanted.card || entity.folder === wanted.card || entity.title?.toLowerCase() === needle;
           if (hit) matches.push({ section: id, ...summary(entity) });
         }

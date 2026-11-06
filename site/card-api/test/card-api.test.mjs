@@ -721,6 +721,34 @@ test('cards.mjs with no card API set says so, and reads config.json', async () =
   }
 });
 
+test('scripts/cards.mjs: link and get give the address a person opens, from any form of link', async () => {
+  const { fake, api } = await setup();
+  const server = await serve(api);
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cards-link-'));
+  const run = (env, ...args) => promisify(execFile)(process.execPath, [path.join(repo, 'scripts/cards.mjs'), ...args], {
+    env: { PATH: process.env.PATH, HOME: dir, USERPROFILE: dir, BUW_CONFIG: path.join(dir, 'none.json'), BUW_HUB_CONFIG: path.join(dir, 'none.json'), BUW_CARD_API: server.url, BUW_CARDS_PASSWORD: 'tok-all', BUW_CARDS_VIA: 'api', ...env },
+  });
+  const site = { BUW_SITE_URL: 'https://site.example/' };
+  const page = 'https://site.example/magic-loops#/loops-plan';
+  try {
+    for (const ref of [
+      'magic-loops/loops-plan',
+      'loops-plan',
+      'https://site.example/magic-loops#/loops-plan',
+      'https://cards.site.example/w/magic-loops/loops-plan',
+      'https://site.example/w/magic-loops/2026-10-01_loops-plan/index.md',
+    ]) {
+      assert.equal((await run(site, 'link', ref)).stdout.trim(), page, ref);
+    }
+    assert.match((await run(site, 'get', 'magic-loops/loops-plan', '--into', dir)).stdout, /Link to give people: https:\/\/site\.example\/magic-loops#\/loops-plan/);
+    assert.match((await run(site, 'put', dir, '--section', 'magic-loops', '--card', 'loops-plan')).stdout, /Link to give people: https:\/\/site\.example\/magic-loops#\/loops-plan/);
+    await assert.rejects(run({}, 'link', 'magic-loops/loops-plan'), error => /The site is not known/.test(error.stderr), 'A local API address names no site.');
+  } finally {
+    await server.close();
+    await fake.close();
+  }
+});
+
 test('scripts/cards.mjs: get a card by link into an empty folder, change it, put it back', async () => {
   const { fake, api } = await setup();
   const server = await serve(api);
