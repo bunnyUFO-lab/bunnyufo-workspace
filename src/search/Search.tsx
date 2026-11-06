@@ -251,7 +251,7 @@ export default function Search({ desktop, onClose }: {
     } else if (event.key === 'Tab') {
       // The field is the only stop: the rows are reached with the arrows.
       event.preventDefault()
-    } else if (event.key === 'Escape' && !desktop) {
+    } else if (event.key === 'Escape') {
       event.preventDefault()
       onClose()
     }

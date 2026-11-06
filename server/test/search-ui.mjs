@@ -1,0 +1,355 @@
+// Run after npm run build. Search through a real browser, over the Hub fixture service: Ctrl+K as a dialog at 1280, the Search tab as a
+// full screen at 390 and 320, chips that filter and chips that jump, Back from a result, tasks read only while typed, message hits, a guest.
+import { chromium } from '@playwright/test';
+import { ms } from './ui-timeouts.mjs';
+import assert from 'node:assert/strict';
+import { startHubFixture } from './hub-fixture.mjs';
+import { entryOf, hashOf, noSideways } from './shell-helpers.mjs';
+
+const step = name => console.log(`- ${name}`);
+const channel = process.env.BUW_TEST_BROWSER || 'msedge';
+
+const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const CHAT = `${day}-find01`;
+const fixture = await startHubFixture({ secondSection: true, hermes: true, work: true, workSearch: true });
+const line = (role, text) => JSON.stringify({ role, text, at: new Date().toISOString() });
+fixture.fake.seed(`sections/inbox/chat/${CHAT}.jsonl`, `${[line('user', 'Plan the redesign'), line('assistant', 'We agreed on the lantern festival schedule for spring.')].join('\n')}\n`, 'application/x-ndjson');
+const browser = await chromium.launch({ headless: true, channel });
+const contexts = [];
+const open = async (viewport, options = {}) => {
+  const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
+  contexts.push(context);
+  const page = await context.newPage();
+  page.setDefaultTimeout(ms(15000));
+  page.on('pageerror', error => { throw error; });
+  return page;
+};
+const length = page => page.evaluate(() => history.length);
+const settle = page => page.waitForTimeout(250);
+const groupNames = scope => scope.locator('[data-search-group] .srch-g span').evaluateAll(list => list.map(el => el.textContent));
+
+try {
+  const page = await open({ width: 1280, height: 900 });
+  const requests = [];
+  page.on('request', request => { const url = new URL(request.url()); if (url.pathname.startsWith('/api/hub/')) requests.push(url.pathname + url.search); });
+  await page.goto(`${fixture.url}#/~hub/today`);
+  await page.locator('.hub[data-screen="today"]').waitFor();
+  const dialog = page.locator('dialog[data-search="dialog"]');
+
+  step('Ctrl+K opens a dialog: the screens and what to start; the field is a combobox on a listbox and has the focus');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  const input = dialog.locator('input');
+  assert.equal(await input.getAttribute('role'), 'combobox');
+  const listId = await input.getAttribute('aria-controls');
+  assert.equal(await page.locator(`[id="${listId}"]`).getAttribute('role'), 'listbox');
+  assert.ok(await input.evaluate(el => el === document.activeElement), 'The field has focus.');
+  const field = await input.evaluate(el => { const style = getComputedStyle(el); return { left: style.paddingLeft, border: style.borderTopWidth, radius: style.borderTopLeftRadius }; });
+  assert.deepEqual(field, { left: '0px', border: '0px', radius: '0px' }, 'The app-wide input rule does not reach the search field.');
+  assert.ok(await dialog.locator('[role="group"][aria-labelledby]').count() >= 2, 'Groups are labelled.');
+  assert.deepEqual((await groupNames(dialog)).slice(0, 2), ['Open a screen', 'Start something']);
+  assert.equal(await dialog.locator('[role="option"][aria-selected="true"]').count(), 1);
+  assert.deepEqual((await dialog.locator('[data-search-tile] span').allInnerTexts()).slice(0, 3), ['Work', 'Team', 'Skills'], 'Work first.');
+  assert.ok(!requests.some(path => path.includes('/search-text')), 'No task text is read before anything is typed.');
+  assert.ok(!requests.some(path => path.includes('/chat/search')), 'No message search before anything is typed.');
+  assert.ok(requests.some(path => path.includes('/chat?view=all&limit=100')), 'The chat list is read once Search is open.');
+
+  step('the chips: Needs you and Today first, then All, Library, Chats, Jobs, Projects, Tasks, Team, Screens');
+  const chipNames = await dialog.locator('.ui-chip').evaluateAll(list => list.map(el => (el.textContent || '').replace(/\d+$/, '').trim()));
+  assert.deepEqual(chipNames, ['Needs you', 'Today', 'All', 'Library', 'Chats', 'Jobs', 'Projects', 'Tasks', 'Team', 'Screens']);
+  const badge = (await page.locator('[data-hub-badge]').first().innerText()).trim();
+  assert.match(await dialog.locator('[data-search-jump="needs"]').innerText(), new RegExp(`${badge}$`), 'The Needs you chip carries the count the badge shows.');
+  assert.match(await dialog.locator('[data-search-chip="library"]').innerText(), /\d/);
+
+  step('Ctrl+K again closes it');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor({ state: 'detached' });
+
+  step('typing "need" and Enter lands on the Needs you screen');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('need');
+  await page.keyboard.press('Enter');
+  await page.locator('.hub[data-screen="needs"]').waitFor();
+  assert.equal(await hashOf(page), '#/~hub/needs');
+  await dialog.waitFor({ state: 'detached' });
+
+  step('the fixture Ask opens by its words, and its group is Needs you');
+  await page.evaluate(() => { location.hash = '#/~hub/today'; });
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('jump arc');
+  assert.equal((await groupNames(dialog))[0], 'Needs you');
+  await page.keyboard.press('Enter');
+  await page.locator('.hub[data-screen="ask"]').waitFor();
+
+  step('a project and a card are found by name');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('magic');
+  await dialog.locator('[data-search-group="projects"] [role="option"]', { hasText: /magic/i }).first().click();
+  await page.locator('.hub[data-screen="project"]').waitFor();
+  assert.match(await hashOf(page), /^#\/~hub\/project\/magic-loops/);
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('hub card');
+  assert.equal((await groupNames(dialog))[0], 'Library');
+  await page.keyboard.press('Enter');
+  await page.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
+
+  step('a card in another section is found too, naming its section; the open section comes first');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('zebra');
+  const other = dialog.locator('[role="option"]', { hasText: 'Zebra crossing' });
+  await other.first().waitFor();
+  assert.match(await other.first().innerText(), /Two/, 'The line under it names its section.');
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('a');
+  await dialog.locator('[data-search-chip="library"]').click();
+  const cardTitles = await dialog.locator('[data-search-group="library"] .srch-i b').allInnerTexts();
+  assert.ok(cardTitles.includes('The hub card') && cardTitles.includes('Zebra crossing'), `Both cards match "a" (${cardTitles}).`);
+  assert.ok(cardTitles.indexOf('The hub card') < cardTitles.indexOf('Zebra crossing'), 'The open section comes first.');
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+
+  step('Ctrl+K works from inside a text field, and Esc closes it and gives the focus back');
+  await page.evaluate(() => { location.hash = '#/~hub/library'; });
+  const search = page.locator('.lib-search input');
+  await search.waitFor();
+  await search.focus();
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  assert.ok(await dialog.locator('[role="option"]').count() > 0);
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  assert.ok(await search.evaluate(el => el === document.activeElement), 'The search box has the focus again.');
+
+  step('Tab stays inside, arrows move the selection, and a word nothing has leaves only Ask Hermes and New job');
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.press('Tab');
+  assert.ok(await dialog.locator('input').evaluate(el => el === document.activeElement), 'Tab leaves focus on the input.');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await dialog.locator('[role="option"][aria-selected="true"]').evaluate(el => el.id), await dialog.locator('input').getAttribute('aria-activedescendant'));
+  assert.equal(await dialog.locator('[role="option"]').nth(1).getAttribute('aria-selected'), 'true');
+  await page.keyboard.type('zzzzqq');
+  await dialog.locator('[role="option"]', { hasText: 'New job: zzzzqq' }).waitFor();
+  assert.deepEqual(await dialog.locator('[role="option"] b').allInnerTexts(), ['Ask Hermes: zzzzqq', 'New job: zzzzqq']);
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+
+  step('the rail button opens it and shows the key; the shortcut sheet lists it');
+  const button = page.locator('[data-rail] [data-nav="search"]');
+  assert.match(await button.innerText(), /Search\s+Ctrl K/);
+  await button.click();
+  await dialog.waitFor();
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  await page.keyboard.press('Control+h');
+  await page.locator('dialog.shortcuts', { hasText: 'Open search' }).waitFor();
+  await page.keyboard.press('Escape');
+
+  step('Tasks: read once two letters are typed, not before; a task opens its project with the task sheet');
+  await page.evaluate(() => { location.hash = '#/~hub/today'; });
+  await page.locator('.hub[data-screen="today"]').waitFor();
+  requests.length = 0;
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('q');
+  await settle(page);
+  assert.ok(!requests.some(path => path.includes('/search-text')), 'One letter reads no task text.');
+  await page.keyboard.type('uokka');
+  await dialog.locator('[data-search-group="tasks"] [role="option"]').first().waitFor();
+  assert.equal(requests.filter(path => path.includes('/search-text')).length, 1, 'The task text is read once, however many letters follow.');
+  await dialog.locator('[data-search-chip="tasks"]').click();
+  assert.match(await dialog.locator('[data-search-group="tasks"] .srch-g span').textContent(), /task/i);
+  const taskRow = dialog.locator('[data-search-group="tasks"] [role="option"]', { hasText: 'Tune the slide' });
+  await taskRow.waitFor();
+  assert.match(await taskRow.innerText(), /ws-rare/);
+  await taskRow.click();
+  await page.waitForURL(/#\/~hub\/project\/lanes\/roadmap\/ws-rare$/);
+
+  step('Chats: a sentence from inside a chat is found; the hit opens the thread on that message, and Back returns to search');
+  await page.evaluate(() => { location.hash = '#/~hub/today'; });
+  await page.locator('.hub[data-screen="today"]').waitFor();
+  await page.keyboard.press('Control+k');
+  await dialog.waitFor();
+  await page.keyboard.type('lantern festival');
+  const hit = dialog.locator('[data-search-group="chats"] [role="option"]').first();
+  await hit.waitFor();
+  assert.ok(await hit.locator('mark').count() >= 1, 'The words are marked in the snippet.');
+  await hit.click();
+  await page.waitForURL(new RegExp(`#/~hub/chat/${CHAT}/m/1$`));
+  await page.locator('.hub-bubble[data-line="1"]').waitFor();
+  await page.goBack();
+  await dialog.waitFor();
+  assert.equal(await dialog.locator('input').inputValue(), 'lantern festival', 'Back from the thread returns to search with its text.');
+  await page.goBack();
+  await dialog.waitFor({ state: 'detached' });
+
+  step('an answer for the projects that is not JSON leaves Search working and raises no page error');
+  const odd = await open({ width: 1280, height: 900 });
+  const errors = [];
+  odd.on('pageerror', error => errors.push(error.message));
+  await odd.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Not the API</title>' }));
+  await odd.goto(`${fixture.url}#/~hub/today`);
+  await odd.locator('.hub[data-screen="today"]').waitFor();
+  const answered = odd.waitForResponse(response => response.url().includes('/api/hub/projects'));
+  await odd.keyboard.press('Control+k');
+  await odd.locator('dialog[data-search="dialog"]').waitFor();
+  await answered;
+  await odd.keyboard.type('magic');
+  await odd.locator('dialog[data-search="dialog"] [role="option"]', { hasText: /new job/i }).first().waitFor();
+  await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 150)));
+  assert.equal(await odd.locator('[data-search-group="projects"]').count(), 0, 'The unreadable list shows no projects.');
+  assert.deepEqual(errors, []);
+  await odd.keyboard.press('Escape');
+  await odd.locator('dialog[data-search="dialog"]').waitFor({ state: 'detached' });
+
+  step('a list that could not be read is not kept: the next open asks again and lists the projects');
+  await odd.unroute('**/api/hub/projects');
+  await odd.keyboard.press('Control+k');
+  await odd.locator('dialog[data-search="dialog"]').waitFor();
+  await odd.keyboard.type('magic');
+  await odd.locator('[data-search-group="projects"] [role="option"]', { hasText: /magic/i }).first().waitFor();
+  assert.deepEqual(errors, []);
+  await odd.keyboard.press('Escape');
+
+  step('reduced motion: no transition');
+  const calm = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
+  await calm.goto(`${fixture.url}#/~hub/today`);
+  await calm.locator('.hub[data-screen="today"]').waitFor();
+  await calm.keyboard.press('Control+k');
+  await calm.locator('dialog[data-search="dialog"]').waitFor();
+  assert.equal(await calm.locator('dialog[data-search="dialog"]').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
+
+  step('a dialog over a screen leaves that screen as it was: it is not remounted');
+  const under = await open({ width: 1280, height: 900 });
+  await under.goto(`${fixture.url}#/~hub/today`);
+  await under.locator('.hub[data-screen="today"]').waitFor();
+  await under.evaluate(() => { document.querySelector('.hub[data-screen="today"]').dataset.mark = 'same'; });
+  await under.keyboard.press('Control+k');
+  await under.locator('dialog[data-search="dialog"]').waitFor();
+  await under.keyboard.type('need');
+  await under.keyboard.press('Escape');
+  await under.locator('dialog[data-search="dialog"]').waitFor({ state: 'detached' });
+  assert.equal(await under.locator('.hub[data-screen="today"]').getAttribute('data-mark'), 'same', 'The screen under search was not remounted.');
+
+  step('a guest has no Ask Hermes and no New job, and no Chats chip');
+  const guest = await open({ width: 1280, height: 900 });
+  await guest.route('**/api/capabilities', async route => {
+    const response = await route.fetch();
+    const caps = await response.json();
+    await route.fulfill({ response, json: { ...caps, write: false, chat: false, approve: false, create: false, cards: false } });
+  });
+  await guest.goto(`${fixture.url}#/~hub/today`);
+  await guest.locator('.hub[data-screen="today"]').waitFor();
+  await guest.keyboard.press('Control+k');
+  await guest.locator('dialog[data-search="dialog"]').waitFor();
+  assert.equal(await guest.locator('[data-search-group="start"]').count(), 0, 'No Start something before typing.');
+  await guest.keyboard.type('zzzzqq');
+  await guest.locator('[data-search-empty]').waitFor();
+  assert.equal(await guest.locator('dialog[data-search="dialog"] [role="option"]').count(), 0, 'No Ask Hermes, no New job: nothing is left.');
+  assert.equal(await guest.locator('[data-search-chip="chats"]').count(), 0, 'No Chats chip without chat.');
+
+  step('390 px: the Search tab is a full screen, the keyboard stays closed, Work is the first tile, nothing scrolls sideways');
+  const phone = await open({ width: 390, height: 640 }, { hasTouch: true, isMobile: true });
+  await phone.goto(`${fixture.url}#/~hub/today`);
+  await phone.locator('.hub[data-screen="today"]').waitFor();
+  const todayEntry = await entryOf(phone);
+  await phone.locator('[data-tabs] [data-nav="search"]').tap();
+  const screen = phone.locator('[data-search="screen"]');
+  await screen.waitFor();
+  assert.equal(await phone.locator('dialog[data-search]').count(), 0, 'A phone gets a screen, not a dialog.');
+  assert.ok(await phone.locator('[data-search-input]').evaluate(el => el !== document.activeElement), 'The keyboard stays closed until the field is tapped.');
+  assert.equal(await phone.locator('[data-tabs] [data-nav="search"]').getAttribute('aria-current'), 'page');
+  assert.equal(await phone.locator('[data-search-tile] span').first().innerText(), 'Work');
+  assert.equal((await groupNames(screen))[0], 'Open a screen', 'No Recent before anything was picked.');
+  await noSideways(phone, 'Search at 390');
+  const tile = await phone.locator('[data-search-tile]').first().boundingBox();
+  assert.ok(tile.height >= 44 && tile.x >= 0 && tile.x + tile.width <= 390, `Tiles fit and are tall enough (${JSON.stringify(tile)}).`);
+
+  step('typing groups the results; chips carry counts; Library narrows and stays with no new step; Needs you goes there');
+  const startLength = await length(phone);
+  await phone.locator('[data-search-input]').tap();
+  await phone.keyboard.type('hub');
+  await phone.locator('[data-search-group="library"] [role="option"]').first().waitFor();
+  assert.match(await phone.locator('[data-search-chip="library"]').innerText(), /1/, 'Live count on the chip.');
+  const row = await phone.locator('[data-search-group="library"] .srch-i').first().boundingBox();
+  assert.ok(row.height >= 44, `Rows are at least 44 px tall (${row.height}).`);
+  await phone.locator('[data-search-chip="library"]').tap();
+  await settle(phone);
+  assert.equal(await hashOf(phone), '#/~hub/search');
+  assert.equal(await length(phone), startLength, 'A filter chip adds no history entry.');
+  assert.deepEqual(await groupNames(screen), ['1 card']);
+  await phone.locator('[data-search-jump="needs"]').tap();
+  await phone.locator('.hub[data-screen="needs"]').waitFor();
+  await phone.goBack();
+  await screen.waitFor();
+  assert.equal(await phone.locator('[data-search-input]').inputValue(), 'hub', 'Back from Needs you finds the text.');
+  assert.equal(await phone.locator('[data-search-chip="library"]').getAttribute('aria-pressed'), 'true', 'And the chip.');
+
+  step('pick a card, go back: search with text and chip; back again: where you were; nothing is left open over the card');
+  await phone.locator('[data-search-group="library"] [role="option"]', { hasText: 'The hub card' }).tap();
+  await phone.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
+  assert.equal(await phone.locator('[data-search]').count(), 0, 'Picking a result leaves search closed.');
+  await phone.goBack();
+  await screen.waitFor();
+  assert.equal(await phone.locator('[data-search-input]').inputValue(), 'hub');
+  assert.equal(await phone.locator('[data-search-chip="library"]').getAttribute('aria-pressed'), 'true');
+  await phone.goBack();
+  await phone.locator('.hub[data-screen="today"]').waitFor();
+  assert.equal((await entryOf(phone)).serial, todayEntry.serial, 'Back again is where search was opened from.');
+
+  step('Back keeps the scroll of a long list');
+  await phone.locator('[data-tabs] [data-nav="search"]').tap();
+  await screen.waitFor();
+  await phone.locator('[data-search-input]').tap();
+  await phone.keyboard.type('e');
+  await phone.locator('[data-search-chip="screens"]').tap();
+  const scroller = phone.locator('[data-search-results]');
+  await phone.locator('[data-search-group="screens"] [role="option"]').nth(8).waitFor();
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await settle(phone);
+  const scrolled = await scroller.evaluate(el => el.scrollTop);
+  assert.ok(scrolled > 100, `The list scrolls (${scrolled}).`);
+  await phone.locator('[data-search-group="screens"] [role="option"]').last().tap();
+  await phone.locator('[data-search]').waitFor({ state: 'detached' });
+  await phone.goBack();
+  await screen.waitFor();
+  await phone.waitForFunction(() => document.querySelector('[data-search-results]').scrollTop > 50);
+  const again = await scroller.evaluate(el => el.scrollTop);
+  assert.ok(Math.abs(again - scrolled) < 40, `The scroll is where it was (${again} vs ${scrolled}).`);
+  assert.equal(await phone.locator('[data-search-chip="screens"]').getAttribute('aria-pressed'), 'true');
+
+  step('Recent: what was picked is listed first, in this browser only');
+  await phone.goto(`${fixture.url}#/~hub/search`);
+  await screen.waitFor();
+  assert.deepEqual((await groupNames(screen)).slice(0, 2), ['Recent', 'Open a screen']);
+  assert.ok(await phone.evaluate(() => JSON.parse(localStorage.getItem('buw.searchRecent')).length) >= 1);
+
+  step('Cancel is one step back; 320 px has no sideways scroll');
+  await phone.goto(`${fixture.url}#/~hub/today`);
+  await phone.locator('.hub[data-screen="today"]').waitFor();
+  await phone.locator('[data-tabs] [data-nav="search"]').tap();
+  await screen.waitFor();
+  await phone.locator('[data-search-cancel]').tap();
+  await phone.locator('.hub[data-screen="today"]').waitFor();
+  await phone.setViewportSize({ width: 320, height: 640 });
+  await phone.locator('[data-tabs] [data-nav="search"]').tap();
+  await screen.waitFor();
+  await phone.locator('[data-search-input]').tap();
+  await phone.keyboard.type('hub');
+  await phone.locator('[data-search-group="library"] [role="option"]').first().waitFor();
+  await noSideways(phone, 'Search at 320');
+
+  console.log('search-ui: passed');
+} finally {
+  for (const context of contexts) await context.close().catch(() => {});
+  await browser.close();
+  await fixture.close();
+}

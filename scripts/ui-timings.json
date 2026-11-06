@@ -49,7 +49,7 @@
  "library-manage-ui.mjs": 13,
  "links-ui.mjs": 2,
  "order-ui.mjs": 12,
- "palette-ui.mjs": 4,
+ "search-ui.mjs": 5,
  "pin-ui.mjs": 5,
  "pwa-ui.mjs": 3,
  "tab-bar-ui.mjs": 11,
