@@ -1199,7 +1199,10 @@ try {
     await talk.keyboard.press('Enter');
     await talk.locator('.hub-bubble.assistant', { hasText: 'Hello there' }).waitFor();
     await talk.locator('[data-conversation]').waitFor();
-    const saved = [...chatFixture.fake.objects.keys()].filter(key => /inbox\/chat\/[^/]+\.jsonl$/.test(key));
+    // The reply shows as it streams, and its file lands a moment after it ends.
+    const savedChats = () => [...chatFixture.fake.objects.keys()].filter(key => /inbox\/chat\/[^/]+\.jsonl$/.test(key));
+    for (let tries = 0; !savedChats().length && tries < 100; tries += 1) await talk.waitForTimeout(50);
+    const saved = savedChats();
     assert.equal(saved.length, 1);
     assert.equal(chatFixture.fake.text(saved[0]).trim().split('\n').length, 2);
     assert.match(talk.url(), /#\/~hub\/chat\/\d{8}-[a-z0-9]{6}$/, 'The address names the conversation.');
