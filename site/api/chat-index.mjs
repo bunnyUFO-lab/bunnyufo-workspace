@@ -72,7 +72,7 @@ export function createChatIndex({ bucket, key, fresh, pool, readState = null, ma
   let total = 0;
   const prefix = key('chat/x.jsonl').slice(0, -'x.jsonl'.length);
 
-  /** One pass: list, read what changed, forget what is gone, then drop the oldest chats past the cap. */
+  /** One pass: list, read what changed (newest first, keeping the whole under the cap as it goes) and forget what is gone. */
   async function load() {
     const { objects } = await bucket.list(prefix);
     const chats = [];
@@ -94,24 +94,33 @@ export function createChatIndex({ bucket, key, fresh, pool, readState = null, ma
       if (left.get(chat.id) === chat.etag) { dropped = true; continue; }
       changed.push(chat);
     }
-    const sized = await pool(6, changed, async chat => {
+    // Newest first, each transcript goes into the index as it is read and the oldest entries leave at once while the whole is over the
+    // cap, so what is held is the cap plus the entry just read (and the six transcripts in flight), never every chat of the pass.
+    const rank = new Map(chats.map((chat, n) => [chat.id, n]));
+    const oldestHeld = () => { let worst = -1; for (const id of entries.keys()) worst = Math.max(worst, rank.get(id) ?? -1); return worst; };
+    let full = false;   // once an entry has had to leave, the index is full: a chat older than all it holds is not read
+    const evict = () => {
+      while (total > maxBytes && entries.size) {
+        const at = oldestHeld();
+        const victim = chats[at];
+        total -= entries.get(victim.id).bytes;
+        entries.delete(victim.id);
+        left.set(victim.id, victim.etag);
+        dropped = true;
+        full = true;
+      }
+    };
+    await pool(6, changed, async chat => {
+      // The index is full and this chat is older than everything it holds: it would be dropped on arrival, so it is not read at all (an old entry of its own stays).
+      if (full && rank.get(chat.id) > oldestHeld()) { left.set(chat.id, chat.etag); dropped = true; return; }
       const got = await fresh(`chat/${chat.id}.jsonl`);
-      return { chat, entry: got ? entryOf(got.text, got.etag, chat.etag, chat.at) : null };
-    });
-    for (const { chat, entry } of sized) {
+      const entry = got ? entryOf(got.text, got.etag, chat.etag, chat.at) : null;
       const old = entries.get(chat.id);
       if (old) { total -= old.bytes; entries.delete(chat.id); }
+      left.delete(chat.id);
       if (entry) { entries.set(chat.id, entry); total += entry.bytes; }
-    }
-    // Over the cap: drop the oldest until it fits.
-    const order = chats.filter(chat => entries.has(chat.id));
-    while (total > maxBytes && order.length) {
-      const oldest = order.pop();
-      total -= entries.get(oldest.id).bytes;
-      entries.delete(oldest.id);
-      left.set(oldest.id, oldest.etag);
-      dropped = true;
-    }
+      evict();
+    });
     partial = dropped;
   }
 

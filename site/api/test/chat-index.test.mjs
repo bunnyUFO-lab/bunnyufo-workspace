@@ -136,6 +136,40 @@ test('past the size cap the oldest chats are dropped and the answer says partial
   assert.deepEqual(s.calls.get, [], 'Dropped chats are not read over and over.');
 });
 
+test('the cap holds during the load: newest first, a bounded pool, and the older chats are not even read', async () => {
+  const many = 60;
+  const ids = Array.from({ length: many }, (_, n) => `202611${String(10 + (n % 20)).padStart(2, '0')}-${String(n).padStart(6, '0').replace(/^0/, 'a')}`);
+  const text = jsonl([{ role: 'user', text: `needle ${'z'.repeat(200)}`, at: at(1) }]);
+  const s = stub();
+  // id n is newer the larger n is.
+  ids.forEach((id, n) => s.set(id, text, Date.parse(at(2)) + n * 60_000));
+  const maxBytes = 5000;
+  let peak = 0;
+  let index;
+  const fresh = async rel => { peak = Math.max(peak, index.stats().bytes); return s.fresh(rel); };
+  const pool = async (size, items, fn) => {
+    const queue = [...items];
+    await Promise.all(Array.from({ length: size }, async () => { for (let item = queue.shift(); item; item = queue.shift()) await fn(item); }));
+  };
+  index = createChatIndex({ bucket: s.bucket, key: s.key, fresh, pool, maxBytes });
+  const answer = await index.search({ q: 'needle' });
+  const one = index.stats().bytes / index.stats().chats;
+  assert.equal(answer.partial, true);
+  assert.ok(peak <= maxBytes, `Held ${peak} bytes during the load, over the cap of ${maxBytes}.`);
+  assert.ok(index.stats().bytes <= maxBytes);
+  assert.ok(s.calls.get.length <= Math.ceil(maxBytes / one) + 6 + 1, `${s.calls.get.length} transcripts read for a cap that holds ${Math.floor(maxBytes / one)}.`);
+  assert.ok(s.calls.get.length < many / 2, 'Most of the older chats were never read.');
+  assert.equal(answer.hits[0].chat, ids[many - 1], 'The newest chat is the one kept.');
+  s.calls.get.length = 0;
+  await index.search({ q: 'needle' });
+  assert.deepEqual(s.calls.get, [], 'Chats left out are not read again on the next search.');
+  // A chat that changes while the index is full is read, and still fits.
+  s.set(ids[many - 1], jsonl([{ role: 'user', text: `needle changed ${'z'.repeat(200)}`, at: at(1) }]), Date.parse(at(9)));
+  await index.search({ q: 'needle' });
+  assert.deepEqual(s.calls.get, [ids[many - 1]], 'A warm search reads the one that changed.');
+  assert.ok(index.stats().bytes <= maxBytes);
+});
+
 test('state: a trashed chat is left out, an archived one is marked, a rename wins', async () => {
   const s = stub({ [A]: jsonl([{ role: 'user', text: 'alpha one', at: at(1) }]), [B]: jsonl([{ role: 'user', text: 'alpha two', at: at(1) }]), [C]: jsonl([{ role: 'user', text: 'alpha three', at: at(1) }]) });
   const state = { chats: { [A]: { trashed: at(3) }, [B]: { archived: at(3), title: 'Renamed' } } };
