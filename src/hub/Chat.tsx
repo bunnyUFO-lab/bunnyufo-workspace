@@ -5,7 +5,7 @@ import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
-import { ROUTE_EVENT, afterPop, back, direction, entrySerial, skipGone, swap } from '../lib/entries'
+import { ROUTE_EVENT, afterPop, back, direction, entryBelowSerial, entrySerial, overlayDepth, skipGone, swap } from '../lib/entries'
 import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
@@ -236,7 +236,8 @@ function ChatScreen({ id }: { id?: string }) {
   const [wantedAt, setWantedAt] = useState(0)   // the history entry that has the start waiting
   const waiting = !target.id && !place && (!!peekChatStart() || !!peekAsk())
   if (waiting && wantedAt !== entrySerial()) setWantedAt(entrySerial())
-  const wanted = wantedAt !== 0 && wantedAt === entrySerial()
+  // A sheet open over the thread (the options) is an entry of its own: the start is still wanted on the entry beneath it, or a late read of the list would redraw the screen as the list and close the sheet.
+  const wanted = wantedAt !== 0 && (wantedAt === entrySerial() || (overlayDepth(window.location.hash) > 0 && wantedAt === entryBelowSerial()))
   useEffect(() => {
     const want = () => { if (!target.id && !place) setWantedAt(entrySerial()) }
     const offStart = onChatStart(want)

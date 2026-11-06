@@ -149,12 +149,19 @@ try {
   for (const button of await phone.locator('[data-decision="d1"] [data-verdict-btn]').all()) assert.ok((await button.boundingBox()).height >= 44, 'A verdict button is at least 44 px high.');
   await shot(phone, 'change-list-ask-phone');
   await phone.goto(`${fx.url}#/~hub/map/wayfind`);
+  await phone.locator('[data-plan-in-hermes]').waitFor();
+  // The chat list and the team arrive late, as on a slow phone: the Chat screen redraws after the options sheet is open, and the
+  // sheet (an entry of its own) must survive that.
+  await phone.route(/\/api\/hub\/(chat|team)(\?.*)?$/, async route => { await new Promise(resolve => setTimeout(resolve, 2500)); await route.continue(); });
   await phone.locator('[data-plan-in-hermes]').tap();
   await phone.waitForURL(/#\/~hub\/chat$/);
   // The thread has mounted and taken the start once the draft is in the composer; a sheet opened before that is closed again by the remount.
   await phone.waitForFunction(() => /^I want to plan/.test(document.querySelector('textarea[aria-label="Message"]')?.value ?? ''));
   await openChatSheet(phone);
+  await phone.waitForFunction(() => document.querySelector('[data-chat-persona]')?.options?.length > 1);
   assert.equal(await phone.locator('[data-chat-persona]').inputValue(), 'planner');
+  assert.equal(await phone.locator('[data-chat-sheet]').count(), 1, 'The sheet is still open after the list arrived.');
+  assert.equal(await phone.locator('textarea[aria-label="Message"]').count(), 1, 'And the thread is still on screen.');
   await noSideways(phone, 'Chat with the Planner at 390');
   await closeChatSheet(phone);
   await shot(phone, 'chat-planner-phone');

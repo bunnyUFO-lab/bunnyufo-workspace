@@ -111,6 +111,9 @@ export function skipGone(parent: string) {
 /** The tab's serial now, for the things kept against an entry. */
 export const entrySerial = () => currentSerial
 
+/** The serial of the entry before this one: under a sheet's entry, the screen the sheet is open over. */
+export const entryBelowSerial = () => previousSerial
+
 const MEMO_KEEP = 100
 const memo = new Map<string, unknown>()
 const memoOrder: number[] = []
