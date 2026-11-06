@@ -22,6 +22,7 @@ import {
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
 import { buildMap, isWayfinderQuestion } from './hub-map.mjs';
+import { projectSummary } from './hub-project-summary.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
 import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState, NOT_YET, REASON_MAX } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
@@ -77,7 +78,7 @@ const POOL = 16;
 const APPLY_WRITER = 'apply-action';
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team(?:\/skills)?|events|search-text|chat\/search|unasked|map\/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|project-summary|team(?:\/skills)?|events|search-text|chat\/search|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -1924,6 +1925,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             });
           } else if (route === '/hub/projects') {
             reply({ projects: await projects(at) });
+          } else if (route === '/hub/project-summary') {
+            // The Projects list: done of all and the milestone in hand, for every project with a Beads copy. One listing, the copies read once each, the marks listed once.
+            const [rows, marks] = await Promise.all([beadRows(), loadMarks()]);
+            const loaded = await pool(POOL, rows, async row => ({ id: row.id, ...(await loadBeads(row.id)) }));
+            reply({ projects: loaded.map(row => projectSummary({ project: row.id, meta: row.meta, issues: applyMarks(row.issues, marks, row.id), now: at })), at: at.toISOString() });
           } else if (route === '/hub/work') {
             const lane = query.get('lane');
             if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at))); } else {

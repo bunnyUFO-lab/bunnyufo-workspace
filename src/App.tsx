@@ -37,8 +37,8 @@ const HubScreen = lazy(() => import('./hub/HubScreen'))
 const WebView = lazy(() => import('./components/WebView'))
 const Settings = lazy(() => import('./hub/Settings'))
 
-/** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`), a project page's tab (`project/<id>/<tab>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. Work keeps it for every address: the board remounts itself when the resolved board changes (Board.tsx). */
-const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'chat' ? { ...hub, id: parseChatId(hub.id).id } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+/** A Hub screen is remounted when its address changes, except a chat's message line (`chat/<id>/m/<line>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. Work keeps it for every address: the board remounts itself when the resolved board changes (Board.tsx). Projects keep it for every project, tab and map address (the Projects list stays put, and the page keys itself on the project), so List and Map never reload the model. */
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' || hub.screen === 'map' || hub.screen === 'project' ? { screen: hub.screen === 'work' ? 'work' : 'project' } : hub.screen === 'chat' ? { ...hub, id: parseChatId(hub.id).id } : hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
 /**
  * The route in the address. An old or wrong address (an old Hub screen name, an empty hash, a leftover sheet marker) is rewritten
@@ -49,8 +49,6 @@ function readRoute(first = false): Route {
   const target = canonicalAddress({
     pathname: window.location.pathname, hash: window.location.hash, hub: host.hub, routes: host.routes,
     first, overlayOpen: hasOverlay(),
-    // The project page's Work and Cards tabs arrive with item 9; until then its old tab names stand.
-    projectTabs: false,
   })
   if (target) {
     const at = target.indexOf('#')
@@ -78,7 +76,6 @@ const DETAIL: Partial<Record<HubScreen, { title: string; parent: string }>> = {
   team: { title: 'Team', parent: hubHash('today') },
   agent: { title: 'Team', parent: hubHash('team') },
   'agent-edit': { title: 'Team', parent: hubHash('team') },
-  map: { title: 'Roadmap', parent: hubHash('project') },
   sketch: { title: 'Sketch', parent: hubHash('today') },
   settings: { title: 'Settings', parent: homeAddress() },
 }
@@ -352,7 +349,7 @@ export default function App() {
   const showSettings = hubScreen === 'settings'
   const detail = entity || !view.hub ? null
     : showSettings ? DETAIL.settings
-      : host.hub ? (hubScreen === 'project' && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen ? DETAIL[hubScreen] : undefined)
+      : host.hub ? ((hubScreen === 'project' || hubScreen === 'map') && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen ? DETAIL[hubScreen] : undefined)
         : undefined
   // The list is the Library: the screen itself where no card is open, and beside an open card on a desktop (unless folded).
   const libraryScreen = !hubOnly && !showSettings

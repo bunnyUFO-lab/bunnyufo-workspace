@@ -4,7 +4,7 @@ import { hubHash, type HubScreen, type NavId } from './route.ts'
 /** The Hub's screens the search lists under "Go to", in order: [screen, label, icon]. Sketch needs writes and Chat needs the assistant. */
 export function hubRows(caps: Pick<HostCapabilities, 'write' | 'chat'>): [HubScreen, string, string][] {
   const rows: [HubScreen, string, string, boolean][] = [
-    ['today', 'Today', '☀', true], ['needs', 'Needs you', '✉', true], ['work', 'Work', '▦', true], ['team', 'Team', '☺', true], ['project', 'Projects', '◧', true], ['map', 'Roadmap', '◈', true],
+    ['today', 'Today', '☀', true], ['needs', 'Needs you', '✉', true], ['work', 'Work', '▦', true], ['team', 'Team', '☺', true], ['project', 'Projects', '◧', true],
     ['sketch', 'Sketch', '✎', caps.write], ['chat', 'Chat', '☁', caps.chat],
   ]
   return rows.filter(row => row[3]).map(([screen, label, icon]) => [screen, label, icon])

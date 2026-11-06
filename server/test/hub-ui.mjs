@@ -69,7 +69,7 @@ const stillNode = (page, id) => page.waitForFunction(selector => new Promise(res
   requestAnimationFrame(() => requestAnimationFrame(() => resolve(first !== '' && rect() === first)));
 }), `[data-node="${id}"] > circle`);
 try {
-  const page = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
+  const page = await open({ width: 1600, height: 900 }, { reducedMotion: 'reduce' });
   await page.goto(fixture.url);
 
   step('a card whose id is hub still opens');
@@ -267,7 +267,7 @@ try {
   assert.equal(await old.evaluate(() => location.hash), '#/~hub/work');
   assert.match(await old.locator('.hub h2').first().innerText(), /^Work/);
   await go(old, '#/~hub/roadmap/magic-loops');
-  await old.locator('.hub[data-screen="map"]').waitFor();
+  await old.locator('.pp[data-view="map"]').waitFor();
   assert.equal(await old.evaluate(() => location.hash), '#/~hub/map/magic-loops');
   await go(old, `#/~hub/ask/${FIXTURE_ASK}`);
   await old.locator('.hub[data-screen="ask"]').waitFor();
@@ -504,7 +504,7 @@ try {
   await page.waitForTimeout(400);
   const [cleared, side, frame] = await Promise.all([page.locator('[data-node="ml-m3"] > circle').first().boundingBox(), panel.boundingBox(), page.locator('.hub-map-box').boundingBox()]);
   assert.ok(cleared.x + cleared.width <= side.x, `The node is clear of the panel (${cleared.x + cleared.width} > ${side.x}).`);
-  assert.ok(cleared.x >= frame.x && cleared.y >= frame.y && cleared.y + cleared.height <= frame.y + frame.height, 'The node is inside the box.');
+  assert.ok(cleared.x >= frame.x && cleared.y >= frame.y && cleared.y + cleared.height <= frame.y + frame.height, `The node is inside the box (${JSON.stringify([cleared, frame])}).`);
   await page.keyboard.press('Escape');
   await panel.waitFor({ state: 'detached' });
   await page.locator('button:has-text("Collapse")').click();
@@ -567,7 +567,7 @@ try {
   await page.route('**/api/hub/map/*', async route => { await new Promise(resolve => setTimeout(resolve, 800)); await route.continue(); });
   await page.reload();   // nosprint was visited above: a reload makes this a first visit (the last answer is kept in memory)
   await go(page, '#/~hub/map/nosprint');
-  await page.locator('.hub-empty', { hasText: 'Loading…' }).waitFor();
+  await page.locator('.hub-mapview .hub-empty', { hasText: 'Loading…' }).waitFor();
   await page.locator('.hub-map-box svg').waitFor();
   await page.unroute('**/api/hub/map/*');
   await go(page, '#/~hub/map/magic-loops');
@@ -842,22 +842,18 @@ try {
   assert.ok(tall.axis === 'y' && tall.h > tall.w, `The map is taller than it is wide, and vertical (${tall.axis}, ${tall.w} x ${tall.h}).`);
   await noSideways(phone, 'Progress map');
   const tops = await phone.evaluate(() => ({
-    // At phone width the project picker is one native select (ws-ubo.2.1): it shares its top with the Runs on chip.
-    select: Math.round(document.querySelector('.hub-map-chips select').getBoundingClientRect().top),
-    runs: Math.round(document.querySelector('.hub-map-chips .hub-runs')?.getBoundingClientRect().top ?? NaN),
     bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
-  assert.ok(Number.isNaN(tops.runs) || Math.abs(tops.select - tops.runs) <= 12, `The select and the Runs on chip share a row (${tops.select} vs ${tops.runs}).`);
   assert.ok(tops.bar.length >= 6, `The toolbar has its buttons (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap .hub-map-controls').count(), 0, 'The toolbar is a row of its own, not an overlay inside the map.');
   const place = await phone.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const bar = rect('.hub-map-controls');
     const sizes = [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().height));
-    return { chipsBottom: rect('.hub-map-chips').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, wayTop: document.querySelector('.hub-wayfinder')?.getBoundingClientRect().top ?? null, width: innerWidth, sizes };
+    return { chipsBottom: rect('.pp-switch').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, wayTop: document.querySelector('.hub-wayfinder')?.getBoundingClientRect().top ?? null, width: innerWidth, sizes };
   });
-  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 20, `The control bar is directly under the project chips (${place.chipsBottom} to ${place.barTop}).`);
+  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 20, `The control bar is directly under the project's List and Map switch (${place.chipsBottom} to ${place.barTop}).`);
   assert.ok(place.barBottom <= place.boxTop + 1, `and above the map, which it does not cover (${place.barBottom} vs ${place.boxTop}).`);
   if (place.wayTop !== null) assert.ok(place.barBottom <= place.wayTop + 1, `and above the Destination row (${place.barBottom} vs ${place.wayTop}).`);
   assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar wraps.');
@@ -945,20 +941,21 @@ try {
   await big.waitForTimeout(400);
   const bigLayout = await big.evaluate(() => {
     const hub = document.querySelector('.hub');
+    const view = document.querySelector('.hub-mapview');
     const rect = element => element.getBoundingClientRect();
     const box = rect(document.querySelector('.hub-map-box'));
     const chips = rect(document.querySelector('.hub-map-search'));
     const inner = rect(hub);
-    const above = [...hub.children].filter(child => child.getBoundingClientRect().bottom <= box.top + 1 && getComputedStyle(child).position !== 'absolute').map(child => child.className);
+    const above = [...view.children].filter(child => child.getBoundingClientRect().bottom <= box.top + 1 && getComputedStyle(child).position !== 'absolute').map(child => child.className);
     return {
-      scroll: hub.scrollHeight - hub.clientHeight, boxBottom: box.bottom, hubBottom: inner.bottom, boxWidth: box.width, hubWidth: hub.clientWidth,
+      scroll: hub.scrollHeight - hub.clientHeight, boxBottom: box.bottom, hubBottom: inner.bottom, boxWidth: box.width, hubWidth: document.querySelector('.ui-pane-detail').clientWidth,
       above, chipsGap: box.top - chips.bottom, k: Number(document.querySelector('.hub-map-box').dataset.view.split(',')[2]),
     };
   });
   assert.ok(bigLayout.scroll <= 1, `The Hub does not scroll (${bigLayout.scroll}).`);
   assert.ok(Math.abs(bigLayout.boxBottom - (bigLayout.hubBottom - 8)) <= 10, `The box reaches the bottom (${bigLayout.boxBottom} vs ${bigLayout.hubBottom}).`);
-  assert.ok(bigLayout.boxWidth >= bigLayout.hubWidth - 20, `The box is as wide as the screen (${bigLayout.boxWidth} of ${bigLayout.hubWidth}).`);
-  assert.deepEqual(bigLayout.above, ['hub-map-chips', 'hub-map-controls', 'hub-map-search'], 'Only the project chips row, the control bar and the search row sit above the box.');
+  assert.ok(bigLayout.boxWidth >= bigLayout.hubWidth - 20, `The box is as wide as the project's pane (${bigLayout.boxWidth} of ${bigLayout.hubWidth}).`);
+  assert.deepEqual(bigLayout.above, ['hub-map-controls', 'hub-map-search'], 'Only the control bar and the search row sit above the box, inside the map view.');
   assert.ok(bigLayout.chipsGap <= 12, `The box follows the search row (${bigLayout.chipsGap}).`);
   assert.ok(bigLayout.k > 1, `The first view enlarges the map (${bigLayout.k}).`);
   await noSideways(big, 'Progress map at 1920');
@@ -982,18 +979,6 @@ try {
   });
   assert.ok(small390.scroll <= 1, `The Hub does not scroll (${small390.scroll}).`);
   assert.ok(Math.abs(small390.box - (small390.tabs - 8)) <= 10, `The box reaches the tab bar (${small390.box} vs ${small390.tabs}).`);
-  // ws-im1.3.1: `Project ›` sits in the chips row at chip height, so the box under it does not move; its 44 px target hangs outside.
-  const link = phone.locator('.hub-map-chips [data-project-link]');
-  const withLink = await phone.evaluate(() => ({ top: document.querySelector('.hub-map-box').getBoundingClientRect().top, chips: document.querySelector('.hub-map-chips').getBoundingClientRect().height, link: document.querySelector('.hub-map-chips [data-project-link]').getBoundingClientRect().height }));
-  assert.equal(await link.count(), 1, 'The Roadmap has a Project link in its chips row.');
-  const without = await phone.evaluate(() => { const element = document.querySelector('.hub-map-chips [data-project-link]'); element.style.display = 'none'; const top = document.querySelector('.hub-map-box').getBoundingClientRect().top; element.style.display = ''; return top; });
-  assert.ok(Math.abs(withLink.top - without) <= 1, `The map box does not move for the link (${withLink.top} vs ${without}).`);
-  assert.ok(withLink.link < 40, `The link is chip height (${withLink.link}).`);
-  const where = await link.boundingBox();
-  for (const dy of [-20, 20]) {
-    const hit = await phone.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('[data-project-link]')?.getAttribute('data-project-link') ?? null, [where.x + where.width / 2, where.y + where.height / 2 + dy]);
-    assert.equal(hit, 'magic-loops', `A tap ${dy} px from the link's centre still hits it.`);
-  }
   assert.equal(await phone.locator('.hub-map-box').getAttribute('data-axis'), 'y', 'The phone map stays vertical.');
   await phone.locator('.hub-map-controls button:has-text("Key")').tap();
   const legendBox = await phone.locator('.hub-legend').boundingBox();

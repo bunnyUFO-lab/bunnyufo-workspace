@@ -58,14 +58,14 @@ export function hubHash(screen: HubScreen, id?: string): string {
   return id ? `#/~hub/${screen}/${encodeURIComponent(id)}` : `#/~hub/${screen}`
 }
 
-/** `#/~hub/project[/<id>[/<tab>]]`: a project's page. No tab is the Roadmap tab; `running`, `needs` and `library` are the others. No id is the project last chosen. */
+/** `#/~hub/project[/<id>[/<tab>]]`: a project's page. No tab is the Roadmap tab; `work` and `cards` are the others. No id is the Projects list. */
 export function projectHash(id?: string, tab?: string): string {
   if (!id) return '#/~hub/project'
   const base = `#/~hub/project/${encodeURIComponent(id)}`
   return tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base
 }
 
-/** The project id, the raw tab and, on the Roadmap tab, the node whose details are open, out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the four. */
+/** The project id, the raw tab and, on the Roadmap tab, the node whose details are open, out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the three. */
 export function parseProjectId(id: string | undefined): { project?: string; tab?: string; node?: string } {
   if (!id) return {}
   const [project, tab, ...rest] = id.split('/')

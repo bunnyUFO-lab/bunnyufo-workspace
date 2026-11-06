@@ -1,55 +1,66 @@
-/* A project's page. Loaded after today.css; the page wears `.today` for the panel and row looks. Every control is 44 px high. */
-.pp-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 16px; }
-.pp-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
-.pp-name .today-eyebrow { flex: 1 0 100%; }
-.hub .pp-title { font-family: var(--font); font-size: 34px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin: 0; overflow-wrap: anywhere; }
-.pp .hub-runs { min-height: 44px; display: inline-flex; align-items: center; }
-.pp-do { margin-left: auto; min-width: 0; }
-.pp-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.pp-actions .hub-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
-.pp-note { margin: 8px 0 0; max-width: 46ch; text-align: right; }
-.pp .hub-chip { min-height: 44px; display: inline-flex; align-items: center; }
-.pp .hub-chips-wrap { margin-bottom: 4px; }
-@media (max-width: 640px) { .pp .hub-project-pick { margin-bottom: 4px; } }
-.pp-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; margin-top: 4px; }
-.pp-tabs::-webkit-scrollbar { display: none; }
-.pp-tabs .wk-tab { min-height: 44px; display: inline-flex; align-items: center; flex: none; white-space: nowrap; }
-@media (max-width: 640px) {
-  .pp-tabs-row { display: flex; flex-wrap: wrap; align-items: stretch; margin: 4px 0 14px; border-bottom: 1px solid var(--line); }
-  .pp-tabs-row .pp-tabs { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; margin: 0; overflow: visible; border-bottom: 0; }
-  .pp-tabs-row .wk-tab { flex: 0 1 auto; min-width: 0; padding-inline: 10px; white-space: normal; overflow-wrap: anywhere; }
-  .item-menu-button.pp-more { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 44px; max-width: 100%; margin-left: auto; padding: 8px 10px; font-size: 13px; font-weight: 500; line-height: normal; color: var(--t3); white-space: nowrap; }
-  .item-menu-button.pp-more:hover, .item-menu-button.pp-more[aria-expanded="true"] { color: var(--t1); background: none; }
-  .item-menu-button.pp-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-}
+/* The Projects list and a project's page. Tokens only. Loaded after today.css; the page wears `.today` for the panel and row looks.
+   Every control is 44 px high. The page is a column: header and tabs stay, the body scrolls (the Map view fills what is left). */
+.pj-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 32px; }
+.pj-scroll .hub-empty { padding-inline: 2px; }
+.pj-row { min-height: 76px; }
+.pj-row .pp-ring { width: 48px; height: 48px; }
+.pj-now { white-space: nowrap; }
+.pj-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.pj-pill { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--s3); color: var(--t2); font-size: 12px; font-weight: 550; }
+.pj-pill.warn { background: color-mix(in srgb, var(--st-needs) 16%, transparent); color: var(--st-needs); }
+.pj-pill.live { background: color-mix(in srgb, var(--st-working) 16%, transparent); color: var(--st-working); }
+.pj-chev { flex: none; display: flex; color: var(--t3); }
+.pj-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pj-tile { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 76px; padding: 12px 14px; border-radius: 14px; background: var(--s1); color: var(--t1); text-decoration: none; }
+.pj-tile:hover { background: var(--s2); }
+.pj-tile b { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.pj-tile small { color: var(--t3); }
+.pj-tile:focus-visible, .ui-row:focus-visible, .pj-ms-head:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.pp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
-.pp-body[data-side="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 340px); }
-.pp-main, .pp-side { min-width: 0; }
-.pp .hub-panel { background: var(--s1); border-color: var(--line); border-radius: var(--r3); padding: 18px; margin-bottom: 0; }
-.pp-side > .hub-panel + p { margin: 10px 2px 0; }
+.pp { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.pp-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px 4px; }
+.pp-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; flex: 1 1 auto; }
+.hub .pp-title { font-family: var(--font); font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin: 0; overflow-wrap: anywhere; }
+.pp .hub-runs { min-height: 44px; display: inline-flex; align-items: center; }
+.pp-sub { flex: 1 0 100%; margin: 0; color: var(--t2); }
+.pp-actions { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+.pp-actions .hub-btn, .pp-actions .ui-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.pp-note { margin: 8px 0 0; max-width: 46ch; }
+.pp-nav { flex: none; display: flex; flex-direction: column; }
+.pp-tabs { flex: none; margin: 8px 16px 8px; }
+.pp-switch { flex: none; margin: 0 16px 8px; max-width: 220px; }
+.pp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 32px; }
+.pp-main { min-width: 0; }
+.pp .hub-panel { background: var(--s1); border-color: var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
 .pp-foot { margin: 12px 0 0; }
-.pp-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--pink-bright); text-decoration: none; font-size: 0.85rem; }
+.pp-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); text-decoration: none; font-size: 0.85rem; }
 .pp-link:hover { text-decoration: underline; }
 .pp-link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
-
-.pp-list { list-style: none; margin: 0; padding: 0; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r3); }
-.pp-ms { display: flex; gap: 16px; align-items: center; padding: 16px 18px; }
-.pp-ms + .pp-ms { border-top: 1px solid var(--line); }
-.pp-ring { flex: none; width: 56px; height: 56px; }
+.pp-ring { flex: none; width: 52px; height: 52px; }
 .pp-ring text { font: 600 12px var(--mono); fill: var(--t1); font-variant-numeric: tabular-nums; }
-.pp-ms-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.pp-ms-title { color: var(--t1); font-weight: 600; font-size: 0.95rem; text-decoration: none; overflow-wrap: anywhere; }
-.pp-ms-title:hover { text-decoration: underline; }
-.pp-ms-count { font-size: 12px; color: var(--t3); }
-.pp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.pp-chip { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-pill, 999px); border: 1px solid color-mix(in srgb, var(--chip, var(--t3)) 40%, transparent); background: color-mix(in srgb, var(--chip, var(--t3)) 12%, transparent); color: var(--chip, var(--t2)); font: 12px var(--mono); text-decoration: none; white-space: nowrap; }
-a.pp-chip:hover { border-color: var(--chip, var(--t3)); }
-a.pp-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.pp-chip.more { color: var(--t3); border-color: var(--line); background: none; }
-.pp-finished { margin-top: 12px; }
-.pp-finished > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--t2); font-size: 0.85rem; }
-.pp-finished > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
+
+/* The Roadmap list */
+.pj-now-block { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 6px 8px 6px 14px; margin-bottom: 12px; border-radius: 14px; background: var(--s1); }
+.pj-now-block small { color: var(--t3); }
+.pj-now-block b { display: block; font-weight: 600; }
+.pj-now-block .ui-btn { flex: none; text-decoration: none; }
+.pj-ms { margin-bottom: 8px; border-radius: 14px; background: var(--s1); overflow: hidden; }
+.pj-ms-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 8px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.pj-ms-head:hover { background: var(--s2); }
+.pj-ms-head .ui-row-body b { display: block; font-weight: 600; }
+.pj-ms-head .ui-row-body small { display: block; color: var(--t3); margin-top: 2px; }
+.pj-ms.open > .pj-ms-head .pj-chev, .pj-done[data-open="true"] > .pj-ms-head .pj-chev { transform: rotate(90deg); }
+.pj-tasks { border-radius: 0; box-shadow: inset 0 1px 0 var(--line); }
+.pj-task { min-height: 56px; }
+.pj-task b { font-weight: 500; }
+.pj-more { color: var(--accent); }
+.pj-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--st-idle); }
+.pj-dot.done { background: var(--st-done); }
+.pj-dot.working { background: var(--st-working); }
+.pj-dot.needs { background: var(--st-needs); }
+.pj-done { margin-top: 12px; }
+.pj-done-head { min-height: 52px; border-radius: 14px; background: var(--s1); }
+.pj-done > .pj-ms { margin-top: 8px; }
 
 .pp-cards { list-style: none; margin: 0; padding: 0; }
 .pp-cards li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 0; }
@@ -58,24 +69,23 @@ a.pp-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pp-cards a:hover { text-decoration: underline; }
 .pp-cards small { flex: none; color: var(--t3); font-size: 12px; }
 
-@media (max-width: 760px) {
-  .hub .pp-title { font-size: 28px; }
-  .pp-do { margin-left: 0; flex: 1 1 100%; }
-  .pp-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .pp-actions .hub-btn { white-space: normal; text-align: center; padding-inline: 6px; line-height: 1.2; }
-  .pp-note { text-align: left; max-width: none; }
-  .pp-ms { padding: 14px; gap: 12px; }
-  .pp-chip { min-height: 44px; }
-  .pp-ms-title { display: inline-flex; align-items: center; min-height: 44px; }
+@media (min-width: 900px) {
+  .pp-head, .pp-tabs, .pp-switch, .pp-body { padding-inline: 24px; }
+  .pp-tabs, .pp-switch { margin-inline: 24px; padding-inline: 3px; }
+  /* Tabs and the List/Map switch share one row, so the map keeps the height. */
+  .pp-nav { flex-direction: row; align-items: center; padding-right: 24px; }
+  .pp-nav .pp-tabs { flex: 1; min-width: 0; margin-right: 12px; }
+  .pp-nav .pp-switch { flex: none; width: 200px; margin: 8px 0; }
+  .pp-sub, .pp-actions { flex-basis: auto; }
+  .pp-actions { margin-left: auto; }
+  /* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
+  .pp[data-sheet] { padding-right: 436px; }
+  /* The map's own panel (hub.css) covers the right of the screen; the Destination row and its Plan in Hermes button keep clear of it. The map itself stays full width, as it centres a node in what the panel leaves. */
+  .pp[data-map-node] .hub-wayfinder, .pp[data-map-node] .hub-plan-row { margin-right: 396px; }
+  .pp[data-map-node] .hub-wayfinder-row { flex-wrap: wrap; }
 }
 
-/* `Project ›` in the Roadmap's chips row: chip height, so the row and the map box under it do not move. The 44 px target hangs outside, over the row's own padding. */
-.pp-map-link { position: relative; flex: none; white-space: nowrap; padding: 6px 12px; border-radius: var(--radius-pill); background: var(--surface-1); border: 1px solid var(--hairline); font-size: 0.8rem; line-height: normal; color: var(--text-dim); text-decoration: none; }
-.pp-map-link:hover { color: var(--text); }
-.pp-map-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.pp-map-link::after { content: ''; position: absolute; inset: -7px 0; }
-
-/* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
-@media (min-width: 900px) {
-  .pp[data-sheet] { padding-right: 436px; }
+/* The open Wayfinder list takes the height on a phone (else the map box turns wider than tall and flips its axis): the project's name row steps aside while it is open, as the search row does. Likewise for a project with roadmaps: the bar's first crumb already names the project. */
+@media (max-width: 640px) {
+  .pp[data-view="map"]:has(.hub-wayfinder[data-open="true"]) .pp-head, .pp[data-view="map"]:has(.hub-map-branchbar) .pp-head { display: none; }
 }

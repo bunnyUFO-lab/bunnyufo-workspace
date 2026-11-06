@@ -14,7 +14,7 @@ const RUNNING = new Set(['approved', 'taken', 'running', 'stopping', 'lost'])
 const where = (runner?: string) => (runner && runner in RUNNER_LABEL ? RUNNER_LABEL[runner as keyof typeof RUNNER_LABEL] : undefined)
 
 /** A job's row: what it is, who ran it and when, and what it delivered. The whole row opens the job's page. */
-function JobItem({ job }: { job: JobListRow }) {
+export function JobItem({ job }: { job: JobListRow }) {
   const running = RUNNING.has(job.state)
   const when = ago(running ? job.at : job.finishedAt ?? job.at)
   const meta = [job.project, job.agent, where(job.runner), when].filter(Boolean).join(' · ')   // the project and the age tell two jobs with one title apart

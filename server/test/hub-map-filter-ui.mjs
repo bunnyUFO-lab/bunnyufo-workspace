@@ -375,7 +375,7 @@ try {
   const searchWidths = await searchPhone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(searchWidths.scroll <= searchWidths.inner, 'no sideways scroll');
   // hub-ui.mjs guards the same clearance; this faster file fails first when the search row grows.
-  await searchPhone.locator('[data-node="wa-m1"] > circle').tap({ force: true });
+  await searchPhone.locator(`[data-node="${stepped}"] > circle`).first().tap({ force: true });
   const sheetPanel = searchPhone.locator('.hub-map-panel');
   await sheetPanel.waitFor();
   const panelTop = (await sheetPanel.boundingBox()).y;
