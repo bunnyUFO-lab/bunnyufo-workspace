@@ -25,6 +25,7 @@ import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 import { delegatesNote, foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
 import { JOB_LIMITS, SKEW_MS, idsIn, jobIdsOf, jobWindowsOf, splitCreated } from './chat-jobs.mjs';
 import { PAGE_DEFAULT, VIEWS, checkPatch, countPlaces, createChatStateStore, emptyState, orderView, pageOf, pool, viewOfEntry, withPatch } from './chat-state.mjs';
+import { createChatIndex } from './chat-index.mjs';
 import { QUEUE_LIMITS, STALE_MS_DEFAULT, addItem, cancelItem, createQueueStore, holdFor, holdQueue, readQueue, restoreItems, takeItems, tooOld, viewOf } from './chat-queue.mjs';
 
 const MB = 1024 * 1024;
@@ -47,7 +48,7 @@ const historyText = line => [stripInlineImages(line.text), delegatesNote(line)].
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, jobRows = null, approveJob = null, scrub = createScrub(env), log = () => {} }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, pool = (size, items, fn) => Promise.all(items.map(fn)), hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, jobRows = null, approveJob = null, scrub = createScrub(env), log = () => {} }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
@@ -58,6 +59,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   /** What Auto tries first: the label of the model the Hermes host says profile main uses (an export, ws-im1.4.2), else Codex, the app's own default. */
   const autoFirstLabel = async () => (autoFirst ? await autoFirst().catch(() => null) : null) || 'Codex';
   const tableNow = async () => (personas ? await personas() : CHAT_PERSONAS);   // persona:
+
+  // ws-cl0.6.7: the message search index, in memory. `readState` is the seam for ws-cl0.6.6's chat state (`chat/state.json`):
+  // when that lands, pass its reader here and trashed chats leave the results, archived ones are marked, a rename wins.
+  const messageIndex = createChatIndex({ bucket, key, fresh, pool, readState: () => marksNow() });
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 
@@ -1020,6 +1025,14 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
       if (method === 'GET' && route === '/hub/chat') return json(response, 200, { ...await list({ view: query.get('view') ?? 'active', ...pageOf(query) }), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, autoFirst: await autoFirstLabel(), pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
+      if (method === 'GET' && route === '/hub/chat/search') {   // before the generic /hub/chat/<id>
+        const params = new URL(request.url, 'http://hub').searchParams;
+        const q = String(params.get('q') ?? '').trim();
+        if (q.length < 2 || q.length > 200) throw fail('Search needs 2 to 200 characters.', 400);
+        const table = await tableNow();
+        const found = await messageIndex.search({ q, limit: Number(params.get('limit')) || 50 });
+        return json(response, 200, { ...found, hits: found.hits.map(hit => ({ ...hit, persona: storedPersona(hit.persona, table) ? hit.persona : null })) });
+      }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);
