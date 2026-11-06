@@ -1,6 +1,7 @@
 // What Search finds and how it lays it out: pure, so a node test can cover the whole of it with no browser.
 // The rows come from sources the screen has read (cards, items, projects, jobs, agents, chats, Beads text, message hits);
 // nothing here reads a network or `window`.
+import { skillHash } from '../hub/team/skillsModel.ts'
 import { entityHash, hubHash, projectHash, projectNodeHash, reviewHash } from '../lib/route.ts'
 import { rowMatches, snippetOf, words as wordsOf } from '../hub/beadSearch.ts'
 import type { SearchRow } from '../hub/beadSearch.ts'
@@ -60,6 +61,8 @@ export interface Sources {
   projects: { id: string; name?: string }[]
   jobs: JobSource[]
   agents: AgentSource[]
+  /** Skill ids from `/hub/team/skills` (signed in only); empty for a guest. */
+  skills?: string[]
   chats: ChatSource[]
   /** The Beads text rows (`/search-text`), read only while two letters are typed. */
   beads: SearchRow[]
@@ -135,6 +138,7 @@ export function indexRows(sources: Sources, typed: boolean): Hit[] {
     for (const project of sources.projects) out.push({ kind: 'projects', key: project.id, title: project.name || project.id, sub: 'Project', icon: 'project', hash: projectHash(project.id), hay: project.id })
     for (const job of sources.jobs) out.push({ kind: 'jobs', key: job.id, title: job.title, sub: [JOB_STATE(job.state), projectName(sources, job.project)].filter(Boolean).join(' · '), icon: 'job', hash: hubHash('request', job.id), hay: job.agent })
     for (const agent of sources.agents) out.push({ kind: 'team', key: agent.id, title: agent.name, sub: `Agent${agent.role ? ` · ${agent.role}` : ''}`, icon: 'team', hash: hubHash('agent', agent.id), hay: agent.role })
+    for (const skill of sources.skills ?? []) out.push({ kind: 'team', key: `skill:${skill}`, title: skill, sub: 'Skill', icon: 'skill', hash: skillHash(skill), hay: '' })
   }
   return out
 }

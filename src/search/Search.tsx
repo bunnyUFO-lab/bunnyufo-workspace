@@ -4,7 +4,7 @@ import { host } from '../lib/host'
 import { useLibrary } from '../lib/library'
 import { isArchived } from '../library/libraryModel'
 import type { ChatSummary, HubProject, JobsView } from '../lib/hub'
-import type { TeamView } from '../lib/hubTeam'
+import type { TeamSkillsView, TeamView } from '../lib/hubTeam'
 import type { SearchRow } from '../hub/beadSearch'
 import { TodayContext, useHubData } from '../hub/useHub'
 import { openSpawn } from '../hub/spawnStore'
@@ -96,6 +96,8 @@ export default function Search({ desktop, onClose }: {
   const projects = useHubData<{ projects: HubProject[] }>(host.hub ? '/projects' : null)
   const jobs = useHubData<JobsView>(host.hub ? '/jobs' : null)
   const team = useHubData<TeamView>(host.hub ? '/team' : null)
+  // Skills need sign-in: a guest's 401 reads as no skills, and the rest of Search works.
+  const skills = useHubData<TeamSkillsView>(host.hub ? '/team/skills' : null)
   const chats = useHubData<{ conversations: ChatSummary[] }>(host.chat ? '/chat?view=all&limit=100' : null)
   // Tasks and message hits are read only while text is typed, and only where their chip is showing.
   const wantsTasks = host.hub && textTyped && (chip === 'all' || chip === 'tasks')
@@ -130,6 +132,7 @@ export default function Search({ desktop, onClose }: {
   const projectList = useMemo(() => (Array.isArray(projects.data?.projects) ? projects.data!.projects : NONE), [projects.data])
   const jobList = useMemo(() => (Array.isArray(jobs.data?.jobs) ? jobs.data!.jobs : NONE), [jobs.data])
   const agentList = useMemo(() => (Array.isArray(team.data?.agents) ? team.data!.agents : NONE), [team.data])
+  const skillList = useMemo(() => (Array.isArray(skills.data?.skills) ? skills.data!.skills.map(skill => skill.id).filter(id => typeof id === 'string' && id) : NONE), [skills.data])
   const chatList = useMemo(() => (Array.isArray(chats.data?.conversations) ? chats.data!.conversations.map(chat => ({ id: chat.id, title: chat.title, persona: chat.persona ?? null, archived: !!(chat as { archived?: unknown }).archived })) : NONE), [chats.data])
   const beadRows = useMemo(() => (wantsTasks && Array.isArray(beads.data?.rows) ? beads.data!.rows : NONE), [wantsTasks, beads.data])
   const rows = useMemo(() => searchRows({
@@ -139,10 +142,11 @@ export default function Search({ desktop, onClose }: {
     projects: projectList,
     jobs: jobList,
     agents: agentList,
+    skills: skillList,
     chats: chatList,
     beads: beadRows,
     hits,
-  }, q), [cardSources, needsList, projectList, jobList, agentList, chatList, beadRows, hits, q])
+  }, q), [cardSources, needsList, projectList, jobList, agentList, skillList, chatList, beadRows, hits, q])
   const counts = useMemo(() => countsOf(rows), [rows])
   const needs = needsList.length
 

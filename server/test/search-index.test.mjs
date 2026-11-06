@@ -155,3 +155,12 @@ test('Recent keeps the last six, newest first, one per address, and ignores a va
   assert.deepEqual(readRecent(null), []);
   assert.doesNotThrow(() => pushRecent({ getItem: () => null, setItem: () => { throw new Error('blocked'); } }, { title: 'a', sub: '', icon: 'card', hash: '#/a' }));
 });
+
+test('a skill is a Team row that opens its page, with a slash in its id encoded', () => {
+  const rows = searchRows(sources({ skills: ['plan-work', 'github/pr-review'] }), 'review');
+  const skill = rows.find(row => row.title === 'github/pr-review');
+  assert.equal(skill.kind, 'team');
+  assert.equal(skill.sub, 'Skill');
+  assert.equal(skill.hash, '#/~hub/team/skills/github%2Fpr-review');
+  assert.ok(!titles(searchRows(sources(), 'plan-work')).includes('plan-work'), 'A guest has no skills, so none are found.');
+});
