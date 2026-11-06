@@ -370,15 +370,8 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
 .hub-sketch-big { max-height: 360px; aspect-ratio: auto; background: #fff; }
 .hub-row-button { width: 100%; background: none; border: 0; border-top: 1px solid var(--hairline); color: inherit; font: inherit; text-align: left; cursor: pointer; }
 
-/* Chat: the conversation list and the messages side by side; on a phone the list is a drawer. */
-.hub:has(.hub-chat) { max-width: 1100px; }
-.hub-chat { display: grid; grid-template-columns: 240px 1fr; gap: 14px; height: calc(100% - 8px); min-height: 420px; position: relative; }
-.hub-chat-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-width: 0; }
-.hub-chat-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius); text-decoration: none; border: 1px solid transparent; font-size: 0.85rem; overflow-wrap: anywhere; }
-.hub-chat-item:hover { background: var(--surface-2); }
-.hub-chat-item.on { background: var(--pink-dim); border-color: var(--pink); }
+/* Chat: the list and the thread (chatList.css has the panes). */
 .hub-chat-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.hub-chat-toggle { display: none; }
 .hub-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; min-height: 160px; }
 .hub-bubble { max-width: 88%; padding: 9px 13px; border-radius: var(--radius-lg); background: var(--surface-2); overflow-wrap: anywhere; font-size: 0.9rem; }
 .hub-bubble p { margin: 0; }
@@ -415,10 +408,6 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
 .hub-aloud { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 
 @media (max-width: 720px) {
-  .hub-chat { grid-template-columns: 1fr; }
-  .hub-chat-toggle { display: inline-flex; }
-  .hub-chat-list { display: none; position: absolute; z-index: 5; top: 52px; left: 0; right: 0; max-height: 65%; padding: 10px; background: var(--surface-solid); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
-  .hub-chat.drawer .hub-chat-list { display: flex; }
   .hub-tray { gap: 16px; }
   .hub-tray-remove { top: -16px; right: -16px; width: 44px; height: 44px; }
   .hub-bubble-images > * { flex: 1 1 calc(50% - 3px); min-width: 0; }

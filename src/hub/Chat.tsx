@@ -1,10 +1,12 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatListAnswer, ChatMarks, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
+import { afterPop, back, skipGone } from '../lib/entries'
+import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
@@ -26,8 +28,14 @@ import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
 import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
-import { AgentSprite } from './team/AgentSprite'
-import { chooseModel, pauseNote, type ChatPause } from './chatModel'
+import Who from './ChatWho'
+import ChatList, { ChatSetAside, RenameSheet } from './ChatList'
+import { chatMenu, onChatMarks, restoreChat, setChatMarks, wasDeletedHere } from './chatActions'
+import { Sheet } from '../ui/Sheet'
+import RowMenu from '../ui/RowMenu'
+import { IconButton } from '../ui/Controls'
+import type { HubData } from './useHub'
+import { chooseModel, pauseNote } from './chatModel'
 import { MAX_MISSES, hasRunningDelegate, nextLookMs, replySaved, sameLines, type ChatAnswer } from './chatWatch'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
 
@@ -37,12 +45,6 @@ const AUTO = 'auto'
 const HERMES = 'hermes'   // persona: no persona, Hermes itself
 
 /** What the tags call a model: its label, or the bare id when the server no longer lists it. */
-/** When a conversation was last used, in the Hub's clock: the time today, the date and time before. */
-const when = (iso: string) => {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toDateString() === new Date().toDateString() ? clock(iso) : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock(iso)}`
-}
 /** A time in a pause note: the time today, with the weekday when it falls on another day. */
 const pauseWhen = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : `${new Date(iso).toLocaleDateString([], { weekday: 'short' })} ${clock(iso)}`)
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
@@ -181,12 +183,6 @@ function HelpBanner({ about, text, pictures }: { about: { kind: HelpKind; id: st
   )
 }
 
-/** persona: the agent's own sprite from the Team, else a name-seeded one while the Team loads or when it is off. */
-function Who({ id, name, agents, size, bare }: { id: string; name: string; agents: TeamAgent[]; size: number; bare?: boolean }) {
-  const sprite = agents.find(agent => agent.id === id)?.sprite ?? { kind: 'random' as const, salt: 0, name }
-  return <span className="hub-who" data-who={id}><AgentSprite sprite={sprite} size={size} title={name} />{!bare && <span className="hub-who-name">{name}</span>}</span>
-}
-
 /** The owner's own words as typed, with any fenced block shown as code (and its Copy button) instead of its backticks. */
 function OwnerText({ text }: { text: string }) {
   return (
@@ -220,17 +216,38 @@ function Bubble({ line, index, conversation, models, who, agents, jobs, onJobsCh
 
 export default function Chat({ id }: { id?: string }) {
   if (!host.chat) return <p className="hub-empty">Chat is not set up on this host.</p>
-  const target = parseChatId(id)
-  return <ChatShell id={target.id} line={target.line} />
+  return <ChatScreen id={id} />
+}
+
+/**
+ * The Chat screen. A phone shows one pane: the list at `chat`, a thread at `chat/<id>`, or the Archived and Trash lists. From 900 px
+ * the list stays on the left and the thread (or one of those lists) fills the right. Only the panes that show are mounted.
+ */
+function ChatScreen({ id }: { id?: string }) {
+  const desktop = useIsDesktop()
+  const list = useHubData<ChatListAnswer>('/chat')
+  const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker, the header and the rows
+  const agents = team.data?.agents ?? []
+  const place = id === 'archived' || id === 'trash' ? id : null
+  const target = parseChatId(place ? undefined : id)
+  const thread = <ChatShell id={target.id} line={target.line} list={list} team={team} />
+  const setAside = place ? <ChatSetAside view={place} agents={agents} personas={list.data?.personas ?? []} models={list.data?.models ?? []} /> : null
+  const showList = desktop || (!place && target.id === undefined)
+  return (
+    <div className="hub-chat" data-chat-screen={place ?? (target.id ? 'thread' : 'list')}>
+      {showList && <aside className="hub-chat-pane list" aria-label="Conversations"><ChatList list={list} agents={agents} activeId={target.id} /></aside>}
+      {setAside ? <section className="hub-chat-pane main">{setAside}</section> : (desktop || target.id !== undefined) && thread}
+    </div>
+  )
 }
 
 // A start from Spawn always lands in a fresh conversation. On a new Chat that is already showing (it may be empty, or busy with a
 // reply that is still streaming) the view is remounted, so it opens like New chat does: the agent's own model, no earlier pick,
 // the text as a draft. On a stored conversation the address change to a new chat remounts it anyway.
-function ChatShell({ id, line }: { id?: string; line?: number }) {
+function ChatShell({ id, line, list, team }: { id?: string; line?: number; list: HubData<ChatListAnswer>; team: HubData<TeamView> }) {
   const [fresh, setFresh] = useState(0)
   useEffect(() => onChatStart(() => { if (!id) setFresh(count => count + 1) }), [id])
-  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} line={line} />
+  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} line={line} list={list} team={team} />
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
@@ -249,11 +266,9 @@ const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is 
 const HELD_WHY: Record<NonNullable<ChatQueued['why']>, string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long', old: 'this waited too long', joined: 'it joined messages that were held' }
 const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
-function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
+function ChatView({ id, line: landLine, list, team }: { id?: string; line?: number; list: HubData<ChatListAnswer>; team: HubData<TeamView> }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
-  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[]; autoFirst?: string }>('/chat')
-  const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
   // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
   const [start] = useState(() => (id || help ? null : peekChatStart()))
   const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : start?.persona ?? HERMES] })
@@ -303,9 +318,11 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
   const afterRef = useRef<(name: string) => Promise<void>>(async () => {})
   const followRef = useRef<(name: string, answer: ChatAnswer) => Promise<void>>(async () => {})
   const [note, setNote] = useState<string | null>(null)
+  const [marks, setMarks] = useState<ChatMarks | null>(null)   // this chat's pin, rename, archive, Trash and unread marks, as the Hub holds them
+  const [options, setOptions] = useState(false)   // the sheet that holds the persona and the model
+  const [renaming, setRenaming] = useState(false)
   const cutTurn = useRef<CutTurn | null>(null)
   const [approval, setApproval] = useState<ChatApproval | null>(null)
-  const [drawer, setDrawer] = useState(false)
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
   const abort = useRef<AbortController | null>(null)
   const run = useRef<string | null>(null)
@@ -337,11 +354,15 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
     if (!id || help) return undefined
     // A view that a finished turn handed its lines to has them already: it only looks at what the turn left behind (a queued message, a hold).
     if (initial) { const timer = window.setTimeout(() => void afterRef.current(id), 0); return () => window.clearTimeout(timer) }   // after the effects below have set the refs
+    // A chat this tab just put in the Trash: Back onto its entry goes on past it. A link to a trashed chat still opens it.
+    if (wasDeletedHere(id)) { skipGone(hubHash('chat')); return undefined }
     let stopped = false
     const number = stamp()
     hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
       .then(answer => {
         if (stopped) return
+        setMarks(answer.state ?? null)
+        if (answer.state?.unread && host.write) void setChatMarks(id, { unread: false }).catch(() => { /* the dot stays until the next read */ })   // reading a chat clears its unread mark
         setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
         takeView(number, answer)
         if (answer.running) void followRef.current(id, answer)   // opened while the reply is still coming: follow it live
@@ -375,6 +396,7 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
   const busy = streaming || recovering || queued.length > 0 || local.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
   const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
+  useEffect(() => onChatMarks((name, state) => { if (name === conversation.current) setMarks(state) }), [])
   useEffect(() => {
     const name = conversation.current
     if (!watching || !name) return undefined
@@ -791,13 +813,10 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
   }
 
-  const conversations = list.data?.conversations ?? []
-  // Two chats with the same title are told apart by the time they were last used.
-  const sameTitle = new Set(conversations.filter((item, index) => conversations.some((other, at) => at !== index && other.title === item.title)).map(item => item.title))
   const agents = team.data?.agents ?? []
   const pickable = personas.length > 0 && !id && !help && !messages.length && pending === null
   const pick = (value: string) => {
-    if (value === JOB) { openSpawn({ text: draft.trim() || undefined, ...(who ? { preset: who.preset } : {}) }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project
+    if (value === JOB) { afterPop(() => { setOptions(false); openSpawn({ text: draft.trim() || undefined, ...(who ? { preset: who.preset } : {}) }) }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project; the sheet closes first
     setPicked(value)
   }
   // The banner: from the preview of a new help chat, or from the context line a stored one starts with.
@@ -807,36 +826,61 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
     ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
     : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
   const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
+  // The header: what this chat is called, who it talks to, and its own menu. A chat the Hub has no file for yet has no menu.
+  const row = list.data?.conversations.find(entry => entry.id === shownId)
+  const firstUser = messages.find(line => line.role === 'user')
+  const derived = stored?.about ? `Help: ${stored.about.title}` : firstUser?.text.trim().slice(0, 60) || ''
+  const title = marks?.title ?? row?.title ?? (derived || (shownId ? 'Chat' : 'New chat'))
+  const trashed = !!marks?.trashed
+  const archived = !!marks?.archived
+  const chatRef = shownId && !help ? { id: shownId, title, pinned: marks?.pinned ?? row?.pinned ?? null, archived: marks?.archived ?? null, trashed: marks?.trashed ?? null, unread: marks?.unread ?? false } : null
+  const leave = () => back(hubHash('chat'))
   return (
-    <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
-      <aside className="hub-chat-list" aria-label="Conversations">
-        <a className="hub-btn pri" href={hubHash('chat')} onClick={() => setDrawer(false)}>New chat</a>
-        {conversations.map(item => (
-          <a key={item.id} className={`hub-chat-item${item.id === id ? ' on' : ''}`} href={hubHash('chat', item.id)} onClick={() => setDrawer(false)} data-conversation={item.id}>
-            <span>{item.title}</span>
-            {sameTitle.has(item.title) && item.updated && <span className="hub-muted" data-conversation-time>{when(item.updated)}</span>}
-            <span className="hub-muted">{item.count} messages{item.persona && <> · <span className="hub-chat-tag" data-conversation-persona>{personas.find(entry => entry.id === item.persona)?.name ?? item.persona}</span></>}{item.model && item.model !== AUTO && <> · <span className="hub-chat-tag" data-conversation-model>{nameOf(models, item.model)}</span></>}</span>
-          </a>
-        ))}
-        {!conversations.length && <p className="hub-empty">No conversations yet.</p>}
-      </aside>
-      <section className={`hub-chat-main${dragging ? ' hub-drop' : ''}`} onDragEnter={onDrag} onDragOver={onDrag} onDragLeave={onDragLeave} onDrop={onDrop}>
-        <div className="hub-top">
-          <h2>Chat</h2>
-          <span className="hub-chat-with hub-muted" data-chat-with={persona}>with {pickable
-            ? (
-              <>
-                <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} bare />
-                <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
-                  <option value={HERMES}>Hermes</option>
-                  {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
-                </select>
-              </>
-            )
-            : <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} />}</span>
-          <button type="button" className="hub-btn hub-chat-toggle" aria-expanded={drawer} onClick={() => setDrawer(value => !value)}>Chats</button>
+    <section className={`hub-chat-main hub-chat-pane main${dragging ? ' hub-drop' : ''}`} data-chat-thread={shownId ?? ''} onDragEnter={onDrag} onDragOver={onDrag} onDragLeave={onDragLeave} onDrop={onDrop}>
+        <div className="hub-chat-head">
+          <IconButton icon="back" label="Back" className="hub-chat-back" data-back="" onClick={leave} />
+          <button type="button" className="hub-chat-titlebtn" aria-haspopup="dialog" data-chat-options onClick={() => setOptions(true)}>
+            <b data-chat-title>{title}</b>
+            <small data-chat-with={persona}>{who?.name ?? 'Hermes'}{models.length > 0 && <> · {nameOf(models, model)}</>}{trashed ? ' · In the Trash' : archived ? ' · Archived' : ''}</small>
+          </button>
+          {chatRef && <RowMenu label="Chat options" title={title} items={chatMenu(chatRef, () => setRenaming(true), { leave })} />}
         </div>
+        {options && (
+          <Sheet title="Chat options" onClose={() => setOptions(false)}>
+            <div className="hub-chat-sheet" data-chat-sheet>
+              <label>
+                <span>Talk to</span>
+                {pickable
+                  ? (
+                    <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
+                      <option value={HERMES}>Hermes</option>
+                      {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
+                    </select>
+                  )
+                  : <span className="hub-chat-sheet-who" data-chat-with={persona}><Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} /></span>}
+              </label>
+              {models.length > 0 && (
+                <label>
+                  <span>Model</span>
+                  <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
+                    {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry, list.data?.autoFirst || 'Codex')}</option>)}
+                    <option disabled>──────────</option>
+                    <option value={JOB}>Start a job instead…</option>
+                  </select>
+                  <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
+                </label>
+              )}
+            </div>
+          </Sheet>
+        )}
+        {renaming && chatRef && <RenameSheet chat={chatRef} onClose={() => setRenaming(false)} />}
         {banner}
+        {trashed && (
+          <div className="hub-chat-trashed" role="status" data-chat-trashed>
+            <span>This chat is in the Trash. Its messages are still here. Restore it to send.</span>
+            {host.write && chatRef && <button type="button" className="ui-btn" data-chat-restore={chatRef.id} onClick={() => void restoreChat(chatRef)}>Restore</button>}
+          </div>
+        )}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">{who ? `Ask ${who.name} anything: ${who.role}. It writes a card when you ask for one.` : 'Ask the assistant anything, or tell it what to do.'}</p>}
           {messages.map((line, index) => (line.role === 'context' ? null : (
@@ -887,7 +931,7 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
         {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
-        {(images.length > 0 || preparing > 0 || trayNote) && (
+        {!trashed && (images.length > 0 || preparing > 0 || trayNote) && (
           <div className="hub-tray" data-tray>
             {images.map((picture, index) => (
               <div className="hub-tray-item" key={picture.id}>
@@ -899,7 +943,7 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
             {trayNote && <span className="hub-tray-note hub-tray-warn" role="status">{trayNote}</span>}
           </div>
         )}
-        <div className="hub-compose">
+        {!trashed && <div className="hub-compose">
           <input ref={picker} type="file" accept={PICTURE_TYPES} multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
           <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={busy} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
           <textarea
@@ -909,21 +953,11 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
           {streaming && <button type="button" className="hub-btn" disabled={stopping} data-chat-stop onClick={stop}>Stop</button>}
           {/* A press on Send keeps the focus in the field: a tap that blurred it closed the phone's keyboard, the page moved, and the click missed. */}
           <button type="button" className="hub-btn pri" disabled={!canSend} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()} onClick={() => void send()}>Send</button>
-        </div>
-        {/* Until the list has answered the menu is not known: its row is held (min-height) so Send does not move when it arrives. */}
-        {(speaks || models.length > 0 || (!list.data && !list.error)) && (
-          <div className={`hub-chat-extras${list.data || list.error ? '' : ' hub-chat-extras-hold'}`}>
-            {models.length > 0 && (
-              <>
-                <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
-                  {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry, list.data?.autoFirst || 'Codex')}</option>)}
-                  <option disabled>──────────</option>
-                  <option value={JOB}>Start a job instead…</option>
-                </select>
-                <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
-                {pauseText && <span className="hub-model-pause" role="status" data-chat-model-pause data-pause-model={choice.pause?.model}>{pauseText}</span>}
-              </>
-            )}
+        </div>}
+        {/* The model and the persona are in the sheet from the title; what stays here is a pause note and the read-aloud switch. */}
+        {!trashed && (speaks || !!pauseText) && (
+          <div className="hub-chat-extras">
+            {pauseText && <span className="hub-model-pause" role="status" data-chat-model-pause data-pause-model={choice.pause?.model}>{pauseText}</span>}
             {speaks && (
               <label className="hub-muted hub-aloud">
                 <input type="checkbox" checked={readAloud} onChange={event => { setReadAloud(event.target.checked); remember(READ_KEY, event.target.checked ? '1' : '0'); if (!event.target.checked) window.speechSynthesis.cancel() }} /> Read replies aloud
@@ -931,7 +965,6 @@ function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
             )}
           </div>
         )}
-      </section>
-    </div>
+    </section>
   )
 }

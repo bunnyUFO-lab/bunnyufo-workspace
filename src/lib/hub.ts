@@ -516,7 +516,13 @@ export interface JobsView { counts: { running: number; finished: number }; jobs:
 export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
 export interface ChatDelegate { id: string; index?: number; count?: number; goal: string; state: 'running' | 'done' | 'failed' | 'unknown'; summary?: string; seconds?: number }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string; /** the owner renamed it: the title is theirs, not the first message */ renamed?: boolean; /** ISO times of the pin, the archive and the Trash (null: not set) */ pinned?: string | null; archived?: string | null; trashed?: string | null; unread?: boolean }
+/** One chat's marks (`chat/state.json`): what `GET /hub/chat/<id>` and `POST /hub/chat/<id>/state` answer. */
+export interface ChatMarks { title: string | null; pinned: string | null; archived: string | null; trashed: string | null; unread: boolean }
+/** What `POST /hub/chat/<id>/state` takes: any of these. `title` null or blank clears a rename. */
+export type ChatPatch = { title?: string | null; pinned?: boolean | null; archived?: boolean | null; trashed?: boolean | null; unread?: boolean | null }
+/** `GET /hub/chat`: one page of a view, and the counts of the Archived and Trash rows. */
+export interface ChatListAnswer { conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: import('../hub/chatModel').ChatPause[]; autoFirst?: string; counts?: { active: number; archived: number; trashed: number }; total?: number; more?: boolean; offset?: number }
 /** An agent a new chat may talk to instead of Hermes: the id is all the page ever sends. */
 export interface ChatPersona { id: string; name: string; role: string; /** The Spawn preset this agent takes; none for an agent that only chats (the Planner). */ preset?: string; /** the model id this agent's chat starts on */ model?: string }
 /** A model the chat may ask Hermes for: the id is all the page ever sends. */
