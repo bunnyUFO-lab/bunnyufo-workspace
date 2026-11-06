@@ -144,7 +144,7 @@ try {
   await page.locator('.pal-i', { hasText: 'New job: market research on tug-of-war' }).click();
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-preset="market-research"]').getAttribute('aria-pressed'), 'true');
-  assert.match(page.url(), /#\/~hub\/today$/);
+  assert.match(page.url(), /#\/~hub\/today\/~o$/, 'The Hub is Today, and the open sheet is its own history entry.');
   await page.keyboard.press('Escape');
 
   step('Approve: with the capability on the button reads Approve and each target has its toast, and a wait says why');

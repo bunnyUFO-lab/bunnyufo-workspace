@@ -20,7 +20,7 @@ const TABS: [WorkTab, string, string][] = [
 export default function WorkTabs({ tab, running, children }: { tab: WorkTab; running?: number; children: ReactNode }) {
   return (
     <>
-      <div className="hub-top wk-top">
+      <div className={`hub-top wk-top${host.write && tab !== 'board' ? '' : ' bare'}`}>
         <h2>Work</h2>
         {host.write && tab !== 'board' && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn()}>New job</button>}
       </div>
