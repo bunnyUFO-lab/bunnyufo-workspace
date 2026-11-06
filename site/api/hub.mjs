@@ -48,6 +48,7 @@ import { buildWork, unaskedOf } from './hub-work.mjs';
 import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
+import { teamSkills } from './hub-team-skills.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
@@ -74,7 +75,7 @@ const EVENT_CAP = 2000;
 const POOL = 16;
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|unasked|map\/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team(?:\/skills)?|events|search-text|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -1966,6 +1967,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if (route === '/hub/team/skills') {
+            // One read of the newest export, joined with the agent list. Nothing from the Hermes host is called. Same sign-in rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the skills.', 401);
+            reply(teamSkills({ exported: await loadAgentConfig(at).catch(() => null), agents: await allAgents(), at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);
