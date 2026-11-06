@@ -80,8 +80,8 @@
   .pp-actions { margin-left: auto; }
   /* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
   .pp[data-sheet] { padding-right: 436px; }
-  /* The map's own panel is the narrower one (hub.css): the project keeps clear of it, so nothing under it is covered. */
-  .pp[data-view="map"][data-sheet] { padding-right: 396px; }
+  /* The map's own panel (hub.css) covers the right of the screen; the Destination row and its Plan in Hermes button keep clear of it. The map itself stays full width, as it centres a node in what the panel leaves. */
+  .pp[data-map-node] .hub-wayfinder, .pp[data-map-node] .hub-plan-row { margin-right: 396px; }
 }
 
 /* The open Wayfinder list takes the height on a phone (else the map box turns wider than tall and flips its axis): the project's name row steps aside while it is open, as the search row does. Likewise for a project with roadmaps: the bar's first crumb already names the project. */

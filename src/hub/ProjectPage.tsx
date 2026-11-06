@@ -313,7 +313,7 @@ export default function ProjectPage({ project: wanted, route, view }: { project:
   const mapShown = view === 'map'
   const switchTo = (to: 'list' | 'map') => { if (to !== view) swap(to === 'map' ? mapHash(project) : projectHash(project)) }
   return (
-    <div className="pp today" data-project-page={project} data-view={view} data-sheet={shown || (view === 'map' && node && project && model && find(model, node)) ? '' : undefined}>
+    <div className="pp today" data-project-page={project} data-view={view} data-sheet={shown ? '' : undefined} data-map-node={view === 'map' && node && project && model && find(model, node) ? '' : undefined}>
       <header className="pp-head">
         <div className="pp-name">
           <h2 className="pp-title" data-project-title>{name}</h2>
