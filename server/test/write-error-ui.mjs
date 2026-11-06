@@ -76,6 +76,6 @@ try {
   await refused.goto(`${origin}/agent-plans`);
   await refused.getByText('Sign in to continue', { exact: true }).waitFor();
   await refused.getByRole('button', { name: 'Reload', exact: true }).waitFor();
-  assert.equal(await refused.locator('.entity-card').count(), 0);
+  assert.equal(await refused.locator('.lib-row').count(), 0);
   console.log('Write-error UI passed: a sign-in page is reported as one, and a source link points inside its repository.');
 } finally { await browser.close(); server.close(); }

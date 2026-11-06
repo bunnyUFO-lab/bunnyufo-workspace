@@ -1,7 +1,7 @@
 // What the Library shows, as plain functions: no React, no window. The filter, the sort and the grouping that used to sit in App.tsx.
 import type { CardWorkspace, WorkspaceCard } from '../types'
-import { archiveCutoff } from '../lib/workspace'
-import { applyOrder, cardKey, type Order } from '../lib/order'
+import { archiveCutoff } from '../lib/archiveRule.ts'
+import { applyOrder, cardKey, type Order } from '../lib/orderKeys.ts'
 
 export type LibraryView = 'all' | 'pinned' | 'archive' | 'trash'
 

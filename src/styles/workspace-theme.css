@@ -74,13 +74,8 @@ html[data-workspace-theme=light] body::before,html[data-workspace-theme=light] b
 html[data-workspace-theme=light] .workspace-root{background:var(--bg);color:var(--text)}
 html[data-workspace-theme=light] .content{background:var(--bg)}
 html[data-workspace-theme=light] .report-frame,html[data-workspace-theme=light] .file-preview-body iframe{background:#fff;color-scheme:light}
-html[data-workspace-theme=light] .workspace-root .sidebar{box-shadow:20px 0 60px #18213614}
 html[data-workspace-theme=light] .app-layout .step-tab{border-color:var(--hairline);color:var(--text-dim)}
 html[data-workspace-theme=light] .app-layout .step-tab.active{border-color:#2f6fd650;background:var(--pink-dim);color:var(--pink-bright)}
-html[data-workspace-theme=light] .home .entity-card{background:#fff;border-color:var(--hairline-strong);box-shadow:var(--shadow-1)}
-html[data-workspace-theme=light] .home .entity-card:hover{background:#fff;border-color:#2f6fd660;box-shadow:var(--shadow-2)}
-html[data-workspace-theme=light] .home .entity-card .card-desc{color:var(--text-dim)}
-html[data-workspace-theme=light] .home .entity-card .card-foot{color:var(--text-muted);border-color:var(--hairline)}
 html[data-workspace-theme=light] .report-document,html[data-workspace-theme=light] .report-document>.report-loading,
 html[data-workspace-theme=light] .markdown-document,html[data-workspace-theme=light] .markdown-reader,
 html[data-workspace-theme=light] .markdown-editor,html[data-workspace-theme=light] .file-preview,
