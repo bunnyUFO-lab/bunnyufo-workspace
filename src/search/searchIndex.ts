@@ -103,6 +103,8 @@ export function screenRows(caps: Caps): Hit[] {
     ['skills', 'Skills and plugins', 'skill', `${hubHash('team')}/skills`, caps.hub],
     ['sketch', 'Sketch', 'sketch', hubHash('sketch'), caps.hub && caps.write],
     ['settings', 'Settings', 'settings', hubHash('settings'), true],
+    // The install commands live in Settings, under their own heading.
+    ['install-skills', 'Install skills on a PC', 'skill', hubHash('settings'), true],
   ]
   return all.filter(row => row[4]).map(([key, title, icon, hash]) => ({ kind: 'screens', key, title, sub: 'Screen', icon, hash }))
 }

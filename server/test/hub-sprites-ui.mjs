@@ -29,6 +29,8 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
+  // Team opens on the Floor; this file is about the list, so the browser starts with the list chosen (unless the test chose).
+  await context.addInitScript(() => { try { if (!localStorage.getItem('hub.team.view')) localStorage.setItem('hub.team.view', 'roster'); } catch { /* storage off */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));

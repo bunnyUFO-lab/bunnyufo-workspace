@@ -107,6 +107,7 @@
   .ui-pane-list { flex: none; width: 384px; border-right: 1px solid var(--line); }
   .ui-split .ui-pane-detail, .ui-split.has-detail .ui-pane-list { display: flex; }
   .ui-split.folded .ui-pane-list { display: none; }
+  .ui-split.fill .ui-pane-list { flex: 1; width: auto; border-right: 0; }
   .ui-sheet { left: 50%; right: auto; bottom: auto; top: 12%; width: 460px; max-height: 76%; border-radius: 18px; transform: translateX(-50%); animation: none; box-shadow: 0 20px 70px rgba(0, 0, 0, 0.6); }
   .ui-showlist { display: inline-flex; }
 }

@@ -115,11 +115,13 @@ test('a kind chip shows that kind alone, and a page of it', () => {
   assert.equal(countsOf(rows).library, 70);
 });
 
-test('a guest sees the same screens, minus Sketch; a host with no Hub sees Library and Settings only', () => {
+test('a guest sees the same screens, minus Sketch; a host with no Hub sees Library, Settings and the install commands only', () => {
   assert.ok(screenRows(hubCaps).some(row => row.key === 'sketch'));
   assert.ok(!screenRows(guestCaps).some(row => row.key === 'sketch'));
   assert.ok(screenRows(guestCaps).some(row => row.key === 'chat'), 'A guest sees the Chat screen, which says it needs sign-in.');
-  assert.deepEqual(screenRows(bareCaps).map(row => row.key), ['library', 'settings']);
+  assert.deepEqual(screenRows(bareCaps).map(row => row.key), ['library', 'settings', 'install-skills']);
+  const install = screenRows(bareCaps).find(row => row.key === 'install-skills');
+  assert.deepEqual([install.title, install.hash], ['Install skills on a PC', '#/~hub/settings'], 'Search finds the install commands, which live in Settings.');
   assert.deepEqual(indexRows(sources({ caps: bareCaps }), true).map(row => row.kind).filter(kind => kind !== 'screens' && kind !== 'library'), [], 'No Hub: nothing of the Hub is searched.');
 });
 

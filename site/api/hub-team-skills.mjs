@@ -20,6 +20,7 @@ const person = agent => ({ id: agent.id, name: agent.name, profile: agent.profil
  * - `skills`: `[{ id, autoLoad, owner, profiles, autoLoadProfiles, sources, agents }]`, by id. `profiles` are the profiles that have it
  *   installed or auto-loaded. `sources` are the export lists that name it (`autoLoad`, `installed`, `owner`). `agents` are the agents
  *   on those profiles. An owner skill no profile has is listed with no profiles and no agents: the export does not say who can use it.
+ * - `plugins`: `{ known, text, items: [{ name, version, source, description, profiles: [{ profile, status }] }] }`. `known` is false until the export carries plugins.
  * - `agents`: `[{ id, name, profile, skills, autoLoad, note? }]`; `skills` is the ids the agent can use, or null when not known
  *   (no profile, no export, or the export has no block for the profile).
  */
@@ -54,11 +55,21 @@ export function teamSkills({ exported, agents, at }) {
     return { ...person(agent), skills: [...new Set([...installed, ...autoLoad])].sort(), autoLoad: [...autoLoad] };
   };
 
+  // Plugins: one row per name, with its status on each profile that lists it. Known once any profile carries a list (even an empty one).
+  const listed = blocks.filter(name => Array.isArray(exported.profiles[name].plugins));
+  const plugins = new Map();
+  for (const name of listed) {
+    for (const item of exported.profiles[name].plugins) {
+      if (!plugins.has(item.name)) plugins.set(item.name, { name: item.name, version: item.version, source: item.source, description: item.description, profiles: [] });
+      plugins.get(item.name).profiles.push({ profile: name, status: item.status });
+    }
+  }
+
   const maybeCut = blocks.some(name => { const list = exported.profiles[name].skills; return list.installed.length >= INSTALLED_CAP || list.autoLoad.length >= AUTOLOAD_CAP; });
   return {
     exportedAt: exported ? exported.exportedAt : null,
     fresh: exported ? exportFreshness(exported, at) === 'fresh' : false,
     maybeCut, skills, agents: agents.map(forAgent),
-    plugins: { known: false, text: PLUGINS_LINE },
+    plugins: { known: listed.length > 0, text: PLUGINS_LINE, items: [...plugins.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) },
   };
 }

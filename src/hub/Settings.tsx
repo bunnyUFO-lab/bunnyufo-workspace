@@ -34,8 +34,8 @@ function NextItemSetting() {
 }
 
 /**
- * Settings: the theme, the workspaces, the keyboard shortcuts (the Ctrl+H sheet reads the same list) and the skill packs.
- * Every host shows it, with or without a Hub. Away, the PC with its Wake and the next-item setting need a Hub; Skills moves to Team in item 10.
+ * Settings: the theme, the workspaces, the keyboard shortcuts (the Ctrl+H sheet reads the same list) and the commands to install skills on a PC.
+ * Every host shows it, with or without a Hub. Away, the PC with its Wake and the next-item setting need a Hub. What Hermes has installed is on Team.
  */
 export default function Settings() {
   return (
@@ -62,7 +62,7 @@ export default function Settings() {
           ))}
         </div>
       </Section>
-      <Section title="Skill packs"><div className="settings-card"><SkillPacksBody files={host.files} /></div></Section>
+      <Section title="Install skills on a PC"><div className="settings-card"><SkillPacksBody files={host.files} /></div></Section>
     </div>
   )
 }

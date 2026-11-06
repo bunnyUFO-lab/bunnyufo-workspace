@@ -214,5 +214,14 @@ export interface TeamSkillsView {
   maybeCut: boolean
   skills: TeamSkill[]
   agents: { id: string; name: string; profile: AgentProfile; skills: string[] | null; autoLoad: string[] | null; note?: string }[]
-  plugins: { known: false; text: string }
+  plugins: { known: boolean; text: string; items: TeamPlugin[] }
+}
+
+/** One plugin of the Hermes export: its status on each profile that lists it. */
+export interface TeamPlugin {
+  name: string
+  version: string
+  source: string
+  description: string
+  profiles: { profile: 'main' | 'briefs'; status: 'enabled' | 'disabled' | 'not enabled' }[]
 }
