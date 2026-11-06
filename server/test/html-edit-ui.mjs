@@ -107,22 +107,14 @@ try {
   assert.match(page.url(), /#\/edit\/0$/);
   // Q is the way back to the cards.
   await page.locator('body').press('q');
-  await page.locator('.home').waitFor();
+  await page.locator('[data-library]').waitFor();
 
-  // In the search box: ↓ walks headings and cards, Space folds a heading (and folds the board's
-  // section with it: one state), Enter opens a card.
+  // In the Library's search field: Enter opens the first card. (The arrows and Space that walked and folded
+  // headings are gone with the design's headings; the field keeps Enter and Esc.)
   await page.keyboard.press('Control+Shift+f');
-  const search = page.getByRole('textbox', { name: 'Search entities' });
+  const search = page.getByRole('searchbox', { name: 'Search cards' });
   await search.waitFor();
-  await search.press('ArrowDown');
-  await page.locator('.sidebar-section-toggle.cursor').waitFor();
-  await search.press(' ');
-  await page.waitForFunction(() => document.querySelectorAll('.home .entity-card').length === 0);
-  assert.equal(await search.inputValue(), '', 'Space on a heading is not typed into the search');
-  await search.press(' ');
-  await page.locator('.home .entity-card').first().waitFor();
-  await search.press('ArrowDown');
-  await page.locator('.sidebar-item.cursor').waitFor();
+  await page.locator('.lib-row').first().waitFor();
   await search.press('Enter');
   await page.waitForFunction(() => location.hash === '#/edit');
   await page.locator('iframe.report-frame').waitFor();

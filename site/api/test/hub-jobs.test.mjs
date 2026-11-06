@@ -119,6 +119,25 @@ test('tasks come from the session-items of the job\'s session, as a project and 
   } finally { await close(); }
 });
 
+test('tasks a change list created: read from the apply job\'s own applied.json, and from no other writer', async () => {
+  const { get, put, job, close } = await fixture();
+  try {
+    const jobId = id('plan', '6666');
+    const [real, forged, passphrase] = [id('real', '7771'), id('fake', '7772'), id('pass', '7773')];
+    job(jobId, { title: 'Filed a change list', result: { outcome: 'asks', asks: [real, forged, passphrase] } });
+    for (const [ask, name] of [[real, 'Real plan'], [forged, 'Forged plan'], [passphrase, 'Unmarked plan']]) put.ask(filedBy(askJson({ id: ask, project: 'dev-proj', now: NOW, question: name }), jobId));
+    const record = created => ({ v: 1, at: iso(NOW), created });
+    put.put(`asks/${real}/applied.json`, record([{ ref: '#1', id: 'dp-1a2' }, { ref: '#2', id: 'dp-3c4' }, { ref: '#3', id: 'not an id' }]), 'application/json', { writer: 'apply-action' });
+    put.put(`asks/${forged}/applied.json`, record([{ ref: '#1', id: 'dp-evil' }]), 'application/json', { writer: 'agent' });
+    put.put(`asks/${passphrase}/applied.json`, record([{ ref: '#1', id: 'dp-none' }]));
+    const [row] = (await get('/hub/jobs?tab=finished')).body.jobs;
+    assert.deepEqual(row.deliverables.filter(item => item.kind === 'task').map(item => [item.project, item.id]), [['dev-proj', 'dp-1a2'], ['dev-proj', 'dp-3c4']], 'Only the marked record counts, and a bad id is dropped.');
+    assert.deepEqual(row.pills.map(pill => pill.text), ['3 Asks', 'Task']);
+    const page = (await get(`/hub/requests/${jobId}`)).body;
+    assert.equal(page.deliverables.filter(item => item.kind === 'task').length, 2, 'The result page lists them too.');
+  } finally { await close(); }
+});
+
 test('a finished job page lists the bucket for deliverables once, and a repeat open lists none of the Work scan; a plain card job reads no Beads copy', async () => {
   const { get, job, cards, fake, close } = await fixture({ listCacheMs: 15_000 });
   try {

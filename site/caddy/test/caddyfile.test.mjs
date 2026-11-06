@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 const CADDYFILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'Caddyfile');
 const IMAGE = 'caddy:2-alpine';
 const DEADLINE_MS = 110_000;
+// How long the stream waits for the test to see an event before it calls the proxy a buffering one. A buffering proxy never delivers the event while the stream waits, so any wait fails it; the wait is long only so that one slow hop on a loaded machine (a container, a CPU-capped runner) is not mistaken for buffering (ws-cl0.12).
+const EVENT_WAIT_MS = 20_000;
 const NAME = `buw-caddyfile-test-${process.pid}-${Date.now()}`;
 const HEADERS = { 'Accept-Encoding': 'zstd, gzip' };
 
@@ -41,7 +43,7 @@ function lockstepStream(response, route) {
   (async () => {
     for (let n = 0; n < 4; n += 1) {
       response.write(`event: tick\ndata: ${n}\n\n`);
-      const got = await new Promise(resolve => { const t = setTimeout(() => resolve(false), 5000); waiting = { n, done: () => { clearTimeout(t); resolve(true); } }; });
+      const got = await new Promise(resolve => { const t = setTimeout(() => resolve(false), EVENT_WAIT_MS); waiting = { n, done: () => { clearTimeout(t); resolve(true); } }; });
       if (!got) { state.timedOut = true; break; }
     }
     response.end();
@@ -78,6 +80,7 @@ before(async () => {
   upstream = http.createServer((req, res) => {
     const url = req.url;
     if (url.startsWith('/api/hub/requests/r1/events')) return lockstepStream(res, 'run');
+    if (req.method === 'GET' && url.startsWith('/api/hub/chat/') && url.endsWith('/live')) return lockstepStream(res, 'live');
     if (url === '/api/hub/chat' && req.method === 'POST') { req.resume(); return lockstepStream(res, 'chat'); }
     if (req.method === 'POST' && url.startsWith('/api/hub/team/')) { upstreamSaw.writes.push(url); req.resume(); res.writeHead(201, { 'Content-Type': 'application/json' }); return res.end('{"reached":true}'); }
     if (url === '/api/whoami') { upstreamSaw.remoteUser = req.headers['remote-user']; res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{}'); }
@@ -135,12 +138,14 @@ const sizes = {};
 const encoded = (answer, label) => { assert.match(answer.h['content-encoding'] ?? '', /^(zstd|gzip)$/, `${label} is compressed`); assert.match(answer.h.vary ?? '', /Accept-Encoding/i); };
 const plain = (answer, label) => assert.equal(answer.h['content-encoding'], undefined, `${label} is not compressed`);
 
-for (const [label, route, method, key] of [['the run stream', '/api/hub/requests/r1/events', 'GET', 'run'], ['the chat stream', '/api/hub/chat', 'POST', 'chat']]) {
+for (const [label, route, method, key] of [['the run stream', '/api/hub/requests/r1/events', 'GET', 'run'], ['the chat stream', '/api/hub/chat', 'POST', 'chat'], ['the chat live stream a reopened chat follows', '/api/hub/chat/20261105-abc123/live', 'GET', 'live']]) {
   test(`${label} arrives event by event, never compressed`, { skip, timeout: 60_000 }, async () => {
     const seen = [];
+    // A chunk can end in the middle of an event: only a whole event (up to its blank line) counts, so a split never hides one from the stream's wait.
+    let pending = '';
     const answer = await ask(route, { Accept: 'text/event-stream', ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) }, {
       method, body: method === 'POST' ? '{}' : undefined,
-      onChunk: chunk => { for (const m of chunk.toString().matchAll(/data: (\d+)/g)) { seen.push(Number(m[1])); streams[key].ack(Number(m[1])); } },
+      onChunk: chunk => { pending += chunk.toString(); for (let end = pending.indexOf('\n\n'); end !== -1; end = pending.indexOf('\n\n')) { const m = /data: (\d+)/.exec(pending.slice(0, end)); pending = pending.slice(end + 2); if (m) { seen.push(Number(m[1])); streams[key].ack(Number(m[1])); } } },
     });
     assert.equal(streams[key].timedOut, false, 'the next event was written only after the previous one arrived, so a buffering proxy would time out here');
     assert.deepEqual(seen, [0, 1, 2, 3]);

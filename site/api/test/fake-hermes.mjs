@@ -14,6 +14,7 @@
 // Options for runs:
 //   runScript      steps: 'text' (message.delta) | { tool, preview?, error?, ms?, until? } (ms: how long the step runs before it completes; until: 'name' keeps it running until `hermes.go('name')`, for a test that must see it running however slow the PC) | { approval: { command?, description? } }
 //                  | { call: async () => {} } (runs the function and goes on)
+//                  | { reasoning: 'text' } (a reasoning.available event)
 //                  | { wait: ms } | { hold: true } (waits for stop or release; use it for the 120-minute cap)
 //                  | { until: 'name' } (waits for `hermes.go('name')`: a step the test releases, not a delay a slow PC can overrun)
 //                  | { delegate: { goals, id?, started? } } (a background delegate_task: the tool lines, its handle cut to 500 characters as Hermes cuts it, and `subagent.start` per goal unless started is false)
@@ -153,6 +154,7 @@ export async function startFakeHermes({
       if (typeof step === 'string') { text += step; emit(run, 'message.delta', { delta: step }); continue; }
       if (step.wait !== undefined) { await pause(run, step.wait); continue; }
       if (step.until !== undefined && !step.tool) { while (!gates.has(step.until) && !run.stopped) await pause(run, 20); continue; }
+      if (step.reasoning !== undefined) { emit(run, 'reasoning.available', { text: step.reasoning }); continue; }   // what Hermes thinks before it answers (the event name is the one Hermes's run stream uses, unchecked against a live Hermes here)
       if (step.call) { await step.call(); continue; }   // a test's own side effect while the run goes on (e.g. a request filed through the card API)
       if (step.hold) {
         await pause(run, Infinity);

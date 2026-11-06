@@ -178,7 +178,7 @@ try {
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   await page.goto(`${appOrigin}/one`);
-  await page.locator('.entity-card').first().waitFor();
+  await page.locator('.lib-row').first().waitFor();
   await page.evaluate(() => { localStorage.setItem('app-secret', 'the app only'); localStorage.setItem('buw.workspaceTheme', 'light'); });
 
   step('the app reports the content origin');
@@ -259,7 +259,7 @@ try {
   step('the old card API passphrase is removed from the app origin when the app loads');
   await page.evaluate(() => localStorage.setItem('buw.cardApiPassphrase', 'left over'));
   await page.goto(`${appOrigin}/one`);
-  await page.locator('.entity-card').first().waitFor();
+  await page.locator('.lib-row').first().waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('buw.cardApiPassphrase')), null);
   log.length = 0;
 

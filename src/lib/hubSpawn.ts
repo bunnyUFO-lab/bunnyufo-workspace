@@ -1,4 +1,4 @@
-// Spawn: the shapes the presets routes answer with, and the small pure helpers the sheet and the palette share.
+// Spawn: the shapes the presets routes answer with, and the small pure helpers the sheet and Search share.
 
 export type SpawnTarget = 'pc' | 'cloud' | 'hermes' | 'at-pc'
 
@@ -46,7 +46,7 @@ export const RULE_TO: Record<number, string> = { 1: 'you, at the PC', 2: 'the PC
 
 export const CAPS_LINE = '3 Hermes runs at once · 2 PC runs at once · 10 PC and 10 cloud runs a day'
 
-/** The preset a few typed words most likely mean (the palette's "Spawn: <text>"). */
+/** The preset a few typed words most likely mean (Search's "New job: <text>"). */
 export function guessPreset(text: string): string {
   const q = text.toLowerCase()
   if (/avatar/.test(q)) return 'agent-avatar'

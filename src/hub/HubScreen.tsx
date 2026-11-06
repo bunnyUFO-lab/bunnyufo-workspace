@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import './hub.css'
 import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
+import { chatNote } from '../lib/hubNav'
 import Activity from './Activity'
-import AgentDetails from './AgentDetails'
 import AgentEdit from './AgentEdit'
 import ApprovalView from './ApprovalView'
 import AskView from './AskView'
@@ -11,14 +11,12 @@ import Board from './Board'
 import ChecklistView from './ChecklistView'
 import Md from './Md'
 import ReviewView from './ReviewView'
-import RunDrawerHost from './RunDrawer'
 import Chat from './Chat'
 import Jobs from './Jobs'
 import Needs from './Needs'
 import Sketch from './Sketch'
 import SpawnHost from './Spawn'
-import ProgressMap from './ProgressMap'
-import ProjectPage from './ProjectPage.tsx' // the extension: projectPage.ts differs from this file's name only in casing
+import ProjectsScreen from './ProjectsList'
 import Team from './Team'
 import Today from './Today'
 import WorkTabs from './WorkTabs'
@@ -41,11 +39,11 @@ export default function HubScreen({ route }: { route: HubRoute }) {
     return () => document.removeEventListener('click', onClick)
   }, [])
   return (
-    <div className="hub" data-screen={route.screen}>
+    <div className="hub" data-screen={route.screen === 'map' ? 'project' : route.screen}>
       {noSite && <div className="hub-banner" role="alert" data-hub-no-site>{noSite} <button type="button" className="hub-btn" onClick={() => setNoSite('')}>Close</button></div>}
       {!host.write && (
         <div className="hub-banner" role="note">
-          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, ticking checklists, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
+          <Md text={host.reason ?? 'Read-only here. Sign in to change anything.'} />
         </div>
       )}
       {route.screen === 'today' && <Today />}
@@ -54,18 +52,15 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'request' && (route.id ? <ApprovalView key={route.id} id={route.id} /> : <Needs filter="approvals" />)}
-      {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
-      {route.screen === 'team' && <Team />}
-      {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
+      {route.screen === 'work' && <WorkTabs tab="board"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
+      {(route.screen === 'team' || route.screen === 'agent') && <Team routeId={route.screen === 'team' ? route.id : undefined} agentId={route.screen === 'agent' ? route.id : undefined} />}
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
-      {route.screen === 'jobs' && <WorkTabs tab="jobs"><Jobs tab={route.id} /></WorkTabs>}
-      {route.screen === 'map' && <ProgressMap project={route.id} />}
-      {route.screen === 'project' && <ProjectPage route={route.id} />}
+      {route.screen === 'jobs' && <Jobs tab={route.id} />}
+      {(route.screen === 'project' || route.screen === 'map') && <ProjectsScreen route={route} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
-      {route.screen === 'chat' && <Chat id={route.id} />}
+      {route.screen === 'chat' && (chatNote(host) ? <p className="hub-empty" data-hub-chat-note>{chatNote(host)}</p> : <Chat id={route.id} />)}
       {host.write && <SpawnHost />}
-      <RunDrawerHost />
     </div>
   )
 }

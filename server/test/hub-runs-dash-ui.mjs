@@ -57,21 +57,17 @@ try {
     assert.match(text, /Working/);
     assert.match(text, /for \d+ min/);
     assert.equal(await row.locator('[data-runner="hermes"]').innerText(), 'Hermes');
-    assert.equal((await page.locator('[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
+    assert.equal((await page.locator('[data-today-status] .today-pill').first().innerText()).trim(), '1 running');
     const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
     assert.ok(widths.scroll <= widths.inner, `${label}: the page scrolls sideways.`);
-
-    step(`${label}: Since yesterday has the started and finished events`);
-    const since = page.locator('[aria-label="Since yesterday"]');
-    await since.locator('[data-run-event="run-finished"]').waitFor();
-    assert.equal(await since.locator('[data-run-event="run-started"]').count(), 2);
-    assert.match(await since.locator('[data-run-event="run-finished"]').innerText(), /Finished: Game ideas deck/);
-    assert.equal(await since.locator('[data-run-event-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
 
     step(`${label}: Activity lists them under Agents`);
     await page.goto(`${fx.url}#/~hub/activity/agents`);
     await page.locator('[data-run-event="run-started"]').first().waitFor();
     assert.equal(await page.locator('[data-run-event]').count(), 3);
+    assert.equal(await page.locator('[data-run-event="run-started"]').count(), 2);
+    assert.match(await page.locator('[data-run-event="run-finished"]').innerText(), /Finished: Game ideas deck/);
+    assert.equal(await page.locator('[data-run-event-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
     // The title keeps the row's width and the buttons go under it on a phone; a title never breaks beside them.
     const finishedRow = page.locator('[data-run-event="run-finished"]').first();
     const [titleBox, actionsBox, rowBox] = await Promise.all([finishedRow.locator('.hub-row-title').boundingBox(), finishedRow.locator('.hub-row-actions').boundingBox(), finishedRow.boundingBox()]);
@@ -80,18 +76,20 @@ try {
       assert.ok(actionsBox.y >= titleBox.y + titleBox.height - 1, 'the buttons sit under the title');
     }
 
-    step(`${label}: the Working now row opens the run drawer`);
+    step(`${label}: the Working now row opens the job's page, and Back returns to Today`);
     await page.goto(`${fx.url}#/~hub/today`);
     await page.locator('[aria-label="Working now"] [data-run-open]').click();
-    await page.locator('dialog[data-run-drawer][open]').waitFor();
-    await page.locator('dialog[data-run-drawer]', { hasText: 'Help me make a deck' }).waitFor();
-    await page.keyboard.press('Escape');
+    await page.locator('[data-run-view]').waitFor();
+    await page.locator('.hub-top', { hasText: 'Help me make a deck' }).waitFor();
+    await page.goBack();
+    await page.locator('[aria-label="Working now"]').waitFor();
+    assert.match(page.url(), /#\/~hub\/today$/);
   }
 
-  step('the drawer of the finished run links to the card in the assistant section');
+  step('the page of the finished run links to the card in the assistant section');
   const page = await open({ width: 1280, height: 900 });
-  await page.goto(`${fx.url}#/~hub/today`);
-  await page.locator('[aria-label="Since yesterday"] [data-run-event="run-finished"] [data-run-event-open]').click();
+  await page.goto(`${fx.url}#/~hub/activity/agents`);
+  await page.locator('[data-run-event="run-finished"] [data-run-event-open]').click();
   await page.locator('[data-run-card]').waitFor();
   assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant');
 
@@ -112,7 +110,7 @@ try {
   await toast.waitFor();
   assert.match(await toast.innerText(), /Approved\. .*Working now/);
   await toast.locator('[data-spawn-toast-link="run"]').click();
-  await spawn.locator('dialog[data-run-drawer][open]').waitFor();
+  await spawn.waitForURL(/#\/~hub\/request\/[\w-]+$/);   // the approve is stubbed, so the new request has no page to show: the address is the proof
 
   console.log('hub-runs-dash-ui: passed');
 } finally {

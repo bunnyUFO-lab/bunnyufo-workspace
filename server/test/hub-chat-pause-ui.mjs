@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -32,7 +33,7 @@ try {
 
   step('Hermes (Auto) is not moved: Auto has its own chain, and no note shows');
   await page.goto(`${fx.url}#/~hub/chat`);
-  await page.locator('[data-chat-model]').waitFor();
+  await openChatSheet(page);
   assert.equal(await selected(page), 'Auto · Codex first');
   assert.equal(await noteOf(page).count(), 0);
 
@@ -53,6 +54,7 @@ try {
 
   step('the turn asks for the model the menu shows');
   await page.goto(`${fx.url}#/~hub/chat`);
+  await openChatSheet(page);
   await page.locator('[data-chat-persona]').selectOption('researcher');
   await page.locator('textarea[aria-label="Message"]').fill('What is new in deckbuilders?');
   await page.keyboard.press('Enter');
@@ -63,7 +65,8 @@ try {
 
   step('390 px: the note shows on its own line and nothing scrolls sideways');
   const phone = await open({ width: 390, height: 800 });
-  await phone.goto(`${fx.url}#/~hub/chat`);
+  await phone.goto(`${fx.url}#/~hub/chat/new`);
+  await openChatSheet(phone);
   await phone.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(phone), 'Sonnet 5.5 · API');
   await noteOf(phone).waitFor();
@@ -78,6 +81,7 @@ try {
   seedRetry(guess, 'magic-loops-retried-e5e5');
   const guessed = await open({ width: 1280, height: 900 });
   await guessed.goto(`${guess.url}#/~hub/chat`);
+  await openChatSheet(guessed);
   await guessed.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(guessed), 'Sonnet 5.5 · API');
   assert.match(await noteOf(guessed).innerText(), /^Codex 6.1 Sol is paused by its usage limit \(seen (?:[A-Z][a-z]{2} )?\d{1,2}:\d\d(?: [AP]M)?\) · using Sonnet 5.5$/);
@@ -87,6 +91,7 @@ try {
   fixtures.push(calm);
   const quiet = await open({ width: 1280, height: 900 });
   await quiet.goto(`${calm.url}#/~hub/chat`);
+  await openChatSheet(quiet);
   await quiet.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(quiet), 'Codex 6.1 Sol');
   assert.equal(await noteOf(quiet).count(), 0);

@@ -1,4 +1,4 @@
-// Run after npm run build. Leaving a milestone or a task that a Project page opened returns to the Project page (ws-2vh.28),
+// Run after npm run build. Leaving a milestone or a task that a Project page opened returns to the Project page (ws-2vh.28; ported in ws-cl0.6.9: the list scrolls in .pp-body, a milestone opens from its Milestone details row),
 // through a real browser over the fixture service. The rows of the Roadmap tab open their details in place, as a Work card does:
 // the address is #/~hub/project/<id>/roadmap/<node>, and X, the scrim, Escape and Back all return to the list (same tab, same scroll, one
 // history step), a shared link closes onto the list, a task inside a milestone's sheet swaps the sheet, focus returns to the row,
@@ -27,7 +27,7 @@ const open = async (viewport, options = {}) => {
 const PHONE = { hasTouch: true, isMobile: true };
 const hashOf = page => page.evaluate(() => location.hash);
 const panelOf = page => page.locator('dialog#hub-map-panel');
-const litTab = page => page.locator('.hub-tab.active').innerText();
+const noTabs = page => page.locator('[data-tabs]').count();
 const list = '[data-project-page="lanes"] [data-pp-roadmap]';
 const sheetUrl = id => `#/~hub/project/lanes/roadmap/${encodeURIComponent(id)}`;
 /** The address settles on the list, the sheet is gone and the list shows. */
@@ -44,15 +44,15 @@ const toList = async (page, base) => {
   await page.locator('.hub').waitFor();
   await page.evaluate(() => { location.hash = '#/~hub/project/lanes'; });
   await page.locator(list).waitFor();
-  await page.evaluate(() => { document.querySelector('.hub').scrollTop = 40; });
-  return page.evaluate(() => document.querySelector('.hub').scrollTop);
+  await page.evaluate(() => { document.querySelector('.pp-body').scrollTop = 40; });
+  return page.evaluate(() => document.querySelector('.pp-body').scrollTop);
 };
 const leaveThePage = async page => {
   await page.goBack();
   await page.waitForFunction(() => location.hash === '#/~hub/today');
 };
 const noSideways = async (page, what) => {
-  const wide = await page.evaluate(() => [document.scrollingElement, document.querySelector('.hub')].filter(Boolean).filter(el => el.scrollWidth > el.clientWidth).map(el => `${el.className}: ${el.scrollWidth} > ${el.clientWidth}`));
+  const wide = await page.evaluate(() => [document.scrollingElement, document.querySelector('.hub'), document.querySelector('.pp-body')].filter(Boolean).filter(el => el.scrollWidth > el.clientWidth).map(el => `${el.className}: ${el.scrollWidth} > ${el.clientWidth}`));
   assert.deepEqual(wide, [], `${what}: scrolls sideways.`);
 };
 
@@ -69,7 +69,7 @@ try {
       [phone ? 'scrim' : 'Escape']: () => (phone ? page.mouse.click(viewport.width / 2, 30) : page.keyboard.press('Escape')),
       Back: () => page.goBack(),
     };
-    for (const [kind, row] of [['milestone', '.pp-ms-title'], ['task', '[data-pp-task]']]) {
+    for (const [kind, row] of [['milestone', '[data-pp-details]'], ['task', '[data-pp-task]']]) {
       for (const [how, leave] of Object.entries(leaves)) {
         step(`${label}: a ${kind}, left by ${how}, returns to the list with the scroll, the tab, one history step and the focus`);
         const scrolled = await toList(page, fixture.url);
@@ -78,12 +78,12 @@ try {
         await press(opener);
         await panelOf(page).locator('h3').waitFor();
         assert.equal(await hashOf(page), sheetUrl(id), `A ${kind} opens at its Project address.`);
-        if (phone) assert.match(await litTab(page), /More/, 'More is lit while the sheet is open.');
+        if (phone) assert.equal(await noTabs(page), 0, 'A project page has no tab bar while the sheet is open.');
         await leave();
         await backOnList(page, `${kind}, ${how}`);
-        const after = await page.evaluate(() => document.querySelector('.hub').scrollTop);
+        const after = await page.evaluate(() => document.querySelector('.pp-body').scrollTop);
         assert.ok(Math.abs(after - scrolled) <= 2, `The scroll holds (${scrolled} -> ${after}).`);
-        if (phone) assert.match(await litTab(page), /More/, 'More stays lit.');
+        if (phone) assert.equal(await noTabs(page), 0, 'Still no tab bar.');
         await page.waitForFunction(value => document.activeElement?.getAttribute('data-pp-node') === value, id);
         await leaveThePage(page);
       }
@@ -91,7 +91,7 @@ try {
 
     step(`${label}: a shared link opens the sheet and X lands on the list; a task inside the milestone's sheet swaps it, and one X returns`);
     await toList(page, fixture.url);
-    const milestone = await page.locator('.pp-ms-title').first().getAttribute('data-pp-node');
+    const milestone = await page.locator('[data-pp-details]').first().getAttribute('data-pp-node');
     await page.goto(`${fixture.url}#/~hub/today`);
     await page.evaluate(value => { location.hash = value; }, sheetUrl(milestone));
     await panelOf(page).locator('h3').waitFor();
@@ -100,7 +100,7 @@ try {
     await leaveThePage(page);
 
     await toList(page, fixture.url);
-    await press(page.locator('[data-pp-milestone]:has([data-pp-task]) .pp-ms-title').first());
+    await press(page.locator('[data-pp-milestone]:has([data-pp-task]) [data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
     const inner = panelOf(page).locator('.hub-map-panel-row-title').first();
     await inner.waitFor();
@@ -110,9 +110,9 @@ try {
     await backOnList(page, 'swapped sheet');
     await leaveThePage(page);
 
-    step(`${label}: Show on roadmap goes to the map, Back returns to the sheet, X returns to the list; Open the Roadmap still goes to the map`);
+    step(`${label}: Show on map goes to the map, Back returns to the sheet, X returns to the list; the Map switch goes to the map`);
     await toList(page, fixture.url);
-    await press(page.locator('.pp-ms-title').first());
+    await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
     const show = panelOf(page).locator('[data-show-on-roadmap]');
     assert.equal(await show.getAttribute('href'), `#/~hub/map/lanes/${milestone}`);
@@ -123,9 +123,7 @@ try {
     assert.equal(await hashOf(page), sheetUrl(milestone));
     await press(page.getByRole('button', { name: 'Close details' }));
     await backOnList(page, 'after the map');
-    await page.locator('[data-pp-open-map]').scrollIntoViewIfNeeded();
-    assert.equal(await page.locator('[data-pp-open-map]').getAttribute('href'), '#/~hub/map/lanes');
-    await press(page.locator('[data-pp-open-map]'));
+    await press(page.locator('[data-roadmap-view="map"]'));
     await page.waitForFunction(() => location.hash === '#/~hub/map/lanes');
 
     step(`${label}: an unknown node shows the list, no sheet and no error`);
@@ -138,7 +136,7 @@ try {
 
     step(`${label}: the sheet ${phone ? 'is a bottom sheet, at most 76% tall, with no sideways scroll' : 'is a side panel with the list beside it'}`);
     await toList(page, fixture.url);
-    await press(page.locator('.pp-ms-title').first());
+    await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
     await noSideways(page, label);
     const box = await panelOf(page).boundingBox();

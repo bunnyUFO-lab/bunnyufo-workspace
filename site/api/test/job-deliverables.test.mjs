@@ -70,6 +70,21 @@ test('checklists, other jobs and tasks', () => {
   assert.deepEqual(Object.keys(out[2]).sort(), ['id', 'kind', 'project', 'title'], 'Only a project and an id are kept of a task, plus its label.');
 });
 
+test('tasks a change list created: from the job\'s own Ask, once, in the Ask\'s project', () => {
+  const asks = [
+    { id: ASK_A, project: 'dev-proj', at: later, title: 'Plan', state: 'answered', fromRequest: JOB, created: ['dp-1a2', 'dp-3c4'] },
+    { id: ASK_B, project: 'dev-proj', at: later, title: 'Not this job', state: 'answered', created: ['dp-9z9'] },
+    { id: '20261105-other-1111', project: 'other', at: later, title: 'Other project', state: 'answered', fromRequest: JOB, created: ['ot-1'] },
+    { id: '20261105-old-2222', project: 'dev-proj', at: earlier, title: 'Before the job', state: 'answered', fromRequest: JOB, created: ['dp-old'] },
+  ];
+  const tasks = list => list.filter(row => row.kind === 'task').map(row => `${row.project}/${row.id}`);
+  const out = deliverablesOf({ item: item(), asks, taskTitle: (project, id) => (id === 'dp-1a2' ? 'First' : undefined) });
+  assert.deepEqual(tasks(out), ['dev-proj/dp-1a2', 'dev-proj/dp-3c4']);
+  assert.equal(out.find(row => row.id === 'dp-1a2').title, 'First');
+  assert.deepEqual(out.map(row => row.kind), ['ask', 'task', 'task'], 'The Ask still lists, then its tasks.');
+  assert.deepEqual(tasks(deliverablesOf({ item: item(), asks, touched: { beads: [{ project: 'dev-proj', id: 'dp-1a2' }, { project: 'dev-proj', id: 'dp-5e6' }] } })), ['dev-proj/dp-1a2', 'dev-proj/dp-3c4', 'dev-proj/dp-5e6'], 'A task the session touched too is listed once.');
+});
+
 test('request.bead is where the job came from, not something it delivered', () => {
   assert.deepEqual(deliverablesOf({ item: item({ bead: 'dp-0aa', finish: { outcome: 'failed', at: later } }) }), []);
 });

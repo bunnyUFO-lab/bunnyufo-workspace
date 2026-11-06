@@ -11,16 +11,19 @@
 
   /* ── Mission-control palette ── */
   --ground: #0a0b0d;
-  --s1: #101113;
-  --s2: #16181b;
-  --s3: #1e2024;
-  --line: rgba(255, 255, 255, 0.08);
-  --line2: rgba(255, 255, 255, 0.13);
-  --t1: #e7e8ea;
-  --t2: #a0a3a8;
-  --t3: #6b6e74;
+  --s1: #111215;
+  --s2: #17191d;
+  --s3: #1f2126;
+  --s4: #2a2d33;
+  --line: rgba(255, 255, 255, 0.075);
+  --line2: rgba(255, 255, 255, 0.14);
+  --t1: #eceef0;
+  --t2: #a9acb2;
+  --t3: #7c7f86;
   --t4: #4b4e54;
   --accent: #6ea8fe;
+  --accent-ink: #07111f;
+  --accent-soft: rgba(110, 168, 254, 0.14);
   --st-working: #5cb8ff;
   --st-needs: #f5c451;
   --st-failed: #f28b82;
@@ -98,4 +101,8 @@
   --ease: var(--ease-out);
   --t-fast: 120ms;
   --t-med: 200ms;
+
+  /* ── Touch ── */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --tap: 44px;
 }

@@ -36,12 +36,13 @@ try {
   const mountId = await report().locator('html').evaluate(() => window.mountId);
   await report().getByRole('textbox', { name: 'Keep my draft' }).fill('Keep this edit');
   await report().locator('body').evaluate(() => scrollTo(0, 400));
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
-  await page.getByLabel('Workspace theme', { exact: true }).selectOption('light');
+  // The theme is picked on the Settings screen of the second window; the first keeps its card open, so what it keeps while the theme changes is the card's own state.
+  await second.locator('[data-rail] [data-nav="settings"]').click();
+  await second.getByLabel('Workspace theme', { exact: true }).selectOption('light');
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
   await expect(second.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
   await expect(second.locator('.content')).toHaveCSS('background-color', 'rgb(247, 248, 250)');
-  await expect(second.locator('.entity-card')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(second.locator('.settings-card').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(report().locator('html')).toHaveAttribute('data-buw-theme', 'light');
   assert.equal(await report().locator('body').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 255, 255)');
   assert.equal(await report().locator('h1').evaluate(node => getComputedStyle(node).color), 'rgb(17, 21, 33)');
@@ -54,7 +55,6 @@ try {
   await expect(report().locator('html')).toHaveAttribute('data-buw-theme', 'light');
   const saved = await (await fetch(service.origin + '/api/settings', { method: 'POST', headers: { Authorization: `Bearer ${service.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceTheme: 'invalid' }) })).json();
   assert.equal(saved.workspaceTheme, 'light');
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
   await page.getByRole('tab', { name: 'Notes', exact: true }).click();
   await page.locator('.buw-markdown h1').waitFor();
   assert.equal(await page.locator('.buw-markdown h1').evaluate(node => getComputedStyle(node).color), 'rgb(17, 21, 33)');
@@ -65,34 +65,35 @@ try {
   await page.locator('.file-preview').getByRole('button', { name: 'Edit', exact: true }).click();
   assert.equal(await page.locator('.markdown-editor').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(255, 255, 255)');
   await page.getByRole('button', { name: 'Close file preview', exact: true }).click();
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
+  await page.locator('[data-rail] [data-nav="settings"]').click();
   await page.getByLabel('Workspace theme', { exact: true }).selectOption('system');
   // The picker is driven by the saved setting, so it only reads 'system' once the service has stored it and sent
   // it back. Waiting here matters: 'dark' below is true both for system-resolved-dark and for the old plain dark,
   // so without it a slow round trip (CI) emulates the light scheme while the app is still on plain dark.
   await expect(page.getByLabel('Workspace theme', { exact: true })).toHaveValue('system');
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark');
+  // A media query's change event is delivered by the browser's rendering update, not on the spot. This window is
+  // not the one last driven, so make it the visible one and let it draw two frames first: a window that is not
+  // drawing never reports the new scheme, and the check below would then sit on 'dark' until it timed out.
+  await page.bringToFront();
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
   await page.getByLabel('Workspace theme', { exact: true }).selectOption('light');
-  await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+  await page.goBack();
   await page.getByRole('tab', { name: 'Custom game', exact: true }).click();
   await report().getByRole('heading', { name: 'Custom game' }).waitFor();
   assert.equal(await report().locator('body').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(20, 30, 40)');
   assert.equal(await report().locator('canvas').evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(30, 80, 40)');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
-  // At phone width the menu button and its open menu follow the theme (the phone rules are dark literals).
+  // At phone width the shell's own chrome follows the theme too: the Settings screen and its Back bar.
   await page.setViewportSize({ width: 375, height: 800 });
-  const toggle = page.locator('.rail-toggle');
-  await toggle.waitFor();
-  const dots = await toggle.locator('svg').evaluate(node => parseFloat(getComputedStyle(node).strokeWidth));
-  assert.ok(dots >= 3, `The dots are drawn bold enough to show at rest (stroke ${dots}).`);
-  assert.equal(await toggle.evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(255, 255, 255, 0.9)');
-  await toggle.click();
-  await expect(page.locator('.files-container.menu-open .files-rail')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-  assert.notEqual(await page.locator('.rail-backdrop').evaluate(node => getComputedStyle(node).backgroundColor), 'rgba(5, 6, 9, 0.4)', 'The backdrop is not the dark literal.');
-  await toggle.click();
+  await page.locator('[data-rail]').waitFor({ state: 'detached' });
+  await page.evaluate(() => { location.hash = '#/~hub/settings'; });
+  await page.locator('[data-settings] .settings-card').first().waitFor();
+  await expect(page.locator('.settings-card').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(page.locator('.ui-top')).toHaveCSS('background-color', 'rgb(247, 248, 250)');
   await page.setViewportSize({ width: 1300, height: 920 });
   assert.deepEqual(errors, []);
   await context.close();

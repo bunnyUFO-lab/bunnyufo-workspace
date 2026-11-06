@@ -48,7 +48,7 @@ await mkdir(path.dirname(registryFile), { recursive: true });
 await addWorkspace({ registryFile, path: dir, name: 'Fixture', activate: true });
 
 const oneRow = async (page, label) => {
-  const tops = await page.$$eval('.step-tab', tabs => tabs.map(tab => tab.offsetTop));
+  const tops = await page.$$eval('.step-tabs .step-tab[role="tab"]', tabs => tabs.map(tab => tab.offsetTop));
   assert.ok(tops.length > 0, `${label}: tabs render`);
   assert.equal(new Set(tops).size, 1, `${label}: every tab sits on one row (${[...new Set(tops)]})`);
 };
@@ -195,8 +195,7 @@ try {
   await noSideways(page, '390 many');
   await phone2.close();
 
-  // 8. A phone at the bottom of a long page: the header hides and shows with the scroll
-  // direction, and the page growing under it must not read as a scroll up (it would flip forever).
+  // 8. A phone at the bottom of a long page: the header stays on screen however far it is read, so Back is always in reach.
   const reader = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   page = await reader.newPage();
   page.setDefaultTimeout(ms(10000));
@@ -205,19 +204,18 @@ try {
   await page.locator('.markdown-reader').waitFor();
   await page.waitForTimeout(500);
   const scrollTo = y => page.evaluate(top => document.querySelector('.markdown-reader').scrollTo(0, top), y);
-  const max = () => page.evaluate(() => { const r = document.querySelector('.markdown-reader'); return r.scrollHeight - r.clientHeight; });
-  const hiddenNow = () => page.evaluate(() => document.documentElement.dataset.chromeHidden !== undefined);
-  // Read down to the bottom in flicks, up a little (the header shows), then down to the bottom again.
-  for (let y = 0; y < 6000; y += 150) { await scrollTo(y); await page.waitForTimeout(16); }
+  const where = () => page.evaluate(() => { const bar = document.querySelector('.topbar').getBoundingClientRect(); const back = document.querySelector('.topbar [data-back]').getBoundingClientRect(); return { top: Math.round(bar.top), back: Math.round(back.top), hidden: document.documentElement.dataset.chromeHidden !== undefined, scroll: Math.round(document.querySelector('.markdown-reader').scrollTop) }; });
+  const start = await where();
+  for (let y = 0; y < 6000; y += 150) {
+    await scrollTo(y);
+    await page.waitForTimeout(16);
+    const now = await where();
+    assert.deepEqual([now.top, now.back, now.hidden], [start.top, start.back, false], `the header stays put at ${y}`);
+  }
   await page.waitForTimeout(300);
-  assert.equal(await hiddenNow(), true, 'reading down hides the header');
-  await scrollTo((await max()) - 40);
-  await page.waitForTimeout(300);
-  assert.equal(await hiddenNow(), false, 'a flick up shows the header');
-  for (let y = (await page.evaluate(() => document.querySelector('.markdown-reader').scrollTop)); y < 6000; y += 30) { await scrollTo(y); await page.waitForTimeout(16); }
-  const samples = [];
-  for (let i = 0; i < 40; i++) { samples.push(await page.evaluate(() => [document.documentElement.dataset.chromeHidden !== undefined, Math.round(document.querySelector('.topbar').getBoundingClientRect().top), Math.round(document.querySelector('.markdown-reader').scrollTop)].join())); await page.waitForTimeout(50); }
-  assert.equal(new Set(samples).size, 1, `the header and the scroll position hold still at the bottom (${[...new Set(samples)]})`);
+  const bottom = await where();
+  assert.ok(bottom.scroll > 1000, `the long card was read far down (${bottom.scroll})`);
+  assert.deepEqual([bottom.top, bottom.back], [start.top, start.back], 'and the header is still where it was at the bottom');
   await reader.close();
 
   // 9.

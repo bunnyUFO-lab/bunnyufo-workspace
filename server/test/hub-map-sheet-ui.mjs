@@ -66,6 +66,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => {
@@ -140,6 +141,7 @@ try {
     assert.equal(await panel.locator('[data-cards]').count(), 0);
     step(`${label}: an open task that waits on nobody has Mark done and No longer needed, and no Unblock or What's needed`);
     assert.equal(await panel.locator('[data-mark-open] [data-mark-done]').count(), 1);
+    assert.equal(await panel.locator('[data-mark-open] [data-mark-done].pri').count(), 0, 'Mark done is not the main action on a task nobody waits on.');
     assert.equal(await panel.locator('[data-mark-open] [data-mark-not-needed]').count(), 1);
     assert.equal(await panel.locator('[data-mark-unblock]').count(), 0, 'Unblock is for a task that waits on the owner.');
     assert.equal(await panel.locator('h4', { hasText: "What's needed" }).count(), 0);
@@ -220,6 +222,7 @@ try {
     const markDone = panel.locator('[data-mark-done]');
     const notNeeded = panel.locator('[data-mark-not-needed]');
     assert.equal(await markDone.innerText(), 'Mark done');
+    assert.equal(await markDone.evaluate(node => node.classList.contains('pri')), true, 'On a task that waits on the owner it is the main action.');
     assert.equal(await notNeeded.innerText(), 'No longer needed');
     assert.ok((await markDone.boundingBox()).height >= 43.5 && (await notNeeded.boundingBox()).height >= 43.5, 'The buttons are tall enough to tap.');
     assert.match(await panel.innerText(), /Unblock: it doesn't wait on you; agents may pick it up\./);

@@ -1,9 +1,9 @@
 // Run after npm run build. Isolated repository, registry and browser profile; the fixture
 // workspaces are the only files written.
 //
-// The board's filters: going back to the cards clears the search, the header counts what the
-// list shows, "All" turns the archive filter off, the project chips carry their number keys,
-// Recent lists every card in one newest-first run, and a card whose page is gone says so.
+// The Library's filters: back from a card finds the search as it was, the Archive view counts what it holds and
+// keeps its place when a section is picked, All lists Recent newest first, one section is grouped by category,
+// and a card whose page is gone says so.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
+import { contextWithListOpen, libraryFilter, pickProject, projectRows } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -47,160 +48,95 @@ const service = await createService({ repo, uiDir: path.join(root, 'dist'), regi
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  const page = await (await contextWithListOpen(browser, { viewport: { width: 1280, height: 900 } })).newPage();
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const logs = []; page.on('console', message => logs.push(message.text()));
   await page.goto(service.urls.workspace);
-  await page.locator('.home .entity-card').first().waitFor();
+  await page.locator('[data-library] .lib-row').first().waitFor();
 
-  // By attribute, not role: with the menu put away the field is hidden from the accessibility tree.
-  const search = page.locator('input[aria-label="Search entities"]');
-  const startSearch = async term => {
-    await page.keyboard.press('Control+Shift+f');
-    await search.waitFor();
-    await search.fill(term);
-    await page.locator('.home .home-filter').waitFor();
-  };
+  const search = page.locator('.lib-search input');
+  const rows = () => page.locator('[data-library] .lib-row');
+  const ids = () => rows().evaluateAll(list => list.map(el => el.getAttribute('data-entity')));
   const blur = () => page.evaluate(() => document.activeElement?.blur?.());
   const openCard = async id => {
     await page.evaluate(hash => { location.hash = hash; }, `#/${id}/0`);
     await page.locator('.report-document').waitFor();
     await blur();
   };
-  const assertBoardWhole = async what => {
-    await page.locator('.home').waitFor();
-    assert.equal(await search.inputValue(), '', `${what}: the search box is empty`);
-    assert.equal(await page.locator('.home .home-filter').count(), 0, `${what}: no matches line`);
-    assert.equal(await page.locator('.home .entity-card').count(), 4, `${what}: every live card is back`);
+  const view = name => page.locator('[data-library] .ui-seg button', { hasText: new RegExp('^' + name) });
+  const arrange = name => page.locator('[data-library] .ui-seg.lib-arrange button', { hasText: new RegExp('^' + name) });
+  const searchFor = async term => {
+    await search.fill(term);
+    await page.locator('[data-matches]').waitFor();
+  };
+  // The list stays beside a card on this context; fold it so a card is read alone and Back is a real step.
+  const assertBack = async (what, term, count) => {
+    await search.waitFor();
+    assert.equal(await search.inputValue(), term, `${what}: Back finds the search text as it was`);
+    assert.equal(await rows().count(), count, `${what}: and the list it filtered`);
   };
 
-  // Item 2: back to the cards clears the search, whichever way back it is.
-  await startSearch('Bravo');
-  assert.equal(await page.locator('.home .entity-card').count(), 1);
-  await openCard('bravo');
+  // Back from a card finds the list as it was, whichever way back it is (design: a Back leaves the Library as you left it).
+  // Replaces: going back to the cards cleared the search.
+  await searchFor('Bravo');
+  assert.equal(await rows().count(), 1);
+  await page.locator('.lib-row-main').first().click();
+  await page.locator('.report-document').waitFor();
+  await blur();
   await page.keyboard.press('q');
-  await assertBoardWhole('Q');
-
-  await startSearch('Bravo');
-  await openCard('bravo');
+  await assertBack('Q', 'Bravo', 1);
+  await page.locator('.lib-row-main').first().click();
+  await page.locator('.report-document').waitFor();
   await page.keyboard.press('Escape');
-  await assertBoardWhole('Esc');
+  await assertBack('Esc', 'Bravo', 1);
+  await page.locator('.lib-row-main').first().click();
+  await page.locator('.report-document').waitFor();
+  await page.getByRole('link', { name: /Back/ }).click();
+  await assertBack('Back link', 'Bravo', 1);
 
-  await startSearch('Bravo');
-  await openCard('bravo');
-  await page.getByRole('link', { name: /Library/ }).click();
-  await assertBoardWhole('← Library');
-
-  // With a search running and the box blurred, Esc on the board clears it; so does the Clear link.
-  await startSearch('Bravo');
-  await blur();
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.querySelectorAll('.home .home-filter').length === 0);
-  assert.equal(await search.inputValue(), '');
-  await startSearch('Bravo');
-  await blur();
-  await page.getByRole('button', { name: 'Hide menu' }).click();
-  await page.locator('.home .home-filter-clear').click();
-  await assertBoardWhole('Clear');
-
-  // Item 3: the header counts the list. The card dated ten days ago is archived, not active.
-  const sectionSum = () => page.locator('.home .section-count').allInnerTexts().then(list => list.reduce((n, text) => n + Number(text), 0));
-  const heroText = () => page.locator('.home-sub').innerText();
-  assert.match(await heroText(), /^\s*4 active \u00b7 1 archived/);
-  assert.equal(await sectionSum(), 4, 'the active number is the sum of the section counts');
-  assert.equal(await page.locator('.home-archive-note').count(), 0);
-  await blur();
-  await page.keyboard.press('Shift+A');
-  await page.locator('.home-archive-note').waitFor();
-  assert.match(await page.locator('.home-archive-note').innerText(), /7 days/);
-  assert.equal(await page.locator('.home .archive-chip .project-chip-count').innerText(), '1', 'the archived number is the archive chip count');
-  assert.match(await heroText(), /^\s*4 active \u00b7 1 archived/, 'the header does not change with the filter');
-  await page.keyboard.press('Shift+A');
-  await page.waitForFunction(() => !document.querySelector('.home-archive-note'));
-
-  // Item 4: "All" turns the archive filter off, by click, 0 and Alt+A; a project keeps it.
-  const archiveChip = page.locator('.home .archive-chip');
-  const archiveOn = async () => (await archiveChip.getAttribute('aria-pressed')) === 'true';
-  const setArchive = async on => {
-    if ((await archiveOn()) !== on) { await blur(); await page.keyboard.press('Shift+A'); }
-    await page.waitForFunction(want => document.querySelector('.home .archive-chip')?.getAttribute('aria-pressed') === String(want), on);
-  };
-  const projectChip = name => page.locator('.home .project-chip', { hasText: new RegExp('^[0-9]?' + name) });
-  await setArchive(true);
-  await projectChip('One').click();
-  assert.equal(await archiveOn(), true, 'picking a project keeps the archive filter');
-  await projectChip('All').click();
-  assert.equal(await archiveOn(), false, 'All by click');
-  await setArchive(true);
-  await projectChip('One').click();
-  await blur();
-  await page.keyboard.press('0');
-  await page.waitForFunction(() => document.querySelector('.home .archive-chip')?.getAttribute('aria-pressed') === 'false');
-  await setArchive(true);
-  await projectChip('One').click();
-  await page.keyboard.press('Alt+a');
-  await page.waitForFunction(() => document.querySelector('.home .archive-chip')?.getAttribute('aria-pressed') === 'false');
-  assert.equal(await page.locator('.home .project-chip.active').innerText().then(text => text.includes('All')), true);
-  assert.equal(await page.locator('.home .project-filter-sep').count(), 1);
-
-  // Item 6b: the chips carry the number keys App binds (0 for All, then the projects in order).
-  const keys = await page.locator('.home .project-chip-key').allInnerTexts();
-  assert.deepEqual(keys, keys.map((_, index) => String(index)), 'keys run 0, 1, 2 in chip order');
-  assert.ok(keys.length >= 3);
-  await blur();
-  await page.keyboard.press('2');
-  await page.waitForFunction(() => document.querySelector('.home .project-chip.active .project-chip-key')?.textContent === '2');
-  await page.keyboard.press('0');
-  await page.waitForFunction(() => document.querySelector('.home .project-chip.active .project-chip-key')?.textContent === '0');
-
-  // Recent: one section, newest first, remembered, Shift+R, and "All" leaves it alone.
-  const recentChip = page.locator('.home .recent-chip');
-  const recentOn = async () => (await recentChip.getAttribute('aria-pressed')) === 'true';
-  const boardIds = () => page.locator('.home .entity-card').evaluateAll(list => list.map(el => el.getAttribute('data-entity')));
-  const waitRecent = on => page.waitForFunction(want => document.querySelector('.home .recent-chip')?.getAttribute('aria-pressed') === String(want), on);
-  assert.equal(await recentOn(), false);
-  assert.ok((await page.locator('.home .home-section').count()) > 1, 'sections to begin with');
-  assert.equal(await recentChip.getAttribute('title'), 'Newest first, no sections ( Shift+R )');
-  await recentChip.click();
-  await waitRecent(true);
-  assert.equal(await page.locator('.home .home-section').count(), 1, 'Recent is one section');
-  assert.match(await page.locator('.home .section-title').innerText(), /recent/i);
-  assert.deepEqual(await boardIds(), ['alpha', 'bravo', 'gamma', 'ghost'], 'newest first');
-  assert.equal(await page.locator('.sidebar-list .sidebar-section-toggle').count(), 1, 'the list is one section too');
-  assert.deepEqual(await page.locator('.sidebar-list .sidebar-item').evaluateAll(list => list.map(el => el.textContent.trim().split(/\s+/)[0])).then(list => list.length), 4, 'the list holds the same four');
-  await projectChip('One').click();
-  assert.deepEqual(await boardIds(), ['alpha', 'bravo'], 'a project chip still narrows');
-  await projectChip('All').click();
-  assert.equal(await recentOn(), true, 'All does not turn Recent off');
-  await setArchive(true);
-  assert.deepEqual(await boardIds(), ['old'], 'Recent with the archive');
-  assert.equal(await page.locator('.home .home-section').count(), 1);
-  await setArchive(false);
-  await page.reload();
-  // The app may reopen the card last read (then the board is one click back) or land on the board.
-  await page.locator('.home .entity-card, .crumb-back').first().waitFor();
-  if (await page.locator('.crumb-back').count()) await page.getByRole('link', { name: /Library/ }).click();
-  await page.locator('.home .entity-card').first().waitFor();
-  assert.equal(await recentOn(), true, 'Recent survives a reload');
-  assert.equal(await page.locator('.home .home-section').count(), 1);
-  // Shift+R does nothing while typing in the search box.
-  await page.keyboard.press('/');
+  // Esc in the field clears it; so does the Clear link. A section chip adds no step.
   await search.focus();
-  await page.keyboard.press('Shift+R');
-  assert.equal(await search.inputValue(), 'R');
-  assert.equal(await recentOn(), true, 'typing R leaves Recent alone');
-  await search.fill('');
-  await blur();
-  await page.keyboard.press('Shift+R');
-  await waitRecent(false);
-  assert.ok((await page.locator('.home .home-section').count()) > 1, 'the sections are back');
+  await page.keyboard.press('Escape');
+  assert.equal(await search.inputValue(), '', 'Esc clears the search');
+  await rows().nth(3).waitFor();
+  await searchFor('Bravo');
+  await page.locator('[data-matches] .lib-clear').click();
+  assert.equal(await search.inputValue(), '');
+  assert.equal(await rows().count(), 4, 'every live card is back');
 
-  // Item 6d: a card whose page is gone says so, with the real status.
+  // The Archive view counts what it holds (the card dated ten days ago), says why, and a section keeps the view.
+  assert.equal(await page.locator('[data-archive-note]').count(), 0);
+  assert.equal(await view('Archive').locator('small').innerText(), '1', 'the Archive segment counts the archived card');
+  await view('Archive').click();
+  await page.locator('[data-archive-note]').waitFor();
+  assert.match(await page.locator('[data-archive-note]').innerText(), /7 days/);
+  assert.deepEqual(await ids(), ['old']);
+  assert.deepEqual(await projectRows(page), [['All projects', 1], ['One', 1], ['Starter examples', 0], ['Two', 0]], 'a project counts what the view would show, the empty one last');
+  await pickProject(page, 'One');
+  assert.equal(await view('Archive').getAttribute('aria-pressed'), 'true', 'picking a section keeps the view (replaces: All turned the archive off)');
+  assert.deepEqual(await ids(), ['old']);
+  await pickProject(page, 'One');
+  await view('All').click();
+
+  // All with no section: Pinned (none here), then Recent, newest first. One section: grouped by category, with the heading's menu.
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent');
+  assert.deepEqual(await ids(), ['alpha', 'bravo', 'gamma', 'ghost'], 'newest first');
+  await pickProject(page, 'One');
+  assert.deepEqual(await ids(), ['alpha', 'bravo'], 'a project pick narrows');
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent', 'Recent stays one run with a project picked');
+  await arrange('By project').click();
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Test', 'By project with one picked is grouped by category');
+  await arrange('Recent').click();
+  await pickProject(page, 'One');
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent');
+  assert.equal(await page.evaluate(() => localStorage.getItem('buw.showRecent') ?? localStorage.getItem('buw.showArchived')), null, 'the old view keys are gone');
+
+  // A card whose page is gone says so, with the real status.
   await page.evaluate(() => { location.hash = '#/ghost/0'; });
   await page.locator('.report-error', { hasText: 'Page unavailable (404)' }).waitFor();
 
-  // Item 6a: no theme message was posted to a frame that was still blank.
+  // No theme message was posted to a frame that was still blank.
   assert.equal(logs.filter(text => /postMessage/.test(text)).length, 0, logs.join(' | '));
 
   assert.equal(errors.length, 0, errors.join('\n'));

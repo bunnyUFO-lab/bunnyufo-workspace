@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
 import { hubGet } from '../lib/hub'
 import type { SettledVerb } from '../lib/nextItem.mjs'
@@ -7,6 +7,27 @@ import { hubHash } from '../lib/route'
 import { setHandoff } from './flash'
 import { setFocus } from './needsFocus'
 import { useHubData } from './useHub'
+
+const AUTO_KEY = 'hub.autoNext'
+
+/** "Next item after answering": off unless the owner turned it on in Settings. Stored in this browser only. */
+export const autoNext = (): boolean => { try { return localStorage.getItem(AUTO_KEY) === '1' } catch { return false } }
+export const setAutoNext = (on: boolean) => { try { if (on) localStorage.setItem(AUTO_KEY, '1'); else localStorage.removeItem(AUTO_KEY) } catch { /* no storage: it stays off */ } }
+
+/**
+ * Whether another item waits after this one, from the queue the owner is already reading. The page offers "Next item"
+ * when it does and "Back to Today" when it does not.
+ */
+export function useHasNext(settled: string): boolean {
+  const { data } = useHubData<{ items: Item[] }>('/inbox?filter=all')
+  return !!data && Array.isArray(data.items) && data.items.some(item => item && itemKey(item) !== settled)
+}
+
+/** The setting as state, for Settings. */
+export function useAutoNext(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(autoNext)
+  return [on, value => { setAutoNext(value); setOn(value) }]
+}
 
 /**
  * The order of the queue as the owner saw it, kept while a deep-link view is open. Read it when an action succeeds:
@@ -20,9 +41,10 @@ export function useQueueOrder(): () => string[] {
 }
 
 /**
- * After an item is settled from its own page: find the next open item, leave a note for the page that shows it, and go
- * there. `assign`, not `replace`, so the browser's Back also returns to the settled item. When the queue cannot be
- * read, the action still worked: go to Needs you with a note that says only what was done.
+ * The owner asked for the next item (the Next item button, or the Settings choice that does it after every answer): find the
+ * next open item, leave a note for the page that shows it, and go there. `assign`, not `replace`, so the browser's Back also
+ * returns to the settled item. With nothing left, Today says "All clear". When the queue cannot be read, the action still
+ * worked: go to Needs you with a note that says only what was done.
  */
 export async function goNext(settled: { kind: Item['kind']; id: string; title?: string }, verb: SettledVerb, previous: string[], backHash: string, detail?: string) {
   const word = NOTE_VERB[verb]
@@ -33,7 +55,7 @@ export async function goNext(settled: { kind: Item['kind']; id: string; title?: 
     const next = pickNext(Array.isArray(answer.items) ? answer.items : [], itemKey(settled), previous)
     if (!next) {
       setHandoff({ verb: word, ...(detail ? { detail } : {}), title: settled.title, nothingLeft: true, backHash })
-      window.location.assign(hubHash('needs'))
+      window.location.assign(hubHash('today'))
       return
     }
     const link = itemLink(next)

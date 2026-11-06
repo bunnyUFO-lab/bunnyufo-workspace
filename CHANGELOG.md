@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A new shell.** A rail on a desktop and five tabs on a phone (Today, Chat, Library, Projects, Search) replace the Operate, Plan and Know groups, the More menu and the phone's side bar. Opening the site lands on Today. Back walks one history: the browser's back, Alt+Left and the Back buttons agree, a sheet closes on Back, and a filter chip adds no step. Settings is a screen. Old links keep working. Beside a card, the card list folds below 1400 px, with a Show list button.
 - **Agent card-writing text.** The brief and the chat personas now say to prefer a new tab, that an existing script file cannot be edited, and that editing an owner's HTML tab turns off its saving until reverted.
 - **Who wrote what, and Revert.** A card an agent has written to shows one line above it (who, what, when) with its history; the project page lists the newest agent writes; **Revert** puts an edit's old text back, takes an added tab off (the "+" form brings it back) or puts an added card in the Trash, and a later publish from the PC keeps that. Team gains **Where agents may add cards**, a checkbox per Library section. A tab an agent adds to your card gets no card bridge.
 - **Jobs write their card to the project.** A research, mockup or question job is signed with the project's own section when it is a Library section agent cards are on for, else `assistant`; its brief and the chat personas say who is writing and why, and the result links the card in either section. Only a `CARD:` line naming `assistant` or the signed project counts.

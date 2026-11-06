@@ -2,7 +2,7 @@
 // select on every screen that has the picker; 641 px and up keeps the chips; more than ten projects keeps the typeable list above 640 px
 // only: a phone gets the select however many projects there are (ws-2vh.27).
 // Checks: the field is 44 px high and inside the screen, nothing scrolls sideways (the page, .content and .hub), a pick changes the
-// screen, the choice is kept across Today, Needs you, Work, the Roadmap and Project, "All" is reachable, an unknown project reads
+// screen, the choice is kept across Needs you and Work, "All" is reachable, an unknown project reads
 // "Choose a project", Back restores the old project, rotation swaps the control with the choice intact, and both themes read.
 // The real iOS and Android lists and the zoom behaviour cannot be checked here: they wait for the owner's play test.
 import { chromium, expect } from '@playwright/test';
@@ -38,10 +38,7 @@ const stored = (page, key) => page.evaluate(k => localStorage.getItem(k), key);
 const go = (page, hash) => page.evaluate(next => { location.hash = next; }, hash);
 
 const SCREENS = [
-  { name: 'Today', hash: '#/~hub/today', scope: '[data-today-project]' },
   { name: 'Work', hash: '#/~hub/work', scope: '.work' },
-  { name: 'Roadmap', hash: '#/~hub/map', scope: '.hub-map-chips' },
-  { name: 'Project', hash: '#/~hub/project/magic-loops', scope: '.pp' },
   { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]' },
   { name: 'Needs', hash: '#/~hub/needs', scope: '[data-needs-project]' },
   { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top' },
@@ -91,7 +88,7 @@ try {
     await page.context().close();
   }
 
-  step('A pick changes the screen: Work, the Roadmap and Project change the address, Today its project');
+  step('A pick changes the screen: Work changes the address');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
@@ -100,79 +97,26 @@ try {
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
     await none(page, 'Work after a pick');
 
-    await go(page, '#/~hub/map');
-    select = await ready(page, '.hub-map-chips');
-    const values = await select.locator('option:not([hidden])').evaluateAll(list => list.map(item => item.value));
-    const current = await select.inputValue();
-    const other = values.find(value => value !== current);
-    await select.selectOption(other);
-    await page.waitForFunction(id => location.hash.startsWith(`#/~hub/map/${id}`), other);
-    await none(page, 'Roadmap after a pick');
-
-    await go(page, '#/~hub/project/magic-loops');
-    select = await ready(page, '.pp');
-    await select.selectOption('lanes');
-    await page.waitForFunction(() => location.hash === '#/~hub/project/lanes');
-    await go(page, '#/~hub/project/magic-loops/library');
-    select = await ready(page, '.pp');
-    await select.selectOption('lanes');
-    await page.waitForFunction(() => location.hash === '#/~hub/project/lanes/library');
-    await none(page, 'Project after a pick');
-
-    await go(page, '#/~hub/today');
-    select = await ready(page, '[data-today-project]');
-    const kpi = page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v');
-    // The last pick (lanes, on the Project page) is what Today shows.
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await expect(kpi).toHaveText('1');
-    await select.selectOption('all');
-    await expect(kpi).toHaveText('5');
-    await select.selectOption('lanes');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await expect(kpi).toHaveText('1');
-    assert.equal((await select.locator('option[value="lanes"]').textContent()).trim(), 'Lanes (1)', 'Today says how many wait in a project.');
-    await none(page, 'Today after a pick');
     await page.context().close();
   }
 
-  step('The choice is kept on Work, the Roadmap, Project and Today, and survives a reload; a pick on Today reaches Work');
+  step('The choice is kept on Work, and survives a reload');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
     await (await ready(page, '.work')).selectOption('lanes');
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
-    await go(page, '#/~hub/map');
-    await expect(await ready(page, '.hub-map-chips')).toHaveValue('lanes');
-    await go(page, '#/~hub/project');
-    await expect(await ready(page, '.pp')).toHaveValue('lanes');
     assert.equal(await stored(page, 'buw.hub.project'), 'lanes');
     await page.reload();
-    await expect(await ready(page, '.pp')).toHaveValue('lanes');
-
-    await go(page, '#/~hub/today');
-    const today = await ready(page, '[data-today-project]');
-    await expect(today).toHaveValue('lanes');
-    assert.equal(await stored(page, 'hub-today-project'), 'lanes', 'A pick on Work is what Today shows.');
-    await page.reload();
-    await expect(await ready(page, '[data-today-project]')).toHaveValue('lanes');
-    await (await ready(page, '[data-today-project]')).selectOption('magic-loops');
-    assert.equal(await stored(page, 'hub-today-project'), 'magic-loops');
-    assert.equal(await stored(page, 'buw.hub.project'), 'magic-loops', 'A pick on Today is the shared choice.');
-    await go(page, '#/~hub/work');
-    await expect(await ready(page, '.work')).toHaveValue('magic-loops');
+    await expect(await ready(page, '.work')).toHaveValue('lanes');
     await page.context().close();
   }
 
-  step('"All" is the first option on Today and Work, and Roadmap and Project have none');
+  step('"All" is the first option on Work');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${fixture.url}#/~hub/today`);
-    let select = await ready(page, '[data-today-project]');
-    assert.equal(await select.locator('option').first().getAttribute('value'), 'all');
-    await select.selectOption('lanes');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await select.selectOption('all');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'all');
+    await page.goto(`${fixture.url}#/~hub/work/lanes`);
+    let select;
 
     await go(page, '#/~hub/work/lanes');
     select = await ready(page, '.work');
@@ -180,38 +124,6 @@ try {
     await select.selectOption('all');
     await page.waitForFunction(() => location.hash === '#/~hub/work/all');
 
-    for (const [hash, scope] of [['#/~hub/map', '.hub-map-chips'], ['#/~hub/project/magic-loops', '.pp']]) {
-      await go(page, hash);
-      select = await ready(page, scope);
-      assert.equal(await select.locator('option[value="all"]').count(), 0, `${scope}: no All.`);
-    }
-    await page.context().close();
-  }
-
-  step('A project that is not in the list reads "Choose a project", and a pick moves there');
-  {
-    const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${fixture.url}#/~hub/project/no-such-thing`);
-    await page.locator('[data-project-missing]').waitFor();
-    const select = await ready(page, '.pp');
-    assert.match(await page.locator('[data-project-missing]').innerText(), /No project called/);
-    assert.equal(await shown(select), 'Choose a project');
-    await select.selectOption('magic-loops');
-    await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
-    await expect(select).toHaveValue('magic-loops');
-    await page.context().close();
-  }
-
-  step('Back after a pick on the Project page returns to the old project');
-  {
-    const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${fixture.url}#/~hub/project/magic-loops`);
-    const select = await ready(page, '.pp');
-    await select.selectOption('lanes');
-    await page.waitForFunction(() => location.hash === '#/~hub/project/lanes');
-    await page.goBack();
-    await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
-    await expect(select).toHaveValue('magic-loops');
     await page.context().close();
   }
 
@@ -273,14 +185,14 @@ try {
   step('Above ten projects at 390 px: still one native select, 44 px high, with every project');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${many.url}#/~hub/map`);
-    const select = await ready(page, '.hub-map-chips');
+    await page.goto(`${many.url}#/~hub/work`);
+    const select = await ready(page, '.work');
     assert.equal(await select.evaluate(node => node.tagName), 'SELECT', 'A select above ten projects.');
-    assert.equal(await page.locator('.hub-map-chips input[role="combobox"]').count(), 0, 'No text field above ten projects.');
+    assert.equal(await page.locator('.work input[role="combobox"]').count(), 0, 'No text field above ten projects.');
     await expect.poll(() => select.locator('option:not([hidden])').count()).toBeGreaterThan(11);
     const box = await select.boundingBox();
     assert.ok(box.height >= 44, `The field is at least 44 px high (${box.height}).`);
-    await none(page, 'Roadmap above ten projects');
+    await none(page, 'Work above ten projects');
     await page.context().close();
   }
   console.log('hub-phone-picker-ui: passed');

@@ -64,3 +64,5 @@
 .hub-jobs-a .hub-jobs-cost { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .hub-jobs-a .hub-btn { flex: 1 1 100%; } .hub-jobs-a .hub-jobs-cost { flex-basis: 100%; } }
 .hub-queue-join { margin: 4px 0 0; font-size: 0.78rem; }
+.hub-thinking { margin: 0; font-style: italic; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow-y: auto; }
+.hub-thinking span { font-style: normal; font-weight: 600; }

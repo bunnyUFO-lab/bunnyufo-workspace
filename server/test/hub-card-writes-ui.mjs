@@ -17,6 +17,8 @@ const contexts = [];
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 const open = async options => {
   const context = await browser.newContext({ serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  // Team opens on the Floor; this file is about the list, so the browser starts with the list chosen (unless the test chose).
+  await context.addInitScript(() => { try { if (!localStorage.getItem('hub.team.view')) localStorage.setItem('hub.team.view', 'roster'); } catch { /* storage off */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -41,9 +43,11 @@ try {
   const phone = await open(PHONE);
 
   step('a card with no agent writes shows no strip at all');
+  // Waiting starts before the page loads: the answer can arrive before a wait that is attached after goto.
+  const answered = phone.waitForResponse(response => response.url().includes('/hub/card-writes'));
   await phone.goto(`${fixture.url}#/hub`);
   await phone.locator('.content').waitFor();
-  await phone.waitForResponse(response => response.url().includes('/hub/card-writes'));
+  await answered;
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(await phone.locator('[data-cw-strip]').count(), 0);
 
@@ -135,17 +139,20 @@ try {
   await expect(editRow.locator('[data-cw-reverted]')).toContainText('Reverted by you');
   assert.equal(fixture.fake.text(KEY), ORIGINAL, 'the old text is back');
 
-  step('the project page: a line about the setting above the cards, and the rows below them');
-  await phone.goto(`${fixture.url}#/~hub/project/lanes/library`);
+  step('the project page: a line about the setting above the cards (Cards tab), and the rows on the Work tab');
+  await phone.goto(`${fixture.url}#/~hub/project/lanes/cards`);
   const agents = phone.locator('[data-pp-agents]');
   await agents.waitFor();
   await expect(agents).toContainText('Agents may add cards here.');
+  await tall(phone.locator('[data-pp-agents] a'), 'the Cards tab');
+  await noSideways(phone, 'the Cards tab');
+  await phone.goto(`${fixture.url}#/~hub/project/lanes/work`);
   await expect(phone.locator('[data-pp-agent-writes] h3')).toHaveText('Agent writes');
   const projectRows = phone.locator('[data-pp-agent-writes] [data-cw-row]');
   assert.equal(await projectRows.count(), 2);
   await expect(projectRows.first()).toContainText('in Lanes plan');
-  await tall(phone.locator('[data-pp-agent-writes] button, [data-pp-agents] a'), 'the Library tab');
-  await noSideways(phone, 'the Library tab with rows');
+  await tall(phone.locator('[data-pp-agent-writes] button'), 'the Work tab');
+  await noSideways(phone, 'the Work tab with rows');
 
   step('a file the owner changed after the agent is left alone, said plainly, and the row loses its button');
   const laneEdit = phone.locator('[data-batch="laneedit001"]');
@@ -194,7 +201,7 @@ try {
   await expect(lanes).not.toBeChecked();
   await expect.poll(() => fixture.fake.json('sections/inbox/library-writes.json')?.off).toEqual(['lanes']);
   await expect(panel.locator('[data-card-write-unsaved]')).toHaveCount(0);
-  await phone.goto(`${fixture.url}#/~hub/project/lanes/library`);
+  await phone.goto(`${fixture.url}#/~hub/project/lanes/cards`);
   await expect(phone.locator('[data-pp-agents]')).toHaveText('Agents may not write here');
   await phone.goto(`${fixture.url}#/~hub/team`);
   await panel.waitFor();

@@ -4,16 +4,15 @@ import { remember } from '../lib/hub'
 import { useHubData } from './useHub'
 
 const KEY = 'buw.hub.project'
-const SCOPE_KEY = 'hub-today-project' // The old name stays: existing values keep working and no migration is needed.
-
-/** What Today and Needs you show: a project id, or '' for All. Only a pick writes it (`chooseProject`); an address or a visit never does. */
-export const savedScope = () => { try { return localStorage.getItem(SCOPE_KEY) ?? '' } catch { return '' } }
-export const saveScope = (project: string) => { try { if (project) localStorage.setItem(SCOPE_KEY, project); else localStorage.removeItem(SCOPE_KEY) } catch { /* private mode: All next time */ } }
-/** A pick in a project picker: null is All. Addresses and visits never call this. All leaves the last real project (`buw.hub.project`) alone. */
-export function chooseProject(id: string | null) { saveScope(id ?? ''); if (id) remember(KEY, id) }
 
 /**
- * The project Work, the Roadmap and the Project page show (a pick on any picker also sets what Today and Needs you show, see `chooseProject`): the one in the address (any project, so a link to one
+ * A pick in a project picker: it is the project Work, the Roadmap and the Project page open on next. Needs you keeps its own chip in
+ * its address and Today has no project at all, so nothing here is shared with them. `null` is All and leaves the last real project alone.
+ */
+export function chooseProject(id: string | null) { if (id) remember(KEY, id) }
+
+/**
+ * The project Work, the Roadmap and the Project page show: the one in the address (any project, so a link to one
  * without a Beads copy says so), else the last one chosen, else the first in the server's order (the project table's order, then alphabetical; nothing here re-sorts). Both draw from a Beads
  * copy, so the chips list only projects that have one (all of them while none has).
  *

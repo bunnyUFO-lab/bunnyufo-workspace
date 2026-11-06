@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { api, onServiceEvent, useService } from '../local/client'
 import { activeSite, allSites, archivedSites, siteHref } from '../lib/sites'
 import type { Site } from '../lib/sites'
 import { useCanWrite, useCapabilities } from '../lib/writes'
 import { host } from '../lib/host'
+import { Sheet } from '../ui/Sheet'
 import type { ActiveWorkspace, WorkspaceEntry } from '../local/types'
 
 type Workspaces = { active: ActiveWorkspace; workspaces: WorkspaceEntry[]; canSwitch: boolean }
@@ -16,7 +17,7 @@ type Workspaces = { active: ActiveWorkspace; workspaces: WorkspaceEntry[]; canSw
  * Published site: the workspaces that site serves (lib/sites), as ordinary links, so the back button works.
  * A site serving only one workspace shows the label without a menu, as before.
  */
-export default function WorkspaceSwitcher({ variant = 'brand' }: { variant?: 'brand' | 'crumb' }) {
+export default function WorkspaceSwitcher({ variant = 'brand' }: { variant?: 'brand' | 'crumb' | 'sheet' }) {
   const { workspace } = useService()
   const [open, setOpen] = useState(false)
   const [list, setList] = useState<Workspaces | null>(null)
@@ -29,6 +30,8 @@ export default function WorkspaceSwitcher({ variant = 'brand' }: { variant?: 'br
   const menu = useRef<HTMLDivElement>(null)
   const [place, setPlace] = useState({ left: 0, top: 0 })
   const label = workspace && !workspace.builtin ? workspace.name : 'workspace'
+  // The 'sheet' variant draws the same menu in a sheet (Library's top bar); the others float it from the button.
+  const wrap = (panel: ReactElement) => variant === 'sheet' ? <Sheet title="Workspaces" onClose={() => setOpen(false)}>{panel}</Sheet> : createPortal(panel, document.body)
 
   const refresh = () => api<Workspaces>('/workspaces').then(setList).catch(error => setError(String(error.message || error)))
   useEffect(() => {
@@ -75,10 +78,10 @@ export default function WorkspaceSwitcher({ variant = 'brand' }: { variant?: 'br
   })
 
   return <div className={`workspace-switcher workspace-switcher-${variant}`} ref={root}>
-    <button type="button" className={`${variant === 'brand' ? 'brand-sub ' : ''}workspace-switcher-button`} aria-label={`Workspace: ${label}. Switch or add a workspace`} onClick={toggle} aria-haspopup="menu" aria-expanded={open} title={workspace?.root}>
+    <button type="button" className={`${variant === 'brand' ? 'brand-sub ' : variant === 'sheet' ? 'ui-btn sm ghost ' : ''}workspace-switcher-button`} aria-label={`Workspace: ${label}. Switch or add a workspace`} onClick={toggle} aria-haspopup="menu" aria-expanded={open} title={workspace?.root}>
       {label}<span aria-hidden="true"> ▾</span>
     </button>
-    {open && createPortal(<div className="workspace-menu" ref={menu} role="menu" aria-label="Workspaces" style={{ left: place.left, top: place.top }}>
+    {open && wrap(<div className="workspace-menu" ref={menu} role="menu" aria-label="Workspaces" style={variant === 'sheet' ? undefined : { left: place.left, top: place.top }}>
       <p className="workspace-menu-title">Workspaces</p>
       {!list ? <p className="workspace-menu-note">Loading…</p> : <>
         {list.workspaces.map(item => <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === list.active.id}
@@ -104,17 +107,19 @@ export default function WorkspaceSwitcher({ variant = 'brand' }: { variant?: 'br
         <button type="button" role="menuitem" className="workspace-menu-new" onClick={() => { setName(''); setAdding('folder') }}>Add existing folder…</button>
       </div>}
       {error && <p className="workspace-menu-error" role="alert">{error}</p>}
-    </div>, document.body)}
+    </div>)}
   </div>
 }
 
 /** The published site's version: the sections this site serves, as links — and a way to start one. */
-function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
+function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' | 'sheet' }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const menu = useRef<HTMLDivElement>(null)
   const [place, setPlace] = useState({ left: 0, top: 0 })
   const label = activeSite?.name ?? 'workspace'
+  // The 'sheet' variant draws the same menu in a sheet (Library's top bar); the others float it from the button.
+  const wrap = (panel: ReactElement) => variant === 'sheet' ? <Sheet title="Workspaces" onClose={() => setOpen(false)}>{panel}</Sheet> : createPortal(panel, document.body)
   const { create } = useCapabilities()
   const [naming, setNaming] = useState(false)
   const [name, setName] = useState('')
@@ -216,11 +221,11 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
   }
 
   return <div className={`workspace-switcher workspace-switcher-${variant}`} ref={root}>
-    <button type="button" className={`${variant === 'brand' ? 'brand-sub ' : ''}workspace-switcher-button`}
+    <button type="button" className={`${variant === 'brand' ? 'brand-sub ' : variant === 'sheet' ? 'ui-btn sm ghost ' : ''}workspace-switcher-button`}
       aria-label={`Workspace: ${label}. Switch workspace`} onClick={toggle} aria-haspopup="menu" aria-expanded={open}>
       {label}<span aria-hidden="true"> ▾</span>
     </button>
-    {open && createPortal(<div className="workspace-menu" ref={menu} role="menu" aria-label="Workspaces" style={{ left: place.left, top: place.top }}>
+    {open && wrap(<div className="workspace-menu" ref={menu} role="menu" aria-label="Workspaces" style={variant === 'sheet' ? undefined : { left: place.left, top: place.top }}>
       <p className="workspace-menu-title">Workspaces</p>
       {allSites.map(site => editing === site.id
         ? <form key={site.id} className="workspace-menu-add workspace-menu-rename" onSubmit={event => { event.preventDefault(); void rename(site) }}>
@@ -262,6 +267,6 @@ function SiteSwitcher({ variant }: { variant: 'brand' | 'crumb' }) {
         </form>
         : <div className="workspace-menu-actions"><button type="button" role="menuitem" className="workspace-menu-new" onClick={() => setNaming(true)}>＋ New workspace…</button></div>)}
       {error && <p className="workspace-menu-error" role="alert">{error}</p>}
-    </div>, document.body)}
+    </div>)}
   </div>
 }

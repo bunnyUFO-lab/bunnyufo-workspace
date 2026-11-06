@@ -7,6 +7,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 import { askJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -17,6 +18,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   // The Roadmap's default filter (Open) hides done work; these tests need to see the decided question too.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
@@ -129,6 +131,7 @@ try {
   await desk.locator('[data-q-item-action="chat"]').click();
   await desk.waitForURL(/#\/~hub\/chat$/);
   await desk.locator('textarea[aria-label="Message"]').waitFor();
+  await openChatSheet(desk);
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'hermes', 'Plain Hermes, not a persona.');
   const draft = await desk.locator('textarea[aria-label="Message"]').inputValue();
   assert.match(draft, /Question wf-q2 \(research\)/);

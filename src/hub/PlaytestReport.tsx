@@ -4,6 +4,7 @@ import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { setTarget } from './stepTarget'
 import HubImage from './HubImage'
+import { PICTURE_TYPES } from './chatImages'
 import { MAX_ISSUES, VERDICT_LABEL } from './playtest'
 import type { usePlaytestReport } from './playtest'
 
@@ -61,7 +62,7 @@ export default function PlaytestReport({ report, checklistId, live }: { report: 
             <label className="hub-cl-cam" title="Attach a screenshot" data-attach-shot aria-disabled={uploading || undefined}>
               <span aria-hidden="true">{uploading ? '…' : '📷'}</span>
               <input
-                type="file" accept="image/jpeg,image/png,image/*" aria-label="Attach a screenshot to this issue" disabled={uploading} data-shot-input
+                type="file" accept={PICTURE_TYPES} aria-label="Attach a screenshot to this issue" disabled={uploading} data-shot-input
                 onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void report.attach(file) }}
               />
             </label>

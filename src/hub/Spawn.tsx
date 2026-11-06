@@ -7,9 +7,9 @@ import { CAPS_LINE, MACHINE, RULE_TO, approvedNote, claudeOnly, estimateCost, gu
 import type { PresetList } from './spawnData'
 import { cachedPresets, loadPresets } from './spawnData'
 import { hubHash } from '../lib/route'
-import { openFromClick } from './ItemRow'
 import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
+import { afterPop, go, useOverlayEntry } from '../lib/entries'
 import { startChat } from './chatStart'
 import Combobox from './Combobox'
 import type { ComboOption } from './comboboxLogic'
@@ -86,6 +86,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [personas, setPersonas] = useState<ChatPersona[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // The open sheet is a history entry: Back closes it and stays on the screen (lib/entries).
+  useOverlayEntry(true, onClose)
   useEffect(() => {
     const node = dialog.current
     if (node && !node.open) node.showModal()
@@ -179,7 +181,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     if (chatting) {
       // Files nothing: no request, no card, no write. Chat opens on a new conversation with the agent and the text as a draft.
       startChat({ persona: chatPersona?.id ?? HERMES, draft: trimmed })
-      window.location.hash = hubHash('chat')
+      afterPop(() => go(hubHash('chat')))
       onClose()
       return
     }
@@ -243,7 +245,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     >
       <div className="sp-head">
         <Icon name="spark" />
-        <h2 id={`${uid}-title`}>{edit ? 'Edit the request' : 'Spawn work'}</h2>
+        <h2 id={`${uid}-title`}>{edit ? 'Edit the request' : 'New job'}</h2>
         <button type="button" className="hub-btn sp-x" aria-label="Close" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
       </div>
       <div className="sp-body">
@@ -403,7 +405,7 @@ export default function SpawnHost() {
       {toast && (
         <div className="runs-toast" role="status" data-spawn-toast>
           <span>{toast.text}</span>
-          {toast.run && <> <span data-spawn-where>It shows in Working now once it starts.</span> <a href={hubHash('request', toast.run)} onClick={event => { openFromClick(event, toast.run as string); setToast(null) }} data-spawn-toast-link="run">Open run</a></>}
+          {toast.run && <> <span data-spawn-where>It shows in Working now once it starts.</span> <a href={hubHash('request', toast.run)} onClick={() => setToast(null)} data-spawn-toast-link="run">Open run</a></>}
           {toast.needs && <> <a href={hubHash('needs')} onClick={() => { setFocus(`approval-${toast.needs}`); setToast(null) }} data-spawn-toast-link="needs">Open in Needs you</a></>}
         </div>
       )}

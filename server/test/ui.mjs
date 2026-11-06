@@ -111,7 +111,7 @@ try {
   await stranger.goto(service.origin + '/');
   await stranger.getByText('Open bunnyUFO Workspace from the address its service printed', { exact: true }).waitFor();
   await stranger.getByRole('button', { name: 'Reload', exact: true }).waitFor();
-  assert.equal(await stranger.locator('.entity-card').count(), 0);
+  assert.equal(await stranger.locator('.lib-row').count(), 0);
   console.log('UI passed: 12 clickable wrapping tabs; Markdown preview/edit/save/conflict/draft; local Skills; MCP filtering, checks and hidden credentials.');
 } finally {
   await browser?.close();

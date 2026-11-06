@@ -17,6 +17,7 @@ const fixtures = [];
 const servers = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(20000));
@@ -42,11 +43,13 @@ const staleFixture = async env => {
 };
 
 try {
-  step('A stale status and a wake set up: the tile says asleep or off and offers Wake the PC; one tap sends one POST and the tile says Waking');
+  step('A stale status and a wake set up: Today says PC asleep in one line, and Settings has the tile that says asleep or off and offers Wake the PC; one tap sends one POST and the tile says Waking');
   const hook = await controller();
   const fixture = await staleFixture({ HUB_WAKE_URL: hook.url });
   const page = await open({ width: 1280, height: 900 });
   await page.goto(`${fixture.url}#/~hub/today`);
+  assert.equal(await page.locator('[data-today-pc]').innerText(), 'PC asleep', 'Today says it in one line.');
+  await page.goto(`${fixture.url}#/~hub/settings`);
   const tile = page.locator('[data-pc]');
   await tile.waitFor();
   assert.match(await tile.locator('[data-pc-headline]').innerText(), /Asleep or off/);
@@ -71,7 +74,7 @@ try {
   await view.locator('[data-next-note]').waitFor();
   await view.goto(`${drawerFixture.url}#/~hub/needs/requests`);
   await view.locator(`[data-request-open="${PC_REQUEST}"]`).click();
-  const drawer = view.locator('[data-run-drawer]');
+  const drawer = view.locator('[data-run-view]');
   await drawer.waitFor();
   assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /Starts on the PC within a few minutes/);
   await drawer.locator('[data-wake-button]').waitFor();
@@ -83,7 +86,7 @@ try {
   step('No wake set up: the same screens show no Wake button, only the copy');
   const bare = await staleFixture({});
   const plain = await open({ width: 1280, height: 900 });
-  await plain.goto(`${bare.url}#/~hub/today`);
+  await plain.goto(`${bare.url}#/~hub/settings`);
   await plain.locator('[data-pc]').waitFor();
   assert.equal(await plain.locator('[data-wake], [data-wake-button]').count(), 0);
   await plain.goto(`${bare.url}#/~hub/needs`);
@@ -98,7 +101,7 @@ try {
   const hook3 = await controller();
   const phoneFixture = await staleFixture({ HUB_WAKE_URL: hook3.url });
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
-  await phone.goto(`${phoneFixture.url}#/~hub/today`);
+  await phone.goto(`${phoneFixture.url}#/~hub/settings`);
   await phone.locator('[data-wake-button]').waitFor();
   const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `the page scrolls sideways (${widths.scroll} > ${widths.inner})`);

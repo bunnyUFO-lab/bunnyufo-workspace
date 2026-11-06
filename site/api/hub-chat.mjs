@@ -24,6 +24,8 @@ import { CHAT_PERSONAS, chatPersonaOf, chatPersonasForClient, storedPersona } fr
 import { HELP_KINDS, buildHelpContext, helpExcerpt } from './hub-help.mjs';
 import { delegatesNote, foldDelegates, hasRunningDelegate, settleDelegates } from './chat-delegates.mjs';
 import { JOB_LIMITS, SKEW_MS, idsIn, jobIdsOf, jobWindowsOf, splitCreated } from './chat-jobs.mjs';
+import { PAGE_DEFAULT, VIEWS, checkPatch, countPlaces, createChatStateStore, emptyState, orderView, pageOf, pool, viewOfEntry, withPatch } from './chat-state.mjs';
+import { createChatIndex } from './chat-index.mjs';
 import { QUEUE_LIMITS, STALE_MS_DEFAULT, addItem, cancelItem, createQueueStore, holdFor, holdQueue, readQueue, restoreItems, takeItems, tooOld, viewOf } from './chat-queue.mjs';
 
 const MB = 1024 * 1024;
@@ -37,6 +39,7 @@ export const TOTAL_MS_DEFAULT = 600_000;
 export const IDLE_MS_DEFAULT = 300_000;
 const MAX_TOOLS = 20;
 const KEEPALIVE_MS = 15_000;
+const MAX_THOUGHT = 1500;   // characters of what Hermes is thinking that a page is sent
 const DELEGATE_LOOK_MS = 4_000;   // how long reading a conversation waits for Hermes's delegate results
 
 const clip = (value, length) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, length);
@@ -45,17 +48,22 @@ const historyText = line => [stripInlineImages(line.text), delegatesNote(line)].
 
 export const isChatRoute = route => route === '/hub/chat' || route.startsWith('/hub/chat/');
 
-export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, jobRows = null, approveJob = null, scrub = createScrub(env), log = () => {} }) {
+export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem = null, readJson, json, fail, now, pool = (size, items, fn) => Promise.all(items.map(fn)), hermesRuns = null, planPauses = null, personas = null, autoFirst = null, copyApproval = null, readApproval = null, jobRows = null, approveJob = null, scrub = createScrub(env), log = () => {} }) {
   const IDLE_MS = Number(env.HUB_CHAT_IDLE_MS) > 0 ? Number(env.HUB_CHAT_IDLE_MS) : IDLE_MS_DEFAULT; // completions turns only; a test shortens it
   const TOTAL_MS = Number(env.HUB_CHAT_TOTAL_MS) > 0 ? Number(env.HUB_CHAT_TOTAL_MS) : TOTAL_MS_DEFAULT; // completions turns only; a test shortens it
   const hermesUrl = String(env.HERMES_URL ?? '').replace(/\/+$/, '');
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
   const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
   const titles = new Map();   // etag → { title, count }
+  const startingTurns = new Map();   // queue file etag → its running first turn, or null
   /** The persona table of this request: the app's, with the owner's edits (hub-personas.mjs) when the Hub gave a reader. */
   /** What Auto tries first: the label of the model the Hermes host says profile main uses (an export, ws-im1.4.2), else Codex, the app's own default. */
   const autoFirstLabel = async () => (autoFirst ? await autoFirst().catch(() => null) : null) || 'Codex';
   const tableNow = async () => (personas ? await personas() : CHAT_PERSONAS);   // persona:
+
+  // ws-cl0.6.7: the message search index, in memory. `readState` is the seam for ws-cl0.6.6's chat state (`chat/state.json`):
+  // when that lands, pass its reader here and trashed chats leave the results, archived ones are marked, a rename wins.
+  const messageIndex = createChatIndex({ bucket, key, fresh, pool, readState: () => marksNow() });
 
   const parse = text => String(text ?? '').split(/\r?\n/).filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 
@@ -64,14 +72,46 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     ? { kind: about.kind, id: about.id, ...(typeof about.step === 'string' && /^\d{2}$/.test(about.step) ? { step: about.step } : {}), title: clip(about.title, 120) }
     : null);
 
-  async function list() {
+  const stateStore = createChatStateStore({ fresh, bucket, key, fail });
+  /** The chat marks (pin, rename, archive, Trash, unread); an unreadable file reads as none. */
+  const marksNow = () => stateStore.read().catch(() => emptyState());
+  const isTrashed = async id => !!(await marksNow()).chats[id]?.trashed;
+  const TRASH_SAYS = 'This chat is in the Trash. Restore it to send.';
+  /** A send to an archived chat brings it back to the list. A failed write only logs: the send goes on. */
+  const unarchive = id => stateStore.update(marks => (marks.chats[id]?.archived ? withPatch(marks, id, { archived: false }, now().toISOString()) : null)).catch(error => log(`chat state: could not un-archive: ${error.message}`));
+
+  /** One page of the chat list: `view` is active (default), archived, trash or all (active and archived). Pins lead page one whatever their age. */
+  async function list({ view = 'active', offset = 0, limit = PAGE_DEFAULT } = {}) {
     const table = await tableNow();   // persona:
-    const { objects } = await bucket.list(`${key('chat/x.jsonl').slice(0, -'x.jsonl'.length)}`);
-    const newest = objects.filter(object => object.key.endsWith('.jsonl')).sort((a, b) => (new Date(b.lastModified) - new Date(a.lastModified)) || (a.key < b.key ? 1 : -1)).slice(0, 30);
-    const conversations = [];
-    for (const object of newest) {
+    const [{ objects }, marks] = await Promise.all([bucket.list(`${key('chat/x.jsonl').slice(0, -'x.jsonl'.length)}`), marksNow()]);
+    const chats = [];
+    for (const object of objects) {
+      if (!object.key.endsWith('.jsonl')) continue;
       const id = object.key.split('/').pop().replace(/\.jsonl$/, '');
-      if (!CHAT_ID.test(id)) continue;
+      if (CHAT_ID.test(id)) chats.push({ id, at: object.lastModified ? new Date(object.lastModified).getTime() || 0 : 0, object });
+    }
+    // A new chat's first reply is still running: its transcript is saved when the reply ends, but the queue file already holds the turn.
+    // Only queue files with no transcript are read, and an unchanged one is not read again (etag).
+    const have = new Set(chats.map(chat => chat.id));
+    const waiting = objects.flatMap(object => { const id = /\/queue\/([^/]+)\.json$/.exec(object.key)?.[1]; return id && CHAT_ID.test(id) && !have.has(id) ? [{ id, object }] : []; });
+    const starting = (await pool(6, waiting, async ({ id, object }) => {
+      let turn = startingTurns.get(object.etag);
+      if (turn === undefined) {
+        turn = (await queueStore.read(id).catch(() => null))?.turn ?? null;
+        startingTurns.set(object.etag, turn);
+        while (startingTurns.size > 200) startingTurns.delete(startingTurns.keys().next().value);
+      }
+      return turn && (carriedOf(id) || turn.run) ? { id, at: Date.parse(turn.at) || 0, object: null, turn } : null;
+    })).filter(Boolean);
+    chats.push(...starting);
+    const ordered = orderView(chats, marks, VIEWS.includes(view) ? view : 'active');
+    const page = ordered.slice(offset, offset + limit);
+    // Titles are read for this page only, six at a time; the etag cache answers a chat that has not changed.
+    const conversations = await pool(6, page, async ({ id, object, turn }) => {
+      if (!object) {   // running first turn: no transcript yet
+        const mark = viewOfEntry(marks.chats[id]);
+        return { id, title: mark.title ?? (clip(turn.text, 60) || 'New chat'), renamed: !!mark.title, updated: turn.at ?? null, count: 1, running: true, pinned: mark.pinned, archived: mark.archived, trashed: mark.trashed, unread: mark.unread, ...(turn.model ? { model: turn.model } : {}), ...(turn.persona && storedPersona(turn.persona, table) ? { persona: turn.persona } : {}) };
+      }
       let info = titles.get(object.etag);
       if (!info) {
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);
@@ -83,9 +123,10 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         titles.set(object.etag, info);
         while (titles.size > 200) titles.delete(titles.keys().next().value);
       }
-      conversations.push({ id, title: info.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, ...(info.about ? { about: info.about } : {}), ...(info.model ? { model: info.model } : {}), ...(info.persona ? { persona: info.persona } : {}) });
-    }
-    return conversations;
+      const mark = viewOfEntry(marks.chats[id]);
+      return { id, title: mark.title ?? info.title, renamed: !!mark.title, updated: object.lastModified ? new Date(object.lastModified).toISOString() : null, count: info.count, pinned: mark.pinned, archived: mark.archived, trashed: mark.trashed, unread: mark.unread, ...(info.about ? { about: info.about } : {}), ...(info.model ? { model: info.model } : {}), ...(info.persona ? { persona: info.persona } : {}) };
+    });
+    return { conversations, counts: countPlaces(chats.map(chat => chat.id), marks), total: ordered.length, more: offset + limit < ordered.length, offset };
   }
 
   /** Append lines to a conversation, conditionally; read again and retry twice on a lost race. */
@@ -220,6 +261,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   function busFor(carried, response = null) {
     return (event, value) => {
       if (response && !response.destroyed) response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
+      if (event === 'thinking') { const old = carried.log.findLastIndex(entry => entry.event === 'thinking'); if (old >= 0) carried.log.splice(old, 1); }   // only the latest is kept: the log stays the reply's size
       const last = carried.log[carried.log.length - 1];
       if (event === 'delta' && last?.event === 'delta') last.data = { text: last.data.text + value.text };
       else carried.log.push({ event, data: value });
@@ -283,6 +325,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (next !== delegates) { delegates = next; emit('delegates', { items: delegates }); }
     };
     let finishedByHermes = false;
+    let thought = '';
     try {
       let ended = false;
       for await (const event of hermesRuns.events(runId, { signal })) {
@@ -298,7 +341,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
           see(data.preview);
           noteDelegates(event.event, data);
         } else if (event.event === 'subagent.start' || event.event === 'subagent.complete') noteDelegates(event.event, data);
-        else if (event.event === 'approval.request') {
+        else if (/^(reasoning|thinking)./.test(event.event)) {
+          // What Hermes is thinking, shown while no text has come. Never saved with the reply. Its delta events add up; `available` gives the whole.
+          const piece = [data.text, data.delta, data.reasoning, data.content].find(value => typeof value === 'string' && value.trim());
+          if (piece) { thought = event.event.endsWith('.delta') ? thought + piece : piece; emit('thinking', { text: thought.length > MAX_THOUGHT ? `…${thought.slice(-MAX_THOUGHT)}` : thought }); }
+        } else if (event.event === 'approval.request') {
           // The card shows the stored record: its answers (once or deny), and an expiry counted from when Hermes asked.
           let stored = null;
           let copied = null;
@@ -337,9 +384,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     if (created.length) emit('created', { items: created });
     if (jobs.length) emit('jobs', { ids: jobs });
     const at = now().toISOString();
+    // A Stop that ended the turn with nothing to show: the note lives on the owner's line (no extra line, so the history Hermes gets and the turn count stay as they were).
+    const stoppedEmpty = !!failure && !reply.trim() && !delegates.length && (!!carried?.stopAsked || failure === 'The run was stopped.');
     const kept = stripInlineImages(reply);   // a picture Hermes made is megabytes of text: the line keeps a note
     const assistant = { role: 'assistant', text: failure ? `${kept} [interrupted]`.trim() : kept, at, ...(runId ? { run: runId, ...(tools.length ? { tools } : {}) } : {}), ...(delegates.length ? { delegates } : {}), ...(created.length ? { created } : {}), ...(jobs.length ? { jobs } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}) };   // model: persona:
-    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}), ...(queued.length ? { queued } : {}) };   // model: persona: queued: the ids of the messages a queued turn joined
+    const userLine = { role: 'user', text, at: new Date(started).toISOString(), ...(user ? { by: user } : {}), ...(choice.provider ? { model: choice.id } : {}), ...(persona ? { persona: persona.id } : {}), ...(queued.length ? { queued } : {}), ...(stoppedEmpty ? { stopped: true } : {}) };   // model: persona: queued: the ids of the messages a queued turn joined; stopped: a Stop ended the turn before any text, so there is no reply line to say so
     let contextLine = null;   // help:
     try {
       if (context) {
@@ -375,10 +424,11 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    * Returns that turn, or null.
    */
   async function advanceQueue(id, carried, failure) {
+    const trashed = await isTrashed(id);   // nothing goes out of a chat in the Trash
     const { out } = await queueStore.update(id, queue => {
       const base = queue.turn?.key === carried.key ? { ...queue, turn: null } : queue;
       // A Stop that was accepted while the reply was ending counts as much as a failure: nothing goes out after a Stop.
-      if (failure || carried.stopAsked) return { queue: queue.items.length ? holdQueue(base, holdFor(failure, carried.stopAsked), now().toISOString()) : base };
+      if (failure || carried.stopAsked || trashed) return { queue: queue.items.length ? holdQueue(base, holdFor(failure, carried.stopAsked || trashed), now().toISOString()) : base };
       if (!queue.items.length || queue.held || base.turn || pumpedCount(carried) >= MAX_PUMPED) return { queue: base };
       if (tooOld(queue.items, now().getTime(), STALE_MS)) return { queue: holdQueue(base, 'old', now().toISOString()) };
       return takeTurn(base, id);
@@ -524,6 +574,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
    */
   async function pump(id, { force = false } = {}) {
     if (carriedOf(id) || pumping.has(id) || (pumpedCount() >= MAX_PUMPED)) return null;
+    if (await isTrashed(id)) return null;   // a trashed chat sends nothing, whatever waits in it
     pumping.add(id);   // until the turn is in `active`: a sweep that reads the new `turn` in between must not recover it too
     try {
       // Messages with no saved chat behind them (a picture or help first turn that a restart lost) have nothing to be delivered into.
@@ -577,6 +628,8 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   async function sweepOne(id, queue = null) {
     if (carriedOf(id) || pumping.has(id)) return false;
     const current = queue ?? await queueStore.read(id);
+    // In the Trash nothing starts: a turn that has a run is still read on, so its reply is saved; one with no run waits for Restore.
+    if ((current.turn ? !current.turn.run : current.items.length && !current.held) && await isTrashed(id)) return false;
     if (current.turn) { recoverTurn(id, current.turn); return false; }
     if (current.items.length && !current.held) { await pump(id); return false; }
     return true;
@@ -634,6 +687,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const context = asking ? null : (data.about !== undefined && data.about !== null ? await helpContext(data.about) : null);   // help:
     if (asking) {
       if (typeof id !== 'string' || !CHAT_ID.test(id)) throw fail('No such conversation.', 404);
+      if (await isTrashed(id)) throw fail(TRASH_SAYS, 409);
       // An earlier reply is still being written: a new turn now would miss it in the history and save out of order.
       if (carriedOf(id)) throw fail('Hermes is still answering in this conversation; wait for the reply.', 409);
       const got = await fresh(`chat/${id}.jsonl`);
@@ -641,6 +695,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       if (Buffer.byteLength(got.text) > MAX_FILE) throw fail('This conversation is long; start a new one.', 409);
       history = await withDelegateResults(id, got);   // results saved since the chat was last read go with this turn
       persona = storedPersona(history.find(line => line.persona)?.persona, table);   // persona: the one this conversation started with
+      await unarchive(id);   // a message to an archived chat brings it back
     } else {
       id = `${day8(now())}-${randomId(6)}`;
     }
@@ -837,6 +892,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     const text = typeof data.text === 'string' ? data.text.trim() : '';
     if (!text || text.length > QUEUE_LIMITS.text) throw fail(`A message is 1 to ${QUEUE_LIMITS.text} characters.`);
     const choice = chatModelOf(data.model);   // model: an id from the table, or a 400
+    if (await isTrashed(id)) throw fail(TRASH_SAYS, 409);
     if (!carriedOf(id) && !await fresh(`chat/${id}.jsonl`)) throw fail('No such conversation.', 404);
     const { out } = await queueStore.update(id, queue => {
       const added = addItem(queue, { id: `q${randomId(5)}`, text, at: now().toISOString(), by: user ?? undefined, model: choice.provider ? choice.id : undefined });
@@ -844,6 +900,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     });
     if (out.error === 'items') throw fail(`${QUEUE_LIMITS.items} messages are already waiting in this chat.`, 409);
     if (out.error) throw fail(`The waiting messages are at the ${QUEUE_LIMITS.chars} character limit; wait for the reply.`, 409);
+    await unarchive(id);
     await pump(id);   // nothing running and nothing held: it goes now
     return queueView(id);
   }
@@ -862,9 +919,38 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   /** POST /queue/send: Send now. Clears the hold and delivers, unless a turn is running: then the messages stay queued. */
   async function sendQueued(id) {
     queueId(id);
+    if (await isTrashed(id)) throw fail(TRASH_SAYS, 409);
     await queueStore.update(id, queue => (queue.held ? { queue: { ...queue, held: null } } : null));
     await pump(id, { force: true });
     return queueView(id);
+  }
+
+  /** Whether a chat has a transcript in the inbox. */
+  const hasTranscript = async id => {
+    try { await bucket.head(key(`chat/${id}.jsonl`)); return true; } catch (error) { if (error.status === 404) return false; throw error; }
+  };
+
+  /**
+   * POST /state: pin, rename, archive, Trash or mark unread, written to chat/state.json and nowhere else. Nothing is moved or deleted.
+   * Trash also stops this user's running reply (as Stop does) and holds the chat's queue, so nothing waiting can go out of it; Restore
+   * leaves that hold, and the owner sends.
+   */
+  async function setState(id, data, user) {
+    if (!CHAT_ID.test(id)) throw fail('No such conversation.', 404);
+    const checked = checkPatch(data);
+    if (checked.error) throw fail(checked.error);
+    if (!carriedOf(id) && !await hasTranscript(id)) throw fail('No such conversation.', 404);   // a new chat has no file until its first reply is saved
+    const at = now().toISOString();
+    const next = await stateStore.update(marks => withPatch(marks, id, checked.patch, at));
+    if (checked.patch.trashed === true) {
+      const carried = carriedOf(id);
+      if (carried && !carried.ending && carried.user === (user ?? null)) {
+        carried.stopAsked = true;
+        if (carried.run) await hermesRuns?.stop(carried.run).catch(() => {});
+      }
+      await queueStore.update(id, queue => (queue.items.length && !queue.held ? { queue: holdQueue(queue, 'stopped', at) } : null)).catch(error => log(`chat state: could not hold the queue: ${error.message}`));
+    }
+    return { id, state: viewOfEntry(next.chats[id]) };
   }
 
   /** The conversation's job ids (oldest first) and its persona, for the jobs routes. 404 when there is no such conversation. */
@@ -947,7 +1033,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
     /** Answers the chat routes; the caller has checked that the route is one of them. */
     /** help: the excerpt an answer carries, `{ chat, lines, excerpt }`. */
     helpExcerpt: excerptOf,
-    async handle({ request, response, method, route, user, requireRemoteUser }) {
+    async handle({ request, response, method, route, query = new URLSearchParams(), user, requireRemoteUser }) {
       if (requireRemoteUser && !user) throw fail('Chat needs a signed-in user.', 401);
       if (!chatConfigured) throw fail('Chat is not set up on this host.', 503);
       let match;
@@ -957,7 +1043,15 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         const built = await helpContext({ kind, id: itemId, step });
         return json(response, 200, { about: built.about, title: built.title, text: built.text, pictures: built.pictures.map(picture => ({ path: picture.path, label: picture.label })) });
       }
-      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { conversations: await list(), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, autoFirst: await autoFirstLabel(), pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
+      if (method === 'GET' && route === '/hub/chat') return json(response, 200, { ...await list({ view: query.get('view') ?? 'active', ...pageOf(query) }), models: chatModelsForClient(), personas: chatPersonasForClient(await tableNow()), chain: CHAT_CHAIN, autoFirst: await autoFirstLabel(), pauses: pausesForClient(await planPauses?.read(now()).catch(() => []) ?? [], CHAT_MODELS) });   // model: persona: pauses:
+      if (method === 'GET' && route === '/hub/chat/search') {   // before the generic /hub/chat/<id>
+        const params = new URL(request.url, 'http://hub').searchParams;
+        const q = String(params.get('q') ?? '').trim();
+        if (q.length < 2 || q.length > 200) throw fail('Search needs 2 to 200 characters.', 400);
+        const table = await tableNow();
+        const found = await messageIndex.search({ q, limit: Number(params.get('limit')) || 50 });
+        return json(response, 200, { ...found, hits: found.hits.map(hit => ({ ...hit, persona: storedPersona(hit.persona, table) ? hit.persona : null })) });
+      }
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)$/.exec(route))) {
         if (!CHAT_ID.test(match[1])) throw fail('No such conversation.', 404);
         const got = await fresh(`chat/${match[1]}.jsonl`);
@@ -965,8 +1059,9 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
         if (!got && !turn) throw fail('No such conversation.', 404);   // a new chat has no file until its first reply is saved
         const waiting = await queueStore.read(match[1]).catch(() => readQueue(null));
         nudge(match[1], waiting);
-        return json(response, 200, { id: match[1], messages: got ? currentModels(await withDelegateResults(match[1], got)) : [], ...viewOf(waiting), ...(turn ?? {}) });
+        return json(response, 200, { id: match[1], messages: got ? currentModels(await withDelegateResults(match[1], got)) : [], state: viewOfEntry((await marksNow()).chats[match[1]]), ...viewOf(waiting), ...(turn ?? {}) });
       }
+      if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/state$/.exec(route))) return json(response, 200, await setState(match[1], await readJson(request, 4 * 1024), user));
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/live$/.exec(route))) return live(response, match[1]);
       if (method === 'GET' && (match = /^\/hub\/chat\/([^/]+)\/jobs$/.exec(route))) return json(response, 200, await jobsView(match[1]));
       if (method === 'POST' && (match = /^\/hub\/chat\/([^/]+)\/jobs\/approve$/.exec(route))) return json(response, 200, await approveJobs(match[1], await readJson(request, 8 * 1024), user));

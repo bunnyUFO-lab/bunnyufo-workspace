@@ -12,7 +12,7 @@ if (token && params.has('token')) sessionStorage.setItem('buw.token', token)
 if (['token', 'desktop', 'surface'].some(name => params.has(name))) {
   for (const name of ['token', 'desktop', 'surface']) params.delete(name)
   const rest = params.toString()
-  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
+  history.replaceState(history.state, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`)
 }
 const listeners = new Set<() => void>()
 const events = new Set<(event: ServiceEvent) => void>()
@@ -97,7 +97,7 @@ export async function startService() {
   started = true
   try {
     const initial = await api<ServiceState>('/bootstrap')
-    if (!location.hash && initial.settings.workspaceRoute?.startsWith('#/')) history.replaceState(null, '', location.pathname + location.search + initial.settings.workspaceRoute)
+    if (!location.hash && initial.settings.workspaceRoute?.startsWith('#/')) history.replaceState(history.state, '', location.pathname + location.search + initial.settings.workspaceRoute)
     update({ ...initial, ready: true, error: null })
     connect()
   } catch (error) { started = false; reportError(error) }

@@ -117,10 +117,10 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const fetched = []; page.on('request', request => fetched.push(request.url()));
   await page.goto(service.urls.workspace);
-  await page.locator('.entity-card').first().waitFor();
+  await page.locator('.lib-row').first().waitFor();
   assert.equal(fetched.filter(url => /DrawingEditor|excalidraw/i.test(url)).length, 0, 'The Library loads nothing of Excalidraw.');
 
-  await page.locator('.entity-card[data-entity="sketches"]').click();
+  await page.locator('.lib-row[data-entity="sketches"]').click();
   await addDrawing(page);
   await draw(page);
   await page.locator('.drawing-state', { hasText: 'Unsaved changes' }).waitFor();

@@ -104,6 +104,8 @@ try {
 
   step('The approval view names the choice');
   const id = haikuKey.split('/').at(-2);
+  // The sheet's own entry (the address plus /~o) is taken off by history.back() once it closes: a goto while that is still landing is aborted. Wait for the address without it.
+  await page.waitForFunction(() => !location.hash.includes('~o'));
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(id)}`);
   await page.locator('[data-approval-model]').waitFor();
   assert.equal((await page.locator('[data-approval-model]').innerText()).trim(), 'Model: Haiku 5.5 · API');

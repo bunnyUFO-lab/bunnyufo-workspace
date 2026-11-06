@@ -195,3 +195,33 @@ export interface PersonaTemplate { id: string; label: string; line: string; text
 export interface RetiredPersona { id: string; name: string; role: string; to: string; base: string }
 
 export interface TemplatesView { templates: PersonaTemplate[]; retired: RetiredPersona[]; max: number }
+
+/** One skill of GET /api/hub/team/skills. `agents` are the agents on the profiles that have it; an owner skill no profile has lists none. */
+export interface TeamSkill {
+  id: string
+  autoLoad: boolean
+  owner: boolean
+  profiles: string[]
+  autoLoadProfiles: string[]
+  sources: ('autoLoad' | 'installed' | 'owner')[]
+  agents: { id: string; name: string; profile: AgentProfile }[]
+}
+
+/** GET /api/hub/team/skills (site/api/hub-team-skills.mjs). `skills: null` on an agent means the Hub does not know its list. */
+export interface TeamSkillsView {
+  exportedAt: string | null
+  fresh: boolean
+  maybeCut: boolean
+  skills: TeamSkill[]
+  agents: { id: string; name: string; profile: AgentProfile; skills: string[] | null; autoLoad: string[] | null; note?: string }[]
+  plugins: { known: boolean; text: string; items: TeamPlugin[] }
+}
+
+/** One plugin of the Hermes export: its status on each profile that lists it. */
+export interface TeamPlugin {
+  name: string
+  version: string
+  source: string
+  description: string
+  profiles: { profile: 'main' | 'briefs'; status: 'enabled' | 'disabled' | 'not enabled' }[]
+}

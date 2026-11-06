@@ -1,122 +1,138 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties, MouseEvent } from 'react'
-import type { HubProject, MapMilestone, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
+import type { MouseEvent } from 'react'
+import type { HubProject, JobsView, MapMilestone, MapTask, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { host } from '../lib/host'
-import ItemMenu from '../components/ItemMenu'
-import { useIsPhone } from '../lib/chrome'
 import { needsHref } from '../lib/needsView.mjs'
 import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
+import { swap } from '../lib/entries'
+import Icon from '../ui/Icon'
+import { Button } from '../ui/Controls'
 import MapPanel from './MapPanel'
 import { CardWriteRows } from './CardWrites'
 import { useCardWrites } from './cardWriteText'
+import { JobItem } from './Jobs'
 import NeedsRows from './NeedsRows'
 import PlanInHermes from './PlanInHermes'
-import ProjectPicker from './ProjectPicker'
+import ProgressMap from './ProgressMap'
+import ProjectRing from './ProjectRing'
 import RoadmapRows from './RoadmapRows'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
-import { isLaterOnly, tallyFraction, tallyWords } from './mapCount.ts'
-import type { Tally } from './mapCount.ts'
-import { STATE_COLOR, STATE_LABEL, find } from './mapState'
-import { PROJECT_TABS, currentMilestone, milestoneRow, moreCount, phoneTabs, tabCounts, tabOf } from './projectPage.ts'
+import { tallyOf, tallyWords } from './mapCount.ts'
+import { STATE_LABEL, find } from './mapState'
+import { PROJECT_TABS, TASK_PAGE, currentMilestone, orderedTasks, roadmapList, tabCounts, tabOf, tasksOfMilestone } from './projectPage.ts'
 import type { ProjectTab } from './projectPage.ts'
 import { openSpawn } from './spawnStore'
 import { legacyRunning } from './Today'
 import { todayFor } from './todayFilter.ts'
 import RefreshNote from './RefreshNote'
 import { useHeldHubData, useHubData, useTodayScreen } from './useHub'
-import { useProject } from './useProject'
 import './today.css'
 import './work.css'
+import './jobs.css'
 import './project.css'
 import './cardWrites.css'
 
 const enc = encodeURIComponent
-const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', running: 'Running', needs: 'Needs you', library: 'Library' }
-const WIDE = '(min-width: 1000px)'
-
-function setHash(hash: string) { window.location.hash = hash }
-
-function useWide() {
-  const [wide, setWide] = useState(() => typeof window.matchMedia === 'function' && window.matchMedia(WIDE).matches)
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return undefined
-    const query = window.matchMedia(WIDE)
-    const update = () => setWide(query.matches)
-    query.addEventListener('change', update)
-    return () => query.removeEventListener('change', update)
-  }, [])
-  return wide
-}
-
-/** The ring of a milestone: the done part of everything it holds, and `done/total` inside. */
-function Ring({ tally }: { tally: Tally }) {
-  const r = 21
-  const length = 2 * Math.PI * r
-  const colour = isLaterOnly(tally) ? 'var(--text-muted)' : 'var(--green)'
-  return (
-    <svg className="pp-ring" viewBox="0 0 52 52" aria-hidden="true">
-      <circle cx="26" cy="26" r={r} fill="none" stroke="var(--line)" strokeWidth="5" />
-      {tallyFraction(tally) > 0 && <circle cx="26" cy="26" r={r} fill="none" stroke={colour} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${length * tallyFraction(tally)} ${length}`} transform="rotate(-90 26 26)" />}
-      <text x="26" y="26" textAnchor="middle" dominantBaseline="central">{tally.done}/{tally.total}</text>
-    </svg>
-  )
-}
+const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', work: 'Work', cards: 'Cards' }
 
 type OpenNode = (event: MouseEvent<HTMLAnchorElement>, href: string) => void
 
-function MilestoneRow({ project, milestone, onOpen }: { project: string; milestone: MapMilestone; onOpen: OpenNode }) {
-  const { tally, chips, more } = milestoneRow(milestone)
+const STATE_DOT: Record<string, string> = { done: 'done', doing: 'working', you: 'needs', next: '', later: '' }
+
+/** One task of an open milestone: its state as a dot, its title and what it is doing. The whole row opens the task's details. */
+function TaskRow({ project, task, onOpen }: { project: string; task: MapTask; onOpen: OpenNode }) {
+  const href = projectNodeHash(project, task.id)
   return (
-    <li className="pp-ms" data-pp-milestone={milestone.id} data-state={milestone.state}>
-      <Ring tally={tally} />
-      <div className="pp-ms-body">
-        <a className="pp-ms-title" href={projectNodeHash(project, milestone.id)} data-pp-node={milestone.id} onClick={event => onOpen(event, projectNodeHash(project, milestone.id))}>{milestone.title}</a>
-        <span className="pp-ms-count" data-pp-count>{tallyWords(tally)}</span>
-        {chips.length > 0 && (
-          <span className="pp-chips">
-            {chips.map(task => (
-              <a key={task.id} className="pp-chip" href={projectNodeHash(project, task.id)} onClick={event => onOpen(event, projectNodeHash(project, task.id))} style={{ '--chip': STATE_COLOR[task.state] } as CSSProperties} data-pp-task={task.id} data-pp-node={task.id} data-state={task.state} title={task.title}>{task.id} {STATE_LABEL[task.state]}</a>
-            ))}
-            {more > 0 && <span className="pp-chip more">+{more}</span>}
-          </span>
-        )}
-      </div>
-    </li>
+    <a role="listitem" className="ui-row pj-task" href={href} onClick={event => onOpen(event, href)} data-pp-task={task.id} data-pp-node={task.id} data-state={task.state}>
+      <span className={`pj-dot ${STATE_DOT[task.state] ?? ''}`} aria-hidden="true" />
+      <span className="ui-row-body">
+        <b>{task.title}</b>
+        <small>{task.id} · {task.state === 'later' && task.status === 'deferred' ? 'later' : STATE_LABEL[task.state]}</small>
+      </span>
+    </a>
   )
 }
 
-/** The Roadmap tab: one row per milestone, from the same read as the map. */
-function RoadmapTab({ project, model, error, loading, at, onOpen }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
-  if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
-  return <><RefreshNote error={error} hasData at={at} /><RoadmapBody project={project} model={model} onOpen={onOpen} /></>
+/** A milestone on the list: a ring, its title and state, and when open its tasks, 20 at a time, the open ones first. */
+function MilestoneRow({ project, milestone, current, open, shown, onToggle, onMore, onOpen }: {
+  project: string; milestone: MapMilestone; current: boolean; open: boolean; shown: number
+  onToggle: () => void; onMore: () => void; onOpen: OpenNode
+}) {
+  const tasks = open ? orderedTasks(milestone) : []
+  const tally = tallyOf(tasksOfMilestone(milestone))
+  const word = current ? 'Now' : milestone.state === 'done' ? 'Done' : 'Later'
+  return (
+    <div className={`pj-ms${open ? ' open' : ''}`} data-pp-milestone={milestone.id} data-state={milestone.state} data-open={open}>
+      <button type="button" className="pj-ms-head" aria-expanded={open} onClick={onToggle} data-pp-toggle={milestone.id}>
+        <ProjectRing tally={tally} />
+        <span className="ui-row-body"><b>{milestone.title}</b><small data-pp-count>{word} · {tallyWords(tally)}</small></span>
+        <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
+      </button>
+      {open && (
+        <div className="ui-list pj-tasks" role="list" aria-label={`Tasks in ${milestone.title}`}>
+          <a role="listitem" className="ui-row pj-task pj-details" href={projectNodeHash(project, milestone.id)} onClick={event => onOpen(event, projectNodeHash(project, milestone.id))} data-pp-details={milestone.id} data-pp-node={milestone.id}>
+            <span className="ui-row-body"><b>Milestone details</b><small>Sprint, questions and what it holds</small></span>
+            <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
+          </a>
+          {tasks.length === 0 && <p className="hub-empty">No tasks yet.</p>}
+          {tasks.slice(0, shown).map(task => <TaskRow key={task.id} project={project} task={task} onOpen={onOpen} />)}
+          {tasks.length > shown && (
+            <button type="button" className="ui-row pj-more" role="listitem" onClick={onMore} data-pp-more={milestone.id}>
+              <span className="ui-row-body"><b>Show more</b><small>{tasks.length - shown} more</small></span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
-function RoadmapBody({ project, model, onOpen }: { project: string; model: MapModel; onOpen: OpenNode }) {
-  if (!model.meta) return <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
-  // A project with roadmaps lists them, nested; a row opens that roadmap's map.
-  if (model.roadmaps?.length) {
-    return (
-      <>
-        <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} /></div>
-        <p className="pp-foot"><a className="pp-link" href={mapHash(project)} data-pp-open-map>Open the Roadmap ›</a></p>
-      </>
-    )
-  }
-  const open = model.milestones.filter(milestone => milestone.state !== 'done')
-  const finished = model.milestones.filter(milestone => milestone.state === 'done')
+/** The Roadmap as a list. Only the milestone in hand starts open; the finished ones fold into one "Done" row. */
+function RoadmapList({ project, model, onOpen }: { project: string; model: MapModel; onOpen: OpenNode }) {
+  const { current, open: milestones, done } = roadmapList(model)
+  const [opened, setOpened] = useState<Record<string, boolean>>({})
+  const [shown, setShown] = useState<Record<string, number>>({})
+  const [doneOpen, setDoneOpen] = useState(false)
+  const isOpen = (id: string) => opened[id] ?? id === current
+  const row = (milestone: MapMilestone) => (
+    <MilestoneRow
+      key={milestone.id} project={project} milestone={milestone} current={milestone.id === current}
+      open={isOpen(milestone.id)} shown={shown[milestone.id] ?? TASK_PAGE}
+      onToggle={() => setOpened(prev => ({ ...prev, [milestone.id]: !(prev[milestone.id] ?? milestone.id === current) }))}
+      onMore={() => setShown(prev => ({ ...prev, [milestone.id]: (prev[milestone.id] ?? TASK_PAGE) + TASK_PAGE }))}
+      onOpen={onOpen}
+    />
+  )
+  return (
+    <div className="pj-roadmap" data-pp-roadmap>
+      {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
+      {milestones.map(row)}
+      {done.length > 0 && (
+        <div className="pj-done" data-pp-finished data-open={doneOpen}>
+          <button type="button" className="pj-ms-head pj-done-head" aria-expanded={doneOpen} onClick={() => setDoneOpen(value => !value)} data-pp-done-toggle>
+            <span className="ui-row-body"><b>Done ({done.length})</b></span>
+            <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
+          </button>
+          {doneOpen && done.map(row)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The Roadmap list: one row per milestone, from the same read as the map. A project with roadmaps lists them, nested, as it did. */
+function RoadmapTab({ project, model, error, loading, at, onOpen }: { project: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
+  if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
   return (
     <>
-      {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
-      {open.length > 0 && <ul className="pp-list" data-pp-roadmap>{open.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} onOpen={onOpen} />)}</ul>}
-      {finished.length > 0 && (
-        <details className="pp-finished" data-pp-finished>
-          <summary>{finished.length} finished</summary>
-          <ul className="pp-list">{finished.map(milestone => <MilestoneRow key={milestone.id} project={project} milestone={milestone} onOpen={onOpen} />)}</ul>
-        </details>
-      )}
-      <p className="pp-foot"><a className="pp-link" href={mapHash(project)} data-pp-open-map>Open the Roadmap ›</a></p>
+      <RefreshNote error={error} hasData at={at} />
+      {!model.meta
+        ? <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
+        : model.roadmaps?.length
+          ? <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} /></div>
+          : <RoadmapList project={project} model={model} onOpen={onOpen} />}
     </>
   )
 }
@@ -154,14 +170,19 @@ function AgentWrites({ section }: { section: string }) {
   )
 }
 
-function LibraryTab({ project }: { project: string }) {
-  const { data, error, loading, at } = useHubData<ProjectCards>(`/project-cards?project=${enc(project)}`)
+/** The project's card section id, from the same read as the Cards tab. */
+function useCardSection(project: string, on: boolean) {
+  return useHubData<ProjectCards>(on ? `/project-cards?project=${enc(project)}` : null)
+}
+
+function CardsTab({ project }: { project: string }) {
+  const { data, error, loading, at } = useCardSection(project, true)
   if (!data) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
   const note = <RefreshNote error={error} hasData at={at} />
-  if (!data.section) return <>{note}<p className="hub-empty" data-pp-no-library>No Library section for this project.</p></>
+  if (!data.section) return <>{note}<p className="hub-empty" data-pp-no-library>This project has no cards yet, because it has no Library section. A section is a Library folder with the project&apos;s name: <a href={hubHash('library')} data-pp-library-link>open the Library</a> to see what exists, or ask an agent to start a card for it.</p></>
   const cards = data.cards.filter(card => SAFE_CARD.test(card.href))
   return (
-    <section className="hub-panel" aria-label="Library">
+    <section className="hub-panel" aria-label="Cards">
       {note}
       {data.agents !== undefined && (data.agents
         ? <p className="cw-agents-line" data-pp-agents="on">Agents may add cards here. <a href={hubHash('team')}>Change this in Team ›</a></p>
@@ -169,9 +190,34 @@ function LibraryTab({ project }: { project: string }) {
       {cards.length
         ? <ul className="pp-cards" data-pp-cards>{cards.map(card => <li key={card.href}><a href={card.href} data-pp-card>{card.title}</a>{card.updated && ago(card.updated) && <small>{ago(card.updated)}</small>}</li>)}</ul>
         : <p className="hub-empty">No cards in this section yet.</p>}
-      <AgentWrites section={data.section} />
       <p className="pp-foot"><a className="pp-link" href={`/${enc(data.section)}`} data-pp-open-section>Open the Library section ›</a></p>
     </section>
+  )
+}
+
+/** Work: what waits on you, what runs, the project's jobs, and what agents wrote to its Library section. */
+function WorkTab({ project, name, today }: { project: string; name: string; today: TodayData | null }) {
+  const jobs = useHubData<JobsView>(`/jobs?project=${enc(project)}`)
+  const cards = useCardSection(project, true).data
+  const running = today && (() => {
+    const { data } = todayFor(today, project)
+    return <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={data.counts.running} now={new Date(data.at).getTime()} />
+  })()
+  const rows = (jobs.data?.jobs ?? []).slice(0, 10)
+  return (
+    <div className="pj-work" data-pp-work>
+      <NeedsTab project={project} name={name} today={today} />
+      {running}
+      <section className="hub-panel" aria-label="Jobs" data-pp-jobs>
+        <h3>Jobs</h3>
+        <RefreshNote error={jobs.error} hasData={!!jobs.data} at={jobs.at} />
+        {!jobs.data && !jobs.error && jobs.loading && <p className="hub-empty">Loading…</p>}
+        {jobs.data && !rows.length && <p className="hub-empty" data-pp-no-jobs>No jobs yet.</p>}
+        {rows.length > 0 && <div className="jb-list">{rows.map(job => <JobItem key={job.id} job={job} />)}</div>}
+        <p className="pp-foot"><a className="pp-link" href={hubHash('jobs')} data-pp-all-jobs>All jobs in Work ›</a></p>
+      </section>
+      {cards?.section && <AgentWrites section={cards.section} />}
+    </div>
   )
 }
 
@@ -189,22 +235,23 @@ function useSprintAction(project: string, model: MapModel | null): SprintAction 
   if (preview.error && !preview.data) return { note: preview.error }
   if (!preview.data) return {}
   if (!preview.data.allowed) return { note: preview.data.why }
-  return { link: { href: projectNodeHash(project, milestone.id), label: going ? 'Sprint running ›' : 'Run a sprint…' } }
+  return { link: { href: projectNodeHash(project, milestone.id), label: going ? 'Sprint running ›' : 'Run sprint' } }
 }
 
-function Actions({ project, name, model, runsOn, onOpen }: { project: string; name: string; model: MapModel | null; runsOn: HubProject['runsOn']; onOpen: OpenNode }) {
+/** Now: the milestone the work is in, with Run sprint. */
+function NowBlock({ project, model, runsOn, onOpen }: { project: string; model: MapModel | null; runsOn: HubProject['runsOn']; onOpen: OpenNode }) {
   const sprint = useSprintAction(project, model)
+  const milestone = model ? currentMilestone(model) : undefined
   const rule = runsOn && runsOn !== 'pc' ? RUNS_ON[runsOn].rule : ''
+  if (!model?.meta) return null
   return (
     <>
-      <div className="pp-actions" data-project-actions>
-        <PlanInHermes project={project} projectName={name} selected={null} action="plan" />
-        {host.write && <button type="button" className="hub-btn" data-project-action="build" onClick={() => openSpawn({ project, preset: 'code-task' })}>Build it…</button>}
+      <div className="pj-now-block" data-project-now-block>
+        <span className="ui-row-body"><small>Now</small><b data-pp-now>{milestone?.title ?? 'Nothing open'}</b></span>
         {!sprint.hidden && (sprint.link
-          ? <a className="hub-btn" href={sprint.link.href} onClick={event => onOpen(event, sprint.link!.href)} data-project-action="sprint">{sprint.link.label}</a>
-          : <button type="button" className="hub-btn" disabled data-project-action="sprint" aria-describedby={sprint.note ? 'pp-sprint-note' : undefined}>Run a sprint…</button>)}
+          ? <a className="ui-btn sm primary" href={sprint.link.href} onClick={event => onOpen(event, sprint.link!.href)} data-project-action="sprint">{sprint.link.label}</a>
+          : null)}
       </div>
-      {!host.write && <p className="hub-muted pp-note" data-project-note="build">Sign in to ask an agent to do something.</p>}
       {sprint.note && <p className="hub-muted pp-note" id="pp-sprint-note" data-project-note="sprint">{sprint.note}</p>}
       {rule && <p className="hub-muted pp-note" data-project-note="runs-on">{rule}</p>}
     </>
@@ -212,37 +259,35 @@ function Actions({ project, name, model, runsOn, onOpen }: { project: string; na
 }
 
 /**
- * One page per project (`#/~hub/project[/<id>[/<tab>[/<node>]]]`): name, where it runs, the three buttons, the project chips and four tabs. It links
- * into the Roadmap, Work and Needs you; it does not replace them. A milestone or task on the Roadmap tab opens its details in place (the Roadmap's
- * panel over the page, as a Work card does), so closing returns to this list.
+ * One project (`#/~hub/project/<id>[/<tab>[/<node>]]`, and `#/~hub/map/<id>[/<node>]` for its Map): the name, Plan in Hermes and New job, and three
+ * tabs (Roadmap, Work, Cards). The Roadmap is a list with a Map one tap away, and the switch between them swaps the address, adding no history
+ * entry. A milestone or task opens its details over the list (the Roadmap's panel, as a Work card does), so closing returns to the list.
  */
-export default function ProjectPage({ route }: { route?: string }) {
-  const { project: wanted, tab: rawTab, node } = parseProjectId(route)
-  const tab = tabOf(rawTab)
+export default function ProjectPage({ project: wanted, route, view }: { project: string; route?: string; view: 'list' | 'map' }) {
+  const { tab: rawTab, node: listNode } = parseProjectId(route)
+  const mapNode = view === 'map' ? route?.split('/').slice(1).join('/') || undefined : undefined
+  const tab = view === 'map' ? 'roadmap' : tabOf(rawTab)
+  const node = view === 'map' ? mapNode : listNode
   const all = useHubData<{ projects: HubProject[] }>('/projects')
-  const known = !wanted || !all.data || all.data.projects.some(item => item.id === wanted)
-  // useProject would fall back to another project for an id the list does not have; the page says so instead.
-  const { list, project, early } = useProject(known ? wanted : undefined)
+  const known = !all.data || all.data.projects.some(item => item.id === wanted)
+  const project = all.data && known ? wanted : undefined
   const today = useTodayScreen().data
-  const target = project ?? early
-  const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known && target ? `/map/${enc(target)}` : null, !!project)
-  const wide = useWide()
-  const phone = useIsPhone()
-  const go = (id: string) => setHash(projectHash(id, tab))
-  // The details of a milestone or task: the Roadmap's panel over the page. Close returns to the page, one step back when this page pushed
+  // The model is asked for as soon as the address names the project, but not shown until the list says the project exists: the server answers 200 for any valid id.
+  const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known ? `/map/${enc(wanted)}` : null, !!project)
+  // The details of a milestone or task: the Roadmap's panel over the list. Close returns to the list, one step back when this page pushed
   // the address, else a replace (a shared link); `pushed` is cleared whenever the sheet goes away.
-  const shown = tab === 'roadmap' && node && project && model && find(model, node) ? node : undefined
+  const shown = view === 'list' && tab === 'roadmap' && node && project && model && find(model, node) ? node : undefined
   const pushed = useRef(false)
   const lastNode = useRef<string | null>(null)
   const openNode: OpenNode = (event, href) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    if (node) { event.preventDefault(); window.location.replace(href); return }
+    if (node) { event.preventDefault(); swap(href); return }
     pushed.current = true
   }
   const closeNode = () => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(projectHash(project))
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(projectHash(project))
   }
-  const openRelated = (id: string) => { if (project) window.location.replace(projectNodeHash(project, id)) }
+  const openRelated = (id: string) => { if (project) swap(projectNodeHash(project, id)) }
   // Whatever closes the sheet (the button, the scrim, Escape, Back), focus goes back to the row that opened it.
   useEffect(() => {
     if (node) { lastNode.current = node; return }
@@ -256,69 +301,64 @@ export default function ProjectPage({ route }: { route?: string }) {
     return (
       <div className="pp today" data-project-page="">
         <h2 className="pp-title">Project</h2>
-        <p className="hub-empty" data-project-missing>No project called {wanted}.</p>
-        <ProjectPicker id="hub-project-page" projects={list} value="" onChange={go} href={id => projectHash(id)} oneRow />
+        <p className="hub-empty" data-project-missing>No project called {wanted}. <a className="pp-link" href={hubHash('project')}>All projects ›</a></p>
       </div>
     )
   }
-  if (!project) return <p className="hub-empty">{all.error ?? (all.loading ? 'Loading…' : 'No projects yet. A project appears once an agent session pushes a Beads copy or writes to the Hub.')}</p>
+  if (!project) return <p className="hub-empty">{all.error ?? 'Loading…'}</p>
   const item = all.data?.projects.find(row => row.id === project)
   const name = item?.name ?? project
   const counts = today ? tabCounts(today, project) : null
-  const numbered = (key: ProjectTab) => (key === 'running' && counts ? ` (${counts.running})` : key === 'needs' && counts ? ` (${counts.needs})` : '')
-  const running = today && (() => {
-    const { data } = todayFor(today, project)
-    return <WorkingNow items={data.working ?? legacyRunning(data)} blocked={data.needsYou} running={data.counts.running} now={new Date(data.at).getTime()} />
-  })()
-  const { row, more } = phone ? phoneTabs(tab) : { row: PROJECT_TABS, more: [] }
-  const tablist = (
-    <div className="wk-tabs pp-tabs" role="tablist" aria-label="Project">
-      {row.map(key => (
-        <a key={key} role="tab" className={`wk-tab${key === tab ? ' on' : ''}`} href={projectHash(project, key)} aria-selected={key === tab} data-project-tab={key}>{TAB_LABEL[key]}{numbered(key)}</a>
-      ))}
-    </div>
-  )
-  const hidden = more.map(key => TAB_LABEL[key] + numbered(key))
-  const held = moreCount(more, counts)
-  // The side panel of Running takes the room the sheet needs, so it steps aside while a sheet is open.
-  const side = wide && tab === 'roadmap' && !shown && running
+  const done = model?.meta ? tallyOf(model.milestones.flatMap(tasksOfMilestone)) : null
+  const mapShown = view === 'map'
+  const switchTo = (to: 'list' | 'map') => { if (to !== view) swap(to === 'map' ? mapHash(project) : projectHash(project)) }
   return (
-    <div className="pp today" data-project-page={project} data-sheet={shown ? '' : undefined}>
+    <div className="pp today" data-project-page={project} data-view={view} data-sheet={shown ? '' : undefined} data-map-node={view === 'map' && node && project && model && find(model, node) ? '' : undefined}>
       <header className="pp-head">
         <div className="pp-name">
-          <div className="today-eyebrow">Project</div>
-          <h2 className="pp-title">{name}</h2>
+          <h2 className="pp-title" data-project-title>{name}</h2>
           <RunsOnChip key={project} runsOn={item?.runsOn} />
         </div>
-        <div className="pp-do">
-          <Actions key={project} project={project} name={name} model={model} runsOn={item?.runsOn} onOpen={openNode} />
-        </div>
+        {!mapShown && done && <p className="pp-sub" data-project-done>{done.done} of {done.total} tasks done.</p>}
+        {!mapShown && (
+          <div className="pp-actions" data-project-actions>
+            <PlanInHermes project={project} projectName={name} selected={null} action="plan" />
+            {host.write && <Button small data-project-action="build" data-spawn-open onClick={() => openSpawn({ project, preset: 'code-task' })}>New job</Button>}
+          </div>
+        )}
       </header>
-      <ProjectPicker id="hub-project-page" projects={list} value={project} onChange={go} href={id => projectHash(id, tab)} oneRow />
-      {phone ? (
-        <div className="pp-tabs-row" data-pp-tabs-row>
-          {tablist}
-          <ItemMenu
-            label={`More project tabs: ${hidden.join(', ')}`}
-            className="pp-more"
-            items={more.map((key, index) => ({ label: hidden[index], onSelect: () => { window.location.hash = projectHash(project, key) } }))}
-          >
-            More{held > 0 ? ` (${held})` : ''} <span aria-hidden="true">▾</span>
-          </ItemMenu>
+      <div className="pp-nav">
+      <nav className="ui-seg ui-seg-tabs pp-tabs" role="tablist" aria-label="Project" data-project-tabs>
+        {PROJECT_TABS.map(key => (
+          <a key={key} role="tab" href={projectHash(project, key)} className={key === tab ? 'on' : undefined} aria-selected={key === tab} data-project-tab={key}>
+            {TAB_LABEL[key]}{key === 'work' && counts && counts.needs > 0 ? <small>{counts.needs}</small> : null}
+          </a>
+        ))}
+      </nav>
+      {tab === 'roadmap' && (
+        <div className="ui-seg pp-switch" role="group" aria-label="Roadmap view" data-roadmap-switch>
+          <button type="button" className={view === 'list' ? 'on' : undefined} aria-pressed={view === 'list'} onClick={() => switchTo('list')} data-roadmap-view="list">List</button>
+          <button type="button" className={view === 'map' ? 'on' : undefined} aria-pressed={view === 'map'} onClick={() => switchTo('map')} data-roadmap-view="map">Map</button>
         </div>
-      ) : tablist}
-      <div className="pp-body" data-tab={tab} data-side={side ? 'true' : undefined}>
-        <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
-          {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
-          {tab === 'running' && (running || <p className="hub-empty">Loading…</p>)}
-          {tab === 'needs' && <NeedsTab project={project} name={name} today={today} />}
-          {tab === 'library' && <LibraryTab project={project} />}
-        </div>
-        {side && <aside className="pp-side" data-pp-side>{running}<p className="hub-muted">Open the Running tab for logs and stop.</p></aside>}
+      )}
       </div>
+      {mapShown
+        ? (
+          <ProgressMap key={project} project={project} name={name} nodeId={node} model={model} error={error} loading={loading} at={modelAt} />
+        )
+        : (
+          <div className="pp-body" data-tab={tab}>
+            <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
+              {tab === 'roadmap' && <NowBlock project={project} model={model} runsOn={item?.runsOn} onOpen={openNode} />}
+              {tab === 'roadmap' && <RoadmapTab project={project} model={model} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
+              {tab === 'work' && <WorkTab project={project} name={name} today={today} />}
+              {tab === 'cards' && <CardsTab project={project} />}
+            </div>
+          </div>
+        )}
       {shown && model && (
         <div className="wk-sheet">
-          <MapPanel model={model} nodeId={shown} onClose={closeNode} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(project, shown)} data-show-on-roadmap>Show on roadmap</a></p>} />
+          <MapPanel model={model} nodeId={shown} onClose={closeNode} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(project, shown)} data-show-on-roadmap>Show on map</a></p>} />
         </div>
       )}
     </div>

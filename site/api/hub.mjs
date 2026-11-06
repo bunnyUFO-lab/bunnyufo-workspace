@@ -22,6 +22,7 @@ import {
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
 import { buildMap, isWayfinderQuestion } from './hub-map.mjs';
+import { projectSummary } from './hub-project-summary.mjs';
 import { SESSION_ITEMS, projectsToLoad, touchedBySession, withLinks } from './hub-links.mjs';
 import { applyMarks, checkMarkRequest, isWaiting, markEntry, markKey, markState, NOT_YET, REASON_MAX } from './hub-marks.mjs';
 import { createRequests } from './hub-requests.mjs';
@@ -44,14 +45,15 @@ import { defaultsOf } from './project-defaults.mjs';
 import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
-import { buildWork, unaskedOf } from './hub-work.mjs';
+import { buildWork, PAGE_LANES, unaskedOf, workPage } from './hub-work.mjs';
 import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
+import { teamSkills } from './hub-team-skills.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
-import { deliverablesOf, jobsList } from './job-deliverables.mjs';
+import { createdIds, deliverablesOf, jobsList } from './job-deliverables.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -72,9 +74,11 @@ const LIMITS = { big: 8 * MB, chat: 64 * 1024, small: 256 * 1024 };
 const CACHE_MAX = 5000;
 const EVENT_CAP = 2000;
 const POOL = 16;
+/** The card API's mark on an Ask's applied.json: the name of the apply job's token (site/card-api/handler.mjs). */
+const APPLY_WRITER = 'apply-action';
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|unasked|map\/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|project-summary|team(?:\/skills)?|events|search-text|chat\/search|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -214,6 +218,20 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     return { ...ask, id };
   };
 
+  /**
+   * The task ids a change list made, from `asks/<id>/applied.json`. Counted only when the card API marked the file `writer: apply-action` (its own
+   * stamp for the apply job's token); an agent's or the passphrase's copy has another mark or none. The file is create-only, so the answer is kept.
+   */
+  async function appliedOf(id) {
+    const name = `${key(`asks/${id}/applied.json`)}#applied`;
+    if (cache.has(name)) return cache.get(name);
+    let head;
+    try { head = await bucket.head(key(`asks/${id}/applied.json`)); } catch (error) { if (error.status === 404) { remember(name, null); } return null; }
+    const ids = head?.metadata?.writer === APPLY_WRITER ? createdIds(await cached(`asks/${id}/applied.json`)) : null;
+    remember(name, ids);
+    return ids;
+  }
+
   async function loadAsks(at) {
     const folders = await listFolders('asks', at);
     const rows = await pool(POOL, [...folders], async ([id, names]) => {
@@ -223,7 +241,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
       const state = askState(names, ask, at, snooze);
       const clean = readAsk(ask, id);
-      return { ask: clean, names, state, item: askItem(clean, state) };
+      const created = names.has('applied.json') ? await appliedOf(id) : null;
+      return { ask: clean, names, state, item: askItem(clean, state), ...(created?.length ? { created } : {}) };
     });
     return rows.filter(Boolean);
   }
@@ -1720,7 +1739,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const issues = (await loadBeads(project).catch(() => null))?.issues ?? [];
       titles.set(project, new Map(issues.map(issue => [issue.id, issue.title])));
     });
-    const input = { asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, card: ref => cards(ref) ?? undefined, taskTitle: (project, id) => titles.get(project)?.get(id) };
+    const input = { asks: asks.map(row => (row.created ? { ...row.item, created: row.created } : row.item)), checklists: checklists.map(row => row.item), requests, card: ref => cards(ref) ?? undefined, taskTitle: (project, id) => titles.get(project)?.get(id) };
     return { requests, of: (item, result, reportText) => deliverablesOf({ ...input, item, result, reportText, touched: touched.get(item.run?.session) ?? null }) };
   }
   /** `GET /hub/jobs?project=&tab=`: the jobs of the last two months with what each delivered. Reads no report. */
@@ -1758,7 +1777,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     } finally { mapRequests = null; }
   }
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), jobRows, approveJob, log: line => log(scrub(line, 400)) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, pool, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), jobRows, approveJob, log: line => log(scrub(line, 400)) });
 
   const self = {
     enabled: on,
@@ -1827,7 +1846,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       if (!String(route).startsWith('/hub/')) return false;
       try {
         if (!on) throw fail('The Hub is off on this host.', 404);
-        if (isChatRoute(route)) { await chat.handle({ request, response, method, route, user, requireRemoteUser }); return true; }
+        if (isChatRoute(route)) { await chat.handle({ request, response, method, route, query, user, requireRemoteUser }); return true; }
         const at = now();
         const limit = bodyLimit(method, route);
         let match;
@@ -1906,8 +1925,20 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             });
           } else if (route === '/hub/projects') {
             reply({ projects: await projects(at) });
+          } else if (route === '/hub/project-summary') {
+            // The Projects list: done of all and the milestone in hand, for every project with a Beads copy. One listing, the copies read once each, the marks listed once.
+            const [rows, marks] = await Promise.all([beadRows(), loadMarks()]);
+            const loaded = await pool(POOL, rows, async row => ({ id: row.id, ...(await loadBeads(row.id)) }));
+            reply({ projects: loaded.map(row => projectSummary({ project: row.id, meta: row.meta, issues: applyMarks(row.issues, marks, row.id), now: at })), at: at.toISOString() });
           } else if (route === '/hub/work') {
-            reply(buildWork(await loadWorkInputs(query.get('project'), at)));
+            const lane = query.get('lane');
+            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at))); } else {
+              // The rest of a lane the board cut: Backlog and Done only, from an offset the client already holds.
+              const offset = Number(query.get('offset') ?? 0);
+              if (!PAGE_LANES.includes(lane)) throw fail('Only the Backlog and Done lanes have more.', 400);
+              if (!Number.isInteger(offset) || offset < 0 || offset > 100_000) throw fail('The offset must be a whole number.', 400);
+              reply(workPage(await loadWorkInputs(query.get('project'), at), lane, offset));
+            }
           } else if (route === '/hub/search-text') {
             // The text the Work search reads: one project, or every project with Beads. Loaded only while a search is on.
             const only = query.get('project');
@@ -1966,6 +1997,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             reply({ text: got.text, etag: got.etag });
           } else if (route === '/hub/team') {
             reply(await teamView(at));
+          } else if (route === '/hub/team/skills') {
+            // One read of the newest export, joined with the agent list. Nothing from the Hermes host is called. Same sign-in rule as the details.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the skills.', 401);
+            reply(teamSkills({ exported: await loadAgentConfig(at).catch(() => null), agents: await allAgents(), at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);

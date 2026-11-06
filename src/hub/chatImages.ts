@@ -1,6 +1,8 @@
 // Pictures for a Hub Chat message: decode in the browser, scale, re-encode through a canvas (which
 // drops EXIF, GPS included), and turn into base64 for the message body.
 export const MAX_IMAGES = 4
+/** What a picture button offers. Explicit types, never `image/*`, and never `capture`: a phone then lists its photos and screenshots as well as the camera (`capture` opens the camera and nothing else). HEIC is left out on purpose: iOS then hands over a JPEG. */
+export const PICTURE_TYPES = 'image/png,image/jpeg,image/webp,image/gif'
 const LONG_EDGE = 1568
 const PNG_KEEP = 1.5 * 1024 * 1024
 const MAX_BYTES = 1.5 * 1024 * 1024

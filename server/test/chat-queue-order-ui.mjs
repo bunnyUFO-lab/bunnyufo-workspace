@@ -27,7 +27,7 @@ try {
     await new Promise(resolve => { release = resolve; });
     await route.fulfill({ response: answer });
   });
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
 
   await send('Plan the forest');
   await page.locator('[data-pending]').waitFor();

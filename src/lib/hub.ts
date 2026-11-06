@@ -417,13 +417,13 @@ if (typeof window !== 'undefined') {
   window.addEventListener('bunnyufo-workspace-changed', () => clearHub('/project-cards'))
 }
 
-/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. */
-export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false): Promise<T> {
+/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. `keepalive`: the browser finishes the request even if the page goes away (a held answer flushed as the phone sleeps); the body must stay under 64 KB. */
+export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false, keepalive = false): Promise<T> {
   const changed = () => { if (!quiet) window.dispatchEvent(new Event(HUB_WROTE)) }
   const release = holdReload()   // an update reload waits for this write
   try {
     const answer = await parse<T>(await fetch(`/api/hub${path}`, {
-      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal,
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal, ...(keepalive ? { keepalive: true } : {}),
     }))
     changed()
     return answer
@@ -494,7 +494,7 @@ export interface ChatJob {
 }
 /** What one tap did to each id, in the order they were signed. Not atomic: a signed approval stands when a later one fails. */
 export interface ChatJobResult { id: string; ok: boolean; state?: string; waiting?: string; error?: string }
-export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[] }
+export interface ChatLine { role: 'user' | 'assistant' | 'context'; text: string; at: string; created?: Item[]; /** the ids of the jobs this reply named */ jobs?: string[]; images?: ChatImage[]; about?: ChatAbout; run?: string; tools?: string[]; delegates?: ChatDelegate[]; model?: string; persona?: string; /** the ids of the queued messages this turn joined */ queued?: string[]; /** a Stop ended the turn before any text: the owner's line carries the note, the history has no extra line */ stopped?: boolean }
 /** A message sent while a reply was running, waiting for it to end. */
 export interface ChatQueued { id: string; text: string; at: string; model?: string; /** why this row is not going out: the hold's reason when it was held, or `joined` when it was typed during a hold */ why?: ChatHeld['reason'] | 'joined' }
 /** Why the waiting messages are not going out by themselves. */
@@ -516,7 +516,13 @@ export interface JobsView { counts: { running: number; finished: number }; jobs:
 export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
 export interface ChatDelegate { id: string; index?: number; count?: number; goal: string; state: 'running' | 'done' | 'failed' | 'unknown'; summary?: string; seconds?: number }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string; /** the owner renamed it: the title is theirs, not the first message */ renamed?: boolean; /** ISO times of the pin, the archive and the Trash (null: not set) */ pinned?: string | null; archived?: string | null; trashed?: string | null; unread?: boolean; /** its first reply is still running: the chat has no transcript yet */ running?: boolean }
+/** One chat's marks (`chat/state.json`): what `GET /hub/chat/<id>` and `POST /hub/chat/<id>/state` answer. */
+export interface ChatMarks { title: string | null; pinned: string | null; archived: string | null; trashed: string | null; unread: boolean }
+/** What `POST /hub/chat/<id>/state` takes: any of these. `title` null or blank clears a rename. */
+export type ChatPatch = { title?: string | null; pinned?: boolean | null; archived?: boolean | null; trashed?: boolean | null; unread?: boolean | null }
+/** `GET /hub/chat`: one page of a view, and the counts of the Archived and Trash rows. */
+export interface ChatListAnswer { conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: import('../hub/chatModel').ChatPause[]; autoFirst?: string; counts?: { active: number; archived: number; trashed: number }; total?: number; more?: boolean; offset?: number }
 /** An agent a new chat may talk to instead of Hermes: the id is all the page ever sends. */
 export interface ChatPersona { id: string; name: string; role: string; /** The Spawn preset this agent takes; none for an agent that only chats (the Planner). */ preset?: string; /** the model id this agent's chat starts on */ model?: string }
 /** A model the chat may ask Hermes for: the id is all the page ever sends. */

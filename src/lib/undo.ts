@@ -7,10 +7,11 @@ const emit = () => listeners.forEach(listener => listener())
 export const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 
 /** Show "<message> · Undo" for eight seconds. One at a time: a new one replaces the old. */
-export function showUndo(message: string, undo?: () => Promise<unknown> | void) {
+export function showUndo(message: string, undo?: () => Promise<unknown> | void): number {
   counter += 1
   current = { id: counter, message, undo }
   emit()
+  return counter
 }
 
 export const dismiss = (id: number) => { if (current?.id === id) { current = null; emit() } }

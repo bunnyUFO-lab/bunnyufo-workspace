@@ -39,7 +39,7 @@ try {
       }), { status: answer.status, headers: answer.headers });
     };
   });
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
 
   step('a delegate shows its goal and that it is running, not a tool name');
   await page.locator('textarea[aria-label="Message"]').fill('Plan the backgrounds');

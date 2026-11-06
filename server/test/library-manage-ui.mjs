@@ -68,36 +68,43 @@ try {
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   let page = await open(desktop, '#/deck/0');
   await page.locator('.step-tab.active').waitFor();
-  await page.locator('.step-tab-more').click();
-  assert.equal(await page.getByRole('menu').count(), 1, 'the tab menu opens');
-  await pick(page, 'Rename');
-  await page.locator('.step-tab-rename').fill('Intro');
+  const organize = () => page.getByRole('button', { name: 'Organize', exact: true });
+  const sheet = () => page.getByRole('dialog', { name: 'Organize tabs' });
+  assert.equal(await page.locator('.step-tab-more').count(), 0, 'no control sits over a tab');
+  await organize().click();
+  await sheet().waitFor();
+  assert.deepEqual(await sheet().locator('li[data-tab-row] .tab-org-name').allInnerTexts(), ['Overview', 'Rules', 'Art'], 'the sheet lists every tab in order');
+  await page.getByRole('button', { name: 'Rename the Overview tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Intro');
   await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'rename wrote the tab name');
   assert.ok((await readFile(path.join(alpha, 'deck/overview.md'), 'utf8')).includes('Body of Overview'), 'the file keeps its name');
-  // Rename offers Undo, too.
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  // Rename back (the sheet has no undo toast; the name is just edited again).
+  await page.getByRole('button', { name: 'Rename the Intro tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Overview');
+  await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Overview', exact: true }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Overview', 'Rules', 'Art'], 'undo of the rename');
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Rename');
-  await page.locator('.step-tab-rename').fill('Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Overview', 'Rules', 'Art'], 'renamed back');
+  await page.getByRole('button', { name: 'Rename the Overview tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Intro');
   await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
 
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Move right');
-  await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Intro' && document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
+  // Move down, then up, with the buttons; the open tab goes with its tab.
+  await page.getByRole('button', { name: 'Move Intro down', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Intro' && document.querySelectorAll('.step-tab[role="tab"]')[1]?.textContent === 'Intro');
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'move wrote the order');
-  // Move offers Undo, too (and sends the tab's path).
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[0]?.textContent === 'Intro');
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'undo of the move');
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Move right');
-  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
+  await page.getByRole('button', { name: 'Move Intro up', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab[role="tab"]')[0]?.textContent === 'Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'moved back up');
+  await page.getByRole('button', { name: 'Move Intro down', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab[role="tab"]')[1]?.textContent === 'Intro');
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art']);
+  // Back closes the sheet and stays on the card.
+  await page.goBack();
+  await sheet().waitFor({ state: 'detached' });
+  assert.match(await page.locator('.crumb-current').innerText(), /Deck/, 'Back closed the sheet and stayed on the card');
 
   // The card menu by keyboard: Enter opens it, arrows move, Esc closes and gives the focus back.
   const more = page.getByRole('button', { name: 'More for this card' });
@@ -115,21 +122,28 @@ try {
   assert.ok(await more.evaluate(el => el === document.activeElement), 'Esc returns the focus to the button');
   assert.match(await page.locator('.crumb-current').innerText(), /Deck/, 'Esc did not leave the card');
 
+  // Remove: a right-click on a tab opens the same sheet. The file stays, the tab is listed under Removed tabs, and Bring back restores it in place.
   await page.getByRole('tab', { name: 'Rules', exact: true }).click({ button: 'right' });
-  await pick(page, 'Delete');
-  await toast(page).filter({ hasText: 'Deleted the' }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Art'], 'delete took the tab off');
+  await sheet().waitFor();
+  await page.getByRole('button', { name: 'Remove the Rules tab', exact: true }).click();
+  await sheet().getByRole('status').waitFor();
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Art'], 'remove took the tab off');
   assert.ok((await readFile(path.join(alpha, 'deck/rules.md'), 'utf8')).includes('Body of Rules'), 'the file stays');
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  assert.match(await sheet().getByRole('status').innerText(), /bring it back/i, 'the sheet says it can be brought back');
+  await page.getByRole('button', { name: 'Bring back the Rules tab', exact: true }).click();
   await page.getByRole('tab', { name: 'Rules', exact: true }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'undo put the tab back where it was');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'bringing it back put the tab where it was');
+  await page.goBack();
+  await sheet().waitFor({ state: 'detached' });
 
   // 2. Home: rename a category, then merge one into another.
-  await page.goto(service.urls.workspace + '#');
-  await page.evaluate(() => history.pushState(null, '', location.pathname));
+  // The service remembers the last route (now every tab click is one), so Home is asked for by its address.
+  await page.evaluate(() => { location.hash = '#/'; });
   await page.reload();
-  await page.locator('.section-head-row').first().waitFor();
-  const heading = label => page.locator('.section-head-row', { hasText: label });
+  // One project is picked: it shows its categories under By project (Recent, the default, is one run).
+  await page.locator('[data-library] .lib-arrange button', { hasText: 'By project' }).click();
+  await page.locator('.lib-head[data-section]').first().waitFor();
+  const heading = label => page.locator('.lib-head[data-section]', { hasText: label });
   await heading('ideas').getByRole('button', { name: /More for the ideas category/ }).click();
   await pick(page, 'Rename…');
   await page.getByLabel('New name').fill('Game Ideas');
@@ -154,11 +168,11 @@ try {
   await page.getByRole('button', { name: 'Merge…' }).click();
   await page.getByText(/Merge 1 card into game ideas\?/).waitFor();
   await page.getByRole('button', { name: 'Merge', exact: true }).click();
-  await page.waitForFunction(() => ![...document.querySelectorAll('.section-title')].some(el => /notes/.test(el.textContent)));
+  await page.waitForFunction(() => ![...document.querySelectorAll('.lib-head h2')].some(el => /notes/.test(el.textContent)));
   assert.deepEqual([...new Set((await listOf(alpha)).entities.map(item => item.category))], ['game-ideas']);
 
   // 3. A card's category by its menu.
-  const card = id => page.locator(`.buw-card[data-entity="${id}"]`);
+  const card = id => page.locator(`.lib-row[data-entity="${id}"]`);
   await card('brief').getByRole('button', { name: /More for Brief/ }).click();
   await pick(page, 'Category…');
   await page.getByLabel('New category').fill('spend');
@@ -172,14 +186,14 @@ try {
   await card('plan').waitFor({ state: 'detached' });
   assert.ok((await listOf(alpha)).retired.plan.entity, 'the card is in the Trash record');
   assert.ok((await readFile(path.join(alpha, 'plan/overview.md'), 'utf8')).includes('Body of Overview'), 'its files stay');
-  await page.locator('[data-trash-link]').click();
+  await page.locator('[data-library] .ui-seg button', { hasText: /^Trash/ }).click();
   const row = page.locator('[data-trash="plan"]');
   await row.waitFor();
   assert.ok(!/forever/i.test(await row.innerText()), 'the local app deletes nothing, so it promises nothing');
   await row.getByRole('button', { name: 'Restore' }).click();
+  await page.locator('[data-library] .ui-seg button', { hasText: /^All/ }).click();
   await card('plan').waitFor();
   assert.equal((await listOf(alpha)).retired, undefined, 'restore emptied the Trash record');
-  await page.keyboard.press('Escape');
 
   // A link to a deleted card says so, and offers Restore.
   await card('plan').getByRole('button', { name: /More for Plan/ }).click();
@@ -275,24 +289,28 @@ try {
   assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll with the list used');
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Overview', exact: true }).tap();
-  await page.locator('.step-tab-more').tap();
-  box = await page.locator('.item-menu.sheet').boundingBox();
-  assert.ok(box && box.y + box.height >= 800, 'the tab menu is a sheet');
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Organize', exact: true }).tap();
+  box = await page.getByRole('dialog', { name: 'Organize tabs' }).boundingBox();
+  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Organize sheet is a sheet at the bottom (${JSON.stringify(box)})`);
+  await page.goBack();
+  await page.getByRole('dialog', { name: 'Organize tabs' }).waitFor({ state: 'detached' });
 
   // The Trash on a phone: a sheet with Restore.
   await page.evaluate(() => { location.hash = ''; });
-  const phoneCard = id => page.locator(`.buw-card[data-entity="${id}"]`);
+  const phoneCard = id => page.locator(`.lib-row[data-entity="${id}"]`);
   await phoneCard('brief').getByRole('button', { name: /More for Brief/ }).tap();
+  // A row's menu is a sheet at the bottom of the screen (replaces: each menu was a popover or a sheet by width).
+  box = await page.locator('.ui-sheet').boundingBox();
+  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the row menu is a sheet at the bottom (${JSON.stringify(box)})`);
   await pick(page, 'Delete');
   await phoneCard('brief').waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Show menu' }).tap();
-  await page.locator('[data-trash-link]').tap();
-  box = await page.locator('.lib-dialog').boundingBox();
-  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Trash is a sheet (${JSON.stringify(box)})`);
+  // The Trash is a view of the Library itself, not a dialog: its rows sit in the list, with Restore.
+  await page.locator('[data-library] .ui-seg button', { hasText: /^Trash/ }).tap();
+  await page.locator('[data-library] [data-trash="brief"]').waitFor();
+  assert.equal(await page.locator('.lib-dialog').count(), 0, 'the Trash is inline, not a dialog');
   assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll in the Trash');
   await page.locator('[data-trash="brief"]').getByRole('button', { name: 'Restore' }).tap();
-  await page.keyboard.press('Escape');
+  await page.locator('[data-library] .ui-seg button', { hasText: /^All/ }).tap();
   await phoneCard('brief').waitFor();
   assert.equal((await listOf(alpha)).entities.some(item => item.id === 'brief'), true, 'Restore on the phone brought the card back');
   await phone.close();
@@ -304,6 +322,8 @@ try {
     old: { name: 'Old Stuff', archived: true, entities: [] },
   };
   const siteCalls = [];
+  // The workspace list is open as a sheet (its entry is the address plus /~o), so a hash change is not the reload: wait for the page to come back without the sheet's marker.
+  const reloaded = page => page.waitForNavigation({ url: url => !url.hash.includes('~o') });
   const sendJson = (response, status, value) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); };
   const siteServer = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://site');
@@ -341,7 +361,7 @@ try {
       await sitePage.goto(`${siteOrigin}/one`);
       const opener = name => sitePage.getByRole('button', { name: new RegExp(`^Workspace: ${name}`) }).first();
       // On a phone the switcher sits in the slide-over menu.
-      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show menu' }); if (await show.isVisible()) await show.click(); };
+      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show list' }); if (await show.isVisible()) await show.click(); };
       const pop = async name => { await reveal(); await opener(name).click(); };
       await pop('Section One');
       const menu = sitePage.getByRole('menu', { name: 'Workspaces' });
@@ -386,7 +406,7 @@ try {
       await menu.getByRole('button', { name: 'Manage Section One' }).click();
       await menu.getByRole('button', { name: 'Rename…' }).click();
       await field.fill('Section Uno');
-      await Promise.all([sitePage.waitForNavigation(), field.press('Enter')]);
+      await Promise.all([reloaded(sitePage), field.press('Enter')]);
       assert.deepEqual(siteCalls[0], ['/api/sections/rename', { workspace: 'one', name: 'Section Uno' }]);
       assert.equal(new URL(sitePage.url()).pathname, '/one', 'the address does not change');
       await reveal();
@@ -401,11 +421,11 @@ try {
 
       // Archive the idle one, then restore it from the Archived list.
       await menu.getByRole('button', { name: 'Manage Section Two' }).click();
-      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Archive' }).click()]);
+      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Archive' }).click()]);
       assert.equal(siteData.two.archived, true);
       await pop('Section Uno');
       assert.equal(await menu.getByRole('menuitemradio', { name: 'Section Two' }).count(), 0, 'an archived workspace leaves the switcher');
-      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
+      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
       assert.equal(siteData.two.archived, undefined, 'Restore clears the flag');
       await pop('Section Uno');
       await menu.getByRole('menuitemradio', { name: 'Section Two' }).waitFor();

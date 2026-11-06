@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
-import { hubHash, mapHash } from '../lib/route'
+import { mapHash } from '../lib/route'
+import { swap } from '../lib/entries'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
 import MapPanel from './MapPanel'
@@ -19,9 +20,7 @@ import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { tallyFraction } from './mapCount.ts'
 import RefreshNote from './RefreshNote'
-import { useHeldHubData, useHubData } from './useHub'
-import ProjectPicker from './ProjectPicker'
-import { useProject } from './useProject'
+import { useHubData } from './useHub'
 import RoadmapRows, { RoadmapBar } from './RoadmapRows'
 import { FULL, branchModel, resolveBranch } from './mapBranch.ts'
 import { saveBranch, savedBranch } from './branchMemory.ts'
@@ -29,10 +28,12 @@ import QuestionActions from './QuestionActions'
 import { COST, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
 import PlanInHermes from './PlanInHermes'
-import { ProjectLink } from './ProjectChip'
-import RunsOnChip from './RunsOnChip'
 import { host } from '../lib/host'
+import { useMedia } from '../lib/chrome'
+import RowMenu from '../ui/RowMenu'
 
+/** The smallest scale Fit and the first view settle on a phone: below this the labels cannot be read. */
+const READABLE = 0.6
 const HINT_KEY = 'hub-map-hint-seen'
 const FILTER_KEY = 'hub-map-filter'
 /** The viewer's saved filter; a missing or bad value is the default (Open). */
@@ -55,32 +56,21 @@ const axisFor = (w: number, h: number): Axis | null => (h >= TALL * w ? 'y' : w 
 /** A zoom step's relayout may not be followed by another this soon (ms). */
 const SETTLE_MS = 150
 
-/** The screen's id is `<project>[/<node>]`: the project alone decides what is fetched and drawn, so opening a panel never reloads the map. Project and bead ids have no `/`. */
-const splitId = (id?: string): [string | undefined, string | undefined] => {
-  const at = id ? id.indexOf('/') : -1
-  return at < 0 ? [id, undefined] : [id?.slice(0, at), id?.slice(at + 1) || undefined]
-}
-
-export default function ProgressMap({ project: routeId }: { project?: string }) {
-  const [wanted, nodeId] = splitId(routeId)
-  const { list, project, early, loading: listing } = useProject(wanted)
-  const target = project ?? early
-  const { data: model, error, loading: mapping, at } = useHeldHubData<MapModel>(target ? `/map/${encodeURIComponent(target)}` : null, !!project)
+/**
+ * The Map view of a project: what the project page draws under its tabs when the address is `#/~hub/map/<project>[/<node>]`. The page owns the
+ * project (a known one), the read of the map and the header; this draws the map inside a box that takes the room left. The project alone decides
+ * what is fetched and drawn, so opening a panel never reloads the map.
+ */
+export default function ProgressMap({ project, name, nodeId, model, error, loading, at }: { project: string; name: string; nodeId?: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null }) {
   return (
-    <>
-      <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
-      <div className="hub-map-chips">
-        <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} href={id => hubHash('map', id)} oneRow inRow />
-        <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
-        {project && <ProjectLink id={project} label="Project" className="pp-map-link" />}
-      </div>
+    <div className="hub-mapview" data-map-view>
+      <h2 className="hub-sr">Roadmap · {name}</h2>
       <RefreshNote error={error} hasData={!!model} at={at} />
-      {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
+      {!model && !error && loading && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
-      {model?.meta && project && (
+      {model?.meta && (
         <Fragment key={project}>
           {(() => {
-            const name = list.find(item => item.id === project)?.name ?? project
             const found = nodeId ? find(model, nodeId) : null
             const selected = found ? { id: nodeId as string, title: found.kind === 'm' ? found.milestone.title : found.kind === 'f' ? found.feature.title : found.task.title } : null
             const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
@@ -95,7 +85,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
           })()}
         </Fragment>
       )}
-    </>
+    </div>
   )
 }
 
@@ -121,7 +111,7 @@ function Branched({ model, project, projectName, param, header }: { model: MapMo
 function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: string; repoName: string; wayfinder: MapWayfinder; plan?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 700) }, [])
+  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 600) }, [])
   const { destination, decisions, open: questions } = wayfinder
   const ready = preparable(wayfinder)
   if (!destination && !decisions && !questions.length) return null
@@ -217,6 +207,9 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
     const hint = hintBar.current?.getBoundingClientRect()
     return { top: frame && hint && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0, bottom: 0 }
   }, [])
+  /** A phone: the bar keeps its everyday buttons and Fit stops at a readable size. */
+  const phone = useMedia('(max-width: 640px)')
+  const contentSize = useRef({ w: 0, h: 0 })
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
   /** The spine runs down when the box is taller than wide, as a phone held upright is. */
@@ -276,16 +269,17 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
     picture.setAttribute('height', String(h))
     origin.current = { x: bounds.x - PAD, y: bounds.y - PAD }
     pz.setContent({ w, h })
+    contentSize.current = { w, h }
     const todo = forNewAxis ? null : after.current
     if (!forNewAxis) after.current = null
     if (wrap.current && (todo === 'init' || todo === 'fit' || (todo && todo.how === 'centre'))) placedFor.current = { w: wrap.current.clientWidth, h: wrap.current.clientHeight }
     const size = pz.box()
     if (todo === 'init') {
       // Fitted and centred; a long map on a phone would be too small to read, so it starts at a readable size on "now".
-      if (fitScale({ w, h }, size, FIT_MAX) < 0.6) pz.go(viewOnNow(0.6, freeRect()), false)
+      if (fitScale({ w, h }, size, FIT_MAX) < READABLE) pz.go(viewOnNow(READABLE, freeRect()), false)
       else pz.fit(false)
     } else if (todo === 'fit') {
-      pz.fit(true)
+      fitReadable(true)
     } else if (todo && todo.how === 'centre') {
       // The axis switched: the selected node (else "now") goes to the middle of what the panel leaves free, at the scale it had.
       const node = todo.id ? layout.nodes.find(item => item.id === todo.id) : null
@@ -390,12 +384,12 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
 
   const openPanel = useCallback((id: string) => {
     if (id === shownId) return
-    if (shownId) { window.location.replace(mapHash(project, id)); return }
+    if (shownId) { swap(mapHash(project, id)); return }
     pushed.current = true
     window.location.assign(mapHash(project, id))
   }, [project, shownId])
   const closePanel = useCallback(() => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(mapHash(project, closeTo))
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(mapHash(project, closeTo))
   }, [project, closeTo])
 
   // Opening or closing a node keeps that node where it is on screen; the rest of the map moves around it.
@@ -430,6 +424,11 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   const empty = tasksIn(model) === 0 && tasksIn(fullModel) > 0
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
+  /** Fit the whole map. On a phone a large map would shrink past reading, so Fit stops at a readable size, centred on now, and the owner pans from there. */
+  function fitReadable(animate: boolean) {
+    if (phone && fitScale(contentSize.current, pz.box(), FIT_MAX) < READABLE) pz.go(viewOnNow(READABLE, freeRect()), animate)
+    else pz.fit(animate)
+  }
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
 
   /** Glide a match into the middle of the free part of the box; one the owner folded away is unfolded first and centred by the layout effect. */
@@ -514,17 +513,27 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   return (
     <>
       <div className="hub-map-controls" onKeyDown={onEscape}>
-          <button type="button" className="hub-btn" onClick={() => pz.fit(true)} aria-label="Fit the whole map">Fit</button>
+          <button type="button" className="hub-btn" onClick={() => fitReadable(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
-          <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
-          <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
-          <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
+          {!phone && <>
+            <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
+            <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
+            <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
+          </>}
           <button type="button" className={`hub-btn${filterOpen ? ' pri' : ''}`} ref={filterButton} aria-expanded={filterOpen} aria-controls="hub-map-filter" onClick={() => { setFilterOpen(value => !value); setKeyOpen(false) }}>Filter</button>
           <span className={`hub-filter-chip${isOpenFilter(filter) ? '' : ' changed'}`} data-filter-chip>
             <button type="button" className="hub-filter-chip-text" title="Change the filter" onClick={() => { setFilterOpen(true); setKeyOpen(false) }}>{filterLabel(filter)}</button>
             {!isOpenFilter(filter) && <button type="button" className="hub-filter-chip-x" aria-label="Reset the filter to Open" onClick={() => applyFilter(OPEN_FILTER)}>×</button>}
           </span>
+          {!phone && (
           <button type="button" className={`hub-btn${keyOpen ? ' pri' : ''}`} ref={keyButton} aria-expanded={keyOpen} aria-controls="hub-map-key" onClick={() => { setKeyOpen(value => !value); setFilterOpen(false) }}>Key</button>
+          )}
+          {phone && <RowMenu label="More map options" title="Map options" items={[
+            { label: 'Expand all', onSelect: expandAll },
+            { label: 'Collapse', onSelect: () => refit(() => setOpen(new Set())) },
+            { label: sprints ? 'Hide sprints' : 'Show sprints', onSelect: () => refit(() => setSprints(value => !value)) },
+            { label: 'Key', onSelect: () => { setKeyOpen(true); setFilterOpen(false) } },
+          ]} />}
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
@@ -640,6 +649,7 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
         {filterOpen && <MapFilterPanel filter={filter} shown={tasksIn(model)} total={tasksIn(fullModel)} onChange={applyFilter} onClose={() => { setFilterOpen(false); filterButton.current?.focus() }} />}
         {keyOpen && (
           <div className="hub-legend" id="hub-map-key" aria-label="Legend">
+            {phone && <button type="button" className="hub-btn hub-legend-close" data-key-close aria-label="Close the key" onClick={() => setKeyOpen(false)}>Close</button>}
             {model.ageMinutes != null && <p className="hub-muted hub-legend-age">Beads copy from {copyAge(model.ageMinutes)}</p>}
             {(Object.keys(STATE_LABEL) as TaskState[]).map(state => <span key={state}><i style={{ background: STATE_COLOR[state] }} />{STATE_LABEL[state]}</span>)}
             {(['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed'] as const).map(sign => <span key={sign}><b>{SIGN_GLYPH[sign]}</b>{SIGN_LABEL[sign]}</span>)}

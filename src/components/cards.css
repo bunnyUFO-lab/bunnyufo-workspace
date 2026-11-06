@@ -75,6 +75,14 @@
 .card-inline-form .card-form-error { flex-basis: 100%; }
 .step-tabs > .card-inline-form { flex-shrink: 0; }
 .step-tab.step-tab-add { flex-shrink: 0; min-width: 30px; padding-inline: 8px; color: var(--text-dim); }
+/* Beside the tab strip, not inside it: it stays in reach while the tabs scroll. */
+.step-tab.step-tab-organize { align-self: flex-start; flex-shrink: 0; color: var(--t2); }
+/* A phone: every tab and the buttons beside them are 44 px high. */
+@media (max-width: 640px) {
+  .app-layout .step-tab { min-height: var(--tap); min-width: var(--tap); display: inline-flex; align-items: center; justify-content: center; }
+  .app-layout .step-tabs > .step-tab:not(.step-tab-add) { justify-content: flex-start; }
+  .app-layout .topbar:has(.step-tabs) .step-tab-organize { align-self: center; }
+}
 
 /* The edit form drops under the breadcrumb (the title itself clips, so it cannot hold it), over
    the page below: the bar sits above the content while it is open (and only then, so an
@@ -181,18 +189,6 @@
 }
 .item-menu-button:hover, .item-menu-button[aria-expanded="true"] { color: var(--text); background: var(--surface-2); }
 .crumb-more { margin-left: 2px; }
-.card-more { position: relative; z-index: 1; margin-left: auto; font-size: 1.1rem; }
-.card-top .card-more { opacity: 0.55; }
-.buw-card:hover .card-more, .card-more:focus-visible, .card-more[aria-expanded="true"] { opacity: 1; }
-@media (hover: none) { .card-top .card-more { opacity: 1; } }
-.step-tab-more { position: relative; z-index: 1; flex-shrink: 0; align-self: center; width: 24px; margin-left: -26px; padding: 2px 0; text-align: center; }
-.step-tab.has-more { padding-right: 26px; }
-.step-tab-rename { width: 140px; padding: 4px 8px; }
-.section-head-row { display: flex; align-items: baseline; gap: 4px; }
-.section-head-row > .section-head { flex: 1; min-width: 0; }
-.section-more { align-self: center; margin-bottom: 8px; opacity: 0.55; }
-.section-head-row:hover .section-more, .section-more:focus-visible { opacity: 1; }
-@media (hover: none) { .section-more { opacity: 1; } }
 
 .item-menu {
   position: fixed; z-index: 200; min-width: 190px; padding: 6px; display: flex; flex-direction: column;
@@ -250,13 +246,32 @@
 .undo-toast button { padding: 3px 10px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; }
 .undo-toast .undo-close { border: 0; background: none; color: var(--text-muted); }
 @media (max-width: 960px) { .undo-toast { bottom: calc(76px + env(safe-area-inset-bottom)); } }
-
-.sidebar-trash {
-  flex-shrink: 0; margin: 0 2px 6px; padding: 6px 10px; border: 0; background: none; color: var(--text-muted);
-  font: inherit; font-size: 0.72rem; text-align: left; cursor: pointer;
-}
-.sidebar-trash:hover { color: var(--text); }
 .removed-tabs { flex-basis: 100%; font-size: 0.76rem; color: var(--text-dim); }
 .removed-tabs ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .removed-tabs li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .lib-trash-notice { display: block; }
+
+/* The Organize sheet (TabOrganize). Tokens only: the themes can change them. */
+.tab-org-hint { margin: 0 0 8px; color: var(--t3); font-size: 13px; }
+.tab-org-list, .tab-org-removed ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tab-org-row { display: flex; align-items: center; gap: 4px; min-height: var(--tap); padding: 0 4px; border-radius: 12px; background: var(--s2); transition: transform 0.12s var(--ease); }
+.tab-org-row.dragging { transition: none; position: relative; z-index: 2; background: var(--s3); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
+.tab-org-handle { flex: none; width: var(--tap); height: var(--tap); display: flex; align-items: center; justify-content: center; color: var(--t3); cursor: grab; touch-action: none; user-select: none; }
+.tab-org-row.dragging .tab-org-handle { cursor: grabbing; }
+.tab-org-name, .tab-org-name-input { flex: 1; min-width: 0; min-height: var(--tap); font: inherit; color: var(--t1); }
+.tab-org-name { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; border: 0; background: none; padding: 0 6px; text-align: left; cursor: text; }
+.tab-org-name span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-org-name small { color: var(--t3); font-size: 11px; }
+.tab-org-name-input { padding: 0 8px; border: 1px solid var(--accent); border-radius: 10px; background: var(--s1); }
+.tab-org-step { flex: none; width: 40px; min-height: var(--tap); border: 0; background: none; color: var(--t2); font: inherit; font-size: 18px; border-radius: 10px; cursor: pointer; }
+.tab-org-step:hover { background: var(--s4); }
+.tab-org-step[aria-disabled="true"], .tab-org-remove[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.tab-org-remove { flex: none; }
+.tab-org-error { margin: 10px 0 0; color: var(--st-failed); font-size: 14px; }
+.tab-org-note { margin: 10px 0 0; color: var(--t2); font-size: 14px; }
+.tab-org-removed { margin-top: 14px; }
+.tab-org-removed h3 { margin: 0 0 6px; font-size: 13px; font-weight: 620; color: var(--t3); }
+.tab-org-removed li { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-height: var(--tap); padding: 0 4px 0 12px; border-radius: 12px; background: var(--s2); }
+.tab-org-removed li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
+.tab-org-done { margin-top: 14px; }
+@media (max-width: 420px) { .tab-org-step { width: 36px; } .tab-org-remove { padding: 0 10px; } }
