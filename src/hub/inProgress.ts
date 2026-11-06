@@ -13,7 +13,8 @@ export const MAX_CHATS = 20
 export const MAX_JOBS = 50
 export const MAX_BYTES = 64 * 1024
 export const WRITE_EVERY_MS = 1000
-const TERMINAL = new Set(['done', 'failed', 'stopped', 'declined', 'expired'])
+const TERMINAL = new Set(['done', 'failed', 'stopped', 'declined', 'expired', 'lost'])
+const SKEW_MS = 2 * 60 * 1000
 const PICTURE_NOTE = '[Picture not kept on this device]'
 
 /** One chat whose turn has not been seen saved. `id` is null until the Hub names the chat. */
@@ -29,6 +30,8 @@ export interface ChatEntry {
   /** How many lines (not counting the context line) the chat had before this turn. */
   base: number
   ask: { text: string; at: string }
+  /** The stream reported an error and no reply came: the owner's line alone is what the Hub saves. */
+  failed?: boolean
   /** The reply so far. */
   reply: string
   /** The ids of the jobs the turn started. */
@@ -69,11 +72,37 @@ export function cachedLines(entry: ChatEntry): ChatLine[] {
 }
 
 /** Whether the saved lines hold this turn: the owner's message where it was added, answered (or stopped before any reply). */
-export function turnSaved(messages: ChatLine[], entry: Pick<ChatEntry, 'base' | 'ask'>): boolean {
-  const lines = messages.filter(line => line.role !== 'context')
-  const mine = lines[entry.base]
-  return !!mine && mine.role === 'user' && (!entry.ask.text || mine.text === entry.ask.text) && (lines[entry.base + 1]?.role === 'assistant' || !!mine.stopped)
+export function turnSaved(messages: ChatLine[], entry: Pick<ChatEntry, 'ask' | 'failed'>): boolean {
+  const at = askedAt(messages, entry.ask)
+  if (at < 0) return false
+  const rest = messages.slice(at + 1).filter(line => line.role !== 'context')
+  return rest[0]?.role === 'assistant' || !!messages[at].stopped || !!entry.failed
 }
+
+/** Where the owner's message of a turn is among the saved lines: searched from the end, so it does not depend on how many lines came before. -1 when it is not there. */
+export function askedAt(messages: ChatLine[], ask: { text: string; at: string }): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const line = messages[index]
+    if (line.role !== 'user' || (ask.text && line.text !== ask.text)) continue
+    return !ask.at || time(line.at) >= time(ask.at) - SKEW_MS ? index : -1   // the same words long before are another turn
+  }
+  return -1
+}
+
+/** Whether every line the device holds is among the saved lines, in order (a reply the device holds in part may be longer there). */
+function holds(server: ChatLine[], device: ChatLine[]): boolean {
+  const lines = server.filter(line => line.role !== 'context')
+  let from = 0
+  for (const line of device.filter(item => item.role !== 'context')) {
+    const found = lines.findIndex((other, index) => index >= from && other.role === line.role && (other.text === line.text || (line.role === 'assistant' && other.text.startsWith(line.text))))
+    if (found < 0) return false
+    from = found + 1
+  }
+  return true
+}
+
+/** How many lines the Hub holds once it has saved what the device holds: the lines before the turn, the owner's message, the reply. */
+const deviceCount = (entry: ChatEntry) => entry.base + 1 + (entry.reply ? 1 : 0)
 
 /** What a read of the thread means for an entry. `live`: it is running, follow the stream. `saved`: the entry is done. `keep`: show the device's lines. */
 export type Verdict = { kind: 'live' } | { kind: 'saved' } | { kind: 'keep'; lines: ChatLine[] } | { kind: 'server' }
@@ -81,7 +110,8 @@ export function judge(entry: ChatEntry, answer: { messages: ChatLine[]; running?
   if (answer.running) return { kind: 'live' }
   if (turnSaved(answer.messages, entry)) return { kind: 'saved' }
   const device = cachedLines(entry)
-  return countOf(answer.messages) < countOf(device) ? { kind: 'keep', lines: device } : { kind: 'server' }
+  if (holds(answer.messages, device)) return { kind: 'server' }   // the Hub's lines win whenever they hold what the device has
+  return countOf(answer.messages) < deviceCount(entry) ? { kind: 'keep', lines: device } : { kind: 'server' }
 }
 
 // ---- the store
@@ -116,7 +146,7 @@ const emit = () => listeners.forEach(listener => listener())
 export function fit(entry: ChatEntry): ChatEntry {
   const size = (value: ChatEntry) => JSON.stringify([value.lines, value.reply]).length
   let next = entry
-  while (size(next) > MAX_BYTES && next.lines.length > 1) next = { ...next, lines: next.lines.slice(1), base: Math.max(0, next.base - 1) }
+  while (size(next) > MAX_BYTES && next.lines.length > 1) next = { ...next, lines: next.lines.slice(1) }   // `base` counts the Hub's lines: it stays
   if (size(next) > MAX_BYTES) next = { ...next, reply: next.reply.slice(-Math.max(0, MAX_BYTES - size({ ...next, reply: '' }) - 64)) }
   return next
 }
@@ -184,7 +214,8 @@ export function flushReplies() {
   if (!pending.size) return
   const waiting = new Map(pending)
   pending.clear()
-  commit({ ...store, chats: store.chats.map(entry => (waiting.has(entry.key) ? fit({ ...entry, reply: waiting.get(entry.key)! }) : entry)) })
+  // Stored text is never replaced by less: a followed turn starts from nothing and a replay builds up again.
+  commit({ ...store, chats: store.chats.map(entry => (waiting.has(entry.key) && waiting.get(entry.key)!.length >= entry.reply.length ? fit({ ...entry, reply: waiting.get(entry.key)! }) : entry)) })
 }
 
 /** The reply so far for an entry. Ignored when the entry is gone (dismissed, deleted or settled). */
@@ -198,21 +229,42 @@ export function setReply(key: string, reply: string, now = false) {
 
 // ---- changes
 
-export interface Begin { id: string | null; title: string; persona: string | null; model: string | null; before: ChatLine[]; owner: ChatLine & { previews?: string[] }; now?: number }
+export interface Begin { id: string | null; title: string; persona: string | null; model: string | null; before: ChatLine[]; owner: ChatLine & { previews?: string[] }; now?: number; /** How many lines the Hub holds before this turn, when `before` is not that (it holds lines only the device has). */ base?: number }
+
+/** The entries a new turn replaced, until the Hub has accepted the send: a refusal puts them back. */
+const superseded = new Map<string, ChatEntry[]>()
 
 /** A turn begins (sent here, or seen running in a chat that was opened). The same turn begun twice keeps its entry. Returns the entry's key. */
 export function beginChat(input: Begin): string {
   load()
-  const same = store.chats.find(entry => !!input.id && entry.id === input.id && !!input.owner.text && entry.ask.text === input.owner.text)
+  const same = store.chats.find(entry => !!input.id && entry.id === input.id && !!input.owner.text && entry.ask.text === input.owner.text && Math.abs(time(entry.ask.at) - time(input.owner.at)) < 5 * 60 * 1000)
   if (same) return same.key
   const key = `c${Math.random().toString(36).slice(2, 10)}`
   const lines = [...input.before.map(line => plainLine(line)), plainLine(input.owner)]
   const entry = fit({
     key, id: input.id, title: input.title, persona: input.persona, model: input.model, startedAt: new Date(input.now ?? Date.now()).toISOString(),
-    lines, base: countOf(input.before), ask: { text: input.owner.text, at: input.owner.at }, reply: '', jobs: [],
+    lines, base: input.base ?? countOf(input.before), ask: { text: input.owner.text, at: input.owner.at }, reply: '', jobs: [],
   })
-  commit({ ...store, chats: [...store.chats.filter(other => !(input.id && other.id === input.id)), entry] })
+  const older = store.chats.filter(other => input.id && other.id === input.id)
+  if (older.length) { superseded.set(key, older); while (superseded.size > 50) superseded.delete(superseded.keys().next().value!) }
+  commit({ ...store, chats: [...store.chats.filter(other => !older.includes(other)), entry] })
   return key
+}
+
+/** The Hub refused the send that began this entry: it goes, and the entries it replaced come back. */
+export function refuseChat(key: string) {
+  load()
+  const back = superseded.get(key) ?? []
+  superseded.delete(key)
+  pending.delete(key)
+  if (!store.chats.some(entry => entry.key === key)) return
+  commit({ ...store, chats: [...store.chats.filter(entry => entry.key !== key), ...back] })
+}
+
+/** The stream reported an error and no reply came. */
+export function markFailed(key: string) {
+  load()
+  if (store.chats.some(entry => entry.key === key && !entry.failed)) commit({ ...store, chats: store.chats.map(entry => (entry.key === key ? { ...entry, failed: true } : entry)) })
 }
 
 /** The Hub named the chat. */
@@ -274,6 +326,12 @@ export function settleChat(id: string, answer: { messages: ChatLine[]; running?:
   return verdict
 }
 
+/** A read of a chat's thread: the chat set aside (here or on another device) removes its entry; otherwise the turn may be saved. */
+export function applyRead(id: string, answer: { messages: ChatLine[]; running?: boolean; state?: { archived?: string | null; trashed?: string | null } }): Verdict | null {
+  if (answer.state?.archived || answer.state?.trashed) { dismissChat(id); return null }
+  return settleChat(id, answer)
+}
+
 /** The Hub's list: entries whose chat shows the turn saved leave, and one that had no id yet takes the id of the row it became. */
 export function settleList(rows: ChatSummary[]) {
   load()
@@ -283,7 +341,7 @@ export function settleList(rows: ChatSummary[]) {
   for (const entry of store.chats) {
     let current = entry
     if (!current.id) {
-      const match = rows.find(row => !taken.has(row.id) && row.title === clip(current.ask.text, 60) && time(row.updated) >= time(current.startedAt) - 5 * 60 * 1000)
+      const match = rows.find(row => !taken.has(row.id) && row.title === clip(current.ask.text, 60) && time(row.updated) >= time(current.startedAt) - 60 * 1000)
       if (match) { taken.add(match.id); current = { ...current, id: match.id }; changed = true }
     }
     const row = current.id ? rows.find(item => item.id === current.id) : undefined
@@ -356,7 +414,7 @@ export function mergeJobRows(server: JobListRow[], from: Store, project = '', no
   const local = new Set<string>()
   const rows = [...server]
   for (const entry of from.jobs) {
-    if (jobExpired(entry, now) || isTerminal(entry.job.state) || server.some(row => row.id === entry.job.id)) continue
+    if (jobExpired(entry, now) || !LIVE_JOB.has(entry.job.state) || server.some(row => row.id === entry.job.id)) continue   // a job waiting for approval is not in the Hub's Jobs list either
     if (project && entry.job.project !== project) continue
     local.add(entry.job.id)
     rows.push({ id: entry.job.id, title: entry.job.title, project: entry.job.project, preset: entry.job.preset ?? '', state: entry.job.state, ...(entry.job.agent ? { agent: entry.job.agent } : {}), at: entry.addedAt, deliverables: [], pills: [] })

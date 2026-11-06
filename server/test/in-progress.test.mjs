@@ -50,9 +50,9 @@ test('the reply is written at most about once a second, and at once on a flush',
   assert.equal(getStore().chats[0].reply, '', 'not yet');
   flushReplies();
   assert.equal(getStore().chats[0].reply, 'One two');
-  setReply(key, 'Final', true);
-  assert.equal(JSON.parse(disk.getItem(STORE_KEY)).chats[0].reply, 'Final');
-  assert.deepEqual(cachedLines(getStore().chats[0]).map(line => line.text), ['Plan the level', 'Final']);
+  setReply(key, 'One two three', true);
+  assert.equal(JSON.parse(disk.getItem(STORE_KEY)).chats[0].reply, 'One two three');
+  assert.deepEqual(cachedLines(getStore().chats[0]).map(line => line.text), ['Plan the level', 'One two three']);
 });
 
 test('a reply for an entry that is gone is ignored', () => {
@@ -69,7 +69,7 @@ test('the turn is saved only when the owner message is answered where it was add
   assert.equal(turnSaved([...old, user('Go')], entry), false, 'asked, not answered');
   assert.equal(turnSaved([...old, { ...user('Go'), stopped: true }], entry), true, 'stopped before a reply');
   assert.equal(turnSaved(old, entry), false);
-  assert.equal(turnSaved([user('Go'), bot('x'), user('a'), bot('b')], entry), false, 'an earlier identical message is not this turn');
+  assert.equal(turnSaved([user('Go', '2026-11-05T08:00:00.000Z'), bot('x'), user('a'), bot('b')], entry), false, 'an earlier identical message is not this turn');
   assert.equal(turnSaved([{ role: 'context', text: 'about', at }, ...old, user('Go'), bot('Done')], entry), true, 'the context line is not counted');
 });
 
@@ -238,4 +238,99 @@ test('full storage: the newest half is kept', () => {
   begin({ id: 'a', owner: user('a') });
   begin({ id: 'b', owner: user('b') });
   assert.ok(getStore().chats.length >= 1);
+});
+
+// ---- the review of ws-cl0.6.13
+
+import { applyRead, markFailed, refuseChat } from '../../src/hub/inProgress.ts';
+
+test('B4: the turn is found from the end of the saved lines, whatever the entry\'s base says', () => {
+  const entry = { base: 4, ask: { text: 'Go', at } };   // a base that is too high, as a read in the end-of-turn gap gave
+  assert.equal(turnSaved([user('a'), bot('b'), user('Go'), bot('Done')], entry), true);
+  assert.equal(turnSaved([user('a'), bot('b'), user('Go')], entry), false);
+  assert.equal(turnSaved([user('Go', '2026-11-05T09:00:00.000Z'), bot('Old')], entry), false, 'the same words long before are another turn');
+});
+
+test('B4: the Hub\'s lines win whenever they hold what the device has', () => {
+  begin({ before: [user('a'), bot('b')], owner: user('Go') });
+  setReply(getStore().chats[0].key, 'Partly', true);
+  const entry = getStore().chats[0];
+  assert.equal(judge(entry, { messages: [user('a'), bot('b'), user('Go'), bot('Partly and more')] }).kind, 'saved');
+  assert.equal(judge(entry, { messages: [user('a'), bot('b'), user('Go'), bot('Partly'), user('Next')] }).kind, 'saved');
+  assert.equal(judge(entry, { messages: [user('a'), bot('b'), user('Go')] }).kind, 'keep', 'asked, no reply yet: the device holds a reply the Hub lacks');
+  dismissKey(entry.key);
+  begin({ before: [user('a'), bot('b')], owner: user('Go') });
+  assert.equal(judge(getStore().chats[0], { messages: [user('a'), bot('b'), user('Go')] }).kind, 'server', 'the Hub holds all the lines the device has');
+});
+
+test('B5: stored text is never replaced by less', () => {
+  const key = begin();
+  setReply(key, 'Working on it. ', true);
+  setReply(key, '', true);
+  setReply(key, 'Work', true);
+  assert.equal(getStore().chats[0].reply, 'Working on it. ');
+  setReply(key, 'Working on it. And more', true);
+  assert.equal(getStore().chats[0].reply, 'Working on it. And more');
+});
+
+test('B1: a refused send puts the older entry back; a send the Hub took keeps only the new one', () => {
+  const first = begin();
+  setReply(first, 'Unsaved words', true);
+  const second = begin({ owner: user('Again', '2026-11-05T10:30:00.000Z') });
+  assert.equal(getStore().chats.length, 1);
+  refuseChat(second);
+  assert.equal(getStore().chats.length, 1);
+  assert.equal(getStore().chats[0].key, first);
+  assert.equal(getStore().chats[0].reply, 'Unsaved words');
+  refuseChat('nope');
+  assert.equal(getStore().chats.length, 1);
+});
+
+test('B3: a read that says the chat is archived or in the Trash removes the entry', () => {
+  begin();
+  assert.equal(applyRead('chat-1', { messages: [], state: { archived: at } }), null);
+  assert.equal(getStore().chats.length, 0);
+  begin();
+  assert.equal(applyRead('chat-1', { messages: [] }).kind, 'keep');
+  assert.equal(getStore().chats.length, 1);
+});
+
+test('F1: a proposed job is not a running job in the Jobs view, and a lost one is finished', () => {
+  const key = begin();
+  addJobIds(key, ['p1']);
+  assert.equal(mergeJobRows([], getStore()).rows.length, 0);
+  noteJobs('chat-1', [job('p1', 'running')]);
+  assert.equal(mergeJobRows([], getStore()).rows.length, 1);
+  noteJobs('chat-1', [job('p1', 'lost')]);
+  assert.equal(getStore().jobs.length, 0);
+});
+
+test('F2: trimming a long chat leaves the base alone, and the device count still counts the whole turn', () => {
+  const before = Array.from({ length: 40 }, (_, index) => bot(`${index} ${'x'.repeat(4000)}`));
+  const key = begin({ before });
+  setReply(key, 'Reply', true);
+  const entry = getStore().chats[0];
+  assert.equal(entry.base, 40);
+  assert.equal(judge(entry, { messages: before.slice(0, 40) }).kind, 'keep');
+  assert.equal(settleList([row('chat-1', { count: 40 })]) ?? 0, 0);
+  assert.equal(getStore().chats.length, 1, 'a list row with the old count does not settle it');
+});
+
+test('F3: a turn that failed with no reply is saved once the Hub holds the owner\'s line', () => {
+  const key = begin();
+  assert.equal(judge(getStore().chats[0], { messages: [user('Plan the level')] }).kind, 'server');
+  markFailed(key);
+  assert.equal(judge(getStore().chats[0], { messages: [user('Plan the level')] }).kind, 'saved');
+});
+
+test('F6: a chat with no id takes only the id of a row that changed in the last minute', () => {
+  begin({ id: null, owner: user('hi'), title: 'hi' });
+  settleList([row('other', { title: 'hi', updated: new Date(Date.now() - 3 * 60_000).toISOString(), count: 2 })]);
+  assert.equal(getStore().chats[0].id, null);
+});
+
+test('F7: the same words much later are another turn', () => {
+  const first = begin({ owner: user('yes', '2026-11-05T10:00:00.000Z') });
+  const second = begin({ owner: user('yes', '2026-11-05T10:20:00.000Z') });
+  assert.notEqual(first, second);
 });
