@@ -12,6 +12,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async viewport => {
   const context = await browser.newContext({ viewport });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -37,14 +38,14 @@ try {
   await phone.locator('.hub[data-screen="needs"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/needs');
 
-  step('phone Today: Needs you, then Working now, then Since yesterday, in reading order too');
+  step('phone Today: Needs you, then Working now, then Delivered, in reading order too');
   const panels = layout => phone.locator(`[data-today-layout="${layout}"] .today-stack > [aria-label]`).evaluateAll(list => list.map(e => e.getAttribute('aria-label')));
   await phone.goto(`${fixture.url}#/~hub/today`);
   await phone.locator('[data-today-layout="phone"]').waitFor();
-  assert.deepEqual((await panels('phone')).slice(0, 3), ['Needs you', 'Working now', 'Since yesterday']);
+  assert.deepEqual((await panels('phone')).slice(0, 3), ['Needs you', 'Working now', 'Delivered']);
   await phone.setViewportSize({ width: 1100, height: 812 });
   await phone.locator('[data-today-layout="wide"]').waitFor();
-  assert.deepEqual((await panels('wide')).slice(0, 2), ['Needs you', 'Since yesterday'], 'Wide keeps two columns.');
+  assert.deepEqual((await panels('wide')).slice(0, 3), ['Needs you', 'Working now', 'Delivered'], 'Wide keeps two columns.');
   await phone.setViewportSize({ width: 375, height: 812 });
   await phone.locator('[data-today-layout="phone"]').waitFor();
 

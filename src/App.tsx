@@ -20,6 +20,7 @@ import Search from './search/Search'
 import { host } from './lib/host'
 import type { Today } from './lib/hub'
 import { TodayContext, useHubData } from './hub/useHub'
+import { heldAmong, useHeld } from './hub/heldSend'
 import Rail from './ui/Rail'
 import Tabs from './ui/Tabs'
 import TopBar from './ui/TopBar'
@@ -97,7 +98,9 @@ export default function App() {
   const desktop = useIsDesktop()
   // The Hub's one `/today` poll: the sidebar badge, the phone's tab bar and the Today screen all read it.
   const today = useHubData<Today>(host.hub ? '/today' : null)
-  const needsYou = today.data?.counts.needsYou ?? 0
+  // What is held for Undo is out of the count, like it is out of Today's rows and Needs you: `useHeld` is the one source.
+  const held = useHeld()
+  const needsYou = Math.max(0, (today.data?.counts.needsYou ?? 0) - heldAmong(today.data?.needsYou ?? [], held))
   // Which project the lists show; '' is all of them. On a site it is the first path segment,
   // so a filtered view can be linked, bookmarked and reached with the back button. In the
   // local app there is no address bar, so it is remembered instead. Never allowed to hide

@@ -49,7 +49,7 @@ try {
   await phone.locator('.hub[data-screen="today"]').waitFor();
   const start = await entryOf(phone);
   const startLength = await length(phone);
-  await phone.locator('a[data-kpi="needs-you"]').click();
+  await phone.locator('a[data-today-open]').click();
   await phone.locator('.hub[data-screen="needs"]').waitFor();
   assert.equal(await length(phone), startLength + 1, 'Opening a screen adds exactly one entry.');
   await phone.locator('[data-top="detail"] [data-back]').click();

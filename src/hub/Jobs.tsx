@@ -10,7 +10,7 @@ import { useHubData } from './useHub'
 import { RUNNER_LABEL, requestStateWord } from './working'
 import './jobs.css'
 
-const RUNNING = new Set(['approved', 'taken', 'running', 'stopping', 'lost'])
+export const RUNNING = new Set(['approved', 'taken', 'running', 'stopping', 'lost'])
 const where = (runner?: string) => (runner && runner in RUNNER_LABEL ? RUNNER_LABEL[runner as keyof typeof RUNNER_LABEL] : undefined)
 
 /** A job's row: what it is, who ran it and when, and what it delivered. The whole row opens the job's page. */

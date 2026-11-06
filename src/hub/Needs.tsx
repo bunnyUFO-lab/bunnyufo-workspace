@@ -18,14 +18,14 @@ import ProjectPicker from './ProjectPicker'
 import { ProjectLink, useProjectNames } from './ProjectChip'
 import { itemPage } from './needsFocus'
 import ItemRow from './ItemRow'
-import AwayToggle from './AwayToggle'
 import NeedsItem from './NeedsItem'
 import type { SettleExtra, SettleVerb } from './NeedsItem'
 import { itemKey, rememberFilter, takeFocus } from './needsFocus'
 import { openSpawn } from './spawnStore'
 import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
-import { chooseProject, savedScope, saveScope } from './useProject'
+import { chooseProject } from './useProject'
+import { isHeld, useHeld } from './heldSend'
 import './needs.css'
 
 interface Inbox { items: Item[]; counts?: Record<string, number>; subCounts?: Record<string, number>; projects?: Record<string, number> }
@@ -68,21 +68,18 @@ export default function Needs({ filter: address }: { filter?: string }) {
   const filter = route.filter
   const names = useProjectNames()
   const wanted = useRef<string | null>(null)
-  // A bare address (the tab, the sidebar) shows the project last picked, else All. A pending focus opens on All so its item is not filtered away.
+  // The project is only what the address says: a chip on this screen, with no memory from other screens. A pending focus opens on All so its item is not filtered away.
   // Taken once on mount, before the effect below consumes it.
   const [pending] = useState(takeFocus)
-  const opensOnItem = !!pending
   if (wanted.current === null) wanted.current = pending
-  const saved = !address && !opensOnItem ? savedScope() : ''
-  const gone = !!saved && !!names && !(saved in names)
-  const project = route.project || (gone ? '' : saved)
+  const project = route.project
   const active = canonicalFilter(filter)
   // `question:verify` is the Question chip with its Verify sub-chip: `kind` is the chip, `sub` the second row's.
   const [kind, sub] = splitFilter(active)
   const isHistory = kind === 'answered' || kind === 'requests'
   const { data, error, loading, reload, at } = useHubData<Inbox>(`/inbox?filter=${encodeURIComponent(active)}${project ? `&project=${encodeURIComponent(project)}` : ''}${isHistory ? '' : '&detail=1'}`)
   // The note after the last action: from this list, or handed over by the page the owner settled an item on.
-  const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
+  const [note, setNote] = useState<{ handoff: Handoff; index: number; nextKey: string | null; /** The item the note is about and how often it had been brought back by then: Undo ends the note. */ key?: string; restores?: number } | null>(() => { const handed = takeHandoff(); return handed ? { handoff: handed, index: 0, nextKey: null } : null })
   const [settled, setSettled] = useState<ReadonlySet<string>>(new Set())
   const [leaving, setLeaving] = useState<{ item: Item; index: number }[]>([])
   const root = useRef<HTMLDivElement>(null)
@@ -90,11 +87,6 @@ export default function Needs({ filter: address }: { filter?: string }) {
   const linked = useRef(route.linked)
 
   useEffect(() => { rememberFilter(active, project) }, [active, project])
-  // A remembered project that no longer exists is forgotten once the project list has answered.
-  useEffect(() => { if (gone) saveScope('') }, [gone])
-  // A bare arrival on a remembered project settles on its address, so Back after picking All shows it again. replace adds no history entry.
-  // Only while the address is still bare: a link followed just now has moved it, and the route has not caught up, so a replace here would undo that link.
-  useEffect(() => { if (!address && project && names && window.location.hash === BARE_NEEDS) swap(needsHref('all', project)) }, [address, project, names])
 
   // The note belongs to the list it was left on: another chip starts clean.
   const listKey = `${active}/${project}`
@@ -127,9 +119,19 @@ export default function Needs({ filter: address }: { filter?: string }) {
     window.setTimeout(() => card.classList.remove('flash'), 1600)
   }, [data])
 
-  const base = (data?.items ?? []).filter((item): item is Item => !!item && typeof item === 'object' && !settled.has(itemKey(item)))
+  // What is held for Undo is out of the list, whatever this screen did with it, so every screen agrees.
+  const held = useHeld()
+  const base = (data?.items ?? []).filter((item): item is Item => !!item && typeof item === 'object' && !settled.has(itemKey(item)) && !held.keys.has(itemKey(item)))
+  // Undo, or a send that failed, brings the item back: flash its card. (Its note ends below, by the restore count.)
+  const { restored, restoredN } = held
+  useEffect(() => {
+    if (!restored) return
+    const card = [...(root.current?.querySelectorAll<HTMLElement>('[data-need]') ?? [])].find(node => node.dataset.need === restored)
+    if (card) { card.classList.add('flash'); window.setTimeout(() => card.classList.remove('flash'), 1600) }
+  }, [restored, restoredN, data])
+  const activeNote = note && (!note.key || held.restoreCount(note.key) === note.restores) ? note : null
   const shown = [...base]
-  for (const ghost of leaving) shown.splice(Math.min(ghost.index, shown.length), 0, ghost.item)
+  for (const ghost of leaving.filter(ghost => !base.some(item => itemKey(item) === itemKey(ghost.item)))) shown.splice(Math.min(ghost.index, shown.length), 0, ghost.item)
 
   function handleSettled(item: Item, verb: SettleVerb, extra?: SettleExtra) {
     const key = itemKey(item)
@@ -138,14 +140,15 @@ export default function Needs({ filter: address }: { filter?: string }) {
     const remaining = base.filter(other => itemKey(other) !== key)
     const next = pickNext(remaining, key, order.map(itemKey))
     const page = itemPage(item)
-    setSettled(previous => new Set(previous).add(key))
+    // A held answer is hidden by what is held (Undo shows it again); only an action sent at once is remembered here.
+    if (!isHeld(key)) setSettled(previous => new Set(previous).add(key))
     setLeaving(previous => [...previous, { item, index }])
     // The last item of a chip is not the last item of the queue: the counts from before this action say how many wait in other kinds.
     const elsewhere = !next && active !== 'all' && !isHistory ? Math.max(0, (data?.counts?.all ?? 0) - (data?.counts?.[active] ?? 0)) : 0
     const plural = sub ? undefined : KIND_PLURAL[kind as NeedsKind] as string | undefined
     setNote({
       handoff: { verb: NOTE_VERB[verb], ...(extra?.detail ? { detail: extra.detail } : {}), ...(extra?.link ? { link: extra.link } : {}), title: item.title, next: next?.title ?? null, nothingLeft: !next && elsewhere === 0, ...(elsewhere > 0 ? { elsewhere, ...(plural ? { kindPlural: plural } : {}) } : {}), backHash: page ?? needsHref('unstick') },
-      index, nextKey: next ? itemKey(next) : null,
+      index, nextKey: next ? itemKey(next) : null, key, restores: held.restoreCount(key),
     })
     window.setTimeout(() => setLeaving(previous => previous.filter(ghost => itemKey(ghost.item) !== key)), reducedMotion() ? 0 : LEAVE_MS)
     // The next card takes focus on its title; the note, in the slot the settled card left, is what the page scrolls to.
@@ -156,17 +159,9 @@ export default function Needs({ filter: address }: { filter?: string }) {
     }, reducedMotion() ? 20 : LEAVE_MS + 20)
   }
 
-  function answerNext() {
-    const first = root.current?.querySelector<HTMLElement>('.ni:not(.leaving) .ni-t')
-    if (!first) return
-    first.focus({ preventScroll: true })
-    first.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' })
-  }
-
   // The slot is a position among the cards that stay; a collapsing card sits just before it.
-  const noteSlot = note ? Math.min(note.index + leaving.filter(ghost => ghost.index <= note.index).length, shown.length) : -1
+  const noteSlot = activeNote ? Math.min(activeNote.index + leaving.filter(ghost => ghost.index <= activeNote.index).length, shown.length) : -1
   const counts = data?.counts
-  const waiting = counts?.all ?? 0
   const visible = CHIPS.filter(([key]) => key === 'all' || key === 'answered' || key === kind || (counts?.[key] ?? 0) > 0)
   if (kind === 'requests') visible.push(['requests', 'Requests'])
   const options = projectOptions(data?.projects, names, project)
@@ -197,11 +192,9 @@ export default function Needs({ filter: address }: { filter?: string }) {
           <h2>Needs you</h2>
           <p>Everything that waits on you, in one place. Your answer goes straight back to whoever asked.</p>
         </div>
-        <AwayToggle />
-        {(waiting > 0 || host.write) && (
+        {host.write && (
           <div className="needs-actions">
-            {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>}
-            {waiting > 0 && <button type="button" className="hub-btn needs-next" data-answer-next onClick={answerNext}>Answer the next one</button>}
+            <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>
           </div>
         )}
       </header>
@@ -256,13 +249,13 @@ export default function Needs({ filter: address }: { filter?: string }) {
           </section>
         ) : (
           <>
-            {note && !shown.length && <NextNote note={note.handoff} />}
+            {activeNote && !shown.length && <NextNote note={activeNote.handoff} />}
             {shown.length ? (
               <div className="nq">
                 {shown.map((item, index) => {
                   const ghost = leaving.some(entry => itemKey(entry.item) === itemKey(item))
                   // The note sits in the slot the settled card left: before the card that took its place.
-                  const slot = note && shown.length && index === noteSlot ? <NextNote key="note" note={note.handoff} /> : null
+                  const slot = activeNote && shown.length && index === noteSlot ? <NextNote key="note" note={activeNote.handoff} /> : null
                   return (
                     <Fragment key={itemKey(item)}>
                       {slot}
@@ -270,7 +263,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
                     </Fragment>
                   )
                 })}
-                {note && shown.length > 0 && noteSlot >= shown.length && <NextNote note={note.handoff} />}
+                {activeNote && shown.length > 0 && noteSlot >= shown.length && <NextNote note={activeNote.handoff} />}
               </div>
             ) : empty('hub-empty needs-empty')}
           </>

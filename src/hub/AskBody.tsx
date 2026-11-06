@@ -29,7 +29,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   const live0 = ask.state === 'open' || ask.state === 'snoozed'
   const attachHelp = useAttachHelp('ask', ask.id, live0)
   const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view, help: attachHelp.help })
-  const { choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
+  const { choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
   const options = optionList(ask)
   const sheetCheck = isSheetCheck(ask)
   const live = ask.state === 'open' || ask.state === 'snoozed'
@@ -155,7 +155,13 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
       )}
       {writable && (
         <div className="hub-actions">
-          {confirming ? (
+          {bigConfirm ? (
+            <>
+              <span className="hub-muted" data-big-confirm>This answer has a big picture, so it cannot wait for Undo. Send it now?</span>
+              <button type="button" className="hub-btn" onClick={() => setBigConfirm(false)}>Keep editing</button>
+              <button type="button" className="hub-btn pri" disabled={busy} data-send-now onClick={() => void answer.sendNow()}>Send now</button>
+            </>
+          ) : confirming ? (
             <>
               <span className="hub-muted">Cancel this Ask?</span>
               <button type="button" className="hub-btn" onClick={() => setConfirming(false)}>Keep it</button>

@@ -4,6 +4,7 @@ import { HubError, fileUrl, hubPost } from '../lib/hub'
 import { authHeaders } from '../local/client'
 import type { DrawingIo } from '../components/DrawingEditor'
 import { annotationScene, blankScene, takeHandoff } from './drawing'
+import { KEEPALIVE_LIMIT, hold } from './heldSend'
 
 export interface Attached { scene: string; png: string; optionId: string | null }
 export interface Editing { optionId: string | null; image?: string; w: number; h: number; scene?: string }
@@ -66,6 +67,8 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const [notice, setNotice] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // A big picture cannot be held for Undo (a request that outlives the page carries 64 KB at most): the owner is asked first.
+  const [bigConfirm, setBigConfirm] = useState(false)
   const [drawing, setDrawing] = useState<Attached | null>(() => { const handed = handoff ? takeHandoff() : null; return handed ? { ...handed, optionId: null } : null })
   const [editing, setEditing] = useState<Editing | null>(null)
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({})
@@ -116,16 +119,39 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
     const given = verdicts[item.id]
     return [item.id, { verdict: given.verdict, ...(given.verdict === 'change' && given.note.trim() ? { note: given.note.trim() } : {}) }]
   }))
+  const answerBody = () => ({ ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}), ...(ask.rev ? { rev: ask.rev } : {}) })
+  // An answer that starts work or changes something says so when it lands (the notice), and a passkey-only Ask is the owner's check in the moment:
+  // those go at once. Everything else waits seven seconds with Undo.
+  const holdable = ask.requirePasskey !== true && !ask.rerun && !ask.agentEdit && !ask.avatar
+  const answerVerb: AskVerb = kind ? 'reviewed' : 'answered'
+  const sendNow = () => { setBigConfirm(false); return act(() => hubPost(`${base}/answer`, answerBody()), answerVerb) }
+  // A held answer that loses the race says who answered first, in the words the open form used to show.
+  const sendHeld = async (keepalive: boolean, body: unknown) => {
+    try { return await hubPost(`${base}/answer`, body, undefined, false, keepalive) } catch (failure) {
+      const existing = failure instanceof HubError && failure.status === 409 ? (failure.body?.answer ?? null) as AskAnswer | null : null
+      if (existing) { const taken = new Error(`Already answered by ${existing.by} at ${when(existing.at)}.`); (taken as Error & { cause?: unknown }).cause = failure; throw taken }
+      throw failure
+    }
+  }
+  const send = () => {
+    const body = answerBody()
+    if (!holdable) return sendNow()
+    if (JSON.stringify(body).length > KEEPALIVE_LIMIT) { setBigConfirm(true); return Promise.resolve() }
+    setProblem(null)
+    setNotice(null)
+    if (hold({ key: `ask-${askId}`, title: text(ask.question).slice(0, 90), verb: kind ? 'Review sent' : 'Answered', send: keepalive => sendHeld(keepalive, body) })) onSettled?.(answerVerb)
+    return Promise.resolve()
+  }
   return {
     verdicts, kind, decisions,
     setVerdict: (decision: string, verdict: DecisionVerdict) => setVerdicts(previous => ({ ...previous, [decision]: { verdict, note: previous[decision]?.note ?? '' } })),
     setVerdictNote: (decision: string, text: string) => setVerdicts(previous => (previous[decision] ? { ...previous, [decision]: { ...previous[decision], note: text } } : previous)),
-    choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
+    choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io,
     // A review is ready when every decision has a verdict, a pick when one option is chosen, anything else when it says something.
     // An Ask with options needs one of them picked, whatever else it asks for.
     needsOption,
     ready: (!needsOption || !!choice) && (decisions.length ? decisions.every(item => !!verdicts[item.id]) : kind === 'pick' ? !!choice : !!choice || note.trim().length > 0 || !!drawing),
-    send: () => act(() => hubPost(`${base}/answer`, { ...(decisions.length ? { decisions: sentDecisions() } : {}), ...(choice ? { choice } : {}), ...(note.trim() ? { note: note.trim() } : {}), ...(drawing ? { drawing: { scene: drawing.scene, png: drawing.png } } : {}), ...(help ? { help } : {}), ...(ask.rev ? { rev: ask.rev } : {}) }), kind ? 'reviewed' : 'answered'),
+    send, sendNow,
     snooze: () => act(() => hubPost(`${base}/snooze`, { hours: 24 }), 'snoozed'),
     cancel: () => act(() => hubPost(`${base}/cancel`), 'cancelled'),
   }

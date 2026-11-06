@@ -17,6 +17,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -117,7 +118,7 @@ try {
   step('desktop: an answered plan says it waits for the PC, then when it was applied (ws-im1.2.3)');
   await desk.goto(`${fx.url}#/~hub/ask/${ask}`);
   await desk.locator('[data-plan-state="waiting"]').waitFor();
-  assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), 'Waiting for the PC to apply it.');
+  assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), "Approved. It's applied within a minute or two, and the PC doesn't need to be on.");
   await desk.locator('[data-plan-state="waiting"]').scrollIntoViewIfNeeded();
   await shot(desk, 'plan-waiting-desktop');
   fx.fake.seed(`sections/inbox/asks/${ask}/pickup.json`, JSON.stringify({ at: new Date().toISOString(), host: 'pc' }), 'application/json');

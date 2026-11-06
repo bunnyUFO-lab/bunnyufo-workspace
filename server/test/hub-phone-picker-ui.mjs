@@ -2,7 +2,7 @@
 // select on every screen that has the picker; 641 px and up keeps the chips; more than ten projects keeps the typeable list above 640 px
 // only: a phone gets the select however many projects there are (ws-2vh.27).
 // Checks: the field is 44 px high and inside the screen, nothing scrolls sideways (the page, .content and .hub), a pick changes the
-// screen, the choice is kept across Today, Needs you, and Work, "All" is reachable, an unknown project reads
+// screen, the choice is kept across Needs you and Work, "All" is reachable, an unknown project reads
 // "Choose a project", Back restores the old project, rotation swaps the control with the choice intact, and both themes read.
 // The real iOS and Android lists and the zoom behaviour cannot be checked here: they wait for the owner's play test.
 import { chromium, expect } from '@playwright/test';
@@ -38,7 +38,6 @@ const stored = (page, key) => page.evaluate(k => localStorage.getItem(k), key);
 const go = (page, hash) => page.evaluate(next => { location.hash = next; }, hash);
 
 const SCREENS = [
-  { name: 'Today', hash: '#/~hub/today', scope: '[data-today-project]' },
   { name: 'Work', hash: '#/~hub/work', scope: '.work' },
   { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]' },
   { name: 'Needs', hash: '#/~hub/needs', scope: '[data-needs-project]' },
@@ -89,7 +88,7 @@ try {
     await page.context().close();
   }
 
-  step('A pick changes the screen: Work changes the address, Today its project');
+  step('A pick changes the screen: Work changes the address');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
@@ -98,23 +97,10 @@ try {
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
     await none(page, 'Work after a pick');
 
-    await go(page, '#/~hub/today');
-    select = await ready(page, '[data-today-project]');
-    const kpi = page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v');
-    // The last pick (lanes, on Work) is what Today shows.
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await expect(kpi).toHaveText('1');
-    await select.selectOption('all');
-    await expect(kpi).toHaveText('5');
-    await select.selectOption('lanes');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await expect(kpi).toHaveText('1');
-    assert.equal((await select.locator('option[value="lanes"]').textContent()).trim(), 'Lanes (1)', 'Today says how many wait in a project.');
-    await none(page, 'Today after a pick');
     await page.context().close();
   }
 
-  step('The choice is kept on Work and Today, and survives a reload; a pick on Today reaches Work');
+  step('The choice is kept on Work, and survives a reload');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
@@ -123,31 +109,14 @@ try {
     assert.equal(await stored(page, 'buw.hub.project'), 'lanes');
     await page.reload();
     await expect(await ready(page, '.work')).toHaveValue('lanes');
-
-    await go(page, '#/~hub/today');
-    const today = await ready(page, '[data-today-project]');
-    await expect(today).toHaveValue('lanes');
-    assert.equal(await stored(page, 'hub-today-project'), 'lanes', 'A pick on Work is what Today shows.');
-    await page.reload();
-    await expect(await ready(page, '[data-today-project]')).toHaveValue('lanes');
-    await (await ready(page, '[data-today-project]')).selectOption('magic-loops');
-    assert.equal(await stored(page, 'hub-today-project'), 'magic-loops');
-    assert.equal(await stored(page, 'buw.hub.project'), 'magic-loops', 'A pick on Today is the shared choice.');
-    await go(page, '#/~hub/work');
-    await expect(await ready(page, '.work')).toHaveValue('magic-loops');
     await page.context().close();
   }
 
-  step('"All" is the first option on Today and Work');
+  step('"All" is the first option on Work');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${fixture.url}#/~hub/today`);
-    let select = await ready(page, '[data-today-project]');
-    assert.equal(await select.locator('option').first().getAttribute('value'), 'all');
-    await select.selectOption('lanes');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'lanes');
-    await select.selectOption('all');
-    await expect(page.locator('[data-today-project] select')).toHaveAttribute('data-value', 'all');
+    await page.goto(`${fixture.url}#/~hub/work/lanes`);
+    let select;
 
     await go(page, '#/~hub/work/lanes');
     select = await ready(page, '.work');

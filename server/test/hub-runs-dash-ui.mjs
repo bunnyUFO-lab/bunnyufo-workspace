@@ -57,21 +57,17 @@ try {
     assert.match(text, /Working/);
     assert.match(text, /for \d+ min/);
     assert.equal(await row.locator('[data-runner="hermes"]').innerText(), 'Hermes');
-    assert.equal((await page.locator('[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
+    assert.equal((await page.locator('[data-today-status] .today-pill').first().innerText()).trim(), '1 running');
     const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
     assert.ok(widths.scroll <= widths.inner, `${label}: the page scrolls sideways.`);
-
-    step(`${label}: Since yesterday has the started and finished events`);
-    const since = page.locator('[aria-label="Since yesterday"]');
-    await since.locator('[data-run-event="run-finished"]').waitFor();
-    assert.equal(await since.locator('[data-run-event="run-started"]').count(), 2);
-    assert.match(await since.locator('[data-run-event="run-finished"]').innerText(), /Finished: Game ideas deck/);
-    assert.equal(await since.locator('[data-run-event-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
 
     step(`${label}: Activity lists them under Agents`);
     await page.goto(`${fx.url}#/~hub/activity/agents`);
     await page.locator('[data-run-event="run-started"]').first().waitFor();
     assert.equal(await page.locator('[data-run-event]').count(), 3);
+    assert.equal(await page.locator('[data-run-event="run-started"]').count(), 2);
+    assert.match(await page.locator('[data-run-event="run-finished"]').innerText(), /Finished: Game ideas deck/);
+    assert.equal(await page.locator('[data-run-event-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant', 'The card link is the card id in the assistant section.');
     // The title keeps the row's width and the buttons go under it on a phone; a title never breaks beside them.
     const finishedRow = page.locator('[data-run-event="run-finished"]').first();
     const [titleBox, actionsBox, rowBox] = await Promise.all([finishedRow.locator('.hub-row-title').boundingBox(), finishedRow.locator('.hub-row-actions').boundingBox(), finishedRow.boundingBox()]);
@@ -92,8 +88,8 @@ try {
 
   step('the page of the finished run links to the card in the assistant section');
   const page = await open({ width: 1280, height: 900 });
-  await page.goto(`${fx.url}#/~hub/today`);
-  await page.locator('[aria-label="Since yesterday"] [data-run-event="run-finished"] [data-run-event-open]').click();
+  await page.goto(`${fx.url}#/~hub/activity/agents`);
+  await page.locator('[data-run-event="run-finished"] [data-run-event-open]').click();
   await page.locator('[data-run-card]').waitFor();
   assert.equal(await page.locator('[data-run-card]').getAttribute('href'), '/assistant#/game-ideas-deck-consultant');
 

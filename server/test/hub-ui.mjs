@@ -29,6 +29,7 @@ const contexts = [];
 const requestsSeen = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   // The map checks here draw every task; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
@@ -51,8 +52,13 @@ const noteUnderTitle = async (row, selector, what) => {
   assert.ok(note.y >= title.y + title.height - 1, `${what}: the note sits under the title (${note.y} < ${title.y + title.height}).`);
   assert.ok(title.width >= whole.width * 0.4, `${what}: the title keeps its width (${title.width} of ${whole.width}).`);
 };
-/** Sending an answer from the Ask's own page moves on to the next item with a note; Back returns to the answered Ask. */
+/** Sending an answer from the Ask's own page stays on it; Next item moves on with a note, and Back returns to the answered Ask. */
 const answeredThenBack = async page => {
+  // A big drawing cannot wait for Undo: the page asks first, and the test says yes.
+  const sendNow = page.locator('[data-send-now]');
+  if (await sendNow.waitFor({ timeout: 1500 }).then(() => true, () => false)) await sendNow.click();
+  await page.locator('[data-settled-title]', { hasText: /^(Answered|Review sent)\./ }).waitFor();
+  await page.locator('[data-next-item]').click();
   await page.locator('[data-next-note]').waitFor();
   await page.locator('[data-next-back]').click();
   await page.locator('.hub-steps li.on', { hasText: 'Answered' }).waitFor();
@@ -86,37 +92,28 @@ try {
   assert.equal(await page.locator('[data-rail] [data-nav="today"]').getAttribute('aria-current'), 'page');
   assert.equal(await page.locator('[data-rail]').evaluate(node => /Operate|Plan\b|Know/.test(node.innerText)), false, 'No Operate, Plan or Know headings.');
   assert.equal(await page.locator('[data-rail] [data-nav]').evaluateAll(list => new Set(list.map(item => Math.round(item.getBoundingClientRect().left))).size), 1, 'One column.');
-  assert.equal((await page.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '3');
-  assert.equal((await page.locator('.hub-kpi[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '1');
+  assert.equal((await page.locator('[data-today-title]').innerText()).trim(), '3 need you');
+  assert.equal((await page.locator('[data-today-status] .today-pill').first().innerText()).trim(), '1 running');
   assert.match(await page.locator('.hub-panel[aria-label="Working now"]').innerText(), /running since \d\d:\d\d/);
   await noSideways(page, 'Today');
-  step('Today after the mockup: greeting, eyebrow, the top three of five Needs-you rows with kind labels, the Open button count, an alert row, stacked at 375 px');
+  step('Today after the mockup: the count as the title, the top three of five Needs-you rows with kind labels, the All count, an alert row, stacked at 375 px');
   const busy = await startHubFixture({ busyToday: true });
   const busyPage = await open({ width: 1280, height: 800 });
   await busyPage.goto(`${busy.url}#/~hub/today`);
   await busyPage.locator('.today-head').waitFor();
-  assert.match(await busyPage.locator('.today-head h2').innerText(), /^Good (morning|afternoon|evening)$/);
-  assert.match(await busyPage.locator('[data-today-eyebrow]').innerText(), /\d\d:\d\d( [AP]M)?$/);
-  assert.match(await busyPage.locator('.today-head p').innerText(), /^5 things wait on you\. 1 session is running\.$/);
-  assert.equal((await busyPage.locator('[data-today-open] .today-num').innerText()).trim(), '5', 'The Open button counts everything that needs you.');
-  assert.equal((await busyPage.locator('.hub-kpi[data-kpi="needs-you"] .hub-kpi-v').innerText()).trim(), '5');
-  assert.match(await busyPage.locator('.today-all').innerText(), /^All 5/);
+  assert.equal((await busyPage.locator('[data-today-title]').innerText()).trim(), '5 need you');
+  assert.match(await busyPage.locator('[data-today-status] .today-pill').first().innerText(), /^1 running$/);
+  assert.match(await busyPage.locator('[data-today-open]').innerText(), /^All 5/);
   const kindRows = await busyPage.locator('.hub-panel[aria-label="Needs you"] .nrow small').allInnerTexts();
   assert.equal(kindRows.length, 3, 'Today shows only the top three of five.');
   for (const row of kindRows) assert.match(row, /^(Question|Steps|Review|(?:Claude|Codex|Session) \w+|Approval) · /, `Row "${row}" starts with its kind.`);
-  assert.equal((await busyPage.locator('.hub-kpi[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '1');
+  assert.match(await busyPage.locator('[aria-label="Alerts"] h3').innerText(), /1 failed/);
   assert.match(await busyPage.locator('[data-alert]').innerText(), /Nightly brief failed[\s\S]*529/);
   await busyPage.setViewportSize({ width: 375, height: 812 });
   await busyPage.waitForTimeout(150);
   const columns = (await busyPage.locator('.today-cols').evaluate(node => getComputedStyle(node).gridTemplateColumns)).trim().split(/\s+/);
   assert.equal(columns.length, 1, 'At 375 px the columns stack.');
   assert.ok(await busyPage.evaluate(() => document.documentElement.scrollWidth <= 375), 'Today does not scroll sideways at 375 px.');
-  const gap = await busyPage.locator('.hub-kpi[data-kpi="recent"]').evaluate(tile => {
-    const label = tile.querySelector('.kpi-label > span:first-child').getBoundingClientRect();
-    const dot = tile.querySelector('.kpi-label .dot').getBoundingClientRect();
-    return dot.left - label.right;
-  });
-  assert.ok(gap >= 6, `The "Since yesterday" label keeps room from its dot (${gap} px).`);
   await busy.close();
   await page.locator('a[data-today-open]').click();
   await page.locator('.hub[data-screen="needs"]').waitFor();
@@ -158,7 +155,8 @@ try {
   await page.locator('[data-option="A"] .hub-option-pick').click();
   fixture.seed.put(`asks/${second.id}/answer.json`, { at: new Date().toISOString(), by: 'phone', choice: 'C' });
   await page.locator('button:has-text("Send answer")').click();
-  await page.locator('.hub-error', { hasText: 'Already answered by phone' }).waitFor();
+  await page.locator('[data-undo-toast]', { hasText: /Not sent: .*Already answered by phone/ }).waitFor();
+  await page.locator('.hub-answer', { hasText: 'phone' }).waitFor();
   assert.equal(hubAnswer(second.id).choice, 'C');
 
   step('an Ask file without "from" (and odd options) renders, and a broken Hub screen leaves the rail alone');
@@ -191,9 +189,9 @@ try {
   await phone.locator('.hub[data-screen="today"]').waitFor();
   const phoneAsk = askJson({ id: askId('phone', 'c3d4'), now: new Date(), options: plainOptions() });
   fixture.seed.ask(phoneAsk);
-  for (const [hash, selector] of [['#/~hub/today', '.hub-kpis'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.wk-lanes'], ['#/~hub/activity', '.hub-chips']]) {
+  for (const [hash, selector] of [['#/~hub/today', '[data-today-title]'], ['#/~hub/needs', '.ni'], ['#/~hub/work/magic-loops', '.wk-lanes'], ['#/~hub/activity', '.hub-chips']]) {
     await go(phone, hash);
-    await phone.locator(`.hub ${selector}`).first().waitFor();
+    await phone.locator(selector.startsWith('[') ? selector : `.hub ${selector}`).first().waitFor();
     await phone.waitForTimeout(250);
     await noSideways(phone, hash);
   }
@@ -283,7 +281,7 @@ try {
   // On a loaded PC the test helper reloads a page whose connect timed out (ui-timeouts.mjs), and each load asks once.
   poll.on('load', () => { loads += 1; });
   await poll.goto(`${fixture.url}#/~hub/today`);
-  await poll.locator('.hub-kpis').waitFor();
+  await poll.locator('[data-today-title]').waitFor();
   await poll.waitForTimeout(2000);
   assert.equal(todayCalls, loads, `Expected one /today request per page load, saw ${todayCalls} for ${loads}.`);
 
@@ -1120,8 +1118,9 @@ try {
   await noSideways(phone, 'Reviews at phone width');
   await page.route('**/api/hub/reviews/*/done', route => route.fulfill({ status: 500, body: '{"error":"Test failure"}', contentType: 'application/json' }), { times: 1 });
   await bareRow.locator('button', { hasText: 'Mark done' }).click();
-  await bareRow.locator('.hub-error', { hasText: 'Test failure' }).waitFor();
-  await noteUnderTitle(bareRow, '.hub-error', 'a failed Mark done');
+  // The write is held, then fails: the toast names the item and says why, and the row comes back.
+  await page.locator('[data-undo-toast]', { hasText: /Not sent: Bare review\. Test failure/ }).waitFor();
+  await bareRow.waitFor();
   assert.ok(await bareRow.locator('button', { hasText: 'Mark done' }).isEnabled(), 'Mark done stays available after an error.');
   assert.equal(doneEvents().length, 0, 'The failed click wrote nothing.');
   await page.unroute('**/api/hub/reviews/*/done');

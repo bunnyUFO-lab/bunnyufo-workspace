@@ -1,6 +1,5 @@
 import { useEffect, useId, useState } from 'react'
 import { host } from '../lib/host'
-import type { Item } from '../lib/hub'
 import { ago, hubGet, hubPost } from '../lib/hub'
 import type { SpawnPreset, SpawnRoute, SpawnTarget } from '../lib/hubSpawn'
 import { MACHINE } from '../lib/hubSpawn'
@@ -12,7 +11,9 @@ import Combobox from './Combobox'
 import { RunView } from './RunView'
 import { cachedPresets, loadPresets } from './spawnData'
 import { openSpawn } from './spawnStore'
-import { goNext, useQueueOrder } from './useGoNext'
+import { autoNext, goNext, useQueueOrder } from './useGoNext'
+import { hold } from './heldSend'
+import SettledBar, { useSettledHere } from './SettledBar'
 import { useHubData } from './useHub'
 import './runs.css'
 import { PageProjectChip } from './ProjectChip'
@@ -103,14 +104,20 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
     setError(null)
     try { await work() } catch (failure) { setError(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false) }
   }
-  const approve = () => run(async () => {
-    await hubPost(`/requests/${encodeURIComponent(id)}/${expired ? 'again' : 'approve'}`, { target, ...(needsRepo && pickedRepo ? { repo: pickedRepo } : {}) })
-    onSettled('approved')
-  })
-  const decline = () => run(async () => {
-    await hubPost(`/requests/${encodeURIComponent(id)}/decline`, reason.trim() ? { reason: reason.trim() } : {})
-    onSettled('declined')
-  })
+  // Approve and Decline wait seven seconds with Undo, then make the one write they always made: the signing path is the same POST.
+  const key = `${state === 'proposed' ? 'approval' : 'request'}-${id}`
+  const heldTitle = (request.title ?? request.text).slice(0, 90)
+  const approve = () => {
+    setError(null)
+    const path = `/requests/${encodeURIComponent(id)}/${expired ? 'again' : 'approve'}`
+    const body = { target, ...(needsRepo && pickedRepo ? { repo: pickedRepo } : {}) }
+    if (hold({ key, title: heldTitle, verb: 'Approved', send: keepalive => hubPost(path, body, undefined, false, keepalive) })) onSettled('approved')
+  }
+  const decline = () => {
+    setError(null)
+    const body = reason.trim() ? { reason: reason.trim() } : {}
+    if (hold({ key, title: heldTitle, verb: 'Declined', send: keepalive => hubPost(`/requests/${encodeURIComponent(id)}/decline`, body, undefined, false, keepalive) })) onSettled('declined')
+  }
   const markDone = () => run(async () => {
     await hubPost(`/requests/${encodeURIComponent(id)}/done`, {})
     onSettled('done')
@@ -162,12 +169,12 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
       <div className="ni-a ap-actions" data-approval-actions>
         {!host.write && <span className="hub-muted" data-readonly-note>Sign in to approve this.</span>}
         {host.write && atPc && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void copy()} data-approval-copy>Copy prompt</button>}
-        {host.write && !atPc && <button type="button" className="hub-btn pri" disabled={busy || !canSign} onClick={() => void approve()} data-approval-approve>{expired ? 'Approve again' : 'Approve'}</button>}
+        {host.write && !atPc && <button type="button" className="hub-btn pri" disabled={busy || !canSign} onClick={approve} data-approval-approve>{expired ? 'Approve again' : 'Approve'}</button>}
         {host.write && <button type="button" className="hub-btn" disabled={busy} onClick={edit} data-approval-edit>Edit</button>}
         {host.write && !declining && <button type="button" className="hub-btn danger" disabled={busy} onClick={() => setDeclining(true)} data-approval-decline>Decline</button>}
         {host.write && declining && (
           <>
-            <button type="button" className="hub-btn danger" disabled={busy} onClick={() => void decline()} data-approval-decline-send>Send decline</button>
+            <button type="button" className="hub-btn danger" disabled={busy} onClick={decline} data-approval-decline-send>Send decline</button>
             <button type="button" className="hub-btn" disabled={busy} onClick={() => setDeclining(false)}>Keep</button>
           </>
         )}
@@ -238,10 +245,13 @@ export default function ApprovalView({ id }: { id: string }) {
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
   const title = detail ? (detail.request.title ?? detail.request.text.slice(0, 80)) : ''
+  const kind: 'approval' | 'request' = detail?.state === 'proposed' ? 'approval' : 'request'
+  const here = useSettledHere(`${kind}-${id}`)
   const settle = (verb: SettledVerb) => {
-    const kind: Item['kind'] = detail?.state === 'proposed' ? 'approval' : 'request'
     if (verb === 'done') { window.location.assign(hubHash('needs')); return }
-    void goNext({ kind, id, title }, verb, queue(), hubHash('request', id))
+    // The answer is held (or sent) and the page stays on the request, unless the owner asked for the next item after every answer.
+    here.settle(verb, queue())
+    if (autoNext()) void goNext({ kind, id, title }, verb, queue(), hubHash('request', id))
   }
   if (!detail) return <p className="hub-empty">{error ?? 'Loading…'}</p>
   return (
@@ -251,7 +261,9 @@ export default function ApprovalView({ id }: { id: string }) {
         <h2>{title}</h2>
         <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill" data-request-id>{detail.request.id}</span></span>
       </div>
-      <section className="hub-panel ap-page" aria-label="Request">
+      <SettledBar itemKey={`${kind}-${id}`} kind={kind} id={id} title={title} verb={here.verb} phase={here.phase} backHash={hubHash('request', id)} order={here.order} />
+      {/* Kept mounted while held, so Undo finds the page as it was left. */}
+      <section className="hub-panel ap-page" aria-label="Request" hidden={here.covered}>
         <ApprovalBody id={id} onSettled={settle} page />
       </section>
     </>

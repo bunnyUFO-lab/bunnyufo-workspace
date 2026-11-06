@@ -23,6 +23,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'en-US', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -34,12 +35,12 @@ let stub = null;
 try {
   const page = await open({ width: 1280, height: 800 });
 
-  step('Today: the eyebrow clock is in the same 12 hour format as every other time in the Hub');
+  step('Today: the Updated clock is in the same 12 hour format as every other time in the Hub');
   await page.goto(`${fixture.url}#/~hub/today`);
-  const eyebrow = page.locator('[data-today-eyebrow]');
-  await eyebrow.waitFor();
-  const text = await eyebrow.innerText();
-  assert.match(text, /· \d{2}:\d{2} (AM|PM)$/, `The clock reads like the rest of the Hub: ${text}`);
+  const updated = page.locator('.today-actions .hub-muted');
+  await updated.waitFor();
+  const text = (await updated.innerText()).trim();
+  assert.match(text, /^Updated \d{2}:\d{2} (AM|PM)$/, `The clock reads like the rest of the Hub: ${text}`);
 
   step('Escape closes a dots menu and the focus goes back to the button that opened it');
   await page.goto(`${fixture.url}#/hub`);

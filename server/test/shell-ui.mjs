@@ -49,8 +49,8 @@ try {
   await noSideways(phone, 'Today at 390');
 
   step('phone: Work from Today has a Back button and no tabs, nothing lit; browser back returns to Today');
-  await phone.locator('a[data-kpi="running"]').click();
-  await phone.locator('.hub[data-screen="activity"]').waitFor();
+  await phone.locator('[aria-label="Delivered"] a.today-all').click();
+  await phone.locator('.hub[data-screen="jobs"]').waitFor();
   assert.equal(await phone.locator('[data-tabs]').count(), 0, 'No tabs on Work.');
   await tall(phone, '[data-top="detail"] [data-back]', 'Back');
   await phone.goBack();

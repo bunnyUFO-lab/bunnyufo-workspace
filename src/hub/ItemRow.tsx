@@ -1,10 +1,11 @@
-import { useState } from 'react'
 import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
 import { KIND_LABEL as NEEDS_LABEL, needsKind } from '../lib/needsKinds'
 import { hubHash, reviewHash } from '../lib/route'
 import { requestStateWord } from './working'
 import { useMarkDone } from './useMarkDone'
+import { useHeld } from './heldSend'
+import { itemKey } from './needsFocus'
 import { nothingToDo } from './reviewText'
 
 const EVENT_DOT: Record<string, string> = {
@@ -40,8 +41,9 @@ export function ReviewActions({ item, onDone, links = true, primary = true }: { 
 }
 
 function ReviewRow({ item, meta }: { item: Item; meta: string }) {
-  const [hidden, setHidden] = useState(false)
-  if (hidden) return null
+  // A held "Mark done" hides the row everywhere; Undo shows it again.
+  const held = useHeld()
+  if (held.keys.has(itemKey(item))) return null
   return (
     <div className="hub-row review">
       <span className="hub-dot p" aria-hidden="true" />
@@ -51,18 +53,18 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
         {item.ask && <b className="hub-row-ask" data-ask>{item.ask}</b>}
         <span className="hub-row-meta">{meta} <span className="hub-row-cue" aria-hidden="true">›</span></span>
       </a>
-      <ReviewActions item={item} onDone={() => setHidden(true)} primary={nothingToDo(item.ask) || !item.url} />
+      <ReviewActions item={item} onDone={() => undefined} primary={nothingToDo(item.ask) || !item.url} />
     </div>
   )
 }
 
 /** A blocked session: a button into the session when there is a real link, the desktop app's link where there is a desktop, and plain words otherwise. */
 function BlockedRow({ item, meta }: { item: Item; meta: string }) {
-  const [hidden, setHidden] = useState(false)
+  const held = useHeld()
   const link = sessionUrl(item.url)
   const desk = appUrl(item.appUrl)
-  const { button, notes } = useMarkDone(item, () => setHidden(true))
-  if (hidden) return null
+  const { button, notes } = useMarkDone(item, () => undefined)
+  if (held.keys.has(itemKey(item))) return null
   return (
     <div className="hub-row" data-blocked>
       <span className="hub-dot y" aria-hidden="true" />
