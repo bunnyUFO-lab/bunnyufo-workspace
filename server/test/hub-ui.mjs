@@ -1310,7 +1310,7 @@ try {
       await running.close();
     }
 
-    step('chat at phone width: the drawer opens and the message box fits');
+    step('chat at phone width: the Chat tab is the list, New chat opens the composer, and the message box fits');
     const small = await chatBrowser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     const phoneChat = await small.newPage();
     phoneChat.setDefaultTimeout(ms(15000));
@@ -1320,10 +1320,11 @@ try {
     await go(phoneChat, '#/~hub/chat');
     await phoneChat.locator('.hub-chat').waitFor();
     await phoneChat.waitForTimeout(300);
-    assert.equal(await phoneChat.locator('.hub-chat-list').isVisible(), false, 'The list is a drawer on a phone.');
-    await phoneChat.locator('button:has-text("Chats")').click();
-    await phoneChat.locator('.hub-chat-list').waitFor();
-    await phoneChat.locator('button:has-text("Chats")').click();
+    assert.equal(await phoneChat.locator('[data-chat-list]').isVisible(), true, 'The list is the screen on a phone.');
+    assert.equal(await phoneChat.locator('textarea[aria-label="Message"]').count(), 0, 'The list has no composer.');
+    await phoneChat.locator('[data-new-chat]').click();
+    await phoneChat.locator('textarea[aria-label="Message"]').waitFor();
+    assert.equal(await phoneChat.locator('[data-chat-list]').count(), 0, 'A phone shows one pane.');
     for (const selector of ['textarea[aria-label="Message"]']) {
       const where = await phoneChat.locator(selector).boundingBox();
       assert.ok(where && where.x >= 0 && where.x + where.width <= 390 && where.y + where.height <= 844, `${selector} fits on screen.`);

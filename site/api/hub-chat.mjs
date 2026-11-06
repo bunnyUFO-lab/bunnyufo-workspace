@@ -55,6 +55,7 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
   const chatConfigured = !!hermesUrl && !!env.HERMES_API_KEY;
   const runsOn = String(env.HUB_CHAT_RUNS ?? '') !== '0' && !!hermesRuns?.configured && !!copyApproval && !!readApproval;
   const titles = new Map();   // etag → { title, count }
+  const startingTurns = new Map();   // queue file etag → its running first turn, or null
   /** The persona table of this request: the app's, with the owner's edits (hub-personas.mjs) when the Hub gave a reader. */
   /** What Auto tries first: the label of the model the Hermes host says profile main uses (an export, ws-im1.4.2), else Codex, the app's own default. */
   const autoFirstLabel = async () => (autoFirst ? await autoFirst().catch(() => null) : null) || 'Codex';
@@ -89,10 +90,28 @@ export function createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadR
       const id = object.key.split('/').pop().replace(/\.jsonl$/, '');
       if (CHAT_ID.test(id)) chats.push({ id, at: object.lastModified ? new Date(object.lastModified).getTime() || 0 : 0, object });
     }
+    // A new chat's first reply is still running: its transcript is saved when the reply ends, but the queue file already holds the turn.
+    // Only queue files with no transcript are read, and an unchanged one is not read again (etag).
+    const have = new Set(chats.map(chat => chat.id));
+    const waiting = objects.flatMap(object => { const id = /\/queue\/([^/]+)\.json$/.exec(object.key)?.[1]; return id && CHAT_ID.test(id) && !have.has(id) ? [{ id, object }] : []; });
+    const starting = (await pool(6, waiting, async ({ id, object }) => {
+      let turn = startingTurns.get(object.etag);
+      if (turn === undefined) {
+        turn = (await queueStore.read(id).catch(() => null))?.turn ?? null;
+        startingTurns.set(object.etag, turn);
+        while (startingTurns.size > 200) startingTurns.delete(startingTurns.keys().next().value);
+      }
+      return turn && (carriedOf(id) || turn.run) ? { id, at: Date.parse(turn.at) || 0, object: null, turn } : null;
+    })).filter(Boolean);
+    chats.push(...starting);
     const ordered = orderView(chats, marks, VIEWS.includes(view) ? view : 'active');
     const page = ordered.slice(offset, offset + limit);
     // Titles are read for this page only, six at a time; the etag cache answers a chat that has not changed.
-    const conversations = await pool(6, page, async ({ id, object }) => {
+    const conversations = await pool(6, page, async ({ id, object, turn }) => {
+      if (!object) {   // running first turn: no transcript yet
+        const mark = viewOfEntry(marks.chats[id]);
+        return { id, title: mark.title ?? (clip(turn.text, 60) || 'New chat'), renamed: !!mark.title, updated: turn.at ?? null, count: 1, running: true, pinned: mark.pinned, archived: mark.archived, trashed: mark.trashed, unread: mark.unread, ...(turn.model ? { model: turn.model } : {}), ...(turn.persona && storedPersona(turn.persona, table) ? { persona: turn.persona } : {}) };
+      }
       let info = titles.get(object.etag);
       if (!info) {
         const lines = parse((await fresh(`chat/${id}.jsonl`))?.text);

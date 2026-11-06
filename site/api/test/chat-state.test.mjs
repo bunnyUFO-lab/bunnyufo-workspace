@@ -356,3 +356,36 @@ test('signed out is a 401 under requireRemoteUser, and the state route needs the
     assert.equal(fake.text(`${ROOT}/state.json`), null);
   } finally { await close(); }
 });
+
+test('a new chat whose first reply is still running is in the list from the queue file, with its first message as the title, and leaves the mark when the reply ends', async () => {
+  const { call, fake, upstream, origin, owner, close } = await fixture({ chats: 1, scripts: [['Working. ', { hold: true }]] });
+  try {
+    const controller = new AbortController();
+    const started = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Plan the forest level', persona: 'planner' }), signal: controller.signal });
+    const reader = started.body.getReader();
+    let buffer = '';
+    let id;
+    while (!id) { const { value, done } = await reader.read(); if (done) throw new Error('ended'); buffer += new TextDecoder().decode(value); id = /"conversation":"([^"]+)"/.exec(buffer)?.[1]; }
+    assert.ok(id, 'The first answer names the chat before the reply ends.');
+    await until(() => fake.text(`${ROOT}/queue/${id}.json`), 'the turn to be noted');
+    assert.equal(fake.text(`${ROOT}/${id}.jsonl`), null, 'No transcript yet.');
+    const answer = await list(call);
+    const row = answer.conversations.find(item => item.id === id);
+    assert.ok(row, 'The running chat is listed.');
+    assert.equal(row.title, 'Plan the forest level');
+    assert.equal(row.running, true);
+    assert.equal(row.persona, 'planner');
+    assert.equal(answer.counts.active, 2);
+    assert.ok((await list(call, '?view=all')).conversations.some(item => item.id === id), 'Search lists it too.');
+    assert.equal((await list(call, '?view=trash')).conversations.some(item => item.id === id), false);
+    const view = await (await call('GET', `/hub/chat/${id}`)).json();
+    assert.equal(view.running, true);
+    assert.equal(view.asking.text, 'Plan the forest level', 'Opening it follows the running turn.');
+    upstream.release(upstream.runs[0].id, 'Done.');
+    await until(async () => (await list(call)).conversations.find(item => item.id === id)?.running !== true && fake.text(`${ROOT}/${id}.jsonl`), 'the reply to be saved');
+    const after = (await list(call)).conversations.find(item => item.id === id);
+    assert.equal(after.running, undefined);
+    assert.equal(after.count, 2);
+    controller.abort();
+  } finally { await close(); }
+});

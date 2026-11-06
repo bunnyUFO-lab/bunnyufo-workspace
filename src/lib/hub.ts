@@ -516,7 +516,7 @@ export interface JobsView { counts: { running: number; finished: number }; jobs:
 export interface ChatQueueView { queued: ChatQueued[]; held: ChatHeld | null }
 /** A delegate Hermes started with `delegate_task`. `unknown`: no result reached the Hub in two hours. */
 export interface ChatDelegate { id: string; index?: number; count?: number; goal: string; state: 'running' | 'done' | 'failed' | 'unknown'; summary?: string; seconds?: number }
-export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string; /** the owner renamed it: the title is theirs, not the first message */ renamed?: boolean; /** ISO times of the pin, the archive and the Trash (null: not set) */ pinned?: string | null; archived?: string | null; trashed?: string | null; unread?: boolean }
+export interface ChatSummary { id: string; title: string; updated: string | null; count: number; about?: ChatAbout; model?: string; persona?: string; /** the owner renamed it: the title is theirs, not the first message */ renamed?: boolean; /** ISO times of the pin, the archive and the Trash (null: not set) */ pinned?: string | null; archived?: string | null; trashed?: string | null; unread?: boolean; /** its first reply is still running: the chat has no transcript yet */ running?: boolean }
 /** One chat's marks (`chat/state.json`): what `GET /hub/chat/<id>` and `POST /hub/chat/<id>/state` answer. */
 export interface ChatMarks { title: string | null; pinned: string | null; archived: string | null; trashed: string | null; unread: boolean }
 /** What `POST /hub/chat/<id>/state` takes: any of these. `title` null or blank clears a rename. */

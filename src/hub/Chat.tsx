@@ -5,7 +5,7 @@ import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
-import { afterPop, back, skipGone } from '../lib/entries'
+import { ROUTE_EVENT, afterPop, back, entrySerial, skipGone, swap } from '../lib/entries'
 import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
@@ -233,12 +233,12 @@ function ChatScreen({ id }: { id?: string }) {
   const target = parseChatId(place || blank ? undefined : id)
   // A start ("Chat with Researcher", Plan in Hermes) or a question from Search is waiting for a composer: on a phone the thread shows,
   // not the list, until the person leaves this address.
-  const [wanted, setWanted] = useState(false)
+  const [wantedAt, setWantedAt] = useState(0)   // the history entry that has the start waiting
   const waiting = !target.id && !place && (!!peekChatStart() || !!peekAsk())
-  if (waiting && !wanted) setWanted(true)
-  useEffect(() => { if (target.id || place) setWanted(false) }, [target.id, place])
+  if (waiting && wantedAt !== entrySerial()) setWantedAt(entrySerial())
+  const wanted = wantedAt !== 0 && wantedAt === entrySerial()
   useEffect(() => {
-    const want = () => { if (!target.id && !place) setWanted(true) }
+    const want = () => { if (!target.id && !place) setWantedAt(entrySerial()) }
     const offStart = onChatStart(want)
     const offAsk = onAsk(want)
     return () => { offStart(); offAsk() }
@@ -660,10 +660,15 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         },
         onThinking: setThinking,
         onDelegates: items => { started = items; setDelegates(items) },
-        onStarted: (id, name) => {
-          run.current = id
-          if (name) { conversation.current = name; setKnown(true) }   // a resend joins this conversation, not a second one
-          if (stopWanted.current) { stopWanted.current = false; if (id) stop(); else abort.current?.abort() }
+        onStarted: (runId, name) => {
+          run.current = runId
+          if (name) {
+            conversation.current = name; setKnown(true)   // a resend joins this conversation, not a second one
+            // A new chat gets its address now, not when the reply ends: leaving at any moment finds the way back. `notify` off: the view
+            // stays mounted and goes on reading this stream.
+            if (!id && !help && window.location.hash !== hubHash('chat', name)) swap(hubHash('chat', name), undefined, false)
+          }
+          if (stopWanted.current) { stopWanted.current = false; if (runId) stop(); else abort.current?.abort() }
         },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
@@ -720,11 +725,17 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     if (problem) setError(problem)
     if (!conversation.current) { setStopping(false); giveBack() }   // no name came: nothing will send the waiting rows
     if (cut) list.reload()
+    const handedOver = !!finished && finished !== id
     if (finished) {
       list.reload()
-      if (finished !== id) { carry(finished, lines, askedModel, askedPersona); window.location.assign(hubHash('chat', finished)) }
+      if (handedOver) {
+        carry(finished, lines, askedModel, askedPersona)
+        // The address may already name it (set when the id was known): then the route is only read again, so the view is made anew with these lines.
+        if (window.location.hash === hubHash('chat', finished)) window.dispatchEvent(new Event(ROUTE_EVENT))
+        else window.location.assign(hubHash('chat', finished))
+      }
     }
-    if (!(finished && finished !== id) && conversation.current) void afterRef.current(conversation.current)   // the queue may have moved on, or been held
+    if (!handedOver && conversation.current) void afterRef.current(conversation.current)   // the queue may have moved on, or been held
     if (!stopped && !problem && readAloud && speaks && reply.trim()) window.speechSynthesis.speak(new SpeechSynthesisUtterance(plainText(reply)))
   }
 
@@ -913,7 +924,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
           )))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
-              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted">…</span>}
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted" data-pending-wait>{who?.name ?? 'Hermes'} is working…</span>}
               <ToolLines tools={delegates.length ? tools.filter(tool => tool.name !== DELEGATE_TOOL) : tools} />
               <Delegates items={delegates} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}

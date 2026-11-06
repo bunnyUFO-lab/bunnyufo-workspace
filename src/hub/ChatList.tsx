@@ -96,7 +96,7 @@ function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ChatSummary
           <span className="cl-body">
             <b className="cl-title">{chat.pinned && <span className="cl-pin" data-pin-mark title="Pinned"><Icon name="pin" size={14} /></span>}{chat.title}</b>
             <small className="cl-snip">
-              {chat.count} messages · <span data-conversation-persona>{personaName}</span>{chat.model && chat.model !== AUTO && <> · <span data-conversation-model>{names.modelName(chat.model)}</span></>}
+              {chat.running ? <span data-conversation-running>Replying… · </span> : <>{chat.count} messages · </>}<span data-conversation-persona>{personaName}</span>{chat.model && chat.model !== AUTO && <> · <span data-conversation-model>{names.modelName(chat.model)}</span></>}
             </small>
           </span>
           <span className="cl-end"><span className="cl-when" data-conversation-time>{whenOf(chat.updated)}</span>{chat.unread && <span className="cl-dot" role="img" aria-label="Unread" data-unread-dot />}</span>
