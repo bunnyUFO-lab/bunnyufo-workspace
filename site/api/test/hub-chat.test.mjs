@@ -678,6 +678,11 @@ test('runs on: a new turn in a conversation whose reply is still being written i
     await new Promise(resolve => setTimeout(resolve, 300));
     upstream.release(turn.run, 'Working. Done.');
     await savedLines(fake, turn.conversation, 2);
+    // The file lands a moment before the turn is let go; a page offers Send only once a read says it is no longer running.
+    for (let tries = 0; (await (await call('GET', `/hub/chat/${turn.conversation}`)).json()).running; tries += 1) {
+      assert.ok(tries < 100, 'The turn is let go after its reply is saved.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     const controller = new AbortController();
     const late = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'second', conversation: turn.conversation }), signal: controller.signal });
     assert.equal(late.status, 200);

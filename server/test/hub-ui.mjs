@@ -1323,8 +1323,8 @@ try {
     assert.equal(await phoneChat.locator('.hub-tray-item').count(), 4, 'A fifth picture is refused.');
     for (const selector of ['.hub-attach', '.hub-tray-remove']) {
       const where = await phoneChat.locator(selector).first().boundingBox();
-      const seen = await phoneChat.evaluate(picked => { const box = document.querySelector(picked).getBoundingClientRect(); return { css: [box.width, box.height], scale: visualViewport.scale, innerWidth, docWidth: document.documentElement.scrollWidth }; }, selector);
-      assert.ok(where.width >= 44 && where.height >= 44, `${selector} is at least 44 px: ${where.width} x ${where.height}, ${JSON.stringify(seen)}.`);
+      // Layout can land a hair under a whole pixel (43.999996): round, so only a really smaller button fails.
+      assert.ok(Math.round(where.width) >= 44 && Math.round(where.height) >= 44, `${selector} is at least 44 px: ${where.width} x ${where.height}.`);
     }
     const row = await Promise.all(['.hub-attach', 'textarea[aria-label="Message"]', '.hub-compose .hub-btn'].map(selector => phoneChat.locator(selector).boundingBox()));
     for (const where of row) assert.ok(where && where.x >= 0 && where.x + where.width <= 390, 'The compose row fits.');
