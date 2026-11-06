@@ -1,0 +1,41 @@
+/* The Library screen. Tokens only. Phone first: one column; the list pane is 384 px beside a card (ui.css .ui-pane-list). */
+.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.lib .ui-top { padding-right: 4px; }
+.lib .workspace-switcher { min-width: 0; margin-left: auto; }
+.lib .workspace-switcher-button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: var(--tap); padding-top: 0; padding-bottom: 0; }
+.lib .workspace-switcher + .ui-icobtn { margin-left: 0; }
+.lib-new { flex: none; padding: 0 16px 8px; }
+.lib-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); color: var(--t3); border: 1px solid var(--line); }
+.lib-search:focus-within { border-color: var(--line2); }
+.lib-search input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); border: 0; background: none; color: var(--t1); font: inherit; outline: none; }
+.lib-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px calc(24px + var(--safe-b)); overscroll-behavior: contain; }
+.lib-head { display: flex; align-items: center; gap: 4px; min-height: 36px; color: var(--t2); font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.lib-head h2 { flex: 1; margin: 0; font-size: inherit; font-weight: inherit; }
+.lib-rows { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; background: var(--s1); }
+.lib-row { display: flex; align-items: center; min-height: 64px; position: relative; transition: background 0.15s; }
+.lib-row + .lib-row { box-shadow: inset 0 1px 0 var(--line); }
+.lib-row:hover { background: var(--s2); }
+.lib-row.on { background: var(--s3); }
+.lib-row-main { flex: 1; min-width: 0; min-height: 64px; display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 14px; color: inherit; text-decoration: none; }
+.lib-row-icon { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 20px; line-height: 1; }
+.lib-row-icon img { width: 24px; height: 24px; object-fit: contain; }
+.lib-row-body { flex: 1; min-width: 0; }
+.lib-row-body b { display: block; font-weight: 550; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-row-body small { display: block; color: var(--t3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-row.pinned .lib-row-icon { color: var(--accent); }
+.lib-note { margin: 4px 0 10px; color: var(--t3); font-size: 13px; }
+.lib-clear { min-height: var(--tap); padding: 0 8px; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.lib-empty { margin: 40px 0; text-align: center; color: var(--t3); }
+.lib-foot { margin: 20px 0 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--t3); font-size: 12px; }
+.lib-trash-rows { padding: 0; }
+.lib-trash-rows li { min-height: var(--tap); }
+.lib-trash-rows button, .lib-icon-reset { min-height: var(--tap); }
+.lib-icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.lib-icons button { min-height: var(--tap); padding: 0; font-size: 20px; border: 1px solid transparent; border-radius: 8px; background: none; cursor: pointer; }
+.lib-icons button.on { border-color: var(--accent); background: var(--accent-soft); }
+.lib-icon-reset { margin-top: 10px; }
+.ui-sheet .workspace-menu { position: static; width: auto; max-height: none; box-shadow: none; border: 0; background: none; padding: 0; }
+.lib-trash-notice { margin: 0 16px 8px; }
+.lib-trash-notice button { min-height: var(--tap); }
+.ui-sec .lib-rows { margin-bottom: 4px; }
+.lib-detail { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
