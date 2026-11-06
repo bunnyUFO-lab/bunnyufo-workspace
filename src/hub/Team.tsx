@@ -114,12 +114,13 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
       </nav>
       {!skills && (
         <div className="team-tools">
+          {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
+          <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
+          {/* After the buttons in the page, before them on screen (team.css), so Tab from Floor still goes to the first desk. */}
           <div className="hub-seg team-view" role="group" aria-label="View">
             <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">List</button>
             <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
           </div>
-          {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
-          <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
         </div>
       )}
     </div>
@@ -132,7 +133,7 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
     body = <div className="team-pane">{heading}<p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p></div>
   } else if (view === 'floor' && !agentId) {
     body = (
-      <div className="team-pane team-solo" data-team-floor>
+      <div className="team-pane team-solo">
         {heading}
         <RefreshNote error={error} hasData={!!data} at={at} />
         {failure && <p className="hub-error" role="alert">{failure}</p>}

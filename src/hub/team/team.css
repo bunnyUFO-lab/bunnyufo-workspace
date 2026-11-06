@@ -90,7 +90,7 @@ a.team-session:hover { background: var(--s2); }
 .team-top { display: flex; flex-direction: column; min-width: 0; }
 .team-top .ui-seg { margin-left: 0; margin-right: 0; }
 .team-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.team-tools .team-write { margin-left: auto; }
+.team-tools .team-view { order: -1; margin-right: auto; }
 .team-detail { display: flex; flex-direction: column; padding: 16px 16px 48px; min-width: 0; max-width: 820px; }
 .team-solo .floor { margin-top: 4px; }
 .team-row { gap: 12px; min-height: 68px; }

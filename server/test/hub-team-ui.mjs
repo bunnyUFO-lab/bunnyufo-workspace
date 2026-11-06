@@ -41,16 +41,32 @@ const noSideways = async (page, what) => {
   const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
 };
+// The sprite on the agent's row in the list, which stays beside the agent's page from 900 px.
 const cardSprite = (page, agent) => page.locator(`[data-agent="${agent}"] .team-tile svg`);
+const AGENTS = ['hermes', 'briefs', 'claude', 'researcher', 'market-researcher', 'teardown', 'planner'];
+// An agent's page, with its buttons: where the roster card's main action, Sprite and Edit moved to.
+const agentPage = async (page, id) => {
+  await page.goto(`${fixture.url}#/~hub/agent/${id}`);
+  await page.locator(`[data-agent-details="${id}"] .ad-head`).waitFor();
+};
 
 try {
-  step('seven cards (the three research agents and the Planner among them), the header counts, the labels, and Team in the sidebar');
+  step('seven rows (the three research agents and the Planner among them), the header counts, the labels, and Team in the sidebar');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('.team-card').count(), 7);
-  assert.deepEqual(await desk.locator('.team-card h3').allInnerTexts(), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
-  assert.equal(await desk.locator('[data-give-work]').count(), 3, 'Only the research agents take work from here.');
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await desk.locator('.team-row').count(), 7);
+  assert.deepEqual(await desk.locator('.team-row b').allInnerTexts(), ['Hermes', 'Briefs', 'Claude Code', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
+  await desk.locator('[data-agent-details]').waitFor();
+  assert.equal(await desk.locator('[data-agent-details]').count(), 1, "From 900 px the first agent's page sits beside the list.");
+  assert.equal(await desk.locator('.team-row [data-main-action]').count(), 0, 'The list has no buttons; the page beside it has the main one.');
+  const give = [];
+  for (const id of AGENTS) {
+    await agentPage(desk, id);
+    if (await desk.locator('[data-give-work]').count()) give.push(id);
+  }
+  assert.deepEqual(give, ['researcher', 'market-researcher', 'teardown'], 'Only the research agents take work from here.');
+  await agentPage(desk, 'teardown');
   await desk.locator('[data-give-work="teardown"]').click();
   await desk.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await desk.locator('[data-preset="game-teardown"]').getAttribute('aria-pressed'), 'true', 'Give work opens Spawn on the preset of that agent.');
@@ -59,40 +75,44 @@ try {
   assert.equal(await desk.locator('[data-rail] [data-nav="team"]').count(), 1, 'Team is on the rail.');
   assert.equal(await desk.locator('[data-rail] [data-nav="team"]').getAttribute('aria-current'), 'page', 'Team is the current entry on the rail.');
   assert.match(await desk.locator('[data-team-online]').innerText(), /^\d\/7$/);
-  assert.equal(await desk.locator('[data-agent="hermes"] .team-facts').innerText().then(t => t.replace(/\s+/g, ' ')), 'Model Codex gpt-6-sol · Sonnet, then DeepSeek fallback Runs as Hermes profile main');
-  assert.match(await desk.locator('[data-agent="briefs"] .team-facts').innerText(), /Haiku 5\.5 · DeepSeek fallback/);
-  assert.equal(await desk.locator('[data-agent="claude"]').getAttribute('data-status'), 'working', 'The fixture PC has a busy session.');
+  await agentPage(desk, 'hermes');
+  assert.equal(await desk.locator('[data-details-model-line]').innerText(), 'Codex gpt-6-sol · Sonnet, then DeepSeek fallback');
+  assert.match(await desk.locator('.ad-facts').innerText().then(t => t.replace(/\s+/g, ' ')), /Runs as Hermes profile main/);
+  await agentPage(desk, 'briefs');
+  assert.match(await desk.locator('[data-details-model-line]').innerText(), /Haiku 5\.5 · DeepSeek fallback/);
+  await agentPage(desk, 'claude');
+  assert.equal(await desk.locator('.team-row[data-agent="claude"]').getAttribute('data-status'), 'working', 'The fixture PC has a busy session.');
   assert.equal(await desk.locator('[data-team-working]').innerText(), '1');
-  assert.ok(await desk.locator('[data-agent="claude"] .team-sessions li').count() >= 2, 'Claude Code lists its sessions.');
-  assert.match(await desk.locator('[data-agent="claude"] .team-sessions').innerText(), /Wall-jump tutorial/);
+  assert.ok(await desk.locator('[data-details-working] .team-sessions li').count() >= 2, 'Claude Code lists its sessions under Working on.');
+  assert.match(await desk.locator('[data-details-working] .team-sessions').innerText(), /Wall-jump tutorial/);
+  assert.equal(await desk.locator('[data-details-can-use] [data-can-use-unknown]').innerText(), "Claude Code's plugins and skills live on the PC. The Hub has no list of them.");
   await noSideways(desk, 'Team at 1280');
 
-  step('each card has one main button with its label; Chat lands in Chat on the right persona; Run now and Start a run open Spawn');
+  step("each agent's page has one main button with its label; Chat lands in Chat on the right persona; Run now and Start a run open Spawn");
   const labels = { hermes: 'Chat', briefs: 'Run now', claude: 'Start a run', researcher: 'Give work', 'market-researcher': 'Give work', teardown: 'Give work', planner: 'Chat' };
   for (const [id, label] of Object.entries(labels)) {
-    assert.equal(await desk.locator(`[data-agent="${id}"] [data-main-action]`).count(), 1, `${id} has one main button.`);
-    assert.equal((await desk.locator(`[data-agent="${id}"] [data-main-action]`).innerText()).trim(), label, id);
-    // Details comes first; Edit follows on the four agents with a chat persona (ws-im1.4.1) and nowhere else.
-    const editable = id !== 'claude';   // every agent on a Hermes profile has an Edit link (its model); Claude Code has none
-    assert.deepEqual(await desk.locator(`[data-agent="${id}"] .team-links a`).allInnerTexts(), editable ? ['Details', 'Edit'] : ['Details'], `${id}: link row.`);
+    await agentPage(desk, id);
+    assert.equal(await desk.locator('[data-main-action]').count(), 1, `${id} has one main button.`);
+    assert.equal((await desk.locator(`[data-main-action="${id}"]`).innerText()).trim(), label, id);
+    assert.equal(await desk.locator(`.team-row[data-agent="${id}"]`).getAttribute('href'), `#/~hub/agent/${id}`, `${id}: the row is a link to its page.`);
+    // Every agent on a Hermes profile has an Edit link (its model); Claude Code has none.
+    const editable = id !== 'claude';
     assert.equal(await desk.locator(`[data-edit-open="${id}"]`).count(), editable ? 1 : 0, `${id}: Edit link.`);
     if (editable) assert.equal(await desk.locator(`[data-edit-open="${id}"]`).getAttribute('href'), `#/~hub/agent-edit/${id}`);
   }
-  assert.equal(await desk.locator('[data-main-action]').count(), 7);
+  await agentPage(desk, 'hermes');
   await desk.locator('[data-main-action="hermes"]').click();
   await desk.waitForFunction(() => location.hash === '#/~hub/chat');
   await desk.locator('textarea').first().waitFor();
   assert.equal(await desk.locator('textarea').first().inputValue(), '', 'The composer is empty.');
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'hermes', 'Hermes is no persona.');
   assert.equal(await desk.locator('[data-spawn-sheet]').count(), 0);
-  await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await agentPage(desk, 'planner');
   await desk.locator('[data-main-action="planner"]').click();
   await desk.waitForFunction(() => location.hash === '#/~hub/chat');
   await desk.locator('textarea').first().waitFor();
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'planner', 'Chat opens on the Planner.');
-  await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await agentPage(desk, 'briefs');
   await desk.locator('[data-main-action="briefs"]').click();
   await desk.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await desk.locator('[data-preset="projects-brief"]').getAttribute('aria-pressed'), 'true', 'Run now opens Spawn on Projects brief.');
@@ -108,8 +128,7 @@ try {
   const filed = [...fixture.fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/request\.json$/.test(key));
   assert.equal(filed.length, 1, 'Sending files one request.');
   assert.deepEqual([fixture.fake.json(filed[0]).preset, fixture.fake.json(filed[0]).target], ['projects-brief', 'hermes'], 'The request is a Hermes one.');
-  await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await agentPage(desk, 'claude');
   await desk.locator('[data-main-action="claude"]').click();
   await desk.locator('[data-spawn-sheet]').waitFor();
   await desk.keyboard.press('Escape');
@@ -123,6 +142,7 @@ try {
   await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
 
   step('the sheet opens with the focus inside, shows the current sprite first, and Escape gives the focus back');
+  await agentPage(desk, 'hermes');
   const hermesButton = desk.locator('[data-sprite-open="hermes"]');
   await hermesButton.click();
   const sheet = desk.locator('dialog[data-sprite-sheet="hermes"]');
@@ -156,10 +176,11 @@ try {
   await desk.locator('[data-team-toast]', { hasText: 'Hermes has a new sprite. No job needed.' }).waitFor();
   const wanted = signatureOf(BUILTIN.developer);
   await desk.reload();
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await domSignature(cardSprite(desk, 'hermes')), wanted, 'The card shows the developer sprite after a reload.');
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await domSignature(cardSprite(desk, 'hermes')), wanted, 'The row shows the developer sprite after a reload.');
 
   step('Undo restores the previous sprite');
+  await agentPage(desk, 'briefs');
   await desk.locator('[data-sprite-open="briefs"]').click();
   const briefsSheet = desk.locator('dialog[data-sprite-sheet="briefs"]');
   await briefsSheet.waitFor();
@@ -167,16 +188,17 @@ try {
   await briefsSheet.locator('[data-sprite-tile="qa"]').click();
   await briefsSheet.locator('[data-sheet-use]').click();
   await desk.locator('[data-team-toast]').waitFor();
-  await desk.waitForFunction(sel => document.querySelector(sel)?.innerHTML.length > 0, '[data-agent="briefs"] .team-tile svg');
-  await desk.waitForFunction(({ sel, was }) => [...document.querySelector(sel).querySelectorAll('rect')].map(r => `${r.getAttribute('x')},${r.getAttribute('y')},${r.getAttribute('width')},${r.getAttribute('fill')}`).join('|') !== was, { sel: '[data-agent="briefs"] .team-tile svg', was: before });
+  await desk.waitForFunction(sel => document.querySelector(sel)?.innerHTML.length > 0, '.team-row[data-agent="briefs"] .team-tile svg');
+  await desk.waitForFunction(({ sel, was }) => [...document.querySelector(sel).querySelectorAll('rect')].map(r => `${r.getAttribute('x')},${r.getAttribute('y')},${r.getAttribute('width')},${r.getAttribute('fill')}`).join('|') !== was, { sel: '.team-row[data-agent="briefs"] .team-tile svg', was: before });
   await desk.locator('[data-team-undo]').click();
   await desk.locator('[data-team-toast]', { hasText: 'old sprite back' }).waitFor();
-  await desk.waitForFunction(({ sel, was }) => [...document.querySelector(sel).querySelectorAll('rect')].map(r => `${r.getAttribute('x')},${r.getAttribute('y')},${r.getAttribute('width')},${r.getAttribute('fill')}`).join('|') === was, { sel: '[data-agent="briefs"] .team-tile svg', was: before });
+  await desk.waitForFunction(({ sel, was }) => [...document.querySelector(sel).querySelectorAll('rect')].map(r => `${r.getAttribute('x')},${r.getAttribute('y')},${r.getAttribute('width')},${r.getAttribute('fill')}`).join('|') === was, { sel: '.team-row[data-agent="briefs"] .team-tile svg', was: before });
   await desk.reload();
-  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('.team-row').first().waitFor();
   assert.equal(await domSignature(cardSprite(desk, 'briefs')), before, 'The restored sprite survives a reload.');
 
   step('Randomize twice gives two different sprites, the same as genSprite for those salts');
+  await agentPage(desk, 'claude');
   await desk.locator('[data-sprite-open="claude"]').click();
   const claudeSheet = desk.locator('dialog[data-sprite-sheet="claude"]');
   await claudeSheet.waitFor();
@@ -193,19 +215,24 @@ try {
   await claudeSheet.locator('[data-sheet-use]').click();
   await claudeSheet.waitFor({ state: 'detached' });
   await desk.reload();
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await domSignature(cardSprite(desk, 'claude')), seen[1], 'The randomized sprite is the card after a reload.');
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await domSignature(cardSprite(desk, 'claude')), seen[1], 'The randomized sprite is the row after a reload.');
 
   step('phone: Team is a page with a 44 px Back button and no tab bar, the sheet is a bottom sheet, nothing scrolls sideways');
   for (const width of [375, 390]) {
     const phone = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
     await phone.goto(`${fixture.url}#/~hub/team`);
-    await phone.locator('.team-card').first().waitFor();
+    await phone.locator('.team-row').first().waitFor();
     assert.equal(await phone.locator('[data-tabs]').count(), 0, 'Team is a page of its own: no tab bar.');
+    assert.equal(await phone.locator('[data-agent-details]').count(), 0, 'On a phone the list is alone: a tap opens the page.');
     const back = await phone.locator('[data-top="detail"] [data-back]').boundingBox();
     assert.ok(back.height >= 44 && back.width >= 44, `Back at ${width}: ${back.width} x ${back.height} is a 44 px target.`);
     await noSideways(phone, `Team at ${width}`);
-    for (const target of await phone.locator('.team-card [data-main-action], .team-card .team-details-link, .team-card [data-sprite-open]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A main button, Details or Sprite is ${target} px high.`);
+    for (const target of await phone.locator('.team-row, [data-team-tab], [data-team-view]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A row, a tab or the view switch is ${target} px high.`);
+    await phone.locator('.team-row[data-agent="hermes"]').tap();
+    await phone.locator('[data-agent-details="hermes"] [data-sprite-open]').waitFor();
+    await noSideways(phone, `Agent page at ${width}`);
+    for (const target of await phone.locator('.ad-actions .hub-btn').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A button on the agent's page is ${target} px high.`);
     await phone.locator('[data-sprite-open="hermes"]').tap();
     const sheetBox = await phone.locator('dialog.sprite-sheet').boundingBox();
     assert.ok(Math.abs(sheetBox.x) < 1 && Math.abs(sheetBox.width - width) < 1, `The sheet spans the screen at ${width}.`);
@@ -225,15 +252,17 @@ try {
   });
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(ms(15000));
-  await guest.goto(`${fixture.url}#/~hub/team`);
-  await guest.locator('.team-card').first().waitFor();
+  await guest.goto(`${fixture.url}#/~hub/agent/hermes`);
+  await guest.locator('.team-row').first().waitFor();
+  await guest.locator('[data-agent-details="hermes"] .ad-head').waitFor();
   assert.equal(await guest.locator('[data-sprite-open]').count(), 0, 'No Sprite button without write.');
-  assert.equal(await guest.locator('[data-sprite-signin]').count(), 7, 'Each card says why.');
+  assert.equal(await guest.locator('[data-sprite-signin]').count(), 1, 'The page says why.');
   assert.equal(await guest.locator('[data-sprite-signin]').first().innerText(), 'Sign in to change sprites');
   assert.equal(await guest.locator('[data-sprite-signin]').first().isVisible(), true);
-  assert.equal(await guest.locator('[data-main-action]').count(), 0, 'Signed out: no main button.');
-  assert.equal(await guest.locator('[data-details-open]').count(), 7, 'Details stays.');
+  assert.equal(await guest.locator('[data-main-action], [data-spawn-open], [data-edit-open]').count(), 0, 'Signed out: no main button, no New job, no Edit.');
+  assert.equal(await guest.locator('.team-row').count(), 7, 'Every agent stays in the list.');
   assert.equal(await guest.locator('[data-new-persona]').count(), 0, 'No New persona without write.');
+  assert.equal(await guest.locator('[role="switch"]').count(), 0, 'No switch on the Team screen.');
 
   step('with chat off the Chat buttons go and the others stay');
   const quiet = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -244,13 +273,17 @@ try {
   });
   const noChat = await quiet.newPage();
   noChat.setDefaultTimeout(ms(15000));
-  await noChat.goto(`${fixture.url}#/~hub/team`);
-  await noChat.locator('.team-card').first().waitFor();
-  assert.deepEqual(await noChat.locator('[data-main-action]').allInnerTexts(), ['Run now', 'Start a run', 'Give work', 'Give work', 'Give work']);
+  const labelsNoChat = [];
+  for (const id of AGENTS) {
+    await noChat.goto(`${fixture.url}#/~hub/agent/${id}`);
+    await noChat.locator(`[data-agent-details="${id}"] .ad-head`).waitFor();
+    labelsNoChat.push(...await noChat.locator('[data-main-action]').allInnerTexts());
+  }
+  assert.deepEqual(labelsNoChat, ['Run now', 'Start a run', 'Give work', 'Give work', 'Give work']);
 
   step('New persona: pick a template, name it, land on its Edit page; it is a card with Chat, Details, Edit and Sprite (no sheet job), in Chat, and shares Hermes main');
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('.team-row').first().waitFor();
   assert.equal(await desk.locator('[data-new-persona]').count(), 1);
   await desk.locator('[data-new-persona]').click();
   const sheetNew = desk.locator('dialog[data-new-persona-sheet]');
@@ -278,12 +311,13 @@ try {
   assert.match(await desk.locator('.ae-version').first().innerText(), /Created/);
 
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('.team-card').count(), 8);
-  assert.equal(await desk.locator('[data-agent="level-reviewer"] h3').innerText(), 'Level reviewer');
-  assert.deepEqual(await desk.locator('[data-agent="level-reviewer"] .team-links a').allInnerTexts(), ['Details', 'Edit']);
-  assert.equal((await desk.locator('[data-agent="level-reviewer"] [data-main-action]').innerText()).trim(), 'Chat');
-  assert.equal(await desk.locator('[data-agent="level-reviewer"] .team-chip').innerText(), 'Research');
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await desk.locator('.team-row').count(), 8);
+  assert.equal(await desk.locator('.team-row[data-agent="level-reviewer"] b').innerText(), 'Level reviewer');
+  await agentPage(desk, 'level-reviewer');
+  assert.equal(await desk.locator('[data-edit-open="level-reviewer"]').count(), 1);
+  assert.equal((await desk.locator('[data-main-action="level-reviewer"]').innerText()).trim(), 'Chat');
+  assert.match(await desk.locator('.ad-facts').innerText().then(t => t.replace(/\s+/g, ' ')), /Room Research/);
   await desk.locator('[data-sprite-open="level-reviewer"]').click();
   const customSheet = desk.locator('dialog[data-sprite-sheet="level-reviewer"]');
   await customSheet.waitFor();
@@ -310,8 +344,8 @@ try {
   await desk.locator('[data-retire-open]').click();
   await desk.locator('[data-retire-yes]').click();
   await desk.waitForFunction(() => location.hash === '#/~hub/team');
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('.team-card').count(), 7);
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await desk.locator('.team-row').count(), 7);
   assert.equal(await desk.locator('[data-agent="level-reviewer"]').count(), 0);
   await desk.locator('[data-new-persona]').click();
   await sheetNew.locator('[data-retired-row="level-reviewer"]').waitFor();
@@ -319,15 +353,15 @@ try {
   await sheetNew.locator('[data-bring-back="level-reviewer"]').click();
   await sheetNew.waitFor({ state: 'detached' });
   await desk.locator('[data-team-toast]').waitFor();
-  await desk.locator('[data-agent="level-reviewer"]').waitFor();
-  assert.equal(await desk.locator('.team-card').count(), 8);
+  await desk.locator('.team-row[data-agent="level-reviewer"]').waitFor();
+  assert.equal(await desk.locator('.team-row').count(), 8);
   await desk.waitForFunction(() => document.activeElement?.hasAttribute('data-new-persona'));
 
   step('phone: New persona is a bottom sheet, every button is 44 px high, nothing scrolls sideways');
   for (const width of [375, 390]) {
     const phone = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
     await phone.goto(`${fixture.url}#/~hub/team`);
-    await phone.locator('.team-card').first().waitFor();
+    await phone.locator('.team-row').first().waitFor();
     await noSideways(phone, `Team with a made persona at ${width}`);
     assert.ok((await phone.locator('[data-new-persona]').boundingBox()).height >= 44 - 0.5);
     await phone.locator('[data-new-persona]').tap();

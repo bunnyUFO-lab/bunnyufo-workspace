@@ -67,11 +67,13 @@ try {
   step('Roster is the default; Floor puts every agent in its room, unknown rooms in Ops, and the choice survives a reload');
   const { page: desk, errors } = await open({ width: 1920, height: 1080 });
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('.team-row').first().waitFor();
   assert.equal(await desk.locator('[data-team-view="roster"]').getAttribute('aria-pressed'), 'true');
   assert.equal(await floorOf(desk).count(), 0);
+  const steps = await desk.evaluate(() => history.length);
   await desk.locator('[data-team-view="floor"]').click();
   await floorOf(desk).waitFor();
+  assert.equal(await desk.evaluate(() => history.length), steps, 'Floor is a view, not a step: no back entry.');
   assert.equal(await desk.locator('[data-team-view="floor"]').getAttribute('aria-pressed'), 'true');
   for (const agent of AGENTS) assert.equal(await desk.locator(`[data-room="${agent.room}"] [data-desk="${agent.id}"]`).count(), 1, `${agent.id} is in ${agent.room}`);
   assert.equal(await desk.locator('[data-room="Review"] [data-desk="sx-needs"]').count(), 1);
@@ -103,7 +105,7 @@ try {
   assert.equal(await desk.locator('[data-desk="sx-needs"] [data-desk-task]').isVisible(), false, 'A mouse has the bubble, not the task line.');
 
   step('an idle custom-sheet agent walks under CSS only: three sheet layers and a floor-walk animation');
-  await desk.locator('[data-team-view="roster"]').click();
+  await desk.goto(`${fixture.url}#/~hub/agent/briefs`);
   await desk.locator('[data-sprite-open="briefs"]').click();
   const dialog = desk.locator('dialog[data-sprite-sheet="briefs"]');
   await dialog.locator('[data-sheet-mode="custom"]').click();
@@ -118,12 +120,13 @@ try {
   assert.equal(await desk.locator('[data-desk="hermes"] [data-floor-walk]').count(), 0, 'A built-in sprite does not walk.');
   assert.equal(await desk.locator('[data-desk="sx-idle"] .floor-spr').getAttribute('class'), 'floor-spr bob', 'An idle quick default bobs.');
 
-  step('a desk opens the agent\'s Roster card, focused, without changing the chosen view');
+  step("a desk opens the agent's page, beside the list, without changing the chosen view");
   await desk.locator('[data-desk="briefs"]').click();
-  await desk.locator('.team-card[data-agent="briefs"]').waitFor();
-  await desk.waitForFunction(() => document.activeElement?.getAttribute('data-agent') === 'briefs');
+  await desk.locator('[data-agent-details="briefs"]').waitFor();
+  assert.equal(await desk.evaluate(() => location.hash), '#/~hub/agent/briefs');
+  assert.equal(await desk.locator('.team-row').count() > 1, true, 'The list is beside the page.');
   assert.equal(await desk.evaluate(() => localStorage.getItem('hub.team.view')), 'floor');
-  await desk.reload();
+  await desk.goto(`${fixture.url}#/~hub/team`);
   await floorOf(desk).waitFor();
 
   step('reduced motion: the walker stands still on the idle layer');
@@ -160,7 +163,7 @@ try {
   assert.ok(eventRequests.length > asked, 'A minute later it asked again.');
   assert.match(eventRequests.at(-1), /[?&]since=\d{4}-/, 'The later poll asks only for what is newer.');
   await tick.locator('[data-team-view="roster"]').click();
-  await tick.locator('.team-card').first().waitFor();
+  await tick.locator('.team-row').first().waitFor();
   assert.equal(await floorOf(tick).count(), 0);
   const stopped = eventRequests.length;
   await tick.clock.runFor(70_000);
@@ -212,8 +215,8 @@ try {
     assert.deepEqual(touch, { text: 'Waiting for your pick on the jump arc', shown: true, inside: true, bubble: 'none' }, `A touch screen shows the task under the name at ${width}.`);
     assert.equal(await phone.locator('[data-desk="sx-long"] .floor-name').evaluate(node => node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis'), true, 'The long name is cut with an ellipsis.');
     await phone.locator('[data-desk="sx-needs"]').tap();
-    await phone.locator('.team-card[data-agent="sx-needs"]').waitFor();
-    await noSideways(phone, `Roster after a desk at ${width}`);
+    await phone.locator('[data-agent-details="sx-needs"]').waitFor();
+    await noSideways(phone, `Agent page after a desk at ${width}`);
   }
 
   assert.deepEqual(errors.filter(text => !/Failed to load resource|ERR_CONNECTION_TIMED_OUT/.test(text)), [], 'no console errors');
