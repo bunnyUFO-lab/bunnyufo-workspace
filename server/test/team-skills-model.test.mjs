@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { agentGroups, exportLine, groupByFolder, isSkillsRoute, NO_PLUGINS_LINE, pluginRows, profileText, sharedText, skillHash, skillMatches, skillOf, sourceText } from '../../src/hub/team/skillsModel.ts';
+import { openSkill, agentGroups, exportLine, groupByFolder, isSkillsRoute, NO_PLUGINS_LINE, pluginRows, profileText, sharedText, skillHash, skillMatches, skillOf, sourceText } from '../../src/hub/team/skillsModel.ts';
 
 const skill = over => ({ id: 'plan', autoLoad: false, owner: false, profiles: ['main'], autoLoadProfiles: [], sources: ['installed'], agents: [], ...over });
 
@@ -65,6 +65,21 @@ test('agents on one profile are one group; Claude Code is its own group with the
   assert.deepEqual(groups[0].autoLoad, ['two']);
   assert.equal(groups[2].skills, null);
   assert.equal(groups[2].note, 'on the PC');
+});
+
+test('group keys cannot collide: a profile name equal to an agent id stays apart', () => {
+  const clash = view({ agents: [person('hermes', 'Hermes', 'main'), person('main', 'Main', null)] });
+  const keys = agentGroups(clash).map(group => group.key);
+  assert.deepEqual(keys, ['profile:main', 'agent:main']);
+});
+
+test('the open skill stays while it matches the search, else the first match', () => {
+  const ids = ['alpha', 'beta', 'gamma'];
+  assert.equal(openSkill(ids, null, ''), 'alpha');
+  assert.equal(openSkill(ids, 'gamma', ''), 'gamma');
+  assert.equal(openSkill(ids, 'alpha', 'et'), 'beta');
+  assert.equal(openSkill(ids, 'beta', 'et'), 'beta');
+  assert.equal(openSkill(ids, 'alpha', 'zzz'), null);
 });
 
 test('the shared line names the agents, and is silent for one', () => {

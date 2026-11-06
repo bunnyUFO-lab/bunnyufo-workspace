@@ -84,11 +84,17 @@ export function agentGroups(view: Pick<TeamSkillsView, 'agents'>): AgentGroup[] 
     const found = agent.profile ? groups.find(group => group.profile === agent.profile) : undefined
     if (found) { found.agents.push({ id: agent.id, name: agent.name }); continue }
     groups.push({
-      key: agent.profile ?? agent.id, profile: agent.profile, agents: [{ id: agent.id, name: agent.name }],
+      key: agent.profile ? `profile:${agent.profile}` : `agent:${agent.id}`, profile: agent.profile, agents: [{ id: agent.id, name: agent.name }],
       skills: agent.skills, autoLoad: agent.autoLoad ?? [], ...(agent.note ? { note: agent.note } : {}),
     })
   }
   return groups
+}
+
+/** The skill to show beside the list: the current one while it still matches the search, else the first match; null when nothing matches. */
+export function openSkill(ids: string[], current: string | null, query: string): string | null {
+  const matching = ids.filter(id => skillMatches(id, query))
+  return current && matching.includes(current) ? current : matching[0] ?? null
 }
 
 /** "Hermes, Planner and Researcher share one list.", or null for one agent. */
