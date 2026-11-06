@@ -1,10 +1,15 @@
 import { openSpawn } from './spawnStore'
-import { useCallback, useEffect, useState } from 'react'
-import { ago, HubError, hubGet } from '../lib/hub'
+import { useCallback, useState } from 'react'
+import { ago } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileChange, ProfileSettings, TeamView } from '../lib/hubTeam'
+import { startChat } from './chatStart'
+import type { AgentDetailsView, DetailsFreshness, DetailsPrompt, ProfileChange, ProfileSettings, TeamAction, TeamAgent } from '../lib/hubTeam'
 import { AgentSprite } from './team/AgentSprite'
+import SessionRow from './team/SessionRow'
+import { useRoute } from './team/useRoute'
+import { PLUGINS_LINE, SHARED_LINE, skillHash } from './team/skillsModel'
+import { List } from '../ui/Layout'
 import { STATUS_DOT, STATUS_LABEL } from './team/teamModel'
 import { stateOf } from './team/spriteState'
 import { NOT_PICKED_UP_TEXT, replacedText, runningText, waitingText, WAITING_TOO_LONG_MS } from './profileChangeWords'
@@ -12,29 +17,6 @@ import { useWaitingPoll } from './useWaitingPoll'
 import './team/agentDetails.css'
 
 const SOURCE_TAG: Record<DetailsPrompt['source'], string> = { 'hermes-host': 'Hermes host', app: 'App' }
-
-type Load<T> = { data: T | null; error: string | null; status: number | null; refresh: (signal: AbortSignal) => Promise<void> }
-
-/** One Hub route, fetched on mount. The status is kept so a 401 can say "sign in" instead of a bare error. `refresh` reads it again and keeps what is shown when that fails. */
-function useRoute<T>(path: string): Load<T> {
-  const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null }>({ path, data: null, error: null, status: null })
-  useEffect(() => {
-    const controller = new AbortController()
-    hubGet<T>(path, controller.signal).then(
-      data => setState({ path, data, error: null, status: 200 }),
-      (problem: unknown) => {
-        if ((problem as { name?: string }).name === 'AbortError') return
-        setState({ path, data: null, error: problem instanceof Error ? problem.message : 'Could not load this.', status: problem instanceof HubError ? problem.status : 0 })
-      },
-    )
-    return () => controller.abort()
-  }, [path])
-  const refresh = useCallback(async (signal: AbortSignal) => {
-    const data = await hubGet<T>(path, signal)
-    if (!signal.aborted) setState({ path, data, error: null, status: 200 })
-  }, [path])
-  return state.path === path ? { ...state, refresh } : { data: null, error: null, status: null, refresh }
-}
 
 function Chips({ items, label }: { items: string[] | undefined; label: string }) {
   if (!items?.length) return <span className="team-dim" data-none>None</span>
@@ -106,8 +88,6 @@ function Settings({ settings }: { settings: ProfileSettings }) {
                 : <span className="team-dim" data-none>None</span>}
             </dd>
           </div>
-          <div><dt>Skills loaded on every reply</dt><dd><Chips items={settings.skills.autoLoad} label="Skills loaded on every reply" /></dd></div>
-          <div><dt>Installed skills</dt><dd><Chips items={settings.skills.installed} label="Installed skills" /></dd></div>
           <div><dt>Sandbox</dt><dd>{sandbox || <span className="team-dim">None</span>}</dd></div>
         </dl>
       </section>
@@ -126,52 +106,118 @@ function Prompt({ prompt }: { prompt: DetailsPrompt }) {
   )
 }
 
-/** `#/~hub/agent/<id>`: who an agent is, the settings of its Hermes profile and its prompts. Read-only. */
-export default function AgentDetails({ id }: { id: string }) {
+/** What an agent can use, as rows from the Hermes profile's export. Nothing here switches a skill: the Hub holds no list of who can use what. */
+function CanUse({ settings, hasProfile }: { settings: ProfileSettings | null; hasProfile: boolean }) {
+  if (!settings) {
+    return (
+      <section className="ad-section" aria-labelledby="ad-can" data-details-can-use>
+        <h3 id="ad-can">Can use</h3>
+        <p className="ad-note team-dim" data-can-use-unknown>{hasProfile ? 'Not known: the Hermes host has not published the skills of this profile.' : PLUGINS_LINE}</p>
+      </section>
+    )
+  }
+  const every = new Set(settings.skills.autoLoad)
+  const names = [...new Set([...settings.skills.installed, ...settings.skills.autoLoad])].sort()
+  return (
+    <section className="ad-section" aria-labelledby="ad-can" data-details-can-use>
+      <h3 id="ad-can">Can use<span>{names.length}</span></h3>
+      {names.length
+        ? (
+          <List label="Can use">
+            {names.map(name => (
+              <a key={name} role="listitem" className="ui-row ad-skill" href={skillHash(name)} data-can-use={name}>
+                <span className="ui-row-body"><b>{name}</b></span>
+                {every.has(name) && <span className="ad-tag" data-tag="every-reply">Every reply</span>}
+              </a>
+            ))}
+          </List>
+        )
+        : <span className="team-dim" data-none>None</span>}
+      <p className="ad-note team-dim" data-can-use-shared>{SHARED_LINE}</p>
+    </section>
+  )
+}
+
+/** The main button's work: Chat on a persona (a fresh conversation, empty composer), or Spawn on a preset. */
+function runAction(action: TeamAction) {
+  if ('chat' in action) {
+    startChat({ persona: action.chat, draft: '' })
+    window.location.hash = hubHash('chat')
+  } else {
+    openSpawn({ preset: action.preset, ...(action.project ? { project: action.project } : {}), ...(action.text ? { text: action.text } : {}) })
+  }
+}
+
+/**
+ * An agent's page (`#/~hub/agent/<id>`, or beside the list on Team from 900 px): who it is, Chat and New job, what it is working on,
+ * the settings of its Hermes profile, what it can use, and its prompts. Read-only except the buttons that start work and the sprite.
+ * `live` is the agent as the Team list has it (status, sprite, sessions, main action).
+ */
+export default function AgentDetails({ id, live, onSprite, opener }: { id: string; live?: TeamAgent; onSprite?: (agent: TeamAgent) => void; opener?: (node: HTMLButtonElement | null) => void }) {
   const details = useRoute<AgentDetailsView>(`/team/${encodeURIComponent(id)}/details`)
-  const team = useRoute<TeamView>('/team')
   const body = details.data
-  const live = team.data?.agents.find(agent => agent.id === id) ?? null
   const [now] = useState(() => Date.now())
   const [asked, setAsked] = useState(() => Date.now())
   // A change that waits for the host is read again every few seconds, so the page says Running when the result lands.
   const refresh = details.refresh
   useWaitingPoll(body?.change?.state === 'waiting', useCallback(async (signal: AbortSignal) => { await refresh(signal); setAsked(Date.now()) }, [refresh]))
 
-  const back = <a className="ad-back" href={hubHash('team')} data-details-back>← Team</a>
   if (!body) {
     return (
       <div className="ad team" data-agent-details={id}>
-        {back}
         {details.status === 401
-          ? <p className="hub-empty" role="status" data-details-signin>Sign in to see this agent&apos;s prompts.</p>
+          ? (
+            <>
+              <p className="hub-empty" role="status" data-details-signin>Sign in to see this agent&apos;s prompts.</p>
+              <p className="hub-empty" data-details-skills-signin>Skills need sign-in too.</p>
+            </>
+          )
           : <p className={details.error ? 'hub-error' : 'hub-empty'} role={details.error ? 'alert' : undefined}>{details.error ?? 'Loading…'}</p>}
       </div>
     )
   }
   const { agent } = body
+  const action = live?.action
+  // The main button needs a signed-in owner; Chat also needs Chat to be set up.
+  const showMain = !!action && host.write && (!('chat' in action) || host.chat)
+  const sessions = live?.sessions ?? []
+  const working = live && live.status !== 'offline' ? live.task : ''
   return (
     <div className="ad team" data-agent-details={agent.id}>
-      {back}
       <header className="ad-head">
         {live && <span className="team-tile big"><AgentSprite sprite={live.sprite} size={live.sprite.kind === 'custom' ? 62 : 54} name={live.name} state={stateOf({ status: live.status, now })} /></span>}
         <div className="ad-title">
           <h2>{agent.name}</h2>
           {live && <span className="team-status" data-details-status><span className={`dot st-${STATUS_DOT[live.status]}`} aria-hidden="true" />{STATUS_LABEL[live.status]}</span>}
           <p className="team-dim">{agent.role}</p>
-          {agent.editable && host.write && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id}>{agent.editable.persona ? 'Edit the persona and model' : 'Edit the model'}</a>}
-          {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>}
         </div>
       </header>
+      <div className="ad-actions">
+        {showMain && live && action && <button type="button" className="hub-btn pri" onClick={() => runAction(action)} data-main-action={live.id} {...(action.label === 'Give work' ? { 'data-give-work': live.id } : {})}>{action.label}</button>}
+        {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>}
+        {agent.editable && host.write && <a className="hub-btn" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id}>{agent.editable.persona ? 'Edit the persona and model' : 'Edit the model'}</a>}
+        {live && host.write && onSprite && <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(live)} data-sprite-open={live.id}>Sprite</button>}
+        {live && !host.write && <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}
+      </div>
+      {live && (working || sessions.length > 0) && (
+        <section className="ad-section" aria-labelledby="ad-working" data-details-working>
+          <h3 id="ad-working">Working on</h3>
+          {sessions.length > 0
+            ? <ul className="team-sessions" aria-label={`${live.name} sessions`}>{sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>
+            : <p className="team-task">{working}</p>}
+        </section>
+      )}
       <dl className="ad-facts">
         <div><dt>Room</dt><dd>{agent.room}</dd></div>
         <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
+        {live && <div><dt>Model</dt><dd data-details-model-line>{live.model}{live.chatModel ? ` · chat: ${live.chatModel}` : ''}</dd></div>}
         <div><dt>Profile</dt><dd data-details-profile-name>{agent.profile ?? 'None'}</dd></div>
         {agent.chatModel && <div><dt>Chat model</dt><dd data-details-chat-model>{agent.chatModel}</dd></div>}
       </dl>
       <FreshnessNote freshness={body.freshness} hasPrompts={body.prompts.length > 0} />
       {body.change && <ChangeBanner change={body.change} now={asked} />}
       {body.settings && <Settings settings={body.settings} />}
+      <CanUse settings={body.settings} hasProfile={!!agent.profile} />
       {body.prompts.length > 0 && (
         <section className="ad-section" aria-labelledby="ad-prompts" data-details-prompts>
           <h3 id="ad-prompts">Prompts</h3>

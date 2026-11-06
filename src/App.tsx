@@ -60,7 +60,7 @@ const sortPins = (cards: WorkspaceCard[]) =>
   cards.filter(e => e.pinned).sort((a, b) => pinRank(a) - pinRank(b) || byFreshness(a, b))
 
 /** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`), a project page's tab (`project/<id>/<tab>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. Work keeps it for every address: the board remounts itself when the resolved board changes (Board.tsx). */
-const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'team' || hub.screen === 'agent' ? { screen: 'team' } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
 /**
  * The route in the address. An old or wrong address (an old Hub screen name, an empty hash, a leftover sheet marker) is rewritten
@@ -664,7 +664,7 @@ export default function App() {
   const showSettings = hubScreen === 'settings'
   const detail = entity || !view.hub ? null
     : showSettings ? DETAIL.settings
-      : host.hub ? (hubScreen === 'project' && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen ? DETAIL[hubScreen] : undefined)
+      : host.hub ? (hubScreen === 'project' && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen === 'team' && view.hub.id?.startsWith('skills/') ? { title: 'Team', parent: hubHash('team', 'skills') } : hubScreen ? DETAIL[hubScreen] : undefined)
         : undefined
   // The list beside the screen: on the Library, on a card (unless folded) and where there is no Hub. A phone has no such column.
   const showSidebar = desktop && !hubOnly && !showSettings && !listFolded
