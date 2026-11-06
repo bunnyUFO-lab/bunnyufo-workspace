@@ -110,8 +110,8 @@ try {
   assert.ok(await page.locator('.hub-chip.on', { hasText: /^All$/ }).count() === 1);
   assert.ok(await page.locator('.wk-lane[data-lane="running"] .wk-project').count() >= 1);
 
-  step('the tabs: Lanes lit on Work, Activity under the same tab strip with Work lit in the nav');
-  assert.equal(await page.locator('[data-work-tab="lanes"]').getAttribute('aria-selected'), 'true');
+  step('the tabs: Board lit on Work, Activity under the same tab strip with Work lit in the nav');
+  assert.equal(await page.locator('[data-work-tab="board"]').getAttribute('aria-selected'), 'true');
   await page.locator('[data-work-tab="activity"]').click();
   await page.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
   assert.equal(await page.locator('[data-work-tab="activity"]').getAttribute('aria-selected'), 'true');
@@ -121,7 +121,7 @@ try {
   await go(page, '#/~hub/activity/agents');
   await page.locator('.hub-chip.on', { hasText: 'Agents' }).waitFor();
   assert.equal(await page.locator('[data-rail] [data-nav="work"]').getAttribute('aria-current'), 'page');
-  await page.locator('[data-work-tab="lanes"]').click();
+  await page.locator('[data-work-tab="board"]').click();
   await page.locator('.wk-lane').first().waitFor();
 
   step('phone: one lane at a time, In progress first, the chip switches it, nothing scrolls sideways');
@@ -245,7 +245,7 @@ try {
   await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
   assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
 
-  step('requests: one card per lane by state; a click opens the run drawer, a proposal opens its page');
+  step('requests: one card per lane by state; a click opens the job's page, a proposal opens its page');
   const reqs = await startHubFixture({ work: true });
   fixtures.push(reqs);
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -278,9 +278,10 @@ try {
   assert.equal((await lanePage.locator(`[data-card="request:${seedFiles.asking}"] .wk-why`).innerText()).trim(), 'asked you a question');
   assert.equal(await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).getAttribute('href'), `#/~hub/request/${seedFiles.asking}`);
   await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).click();
-  await lanePage.locator('[data-run-drawer] [data-run-asking]').waitFor();
-  assert.match(await lanePage.locator('[data-run-drawer]').innerText(), /Which game do you mean\?/);
-  await lanePage.keyboard.press('Escape');
+  await lanePage.locator('[data-run-view] [data-run-asking]').waitFor();
+  assert.match(await lanePage.locator('[data-run-view]').innerText(), /Which game do you mean\?/);
+  await lanePage.goBack();
+  await lanePage.locator('.wk-lane').first().waitFor();
   await lanePage.locator(`[data-card="request:${seedFiles.proposed}"]`).click();
   await lanePage.waitForFunction(id => location.hash === `#/~hub/request/${id}`, seedFiles.proposed);
   await lanePage.locator('[data-approval-body]').waitFor();
