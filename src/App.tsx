@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace } from './lib/workspace'
-import { parseHash, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
+import { parseHash, parseChatId, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
 import { ROUTE_EVENT, back, go, hasOverlay, swap } from './lib/entries'
 import { canonicalAddress } from './lib/redirects'
 import { useOrder } from './lib/order'
@@ -38,7 +38,7 @@ const WebView = lazy(() => import('./components/WebView'))
 const Settings = lazy(() => import('./hub/Settings'))
 
 /** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`), a project page's tab (`project/<id>/<tab>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. Work keeps it for every address: the board remounts itself when the resolved board changes (Board.tsx). */
-const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
+const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'chat' ? { ...hub, id: parseChatId(hub.id).id } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
 /**
  * The route in the address. An old or wrong address (an old Hub screen name, an empty hash, a leftover sheet marker) is rewritten

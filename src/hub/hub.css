@@ -382,6 +382,9 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
 .hub-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 10px; min-height: 160px; }
 .hub-bubble { max-width: 88%; padding: 9px 13px; border-radius: var(--radius-lg); background: var(--surface-2); overflow-wrap: anywhere; font-size: 0.9rem; }
 .hub-bubble p { margin: 0; }
+@keyframes hub-flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 3px transparent; } }
+.hub-bubble.hub-flash { animation: hub-flash 1.6s var(--ease-out) 1; }
+@media (prefers-reduced-motion: reduce) { .hub-bubble.hub-flash { animation: none; box-shadow: 0 0 0 3px var(--accent); } }
 /* Paragraphs, lists and code in a bubble get room between them, as chat apps show them. */
 .hub-bubble .hub-md > * { margin-block: 0; }
 .hub-bubble .hub-md > * + * { margin-top: 0.6em; }

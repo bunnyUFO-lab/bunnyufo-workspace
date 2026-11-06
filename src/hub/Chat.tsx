@@ -4,7 +4,7 @@ import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatModel
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
-import { hubHash, parseHelpId, reviewHash } from '../lib/route'
+import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
@@ -198,10 +198,10 @@ function OwnerText({ text }: { text: string }) {
   )
 }
 
-function Bubble({ line, conversation, models, who, agents, jobs, onJobsChanged }: { line: Shown; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[]; jobs: ChatJob[]; onJobsChanged: () => void }) {
+function Bubble({ line, index, conversation, models, who, agents, jobs, onJobsChanged }: { line: Shown; index?: number; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[]; jobs: ChatJob[]; onJobsChanged: () => void }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
-    <div className={`hub-bubble ${line.role}`}>
+    <div className={`hub-bubble ${line.role}`} data-line={index}>
       {line.role === 'assistant' && who && <Who id={who.id} name={who.name} agents={agents} size={22} />}
       {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} copy breaks /> : line.text && <OwnerText text={line.text} />}
       {urls.length > 0 && (
@@ -220,16 +220,17 @@ function Bubble({ line, conversation, models, who, agents, jobs, onJobsChanged }
 
 export default function Chat({ id }: { id?: string }) {
   if (!host.chat) return <p className="hub-empty">Chat is not set up on this host.</p>
-  return <ChatShell id={id} />
+  const target = parseChatId(id)
+  return <ChatShell id={target.id} line={target.line} />
 }
 
 // A start from Spawn always lands in a fresh conversation. On a new Chat that is already showing (it may be empty, or busy with a
 // reply that is still streaming) the view is remounted, so it opens like New chat does: the agent's own model, no earlier pick,
 // the text as a draft. On a stored conversation the address change to a new chat remounts it anyway.
-function ChatShell({ id }: { id?: string }) {
+function ChatShell({ id, line }: { id?: string; line?: number }) {
   const [fresh, setFresh] = useState(0)
   useEffect(() => onChatStart(() => { if (!id) setFresh(count => count + 1) }), [id])
-  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} />
+  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} line={line} />
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
@@ -248,7 +249,7 @@ const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is 
 const HELD_WHY: Record<NonNullable<ChatQueued['why']>, string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long', old: 'this waited too long', joined: 'it joined messages that were held' }
 const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
-function ChatView({ id }: { id?: string }) {
+function ChatView({ id, line: landLine }: { id?: string; line?: number }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
   const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[]; autoFirst?: string }>('/chat')
@@ -349,7 +350,20 @@ function ChatView({ id }: { id?: string }) {
     return () => { stopped = true }
   }, [id, initial, help, stamp, takeView])
 
-  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [messages, pending])
+  // A search hit opens at its message and flashes it. A line that is gone opens at the bottom, as every chat does.
+  const landed = useRef(false)
+  useEffect(() => {
+    const box = scroller.current
+    const target = landLine !== undefined && !landed.current && messages.length ? box?.querySelector<HTMLElement>(`[data-line="${landLine}"]`) : null
+    if (target) {
+      landed.current = true
+      target.scrollIntoView({ block: 'center' })
+      target.classList.add('hub-flash')
+      window.setTimeout(() => target.classList.remove('hub-flash'), 1800)
+      return
+    }
+    box?.scrollTo({ top: box.scrollHeight })
+  }, [messages, pending, landLine])
   useEffect(() => {
     const made = urls.current
     return () => { abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
@@ -827,7 +841,7 @@ function ChatView({ id }: { id?: string }) {
           {!messages.length && pending === null && <p className="hub-empty">{who ? `Ask ${who.name} anything: ${who.role}. It writes a card when you ask for one.` : 'Ask the assistant anything, or tell it what to do.'}</p>}
           {messages.map((line, index) => (line.role === 'context' ? null : (
             <Fragment key={index}>
-              <Bubble line={line} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />
+              <Bubble line={line} index={index} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />
               {line.role === 'user' && line.stopped && (
                 <p className="hub-muted hub-chat-note" role="status" data-chat-stopped>
                   Stopped before it replied.

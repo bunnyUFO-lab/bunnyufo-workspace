@@ -158,6 +158,12 @@ export function showsTabs(route: Route): boolean {
   return (hub.screen === 'chat' || hub.screen === 'project') && !hub.id
 }
 
+/** A chat route's id: the conversation, and the stored line a search hit lands on (`<id>/m/<line>`). Help ids (`help/...`) pass through. */
+export function parseChatId(id: string | undefined): { id?: string; line?: number } {
+  const match = id ? /^(.+)\/m\/(\d+)$/.exec(id) : null
+  return match ? { id: match[1], line: Number(match[2]) } : { id }
+}
+
 /** Where the cards' list is: the Library screen. */
 export const libraryHash = (): string => hubHash('library')
 
