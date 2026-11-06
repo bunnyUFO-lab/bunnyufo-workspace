@@ -18,6 +18,9 @@ export const DELEGATE_WAIT_MS = 2 * 60 * 60 * 1000;
 const MAX_DELEGATES = 12;
 const MAX_GOAL = 400;
 const MAX_SUMMARY = 6000;
+/** The results a line's note may carry: history goes to Hermes on every turn, and the whole text stays in its session. */
+const NOTE_ROOM = 1200;
+const NOTE_GOAL = 80;
 const DONE = new Set(['completed', 'success']);
 
 const cut = (value, length) => {
@@ -132,6 +135,23 @@ export function parseDelivery(content) {
   });
   const error = tasks.length ? '' : /^--- ERROR ---\s*\n(.*)$/m.exec(text)?.[1] ?? '';
   return { delegation, tasks, ...(error ? { error } : {}) };
+}
+
+/**
+ * The results of a line's finished delegates, as a note for the history Hermes gets: each Hub turn is a new run, and they reach it no other
+ * way. Empty when none has finished. Each row gets a fair part of what is left, so a long result leaves room for the rest.
+ */
+export function delegatesNote(line) {
+  const finished = (Array.isArray(line?.delegates) ? line.delegates : []).filter(item => item.state === 'done' || item.state === 'failed');
+  if (!finished.length) return '';
+  let room = NOTE_ROOM;
+  const rows = finished.map((item, at) => {
+    const flat = `- ${cut(item.goal, NOTE_GOAL) || 'Delegate'} (${item.state}): ${item.summary || 'no result'}`.replace(/\s+/g, ' ');
+    const row = cut(flat, Math.floor(room / (finished.length - at)));
+    room -= row.length;
+    return row;
+  });
+  return [`[Hub: results of the delegates this reply started. … marks one cut short.]`, ...rows].join('\n');
 }
 
 export const hasRunningDelegate = line => Array.isArray(line?.delegates) && line.delegates.some(item => item.state === 'running');

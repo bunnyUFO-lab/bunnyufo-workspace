@@ -24,6 +24,9 @@
 //   npm run cards -- get <link | section/card | name> [--into <folder>]
 //        fetch a card into <folder>/<card folder>/ and add its entry to <folder>/workspace.json; the version of each file read
 //        goes to <folder>/.cards-base.json, which `put --edit` needs (never uploaded)
+//   npm run cards -- link <link | section/card | name>
+//        print the address a person opens the card at (<site>/<section>#/<card>). The site is BUW_SITE_URL, else "siteUrl" in
+//        ~/.buw/hub.json or config.json, else the card API's address without its leading "api.". `get` and `put` print it too.
 //   npm run cards -- put <folder> --section <section> --card <id> [--dry-run]
 //          [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]
 //        upload the card folder (what differs), then its entry. It removes nothing unless --remove (a change from before, when a file gone
@@ -177,7 +180,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 }
 
 const MAX_INLINE = 4 * 1024 * 1024;
-const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | put <folder> --section <s> --card <id> [--dry-run] [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]  [--via s3|api]\n'
+const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | link <ref> | put <folder> --section <s> --card <id> [--dry-run] [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state|card | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>]\n'
   + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again] [--journal <file>] | apply pending --project <p> --json\n'
@@ -252,6 +255,28 @@ function configuredApi() {
 
 /** The card API's address: BUW_CARD_API, else config.json, else the host that served this file, else ''. */
 const apiBase = () => (process.env.BUW_CARD_API || configuredApi() || SERVED_API).replace(/\/+$/, '');
+
+/** The site people open cards on: BUW_SITE_URL, else "siteUrl" in hub.json or config.json, else the API's address without its leading "api.". '' when nothing says. */
+async function siteBase() {
+  let configured = '';
+  try { configured = JSON.parse(readFileSync(process.env.BUW_CONFIG || path.join(os.homedir(), '.buw', 'config.json'), 'utf8')).siteUrl; } catch { /* no config */ }
+  const named = [process.env.BUW_SITE_URL, (await hubConfig())?.siteUrl, configured].find(value => typeof value === 'string' && value.trim());
+  if (named) return named.trim().replace(/\/+$/, '');
+  try {
+    const url = new URL(apiBase());
+    if (!/^api\./i.test(url.hostname)) return '';
+    url.hostname = url.hostname.slice(4);
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+/** The address a person opens a card at, or '' when the site is not known. Never the card API or the /w/ file host. */
+async function cardLink(section, id) {
+  const site = await siteBase();
+  return site ? `${site}/${encodeURIComponent(section)}#/${encodeURIComponent(id)}` : '';
+}
 
 /** apiBase(), or an error saying where to set it. */
 function requireApi() {
@@ -401,14 +426,33 @@ async function readBase(folder) {
   }
 }
 
-async function get(ref, into) {
+/** The one card a link or a name means; several stop the run with the list. */
+async function resolveCard(ref) {
   const { matches } = await call('GET', `/resolve?ref=${encodeURIComponent(ref)}`);
   if (matches.length > 1) {
     console.error(`"${ref}" matches several cards; name one as section/card:`);
     for (const match of matches) console.error(`  ${match.section}/${match.id}  ${match.title}`);
     process.exit(2);
   }
-  const [{ section, id }] = matches;
+  return matches[0];
+}
+
+/** `link <ref>`: only the address on stdout, so a script can use it. */
+async function link(ref) {
+  const { section, id } = await resolveCard(ref);
+  const address = await cardLink(section, id);
+  if (!address) throw new Error('The site is not known: set BUW_SITE_URL, or "siteUrl" in ~/.buw/config.json.');
+  console.log(address);
+}
+
+/** The line `get` and `put` end with, so an agent copies the right address instead of building one. */
+async function printCardLink(section, id) {
+  const address = await cardLink(section, id);
+  if (address) console.log(`Link to give people: ${address}`);
+}
+
+async function get(ref, into) {
+  const { section, id } = await resolveCard(ref);
   const card = await call('GET', `/sections/${section}/cards/${encodeURIComponent(id)}`);
   const etags = {};
   for (const file of card.files) {
@@ -439,6 +483,7 @@ async function get(ref, into) {
   for (const key of Object.keys(base)) if (key.startsWith(`${section}/${card.entity.folder}/`)) delete base[key];
   await writeFile(path.join(into, BASE_FILE), `${JSON.stringify({ ...base, ...etags }, null, 2)}\n`);
   console.log(`${section}/${id} -> ${path.join(into, card.entity.folder)} (${card.files.length} file(s)); entry in ${path.join(into, 'workspace.json')}`);
+  await printCardLink(section, id);
 }
 
 /** What `sections` says about where this token may write. */
@@ -568,6 +613,7 @@ async function put(folder, section, id, dryRun, { agent, why, context, edit = fa
   if (result.ignored?.length) console.log(`The card list kept its own ${result.ignored.join(', ')}: an agent only adds new tabs to an existing card, so those changes did nothing.`);
   console.log(`${result.unchanged ? 'Nothing to change in' : result.created ? 'Added' : 'Updated'} ${section}/${id}${agent ? ` as ${agent}` : ''}.`);
   if (unrecorded) console.error('Warning: this write was not recorded, so it has no row and no Revert in the Hub.');
+  await printCardLink(section, id);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2337,7 +2383,7 @@ function folderSection() {
 
 const BEADS_COPY_MAX = 30;
 
-/** Every copy of a project's Beads export, merged as the Hub does: per issue the greatest updated_at wins, a tie goes to the copy pushed later. */
+/** Every copy of a project's Beads export, merged as the Hub does: the Dolt server's copy alone when there is one, else per issue the greatest updated_at wins and a tie goes to the copy pushed later. */
 async function mergedBeads(project) {
   const files = (await listInbox('beads/')).filter(file => file.startsWith(`beads/${project}/`) || file === `beads/${project}.jsonl` || file === `beads/${project}.meta.json`);
   const copies = new Map();
@@ -2361,7 +2407,8 @@ async function mergedBeads(project) {
     }
     return { copy, pushed: time(meta?.pushedAt), issues };
   });
-  const kept = rows.filter(Boolean).sort((a, b) => b.pushed - a.pushed).slice(0, BEADS_COPY_MAX);
+  const fromServer = rows.find(row => row?.copy === 'server');
+  const kept = fromServer ? [fromServer] : rows.filter(Boolean).sort((a, b) => b.pushed - a.pushed).slice(0, BEADS_COPY_MAX);
   const best = new Map();
   for (const row of kept) {
     for (const issue of row.issues) {
@@ -2945,7 +2992,7 @@ async function main() {
   const context = option('--context');
   const via = option('--via') ?? process.env.BUW_CARDS_VIA;
   const [command, target] = args;
-  if (!['login', 'sections', 'list', 'get', 'put'].includes(command)) {
+  if (!['login', 'sections', 'list', 'get', 'link', 'put'].includes(command)) {
     console.error(USAGE);
     process.exit(1);
   }
@@ -2959,6 +3006,8 @@ async function main() {
     for (const item of (await call('GET', `/sections/${target}`)).cards) console.log(`${item.id}\t${item.updated ?? ''}\t${item.title}`);
   } else if (command === 'get' && target) {
     await get(target, into);
+  } else if (command === 'link' && target) {
+    await link(target);
   } else if (command === 'put' && target && section && card) {
     await put(target, section, card, dryRun, { agent, why, context, edit, remove: removeGone });
   } else {

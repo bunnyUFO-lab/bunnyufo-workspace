@@ -124,6 +124,24 @@ test('capabilities say what the site can do', async () => {
   } finally { await close(); }
 });
 
+test('a /w/ address that names a card and no file goes to the card page in the app', async () => {
+  const { raw, close } = await fixture({ siteUrl: 'https://site.example/' });
+  try {
+    for (const route of ['/w/one/alpha', '/w/one/alpha/']) {
+      const sent = await raw(route, { redirect: 'manual' });
+      assert.equal(sent.status, 302, route);
+      assert.equal(sent.headers.get('location'), 'https://site.example/one#/alpha', route);
+    }
+    assert.equal((await raw('/w/one/alpha/index.html', { redirect: 'manual' })).status, 200, 'A real file is still served.');
+    assert.equal((await raw('/w/one/nope', { redirect: 'manual' })).status, 404, 'A name that is no card stays a 404.');
+    assert.equal((await raw('/w/one/alpha/nope.html', { redirect: 'manual' })).status, 404, 'A missing file in a card stays a 404.');
+  } finally { await close(); }
+  const unset = await fixture();
+  try {
+    assert.equal((await unset.raw('/w/one/alpha', { redirect: 'manual' })).status, 404, 'With no site address there is nowhere to send it.');
+  } finally { await unset.close(); }
+});
+
 test('capabilities report contentOrigin only when one is set', async () => {
   const unset = await fixture();
   try { assert.equal((await (await unset.request('/capabilities')).json()).contentOrigin, null); } finally { await unset.close(); }

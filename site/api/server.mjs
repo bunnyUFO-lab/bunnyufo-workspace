@@ -252,6 +252,15 @@ export function createSiteApi({
     return files;
   }
 
+  /** Where /w/<section>/<card>, with no file, belongs: the card's page in the app. '' when no card has that id or folder. */
+  async function cardPageOf(id, file) {
+    const name = file.replace(/\/+$/, '');
+    if (!siteUrl || !name || name.includes('/')) return '';
+    const stored = await sectionStored(await findSection(id)).catch(() => null);
+    const card = stored?.entities.find(item => item?.id === name || item?.folder === name);
+    return card ? `${siteUrl.replace(/\/+$/, '')}/${encodeURIComponent(id)}#/${encodeURIComponent(card.id)}` : '';
+  }
+
   /** Stream one object of a section to the browser, headers and all. */
   async function serve(request, response, id, file, { sandboxed = false } = {}) {
     const clean = cleanPath(file);
@@ -330,7 +339,15 @@ export function createSiteApi({
       const served = reading && /^\/w\/([^/]+)\/(.+)$/.exec(route);
       if (served) {
         if (!bucket) throw Object.assign(new Error(reason), { status: 503 });
-        return await serve(request, response, decodeURIComponent(served[1]), decodeURIComponent(served[2]), { sandboxed: onContentHost });
+        const [section, file] = [decodeURIComponent(served[1]), decodeURIComponent(served[2])];
+        try {
+          return await serve(request, response, section, file, { sandboxed: onContentHost });
+        } catch (error) {
+          const page = error.status === 404 ? await cardPageOf(section, file) : '';
+          if (!page) throw error;
+          response.writeHead(302, { Location: page, 'Cache-Control': 'no-store' });
+          return response.end();
+        }
       }
 
       if (request.method === 'GET' && route === '/capabilities') {
