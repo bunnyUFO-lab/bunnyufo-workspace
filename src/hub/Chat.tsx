@@ -376,6 +376,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     return () => window.clearInterval(timer)
   }, [jobsLive, reloadJobs])
   const urls = useRef(new Set<string>())
+  const left = useRef(false)   // the screen was left: a late event of its stream must not move the address
   const slots = useRef(MAX_IMAGES)
   const speaks = typeof window !== 'undefined' && 'speechSynthesis' in window
 
@@ -429,7 +430,8 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   }, [messages, pending, landLine])
   useEffect(() => {
     const made = urls.current
-    return () => { abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
+    left.current = false
+    return () => { left.current = true; abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
   }, [speaks])
 
   // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
@@ -681,7 +683,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     let idle = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
     // Kept on this device from the moment it is sent, before the Hub has named the chat, until a read shows the turn saved.
-    const mine = beginChat({ id: conversation.current ?? null, title: titleRef.current || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic })
+    const mine = beginChat({ id: conversation.current ?? null, title: (conversation.current && titleRef.current) || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic })
     const used: string[] = []
     let started: ChatDelegate[] = []
     try {
@@ -702,7 +704,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
             setChatId(mine, name)
             // A new chat gets its address now, not when the reply ends: leaving at any moment finds the way back. `notify` off: the view
             // stays mounted and goes on reading this stream.
-            if (!id && !help && window.location.hash !== hubHash('chat', name)) swap(hubHash('chat', name), undefined, false)
+            if (!id && !help && !left.current && window.location.hash !== hubHash('chat', name)) swap(hubHash('chat', name), undefined, false)
           }
           if (stopWanted.current) { stopWanted.current = false; if (runId) stop(); else abort.current?.abort() }
         },
@@ -720,7 +722,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       } else if (!controller.signal.aborted) {
         unhold()
         live.current = false
-        dismissKey(mine)   // nothing was saved: there is no turn to keep
+        if (failure instanceof HubError) dismissKey(mine)   // the Hub answered no: nothing was saved. A dropped connection may still have reached it, so that entry stays
         refused(failure)
         return
       }
