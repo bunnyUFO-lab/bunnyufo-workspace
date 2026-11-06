@@ -1827,7 +1827,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       if (!String(route).startsWith('/hub/')) return false;
       try {
         if (!on) throw fail('The Hub is off on this host.', 404);
-        if (isChatRoute(route)) { await chat.handle({ request, response, method, route, user, requireRemoteUser }); return true; }
+        if (isChatRoute(route)) { await chat.handle({ request, response, method, route, query, user, requireRemoteUser }); return true; }
         const at = now();
         const limit = bodyLimit(method, route);
         let match;
