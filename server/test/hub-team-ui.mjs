@@ -3,7 +3,16 @@ import { chromium } from '@playwright/test';
 import { ms, steadyFetch } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { openChatSheet, closeChatSheet } from './shell-helpers.mjs';
 import { BUILTIN, genSprite } from '../../src/hub/team/sprites.ts';
+
+// Talk to lives in the sheet the thread title opens (ws-cl0.6.6); read it there and close the sheet the way Back does.
+async function personaOf(page) {
+  const sheet = await openChatSheet(page);
+  const value = await sheet.locator('[data-chat-persona]').inputValue();
+  await closeChatSheet(page);
+  return value;
+}
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -105,13 +114,13 @@ try {
   await desk.waitForFunction(() => location.hash === '#/~hub/chat');
   await desk.locator('textarea').first().waitFor();
   assert.equal(await desk.locator('textarea').first().inputValue(), '', 'The composer is empty.');
-  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'hermes', 'Hermes is no persona.');
+  assert.equal(await personaOf(desk), 'hermes', 'Hermes is no persona.');
   assert.equal(await desk.locator('[data-spawn-sheet]').count(), 0);
   await agentPage(desk, 'planner');
   await desk.locator('[data-main-action="planner"]').click();
   await desk.waitForFunction(() => location.hash === '#/~hub/chat');
   await desk.locator('textarea').first().waitFor();
-  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'planner', 'Chat opens on the Planner.');
+  assert.equal(await personaOf(desk), 'planner', 'Chat opens on the Planner.');
   await agentPage(desk, 'briefs');
   await desk.locator('[data-main-action="briefs"]').click();
   await desk.locator('[data-spawn-sheet]').waitFor();
@@ -328,8 +337,7 @@ try {
   await customSheet.waitFor({ state: 'detached' });
   await desk.locator('[data-main-action="level-reviewer"]').click();
   await desk.waitForFunction(() => location.hash === '#/~hub/chat');
-  await desk.locator('[data-chat-persona]').waitFor();
-  assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'level-reviewer', 'It is in the Talk to menu and Chat opens on it.');
+  assert.equal(await personaOf(desk), 'level-reviewer', 'It is in the Talk to menu and Chat opens on it.');
   await desk.goto(`${fixture.url}#/~hub/agent/level-reviewer`);
   await desk.locator('[data-prompt="persona"] summary').click();
   assert.match(await desk.locator('[data-prompt="persona"] pre').innerText(), /^You are Level reviewer, one of the owner's agents/, 'Details shows its persona prompt.');
