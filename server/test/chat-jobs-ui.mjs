@@ -49,7 +49,7 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(20000));
   page.on('pageerror', error => { throw error; });
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
 
   step('a reply that names two jobs and starts a helper shows two separate blocks');
   await page.locator('textarea[aria-label="Message"]').fill('Plan the scenery research');

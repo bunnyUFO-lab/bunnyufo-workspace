@@ -5,13 +5,7 @@ import { host } from './host'
 import { activeSite, allSites, contentBase } from './sites'
 
 const POLL_MS = 30_000
-export const ARCHIVE_DAYS = 7
-
-export function archiveCutoff(): string {
-  const d = new Date()
-  d.setDate(d.getDate() - ARCHIVE_DAYS)
-  return d.toISOString().slice(0, 10)
-}
+export { ARCHIVE_DAYS, archiveCutoff } from './archiveRule.ts'
 
 /** What one load produced: every workspace, and every card tagged with the one it came from. */
 export interface WorkspaceData {

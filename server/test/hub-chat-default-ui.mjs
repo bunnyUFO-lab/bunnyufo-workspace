@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -26,7 +27,7 @@ try {
 
   step('New chat on Hermes: the menu reads Auto and says what it tries first; Codex is listed without an API tag');
   await page.goto(`${fx.url}#/~hub/chat`);
-  await page.locator('[data-chat-model]').waitFor();
+  await openChatSheet(page);
   assert.equal(await selected(page), 'Auto · Codex first');
   assert.deepEqual(await page.locator('[data-chat-model] option').evaluateAll(list => list.map(option => option.textContent)), ['Auto · Codex first', 'Codex 6.1 Sol', 'Codex 6.1 Terra', 'Codex 6 Astra', 'Codex 6 Luna', 'Sonnet 5.5 · API', 'Haiku 5.5 · API', 'Opus 5.5 · API', 'DeepSeek Flash · API', '──────────', 'Start a job instead…']);
   assert.match(await page.locator('[data-chat-model-note]').innerText(), /Codex on your ChatGPT plan, then Sonnet, then DeepSeek/);
@@ -52,6 +53,7 @@ try {
 
   step('the default is what the run asks for: the openai-codex provider and gpt-6.1-sol');
   await page.goto(`${fx.url}#/~hub/chat`);
+  await openChatSheet(page);
   await page.locator('[data-chat-persona]').selectOption('researcher');
   await page.locator('textarea[aria-label="Message"]').fill('What is new in deckbuilders?');
   await page.keyboard.press('Enter');
@@ -60,9 +62,10 @@ try {
   assert.equal(body.provider, 'openai-codex');
   assert.equal(body.model, 'gpt-6.1-sol');
 
-  step('390 px: the menu fits');
+  step('390 px: the sheet fits');
   const phone = await open({ width: 390, height: 800 });
-  await phone.goto(`${fx.url}#/~hub/chat`);
+  await phone.goto(`${fx.url}#/~hub/chat/new`);
+  await openChatSheet(phone);
   await phone.locator('[data-chat-persona]').selectOption('researcher');
   assert.equal(await selected(phone), 'Codex 6.1 Sol');
   const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));

@@ -77,7 +77,7 @@ try {
   await page.goto(url);
   let steps = 0;
   for (const entity of entities.filter(item => item.status !== 'archived')) {
-    await page.locator(`.entity-card[data-entity="${entity.id}"]`).click();
+    await page.locator(`.lib-row[data-entity="${entity.id}"]`).click();
     await page.getByRole('tab', { name: entity.steps[entity.defaultStep ?? entity.steps.length - 1].name, exact: true }).waitFor();
     for (const [index, step] of entity.steps.entries()) {
       await page.locator('.step-tab').nth(index).click();
@@ -94,12 +94,13 @@ try {
     }
     // With a card open the first crumb is the way back, labelled "← Library" (a link; the arrow is aria-hidden).
     await page.getByRole('link', { name: 'Library', exact: true }).click();
-    await page.locator('.entity-card').first().waitFor();
+    await page.locator('.lib-row').first().waitFor();
   }
   assert.deepEqual(errors, []);
-  await page.locator(`.entity-card[data-entity="${card.id}"] .card-archive`).click();
+  await page.locator(`.lib-row[data-entity="${card.id}"] [data-row-menu]`).click();
+  await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
   for (let waited = 0; !writes.length && waited < 10000; waited += 100) await new Promise(resolve => setTimeout(resolve, 100));
-  assert.equal(writes.length, 1, 'the archive button made one write');
+  assert.equal(writes.length, 1, 'the Archive menu item made one write');
   assert.equal(writes[0].authorization, undefined, 'a site write carries no Authorization header');
   assert.deepEqual(errors, []);
 
@@ -144,18 +145,17 @@ try {
   assert.ok(scrolling.scrollTop > 0, 'a long Markdown page must scroll');
   await longPage.close();
 
-  // The home hero shows the logo and the wordmark at every width.
+  // The Library is the home at every width: its title, the search field and the rows. (The hero with the logo, the wordmark canvas and the stats line is gone with the design.)
   for (const viewport of [{ width: 375, height: 812 }, { width: 1280, height: 800 }]) {
     const context = await browser.newContext({ viewport });
     const home = await context.newPage();
     await noApi(home);
     home.setDefaultTimeout(15000);
     await home.goto(url);
-    await home.locator('.home-hero canvas').waitFor();
+    await home.locator('[data-library] .lib-row').first().waitFor();
     const where = `at ${viewport.width}px`;
-    assert.equal(await home.locator('.home-hero').getByRole('heading', { level: 1, name: 'bunnyUFO Workspace', exact: true }).count(), 1, `the hero heading ${where}`);
-    assert.equal(await home.locator('.home-hero canvas').count(), 1, `the wordmark canvas ${where}`);
-    assert.equal(await home.locator('.home-hero .home-sub').count(), 1, `the stats line ${where}`);
+    assert.equal(await home.locator('[data-library]').getByRole('heading', { level: 1, name: 'Library', exact: true }).count(), 1, `the Library heading ${where}`);
+    assert.equal(await home.locator('[data-library] .lib-search input').count(), 1, `the search field ${where}`);
     await context.close();
   }
 
@@ -169,15 +169,15 @@ try {
   await dialog.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
 
-  // One shell on every host: the site's rail offers the tools it can serve, and no others, and the
-  // top bar carries no tools of its own.
-  for (const name of ['Toggle skills', 'Toggle settings', 'Keyboard shortcuts']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1, `${name} is on the rail`);
-  for (const name of ['Toggle files', 'Toggle mcp']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${name} needs a host with files`);
+  // One shell on every host: a site has no tool column (that is for local files), the top bar carries no tools of its own,
+  // and Settings is a screen on the shell's rail.
+  for (const name of ['Toggle skills', 'Toggle settings', 'Keyboard shortcuts', 'Toggle files', 'Toggle mcp']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${name} needs a host with local files`);
+  assert.equal(await page.locator('[data-rail] [data-nav="settings"]').count(), 1);
   assert.equal(await page.locator('.browser-settings').count(), 0);
   // Browser-only Settings use local storage and style embedded reports too.
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
+  await page.locator('[data-rail] [data-nav="settings"]').click();
   await page.getByLabel('Workspace theme', { exact: true }).selectOption('light');
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
+  await page.goBack();
   assert.equal(await page.locator('html').getAttribute('data-workspace-theme'), 'light');
   assert.equal(await page.locator('.buw-markdown h1').evaluate(node => getComputedStyle(node).color), 'rgb(17, 21, 33)');
   await page.getByRole('img', { name: 'Reference', exact: true }).click();
@@ -201,12 +201,12 @@ try {
   failed.setDefaultTimeout(15000);
   await failed.route('**/src/components/ReportViewer.tsx*', route => route.abort('failed'));
   await failed.goto(url);
-  await failed.locator('.entity-card').first().click();
+  await failed.locator('.lib-row').first().click();
   await failed.getByRole('alert').waitFor();
   assert.equal(await failed.getByRole('link', { name: 'Library', exact: true }).count(), 1);
   await failed.getByRole('button', { name: 'Back to Workspace', exact: true }).click();
-  await failed.locator('.entity-card').first().waitFor();
-  await failed.locator('.entity-card').first().click();
+  await failed.locator('.lib-row').first().waitFor();
+  await failed.locator('.lib-row').first().click();
   await failed.getByRole('alert').waitFor();
   await failed.unroute('**/src/components/ReportViewer.tsx*');
   await failed.getByRole('button', { name: 'Reload page', exact: true }).click();
@@ -240,7 +240,7 @@ try {
   await multi.getByRole('button', { name: /^Workspace: Second Workspace\./ }).first().waitFor();
   // A section served from the bucket has no repository behind it, so there is no source link to
   // offer — and none is, rather than one that would 404.
-  await multi.locator('.entity-card').first().click();
+  await multi.locator('.lib-row').first().click();
   await multi.locator('.report-document[aria-busy=false], .buw-markdown h1').first().waitFor();
   assert.equal(await multi.getByRole('link', { name: 'Open this page in the repository' }).count(), 0, 'no repo, no source link');
 
@@ -249,7 +249,7 @@ try {
 
   // Opening a pin from another project rewrites the address to that project. It used to keep
   // the one in the bar — /first#/third-only — so the link you copied opened the wrong page.
-  await multi.locator('.sidebar-item', { hasText: 'Third only' }).click();
+  await multi.locator('.lib-row-main', { hasText: 'Third only' }).click();
   await multi.frameLocator('iframe.report-frame').getByRole('heading', { name: 'Third only' }).waitFor();
   await multi.waitForFunction(() => location.pathname === '/third');
   assert.equal(new URL(multi.url()).hash, '#/third-only');

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useOverlayEntry } from '../lib/entries'
 
 /** A small modal: closes on Esc and on a click outside, and is a bottom sheet on a phone (cards.css). */
 export default function Dialog({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
@@ -7,6 +8,8 @@ export default function Dialog({ title, onClose, children, wide = false }: { tit
   // The scrim closes on the click, not the press: closing on the press leaves the tap's click to land on whatever lies under it.
   // It closes only when the press began on the scrim too, so a drag that starts in the dialog and ends outside keeps it open.
   const pressed = useRef(false)
+  // An open dialog is a history entry: Back closes it and stays on the screen beneath (lib/entries).
+  useOverlayEntry(true, onClose)
   useEffect(() => {
     // Capture, so Esc closes the dialog before App reads it as "back to the cards".
     const key = (event: KeyboardEvent) => {

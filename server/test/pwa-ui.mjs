@@ -54,7 +54,7 @@ try {
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
   await page.reload();
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
-  await page.locator('.entity-card[data-entity="alpha"]').click();
+  await page.locator('.lib-row[data-entity="alpha"]').click();
 
   // 2. Open the card's page, so it is read once.
   await page.locator('.buw-markdown h1', { hasText: 'Offline card' }).waitFor();

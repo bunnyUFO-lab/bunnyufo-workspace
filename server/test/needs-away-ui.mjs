@@ -1,4 +1,4 @@
-// Run after npm run build. The Away switch in the Needs you header, through a real browser over the fixture service:
+// Run after npm run build. The Away switch in Settings, through a real browser over the fixture service:
 // At the PC by default, one tap to Away (with its "until" and the sub-line) and one tap back, the switch surviving a
 // reload, the file the Hub wrote (no writer mark, 12 h at most), a failed write shown as an error, the blocked session
 // without a link saying so honestly, a linked one offering "Open the session", an Ask from a session carrying the same
@@ -18,6 +18,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
@@ -53,8 +54,8 @@ try {
   const label = () => toggle.locator('[data-away-label]').innerText();
   const stored = () => fake.objects.get('sections/inbox/presence.json');
 
-  step('the header starts at the PC: a switch, no sub-line, and nothing stored');
-  await page.goto(`${fixture.url}#/~hub/needs`);
+  step('Settings starts at the PC: a switch, no sub-line, and nothing stored');
+  await page.goto(`${fixture.url}#/~hub/settings`);
   await toggle.waitFor();
   assert.equal(await label(), 'At the PC');
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');
@@ -73,6 +74,10 @@ try {
   const ahead = new Date(file.until).getTime() - new Date(file.at).getTime();
   assert.ok(ahead > 11.9 * 3600000 && ahead <= 12 * 3600000, `until is 12 h ahead (${ahead / 3600000} h)`);
   assert.deepEqual(stored().metadata, {}, 'no writer mark: the Hub wrote it');
+  await page.evaluate(() => { location.hash = '#/~hub/today'; });
+  await page.locator('[data-today-away]').waitFor();
+  await page.evaluate(() => { location.hash = '#/~hub/settings'; });
+  await toggle.waitFor();
 
   step('it survives a reload, and one tap back to the PC expires it');
   await page.reload();
@@ -123,13 +128,13 @@ try {
 
   step('at 390 px the switch fits, with the sub-line, and nothing scrolls sideways');
   const phone = await open({ width: 390, height: 844 });
-  await phone.goto(`${fixture.url}#/~hub/needs`);
+  await phone.goto(`${fixture.url}#/~hub/settings`);
   await phone.locator('[data-away-toggle]').click();
   await phone.waitForFunction(() => document.querySelector('[data-away-label]')?.textContent?.startsWith('Away until'));
   await phone.locator('[data-away-sub]').waitFor();
   const box = await phone.locator('[data-away-toggle]').boundingBox();
   assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= 390, JSON.stringify(box));
-  await noSideways(phone, 'Needs you with the Away switch at phone width');
+  await noSideways(phone, 'Settings with the Away switch at phone width');
 
   console.log('needs-away-ui: passed');
 } finally {

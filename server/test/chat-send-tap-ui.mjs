@@ -18,7 +18,7 @@ try {
   page.on('pageerror', error => { throw error; });
   const field = page.locator('textarea[aria-label="Message"]');
   const send = page.getByRole('button', { name: 'Send', exact: true });
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
   await field.waitFor();
   // Where Send is when the finger goes down and when the click arrives: on a phone, a tap that blurs the field closes the keyboard and the page
   // moves in between, so the click lands on nothing. The tap must not blur the field.

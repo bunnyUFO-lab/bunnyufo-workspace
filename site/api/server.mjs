@@ -332,7 +332,9 @@ export function createSiteApi({
 
       // The site list the UI loads first: one entry per section in the bucket.
       if (reading && route === '/sites.json') {
-        return json(response, 200, [...(await sections()).values()]);
+        // The real site leaves the development copy's test sections out of its Library. They stay served and stay in findSection.
+        const list = [...(await sections()).values()];
+        return json(response, 200, dev ? list : list.map(section => (section.id.startsWith('dev-') ? { ...section, hidden: true } : section)));
       }
 
       // A section's files, straight from the bucket.

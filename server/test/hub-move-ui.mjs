@@ -20,6 +20,7 @@ const shots = process.env.BUW_SHOTS;
 if (shots) await mkdir(shots, { recursive: true });
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(20000));
@@ -60,16 +61,16 @@ try {
 
   step('the tap opens the new request: started in the cloud, nothing sent; the old one is stopped and its tile is gone');
   await tile.locator('[data-move-to-cloud]').click();
-  const drawer = page.locator('[data-run-drawer]');
+  const drawer = page.locator('[data-run-view]');
   await drawer.waitFor();
-  const shownId = await drawer.locator('[data-run-id]').innerText();
-  assert.notEqual(shownId.trim(), ids.old, 'The drawer shows the new request.');
+  const shownId = await page.locator('[data-request-id]').innerText();
+  assert.notEqual(shownId.trim(), ids.old, 'The page shows the new request.');
+  assert.match(page.url(), new RegExp(`#/~hub/request/${shownId.trim()}$`), 'The tap went to the new job as a page.');
   await drawer.locator('[data-run-cloud="fired"]').waitFor();
   assert.match(await drawer.locator('[data-run-cloud]').innerText(), /Started in the cloud at .*\(dev: nothing was sent\)/);
-  await shot(page, 'move-drawer');
+  await shot(page, 'move-job-page');
   assert.ok(fake.objects.has(`sections/inbox/requests/${ids.old}/stop.json`), 'The old request got a signed stop.');
   assert.match(fake.json(`sections/inbox/requests/${ids.old}/stop.json`).reason, new RegExp(`^moved to the cloud: ${shownId.trim()}$`));
-  await page.keyboard.press('Escape');
   await page.goto(`${fixture.url}#/~hub/request/${encodeURIComponent(ids.old)}`);
   await page.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   step('ws-edv: the old request says where it went, the copy says where it came from, and neither page repeats the title, text or id');

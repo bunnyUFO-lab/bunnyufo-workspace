@@ -1,14 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { cardFile } from '../local/client'
 import { host } from '../lib/host'
 import { publishedCardUrl, repoFileUrl } from '../lib/links'
 import { AddSection, EditCard } from './CardEdits'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
-import { homeLink } from '../lib/route'
+import { libraryHash } from '../lib/route'
+import { behindHash } from '../lib/entries'
+import Icon from '../ui/Icon'
 import ItemMenu from './ItemMenu'
 import { useCardMenu } from './CardMenu'
 import StepTab from './TabEdits'
+import TabOrganize from './TabOrganize'
 
 /** The ⋯ beside the pencil: Rename, Category, Move to workspace, Delete. */
 function CardMore({ card }: { card: WorkspaceCard }) {
@@ -20,7 +23,12 @@ interface TopbarProps {
   entity: WorkspaceCard | null
   stepIndex: number
   onStep: (id: string, index: number) => void
+  /** The first crumb: one step back (lib/entries `back`), or the Library when nothing of ours is behind. */
+  onBack: () => void
+  /** The Library, for the crumbs that name a place rather than a step back. */
   onHome: () => void
+  /** The card list is folded away (beside a card below 1400 px): the button that brings it back. */
+  onShowList?: () => void
   /** Home, filtered to one project: the breadcrumb's middle step. */
   onProject: (id: string) => void
   /** Only show that step when there is more than one project to tell apart. */
@@ -39,19 +47,12 @@ const FADE = 28
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, showProject, liveAppUrl }: TopbarProps) {
+export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onShowList, onProject, showProject, liveAppUrl }: TopbarProps) {
   const [copied, setCopied] = useState(false)
-  // Its own height, which a phone needs to slide it out of view (global.css): at most two rows
-  // (the breadcrumb, then the tabs), but the breadcrumb and the inline forms can change that.
-  const bar = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = bar.current
-    if (!el) return
-    const observer = new ResizeObserver(() => el.style.setProperty('--topbar-height', `${el.offsetHeight}px`))
-    observer.observe(el)
-    for (const child of el.children) observer.observe(child)
-    return () => observer.disconnect()
-  }, [])
+  // Where Back goes, in words: the Library when that is the screen behind this one (or nothing of ours is, and Back falls to it).
+  const behind = behindHash()
+  const backLabel = !behind || /^#\/~hub\/library$/.test(behind) ? 'Library' : 'Back'
+  const [organizing, setOrganizing] = useState(false)
   const tabs = useRef<HTMLDivElement>(null)
   const [adding, setAdding] = useState(0)
   const overflow = useOverflowEdges(tabs, [entity?.id, entity?.steps.length, stepIndex, adding])
@@ -115,16 +116,34 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
   }
 
   return (
-    <div className="topbar" ref={bar}>
+    <div className="topbar">
       <nav className="breadcrumb" aria-label="Breadcrumb">
-        {/* With a card open the first crumb is a plain way back, not just a word in a path. */}
+        {onShowList && (
+          <button type="button" className="crumb-link ui-showlist" onClick={onShowList} data-show-list title="Show the card list ( [ )">
+            Show list
+          </button>
+        )}
+        {/* The first crumb is the way back: one step of history, or the Library when this card was opened from a link. */}
         <a
           className={`crumb-link${entity ? ' crumb-back' : ''}`}
-          {...homeLink(onHome)}
-          title={entity ? 'Back to the Library ( Esc )' : 'Home'}
+          href={libraryHash()}
+          onClick={event => {
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            onBack()
+          }}
+          title={entity ? 'Back ( Esc )' : 'Home'}
+          aria-label={entity ? (backLabel === 'Library' ? 'Back to the Library' : 'Back') : undefined}
           data-home-link="crumb"
+          data-back=""
         >
-          {entity ? <><span aria-hidden="true">←</span> Library</> : 'Workspace'}
+          {entity ? (
+            <>
+              {/* A desktop's small pill keeps its arrow and word; a phone gets a chevron and where it goes (global.css). */}
+              <span className="crumb-back-wide" aria-hidden="true">← Back</span>
+              <span className="crumb-back-phone" aria-hidden="true"><Icon name="back" size={22} />{backLabel}</span>
+            </>
+          ) : 'Workspace'}
         </a>
         {entity && showProject && (
           <>
@@ -154,7 +173,7 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
             <div className="step-tabs-wrap" data-overflow={overflow}>
               <div className="step-tabs" role="tablist" ref={tabs}>
                 {entity.steps.map((_, i) => (
-                  <StepTab key={i} card={entity} index={i} active={i === stepIndex} activeIndex={stepIndex} onStep={onStep} editable={editable} />
+                  <StepTab key={i} card={entity} index={i} active={i === stepIndex} onStep={onStep} onOrganize={editable ? () => setOrganizing(true) : undefined} />
                 ))}
                 {editable && <AddSection key={entity.id} card={entity} onStep={onStep} onNaming={() => setAdding(n => n + 1)} />}
               </div>
@@ -165,6 +184,9 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
                 <button type="button" className="step-tabs-arrow" data-edge="end" tabIndex={-1} aria-hidden="true" onClick={() => scrollTabs(1)}>›</button>
               )}
             </div>
+          )}
+          {editable && entity.steps.length > 0 && (
+            <button type="button" className="step-tab step-tab-organize" onClick={() => setOrganizing(true)} aria-haspopup="dialog">Organize</button>
           )}
           {liveAppUrl && (
             <a className="open-ext" href={liveAppUrl} target="_blank" rel="noreferrer"
@@ -191,6 +213,9 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
             </a>
           )}
         </div>
+      )}
+      {organizing && editable && entity && (
+        <TabOrganize key={entity.id} card={entity} activePath={entity.steps[stepIndex]?.path ?? ''} onClose={() => setOrganizing(false)} />
       )}
     </div>
   )

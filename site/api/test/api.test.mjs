@@ -465,6 +465,22 @@ test('with no site address or card API set, the reason names no address and card
 
 const devOnly = { writable: id => id.startsWith('dev-') };
 
+test('the real site marks dev- sections hidden in sites.json, the development copy does not, and the files stay served', async () => {
+  for (const mode of ['real', 'dev']) {
+    const { raw, fake, close } = await fixture(mode === 'dev' ? { dev: devOnly, stateKey: 'dev-state.json' } : {});
+    try {
+      fake.seed('sections/dev-x/workspace.json', `${JSON.stringify({ name: 'Dev X', entities: [card('probe')] })}
+`, 'application/json');
+      fake.seed('sections/dev-x/probe/index.html', '<h1>probe</h1>', 'text/html; charset=utf-8');
+      const list = await (await raw('/sites.json')).json();
+      const byId = Object.fromEntries(list.map(site => [site.id, site]));
+      assert.equal(byId['dev-x'].hidden, mode === 'real' ? true : undefined, mode);
+      assert.ok(!('hidden' in byId.one) && !('hidden' in byId.two), 'Other sections are untouched.');
+      assert.equal(await (await raw('/w/dev-x/probe/index.html')).text(), '<h1>probe</h1>');
+    } finally { await close(); }
+  }
+});
+
 test('the development copy writes only dev- sections, reports its branch, and keeps its own state object', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-dev-ref-'));
   const deployedRef = path.join(root, '.deployed-ref');
@@ -716,7 +732,7 @@ test('archiving hides a workspace, waits until a card is active as the app count
 test('the date rule the server counts with is the one the app uses', async () => {
   const { readFile } = await import('node:fs/promises');
   const { ARCHIVE_DAYS } = await import('../card-liveness.mjs');
-  const app = await readFile(new URL('../../../src/lib/workspace.ts', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../../../src/lib/archiveRule.ts', import.meta.url), 'utf8');
   assert.equal(Number(/export const ARCHIVE_DAYS = (\d+)/.exec(app)?.[1]), ARCHIVE_DAYS);
 });
 

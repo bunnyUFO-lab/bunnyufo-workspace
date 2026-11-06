@@ -90,12 +90,7 @@
   .ap-facts dt { width: 100%; }
 }
 
-/* The run drawer and the run view. */
-.run-drawer { position: fixed; inset: 0 0 0 auto; margin: 0; height: 100%; max-height: none; max-width: none; width: min(460px, 100vw); padding: 0; border: 0; border-left: 1px solid var(--line2); background: var(--s1); color: var(--t1); box-shadow: -24px 0 60px rgba(0, 0, 0, 0.45); }
-.run-drawer[open] { display: flex; flex-direction: column; }
-.run-drawer::backdrop { background: rgba(0, 0, 0, 0.45); }
-.run-drawer .sp-head h2 { margin-right: auto; }
-.rd-page { min-height: 36px; font-size: 12px; }
+/* The job's page (the run view). */
 .rd { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .rd-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .rd-title { margin: 4px 0 0; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
@@ -130,8 +125,7 @@
 .rd-report { margin-top: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); overflow-wrap: anywhere; }
 @media (max-width: 767px) {
   /* A bottom sheet. */
-  .run-drawer { inset: auto 0 0 0; width: 100%; max-width: none; height: auto; max-height: 92vh; border: 1px solid var(--line2); border-width: 1px 0 0; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom); }
-}
+  }
 
 /* The reply box (ws-q9y.6): the Chat composer's classes, a line of reason under it when it is off. */
 .rd-reply { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
@@ -148,11 +142,17 @@
 .rd-you[data-run-you="queued"] .rd-you-s { color: var(--amber); }
 .rd-timeline [data-run-send-now] { min-height: 36px; margin-left: 4px; }
 /* A finished job's page: what it delivered as cards, and the log in a closed fold. */
-.rd-back { margin-left: auto; display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; text-decoration: none; color: var(--text-dim); }
-.rd-dls { display: flex; flex-direction: column; gap: 8px; }
-.rd-dl { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.rd-back { margin-left: auto; display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 6px; font-size: 13px; text-decoration: none; color: var(--t2); }
+.rd-back:hover { color: var(--t1); }
+.rd-dls { display: flex; flex-direction: column; border-radius: 14px; background: var(--s1); overflow: hidden; }
+.rd-dl { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; padding: 12px 14px; min-width: 0; min-height: var(--tap); }
+.rd-dl + .rd-dl { box-shadow: inset 0 1px 0 var(--line); }
+.rd-dl .rd-links { margin-top: 2px; }
+.rd-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rd-confirm > span { font-weight: 600; }
 .rd-dl > b { overflow-wrap: anywhere; }
 .rd-dl .hub-muted { overflow-wrap: anywhere; }
 .rd-from { margin: 6px 0 0; font-size: 12.5px; }
 .rd-did { margin-top: 12px; }
-.rd-did > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--text-dim); font-size: 13px; }
+.rd-did > summary { cursor: pointer; min-height: var(--tap); display: flex; align-items: center; color: var(--t2); font-size: 14px; font-weight: 550; }
+.rd-did[open] > .rd-live { margin-top: 4px; }

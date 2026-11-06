@@ -1,23 +1,16 @@
-import { useState } from 'react'
 import type { HubEvent, Item } from '../lib/hub'
 import { ago, appUrl, safeUrl, sessionUrl } from '../lib/hub'
 import { KIND_LABEL as NEEDS_LABEL, needsKind } from '../lib/needsKinds'
 import { hubHash, reviewHash } from '../lib/route'
-import { openRun } from './runStore'
 import { requestStateWord } from './working'
 import { useMarkDone } from './useMarkDone'
+import { useHeld } from './heldSend'
+import { itemKey } from './needsFocus'
 import { nothingToDo } from './reviewText'
 
 const EVENT_DOT: Record<string, string> = {
   'session-started': 'g', 'session-ended': 'g', blocked: 'y', 'ready-for-review': 'p', 'pr-opened': 'b', 'pr-merged': 'g', 'pr-closed': 'y',
   'ci-failed': 'r', 'ci-passed': 'g', deployed: 'b', 'ask-created': 'p', alert: 'r', 'review-done': 'g', resumed: 'g', 'checklist-created': 'p', 'checklist-submitted': 'g', 'run-started': 'g', 'run-finished': 'b', 'profile-change': 'g', 'profile-change-sent': 'b',
-}
-
-/** A plain click opens the run drawer; a modified click or a middle click is left to the browser (the request's own page). */
-export function openFromClick(event: { button: number; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void }, id: string) {
-  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
-  event.preventDefault()
-  openRun(id)
 }
 
 const KIND_LABEL: Record<string, string> = { ask: 'Ask', checklist: 'To do', request: 'Request', review: 'Review', blocked: 'Blocked', session: 'Running' }
@@ -48,8 +41,9 @@ export function ReviewActions({ item, onDone, links = true, primary = true }: { 
 }
 
 function ReviewRow({ item, meta }: { item: Item; meta: string }) {
-  const [hidden, setHidden] = useState(false)
-  if (hidden) return null
+  // A held "Mark done" hides the row everywhere; Undo shows it again.
+  const held = useHeld()
+  if (held.keys.has(itemKey(item))) return null
   return (
     <div className="hub-row review">
       <span className="hub-dot p" aria-hidden="true" />
@@ -59,18 +53,18 @@ function ReviewRow({ item, meta }: { item: Item; meta: string }) {
         {item.ask && <b className="hub-row-ask" data-ask>{item.ask}</b>}
         <span className="hub-row-meta">{meta} <span className="hub-row-cue" aria-hidden="true">›</span></span>
       </a>
-      <ReviewActions item={item} onDone={() => setHidden(true)} primary={nothingToDo(item.ask) || !item.url} />
+      <ReviewActions item={item} onDone={() => undefined} primary={nothingToDo(item.ask) || !item.url} />
     </div>
   )
 }
 
 /** A blocked session: a button into the session when there is a real link, the desktop app's link where there is a desktop, and plain words otherwise. */
 function BlockedRow({ item, meta }: { item: Item; meta: string }) {
-  const [hidden, setHidden] = useState(false)
+  const held = useHeld()
   const link = sessionUrl(item.url)
   const desk = appUrl(item.appUrl)
-  const { button, notes } = useMarkDone(item, () => setHidden(true))
-  if (hidden) return null
+  const { button, notes } = useMarkDone(item, () => undefined)
+  if (held.keys.has(itemKey(item))) return null
   return (
     <div className="hub-row" data-blocked>
       <span className="hub-dot y" aria-hidden="true" />
@@ -114,7 +108,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     )
     if (item.kind === 'ask') return <a className="hub-row click" href={hubHash('ask', item.id)}>{body}</a>
     if (item.kind === 'checklist') return <a className="hub-row click" href={hubHash('checklist', item.id)} data-checklist-open>{body}</a>
-    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} onClick={event => openFromClick(event, item.id)} data-request-open={item.id} data-run-open={item.id}>{body}</a>
+    if (item.kind === 'request') return <a className="hub-row click" href={hubHash('request', item.id)} data-request-open={item.id} data-run-open={item.id}>{body}</a>
     return <div className="hub-row">{body}</div>
   }
   if (!event) return null
@@ -130,10 +124,10 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
     </>
   )
   if (event.kind.startsWith('run-') && event.request) {
-    // A run event links to its pull request, else its card, else the run drawer. The drawer is one more link when it is not the main one.
+    // A run event links to its pull request, else its card, else the job's page. The page is one more link when it is not the main one.
     const pr = safeUrl(event.url)
     const card = event.cardHref && /^\/[\w%-]+#\/[\w%.~-]+$/.test(event.cardHref) ? event.cardHref : undefined
-    const drawer = hubHash('request', event.request)
+    const page = hubHash('request', event.request)
     const failed = event.kind === 'run-finished' && event.outcome === 'failed'
     return (
       <div className="hub-row" data-run-event={event.kind} data-outcome={event.outcome}>
@@ -145,7 +139,7 @@ export default function ItemRow({ item, event }: { item?: Item; event?: HubEvent
         <span className="hub-row-actions">
           {pr && <a className="hub-btn" href={pr} target="_blank" rel="noopener noreferrer" data-run-pr>Review on GitHub</a>}
           {card && <a className="hub-btn" href={card} data-run-event-card>Open card</a>}
-          <a className="hub-btn" href={drawer} onClick={click => openFromClick(click, event.request as string)} data-run-event-open data-run-open={event.request}>Open run</a>
+          <a className="hub-btn" href={page} data-run-event-open data-run-open={event.request}>Open run</a>
         </span>
         <span className="hub-row-time">{new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       </div>

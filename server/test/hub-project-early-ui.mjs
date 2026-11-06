@@ -1,5 +1,6 @@
-// Run after npm run build. Work, the Roadmap and the Project page start their work or map request together with /projects
-// (the address's project, else the remembered one) and show nothing of it until /projects confirms that project.
+// Run after npm run build. Work starts its request together with /projects (the address's project, else the remembered one), and the
+// project page and its Map start the map request with it (the address's project: no project is remembered for them any more). None
+// shows anything of it until /projects confirms that project.
 // /projects is held with a latch, never a timer, so the order is proved and not raced.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
@@ -61,12 +62,12 @@ try {
     assert.equal(count(state, '/work?project=magic-loops'), 1, 'One GET for the work request.');
   }
 
-  step('Roadmap, remembered magic-loops: same');
+  step('Map of magic-loops by address, another project remembered: the map request leaves with /projects, is held, one GET');
   {
-    const { page, state } = await open('magic-loops');
+    const { page, state } = await open('nosprint');
     const release = await holdProjects(page);
     const early = seen(page, state, '/map/magic-loops');
-    await page.goto(`${fixture.url}#/~hub/map`);
+    await page.goto(`${fixture.url}#/~hub/map/magic-loops`);
     await early;
     assert.equal(await page.locator('.hub-map-box').count(), 0);
     release();
@@ -75,18 +76,33 @@ try {
     assert.equal(count(state, '/map/magic-loops'), 1, 'One GET for the map.');
   }
 
-  step('Project page, remembered magic-loops: same');
+  step('Project page by address: same, and nothing remembered is fetched');
   {
-    const { page, state } = await open('magic-loops');
+    const { page, state } = await open('nosprint');
     const release = await holdProjects(page);
     const early = seen(page, state, '/map/magic-loops');
-    await page.goto(`${fixture.url}#/~hub/project`);
+    await page.goto(`${fixture.url}#/~hub/project/magic-loops`);
     await early;
     assert.equal(await page.locator('[data-project-page="magic-loops"]').count(), 0);
     release();
     await page.locator('[data-project-page="magic-loops"]').waitFor();
     await wait(300);
     assert.equal(count(state, '/map/magic-loops'), 1, 'One GET for the map.');
+    assert.equal(state.gets.filter(item => item.includes('nosprint')).length, 0, 'The remembered project was not fetched.');
+  }
+
+  step('Projects list with no id: no project and no map is asked for until /projects answers; then the first opens on the right');
+  {
+    const { page, state } = await open('nosprint');
+    const release = await holdProjects(page);
+    await page.goto(`${fixture.url}#/~hub/project`);
+    await wait(500);
+    assert.equal(state.gets.filter(item => item.startsWith('/map/')).length, 0, 'No map request before the list.');
+    assert.equal(await page.locator('[data-project-page]').count(), 0, 'No project shown before the list.');
+    release();
+    await page.locator('[data-project-page]').waitFor();
+    assert.ok(await page.locator('[data-project-page]').getAttribute('data-project-page'), 'A project is open on the right.');
+    assert.equal(await flash(page), false, 'Nothing red or empty flashed.');
   }
 
   step('The address wins over the remembered project, which is never fetched');
@@ -105,7 +121,7 @@ try {
   }
 
   step('A project that is gone: its answer never shows and the screen moves to the fallback');
-  for (const screen of ['work', 'map']) {
+  for (const screen of ['work']) {
     const { page, state } = await open('vanished');
     const release = await holdProjects(page);
     const url = screen === 'work' ? '/work?project=vanished' : '/map/vanished';
@@ -164,7 +180,21 @@ try {
     assert.equal(await flash(page), false);
   }
 
-  step('Nothing remembered, nothing in the address: no early request, the first project comes from /projects');
+  step('Map of a project that is gone: nothing of it shows, then "No project called"');
+  {
+    const { page, state } = await open('');
+    const release = await holdProjects(page);
+    const early = seen(page, state, '/map/vanished');
+    const landed = page.waitForResponse(response => response.url().endsWith('/map/vanished'));
+    await page.goto(`${fixture.url}#/~hub/map/vanished`);
+    await early; await landed; await wait(200);
+    assert.equal(await page.locator('.hub-map-box').count(), 0, 'The held answer shows no map.');
+    release();
+    await page.locator('[data-project-missing]').waitFor();
+    assert.equal(await flash(page), false, 'Nothing red or empty flashed.');
+  }
+
+  step('Work with nothing remembered, nothing in the address: no early request, the first project comes from /projects');
   {
     const { page, state } = await open('');
     const release = await holdProjects(page);

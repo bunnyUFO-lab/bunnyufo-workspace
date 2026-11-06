@@ -2,6 +2,7 @@
 // Pure code, no I/O and no Beads: hub.mjs loads the inputs. A task is only `{ project, id }`, so where Beads keeps its copies can change
 // without changing this. Everything a run files about itself is self-reported, so a link only counts when its project and time fit.
 import { ID_RE } from './hub-model.mjs';
+import { BEAD_ID } from './hub-marks.mjs';
 import { asksOf } from './run-outcome.mjs';
 
 export const JOB_LIMITS = { finished: 100, deliverables: 12 };
@@ -24,6 +25,12 @@ export function prLabel(href) {
   try { const url = new URL(href); return `${url.host}${url.pathname}`.slice(0, 80); } catch { return 'Pull request'; }
 }
 
+/** The task ids in an Ask's `applied.json`: valid Beads ids only, each once, at most a dozen. The caller has already checked who wrote the file. */
+export function createdIds(record) {
+  const rows = Array.isArray(record?.created) ? record.created : [];
+  return [...new Set(rows.map(row => row?.id).filter(value => typeof value === 'string' && BEAD_ID.test(value)))].slice(0, JOB_LIMITS.deliverables);
+}
+
 const time = value => { const ms = new Date(value ?? '').getTime(); return Number.isFinite(ms) ? ms : NaN; };
 
 /** Linked work counts only in the job's own project and not before the job: an agent writes `from.request` itself. */
@@ -34,7 +41,7 @@ const belongs = (job, row) => !!row && row.project === job.project && !(time(row
  * @param item       the job's request list row (`id`, `project`, `at`, `bead`, `finish`)
  * @param result     the result.json when at hand, else `item.finish` is read
  * @param reportText the report, when at hand (the result page only): older Hermes jobs name their Asks only there
- * @param asks       Ask list rows (`id`, `project`, `at`, `title`, `state`, `fromRequest`)
+ * @param asks       Ask list rows (`id`, `project`, `at`, `title`, `state`, `fromRequest`, `created`: the task ids its change list made)
  * @param checklists checklist list rows, as for `asks`
  * @param requests   request list rows: another job counts when its `origin` is `{ kind: 'run', name: <this id> }`
  * @param touched    `{ beads: [{ project, id }] }` of the job's session, or null
@@ -53,14 +60,15 @@ export function deliverablesOf({ item, result, reportText, asks = [], checklists
 
   const askIds = new Set([...(Array.isArray(done.asks) ? done.asks : []), ...(reportText ? asksOf(reportText) : [])].filter(id => typeof id === 'string' && ID_RE.test(id)));
   const seen = new Set();
-  const pushAsk = row => { if (!seen.has(row.id) && belongs(item, row)) { seen.add(row.id); out.push({ kind: 'ask', id: row.id, title: row.title, state: row.state }); } };
+  const made = [];
+  const pushAsk = row => { if (!seen.has(row.id) && belongs(item, row)) { seen.add(row.id); out.push({ kind: 'ask', id: row.id, title: row.title, state: row.state }); made.push(...(row.created ?? []).map(id => ({ project: row.project, id }))); } };
   for (const row of asks) if (row.fromRequest === item.id || askIds.has(row.id)) pushAsk(row);
   for (const row of checklists) if (row.fromRequest === item.id && belongs(item, row)) out.push({ kind: 'checklist', id: row.id, title: row.title, state: row.state });
   for (const row of requests) {
     if (row.id !== item.id && row.origin?.kind === 'run' && row.origin.name === item.id && belongs(item, row) && row.state !== 'declined') out.push({ kind: 'job', id: row.id, title: row.title, state: row.state });
   }
   const tasks = new Set();
-  for (const row of touched?.beads ?? []) {
+  for (const row of [...made, ...(touched?.beads ?? [])]) {
     const key = `${row.project}/${row.id}`;
     if (tasks.has(key)) continue;
     tasks.add(key);

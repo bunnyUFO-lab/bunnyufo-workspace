@@ -5,13 +5,14 @@ import { HubError, clock, hubPost, safeUrl } from '../lib/hub'
 import { host } from '../lib/host'
 import HubImage from './HubImage'
 import Md, { CodeBlock } from './Md'
-import { prepareImage, toBase64 } from './chatImages'
+import { PICTURE_TYPES, prepareImage, toBase64 } from './chatImages'
 import { hasFiles, hasText, isTextField, pictureFiles } from '../lib/pastePictures.mjs'
 import { clearTarget, getTarget, setTarget, useTarget } from './stepTarget'
 import PlaytestReport from './PlaytestReport'
 import { usePlaytestReport } from './playtest'
 import { StepHelp } from './GetHelp'
 import { useAttachHelp } from './useAttachHelp'
+import { KEEPALIVE_LIMIT, bodyBytes, heldDraft, hold } from './heldSend'
 
 const SIGN_IN = 'Sign in to tick items.'
 const finePointer = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -41,7 +42,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const [pending, setPending] = useState<Record<string, Pending>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean> | null>(null)
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(() => heldDraft<{ note?: string }>(`checklist-${data.id}`)?.note ?? '')
   const [warnedAt, setWarnedAt] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -183,16 +184,24 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     if (!live || submitting) return
     if (playtest && !report.ready) return
     if (!playtest && openCount > 0 && warnedAt !== openCount) { setWarnedAt(openCount); return }
-    setSubmitting(true)
     setProblem(null)
-    try {
-      await hubPost(`/checklists/${encodeURIComponent(detail.id)}/submit`, { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) })
-      onSubmitted()
-    } catch (failure) {
-      if (failure instanceof HubError && failure.status === 409) reload()
-      setProblem(failure instanceof Error ? failure.message : 'That did not send.')
-      setSubmitting(false)
+    const body = { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) }
+    const url = `/checklists/${encodeURIComponent(detail.id)}/submit`
+    // A report that is too big to ride a keepalive request goes at once, as it always did.
+    if (bodyBytes(body) > KEEPALIVE_LIMIT) {
+      setSubmitting(true)
+      try {
+        await hubPost(url, body)
+        onSubmitted()
+      } catch (failure) {
+        if (failure instanceof HubError && failure.status === 409) reload()
+        setProblem(failure instanceof Error ? failure.message : 'That did not send.')
+        setSubmitting(false)
+      }
+      return
     }
+    // The hold: seven seconds with Undo, then the one write. A second tap on a held list does nothing.
+    if (hold({ key: `checklist-${detail.id}`, title: text(detail.title).slice(0, 90), verb: playtest ? 'Report sent' : 'Submitted', draft: { note, report: report.snapshot() }, send: keepalive => hubPost(url, body, undefined, false, keepalive) })) onSubmitted()
   }
 
   const percent = total ? Math.round((doneCount / total) * 100) : 0
@@ -255,10 +264,10 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
                   </span>
                 )}
                 {live && !playtest && (
-                  <label className="hub-cl-cam" title={finePointer() ? 'Attach a picture, or paste one (Ctrl+V) after tapping a step' : 'Attach a photo'} data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
+                  <label className="hub-cl-cam" title={finePointer() ? 'Attach a picture, or paste one (Ctrl+V) after tapping a step' : 'Attach a photo or a screenshot'} data-attach aria-disabled={!!uploading[item.id] || undefined} onClick={event => { if (!host.write) { event.preventDefault(); setSignIn(true) } }}>
                     <span aria-hidden="true">{uploading[item.id] ? '…' : '📷'}</span>
                     <input
-                      type="file" accept="image/jpeg,image/png,image/*" capture="environment" data-attach-input
+                      type="file" accept={PICTURE_TYPES} data-attach-input
                       aria-label={`Attach evidence for step ${Number(item.id)}`} disabled={!!uploading[item.id]}
                       onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void attach(item, file) }}
                     />

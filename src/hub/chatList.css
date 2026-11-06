@@ -1,0 +1,72 @@
+/* The Chat tab: the list and the thread. Phone first: one pane at a time; from 900 px the list sits beside the thread. Tokens only. */
+.hub:has(.hub-chat) { padding: 0; max-width: none; overflow: hidden; }
+.hub:has(.hub-chat) .hub-banner { margin: 8px 16px 0; }
+.hub-chat { display: flex; height: 100%; min-height: 0; position: relative; }
+.hub-chat-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.hub-chat-pane.list { overflow: hidden; }
+.hub-chat-pane.main { padding: 0 16px 8px; }
+
+.cl { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cl-search { flex: none; padding: 0 16px 8px; }
+.cl-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px 24px; overscroll-behavior: contain; }
+.cl-note { margin: 16px 0; color: var(--t3); text-align: center; font-size: 14px; }
+.cl-note.cl-left { text-align: left; margin: 4px 16px 8px; }
+.cl-more { margin: 12px 0; }
+.cl-list { overflow: hidden; }
+
+/* A chat's row. The swipe wrapper holds the "Archive" strip behind the row; the row slides over it. */
+.cl-swipe { position: relative; overflow: hidden; background: var(--st-failed); touch-action: pan-y; }
+.cl-swipe + .cl-swipe { box-shadow: inset 0 1px 0 var(--line); }
+.cl-swipe-bg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 20px; color: var(--accent-ink); font-weight: 600; opacity: 0; }
+.cl-row { display: flex; align-items: center; gap: 4px; min-height: 64px; padding-right: 4px; background: var(--s1); position: relative; }
+.cl-row.on { background: var(--s3); }
+.cl-row.cl-set { padding: 4px 10px 4px 0; border-top: 1px solid var(--line); }
+.cl-link { flex: 1; min-width: 0; min-height: 60px; display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 14px; color: inherit; text-decoration: none; }
+.cl-link:hover { background: var(--s2); }
+.cl-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.cl-body { flex: 1; min-width: 0; display: block; }
+.cl-title { display: block; font-weight: 550; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-row.unread .cl-title { font-weight: 700; }
+.cl-pin { display: inline-flex; vertical-align: -2px; margin-right: 4px; color: var(--t3); }
+.cl-snip { display: block; color: var(--t3); margin-top: 2px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-mark { color: var(--t2); }
+.cl-end { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 32px; }
+.cl-when { color: var(--t3); font-size: 12px; }
+.cl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.cl-place .cl-count { margin: 0; }
+.cl-place .cl-chev { display: flex; color: var(--t3); }
+.cl-hit-text { display: block; margin-top: 2px; }
+.cl-kind { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line2); color: var(--t2); font-size: 11px; line-height: 16px; vertical-align: 1px; }
+.cl-hit mark, .cl-snip mark { background: var(--accent-soft); color: var(--t1); border-radius: 3px; padding: 0 1px; }
+
+/* Rename sheet */
+.cl-rename { display: flex; flex-direction: column; gap: 10px; }
+.cl-field { display: flex; flex-direction: column; gap: 6px; color: var(--t2); font-size: 13px; }
+.cl-field input { min-height: var(--tap); padding: 0 12px; border-radius: 10px; border: 1px solid var(--line2); background: var(--ground); color: var(--t1); font: inherit; font-size: 16px; }
+.cl-hint { margin: 0; color: var(--t3); font-size: 13px; }
+
+/* The thread's header: Back (phone), the title that opens the persona and model sheet, and the "..." menu. */
+.hub-chat-head { flex: none; display: flex; align-items: center; gap: 4px; min-height: 56px; margin: 0 -16px 4px; padding: 6px 8px 6px 4px; border-bottom: 1px solid var(--line); background: var(--ground); }
+.hub-chat-head .hub-chat-back { display: inline-flex; }
+.hub-chat-titlebtn { flex: 1; min-width: 0; min-height: var(--tap); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 1px; padding: 0 10px; border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.hub-chat-titlebtn:hover { background: var(--s2); }
+.hub-chat-titlebtn b { display: block; max-width: 100%; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hub-chat-titlebtn small { display: flex; align-items: center; gap: 6px; max-width: 100%; color: var(--t3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hub-chat-sheet { display: flex; flex-direction: column; gap: 14px; padding-bottom: 8px; }
+.hub-chat-sheet label { display: flex; flex-direction: column; gap: 6px; color: var(--t2); font-size: 13px; }
+.hub-chat-sheet .hub-persona, .hub-chat-sheet .hub-model { min-height: var(--tap); width: 100%; max-width: 100%; font-size: 15px; }
+.hub-chat-sheet .hub-model-note { white-space: normal; font-size: 13px; }
+.hub-chat-sheet-who { display: flex; align-items: center; gap: 8px; color: var(--t1); }
+
+/* A chat in the Trash: a line over the thread, and no composer. */
+.hub-chat-trashed { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; padding: 10px 12px; border-radius: 12px; background: var(--s1); border: 1px solid var(--line2); color: var(--t2); font-size: 14px; }
+.hub-chat-trashed span { flex: 1 1 200px; min-width: 0; }
+.hub-chat-archived { margin: 4px 0 8px; color: var(--t3); font-size: 13px; }
+
+@media (min-width: 900px) {
+  .hub-chat-pane.list { flex: none; width: 384px; border-right: 1px solid var(--line); }
+  .hub-chat-head .hub-chat-back { display: none; }
+  .hub-chat-head { padding-left: 8px; }
+  .hub-chat-pane.main { padding: 0 20px 12px; }
+  .hub-chat-head { margin: 0 -20px 4px; }
+}

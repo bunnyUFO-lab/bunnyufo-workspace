@@ -23,6 +23,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'en-US', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -34,12 +35,12 @@ let stub = null;
 try {
   const page = await open({ width: 1280, height: 800 });
 
-  step('Today: the eyebrow clock is in the same 12 hour format as every other time in the Hub');
+  step('Today: the Updated clock is in the same 12 hour format as every other time in the Hub');
   await page.goto(`${fixture.url}#/~hub/today`);
-  const eyebrow = page.locator('[data-today-eyebrow]');
-  await eyebrow.waitFor();
-  const text = await eyebrow.innerText();
-  assert.match(text, /· \d{2}:\d{2} (AM|PM)$/, `The clock reads like the rest of the Hub: ${text}`);
+  const updated = page.locator('.today-actions .hub-muted');
+  await updated.waitFor();
+  const text = (await updated.innerText()).trim();
+  assert.match(text, /^Updated \d{2}:\d{2} (AM|PM)$/, `The clock reads like the rest of the Hub: ${text}`);
 
   step('Escape closes a dots menu and the focus goes back to the button that opened it');
   await page.goto(`${fixture.url}#/hub`);
@@ -128,22 +129,22 @@ try {
   const times = await guest.locator('[data-conversation]').evaluateAll(list => list.map(item => item.querySelector('[data-conversation-time]')?.textContent ?? null));
   assert.ok(times[0] && times[1], `Both "Plan the week" chats show a time: ${times}`);
   assert.notEqual(times[0], times[1], 'The two times differ.');
-  assert.equal(times[2], null, 'A title that is alone shows no time.');
+  assert.ok(times[2], 'Every row shows its time (the list is rows now, not a drawer that only told twins apart).');
   assert.match(times[0], /^\d{2}:\d{2} (AM|PM)$/, 'Today is just the time, in the Hub clock.');
-  assert.match(times[1], /^Oct 2\d, \d{2}:\d{2} (AM|PM)$/, 'Another day carries its date.');
+  assert.match(times[1], /^Oct 2\d$/, 'Another day carries its date, without the clock (a row has little room).');
 
-  step('read-only: a note where Chat would be, in the sidebar and in the phone\'s More sheet; none for a visitor who has Chat');
+  step('read-only: Chat is on the rail and the tab bar, and its screen carries the note; none for a visitor who has Chat');
   canned['/api/capabilities'].chat = false;
   const readOnly = await open({ width: 1280, height: 800 });
   await readOnly.goto(`${site}/one#/~hub/today`);
-  const note = readOnly.locator('.sidebar-hub [data-hub-chat-note]');
+  await readOnly.locator('[data-rail] [data-nav="chat"]').click();
+  const note = readOnly.locator('[data-hub-chat-note]');
   await note.waitFor();
   assert.match(await note.innerText(), /Chat .*signed in/);
-  assert.equal(await readOnly.locator('.sidebar-hub [data-hub-link="chat"]').count(), 0);
   const phone = await open({ width: 390, height: 800 });
   await phone.goto(`${site}/one#/~hub/today`);
-  await phone.locator('[data-hub-tab="more"]').click();
-  await phone.locator('.hub-more [data-hub-chat-note]').waitFor();
+  await phone.locator('[data-tabs] [data-nav="chat"]').click();
+  await phone.locator('[data-hub-chat-note]').waitFor();
   const width = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(width.scroll <= width.inner, 'No sideways scroll at 390 px.');
   assert.equal(await guest.locator('[data-hub-chat-note]').count(), 0, 'A visitor who has Chat is not told it needs signing in.');

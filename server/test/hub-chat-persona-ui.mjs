@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -25,7 +26,7 @@ try {
 
   step('New chat: the picker reads Hermes and lists the three agents; the header says Hermes');
   await page.goto(`${fx.url}#/~hub/chat`);
-  await page.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(page);
   assert.deepEqual(await page.locator('[data-chat-persona] option').evaluateAll(list => list.map(option => option.textContent)), ['Hermes', 'Researcher', 'Market researcher', 'Teardown', 'Planner']);
   assert.equal(await page.locator('[data-chat-persona]').inputValue(), 'hermes');
   assert.equal(await page.locator('[data-chat-with]').getAttribute('data-chat-with'), 'hermes');
@@ -33,7 +34,7 @@ try {
   step('Teardown: the header changes, the run starts with the server text, the reply shows the agent');
   await page.locator('[data-chat-persona]').selectOption('teardown');
   assert.equal(await page.locator('[data-chat-with]').getAttribute('data-chat-with'), 'teardown');
-  await page.locator('[data-chat-with] [data-who="teardown"] svg, [data-chat-with] [data-who="teardown"] div').first().waitFor();
+  await page.locator('[data-sheet-who] [data-who="teardown"] svg, [data-sheet-who] [data-who="teardown"] div').first().waitFor();
   await page.locator('textarea[aria-label="Message"]').fill('How does Balatro teach its rules?');
   await page.keyboard.press('Enter');
   await page.locator('.hub-bubble.assistant [data-who="teardown"]').waitFor();
@@ -46,8 +47,10 @@ try {
   step('the chat reopens on Teardown: no picker, the header and the drawer name it');
   await page.reload();
   await page.locator('.hub-bubble.assistant').first().waitFor();
-  await page.locator('[data-chat-with="teardown"] .hub-who-name', { hasText: 'Teardown' }).waitFor();
+  await page.locator('[data-chat-with="teardown"]', { hasText: 'Teardown' }).waitFor();
+  await openChatSheet(page);
   assert.equal(await page.locator('[data-chat-persona]').count(), 0);
+  await closeChatSheet(page);
   assert.equal((await page.locator('[data-conversation-persona]').first().innerText()).trim(), 'Teardown');
   await page.locator('textarea[aria-label="Message"]').fill('And its shop?');
   await page.keyboard.press('Enter');
@@ -56,7 +59,7 @@ try {
 
   step('a new chat is Hermes again and names no persona');
   await page.goto(`${fx.url}#/~hub/chat`);
-  await page.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(page);
   assert.equal(await page.locator('[data-chat-persona]').inputValue(), 'hermes');
   await page.locator('textarea[aria-label="Message"]').fill('Hi');
   await page.keyboard.press('Enter');
@@ -66,6 +69,7 @@ try {
 
   step('Start a job instead: Spawn opens on the persona\'s preset with the draft');
   await page.goto(`${fx.url}#/~hub/chat`);
+  await openChatSheet(page);
   await page.locator('[data-chat-persona]').selectOption('market-researcher');
   await page.locator('textarea[aria-label="Message"]').fill('Tug-of-war card games');
   await page.locator('[data-chat-model]').selectOption({ label: 'Start a job instead…' });
@@ -77,15 +81,16 @@ try {
   step('Get help: no picker');
   await page.goto(`${fx.url}#/~hub/needs`);
   await page.locator('[data-get-help]').first().click();
-  await page.locator('[data-chat-model]').waitFor();
+  await openChatSheet(page);
   assert.equal(await page.locator('[data-chat-persona]').count(), 0);
-  assert.equal((await page.locator('[data-chat-with] .hub-who-name').innerText()).trim(), 'Hermes');
+  assert.equal((await page.locator('[data-sheet-who] .hub-who-name').innerText()).trim(), 'Hermes');
 
-  step('390 px: both menus and the aloud line fit, the page does not scroll sideways');
+  step('390 px: both menus in the sheet and the header fit, the page does not scroll sideways');
   const phone = await open({ width: 390, height: 800 }, { hasTouch: true, isMobile: true });
-  await phone.goto(`${fx.url}#/~hub/chat`);
+  await phone.goto(`${fx.url}#/~hub/chat/new`);
+  await openChatSheet(phone);
   await phone.locator('[data-chat-persona]').selectOption('market-researcher');
-  const fit = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth, right: Math.max(...[...document.querySelectorAll('.hub-chat-extras > *, .hub-top > *')].map(node => node.getBoundingClientRect().right)) }));
+  const fit = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth, right: Math.max(...[...document.querySelectorAll('.hub-chat-sheet label > *, .hub-chat-head > *')].map(node => node.getBoundingClientRect().right)) }));
   assert.ok(fit.scroll <= fit.inner, `the page scrolls sideways (${fit.scroll} > ${fit.inner})`);
   assert.ok(fit.right <= fit.inner + 1, `something sticks out (${fit.right})`);
   console.log('ok');

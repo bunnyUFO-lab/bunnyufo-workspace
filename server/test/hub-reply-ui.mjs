@@ -16,6 +16,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -244,6 +245,7 @@ try {
   // the page then stops following the run and shows the reply as sent until its next minute poll.
   await stopper.locator(`[data-run-view="${steerIds.stopped}"][data-run-state="running"]`).waitFor();
   await held.locator('[data-run-stop]').click();
+  await held.locator('[data-run-stop-confirm]').click();
   await held.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   await openLog(held, { finished: true });
   const queuedRow = held.locator('[data-step="reply"]');

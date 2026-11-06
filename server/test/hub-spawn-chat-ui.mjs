@@ -7,6 +7,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -62,7 +63,7 @@ try {
   step('Open chat: Chat is open on a new conversation with Hermes, the text is in the composer and not sent');
   await page.locator('[data-spawn-go]').click();
   await page.waitForURL(/#\/~hub\/chat$/);
-  await page.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(page);
   assert.equal(await page.locator('[data-spawn-sheet]').count(), 0, 'The sheet is gone.');
   assert.equal(await page.locator('[data-chat-persona]').inputValue(), 'hermes');
   assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'What should I build after the roadmap?');
@@ -75,6 +76,7 @@ try {
   await page.locator('[data-spawn-chat]', { hasText: 'Chat with Researcher' }).click();
   await page.locator('[data-spawn-text]').fill('Compare two tug-of-war card games');
   await page.locator('[data-spawn-go]').click();
+  await openChatSheet(page);
   await page.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'researcher');
   assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'Compare two tug-of-war card games');
   assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol', "The agent's own model.");
@@ -93,6 +95,7 @@ try {
 
   step('An earlier manual model pick does not survive the switch: the new agent opens on its own model');
   await page.goto(`${fx.url}#/~hub/chat`);
+  await openChatSheet(page);
   await page.locator('[data-chat-model]').selectOption('sonnet');
   assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Sonnet 5.5 · API');
   await page.locator('[data-chat-model]').selectOption({ label: 'Start a job instead…' });
@@ -101,6 +104,7 @@ try {
   await page.locator('[data-spawn-chat]', { hasText: 'Chat with Teardown' }).click();
   await page.locator('[data-spawn-text]').fill('How does it teach?');
   await page.locator('[data-spawn-go]').click();
+  await openChatSheet(page);
   await page.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'teardown');
   assert.equal(await page.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol');
   assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'How does it teach?');
@@ -122,13 +126,14 @@ try {
   await other.locator('[data-spawn-chat]', { hasText: 'Chat with Researcher' }).click();
   await other.locator('[data-spawn-text]').fill('A second thought');
   await other.locator('[data-spawn-go]').click();
+  await openChatSheet(other);
   await other.waitForFunction(() => document.querySelector('[data-chat-persona]')?.value === 'researcher');
   assert.equal(await other.locator('textarea[aria-label="Message"]').inputValue(), 'A second thought');
   assert.equal(await other.locator('.hub-bubble').count(), 0, 'A fresh conversation, not the busy one.');
   assert.equal(await other.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol');
   await other.goto(`${slow.url}#/~hub/needs`);
   await other.goto(`${slow.url}#/~hub/chat`);
-  await other.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(other);
   assert.equal(await other.locator('[data-chat-persona]').inputValue(), 'hermes', 'No old start comes back.');
   assert.equal(await other.locator('textarea[aria-label="Message"]').inputValue(), '');
 

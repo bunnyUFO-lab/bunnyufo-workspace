@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import type { Sign } from '../lib/hub'
+import { hubGet, type Sign } from '../lib/hub'
 import type { WorkCard, WorkLane, WorkLanes } from '../lib/hubWork'
 import { rowMatches, snippetOf, words } from './beadSearch.ts'
 import type { SearchRow } from './beadSearch.ts'
@@ -11,8 +11,8 @@ import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
 import { hubHash, mapHash, workHash } from '../lib/route'
+import { swap } from '../lib/entries'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
-import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { openSpawn } from './spawnStore'
 import RefreshNote from './RefreshNote'
@@ -29,6 +29,21 @@ const LANES: [WorkLane, string][] = [
   ['backlog', 'Backlog'], ['ready', 'Ready'], ['running', 'In progress'], ['blocked', 'Blocked'], ['review', 'Review'], ['done', 'Done'],
 ]
 const COLLAPSE = 10
+/** The lanes the Hub cuts (`BACKLOG_KEEP` and `DONE_KEEP`) and can page: "Show more" asks for the next 50 from the cards already held. */
+const PAGED: WorkLane[] = ['backlog', 'done']
+interface WorkPage { cards: WorkCard[]; total: number }
+/** The board's lanes with the pages read after "Show more" added at the end of their lane, each card once. */
+function withPages(work: WorkLanes | null | undefined, pages: Partial<Record<WorkLane, WorkCard[]>>): WorkLanes | null | undefined {
+  if (!work) return work
+  const lanes = { ...work.lanes }
+  for (const lane of PAGED) {
+    const extra = pages[lane]
+    if (!extra?.length) continue
+    const have = new Set(lanes[lane].map(card => card.key))
+    lanes[lane] = [...lanes[lane], ...extra.filter(card => !have.has(card.key))]
+  }
+  return { ...work, lanes }
+}
 const ASKED_LINK: Record<string, string> = { ask: 'Open Ask →', checklist: 'Open checklist →' }
 const FILTER_KEY = 'hub-work-filter'
 /** The viewer's saved filter, one for the Work view across projects; a missing or bad value is the default. */
@@ -52,7 +67,7 @@ function Card({ card, href, showProject, projectName, focused, onSheet, q = '', 
   const absent = words(q).filter(word => !`${card.id} ${card.title}`.toLowerCase().includes(word))
   const snippet = row && absent.length ? snippetOf(row.text, absent.join(' ')) : null
   const cardLink = (
-    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : card.source === 'request' && card.state !== 'proposed' ? event => openFromClick(event, card.id) : undefined}>
+    <a className={`wk-card${card.live?.state === 'working' ? ' live' : ''}${focused ? ' focus' : ''}`} href={href} data-card={card.key} data-focused={focused ? 'true' : undefined} data-run-open={card.source === 'request' && card.state !== 'proposed' ? card.id : undefined} aria-haspopup={beads ? 'dialog' : undefined} aria-controls={beads && focused ? 'hub-map-panel' : undefined} onClick={beads ? event => onSheet(event, href) : undefined}>
       <span className="wk-title"><Marked text={card.title} q={q} /></span>
       {snippet && <small className="wk-snip">text: <Marked text={snippet} q={q} /></small>}
       {card.why && <span className="wk-why">{card.nothingAsked && <><span className="wk-warn" role="img" aria-label="Nothing asked yet">⚠</span>{' '}</>}{card.why}</span>}
@@ -99,7 +114,7 @@ function SheetWaiting({ error, onClose }: { error: string | null; onClose: () =>
   )
 }
 
-/** Work's Lanes tab: `project` is a project id, `all` for every project, or absent for the default one. */
+/** Work's Board tab: `project` is a project id, `all` for every project, or absent for the default one. */
 export default function Board(props: { project?: string; focus?: string }) {
   // The board's own state (lane, folds, scroll) restarts with the board it shows, never with the item a sheet is open on:
   // the bare `work` address and the default board's own address are the same board.
@@ -135,7 +150,19 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const text = useHubData<{ rows: SearchRow[] }>(hasQuery ? `/search-text${project ? `?project=${encodeURIComponent(project)}` : ''}` : null)
   const rowOf = useMemo(() => new Map((hasQuery ? text.data?.rows ?? [] : []).map(row => [`${row.project}/${row.id}`, row])), [hasQuery, text.data])
   const nameOf = (id: string) => list.find(item => item.id === id)?.name ?? id
-  const data = work.data
+  const [pages, setPages] = useState<Partial<Record<WorkLane, WorkCard[]>>>({})
+  const [paging, setPaging] = useState<WorkLane | null>(null)
+  const [pageError, setPageError] = useState<string | null>(null)
+  const data = useMemo(() => withPages(work.data, pages), [work.data, pages])
+  const showMore = async (lane: WorkLane) => {
+    if (!data || paging) return
+    setPaging(lane)
+    setPageError(null)
+    try {
+      const page = await hubGet<WorkPage>(`/work?${project ? `project=${encodeURIComponent(project)}&` : ''}lane=${lane}&offset=${data.lanes[lane].length}`)
+      setPages(value => ({ ...value, [lane]: [...(value[lane] ?? []), ...page.cards] }))
+    } catch (failure) { setPageError(failure instanceof Error ? failure.message : 'It did not load.') } finally { setPaging(null) }
+  }
   const focusKey = focus ? `bead:${focus}` : undefined
   // The lanes the board shows. A focused card always passes, so a link to a bead never opens on a hidden card. `focusLane` and `focusCard` read `data.lanes`.
   const shownLanes = useMemo(() => {
@@ -173,15 +200,15 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const boardHash = hubHash('work', board)
   const openFromCard = useCallback((event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    if (focus) { event.preventDefault(); window.location.replace(href); return }
+    if (focus) { event.preventDefault(); swap(href); return }
     pushed.current = true
   }, [focus])
   const closeSheet = useCallback(() => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(boardHash)
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(boardHash)
   }, [boardHash])
   const openRelated = useCallback((id: string) => {
     if (sheetOf) setCarried({ id, project: sheetOf })
-    window.location.replace(workHash(board, id))
+    swap(workHash(board, id))
   }, [board, sheetOf, setCarried])
   // Whatever closes the sheet (the button, Escape, Back), focus goes back to the card that opened it.
   useEffect(() => {
@@ -230,12 +257,12 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
     <div className="work" data-sheet={focus && !unknown ? 'open' : undefined}>
       {phone ? (
         <div className="wk-phone-bar" data-work-bar>
-          <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} inRow />
+          <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(hubHash('work', id))} href={id => hubHash('work', id)} inRow />
           <button type="button" ref={filtersButton} className={`hub-btn wk-filters-btn${filterCount ? ' on' : ''}`} data-work-filters disabled={!data} aria-haspopup="dialog" aria-expanded={filtersOpen} aria-label={filterCount ? `Filters, ${filterCount} on` : undefined} onClick={() => setFiltersOpen(true)}>{filterCount ? `Filters (${filterCount})` : 'Filters'}</button>
-          {project && host.write && <button type="button" className="hub-btn pri" data-spawn-open aria-label="Spawn work" onClick={() => openSpawn({ project })}>Spawn</button>}
+          {project && host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}
         </div>
       ) : (
-        <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => { window.location.hash = hubHash('work', id) }} href={id => hubHash('work', id)} oneRow />
+        <ProjectPicker id="hub-work-project" projects={list} value={all ? 'all' : project ?? ''} allValue="all" onChange={id => swap(hubHash('work', id))} href={id => hubHash('work', id)} oneRow />
       )}
       {data && (
         <>
@@ -246,7 +273,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
       )}
-      {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>Spawn work</button>}<ProjectLink id={project} label="Project" /></div>}
+      {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}<ProjectLink id={project} label="Project" /></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
@@ -280,7 +307,12 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
                       {expanded[lane] ? 'Show fewer' : `Show all ${cards.length}`}
                     </button>
                   )}
-                  {!filtering && data.counts[lane] > cards.length && <p className="hub-muted">{data.counts[lane] - cards.length} older not shown.</p>}
+                  {!filtering && PAGED.includes(lane) && data.counts[lane] > cards.length && (!collapsible || expanded[lane]) && (
+                    <button type="button" className="hub-btn wk-more" disabled={paging === lane} onClick={() => void showMore(lane)} data-lane-more={lane}>
+                      {paging === lane ? 'Loading…' : `Show more · ${data.counts[lane] - cards.length} left`}
+                    </button>
+                  )}
+                  {pageError && paging === null && PAGED.includes(lane) && data.counts[lane] > cards.length && <p className="hub-error" role="alert" data-lane-more-error>{pageError}</p>}
                 </section>
               )
             })}

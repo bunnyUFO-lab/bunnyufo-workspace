@@ -16,8 +16,8 @@ try {
   const failed = [];
   page.on('requestfailed', request => failed.push(request.url()));
   await page.goto(fixture.url);
-  await page.locator('[data-hub-link="chat"]').waitFor();
-  await page.locator('[data-hub-link="chat"]').click();
+  await page.locator('[data-nav="chat"]').waitFor();
+  await page.locator('[data-nav="chat"]').click();
 
   step('a reply survives the page refreshing its data and the window regaining focus mid-stream');
   await page.locator('textarea[aria-label="Message"]').fill('Say something long');

@@ -253,6 +253,26 @@ test('modelOptions are kept only when the export has them, cleaned, and at most 
   assert.deepEqual(validExport(empty).profiles.main.modelOptions, [], 'an empty list is a list: the host has nothing to offer');
 });
 
+test('plugins are kept only when the export has them: name, status, version, source, short redacted description', () => {
+  assert.ok(!('plugins' in validExport(agentConfigJson({ now: NOW })).profiles.main), 'an older exporter profile has no such key');
+  const raw = agentConfigJson({ now: NOW });
+  raw.profiles.main.plugins = [
+    { name: 'disk-cleanup', status: 'enabled', version: '2.0.0', source: 'bundled', description: 'Clean up temp files.', path: '/home/x/secret', env: 'KEY' },
+    { name: 'odd', status: 'weird', version: 7, source: 'elsewhere', description: 'api_key: CANARYSECRETVALUE123' },
+    { name: '' }, 'junk', { status: 'enabled' },
+  ];
+  raw.profiles.briefs.plugins = Array.from({ length: 130 }, (_, index) => ({ name: `p${index}`, status: 'enabled', description: 'ab '.repeat(200) }));
+  const clean = validExport(raw);
+  assert.deepEqual(clean.profiles.main.plugins, [
+    { name: 'disk-cleanup', status: 'enabled', version: '2.0.0', source: 'bundled', description: 'Clean up temp files.' },
+    { name: 'odd', status: 'not enabled', version: '', source: 'user', description: '[redacted]' },
+  ]);
+  assert.equal(clean.profiles.briefs.plugins.length, 100);
+  assert.ok(clean.profiles.briefs.plugins.every(item => item.description.length === 160));
+  raw.profiles.main.plugins = [];
+  assert.deepEqual(validExport(raw).profiles.main.plugins, [], 'an empty list is a list');
+});
+
 test('validChange keeps a good signed change and refuses a wrong kind, extra or missing key, a mismatched id, a bad profile, a duplicate model or five fallbacks', () => {
   const good = validChange(approvedDoc());
   assert.deepEqual(good, { change: '20261101-profile-main-ab12', profile: 'main', from: { ...CODEX, fallbacks: [SONNET] }, to: { ...SONNET, fallbacks: [CODEX, FLASH] }, expires: '2026-11-02T10:00:00.000Z', at: '2026-11-01T10:00:00.000Z', by: 'owner', ask: '20261101-profile-main-ab12' });

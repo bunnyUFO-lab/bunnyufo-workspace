@@ -1,100 +1,52 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ago, appUrl, hubPost, remember, sessionUrl } from '../lib/hub'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { hubPost, remember } from '../lib/hub'
+import { go } from '../lib/entries'
 import { hubHash } from '../lib/route'
 import { host } from '../lib/host'
-import type { TeamAction, TeamAgent, TeamView } from '../lib/hubTeam'
+import { useIsDesktop } from '../lib/chrome'
+import type { TeamAgent, TeamView } from '../lib/hubTeam'
 import { stateOf, type AgentActivity } from './team/spriteState'
-import type { WorkingItem } from '../lib/hubPc'
 import { AgentSprite } from './team/AgentSprite'
 import SpriteSheet from './team/SpriteSheet'
 import NewPersona from './team/NewPersona'
 import Floor from './team/Floor'
+import SkillsTab from './team/SkillsTab'
+import { isSkillsRoute, skillOf } from './team/skillsModel'
 import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
-import { openSpawn } from './spawnStore'
-import { startChat } from './chatStart'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
+import { List, Split } from '../ui/Layout'
 import './team/team.css'
 import RefreshNote from './RefreshNote'
 import AgentCardSettings from './AgentCardSettings'
+import AgentDetails from './AgentDetails'
 import { useHubData } from './useHub'
 
 interface Toast { text: string; undo?: () => void }
 
-const bare = (text: string) => text.replace(/ ago$/, '')
-const SESSION_STATE = { working: 'Working', 'needs-you': 'Needs you', stopping: 'Stopping', idle: 'Idle', stale: 'No word' } as const
-
-/** A Claude Code session, compact: state, title, where it runs, and a link to open it. */
-function SessionRow({ item }: { item: WorkingItem }) {
-  const link = sessionUrl(item.url) ?? appUrl(item.appUrl)
-  const where = [item.project, item.branch].filter(Boolean).join(' · ')
-  const body = (
-    <>
-      <span className={`dot st-${item.state === 'needs-you' ? 'needs' : item.state === 'stopping' ? 'working' : item.state === 'stale' ? 'idle' : item.state}`} aria-hidden="true" />
-      <span className="team-session-text">
-        <b>{item.title}</b>
-        <small>{[where, SESSION_STATE[item.state], `for ${bare(ago(item.since))}`].filter(Boolean).join(' · ')}</small>
-      </span>
-    </>
-  )
-  return link
-    ? <li><a className="team-session" href={link} target={link.startsWith('http') ? '_blank' : undefined} rel="noopener noreferrer" aria-label={`Open session: ${item.title}`}>{body}</a></li>
-    : <li><span className="team-session">{body}</span></li>
-}
-
-/** The main button's work: Chat on a persona (a fresh conversation, empty composer), or Spawn on a preset. */
-function runAction(action: TeamAction) {
-  if ('chat' in action) {
-    startChat({ persona: action.chat, draft: '' })
-    window.location.hash = hubHash('chat')
-  } else {
-    openSpawn({ preset: action.preset, ...(action.project ? { project: action.project } : {}), ...(action.text ? { text: action.text } : {}) })
-  }
-}
-
-function AgentCard({ agent, now, canPick, onSprite, opener }: { agent: TeamAgent; now: number; canPick: boolean; onSprite: (agent: TeamAgent) => void; opener: (node: HTMLButtonElement | null) => void }) {
-  const dot = STATUS_DOT[agent.status]
+/** One agent as a row: its sprite, name, role and state. A link to its page, which opens beside the list from 900 px. */
+function AgentRow({ agent, now, on }: { agent: TeamAgent; now: number; on: boolean }) {
   const live = agent as TeamAgent & AgentActivity
   const state = stateOf({ status: agent.status, doneAt: live.doneAt, review: live.review, now })
-  const sprite = agent.sprite
-  const action = agent.action
-  // The one main button. Spawn and sprites need a signed-in owner (canPick); Chat also needs Chat to be set up.
-  const showMain = canPick && (!('chat' in action) || host.chat)
   return (
-    <article className={`team-card st-${agent.status}`} data-agent={agent.id} data-status={agent.status}>
-      <header className="team-card-head">
-        <span className="team-tile"><AgentSprite sprite={sprite} size={sprite.kind === 'custom' ? 52 : 44} name={agent.name} state={state} /></span>
-        <span className="team-card-name">
-          <h3>{agent.name}</h3>
-          <span className="team-status"><span className={`dot st-${dot}${agent.status === 'working' ? ' live' : ''}`} aria-hidden="true" />{STATUS_LABEL[agent.status]}</span>
-        </span>
-        <span className="team-chip">{agent.room}</span>
-      </header>
-      <p className="team-role team-dim">{agent.role}</p>
-      <p className="team-task">{agent.status === 'offline' ? <span className="team-dim">{agent.task}</span> : <><b>Now</b> · {agent.task}</>}</p>
-      <dl className="team-facts">
-        <div><dt>Model</dt><dd>{agent.model}{agent.chatModel ? ` · chat: ${agent.chatModel}` : ''}</dd></div>
-        <div><dt>Runs as</dt><dd>{agent.runtime}</dd></div>
-      </dl>
-      {agent.sessions && agent.sessions.length > 0 && <ul className="team-sessions" aria-label={`${agent.name} sessions`}>{agent.sessions.map(item => <SessionRow key={item.id} item={item} />)}</ul>}
-      {showMain && (
-        <div className="team-main">
-          <button type="button" className="hub-btn pri" onClick={() => runAction(action)} data-main-action={agent.id} {...(action.label === 'Give work' ? { 'data-give-work': agent.id } : {})}>{agent.action.label}</button>
-        </div>
-      )}
-      <footer className="team-links">
-        <a className="team-details-link" href={hubHash('agent', agent.id)} data-details-open={agent.id} aria-label={`${agent.name}: details`}>Details</a>
-        {agent.editable && canPick && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id} aria-label={`${agent.name}: edit`}>Edit</a>}
-        {canPick
-          ? <button type="button" className="hub-btn team-sprite-btn" ref={opener} onClick={() => onSprite(agent)} data-sprite-open={agent.id}>Sprite</button>
-          : <span className="team-dim" data-sprite-signin>Sign in to change sprites</span>}
-      </footer>
-    </article>
+    <a role="listitem" className={`ui-row team-row st-${agent.status}${on ? ' on' : ''}`} href={hubHash('agent', agent.id)} data-agent={agent.id} data-status={agent.status} aria-current={on ? 'page' : undefined}>
+      <span className="team-tile"><AgentSprite sprite={agent.sprite} size={agent.sprite.kind === 'custom' ? 52 : 44} name={agent.name} state={state} /></span>
+      <span className="ui-row-body">
+        <b>{agent.name}</b>
+        <small className="team-row-role">{agent.role}</small>
+        <small className="team-status"><span className={`dot st-${STATUS_DOT[agent.status]}${agent.status === 'working' ? ' live' : ''}`} aria-hidden="true" />{STATUS_LABEL[agent.status]}</small>
+      </span>
+    </a>
   )
 }
 
-/** The Team screen: one card per agent (the Roster view), and the Sprite sheet. */
-export default function Team() {
+/**
+ * The Team screen. Two halves, each its own address: Agents (`#/~hub/team`, an agent's page at `#/~hub/agent/<id>`) and Skills and
+ * plugins (`#/~hub/team/skills[/<skill>]`). Agents is a list with the agent's page beside it from 900 px, or the Floor (the pixel
+ * office) on its own; the choice is remembered in this browser. Nothing here switches a skill.
+ */
+export default function Team({ routeId, agentId }: { routeId?: string; agentId?: string }) {
   const { data, error, loading, reload, at } = useHubData<TeamView>('/team')
+  const desktop = useIsDesktop()
   const [sheetFor, setSheetFor] = useState<string | null>(null)
   const [newOpen, setNewOpen] = useState(false)
   const newOpener = useRef<HTMLButtonElement>(null)
@@ -102,25 +54,17 @@ export default function Team() {
   const [failure, setFailure] = useState<string | null>(null)
   const openers = useRef(new Map<string, HTMLButtonElement | null>())
   const timer = useRef(0)
-  // Roster or Floor: remembered in this browser only. Opening an agent from a desk shows its card without changing the choice.
+  // List or Floor: remembered in this browser only. An agent's page always has the list beside it.
   const [view, setView] = useState<TeamViewMode>(() => viewOf(remember(VIEW_KEY)))
-  const focusId = useRef<string | null>(null)
   // The Done window ends on its own, so the clock ticks even when no new data arrives.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => { const tick = window.setInterval(() => setNow(Date.now()), 30_000); return () => window.clearInterval(tick) }, [])
   useEffect(() => () => window.clearTimeout(timer.current), [])
-  // The Roster card of the agent a desk opened: scrolled to and focused once the Roster is drawn.
-  useEffect(() => {
-    if (!focusId.current || view !== 'roster') return
-    const card = document.querySelector<HTMLElement>(`.team-card[data-agent="${CSS.escape(focusId.current)}"]`)
-    if (card) {
-      card.tabIndex = -1
-      card.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-      card.focus({ preventScroll: true })
-    }
-    focusId.current = null
-  }, [view, data])
-  const pick = (next: TeamViewMode) => { setView(next); remember(VIEW_KEY, next) }
+  const pick = (next: TeamViewMode) => {
+    setView(next)
+    remember(VIEW_KEY, next)
+    if (agentId) go(hubHash('team'))
+  }
 
   const say = useCallback((next: Toast | null) => {
     window.clearTimeout(timer.current)
@@ -150,40 +94,82 @@ export default function Team() {
     return true
   }, [save, say])
 
-  if (!data) return <p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p>
-  const counts = rosterCounts(data.agents)
-  const sheetAgent = data.agents.find(agent => agent.id === sheetFor) ?? null
-  return (
-    <div className="team">
-      <header className="team-head">
-        <div>
-          <div className="team-eyebrow">Your AI team</div>
-          <h2>Team</h2>
-        </div>
-        <dl className="team-counts">
-          <div><dt>Online</dt><dd data-team-online>{counts.online}<span className="team-dim">/{counts.total}</span></dd></div>
-          <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
-        </dl>
-        {/* Before the view switch, so Tab from Floor still goes to the first desk. */}
-        <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
-        {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
-        <div className="hub-seg team-view" role="group" aria-label="View">
-          <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">Roster</button>
-          <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
-        </div>
-      </header>
-      <RefreshNote error={error} hasData={!!data} at={at} />
-      {failure && <p className="hub-error" role="alert">{failure}</p>}
-      {view === 'floor'
-        ? <Floor agents={data.agents} now={now} onOpen={id => { focusId.current = id; setView('roster') }} />
-        : (
-          <div className="team-roster">
-            {data.agents.map(agent => (
-              <AgentCard key={agent.id} agent={agent} now={now} canPick={host.write} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(agent.id, node) }} />
-            ))}
-          </div>
+  const skills = isSkillsRoute(routeId)
+  const counts = data ? rosterCounts(data.agents) : null
+  // The heading, the two halves as links (one step each), and on Agents the list or floor choice and the buttons.
+  const heading = (
+    <div className="team-top">
+      <div className="hub-top team-head">
+        <h2>Team</h2>
+        {counts && (
+          <dl className="team-counts">
+            <div><dt>Online</dt><dd data-team-online>{counts.online}<span className="team-dim">/{counts.total}</span></dd></div>
+            <div><dt>Working</dt><dd data-team-working className={counts.working ? 'on' : undefined}>{counts.working}</dd></div>
+          </dl>
         )}
-      <AgentCardSettings />
+      </div>
+      <nav className="ui-seg ui-seg-tabs" role="tablist" aria-label="Team" data-team-tabs>
+        <a role="tab" href={hubHash('team')} className={skills ? undefined : 'on'} aria-selected={!skills} data-team-tab="agents">Agents</a>
+        <a role="tab" href={hubHash('team', 'skills')} className={skills ? 'on' : undefined} aria-selected={skills} data-team-tab="skills">Skills and plugins</a>
+      </nav>
+      {!skills && (
+        <div className="team-tools">
+          {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
+          <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
+          {/* After the buttons in the page, before them on screen (team.css), so Tab from Floor still goes to the first desk. */}
+          <div className="hub-seg team-view" role="group" aria-label="View">
+            <button type="button" className={view === 'roster' ? 'on' : ''} aria-pressed={view === 'roster'} onClick={() => pick('roster')} data-team-view="roster">List</button>
+            <button type="button" className={view === 'floor' ? 'on' : ''} aria-pressed={view === 'floor'} onClick={() => pick('floor')} data-team-view="floor">Floor</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  let body: ReactNode
+  if (skills) {
+    body = <SkillsTab id={skillOf(routeId)} head={heading} desktop={desktop} />
+  } else if (!data) {
+    body = <div className="team-pane">{heading}<p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p></div>
+  } else if (view === 'floor' && !agentId) {
+    body = (
+      <div className="team-pane team-solo">
+        {heading}
+        <RefreshNote error={error} hasData={!!data} at={at} />
+        {failure && <p className="hub-error" role="alert">{failure}</p>}
+        <Floor agents={data.agents} now={now} onOpen={id => { window.location.hash = hubHash('agent', id) }} />
+        <AgentCardSettings />
+      </div>
+    )
+  } else {
+    const shown = agentId ?? (desktop ? data.agents[0]?.id : undefined)
+    const list = (
+      <div className="team-pane">
+        {heading}
+        <RefreshNote error={error} hasData={!!data} at={at} />
+        {failure && <p className="hub-error" role="alert">{failure}</p>}
+        <List label="Agents">{data.agents.map(agent => <AgentRow key={agent.id} agent={agent} now={now} on={agent.id === shown} />)}</List>
+        <AgentCardSettings />
+      </div>
+    )
+    const open = shown ? data.agents.find(agent => agent.id === shown) : undefined
+    body = (
+      <Split
+        list={list}
+        detail={shown ? (
+          <div className="team-detail">
+            <AgentDetails key={shown} id={shown} live={open} onSprite={item => setSheetFor(item.id)} opener={node => { openers.current.set(shown, node) }} />
+          </div>
+        ) : undefined}
+        empty="Pick an agent from the list."
+      />
+    )
+  }
+
+  const sheetAgent = data?.agents.find(agent => agent.id === sheetFor) ?? null
+  return (
+    <div className="team" data-team-half={skills ? 'skills' : 'agents'}>
+      {body}
       {sheetAgent && (
         <SpriteSheet
           key={sheetAgent.id}

@@ -678,6 +678,11 @@ test('runs on: a new turn in a conversation whose reply is still being written i
     await new Promise(resolve => setTimeout(resolve, 300));
     upstream.release(turn.run, 'Working. Done.');
     await savedLines(fake, turn.conversation, 2);
+    // The file lands a moment before the turn is let go; a page offers Send only once a read says it is no longer running.
+    for (let tries = 0; (await (await call('GET', `/hub/chat/${turn.conversation}`)).json()).running; tries += 1) {
+      assert.ok(tries < 100, 'The turn is let go after its reply is saved.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     const controller = new AbortController();
     const late = await fetch(`${origin}/api/hub/chat`, { method: 'POST', headers: { ...owner, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'second', conversation: turn.conversation }), signal: controller.signal });
     assert.equal(late.status, 200);
@@ -693,7 +698,7 @@ test('runs on: reading a conversation says a reply is still coming, and stops sa
     const early = await call('GET', `/hub/chat/${turn.conversation}`);
     assert.equal(early.status, 200, 'A new chat has no file yet, and is not a 404 while its reply comes.');
     const { asking, ...shown } = await early.json();
-    assert.deepEqual(shown, { id: turn.conversation, messages: [], queued: [], held: null, running: true, run: turn.run });
+    assert.deepEqual(shown, { id: turn.conversation, messages: [], state: { title: null, pinned: null, archived: null, trashed: null, unread: false }, queued: [], held: null, running: true, run: turn.run });
     assert.equal(asking.text, 'first', 'A page that comes back sees what the running turn was asked.');
     const other = await call('GET', `/hub/chat/${turn.conversation}`, undefined, { 'Remote-User': 'someone-else', Origin: 'https://site.example' });
     assert.equal((await other.json()).run, null, 'Only who started it gets the run to stop.');
@@ -850,6 +855,34 @@ test('runs on: Stop ends the run through its own route, which needs a signed-in 
     assert.deepEqual(upstream.stops, [turn.run]);
     assert.match(saved[1].text, /\[interrupted\]$/);
     assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 404, 'A finished turn cannot be stopped again.');
+  } finally { await close(); }
+});
+
+test('runs on: a Stop before any text keeps the owner message marked stopped, and the history for Hermes stays what it was', async () => {
+  const { fake, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: [{ hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me early');
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const after = lines(fake, turn.conversation);
+    assert.equal(after.length, 1, 'No assistant line is added: the history keeps its turns.');
+    assert.equal(saved[0].role, 'user');
+    assert.equal(saved[0].stopped, true, 'The owner message says its reply was stopped before any text.');
+    const read = await (await call('GET', `/hub/chat/${turn.conversation}`)).json();
+    assert.equal(read.messages[0].stopped, true, 'A reload still has the note.');
+  } finally { await close(); }
+});
+
+test('runs on: a Stop after some text saves no stopped mark (the reply says it was interrupted)', async () => {
+  const { fake, call, origin, owner, close } = await fixture({ env: RUNS, hermes: { runScript: ['Working. ', { hold: true }] } });
+  try {
+    const turn = await startTurn(origin, owner, 'stop me late', /Working/);
+    assert.equal((await call('POST', '/hub/chat/stop', { run: turn.run })).status, 200);
+    turn.controller.abort();
+    const saved = await savedLines(fake, turn.conversation, 2);
+    assert.ok(!('stopped' in saved[0]));
   } finally { await close(); }
 });
 

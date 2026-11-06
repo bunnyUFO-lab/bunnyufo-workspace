@@ -23,6 +23,7 @@ const id = (slug, tail) => `${day}-probe-${slug}-${tail}`;
 
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   // The Roadmap's default filter hides finished work; these checks want the whole toolbar and map.
   await context.addInitScript(() => { try { localStorage.setItem('hub-map-filter', JSON.stringify({ states: ['doing', 'you', 'next', 'later', 'done'], within: null, from: '', to: '' })); } catch { /* none */ } });
@@ -74,7 +75,7 @@ try {
     needs: { hash: '#/~hub/needs', ready: 'select[aria-label="Needs you filter"]', row: 'select[aria-label="Needs you filter"]', last: 'select[aria-label="Needs you filter"]' },
     work: { hash: '#/~hub/work/magic-loops', ready: '[data-lane-chip="done"]', row: '.wk-lane-chips', last: '[data-lane-chip="done"]' },
     crumbs: { hash: '#/~hub/map/longpath/lp-r2', ready: '[data-inside="lp-r3"]', row: '.rm-crumbs', last: '[data-inside="lp-r3"]' },
-    toolbar: { hash: '#/~hub/map/magic-loops', ready: '.hub-map-controls', row: '.hub-map-controls', last: '.hub-map-controls button:has-text("Key")' },
+    toolbar: { hash: '#/~hub/map/magic-loops', ready: '.hub-map-controls', row: '.hub-map-controls', last: '.hub-map-controls [data-row-menu]' },
   };
 
   for (const width of [390, 320]) {
@@ -129,13 +130,17 @@ try {
     await fits(page, ROWS.toolbar.row, ROWS.toolbar.last, `Toolbar at ${width}`);
     const bars = await page.locator('.hub-map-controls button').evaluateAll(list => list.filter(node => node.offsetParent).map(node => { const b = node.getBoundingClientRect(); return { left: b.left, right: b.right, height: Math.round(b.height) }; }));
     assert.ok(bars.every(item => item.height >= 43.5 && item.left >= 0 && item.right <= width), `Every control is 44 px tall and inside the screen (${JSON.stringify(bars)}).`);
-    for (const name of ['Filter', 'Key']) {
-      const control = page.locator(`.hub-map-controls button:has-text("${name}")`);
-      await control.tap();
-      await expect(control).toHaveAttribute('aria-expanded', 'true');
-      await control.tap();
-      await expect(control).toHaveAttribute('aria-expanded', 'false');
-    }
+    const lines = await page.locator('.hub-map-controls button').evaluateAll(list => new Set(list.filter(node => node.offsetParent).map(node => Math.round(node.getBoundingClientRect().top))).size);
+    assert.ok(lines <= 2, `The toolbar takes at most two lines on a phone, not ${lines}.`);
+    for (const name of ['Expand all', 'Collapse', 'Sprints', 'Key']) assert.equal(await page.locator(`.hub-map-controls button:has-text("${name}")`).count(), 0, `${name} is in the overflow button, not on the bar.`);
+    const filterButton = page.locator('.hub-map-controls button:has-text("Filter")');
+    await filterButton.tap();
+    await expect(filterButton).toHaveAttribute('aria-expanded', 'true');
+    await filterButton.tap();
+    await expect(filterButton).toHaveAttribute('aria-expanded', 'false');
+    await page.locator('.hub-map-controls [data-row-menu]').tap();
+    await page.getByRole('menuitem', { name: 'Key', exact: true }).tap();
+    await expect(page.locator('#hub-map-key')).toBeVisible();
     const chip = page.locator('[data-filter-chip] .hub-filter-chip-text');
     assert.equal((await chip.innerText()).length > 0, true, 'The Open chip has its label.');
     const chipBox = await chip.boundingBox();

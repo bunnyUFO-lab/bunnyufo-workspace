@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
 import { api, onServiceEvent, useService } from './client'
-import { Icon } from './Icons'
-import ThemePicker from '../components/ThemePicker'
 import { host } from '../lib/host'
 import type { ActiveWorkspace, WorkspaceEntry } from './types'
 
@@ -45,11 +43,11 @@ function WorkspacesSection() {
   </section>
 }
 
-export default function WorkspaceSettings({ onClose }: { onClose: () => void }) {
+/** Workspaces and the project folder, for the Settings screen (hub/Settings). */
+export default function WorkspaceSettings() {
   const { repo } = useService()
-  return <div className="files-panel workspace-settings"><header><h2>Settings</h2><button className="desk-icon" onClick={onClose} aria-label="Close settings"><Icon name="close" size={17} /></button></header>
-    <div className="settings-scroll"><section><h3>Appearance</h3><ThemePicker /></section>
-      {host.workspaces && <WorkspacesSection />}
-      {host.files && <section><h3>Project</h3><p className="settings-repo">{repo}</p><p>Skills, knowledge and processes belong to this repository.</p></section>}
-    </div></div>
+  return <>
+    {host.workspaces && <WorkspacesSection />}
+    {host.files && <section><h3>Project</h3><p className="settings-repo">{repo}</p><p>Skills, knowledge and processes belong to this repository.</p></section>}
+  </>
 }

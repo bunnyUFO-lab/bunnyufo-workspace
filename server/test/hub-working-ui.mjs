@@ -15,6 +15,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, fixture) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -24,6 +25,8 @@ const open = async (viewport, fixture) => {
   await page.locator('[aria-label="Working now"]').waitFor();
   return page;
 };
+const toSettings = async page => { await page.evaluate(() => { location.hash = '#/~hub/settings'; }); await page.locator('[data-settings-pc]').waitFor(); };
+const toToday = async page => { await page.evaluate(() => { location.hash = '#/~hub/today'; }); await page.locator('[aria-label="Working now"]').waitFor(); };
 const noSideways = async (page, what) => {
   const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(widths.scroll <= widths.inner, `${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
@@ -53,6 +56,7 @@ try {
     assert.doesNotMatch(await panel.locator('[data-working="idle"]').innerText(), /for \d+ (min|h|days)/, 'An idle row shows no running time: it is not working.');
 
     step(`${label}: the Gaming PC tile`);
+    await toSettings(page);
     const tile = page.locator('[aria-label="Gaming PC"]');
     assert.equal(await tile.getAttribute('data-pc'), 'on');
     assert.equal(await tile.locator('[data-pc-headline]').innerText(), 'On · in use');
@@ -66,10 +70,9 @@ try {
     assert.equal(await tile.locator('[data-pc-awake]').innerText(), 'Kept awake');
     assert.match(await tile.innerText(), /Updated \d+ (s|min) ago/);
 
-    step(`${label}: the running tile counts the working sessions and says where from`);
-    const kpi = page.locator('[data-kpi="running"]');
-    assert.equal((await kpi.locator('.hub-kpi-v').innerText()).trim(), '2');
-    assert.equal((await kpi.locator('.kpi-sub').innerText()).trim(), 'on the PC and in the cloud');
+    await toToday(page);
+    step(`${label}: the status line counts the working sessions`);
+    assert.equal((await page.locator('[data-today-status] .today-pill').first().innerText()).trim(), '2 running');
     await noSideways(page, `Today at ${label} width`);
   }
 
@@ -81,12 +84,14 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   for (const [label, viewport] of [['desktop', { width: 1920, height: 1080 }], ['phone', { width: 390, height: 844 }]]) {
     const lowPage = await open(viewport, low);
+    await toSettings(lowPage);
     const row = lowPage.locator('[aria-label="Gaming PC"] [data-pc-line="ram"]');
     assert.match(await row.innerText(), /RAM\s*21\.5 \/ 24 GB\s*·\s*90 %/);
     assert.match(await row.innerText(), /Low memory: the PC's watchdog frees cache below 4 GB/);
     assert.equal(await row.getAttribute('data-pc-warn'), '', `${label}: the row carries the warning marker.`);
     await noSideways(lowPage, `the low-memory tile at ${label} width`);
     const oldPage = await open(viewport, oldReporter);
+    await toSettings(oldPage);
     const tile = oldPage.locator('[aria-label="Gaming PC"]');
     assert.equal(await tile.locator('[data-pc-line="ram"]').count(), 0, `${label}: no RAM row without memory.`);
     assert.equal(await tile.locator('[data-pc-line="gpu"]').count(), 1);
@@ -99,6 +104,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   for (const [label, viewport] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     const busyPage = await open(viewport, busy);
+    await toSettings(busyPage);
     const row = busyPage.locator('[aria-label="Gaming PC"] [data-pc-line="hogs"]');
     assert.match(await row.innerText(), /Busy processes\s*1 need a look/);
     assert.equal(await row.getAttribute('data-pc-warn'), '', `${label}: the row carries the warning marker.`);
@@ -127,10 +133,12 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
     const old = await open(viewport, stale);
+    await toSettings(old);
     const tile = old.locator('[aria-label="Gaming PC"]');
     assert.equal(await tile.getAttribute('data-pc'), 'asleep-or-off');
     assert.match(await tile.locator('[data-pc-headline]').innerText(), /^Asleep or off · last seen \d+ min ago$/);
     assert.equal(await tile.locator('[data-pc-line]').count(), 0, 'Old numbers are not shown.');
+    await toToday(old);
     assert.equal(await old.locator('[aria-label="Working now"] [data-source="pc"]').count(), 0);
     assert.equal(await old.locator('[aria-label="Working now"] [data-source="events"]').count(), 1);
     await noSideways(old, `the stale Today at ${viewport.width} px`);
@@ -152,7 +160,7 @@ try {
     assert.doesNotMatch(await row.innerText(), /Working/);
     assert.equal(await row.locator('.dot.live').count(), 0, `${label}: a stale row does not pulse.`);
     assert.equal(await panel.locator('[data-working="working"]').count(), 2, `${label}: the live rows stay.`);
-    assert.equal((await page.locator('[data-kpi="running"] .hub-kpi-v').innerText()).trim(), '2', `${label}: the Running count leaves it out.`);
+    assert.equal((await page.locator('[data-today-status] .today-pill').first().innerText()).trim(), '2 running', `${label}: the Running count leaves it out.`);
     assert.equal((await panel.locator('h3 span').last().innerText()).trim(), '2', `${label}: so does the Working now count.`);
     await noSideways(page, `stale Today at ${label} width`);
     if (process.env.BUW_SHOTS) await panel.screenshot({ path: `${process.env.BUW_SHOTS}-${label}.png` });
@@ -192,8 +200,8 @@ try {
     await page.waitForTimeout(800);
     assert.match(await page.locator('body').innerText(), /blocked: needs permission/, 'Activity lists the events that are news.');
     assert.doesNotMatch(await page.locator('body').innerText(), /beat: working|blocked: working/, 'A heartbeat is not news: it is not in Activity.');
-    await page.goto(`${beat.url}#/~hub/today`);
-    await page.locator('.today-head').waitFor();
+    await page.goto(`${beat.url}#/~hub/needs`);
+    await page.locator('.ni').first().waitFor();
     assert.match(await page.locator('body').innerText(), /needs permission/, 'A heartbeat does not resolve a blocked session: it stays in Needs you.');
     await page.close();
   }
@@ -203,6 +211,9 @@ try {
   fixtures.push(bare);
   const none = await open({ width: 1280, height: 900 }, bare);
   assert.equal(await none.locator('[aria-label="Gaming PC"]').count(), 0);
+  await toSettings(none).catch(() => undefined);
+  assert.equal(await none.locator('[aria-label="Gaming PC"]').count(), 0, 'Settings shows no tile either, only a line that says nothing has reported.');
+  await toToday(none);
   assert.equal(await none.locator('[aria-label="Working now"] .hub-empty').innerText(), 'Nothing is running.');
 
   console.log('hub-working-ui: passed');

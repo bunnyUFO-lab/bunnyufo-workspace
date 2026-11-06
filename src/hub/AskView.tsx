@@ -3,7 +3,8 @@ import type { Ask, AskAnswer } from '../lib/hub'
 import { hubHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
-import { goNext, useQueueOrder } from './useGoNext'
+import { autoNext, goNext, useQueueOrder } from './useGoNext'
+import SettledBar, { useSettledHere } from './SettledBar'
 import AskBody from './AskBody'
 import { VERDICTS, decisionList, optionList, text, when } from './askAnswer'
 import HubImage from './HubImage'
@@ -45,6 +46,7 @@ export default function AskView({ id }: { id: string }) {
   const [taken, setTaken] = useState<AskAnswer | null>(null)
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
+  const here = useSettledHere(`ask-${id}`)
 
   if (!ask) return <p className="hub-empty">{error ?? 'Loading…'}</p>
   const from = { tool: text(ask.from?.tool), host: text(ask.from?.host) }
@@ -73,12 +75,14 @@ export default function AskView({ id }: { id: string }) {
       </ol>
       {ask.rerunBlocked && <p className="hub-muted" role="note" data-rerun-blocked>This Ask asks to run something again. Answering it starts nothing: {text(ask.rerunBlocked)}</p>}
       {ask.agentEditBlocked && <p className="hub-muted" role="note" data-agent-edit-blocked>This Ask proposes an edit. Answering it changes nothing: {text(ask.agentEditBlocked)}</p>}
-      <section className="hub-panel">
+      <SettledBar itemKey={`ask-${ask.id}`} kind="ask" id={ask.id} title={text(ask.question)} verb={here.verb} phase={here.phase} backHash={hubHash('ask', ask.id)} order={here.order} />
+      {/* Kept mounted while the answer is held, so Undo finds the form as it was left. */}
+      <section className="hub-panel" hidden={here.covered}>
         <p className="hub-muted">{from.tool || from.host ? `From ${from.tool || 'an agent'}${from.host ? ` on ${from.host}` : ''}, ` : 'From an unknown sender, '}{when(ask.createdAt)}.</p>
-        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail)} view />
+        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => { here.settle(verb, queue()); if (autoNext()) void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail) }} view />
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
-      {answer && isPlan && !ask.pickup && !ask.cancel && <p className="hub-muted" data-plan-state="waiting">Waiting for the PC to apply it.</p>}
+      {answer && isPlan && !ask.pickup && !ask.cancel && <p className="hub-muted" data-plan-state="waiting">Approved. It&apos;s applied within a minute or two, and the PC doesn&apos;t need to be on.</p>}
       {answer && ask.delivery && !isPlan && !ask.pickup && <Delivery noun="Ask" project={ask.project} delivery={ask.delivery} />}
       {ask.pickup && isPlan && <p className="hub-muted" data-plan-state="applied">Applied {when(ask.pickup.at)}.</p>}
       {ask.pickup && !isPlan && <p className="hub-muted">Picked up {when(ask.pickup.at)}{text(ask.pickup.host) ? ` on ${text(ask.pickup.host)}` : ''}{text(ask.pickup.bead) ? ` as ${text(ask.pickup.bead)}` : ''}.</p>}

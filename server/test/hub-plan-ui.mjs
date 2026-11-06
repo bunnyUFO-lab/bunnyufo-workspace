@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 import { askJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -16,6 +17,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -60,7 +62,7 @@ try {
   await shot(desk, 'plan-in-hermes-roadmap-desktop');
   await button.click();
   await desk.waitForURL(/#\/~hub\/chat$/);
-  await desk.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(desk);
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'planner');
   const draft = await desk.locator('textarea[aria-label="Message"]').inputValue();
   assert.match(draft, /^I want to plan work on the .* Roadmap \(project wayfind\)\./);
@@ -69,6 +71,7 @@ try {
   assert.equal(await desk.locator('.hub-bubble').count(), 0, 'Nothing was sent.');
   assert.equal(await desk.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol');
   assert.deepEqual(writes, [], 'Opening it wrote nothing.');
+  await closeChatSheet(desk);
   await shot(desk, 'chat-planner-desktop');
 
   step('desktop: with a node open the draft names it; a project without a map has the button above the map');
@@ -76,7 +79,7 @@ try {
   await desk.locator('.hub-map-panel').waitFor();
   await desk.locator('.hub-wayfinder-row [data-plan-in-hermes]').click();
   await desk.waitForURL(/#\/~hub\/chat$/);
-  await desk.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(desk);
   assert.match(await desk.locator('textarea[aria-label="Message"]').inputValue(), /I am looking at "Which project comes first\?" \(wf-q1\)\./);
   await desk.goto(`${fx.url}#/~hub/map/magic-loops`);
   await desk.locator('.hub-map-wrap').waitFor();
@@ -115,7 +118,7 @@ try {
   step('desktop: an answered plan says it waits for the PC, then when it was applied (ws-im1.2.3)');
   await desk.goto(`${fx.url}#/~hub/ask/${ask}`);
   await desk.locator('[data-plan-state="waiting"]').waitFor();
-  assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), 'Waiting for the PC to apply it.');
+  assert.equal(await desk.locator('[data-plan-state="waiting"]').innerText(), "Approved. It's applied within a minute or two, and the PC doesn't need to be on.");
   await desk.locator('[data-plan-state="waiting"]').scrollIntoViewIfNeeded();
   await shot(desk, 'plan-waiting-desktop');
   fx.fake.seed(`sections/inbox/asks/${ask}/pickup.json`, JSON.stringify({ at: new Date().toISOString(), host: 'pc' }), 'application/json');
@@ -146,11 +149,21 @@ try {
   for (const button of await phone.locator('[data-decision="d1"] [data-verdict-btn]').all()) assert.ok((await button.boundingBox()).height >= 44, 'A verdict button is at least 44 px high.');
   await shot(phone, 'change-list-ask-phone');
   await phone.goto(`${fx.url}#/~hub/map/wayfind`);
+  await phone.locator('[data-plan-in-hermes]').waitFor();
+  // The chat list and the team arrive late, as on a slow phone: the Chat screen redraws after the options sheet is open, and the
+  // sheet (an entry of its own) must survive that.
+  await phone.route(/\/api\/hub\/(chat|team)(\?.*)?$/, async route => { await new Promise(resolve => setTimeout(resolve, 2500)); await route.continue(); });
   await phone.locator('[data-plan-in-hermes]').tap();
   await phone.waitForURL(/#\/~hub\/chat$/);
-  await phone.locator('[data-chat-persona]').waitFor();
+  // The thread has mounted and taken the start once the draft is in the composer; a sheet opened before that is closed again by the remount.
+  await phone.waitForFunction(() => /^I want to plan/.test(document.querySelector('textarea[aria-label="Message"]')?.value ?? ''));
+  await openChatSheet(phone);
+  await phone.waitForFunction(() => document.querySelector('[data-chat-persona]')?.options?.length > 1);
   assert.equal(await phone.locator('[data-chat-persona]').inputValue(), 'planner');
+  assert.equal(await phone.locator('[data-chat-sheet]').count(), 1, 'The sheet is still open after the list arrived.');
+  assert.equal(await phone.locator('textarea[aria-label="Message"]').count(), 1, 'And the thread is still on screen.');
   await noSideways(phone, 'Chat with the Planner at 390');
+  await closeChatSheet(phone);
   await shot(phone, 'chat-planner-phone');
 
   console.log('hub-plan-ui: passed');

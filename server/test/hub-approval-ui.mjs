@@ -16,6 +16,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'], ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -127,8 +128,7 @@ try {
   await page.locator('[data-approval-state]', { hasText: 'Expired' }).waitFor();
   await page.locator('[data-approval-expired]').waitFor();
   await page.locator('[data-approval-approve]', { hasText: 'Approve again' }).click();
-  await page.locator('[data-next-note]').waitFor();
-  assert.match(await page.locator('[data-next-note]').innerText(), /^Approved/);
+  await page.locator('[data-settled-title]', { hasText: /^Approved\./ }).waitFor();
   assert.ok(requestFolders().some(id => has(id, 'request.json') && json(id, 'request.json').replaces === ids.expired && has(id, 'approved.json')), 'The new request replaces the expired one and is approved.');
 
   step('A request signed by policy says so, and a link opens the item page');
@@ -217,7 +217,7 @@ try {
   await cloudPage.locator('[data-approval-approve]').waitFor();
   assert.equal(await cloudPage.locator('[data-approval-repo-box]').count(), 0, 'No picker when the project has a repo.');
   await cloudPage.locator('[data-approval-approve]').click();
-  await cloudPage.locator('[data-next-note]').waitFor();
+  await cloudPage.locator('[data-settled-title]', { hasText: /^Approved\./ }).waitFor();
   assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.tracked}/approved.json`).repo, 'example/app', 'Signed with the project repo.');
   await cloudPage.goto(`${cloud.url}#/~hub/request/${encodeURIComponent(repoIds.bare)}`);
   await cloudPage.locator('[data-approval-repo-box]').waitFor();
@@ -227,7 +227,7 @@ try {
   await cloudPage.getByRole('option', { name: 'example/picked' }).click();
   assert.equal(await cloudPage.locator('[data-approval-approve]').isDisabled(), false);
   await cloudPage.locator('[data-approval-approve]').click();
-  await cloudPage.locator('[data-next-note]').waitFor();
+  await cloudPage.locator('[data-settled-title]', { hasText: /^Approved\./ }).waitFor();
   assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.bare}/approved.json`).repo, 'example/picked', 'Signed with the picked repo.');
   assert.equal(cloud.fake.json(`sections/inbox/requests/${repoIds.bare}/request.json`).repo, undefined, 'request.json is not rewritten.');
   const narrow = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });

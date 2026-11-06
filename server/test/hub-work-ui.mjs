@@ -110,18 +110,18 @@ try {
   assert.ok(await page.locator('.hub-chip.on', { hasText: /^All$/ }).count() === 1);
   assert.ok(await page.locator('.wk-lane[data-lane="running"] .wk-project').count() >= 1);
 
-  step('the tabs: Lanes lit on Work, Activity under the same tab strip with Work lit in the nav');
-  assert.equal(await page.locator('[data-work-tab="lanes"]').getAttribute('aria-selected'), 'true');
+  step('the tabs: Board lit on Work, Activity under the same tab strip with Work lit in the nav');
+  assert.equal(await page.locator('[data-work-tab="board"]').getAttribute('aria-selected'), 'true');
   await page.locator('[data-work-tab="activity"]').click();
   await page.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
   assert.equal(await page.locator('[data-work-tab="activity"]').getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('.hub h2').first().innerText(), 'Work');
-  assert.equal(await page.locator('[data-hub-link="work"]').getAttribute('aria-current'), 'page', 'Work stays lit on the Activity tab.');
-  assert.equal(await page.locator('[data-hub-link="activity"]').count(), 0, 'Activity has left the nav.');
+  assert.equal(await page.locator('[data-rail] [data-nav="work"]').getAttribute('aria-current'), 'page', 'Work stays lit on the Activity tab.');
+  assert.equal(await page.locator('[data-nav="activity"]').count(), 0, 'Activity has left the nav.');
   await go(page, '#/~hub/activity/agents');
   await page.locator('.hub-chip.on', { hasText: 'Agents' }).waitFor();
-  assert.equal(await page.locator('[data-hub-link="work"]').getAttribute('aria-current'), 'page');
-  await page.locator('[data-work-tab="lanes"]').click();
+  assert.equal(await page.locator('[data-rail] [data-nav="work"]').getAttribute('aria-current'), 'page');
+  await page.locator('[data-work-tab="board"]').click();
   await page.locator('.wk-lane').first().waitFor();
 
   step('phone: one lane at a time, In progress first, the chip switches it, nothing scrolls sideways');
@@ -152,9 +152,8 @@ try {
   await phone.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
   await phone.waitForTimeout(250);
   await noSideways(phone, 'Activity at 390 px');
-  assert.equal(await phone.locator('[data-hub-tab="work"]').getAttribute('class').then(value => value.includes('active')), true, 'The phone bar lights Work on Activity.');
-  await phone.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['project', 'library', 'sketch']);
+  assert.equal(await phone.locator('[data-tabs]').count(), 0, 'Work is a page of its own on a phone: no tab bar, a Back button instead.');
+  assert.equal(await phone.locator('[data-top="detail"] [data-back]').count(), 1);
 
   step('phone: with nothing running, Blocked is the lane that opens');
   const quiet = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -197,7 +196,7 @@ try {
   step('CUJ 5: Spawn replaces the old request form; a job from Work lands in the bucket as a proposal for that project');
   assert.equal(await desk.locator('.wk-lane').count(), 6);
   assert.equal(await desk.locator('button:has-text("Ask an agent to do something")').count(), 0, 'The old request form is gone.');
-  await desk.locator('button[data-spawn-open]', { hasText: 'Spawn work' }).click();
+  await desk.locator('button[data-spawn-open]', { hasText: 'New job' }).click();
   await desk.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await desk.locator('[data-spawn-project]').getAttribute('data-value'), 'magic-loops', 'Spawn opens on the project Work shows.');
   await desk.locator('[data-spawn-text]').fill('Add wall-slide dust particles');
@@ -241,12 +240,12 @@ try {
   const none = await open({ width: 1200, height: 800 });
   await none.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"projects":[]}' }));
   await none.goto(plain.url);
-  await none.locator('.sidebar-list').waitFor();
+  await none.locator('[data-rail]').waitFor();
   await go(none, '#/~hub/work');
   await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
   assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
 
-  step('requests: one card per lane by state; a click opens the run drawer, a proposal opens its page');
+  step('requests: one card per lane by state; a click opens the job page, a proposal opens its page');
   const reqs = await startHubFixture({ work: true });
   fixtures.push(reqs);
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -279,9 +278,10 @@ try {
   assert.equal((await lanePage.locator(`[data-card="request:${seedFiles.asking}"] .wk-why`).innerText()).trim(), 'asked you a question');
   assert.equal(await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).getAttribute('href'), `#/~hub/request/${seedFiles.asking}`);
   await lanePage.locator(`[data-card="request:${seedFiles.asking}"]`).click();
-  await lanePage.locator('[data-run-drawer] [data-run-asking]').waitFor();
-  assert.match(await lanePage.locator('[data-run-drawer]').innerText(), /Which game do you mean\?/);
-  await lanePage.keyboard.press('Escape');
+  await lanePage.locator('[data-run-view] [data-run-asking]').waitFor();
+  assert.match(await lanePage.locator('[data-run-view]').innerText(), /Which game do you mean\?/);
+  await lanePage.goBack();
+  await lanePage.locator('.wk-lane').first().waitFor();
   await lanePage.locator(`[data-card="request:${seedFiles.proposed}"]`).click();
   await lanePage.waitForFunction(id => location.hash === `#/~hub/request/${id}`, seedFiles.proposed);
   await lanePage.locator('[data-approval-body]').waitFor();

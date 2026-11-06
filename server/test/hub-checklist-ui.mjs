@@ -23,6 +23,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -51,11 +52,12 @@ const waitProgress = (page, text) => page.waitForFunction(value => document.quer
 
 try {
   const page = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'] });
-  await page.goto(`${fixture.url}#/~hub/needs`);
-  await page.locator('[data-hub-tab-badge]').waitFor();
+  await page.goto(`${fixture.url}#/~hub/today`);
+  await page.locator('[data-tabs] [data-hub-badge]').waitFor();
 
   step('the Steps chip lists the open list with "1 of 4", the submitted one is history, and the Needs you badge counts it');
-  assert.equal(await page.locator('[data-hub-tab-badge]').innerText(), '4', 'Three things wait in the fixture, and the list is a fourth.');
+  assert.equal(await page.locator('[data-tabs] [data-hub-badge]').innerText(), '4', 'Three things wait in the fixture, and the list is a fourth.');
+  await page.evaluate(() => { location.hash = '#/~hub/needs'; });
   // At phone width the filter is a native select (one option per filter), not a row of chips.
   const filter = page.locator('[data-needs-filter-select]');
   await filter.waitFor();
@@ -81,7 +83,6 @@ try {
   step('opening it: the first open item with a guide is expanded, and a done item shows its time');
   await row.locator('.ni-t a').tap();
   await page.locator('.hub-cl h2', { hasText: 'Finish the Discord bot setup' }).waitFor();
-  assert.equal(await page.locator('[data-hub-inbox-badge], [data-hub-tab-badge]').first().innerText(), '4');
   assert.equal(await page.locator('[data-item="02"] [data-toggle]').getAttribute('aria-expanded'), 'true');
   assert.equal(await page.locator('[data-item="01"] [data-toggle]').getAttribute('aria-expanded'), 'false', 'Item 1 has a link, and starts closed.');
   assert.equal(await page.locator('[data-item="04"] [data-toggle]').getAttribute('aria-expanded'), 'false');
@@ -195,6 +196,9 @@ try {
   await tall(page.locator('[data-submit]'), 'Submit with open');
   await noSideways(page, 'the Submit warning');
   await page.locator('[data-submit]').tap();
+  await page.locator('[data-settled-title]', { hasText: /^Submitted\./ }).waitFor();
+  assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/checklist\//, 'Submit stays on the list: nothing moves by itself.');
+  await page.locator('[data-next-item]').tap();
   await page.locator('[data-next-note]', { hasText: 'Submitted · next:' }).waitFor();
   assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/review\//, 'The next item in the queue is the review: its own page opens.');
   assert.equal(await page.locator('[data-next-back]').getAttribute('href'), `#/~hub/checklist/${FIXTURE_CHECKLIST}`);
@@ -203,7 +207,8 @@ try {
   const events = [...fixture.fake.objects.keys()].filter(key => key.includes('/events/')).map(key => fixture.fake.json(key)).filter(event => event.kind === 'checklist-submitted');
   assert.equal(events.length, 1);
   assert.deepEqual({ checklist: events[0].checklist, summary: events[0].summary, title: events[0].title }, { checklist: FIXTURE_CHECKLIST, summary: '2 of 4 done', title: 'Submitted: Finish the Discord bot setup' });
-  await page.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3');
+  await go(page, '#/~hub/today');
+  await page.waitForFunction(() => document.querySelector('[data-tabs] [data-hub-badge]')?.textContent === '3');
   await go(page, '#/~hub/needs');
   await page.locator('.ni').first().waitFor();
   assert.equal(await page.locator('.ni', { hasText: 'Finish the Discord bot setup' }).count(), 0, 'Gone from Needs you.');
@@ -271,7 +276,7 @@ try {
     const guest = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true, reducedMotion: 'reduce' });
     await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/checklist/${FIXTURE_CHECKLIST}`);
     await guest.locator('.hub-cl h2', { hasText: 'A read-only list' }).waitFor();
-    assert.match(await guest.locator('.hub-banner').innerText(), /ticking checklists/);
+    assert.match(await guest.locator('.hub-banner').innerText(), /Read-only here: sign in/);
     assert.equal(await guest.locator('[data-readonly-note]').count(), 0, 'Quiet until someone taps.');
     await guest.locator('[data-item="01"] [data-box]').tap({ force: true });
     await guest.locator('[data-readonly-note]', { hasText: 'Sign in to tick items.' }).first().waitFor();

@@ -24,6 +24,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -128,21 +129,16 @@ try {
   await page.locator('.hub-row', { hasText: 'Update the router settings' }).waitFor();
   assert.equal(await page.locator('.ni').count(), 0, 'Answered is history, not cards.');
 
-  step('a Today row opens the list on its item, flashed');
+  step('a Today row opens its own page for an item that has one (the flash on the list on a linked item is the event-file step below)');
   await go(page, '#/~hub/today');
   const row = page.locator('.nrow[data-nrow="steps"]');
   await row.waitFor();
   await row.click();
-  await page.locator('.hub[data-screen="needs"]').waitFor();
-  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor();
-  const top = await page.evaluate(id => {
-    const card = document.querySelector(`[data-need="checklist-${id}"]`).getBoundingClientRect();
-    const hub = document.querySelector('.hub').getBoundingClientRect();
-    return card.top - hub.top;
-  }, FIXTURE_CHECKLIST);
-  assert.ok(top >= 0 && top < 120, `The item is scrolled to the top of the list (${top} px).`);
-  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor({ state: 'detached', timeout: ms(4000) });
+  await page.locator('.hub-cl').waitFor();
+  assert.equal(await page.evaluate(() => location.hash), `#/~hub/checklist/${FIXTURE_CHECKLIST}`);
 
+  await go(page, '#/~hub/needs');
+  await page.locator('.ni').first().waitFor();
   assert.equal(await page.locator('.ni').first().evaluate(node => getComputedStyle(node).transitionDuration), '0s', 'No collapse animation with reduced motion.');
 
   step('an Ask is answered where it stands: pick B, write a note, send; the card leaves with no animation under reduced motion');
@@ -154,11 +150,13 @@ try {
   await card.locator('textarea').fill('shorter hang here');
   await card.getByRole('button', { name: 'Send answer' }).click();
   await card.waitFor({ state: 'detached' });
+  // The card leaves when the answer is held; the write follows (at once here: hub.undoMs is 0), so wait for it to land.
+  await eventually(() => assert.ok(fixture.fake.objects.has(`sections/inbox/asks/${FIXTURE_ASK}/answer.json`)));
   assert.deepEqual([answerOf(FIXTURE_ASK).choice, answerOf(FIXTURE_ASK).note, answerOf(FIXTURE_ASK).by], ['B', 'shorter hang here', 'local']);
   await page.locator('[data-next-note]', { hasText: 'Answered' }).waitFor();
   await page.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '3');
   assert.equal(await page.locator('.hub-chip[data-filter="question"]').count(), 0, 'The Question chip hides when nothing is left.');
-  await page.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3');
+  await page.waitForFunction(() => document.querySelector('[data-hub-badge]')?.textContent === '3');
 
   step('a step is ticked in place: it shows at once, and a new mark file is written');
   const list = page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"]`);
@@ -397,6 +395,9 @@ try {
   assert.equal(await reduced.locator('[data-next-note]').count(), 0, 'No note on the settled item itself.');
 
   step('next item, from a deep link: Submit lands on the next item with the note, and the browser Back returns to the list');
+  // The old behaviour is now the Settings choice "Next item after answering": a page stays on the item unless it is on.
+  await reduced.evaluate(() => localStorage.setItem('hub.autoNext', '1'));
+
   await go(reduced, `#/~hub/checklist/${listOne.id}`);
   await reduced.locator('[data-submit]').waitFor();
   await reduced.locator('[data-submit]').click();
@@ -449,8 +450,7 @@ try {
   const back = await phoneNote.locator('[data-next-back]').boundingBox();
   assert.ok(back && back.height >= 44, `Back is ${back?.height} px tall.`);
   const box = await phoneNote.boundingBox();
-  const bar = await phone2.locator('nav.hub-tabs').boundingBox();
-  assert.ok(box && box.y >= 0 && box.y + box.height <= (bar?.y ?? 812), 'The note is on screen and above the phone bar.');
+  assert.ok(box && box.y >= 0 && box.y + box.height <= 812, 'The note is on screen.');
   assert.ok(back.x + back.width <= 375, 'Back is not pushed off screen.');
   assert.ok(await phoneNote.locator('.nq-next-text').evaluate(node => node.getBoundingClientRect().height < 70), 'The note is at most two lines.');
   await noSideways(phone2, 'the next-item note at 375 px');

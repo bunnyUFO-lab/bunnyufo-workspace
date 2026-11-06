@@ -128,9 +128,9 @@ try {
 
   step('Ctrl+K: "spawn <text>" lists the command first; Enter opens the sheet with the text and the guessed preset');
   await page.keyboard.press('Control+k');
-  await page.locator('.pal input[role="combobox"]').fill('spawn teardown of how balatro teaches its rules');
-  const first = page.locator('.pal-i').first();
-  assert.equal((await first.locator('.pal-i-label').innerText()).trim(), 'Spawn: teardown of how balatro teaches its rules');
+  await page.locator('dialog[data-search="dialog"] input[role="combobox"]').fill('spawn teardown of how balatro teaches its rules');
+  const first = page.locator('dialog[data-search="dialog"] [role="option"]').first();
+  assert.equal((await first.locator('b').innerText()).trim(), 'New job: teardown of how balatro teaches its rules');
   await page.keyboard.press('Enter');
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-spawn-text]').inputValue(), 'teardown of how balatro teaches its rules');
@@ -140,11 +140,13 @@ try {
   step('Ctrl+K from a card page goes to the Hub and opens the sheet there');
   await page.evaluate(() => { location.hash = '#/hub'; });
   await page.keyboard.press('Control+k');
-  await page.locator('.pal input[role="combobox"]').fill('market research on tug-of-war');
-  await page.locator('.pal-i', { hasText: 'Spawn: market research on tug-of-war' }).click();
+  await page.locator('dialog[data-search="dialog"] input[role="combobox"]').fill('market research on tug-of-war');
+  await page.locator('dialog[data-search="dialog"] [role="option"]', { hasText: 'New job: market research on tug-of-war' }).click();
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-preset="market-research"]').getAttribute('aria-pressed'), 'true');
-  assert.match(page.url(), /#\/~hub\/today$/);
+  // The sheet's entry is added a moment after the sheet draws, and page.url() is the browser's last reported address: wait for it.
+  await page.waitForURL(/#\/~hub\/today\/~o$/);
+  assert.equal(await page.evaluate(() => location.hash), '#/~hub/today/~o', 'The Hub is Today, and the open sheet is its own history entry.');
   await page.keyboard.press('Escape');
 
   step('Approve: with the capability on the button reads Approve and each target has its toast, and a wait says why');

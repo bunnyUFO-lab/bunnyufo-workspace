@@ -54,7 +54,7 @@ test('publish uploads the cards, the card list and _shared, never the Jekyll sca
   } finally { await fake.close(); }
 });
 
-test('.cards-base.json is never published, at the root or inside a card folder', async () => {
+test('.cards-base.json and .cards-skipped.json are never published, at the root or inside a card folder', async () => {
   const fake = await startFakeS3();
   try {
     const { site, registryFile, bucketOptions } = await workspace(fake);
@@ -62,8 +62,10 @@ test('.cards-base.json is never published, at the root or inside a card folder',
     await mkdir(path.join(site, 'hub', 'media'), { recursive: true });
     await writeFile(path.join(site, 'hub', '.cards-base.json'), '{}');
     await writeFile(path.join(site, 'hub', 'media', '.cards-base.json'), '{}');
+    await writeFile(path.join(site, '.cards-skipped.json'), '{}');
+    await writeFile(path.join(site, 'hub', '.cards-skipped.json'), '{}');
     await publish({ content: site, registryFile, bucketOptions, log: () => {} });
-    assert.deepEqual([...fake.objects.keys()].filter(key => key.includes('cards-base')), []);
+    assert.deepEqual([...fake.objects.keys()].filter(key => key.includes('cards-base') || key.includes('cards-skipped')), []);
     assert.ok(fake.objects.has('sections/my-workspace/hub/index.md'));
   } finally { await fake.close(); }
 });

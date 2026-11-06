@@ -69,19 +69,21 @@ try {
       assert.ok(widths.scroll <= widths.inner, `${label}: ${what} scrolls sideways (${widths.scroll} > ${widths.inner}).`);
     };
 
-    step(`${label}: Work has a Jobs tab, and with a job running it opens on Running`);
+    step(`${label}: Work has Running and Delivered tabs, and with a job running the bare address opens on Running`);
     await page.goto(`${fx.url}#/~hub/work`);
-    await page.locator('[data-work-tab="jobs"]').click();
+    await page.locator('[data-work-tab="running"]').click();
     await page.locator('[data-jobs-list="running"]').waitFor();
-    assert.equal(await page.locator('[data-work-tab="jobs"][aria-selected="true"]').count(), 1);
-    assert.match(await page.locator('[data-jobs-tab="running"]').innerText(), /^Running 1$/);
+    assert.equal(await page.locator('[data-work-tab][aria-selected="true"]').count(), 1);
+    assert.equal(await page.locator('[data-work-tab="running"][aria-selected="true"]').count(), 1);
+    assert.match(await page.locator('[data-work-tab="running"]').innerText(), /^Running\s*1$/);
+    assert.equal(await page.locator('[data-work-tab]').count(), 4, 'Running, Delivered, Board, Activity.');
     const live = page.locator(`[data-job-row="${J.running}"]`);
     assert.match(await live.innerText(), /Still going[\s\S]*probe · Researcher · Hermes · \d+ min ago[\s\S]*Taken/, 'the row names its project and its age');
     assert.equal(await page.locator('[data-job-row]').count(), 1, 'Only the running one is on the Running tab.');
     await noSideways('Running');
 
-    step(`${label}: Finished lists each job with the pill for what it delivered or how it ended`);
-    await page.locator('[data-jobs-tab="finished"]').click();
+    step(`${label}: Delivered lists each job with the pill for what it delivered or how it ended`);
+    await page.locator('[data-work-tab="delivered"]').click();
     await page.locator('[data-jobs-list="finished"]').waitFor();
     const pills = async jobId => (await page.locator(`[data-job-row="${jobId}"] [data-job-pill]`).allInnerTexts()).join('|');
     assert.equal(await pills(J.card), 'Card|Ask|Checklist|Task|Job', 'The card job also filed an Ask, a list, a follow-up job and touched a task.');
@@ -104,6 +106,7 @@ try {
     assert.match(page.url(), new RegExp(`#/~hub/request/${J.pr}$`));
     await page.locator('[data-run-back]').click();
     await page.locator('[data-jobs-list="finished"]').waitFor();
+    assert.match(page.url(), /#\/~hub\/jobs\/finished$/, 'Back returns to the list the row was in.');
   }
 
   const page = await open({ width: 1280, height: 900 });
@@ -123,7 +126,7 @@ try {
   fixtures.push(quiet);
   await page.goto(`${quiet.url}#/~hub/jobs`);
   await page.locator('[data-jobs-empty]').waitFor();
-  assert.equal((await page.locator('[data-jobs-empty]').innerText()).trim(), 'No finished jobs in the last two months.', 'With nothing running the page opens on Finished.');
+  assert.equal((await page.locator('[data-jobs-empty]').innerText()).trim(), 'No delivered jobs in the last two months.', 'With nothing running the page opens on Delivered.');
   await page.goto(`${quiet.url}#/~hub/jobs/running`);
   assert.equal((await page.locator('[data-jobs-empty]').innerText()).trim(), 'Nothing running.');
 
@@ -149,6 +152,11 @@ try {
     assert.match(await href('checklist'), /#\/~hub\/checklist\//);
     assert.equal(await href('job'), `#/~hub/request/${J.child}`);
     assert.equal(await href('task'), '#/~hub/map/probe/pr-1a2');
+
+    step(`${label}: a task the job made or touched shows its id`);
+    const task = result.locator('[data-run-deliverable="task"]');
+    assert.equal(await task.getAttribute('data-task-id'), 'pr-1a2');
+    assert.equal((await task.locator('[data-run-task-id]').innerText()).trim(), 'pr-1a2', 'A task row names its id: titles are not looked up.');
 
     step(`${label}: the log opens on demand and holds the timeline`);
     await result.locator('[data-run-did] summary').click();
@@ -184,17 +192,17 @@ try {
     assert.equal(await result.locator('[data-run-no-deliverables]').count(), 0, 'A failure is not "delivered nothing".');
     assert.equal(await result.locator('[data-run-deliverables]').count(), 0);
     assert.match(await result.locator('.rd .rd-h').first().innerText(), /why it failed/i, 'The failure comes first.');
-    step(`${label}: "What it did" is not shown when nothing is under it`);
+    step(`${label}: "Live log" is not shown when nothing is under it`);
     for (const empty of [J.nothing, J.failed, J.stopped, J.silent]) {
       await result.goto(`${fx.url}#/~hub/request/${empty}`);
       await result.locator('.rd').waitFor();
-      assert.equal(await result.locator('[data-run-did]').count(), 0, `${empty}: no empty "What it did"`);
-      assert.equal(await result.getByText('What it did', { exact: true }).count(), 0);
+      assert.equal(await result.locator('[data-run-did]').count(), 0, `${empty}: no empty "Live log"`);
+      assert.equal(await result.getByText('Live log', { exact: true }).count(), 0);
     }
     await result.goto(`${fx.url}#/~hub/request/${J.noStart}`);
     await result.locator('[data-run-failure]').waitFor();
     assert.equal((await result.locator('[data-run-failure-text]').innerText()).trim(), 'The run could not start.');
-    assert.equal(await result.locator('[data-run-failure-detail]').isVisible(), false, 'The raw error is not on the page until What it did is opened.');
+    assert.equal(await result.locator('[data-run-failure-detail]').isVisible(), false, 'The raw error is not on the page until Live log is opened.');
     await result.locator('[data-run-did] summary').click();
     assert.match(await result.locator('[data-run-failure-detail]').innerText(), /Cannot read properties/);
     await result.goto(`${fx.url}#/~hub/request/${J.silent}`);
@@ -212,6 +220,35 @@ try {
     await result.goto(`${fx.url}#/~hub/request/${J.running}`);
     await result.locator('[data-run-timeline]').waitFor();
     assert.equal(await result.locator('[data-run-did]').count(), 0);
+
+    step(`${label}: Stop asks first, and Keep going leaves the job alone`);
+    assert.equal(await result.locator('[data-run-stop-ask]').count(), 0);
+    await result.locator('[data-run-stop]').click();
+    await result.locator('[data-run-stop-ask]').waitFor();
+    assert.equal(await result.locator('[data-run-stop]').count(), 0, 'The question replaces the button.');
+    await result.locator('[data-run-stop-cancel]').click();
+    await result.locator('[data-run-stop]').waitFor();
+    assert.equal(await result.locator('[data-run-stop-ask]').count(), 0);
+    assert.equal(await result.locator('[data-run-state]').getAttribute('data-run-state'), 'taken', 'Nothing was stopped.');
+  }
+
+  step('a visitor who cannot write sees the same pages without Stop, Approve again or New job');
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  contexts.push(guestContext);
+  await guestContext.route('**/api/capabilities', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), write: false } });
+  });
+  const guest = await guestContext.newPage();
+  guest.setDefaultTimeout(ms(15000));
+  await guest.goto(`${fx.url}#/~hub/jobs/running`);
+  await guest.locator('[data-job-row]').first().waitFor();
+  assert.equal(await guest.locator('[data-work-tab]').count(), 4, 'The same four tabs.');
+  assert.equal(await guest.locator('[data-spawn-open]').count(), 0, 'No New job.');
+  for (const job of [J.running, J.failed, J.card]) {
+    await guest.goto(`${fx.url}#/~hub/request/${job}`);
+    await guest.locator('[data-run-view]').waitFor();
+    assert.equal(await guest.locator('[data-run-stop], [data-run-again], [data-run-fire-retry]').count(), 0, `${job}: no action`);
   }
   console.log('hub-jobs-ui: ok');
 } finally {

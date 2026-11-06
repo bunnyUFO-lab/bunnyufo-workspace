@@ -13,6 +13,7 @@ const contexts = [];
 const fixtures = [];
 const open = async viewport => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -33,7 +34,7 @@ try {
     const alerts = page.locator('[aria-label="Alerts"]');
     await alerts.locator('[data-alert]').first().waitFor();
     assert.equal(await alerts.locator('[data-alert]').count(), 3);
-    assert.equal((await page.locator('[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '3');
+    assert.match(await alerts.locator('h3').innerText(), /3 failed/);
 
     step(`${label}: Dismiss removes one alert and the count drops; Undo brings it back`);
     const box = await alerts.locator('[data-alert-dismiss]').first().boundingBox();
@@ -41,7 +42,7 @@ try {
     await alerts.locator('[data-alert-dismiss]').first().click();
     await alerts.locator('[data-alerts-undo]').waitFor();
     await page.waitForFunction(() => document.querySelectorAll('[aria-label="Alerts"] [data-alert]').length === 2);
-    assert.equal((await page.locator('[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '2');
+    assert.match(await alerts.locator('h3').innerText(), /2 failed/);
     await page.screenshot({ path: process.env.SHOTS ? `${process.env.SHOTS}/alerts-dismissed-${label}.png` : undefined, fullPage: true }).catch(() => {});
     await alerts.locator('[data-alerts-undo-button]').click();
     await page.waitForFunction(() => document.querySelectorAll('[aria-label="Alerts"] [data-alert]').length === 3);
@@ -49,10 +50,12 @@ try {
     step(`${label}: Clear all empties the panel, and a second browser sees it empty too`);
     await alerts.locator('[data-alerts-clear]').click();
     await alerts.locator('.hub-empty', { hasText: 'No alerts.' }).waitFor();
-    assert.equal((await page.locator('[data-kpi="alerts"] .hub-kpi-v').innerText()).trim(), '0');
+    assert.equal(await alerts.locator('[data-alert]').count(), 0);
     const other = await open(viewport);
     await other.goto(`${fx.url}#/~hub/today`);
-    await other.locator('[aria-label="Alerts"] .hub-empty', { hasText: 'No alerts.' }).waitFor();
+    await other.locator('[data-today-title]').waitFor();
+    await other.waitForTimeout(500);
+    assert.equal(await other.locator('[aria-label="Alerts"]').count(), 0, 'Nothing failed: the panel is not drawn at all.');
     await other.goto(`${fx.url}#/~hub/activity/alerts`);
     await other.locator('.hub-row', { hasText: 'Request failed: Fix a typo in docs' }).waitFor();
     const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));

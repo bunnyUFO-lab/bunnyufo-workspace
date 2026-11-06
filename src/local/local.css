@@ -62,25 +62,3 @@
 .settings-install-skills:hover { background: #e8a4b516; border-color: #e8a4b566; }
 /* Where the menu covers the screen (960px), an open panel does the same to the content instead of squeezing it. */
 @media (max-width:960px){.files-container.expanded{width:48px}.files-container.expanded .files-panel{position:absolute;right:48px;top:0;bottom:0;width:min(320px,calc(100vw - 48px));z-index:45}}
-/* A phone has no room for a tool column: the rail becomes a menu behind a button at the top right,
-   and a tool's panel takes the whole screen. The button slides away with the header (lib/chrome). */
-.rail-toggle,.rail-backdrop{display:none}
-@media (max-width:640px){
-.files-container,.files-container.expanded{width:0}
-.rail-toggle{position:fixed;top:10px;right:12px;z-index:55;display:flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;border:1px solid #ffffff14;border-radius:50%;background:#16171cd9;backdrop-filter:blur(14px);color:#c9c2d0;transition:transform .25s ease,opacity .25s ease}
-.rail-toggle[aria-expanded=true]{z-index:62;color:#f0a0b0;border-color:#f0a0b045}
-html[data-chrome-hidden] .rail-toggle:not([aria-expanded=true]){transform:translateY(-64px);opacity:0;pointer-events:none}
-.rail-backdrop{display:block;position:fixed;inset:0;z-index:61;background:#05060966}
-.files-rail{display:none}
-.files-container.menu-open .files-rail{position:fixed;top:58px;right:12px;z-index:62;display:flex;align-items:stretch;width:min(240px,calc(100vw - 24px));height:auto;padding:6px;gap:2px;border:1px solid #ffffff14;border-radius:12px;background:#16171c;box-shadow:0 18px 50px #000a}
-.files-container.menu-open .rail-tool{flex-direction:row;justify-content:flex-start;gap:12px;width:100%;min-height:44px;padding:0 14px}
-.files-container.menu-open .rail-tool span{font-size:14px}
-.files-container.expanded .files-panel{position:fixed;inset:0;right:0;width:100%;z-index:63}
-/* The three dots are 1.4px wide at the icon's own stroke, which reads as a plain disc. */
-.rail-toggle svg{stroke-width:3}
-/* The light theme: these rules need the html attribute to beat the phone rules above, whose literals are dark. */
-html[data-workspace-theme=light] .rail-toggle{background:#ffffffe6;border-color:var(--hairline-strong);color:var(--text-dim)}
-html[data-workspace-theme=light] .rail-toggle[aria-expanded=true]{color:var(--pink);border-color:var(--pink)}
-html[data-workspace-theme=light] .files-container.menu-open .files-rail{background:#fff;border-color:var(--hairline-strong);box-shadow:var(--shadow-2)}
-html[data-workspace-theme=light] .rail-backdrop{background:#18213622}
-}

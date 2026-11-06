@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub } from '../hub.mjs';
-import { buildWork, reasonOf, unaskedOf } from '../hub-work.mjs';
+import { buildWork, reasonOf, unaskedOf, workPage } from '../hub-work.mjs';
 import { applyMarks, markEntry } from '../hub-marks.mjs';
 import { searchRows } from '../hub-beads.mjs';
 import { rowMatches, snippetOf, words } from '../../../src/hub/beadSearch.ts';
@@ -210,6 +210,26 @@ test('Backlog keeps 50 and counts the rest; Done keeps the newest 30', () => {
   assert.equal(work.lanes.done[0].id, 'ws-d0', 'Newest first.');
 });
 
+test('workPage returns the cards a lane cut, from the offset, in the same order', () => {
+  const issues = [
+    ...Array.from({ length: 120 }, (_, index) => beadsIssue({ id: `ws-b${index}`, status: 'deferred', updated: iso(new Date(NOW.getTime() - index * 60000)) })),
+    ...Array.from({ length: 70 }, (_, index) => beadsIssue({ id: `ws-d${index}`, status: 'closed', closed: iso(new Date(NOW.getTime() - index * 60000)), updated: iso(new Date(NOW.getTime() - index * 60000)) })),
+  ];
+  const input = { issues, now: NOW };
+  const first = buildWork(input);
+  assert.equal(first.lanes.backlog.length, 50);
+  assert.deepEqual(first.totals, first.counts);
+  const next = workPage(input, 'backlog', 50);
+  assert.equal(next.cards.length, 50);
+  assert.equal(next.total, 120);
+  assert.equal(next.totals.done, 70);
+  assert.equal(next.cards[0].id, 'ws-b50', 'It starts where the first answer ended.');
+  assert.deepEqual(workPage(input, 'backlog', 100).cards.map(item => item.id).slice(0, 2), ['ws-b100', 'ws-b101']);
+  assert.equal(workPage(input, 'backlog', 100).cards.length, 20, 'The last page is short.');
+  assert.equal(workPage(input, 'done', 30).cards[0].id, 'ws-d30');
+  assert.deepEqual(workPage(input, 'done', 500).cards, []);
+});
+
 test('GET /hub/work reads every project with a Beads copy, or one', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'buw-hub-work-'));
   const fake = await startFakeS3();
@@ -230,7 +250,8 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
     seedPcStatus(fake, pcStatusJson({ now: NOW, sessions: [{ id: 'pc1', name: 'x', status: 'idle', kind: 'interactive', folder: 'f', repo: 'r', branch: 'sprint/ml-abcd-x' }] }));
 
     const all = (await get('/hub/work')).body;
-    assert.deepEqual(Object.keys(all), ['lanes', 'counts', 'at']);
+    assert.deepEqual(Object.keys(all), ['lanes', 'counts', 'totals', 'at']);
+    assert.deepEqual(all.totals, all.counts);
     assert.deepEqual(all.lanes.running.map(item => item.key), ['bead:ml-abcd']);
     assert.equal(all.lanes.running[0].live.state, 'idle');
     assert.equal(all.lanes.ready.some(item => item.key === 'bead:bl-abcd'), true);
@@ -241,6 +262,13 @@ test('GET /hub/work reads every project with a Beads copy, or one', async () => 
     assert.deepEqual(one.lanes.backlog.map(item => item.project), ['bunnylink']);
     assert.equal((await get('/hub/work?project=Bad_Id')).status, 404);
     assert.equal((await get('/hub/work?project=probe')).body.counts.ready, 0);
+
+    const page = (await get('/hub/work?project=bunnylink&lane=backlog&offset=0')).body;
+    assert.deepEqual(Object.keys(page), ['lane', 'offset', 'cards', 'total', 'totals', 'at']);
+    assert.equal(page.total, one.counts.backlog);
+    assert.equal((await get('/hub/work?lane=running')).status, 400, 'Only the lanes that are cut have pages.');
+    assert.equal((await get('/hub/work?lane=done&offset=-1')).status, 400);
+    assert.equal((await get('/hub/work?lane=done&offset=x')).status, 400);
   } finally { server.close(); await fake.close(); }
 });
 

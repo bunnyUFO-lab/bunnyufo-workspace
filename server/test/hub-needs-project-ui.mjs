@@ -19,6 +19,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -133,8 +134,9 @@ try {
   assert.deepEqual(await chipsOf(), [['all', '2'], ['question', '1'], ['unstick', '1'], ['answered', null]]);
   assert.equal(await page.locator('.needs-project input').inputValue(), 'Sprite Studio (2)');
 
-  step('Back restores All');
-  await page.goBack();
+  step('picking All restores All: a project pick is state on the screen and added no step to Back');
+  await page.locator('.needs-project input').click();
+  await page.locator('.needs-project [role="option"][data-value="all"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
   assert.equal(await hash(), '#/~hub/needs/all');
 
@@ -199,38 +201,42 @@ try {
   // Controls shorter than 44 px: [text, height] pairs of the visible ones.
   const small = (view, selector) => view.locator(selector).evaluateAll(list => list.map(item => [item.textContent.trim().slice(0, 24), Math.round(item.getBoundingClientRect().height), item.getBoundingClientRect().width]).filter(([, height, width]) => width > 0 && height < 44));
 
-  step('project page: name, Runs on chip, three buttons, picker and tabs; every control is 44 px');
+  step('project page: name, Runs on chip, Plan and New job, Run sprint and three tabs; every control is 44 px');
   await goPage(page, '#/~hub/project/magic-loops');
   assert.equal((await page.locator('.pp-title').innerText()).trim(), 'Magic Loops');
   await page.locator('.hub-runs').waitFor();
   assert.deepEqual(await actions(page), ['plan', 'build', 'sprint']);
-  await page.waitForFunction(() => document.querySelector('[data-project-tab="needs"]').textContent.includes('('));
-  assert.deepEqual(await page.locator('[data-project-tab]').allInnerTexts(), ['Roadmap', 'Running (0)', 'Needs you (3)', 'Library']);
-  assert.equal(await page.locator('.pp .hub-chips .hub-chip.on').innerText(), 'Magic Loops');
-  assert.deepEqual(await small(page, '[data-project-actions] .hub-btn, .pp-tabs .wk-tab, .pp-more, .pp .hub-chip, .pp select, .pp .hub-runs'), [], 'Every control is at least 44 px high.');
+  await page.waitForFunction(() => document.querySelector('[data-project-tab="work"] small'));
+  assert.deepEqual((await page.locator('[data-project-tab]').allInnerTexts()).map(text => text.replace(/\s+/g, '')), ['Roadmap', 'Work3', 'Cards']);
+  assert.equal(await page.locator('[data-project-row="magic-loops"]').getAttribute('aria-current'), 'page', 'The Projects list beside it lights this project.');
+  assert.deepEqual(await small(page, '[data-project-action], .pp-tabs a, .pp-switch button, .pp .hub-runs'), [], 'Every control is at least 44 px high.');
   assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator('[data-project-note]').count(), 0, 'Magic Loops runs on the PC: no note.');
-  assert.equal(await page.locator('[data-hub-link="project"]').getAttribute('aria-current'), 'page', 'Projects is lit in the sidebar.');
-  assert.deepEqual(await page.locator('[data-hub-group="plan"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['project', 'map', 'chat']);
+  assert.equal(await page.locator('[data-rail] [data-nav="project"]').getAttribute('aria-current'), 'page', 'Projects is lit on the rail.');
+  assert.deepEqual((await page.locator('[data-rail] [data-nav]').evaluateAll(list => list.map(item => item.getAttribute('data-nav')))).filter(name => name === 'project' || name === 'chat'), ['chat', 'project'], 'Chat, then Projects, as in the mockup; the Roadmap has no entry of its own.');
 
-  step('project page, Roadmap tab: one row per milestone with the map counts; finished ones fold; a chip opens that task over the page, and Back returns');
+  step('project page, Roadmap list: the current milestone open with the map counts; finished ones fold into Done; a task opens over the page, and Back returns; Map and List add no entry');
   const rows = page.locator('[data-pp-roadmap] [data-pp-milestone]');
   assert.equal(await rows.count(), 1);
-  assert.equal(await rows.first().locator('.pp-ms-count').innerText(), '2 of 4 done');
+  assert.match(await rows.first().locator('[data-pp-count]').innerText(), /^Now · 2 of 4 done/);
   assert.equal(await rows.first().locator('.pp-ring text').innerHTML(), '2/4');
   assert.deepEqual(await rows.first().locator('[data-pp-task]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-task'))), ['ml-t3', 'ml-t4', 'ml-t1', 'ml-t2']);
-  assert.equal((await page.locator('[data-pp-finished] summary').innerText()).trim(), '1 finished');
-  assert.equal(await page.locator('[data-pp-finished][open]').count(), 0);
+  assert.equal((await page.locator('[data-pp-done-toggle]').innerText()).trim(), 'Done (1)');
+  assert.equal(await page.locator('[data-pp-finished][data-open="true"]').count(), 0);
   await rows.first().locator('[data-pp-task="ml-t3"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/roadmap/ml-t3');
   await page.locator('.hub-map-panel').waitFor();
   await page.goBack();
   await page.locator('[data-project-page="magic-loops"] [data-pp-roadmap]').waitFor();
   assert.equal(await page.evaluate(() => location.hash), '#/~hub/project/magic-loops');
-  await page.locator('[data-pp-open-map]').click();
+  const depth = await page.evaluate(() => history.length);
+  await page.locator('[data-roadmap-view="map"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/map/magic-loops');
-  await page.goBack();
+  await page.locator('.hub-map-box svg').waitFor();
+  await page.locator('[data-roadmap-view="list"]').click();
+  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await page.locator('[data-pp-roadmap]').waitFor();
+  assert.equal(await page.evaluate(() => history.length), depth, 'Map and List added no entry.');
 
   step('project page, Roadmap tab with roadmaps (RoadmapRows): nested rows instead of the flat list; a row opens that roadmap\'s map, and Back returns');
   await goPage(page, '#/~hub/project/roadmapped');
@@ -246,49 +252,47 @@ try {
   await page.locator('[data-pp-roadmap-rows]').waitFor();
   await goPage(page, '#/~hub/project/magic-loops');
 
-  step('project page, wide: the Running panel sits beside the Roadmap tab, and only there');
-  await page.locator('[data-pp-side] [aria-label="Working now"]').waitFor();
-  assert.equal(await page.locator('[aria-label="Working now"]').count(), 1);
+  step('project page: the Roadmap tab has no Running panel any more; what runs is on the Work tab');
+  assert.equal(await page.locator('[aria-label="Working now"], [data-pp-side]').count(), 0);
 
   step('project page: a tab pushes history, the count matches Today, a row opens Needs you with the project chosen and the item flashed');
-  await page.locator('[data-project-tab="needs"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/needs');
+  await page.locator('[data-project-tab="work"]').click();
+  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/work');
   await page.locator('.pp .nrow').first().waitFor();
-  assert.equal(await page.locator('[data-pp-side]').count(), 0, 'The side panel belongs to the Roadmap tab.');
   assert.equal(await page.locator('.pp .nrow').count(), 3);
   await page.goBack();
   await page.locator('[data-pp-roadmap]').waitFor();
-  await page.locator('[data-project-tab="needs"]').click();
+  await page.locator('[data-project-tab="work"]').click();
   await page.locator('.pp .nrow').first().waitFor();
   await page.locator('.pp .nrow').first().click();
   await page.waitForFunction(() => location.hash === '#/~hub/needs/all/magic-loops');
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 3 && document.querySelector('.ni.flash'));
   assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'A link does not change the choice.');
   await go('#/~hub/project/magic-loops/needs');
+  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/work');
   assert.equal((await page.locator('[data-pp-all-needs]').innerText()).trim(), 'All in Needs you ›');
-  await page.locator('[data-project-tab="running"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/running');
   await page.locator('[aria-label="Working now"]').waitFor();
   assert.equal(await page.locator('[aria-label="Working now"]').count(), 1);
 
-  step('project page, Library tab: the section\'s cards newest first; no section says so; a bad id says no such project');
-  await page.locator('[data-project-tab="library"]').click();
+  step('project page, Cards tab: the section\'s cards newest first; no section says so; a bad id says no such project');
+  await page.locator('[data-project-tab="cards"]').click();
   await page.locator('[data-pp-cards]').waitFor();
   assert.deepEqual(await page.locator('[data-pp-card]').allInnerTexts(), ['Dash report', 'Jump notes']);
   assert.equal(await page.locator('[data-pp-card]').first().getAttribute('href'), '/magic-loops#/dash-report');
   assert.equal(await page.locator('[data-pp-open-section]').getAttribute('href'), '/magic-loops');
-  await goPage(page, '#/~hub/project/sprite-studio/library');
+  await goPage(page, '#/~hub/project/sprite-studio/cards');
   await page.locator('[data-pp-no-library]').waitFor();
-  assert.equal((await page.locator('[data-pp-no-library]').innerText()).trim(), 'No Library section for this project.');
+  assert.match((await page.locator('[data-pp-no-library]').innerText()).trim(), /^This project has no cards yet, because it has no Library section\./);
+  assert.match(await page.locator('[data-pp-no-library] [data-pp-library-link]').getAttribute('href'), /#\/~hub\/library/, 'It says where to go next.');
   await goPage(page, '#/~hub/project/no-such-thing');
-  assert.equal((await page.locator('[data-project-missing]').innerText()).trim(), 'No project called no-such-thing.');
+  assert.match((await page.locator('[data-project-missing]').innerText()).trim(), /^No project called no-such-thing\./);
   assert.equal(await page.locator('[data-project-action]').count(), 0);
-  assert.ok(await page.locator('.pp .hub-chips .hub-chip').count() >= 3, 'The chips are there to pick one.');
+  assert.ok(await page.locator('[data-project-row]').count() >= 3, 'The Projects list is there to pick one.');
 
-  step('project page: no id opens a project; picking a chip pushes history');
+  step('Projects: no id opens the first project beside the list; picking a row pushes history');
   await goPage(page, '#/~hub/project');
   assert.ok(await page.locator('[data-project-page]').getAttribute('data-project-page'), 'It shows a project.');
-  await page.locator('.pp .hub-chips .hub-chip', { hasText: 'Bunnylink' }).click();
+  await page.locator('[data-project-row="bunnylink"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/bunnylink');
   await page.goBack();
   await page.waitForFunction(() => location.hash === '#/~hub/project');
@@ -313,7 +317,7 @@ try {
   await goPage(page, '#/~hub/project/workspace-app');
   await page.locator('[data-project-note="sprint"]').waitFor();
   assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'Sprints run on the PC. Workspace app has no PC runs.');
-  assert.equal(await page.locator('button[data-project-action="sprint"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-project-action="sprint"]').count(), 0, 'No sprint button where none can run.');
   assert.match(await page.locator('[data-project-note="runs-on"]').innerText(), /runs in the cloud/);
   await goPage(page, '#/~hub/project/bunnylink');
   await page.locator('[data-project-note="sprint"]').waitFor();
@@ -322,44 +326,62 @@ try {
   await goPage(page, '#/~hub/project/sprite-studio');
   await page.locator('[data-project-note="sprint"]').waitFor();
   assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'No open milestone to sprint on.');
-  assert.equal(await page.locator('button[data-project-action="sprint"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-project-action="sprint"]').count(), 0);
 
-  step('the name links: Needs, Work, the Roadmap, an item page and Today open the page; a list chip in Needs still filters');
+  step('the name links: Needs, Work and an item page open the page; a list chip in Needs still filters; Today has no picker');
   await go('#/~hub/needs/all/magic-loops');
   await page.locator('[data-project-link="magic-loops"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await go('#/~hub/work/magic-loops');
   await page.locator('.work-spawn [data-project-link="magic-loops"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
-  await go('#/~hub/map/magic-loops');
-  await page.locator('.hub-map-chips [data-project-link="magic-loops"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await go(`#/~hub/ask/${id('magic-loops', 'jump', 'a111')}`);
   await page.locator('.hub-top [data-project-chip="magic-loops"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await go('#/~hub/today');
-  await page.locator('.today-project .hub-chip', { hasText: 'Magic Loops' }).click();
-  await page.locator('.today-project [data-project-link="magic-loops"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
-  await page.evaluate(() => localStorage.removeItem('hub-today-project'));
+  await page.locator('[data-today-title]').waitFor();
+  assert.equal(await page.locator('[data-today-project], .today-project').count(), 0, 'Today has no project picker, so it has no name link either.');
   await go('#/~hub/needs/all');
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
   await page.locator('.ni [data-project-chip="bunnylink"]').first().click();
   await page.waitForFunction(() => location.hash === '#/~hub/needs/all/bunnylink');
 
-  step('at 390 px: the page fits, the three buttons share a row, every control is 44 px, and More has Projects');
+  step('an address wins on Needs you and writes nothing; a bare address is All, whatever another screen picked (moved from hub-shared-project-ui)');
+  await page.evaluate(() => { localStorage.setItem('buw.hub.project', 'sprite-studio'); });
+  await page.goto(`${fixture.url}#/~hub/needs`);
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
+  assert.equal(await hash(), '#/~hub/needs', 'A bare address stays bare: no project is filled in from memory.');
+  await go('#/~hub/needs/question/magic-loops');
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 2);
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'A link is a look, not a pick.');
+  assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), 'sprite-studio', 'Work and the Roadmap keep what they had.');
+  await go('#/~hub/needs/question');
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 3);
+
+  step('the Activity project filter is local: it writes nothing anyone else reads (moved from hub-shared-project-ui)');
+  await go('#/~hub/activity');
+  const activity = page.locator('.hub-top:has([aria-label="Project"])').first();
+  await activity.waitFor();
+  const activityChips = activity.locator('.hub-chips[aria-label="Project"] .hub-chip');
+  if (await activityChips.count()) await activityChips.filter({ hasText: /Bunnylink/i }).first().click();
+  else {
+    await activity.getByRole('combobox', { name: 'Project' }).click();
+    await activity.locator('[role="option"]', { hasText: /Bunnylink/i }).first().click();
+  }
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null);
+  assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), 'sprite-studio', 'Activity left the remembered project alone.');
+
+  step('at 390 px: the page fits, Plan and New job share a row, every control is 44 px');
   const narrow = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await goPage(narrow, '#/~hub/project/magic-loops');
   await narrow.locator('a[data-project-action="sprint"]').waitFor();
   assert.equal(await narrow.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth && document.querySelector('.hub').scrollWidth <= document.querySelector('.hub').clientWidth), true, 'No sideways scroll.');
-  assert.deepEqual(await small(narrow, '[data-project-actions] .hub-btn, .pp-tabs .wk-tab, .pp .hub-chip, .pp .hub-runs, .pp-chip, .pp-ms-title'), [], 'Every control is at least 44 px high.');
-  const tops = await narrow.locator('[data-project-actions] .hub-btn').evaluateAll(list => list.map(item => Math.round(item.getBoundingClientRect().top)));
-  assert.equal(new Set(tops).size, 1, 'The three buttons share a row.');
+  assert.deepEqual(await small(narrow, '[data-project-action], .pp-tabs a, .pp-switch button, .pp .hub-runs, .pj-ms-head, .pj-task'), [], 'Every control is at least 44 px high.');
+  const tops = await narrow.locator('[data-project-actions] .hub-btn, [data-project-actions] .ui-btn').evaluateAll(list => list.map(item => Math.round(item.getBoundingClientRect().top)));
+  assert.equal(new Set(tops).size, 1, 'Plan and New job share a row.');
   assert.equal(await narrow.locator('[aria-label="Working now"]').count(), 0, 'Below 1000 px the Running panel is the Running tab only.');
-  assert.deepEqual(await narrow.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'map', 'more'], 'The phone bar is unchanged.');
-  assert.equal(await narrow.locator('[data-hub-tab="more"]').getAttribute('class').then(value => value.includes('active')), true, 'More is lit on the page: Projects lives there.');
-  await narrow.locator('[data-hub-tab="more"]').tap();
-  assert.equal(await narrow.locator('[data-hub-more="project"]').getAttribute('aria-current'), 'page');
+  assert.equal(await narrow.locator('[data-tabs]').count(), 0, 'A project page is a page of its own on a phone: no tab bar, a Back button instead.');
+  assert.equal(await narrow.locator('[data-top="detail"] [data-back]').count(), 1);
 
   console.log('hub-needs-project-ui: passed');
 } finally {

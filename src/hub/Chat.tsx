@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
-import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatSummary, ChatTool, HelpPreview, Item } from '../lib/hub'
+import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatListAnswer, ChatMarks, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
-import { hubHash, parseHelpId, reviewHash } from '../lib/route'
+import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
+import { ROUTE_EVENT, afterPop, back, direction, entryBelowSerial, entrySerial, overlayDepth, skipGone, swap } from '../lib/entries'
+import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
 import { elapsedLabel } from './runLines'
 import { StreamCut, plainText, streamChat, streamLive } from './chatStream'
 import type { ChatHandlers } from './chatStream'
-import { MAX_IMAGES, prepareImage, toBase64 } from './chatImages'
+import { MAX_IMAGES, PICTURE_TYPES, prepareImage, toBase64 } from './chatImages'
 import type { Prepared } from './chatImages'
 import HubImage from './HubImage'
 import JobsCard from './ChatJobs'
@@ -19,17 +21,25 @@ import { LIVE_JOB } from './jobStates'
 import Md, { CodeBlock } from './Md'
 import { splitFences } from './chatText'
 import { useHubData } from './useHub'
-import { onAsk, takeAsk } from './askHermes'
+import { onAsk, peekAsk, takeAsk } from './askHermes'
 import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
 import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
 import { setFocus } from './needsFocus'
-import { AgentSprite } from './team/AgentSprite'
-import { chooseModel, pauseNote, type ChatPause } from './chatModel'
+import Who from './ChatWho'
+import ChatList, { ChatSetAside, RenameSheet } from './ChatList'
+import { chatMenu, onChatMarks, restoreChat, setChatMarks, wasDeletedHere } from './chatActions'
+import { Sheet } from '../ui/Sheet'
+import RowMenu from '../ui/RowMenu'
+import { IconButton } from '../ui/Controls'
+import type { HubData } from './useHub'
+import { chooseModel, pauseNote } from './chatModel'
 import { MAX_MISSES, hasRunningDelegate, nextLookMs, replySaved, sameLines, type ChatAnswer } from './chatWatch'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
+import { addJobIds, applyRead, askedAt, beginChat, cachedLines, dismissKey, entryFor, expired, lineCount, markFailed, mergeChatJobs, noteJobs, refuseChat, setChatId, setReply, turnSaved, warnMissing } from './inProgress.ts'
+import { useInProgress } from './useInProgress.ts'
 
 const READ_KEY = 'buw.hub.readAloud'
 const JOB = '__job'
@@ -37,12 +47,6 @@ const AUTO = 'auto'
 const HERMES = 'hermes'   // persona: no persona, Hermes itself
 
 /** What the tags call a model: its label, or the bare id when the server no longer lists it. */
-/** When a conversation was last used, in the Hub's clock: the time today, the date and time before. */
-const when = (iso: string) => {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toDateString() === new Date().toDateString() ? clock(iso) : `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${clock(iso)}`
-}
 /** A time in a pause note: the time today, with the weekday when it falls on another day. */
 const pauseWhen = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clock(iso) : `${new Date(iso).toLocaleDateString([], { weekday: 'short' })} ${clock(iso)}`)
 const nameOf = (models: ChatModel[], id: string) => models.find(entry => entry.id === id)?.label ?? id
@@ -181,12 +185,6 @@ function HelpBanner({ about, text, pictures }: { about: { kind: HelpKind; id: st
   )
 }
 
-/** persona: the agent's own sprite from the Team, else a name-seeded one while the Team loads or when it is off. */
-function Who({ id, name, agents, size, bare }: { id: string; name: string; agents: TeamAgent[]; size: number; bare?: boolean }) {
-  const sprite = agents.find(agent => agent.id === id)?.sprite ?? { kind: 'random' as const, salt: 0, name }
-  return <span className="hub-who" data-who={id}><AgentSprite sprite={sprite} size={size} title={name} />{!bare && <span className="hub-who-name">{name}</span>}</span>
-}
-
 /** The owner's own words as typed, with any fenced block shown as code (and its Copy button) instead of its backticks. */
 function OwnerText({ text }: { text: string }) {
   return (
@@ -198,10 +196,10 @@ function OwnerText({ text }: { text: string }) {
   )
 }
 
-function Bubble({ line, conversation, models, who, agents, jobs, onJobsChanged }: { line: Shown; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[]; jobs: ChatJob[]; onJobsChanged: () => void }) {
+function Bubble({ line, index, conversation, models, who, agents, jobs, onJobsChanged }: { line: Shown; index?: number; conversation?: string; models: ChatModel[]; who?: ChatPersona | null; agents: TeamAgent[]; jobs: ChatJob[]; onJobsChanged: () => void }) {
   const urls = line.previews ?? (conversation ? (line.images ?? []).map(image => `/api/hub/chat/${encodeURIComponent(conversation)}/images/${encodeURIComponent(image.file)}`) : [])
   return (
-    <div className={`hub-bubble ${line.role}`}>
+    <div className={`hub-bubble ${line.role}`} data-line={index}>
       {line.role === 'assistant' && who && <Who id={who.id} name={who.name} agents={agents} size={22} />}
       {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} copy breaks /> : line.text && <OwnerText text={line.text} />}
       {urls.length > 0 && (
@@ -220,16 +218,53 @@ function Bubble({ line, conversation, models, who, agents, jobs, onJobsChanged }
 
 export default function Chat({ id }: { id?: string }) {
   if (!host.chat) return <p className="hub-empty">Chat is not set up on this host.</p>
-  return <ChatShell id={id} />
+  return <ChatScreen id={id} />
+}
+
+/**
+ * The Chat screen. A phone shows one pane: the list at `chat`, a thread at `chat/<id>`, or the Archived and Trash lists. From 900 px
+ * the list stays on the left and the thread (or one of those lists) fills the right. Only the panes that show are mounted.
+ */
+function ChatScreen({ id }: { id?: string }) {
+  const desktop = useIsDesktop()
+  const list = useHubData<ChatListAnswer>('/chat')
+  const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker, the header and the rows
+  const agents = team.data?.agents ?? []
+  const place = id === 'archived' || id === 'trash' ? id : null
+  const blank = id === 'new'   // `chat/new`: the + button's address, a thread with nobody in it yet
+  const target = parseChatId(place || blank ? undefined : id)
+  // A start ("Chat with Researcher", Plan in Hermes) or a question from Search is waiting for a composer: on a phone the thread shows,
+  // not the list, until the person leaves this address.
+  const [wantedAt, setWantedAt] = useState(0)   // the history entry that has the start waiting
+  const waiting = !target.id && !place && (!!peekChatStart() || !!peekAsk())
+  if (waiting && wantedAt !== entrySerial()) setWantedAt(entrySerial())
+  // A sheet open over the thread (the options) is an entry of its own: the start is still wanted on the entry beneath it, or a late read of the list would redraw the screen as the list and close the sheet.
+  const wanted = wantedAt !== 0 && (wantedAt === entrySerial() || (overlayDepth(window.location.hash) > 0 && wantedAt === entryBelowSerial()))
+  useEffect(() => {
+    const want = () => { if (!target.id && !place) setWantedAt(entrySerial()) }
+    const offStart = onChatStart(want)
+    const offAsk = onAsk(want)
+    return () => { offStart(); offAsk() }
+  }, [target.id, place])
+  const threadOnly = !!target.id || blank || wanted
+  const thread = <ChatShell id={target.id} line={target.line} list={list} team={team} />
+  const setAside = place ? <ChatSetAside view={place} agents={agents} personas={list.data?.personas ?? []} models={list.data?.models ?? []} /> : null
+  const showList = desktop || (!place && !threadOnly)
+  return (
+    <div className="hub-chat" data-chat-screen={place ?? (threadOnly ? 'thread' : 'list')}>
+      {showList && <aside className="hub-chat-pane list" aria-label="Conversations"><ChatList list={list} agents={agents} activeId={target.id} /></aside>}
+      {setAside ? <section className="hub-chat-pane main">{setAside}</section> : (desktop || threadOnly) && thread}
+    </div>
+  )
 }
 
 // A start from Spawn always lands in a fresh conversation. On a new Chat that is already showing (it may be empty, or busy with a
 // reply that is still streaming) the view is remounted, so it opens like New chat does: the agent's own model, no earlier pick,
 // the text as a draft. On a stored conversation the address change to a new chat remounts it anyway.
-function ChatShell({ id }: { id?: string }) {
+function ChatShell({ id, line, list, team }: { id?: string; line?: number; list: HubData<ChatListAnswer>; team: HubData<TeamView> }) {
   const [fresh, setFresh] = useState(0)
   useEffect(() => onChatStart(() => { if (!id) setFresh(count => count + 1) }), [id])
-  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} />
+  return <ChatView key={`${id ?? 'new'}-${fresh}`} id={id} line={line} list={list} team={team} />
 }
 
 // A new conversation gets its address when its first reply is done; what is on screen travels to the new view.
@@ -248,18 +283,16 @@ const REOPEN_NOTE = 'Hermes is still answering here. The reply shows when it is 
 const HELD_WHY: Record<NonNullable<ChatQueued['why']>, string> = { stopped: 'the reply was stopped', failed: 'the reply failed', lost: 'Hermes lost the reply', long: 'this chat is too long', old: 'this waited too long', joined: 'it joined messages that were held' }
 const LOST_NOTE = 'The reply did not arrive. Reopen the chat later, or send the message again.'
 
-function ChatView({ id }: { id?: string }) {
+function ChatView({ id, line: landLine, list, team }: { id?: string; line?: number; list: HubData<ChatListAnswer>; team: HubData<TeamView> }) {
   const help = parseHelpId(id)
   const preview = useHubData<HelpPreview>(help ? `/chat/about/${help.kind}/${help.step ?? '-'}/${encodeURIComponent(help.id)}` : null)
-  const list = useHubData<{ conversations: ChatSummary[]; models?: ChatModel[]; personas?: ChatPersona[]; chain?: string[]; pauses?: ChatPause[]; autoFirst?: string }>('/chat')
-  const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker and the header
   // "Chat with <agent>" from Spawn: a fresh Chat reads the start once at mount (peeked, so a doubled initializer sees it too; the effect below drops it).
   const [start] = useState(() => (id || help ? null : peekChatStart()))
   const [[initial, initialModel, initialPersona]] = useState<[Shown[] | null, string | null, string]>(() => { const hit = carried && carried.id === id ? carried : null; carried = null; return [hit ? hit.lines : null, hit ? hit.model : null, hit ? hit.persona : start?.persona ?? HERMES] })
   const [persona, setPersona] = useState(initialPersona)   // persona: who the chat talks to; fixed once the chat has a line
   // model: what the owner picked in this conversation (or the chat's own last choice), or null: then the persona's preferred model, else Auto.
   const [picked, setPicked] = useState<string | null>(initialModel)
-  const [messages, setMessages] = useState<Shown[]>(initial ?? [])
+  const [messages, setMessages] = useState<Shown[]>(() => initial ?? (id && !help && entryFor(id) ? cachedLines(entryFor(id)!) : []))   // in progress: the device's lines show at once
   const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
   const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
   const who = personas.find(entry => entry.id === persona) ?? null   // null is Hermes
@@ -280,6 +313,7 @@ function ChatView({ id }: { id?: string }) {
   const [streaming, setStreaming] = useState(false)
   const [tools, setTools] = useState<ChatTool[]>([])
   const [delegates, setDelegates] = useState<ChatDelegate[]>([])
+  const [thinking, setThinking] = useState('')   // what Hermes is thinking, shown until the reply has text
   const [recovering, setRecovering] = useState(false)   // the stream is gone or was never here: the reply is read from the saved chat
   const [queued, setQueued] = useState<ChatQueued[]>([])   // sent while a reply ran; the Hub delivers them when it ends
   // Every request about the queue is numbered when it starts; an answer older than one already shown is dropped, so a late answer never takes a row away.
@@ -301,9 +335,11 @@ function ChatView({ id }: { id?: string }) {
   const afterRef = useRef<(name: string) => Promise<void>>(async () => {})
   const followRef = useRef<(name: string, answer: ChatAnswer) => Promise<void>>(async () => {})
   const [note, setNote] = useState<string | null>(null)
+  const [marks, setMarks] = useState<ChatMarks | null>(null)   // this chat's pin, rename, archive, Trash and unread marks, as the Hub holds them
+  const [options, setOptions] = useState(false)   // the sheet that holds the persona and the model
+  const [renaming, setRenaming] = useState(false)
   const cutTurn = useRef<CutTurn | null>(null)
   const [approval, setApproval] = useState<ChatApproval | null>(null)
-  const [drawer, setDrawer] = useState(false)
   const [readAloud, setReadAloud] = useState(() => remember(READ_KEY) === '1')
   const abort = useRef<AbortController | null>(null)
   const run = useRef<string | null>(null)
@@ -313,11 +349,26 @@ function ChatView({ id }: { id?: string }) {
   const scroller = useRef<HTMLDivElement>(null)
   const conversation = useRef<string | undefined>(help ? undefined : id)
   const [shownId, setShownId] = useState<string | undefined>(help ? undefined : id)
+  // In progress on this device (inProgress.ts): a read that comes back without the turn must not take its lines away.
+  const progress = useInProgress()
+  const entry = entryFor(shownId, progress)
+  const [degraded, setDegraded] = useState(false)   // the Hub has not saved what this device holds
+  const hubLines = useRef(0)   // how many lines the Hub held at the last read: a turn sent from a degraded thread counts from there
+  const titleRef = useRef('')   // the header's title, for the entry of a turn sent in an existing chat
+  const reconcile = useCallback((name: string, answer: ChatAnswer): ChatLine[] => {
+    const mine = entryFor(name)
+    hubLines.current = lineCount(answer.messages)
+    const verdict = mine ? applyRead(name, answer) : null
+    if (mine && verdict?.kind === 'keep') { warnMissing(name, lineCount(verdict.lines), lineCount(answer.messages), mine.startedAt, null); setDegraded(true); return verdict.lines }
+    setDegraded(false)
+    return answer.messages
+  }, [])
   // The jobs the replies name: read only when a line has some. Looked at again when a line gains ids, and every 20 s while a job is going.
   const jobIds = messages.flatMap(line => line.jobs ?? [])
   const jobKey = jobIds.join(',')
   const jobRead = useHubData<{ jobs: ChatJob[] }>(jobIds.length && shownId && !help ? `/chat/${encodeURIComponent(shownId)}/jobs` : null)
-  const jobs = jobRead.data?.jobs ?? []
+  const jobs = mergeChatJobs(jobRead.data?.jobs ?? [], progress, shownId)   // the Hub's rows win; a job only the device holds stays
+  useEffect(() => { if (shownId && jobRead.data) noteJobs(shownId, jobRead.data.jobs) }, [shownId, jobRead.data])
   const jobsLive = jobs.some(job => LIVE_JOB.has(job.state))
   const reloadJobs = jobRead.reload
   useEffect(() => { if (jobKey) reloadJobs() }, [jobKey, reloadJobs])
@@ -327,6 +378,7 @@ function ChatView({ id }: { id?: string }) {
     return () => window.clearInterval(timer)
   }, [jobsLive, reloadJobs])
   const urls = useRef(new Set<string>())
+  const left = useRef(false)   // the screen was left: a late event of its stream must not move the address
   const slots = useRef(MAX_IMAGES)
   const speaks = typeof window !== 'undefined' && 'speechSynthesis' in window
 
@@ -335,23 +387,54 @@ function ChatView({ id }: { id?: string }) {
     if (!id || help) return undefined
     // A view that a finished turn handed its lines to has them already: it only looks at what the turn left behind (a queued message, a hold).
     if (initial) { const timer = window.setTimeout(() => void afterRef.current(id), 0); return () => window.clearTimeout(timer) }   // after the effects below have set the refs
+    // A chat this tab just put in the Trash: Back onto its entry goes on past it. Going forward to it (its row in the Trash, a link) opens it, with its banner and Restore.
+    if (wasDeletedHere(id) && direction() === 'back') { skipGone(hubHash('chat')); return undefined }
     let stopped = false
     const number = stamp()
     hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
       .then(answer => {
         if (stopped) return
-        setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
+        setMarks(answer.state ?? null)
+        if (answer.state?.unread && host.write) void setChatMarks(id, { unread: false }).catch(() => { /* the dot stays until the next read */ })   // reading a chat clears its unread mark
+        const lines = reconcile(id, answer)
+        setMessages(lines); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
         takeView(number, answer)
         if (answer.running) void followRef.current(id, answer)   // opened while the reply is still coming: follow it live
       })
-      .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
+      .catch(failure => {
+        if (stopped) return
+        const mine = entryFor(id)
+        // Not there, or not answering, while the device holds the turn: keep its lines and look again (the effect below); never "not found".
+        if (mine) { warnMissing(id, lineCount(cachedLines(mine)), null, mine.startedAt, failure instanceof HubError ? failure.status : null); setMessages(cachedLines(mine)); setDegraded(true); return }
+        setError(failure instanceof Error ? failure.message : 'The conversation could not be read.')
+      })
     return () => { stopped = true }
-  }, [id, initial, help, stamp, takeView])
+  }, [id, initial, help, stamp, takeView, reconcile])
+  const holding = !!entry && !expired(entry)   // the device still holds a turn the Hub has not confirmed
+  useEffect(() => {
+    if (!degraded || !holding || !shownId || help) return undefined
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void afterRef.current(shownId) }, 8000)
+    return () => window.clearInterval(timer)
+  }, [degraded, holding, shownId, help])
 
-  useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }) }, [messages, pending])
+  // A search hit opens at its message and flashes it. A line that is gone opens at the bottom, as every chat does.
+  const landed = useRef(false)
+  useEffect(() => {
+    const box = scroller.current
+    const target = landLine !== undefined && !landed.current && messages.length ? box?.querySelector<HTMLElement>(`[data-line="${landLine}"]`) : null
+    if (target) {
+      landed.current = true
+      target.scrollIntoView({ block: 'center' })
+      target.classList.add('hub-flash')
+      window.setTimeout(() => target.classList.remove('hub-flash'), 1800)
+      return
+    }
+    box?.scrollTo({ top: box.scrollHeight })
+  }, [messages, pending, landLine])
   useEffect(() => {
     const made = urls.current
-    return () => { abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
+    left.current = false
+    return () => { left.current = true; abort.current?.abort(); if (speaks) window.speechSynthesis.cancel(); made.forEach(url => URL.revokeObjectURL(url)); made.clear() }
   }, [speaks])
 
   // Read the saved chat while a reply is due after its stream broke, or while a delegate has no result yet. The look comes at once when the
@@ -360,6 +443,7 @@ function ChatView({ id }: { id?: string }) {
   const busy = streaming || recovering || queued.length > 0 || local.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
   const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
+  useEffect(() => onChatMarks((name, state) => { if (name === conversation.current) setMarks(state) }), [])
   useEffect(() => {
     const name = conversation.current
     if (!watching || !name) return undefined
@@ -389,7 +473,7 @@ function ChatView({ id }: { id?: string }) {
     const missed = () => {
       misses += 1
       if (misses < MAX_MISSES) return
-      if (cutTurn.current) land(cutTurn.current.fallback, LOST_NOTE)
+      if (cutTurn.current) { const held = entryFor(name); if (held) markFailed(held.key); land(cutTurn.current.fallback, LOST_NOTE) }   // the Hub saves the owner's line alone
       else { setPending(null); setStreaming(false); setRecovering(false); setNote(null); setStopping(false) }
     }
     const look = async () => {
@@ -401,11 +485,12 @@ function ChatView({ id }: { id?: string }) {
         const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
         if (stopped) return
         if (!recovering) {
-          setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+          const lines = reconcile(name, answer)
+          setMessages(current => (sameLines(current, lines) ? current : lines))
           takeView(number, answer)
           if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
-        } else if (answer.running) { if (answer.run) run.current = answer.run }
-        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
+        } else if (answer.running) { takeView(number, answer); if (answer.run) run.current = answer.run }   // the queue is shown while the reply is waited for too
+        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { applyRead(name, answer); land(answer.messages, null); return }
         else missed()
       } catch (failure) {
         if (recovering && failure instanceof HubError && failure.status === 404) missed()   // anything else: offline for now, so look again
@@ -419,7 +504,7 @@ function ChatView({ id }: { id?: string }) {
     window.addEventListener('online', onFront)
     timer = window.setTimeout(() => void look(), recovering ? 1000 : waitingQueue ? 2000 : nextLookMs(false, 0))
     return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onFront); window.removeEventListener('online', onFront) }
-  }, [watching, recovering, waitingQueue, id, reloadList, stamp, takeView])
+  }, [watching, recovering, waitingQueue, id, reloadList, stamp, takeView, reconcile])
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
@@ -568,11 +653,15 @@ function ChatView({ id }: { id?: string }) {
       const number = stamp()
       const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
       if (live.current) return
-      setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+      const lines = reconcile(name, answer)
+      setMessages(current => (sameLines(current, lines) ? current : lines))
       takeView(number, answer)
       if (answer.running) void followRef.current(name, answer)
       else setStopping(false)   // the reply has ended on the server: Stopping… is over
-    } catch { setStopping(false) /* the watcher looks again while a message waits */ }
+    } catch {
+      setStopping(false)   // the watcher looks again while a message waits
+      if (entryFor(name)) setDegraded(true)   // the Hub does not answer for a turn the device holds: its lines stay, and a timer looks again
+    }
   }
   useEffect(() => { afterRef.current = afterTurn })
 
@@ -580,7 +669,7 @@ function ChatView({ id }: { id?: string }) {
    * Reads one turn from a stream: the reply as it comes, its tools and delegates, and how it ends. For a turn this page sent (`streamChat`)
    * and for one it only follows (`streamLive`: the queue's, or one started elsewhere). A stream that breaks leaves the reply to the saved chat.
    */
-  const readTurn = async (turn: { start: (handlers: ChatHandlers, signal: AbortSignal) => Promise<void>; before: Shown[]; optimistic: Shown; previews: string[]; model: string; persona: string; refused: (failure: unknown) => void }) => {
+  const readTurn = async (turn: { start: (handlers: ChatHandlers, signal: AbortSignal) => Promise<void>; before: Shown[]; optimistic: Shown; previews: string[]; model: string; persona: string; refused: (failure: unknown) => void; /** a turn only followed: a Hub error must never remove the device's copy */ follow?: boolean; /** nothing to keep: the chat is set aside */ track?: boolean; base?: number }) => {
     const { start, before, optimistic, previews, model: askedModel, persona: askedPersona, refused } = turn
     const text = optimistic.text
     const controller = new AbortController()
@@ -593,30 +682,40 @@ function ChatView({ id }: { id?: string }) {
     let saved: ChatLine | undefined
     let savedContext: ChatLine | undefined
     let problem: string | null = null
+    let errored = false
     let cut = false
     let idle = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
+    // Kept on this device from the moment it is sent, before the Hub has named the chat, until a read shows the turn saved.
+    const mine = turn.track === false ? '' : beginChat({ id: conversation.current ?? null, title: (conversation.current && titleRef.current) || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic, ...(turn.base !== undefined ? { base: turn.base } : {}) })
     const used: string[] = []
     let started: ChatDelegate[] = []
     try {
       await start({
-        onDelta: piece => { reply += piece; setPending(reply) },
+        onDelta: piece => { reply += piece; setPending(reply); setReply(mine, reply) },
         onCreated: items => { created = items },
-        onJobs: ids => { named = ids },
+        onJobs: ids => { named = ids; addJobIds(mine, ids) },
         onTool: tool => {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
         },
+        onThinking: setThinking,
         onDelegates: items => { started = items; setDelegates(items) },
-        onStarted: (id, name) => {
-          run.current = id
-          if (name) { conversation.current = name; setKnown(true) }   // a resend joins this conversation, not a second one
-          if (stopWanted.current) { stopWanted.current = false; if (id) stop(); else abort.current?.abort() }
+        onStarted: (runId, name) => {
+          run.current = runId
+          if (name) {
+            conversation.current = name; setKnown(true)   // a resend joins this conversation, not a second one
+            setChatId(mine, name)
+            // A new chat gets its address now, not when the reply ends: leaving at any moment finds the way back. `notify` off: the view
+            // stays mounted and goes on reading this stream.
+            if (!id && !help && !left.current && window.location.hash !== hubHash('chat', name)) swap(hubHash('chat', name), undefined, false)
+          }
+          if (stopWanted.current) { stopWanted.current = false; if (runId) stop(); else abort.current?.abort() }
         },
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
         onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },
-        onError: message => { problem = message },
+        onError: message => { problem = message; errored = true },
         onIdle: () => { idle = true },
       }, controller.signal)
     } catch (failure) {
@@ -627,15 +726,22 @@ function ChatView({ id }: { id?: string }) {
       } else if (!controller.signal.aborted) {
         unhold()
         live.current = false
+        // A send the Hub refused saved nothing: a 4xx, or a 5xx with the Hub's own JSON error (Hermes busy or down). The entry it made goes and the
+        // one it replaced comes back; the words go back in the box. A followed turn, a proxy's 5xx and a dropped connection prove nothing, so they keep the copy.
+        if (!turn.follow && failure instanceof HubError && (failure.status < 500 || typeof failure.body?.error === 'string')) refuseChat(mine)
         refused(failure)
         return
       }
     }
     unhold()
     live.current = false
+    setReply(mine, reply, true)
+    if (errored && !reply.trim() && !cut) markFailed(mine)   // the Hub saves the owner's line alone
+    if (left.current) return   // the screen was left: it is not this view's to draw, to hand over or to follow again
+    stopWanted.current = false   // a Stop held for this turn's run id ends with the turn: it must never fire on a later message
     if (idle) {
       // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
-      setTools([])
+      setTools([]); setThinking('')
       setNote(REOPEN_NOTE)
       setRecovering(true)
       return
@@ -643,11 +749,14 @@ function ChatView({ id }: { id?: string }) {
     const stopped = controller.signal.aborted
     const swapped = !!saved && !!finished
     const userLine: Shown = swapped ? saved as ChatLine : { ...optimistic, ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }
-    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, userLine, { role: 'assistant', text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(named.length ? { jobs: named } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }]
+    // A Stop before any text: the note sits on the owner's line, as the saved chat has it, and no reply line is made.
+    const stoppedEmpty = stopped && !cut && !reply.trim() && !started.length
+    const shownUser: Shown = stoppedEmpty ? { ...userLine, stopped: true } : userLine
+    const lines: Shown[] = [...(savedContext && !before.length ? [savedContext as ChatLine] : []), ...before, shownUser, ...(stoppedEmpty ? [] : [{ role: 'assistant' as const, text: cut ? `${reply} [interrupted]`.trim() : stopped ? `${reply} [stopped]`.trim() : reply, at: new Date().toISOString(), ...(used.length ? { tools: used } : {}), ...(started.length ? { delegates: started } : {}), ...(created.length ? { created } : {}), ...(named.length ? { jobs: named } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES ? { persona: askedPersona } : {}) }])]
     // Hermes goes on without the page, so the reply comes from the saved chat: the turn stays open until it is there.
     if (cut && conversation.current) {
       cutTurn.current = { text, sentAt: optimistic.at, fallback: lines, previews, model: askedModel, persona: askedPersona }
-      setTools([])
+      setTools([]); setThinking('')
       setApproval(null)
       setNote(CUT_NOTE)
       setRecovering(true)
@@ -656,7 +765,7 @@ function ChatView({ id }: { id?: string }) {
     if (finished) { conversation.current = finished; setShownId(finished) }
     setMessages(lines)
     setPending(null)
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setStreaming(false)
@@ -664,23 +773,37 @@ function ChatView({ id }: { id?: string }) {
     if (problem) setError(problem)
     if (!conversation.current) { setStopping(false); giveBack() }   // no name came: nothing will send the waiting rows
     if (cut) list.reload()
+    const handedOver = !!finished && finished !== id
     if (finished) {
       list.reload()
-      if (finished !== id) { carry(finished, lines, askedModel, askedPersona); window.location.assign(hubHash('chat', finished)) }
+      if (handedOver) {
+        carry(finished, lines, askedModel, askedPersona)
+        // The address may already name it (set when the id was known): then the route is only read again, so the view is made anew with these lines.
+        if (window.location.hash === hubHash('chat', finished)) window.dispatchEvent(new Event(ROUTE_EVENT))
+        else window.location.assign(hubHash('chat', finished))
+      }
     }
-    if (!(finished && finished !== id) && conversation.current) void afterRef.current(conversation.current)   // the queue may have moved on, or been held
+    if (!handedOver && conversation.current) void afterRef.current(conversation.current)   // the queue may have moved on, or been held
     if (!stopped && !problem && readAloud && speaks && reply.trim()) window.speechSynthesis.speak(new SpeechSynthesisUtterance(plainText(reply)))
   }
 
   /** A turn that is running here and that this page did not start (the queue's own, or one begun on another device): read it live. */
   const followLive = async (name: string, answer: ChatAnswer) => {
-    if (live.current) return
+    if (live.current || left.current) return
+    const asked = answer.asking
+    // Between saving the turn and dropping the running mark the Hub answers both: the lines are saved, so show them and look again.
+    if (asked?.text && turnSaved(answer.messages, { ask: asked }, 1000)) {
+      setMessages(answer.messages)
+      window.setTimeout(() => { if (!left.current) void afterRef.current(name) }, 1500)
+      return
+    }
     live.current = true   // before anything is awaited: two looks must not follow the same turn twice
     cutTurn.current?.previews.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
     cutTurn.current = null
     setRecovering(false)
     const asking = answer.asking
-    const before = answer.messages
+    const at = asking?.text ? askedAt(answer.messages, asking, { within: 1000 }) : -1
+    const before = at >= 0 ? answer.messages.slice(0, at) : answer.messages   // the owner's line may be saved already: it is drawn as this turn's
     const optimistic: Shown = { role: 'user', text: asking?.text ?? '', at: asking?.at ?? new Date().toISOString() }
     conversation.current = name
     setKnown(true)
@@ -689,7 +812,7 @@ function ChatView({ id }: { id?: string }) {
     setError(null)
     setNote(null)
     setStreaming(true)
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setPending('')
@@ -697,7 +820,7 @@ function ChatView({ id }: { id?: string }) {
     setMessages(asking?.text ? [...before, optimistic] : before)
     await readTurn({
       start: (handlers, signal) => streamLive(name, handlers, signal),
-      before, optimistic, previews: [], model, persona,
+      before, optimistic, previews: [], model, persona, follow: true, track: !answer.state?.archived && !answer.state?.trashed, base: lineCount(before),
       refused: () => { setNote(REOPEN_NOTE); setRecovering(true) },   // the stream would not open: the saved chat has the reply when it ends
     })
   }
@@ -720,7 +843,7 @@ function ChatView({ id }: { id?: string }) {
     setStopping(false)
     setStreaming(true)
     if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
-    setTools([])
+    setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
     setPending('')
@@ -736,6 +859,7 @@ function ChatView({ id }: { id?: string }) {
     await readTurn({
       start: async (handlers, signal) => streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES && !conversation.current && !help ? { persona: askedPersona } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(sending.length ? { images: await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) }))) } : {}) }, handlers, signal),
       before, optimistic, previews, model: askedModel, persona: askedPersona,
+      ...(conversation.current && entryFor(conversation.current) ? { base: hubLines.current } : {}),   // a degraded thread shows lines only the device has
       refused: failure => {
         // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
         setMessages(before)
@@ -751,7 +875,7 @@ function ChatView({ id }: { id?: string }) {
   }
 
 
-  // "Ask Hermes: <text>" from the palette: a new conversation that sends the text at once.
+  // "Ask Hermes: <text>" from Search: a new conversation that sends the text at once.
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send })
   const takeQueued = useCallback(() => {
@@ -771,13 +895,10 @@ function ChatView({ id }: { id?: string }) {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }
   }
 
-  const conversations = list.data?.conversations ?? []
-  // Two chats with the same title are told apart by the time they were last used.
-  const sameTitle = new Set(conversations.filter((item, index) => conversations.some((other, at) => at !== index && other.title === item.title)).map(item => item.title))
   const agents = team.data?.agents ?? []
   const pickable = personas.length > 0 && !id && !help && !messages.length && pending === null
   const pick = (value: string) => {
-    if (value === JOB) { openSpawn({ text: draft.trim() || undefined, ...(who ? { preset: who.preset } : {}) }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project
+    if (value === JOB) { afterPop(() => { setOptions(false); openSpawn({ text: draft.trim() || undefined, ...(who ? { preset: who.preset } : {}) }) }); return }   // the select keeps its value; Spawn picks the agent, the machine and the project; the sheet closes first
     setPicked(value)
   }
   // The banner: from the preview of a new help chat, or from the context line a stored one starts with.
@@ -787,42 +908,81 @@ function ChatView({ id }: { id?: string }) {
     ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
     : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
   const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
+  // The header: what this chat is called, who it talks to, and its own menu. A chat the Hub has no file for yet has no menu.
+  const row = list.data?.conversations.find(entry => entry.id === shownId)
+  const firstUser = messages.find(line => line.role === 'user')
+  const derived = stored?.about ? `Help: ${stored.about.title}` : firstUser?.text.trim().slice(0, 60) || ''
+  const title = marks?.title ?? row?.title ?? (derived || (shownId ? 'Chat' : 'New chat'))
+  const trashed = !!marks?.trashed
+  useEffect(() => { titleRef.current = title })
+  const archived = !!marks?.archived
+  const chatRef = shownId && !help ? { id: shownId, title, pinned: marks?.pinned ?? row?.pinned ?? null, archived: marks?.archived ?? null, trashed: marks?.trashed ?? null, unread: marks?.unread ?? false } : null
+  const leave = () => back(hubHash('chat'))
   return (
-    <div className={`hub-chat${drawer ? ' drawer' : ''}`}>
-      <aside className="hub-chat-list" aria-label="Conversations">
-        <a className="hub-btn pri" href={hubHash('chat')} onClick={() => setDrawer(false)}>New chat</a>
-        {conversations.map(item => (
-          <a key={item.id} className={`hub-chat-item${item.id === id ? ' on' : ''}`} href={hubHash('chat', item.id)} onClick={() => setDrawer(false)} data-conversation={item.id}>
-            <span>{item.title}</span>
-            {sameTitle.has(item.title) && item.updated && <span className="hub-muted" data-conversation-time>{when(item.updated)}</span>}
-            <span className="hub-muted">{item.count} messages{item.persona && <> · <span className="hub-chat-tag" data-conversation-persona>{personas.find(entry => entry.id === item.persona)?.name ?? item.persona}</span></>}{item.model && item.model !== AUTO && <> · <span className="hub-chat-tag" data-conversation-model>{nameOf(models, item.model)}</span></>}</span>
-          </a>
-        ))}
-        {!conversations.length && <p className="hub-empty">No conversations yet.</p>}
-      </aside>
-      <section className={`hub-chat-main${dragging ? ' hub-drop' : ''}`} onDragEnter={onDrag} onDragOver={onDrag} onDragLeave={onDragLeave} onDrop={onDrop}>
-        <div className="hub-top">
-          <h2>Chat</h2>
-          <span className="hub-chat-with hub-muted" data-chat-with={persona}>with {pickable
-            ? (
-              <>
-                <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} bare />
-                <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
-                  <option value={HERMES}>Hermes</option>
-                  {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
-                </select>
-              </>
-            )
-            : <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} />}</span>
-          <button type="button" className="hub-btn hub-chat-toggle" aria-expanded={drawer} onClick={() => setDrawer(value => !value)}>Chats</button>
+    <section className={`hub-chat-main hub-chat-pane main${dragging ? ' hub-drop' : ''}`} data-chat-thread={shownId ?? ''} onDragEnter={onDrag} onDragOver={onDrag} onDragLeave={onDragLeave} onDrop={onDrop}>
+        <div className="hub-chat-head">
+          <IconButton icon="back" label="Back" className="hub-chat-back" data-back="" onClick={leave} />
+          <button type="button" className="hub-chat-titlebtn" aria-haspopup="dialog" data-chat-options onClick={() => setOptions(true)}>
+            <b data-chat-title>{title}</b>
+            <small data-chat-with={persona}>{who?.name ?? 'Hermes'}{models.length > 0 && <> · {nameOf(models, model)}</>}{trashed ? ' · In the Trash' : archived ? ' · Archived' : ''}</small>
+          </button>
+          {chatRef && <RowMenu label="Chat options" title={title} items={chatMenu(chatRef, () => setRenaming(true), { leave })} />}
         </div>
+        {options && (
+          <Sheet title="Chat options" onClose={() => setOptions(false)}>
+            <div className="hub-chat-sheet" data-chat-sheet>
+              <label>
+                <span>Talk to</span>
+                {pickable
+                  ? (
+                    <span className="hub-chat-sheet-who" data-sheet-who={persona}>
+                      <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} bare />
+                      <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
+                        <option value={HERMES}>Hermes</option>
+                        {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
+                      </select>
+                    </span>
+                  )
+                  : <span className="hub-chat-sheet-who" data-sheet-who={persona}><Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} /></span>}
+              </label>
+              {models.length > 0 && (
+                <label>
+                  <span>Model</span>
+                  <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
+                    {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry, list.data?.autoFirst || 'Codex')}</option>)}
+                    <option disabled>──────────</option>
+                    <option value={JOB}>Start a job instead…</option>
+                  </select>
+                  <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
+                </label>
+              )}
+            </div>
+          </Sheet>
+        )}
+        {renaming && chatRef && <RenameSheet chat={chatRef} onClose={() => setRenaming(false)} />}
         {banner}
+        {trashed && (
+          <div className="hub-chat-trashed" role="status" data-chat-trashed>
+            <span>This chat is in the Trash. Its messages are still here. Restore it to send.</span>
+            {host.write && chatRef && <button type="button" className="ui-btn" data-chat-restore={chatRef.id} onClick={() => void restoreChat(chatRef)}>Restore</button>}
+          </div>
+        )}
         <div className="hub-messages" ref={scroller} aria-live="polite">
           {!messages.length && pending === null && <p className="hub-empty">{who ? `Ask ${who.name} anything: ${who.role}. It writes a card when you ask for one.` : 'Ask the assistant anything, or tell it what to do.'}</p>}
-          {messages.map((line, index) => (line.role === 'context' ? null : <Bubble key={index} line={line} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />))}
+          {messages.map((line, index) => (line.role === 'context' ? null : (
+            <Fragment key={index}>
+              <Bubble line={line} index={index} conversation={shownId} models={models} who={who} agents={agents} jobs={jobs} onJobsChanged={reloadJobs} />
+              {line.role === 'user' && line.stopped && (
+                <p className="hub-muted hub-chat-note" role="status" data-chat-stopped>
+                  Stopped before it replied.
+                  {index === messages.length - 1 && !streaming && !recovering && !!line.text.trim() && <> <button type="button" className="hub-btn" data-chat-resend onClick={() => void send(line.text)}>Send again</button></>}
+                </p>
+              )}
+            </Fragment>
+          )))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
-              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : <span className="hub-muted">…</span>}
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted" data-pending-wait>{who?.name ?? 'Hermes'} is working…</span>}
               <ToolLines tools={delegates.length ? tools.filter(tool => tool.name !== DELEGATE_TOOL) : tools} />
               <Delegates items={delegates} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}
@@ -856,8 +1016,10 @@ function ChatView({ id }: { id?: string }) {
         {stopProblem && <p className="hub-error" role="alert" data-chat-stop-error>{stopProblem}</p>}
         {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
+        {entry && degraded && !expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unsaved>The Hub has not saved these lines yet. They are kept here, and this keeps trying.</p>}
+        {entry && expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unconfirmed>The Hub never confirmed this reply and may have restarted. <button type="button" className="hub-btn" data-entry-dismiss onClick={() => dismissKey(entry.key)}>Dismiss</button></p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
-        {(images.length > 0 || preparing > 0 || trayNote) && (
+        {!trashed && (images.length > 0 || preparing > 0 || trayNote) && (
           <div className="hub-tray" data-tray>
             {images.map((picture, index) => (
               <div className="hub-tray-item" key={picture.id}>
@@ -869,8 +1031,8 @@ function ChatView({ id }: { id?: string }) {
             {trayNote && <span className="hub-tray-note hub-tray-warn" role="status">{trayNote}</span>}
           </div>
         )}
-        <div className="hub-compose">
-          <input ref={picker} type="file" accept="image/*" multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+        {!trashed && <div className="hub-compose">
+          <input ref={picker} type="file" accept={PICTURE_TYPES} multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
           <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={busy} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
           <textarea
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"
@@ -879,21 +1041,11 @@ function ChatView({ id }: { id?: string }) {
           {streaming && <button type="button" className="hub-btn" disabled={stopping} data-chat-stop onClick={stop}>Stop</button>}
           {/* A press on Send keeps the focus in the field: a tap that blurred it closed the phone's keyboard, the page moved, and the click missed. */}
           <button type="button" className="hub-btn pri" disabled={!canSend} onPointerDown={event => event.preventDefault()} onMouseDown={event => event.preventDefault()} onClick={() => void send()}>Send</button>
-        </div>
-        {/* Until the list has answered the menu is not known: its row is held (min-height) so Send does not move when it arrives. */}
-        {(speaks || models.length > 0 || (!list.data && !list.error)) && (
-          <div className={`hub-chat-extras${list.data || list.error ? '' : ' hub-chat-extras-hold'}`}>
-            {models.length > 0 && (
-              <>
-                <select className="hub-model" aria-label="Model" data-chat-model value={models.some(entry => entry.id === model) ? model : AUTO} disabled={streaming} onChange={event => pick(event.target.value)}>
-                  {models.map(entry => <option key={entry.id} value={entry.id} title={entry.note}>{menuLabel(entry, list.data?.autoFirst || 'Codex')}</option>)}
-                  <option disabled>──────────</option>
-                  <option value={JOB}>Start a job instead…</option>
-                </select>
-                <span className="hub-muted hub-model-note" data-chat-model-note>{models.find(entry => entry.id === model)?.note}</span>
-                {pauseText && <span className="hub-model-pause" role="status" data-chat-model-pause data-pause-model={choice.pause?.model}>{pauseText}</span>}
-              </>
-            )}
+        </div>}
+        {/* The model and the persona are in the sheet from the title; what stays here is a pause note and the read-aloud switch. */}
+        {!trashed && (speaks || !!pauseText) && (
+          <div className="hub-chat-extras">
+            {pauseText && <span className="hub-model-pause" role="status" data-chat-model-pause data-pause-model={choice.pause?.model}>{pauseText}</span>}
             {speaks && (
               <label className="hub-muted hub-aloud">
                 <input type="checkbox" checked={readAloud} onChange={event => { setReadAloud(event.target.checked); remember(READ_KEY, event.target.checked ? '1' : '0'); if (!event.target.checked) window.speechSynthesis.cancel() }} /> Read replies aloud
@@ -901,7 +1053,6 @@ function ChatView({ id }: { id?: string }) {
             )}
           </div>
         )}
-      </section>
-    </div>
+    </section>
   )
 }

@@ -3,10 +3,10 @@ import type { DragEvent, KeyboardEvent } from 'react'
 import { api, reportError, setPreview, uploadFile, useService } from './client'
 import type { FileEntry, Folder, Preview } from './types'
 import { Icon } from './Icons'
-import WorkspaceSettings from './WorkspaceSettings'
 import SkillPacks from './SkillPacks'
 import { completeFolder, matchSummary } from './pathComplete'
 import { host } from '../lib/host'
+import { useIsDesktop } from '../lib/chrome'
 
 // Only a host with an MCP tool pays for this panel.
 const McpPanel = lazy(() => import('./McpPanel'))
@@ -84,14 +84,16 @@ function treeKeys(event: KeyboardEvent<HTMLDivElement>) {
 }
 
 export default function FilesRail() {
+  const desktop = useIsDesktop()
   const { repo, workspace } = useService()
   // The workspace shortcut opens the active workspace, which may be its own repo outside this one.
   const shortcutPath = (name: string) => name === 'workspace' && workspace ? workspace.root : `${repo}/${name}`
   const storageKey = `buw.files.${pathKey(repo)}`
   // The site does not reopen a panel on every load; the local app remembers its file tree.
   const [open, setOpen] = useState(() => host.files && localStorage.getItem(`${storageKey}.open`) === 'true')
-  const tools = (['files', 'settings', 'skills', 'mcp'] as const).filter(name => name === 'files' ? host.files : name === 'mcp' ? host.mcp : true)
-  const [panel, setPanel] = useState<'files' | 'skills' | 'mcp' | 'settings'>(tools[0])
+  // Settings and Shortcuts moved to the Settings screen; the file tree, the skills' files and MCP stay where there are local files.
+  const tools = (['files', 'skills', 'mcp'] as const).filter(name => name === 'files' ? host.files : name === 'mcp' ? host.mcp : host.files)
+  const [panel, setPanel] = useState<'files' | 'skills' | 'mcp'>(tools[0] ?? 'files')
   const [installer, setInstaller] = useState(false)
   const [root, setRoot] = useState(repo)
   const [typedPath, setTypedPath] = useState(repo)
@@ -128,16 +130,7 @@ export default function FilesRail() {
     if (!result) return
     setTypedPath(result.value); setStatus(matchSummary(result.matches))
   }
-  // On a phone the rail is not a column but a menu behind the button at the top right (global.css).
-  const [menu, setMenu] = useState(false)
-  useEffect(() => {
-    if (!menu) return
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setMenu(false) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menu])
-  const showPanel = (next: 'files' | 'skills' | 'mcp' | 'settings') => {
-    setMenu(false)
+  const showPanel = (next: 'files' | 'skills' | 'mcp') => {
     if (open && panel === next) { setOpen(false); return }
     if (next === 'skills' && host.files) { setMode('all'); navigate(`${repo}/.claude/skills`) }
     if (next === 'files' && panel !== 'files') { setMode('main'); navigate(repo) }
@@ -216,12 +209,10 @@ export default function FilesRail() {
       setError(''); setStatus(directory ? 'Drop this folder path into a terminal or an editor. Esc cancels.' : 'Drop into another folder to move it, or into a terminal to insert its path. Esc cancels.')
     },
   }
-  return <aside className={`files-container ${open ? 'expanded' : ''} ${menu ? 'menu-open' : ''}`}>
-    <button className="rail-toggle" onClick={() => setMenu(v => !v)} aria-expanded={menu} aria-label="Tools" title="Tools"><Icon name="more" size={22} /></button>
-    {menu && <div className="rail-backdrop" onClick={() => setMenu(false)} aria-hidden="true" />}
-    {open && panel === 'settings' && <WorkspaceSettings onClose={() => setOpen(false)} />}
+  // Only where there are local files, and only at 900 px and up: a phone has no column for a file tree.
+  if (!host.files || !desktop) return null
+  return <aside className={`files-container ${open ? 'expanded' : ''}`}>
     {open && panel === 'mcp' && <Suspense fallback={null}><McpPanel onClose={() => setOpen(false)} /></Suspense>}
-    {open && panel === 'skills' && !host.files && <SkillPacks onClose={() => setOpen(false)} />}
     {open && panel === 'skills' && host.files && installer && <SkillPacks onBack={() => setInstaller(false)} onClose={() => { setInstaller(false); setOpen(false) }} />}
     {open && host.files && (panel === 'files' || (panel === 'skills' && !installer)) && <div className="files-panel"><header><h2>{panel === 'skills' ? 'Skills' : 'Files'}</h2><div>
       <button className="desk-icon" disabled={copying} onClick={() => input.current?.click()} title={`Copy files into ${fileName(destination)}`} aria-label="Add files"><Icon name="plus" size={16} /></button>
@@ -240,6 +231,6 @@ export default function FilesRail() {
       <footer><button onClick={() => navigate(repo)}>bunnyUFO root</button></footer>
     </div>}
     <div className="files-rail">{tools.map(name => <button key={name} className={`rail-tool ${open && panel === name ? 'active' : ''}`} onClick={() => showPanel(name)} title={name === 'mcp' ? 'MCP' : name[0].toUpperCase() + name.slice(1)} aria-label={`Toggle ${name}`} aria-pressed={open && panel === name}><Icon name={name === 'files' ? 'folder' : name} size={18} /><span>{name === 'mcp' ? 'MCP' : name}</span></button>)}
-      <button className="rail-tool" title="Keyboard shortcuts ( Ctrl+H )" aria-label="Keyboard shortcuts" onClick={() => { setMenu(false); window.dispatchEvent(new Event('bunnyufo-shortcuts')) }}><Icon name="keyboard" size={18} /><span>Shortcuts</span></button></div>
+    </div>
   </aside>
 }

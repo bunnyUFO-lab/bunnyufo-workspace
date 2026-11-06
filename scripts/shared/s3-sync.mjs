@@ -138,7 +138,7 @@ async function walk(root) {
       } else if (entry.isFile()) {
         if (!relative && SKIP_ROOT.has(entry.name)) continue;
         // The versions `cards get` read: a local note for `cards put --edit`, at the root or in any folder, never published.
-        if (entry.name === '.cards-base.json') continue;
+        if (entry.name === '.cards-base.json' || entry.name === '.cards-skipped.json') continue;
         found.push(rel);
       }
     }

@@ -22,6 +22,7 @@ const shots = process.env.BUW_SHOTS;
 if (shots) await mkdir(shots, { recursive: true });
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(20000));
@@ -41,8 +42,11 @@ const shot = async (page, name) => { if (shots) await page.screenshot({ path: pa
 /** Approve a proposal from Needs you and wait for the note that says what comes next. */
 async function approve(page, fixture, ident) {
   await page.goto(`${fixture.url}#/~hub/needs`);
+  // The answer is held for Undo (here 0 ms) and then sent: wait for the POST to finish, so what a test sets next applies to the fire that follows it.
+  const sent = page.waitForResponse(response => /\/requests\/[^/]+\/(approve|again)$/.test(response.url()) && response.request().method() === 'POST');
   await page.locator(`[data-need="approval-${ident}"] [data-approval-approve]`).click();
   await page.locator('[data-next-note]').waitFor();
+  await sent;
 }
 // Every JSON answer the pages read from the hub, to check as well as the page text.
 const bodies = [];
@@ -171,7 +175,7 @@ try {
   await page.locator('[data-run-refused]').waitFor();
   assert.match(await page.locator('[data-run-result]').innerText(), /did not accept the approval[\s\S]*approval refused: bad signature/, 'The plain sentence comes first and the summary stays.');
 
-  step('ws-edv: a click on the board past an open drawer is not lost; Retry tells Work at once');
+  step('ws-edv: a card on the board opens the job page, Back returns to it, and Retry tells Work at once');
   const redo = id('retry-from-work', 'a9a9');
   routine.set({ status: 401 });
   seed.request(proposal(now, redo, 'Work that is retried from the board'));
@@ -186,32 +190,20 @@ try {
   await redoCard.waitFor();
   await firedCard.waitFor();
   await redoCard.evaluate(node => node.click());
-  const workDrawer = work.locator('[data-run-drawer]');
-  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
-  const at = await firedCard.boundingBox();
-  assert.ok(at && at.x + at.width / 2 < 1280 - 380 && at.y + 16 < 900, 'The other card is on screen, left of the drawer.');
-  await work.mouse.click(at.x + at.width / 2, at.y + 16);
-  await workDrawer.locator(`[data-run-view="${ids.fail}"]`).waitFor();
-  await workDrawer.locator('[data-run-state-chip]').waitFor();
+  const workPage = work;
+  await workPage.locator(`[data-run-view="${redo}"]`).waitFor();
+  assert.equal(await work.locator('[data-run-drawer]').count(), 0, 'There is no drawer.');
+  await work.goBack();
+  await firedCard.waitFor();
+  await firedCard.evaluate(node => node.click());
+  await workPage.locator(`[data-run-view="${ids.fail}"]`).waitFor();
+  await workPage.locator('[data-run-state-chip]').waitFor();
+  await work.goBack();
   await redoCard.evaluate(node => node.click());
-  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
-  step('ws-edv: a backdrop click on the same card opens it again, and over a button it only dismisses');
-  const own = await redoCard.boundingBox();
-  await work.mouse.click(own.x + own.width / 2, own.y + 16);
-  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
-  await work.waitForTimeout(400);
-  assert.equal(await work.locator('[data-run-drawer]').count(), 1, 'The drawer stayed open on the same run.');
-  const spawn = await work.locator('[data-spawn-open]').boundingBox();
-  assert.ok(spawn && spawn.x + spawn.width / 2 < 1280 - 380, 'The Spawn work button is left of the drawer.');
-  await work.mouse.click(spawn.x + spawn.width / 2, spawn.y + spawn.height / 2);
-  await work.locator('[data-run-drawer]').waitFor({ state: 'detached' });
-  await work.waitForTimeout(400);
-  assert.equal(await work.locator('dialog[open]').count(), 0, 'The tap only dismissed the drawer: the button under it did not run.');
-  await redoCard.evaluate(node => node.click());
-  await workDrawer.locator(`[data-run-view="${redo}"]`).waitFor();
+  await workPage.locator(`[data-run-view="${redo}"]`).waitFor();
   const before = await work.evaluate(() => window.__wrote);
-  await workDrawer.locator('[data-run-fire-retry]').click();
-  await workDrawer.locator('[data-run-cloud="fired"]').waitFor();
+  await workPage.locator('[data-run-fire-retry]').click();
+  await workPage.locator('[data-run-cloud="fired"]').waitFor();
   assert.ok(await work.evaluate(() => window.__wrote) > before, 'Retry told the other screens, so Work reads again at once.');
 
   step('a usage limit: the request waits and says when it tries again');
@@ -271,8 +263,8 @@ try {
   await noSideScroll(phone, '#root');
   await phone.goto(`${capped.url}#/~hub/needs/requests`);
   await phone.locator(`[data-request-open="${two}"]`).click();
-  await phone.locator('[data-run-drawer] [data-run-cloud="waiting"]').waitFor();
-  await noSideScroll(phone, '[data-run-drawer]');
+  await phone.locator('[data-run-view] [data-run-cloud="waiting"]').waitFor();
+  await noSideScroll(phone, '[data-run-view]');
   await shot(phone, 'cloud-drawer-phone');
   await phone.goto(`${capped.url}#/~hub/today`);
   await phone.locator('[data-today-cloud]', { hasText: 'Cloud: 1 of 1 today' }).waitFor();

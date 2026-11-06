@@ -12,6 +12,9 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async viewport => {
   const context = await browser.newContext({ viewport });
+  // Team opens on the Floor; this file is about the list, so the browser starts with the list chosen (unless the test chose).
+  await context.addInitScript(() => { try { if (!localStorage.getItem('hub.team.view')) localStorage.setItem('hub.team.view', 'roster'); } catch { /* storage off */ } });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
@@ -44,7 +47,7 @@ try {
   const gets = [];
   page.on('request', request => { if (request.method() === 'GET' && request.url().includes('/api/hub/')) gets.push(new URL(request.url()).pathname.replace('/api/hub', '')); });
   await page.goto(`${fixture.url}#/~hub/team`);
-  await page.locator('.team-card').first().waitFor();
+  await page.locator('.team-row').first().waitFor();
 
   step('Team again after Today: the cards are there at once, no Loading, one GET, and the new name lands');
   await go(page, '#/~hub/today');
@@ -52,10 +55,10 @@ try {
   await delayed(page, TEAM, 1000, rename('Renamed agent'));
   const before = gets.filter(path => path === '/team').length;
   await go(page, '#/~hub/team');
-  await page.locator('.team .team-card').first().waitFor({ timeout: ms(500) });
+  await page.locator('.team .team-row').first().waitFor({ timeout: ms(500) });
   assert.equal(await loading(page).count(), 0, 'No Loading line on a return.');
-  assert.notEqual(await page.locator('.team-card h3').first().innerText(), 'Renamed agent', 'The old name shows first.');
-  await page.locator('.team-card h3', { hasText: 'Renamed agent' }).waitFor();
+  assert.notEqual(await page.locator('.team-row b').first().innerText(), 'Renamed agent', 'The old name shows first.');
+  await page.locator('.team-row b', { hasText: 'Renamed agent' }).waitFor();
   await wait(300);
   assert.equal(gets.filter(path => path === '/team').length - before, 1, 'One GET for the return.');
   await page.unroute(TEAM);
@@ -89,7 +92,7 @@ try {
   step('after a write: Today and Needs show Loading, never the pre-write data');
   await go(page, '#/~hub/today');
   await page.locator('[data-today-open]').waitFor();
-  const oldCount = await page.locator('[data-today-open] .today-num').innerText();
+  const oldCount = await page.locator('[data-today-title]').innerText();
   await go(page, '#/~hub/needs');
   const card = page.locator(`.ni[data-need="ask-${FIXTURE_ASK}"]`);
   await card.waitFor();
@@ -106,13 +109,13 @@ try {
   await loading(page).waitFor({ state: 'detached' });
   assert.equal(await card.count(), 0);
   await go(page, '#/~hub/today');
-  await page.locator('[data-today-open] .today-num').waitFor();
-  assert.notEqual(await page.locator('[data-today-open] .today-num').innerText(), oldCount, 'The count dropped by the answered Ask.');
+  await page.locator('[data-today-title]').waitFor();
+  assert.notEqual(await page.locator('[data-today-title]').innerText(), oldCount, 'The count dropped by the answered Ask.');
   await page.unroute(WRITTEN);
 
   step('a GET held open across a write does not leave its old answer in the cache');
   await go(page, '#/~hub/team');
-  await page.locator('.team-card').first().waitFor();
+  await page.locator('.team-row').first().waitFor();
   let served = 0;
   await page.route(TEAM, async route => {
     served += 1;
@@ -123,17 +126,17 @@ try {
   });
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));   // a GET is out
   await wrote(page);                                                                  // and a write lands
-  await page.locator('.team-card h3', { hasText: 'New answer' }).waitFor();
+  await page.locator('.team-row b', { hasText: 'New answer' }).waitFor();
   await wait(1800);
-  assert.equal(await page.locator('.team-card h3', { hasText: 'Old answer' }).count(), 0);
+  assert.equal(await page.locator('.team-row b', { hasText: 'Old answer' }).count(), 0);
   await go(page, '#/~hub/today');
   await page.locator('[data-today-open]').waitFor();
   await page.unroute(TEAM);
   await delayed(page, TEAM, 800);
   await go(page, '#/~hub/team');
-  await page.locator('.team-card').first().waitFor({ timeout: ms(500) });
-  assert.equal(await page.locator('.team-card h3', { hasText: 'Old answer' }).count(), 0, 'The old answer is not in the cache.');
-  await page.locator('.team-card h3', { hasText: 'New answer' }).count();
+  await page.locator('.team-row').first().waitFor({ timeout: ms(500) });
+  assert.equal(await page.locator('.team-row b', { hasText: 'Old answer' }).count(), 0, 'The old answer is not in the cache.');
+  await page.locator('.team-row b', { hasText: 'New answer' }).count();
   await page.unroute(TEAM);
 
   step('a failed refresh keeps the data and says so quietly; it recovers');
@@ -142,7 +145,7 @@ try {
   let failing = true;
   await page.route(TEAM, route => (failing ? route.fulfill({ status: 500, json: { error: 'The Hub is down.' } }) : route.continue()));
   await go(page, '#/~hub/team');
-  await page.locator('.team-card').first().waitFor();
+  await page.locator('.team-row').first().waitFor();
   await page.locator('[data-hub-stale]').waitFor();
   assert.equal(await page.locator('.hub-error').count(), 0, 'No red error over good data.');
   assert.equal(await loading(page).count(), 0);
@@ -163,7 +166,7 @@ try {
 
   step('a 401 empties everything cached and shows the error');
   await go(page, '#/~hub/team');
-  await page.locator('.team-card').first().waitFor();
+  await page.locator('.team-row').first().waitFor();
   await go(page, '#/~hub/work/magic-loops');
   await page.locator('[data-card]').first().waitFor({ state: 'attached' });
   await go(page, '#/~hub/today');
@@ -171,7 +174,7 @@ try {
   await page.route(TEAM, route => route.fulfill({ status: 401, json: { error: 'Sign in again.' } }));
   await go(page, '#/~hub/team');
   await page.locator('.hub-empty', { hasText: 'Sign in again.' }).waitFor();
-  assert.equal(await page.locator('.team-card').count(), 0, 'The old cards are gone.');
+  assert.equal(await page.locator('.team-row').count(), 0, 'The old cards are gone.');
   await page.unroute(TEAM);
   await delayed(page, WORK, 800);
   await go(page, '#/~hub/work/magic-loops');
@@ -181,12 +184,12 @@ try {
 
   step('a reload starts empty, and web storage holds no Hub data');
   await go(page, '#/~hub/team');
-  await page.locator('.team-card').first().waitFor();
+  await page.locator('.team-row').first().waitFor();
   await delayed(page, TEAM, 1000);
   await page.reload();
   await loading(page).waitFor();
-  assert.equal(await page.locator('.team-card').count(), 0);
-  await page.locator('.team-card').first().waitFor();
+  assert.equal(await page.locator('.team-row').count(), 0);
+  await page.locator('.team-row').first().waitFor();
   const stored = await page.evaluate(() => JSON.stringify([{ ...localStorage }, { ...sessionStorage }]));
   for (const text of ['Planner', 'Hermes', FIXTURE_ASK]) assert.ok(!stored.includes(text), `Web storage holds no "${text}".`);
   console.log('hub-cache-ui: ok');

@@ -1,0 +1,54 @@
+/* Search: a full screen on a phone, a dialog from 900 px. Tokens only; the chips, rows and buttons are the shared set where it has one. */
+.srch { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--ground); color: var(--t1); }
+.srch-screen { height: 100%; overflow: hidden; }
+dialog.srch-dialog:not([open]) { display: none; }
+.srch-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 6px 16px; }
+.srch .srch-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); border: 1px solid var(--line); color: var(--t3); }
+.srch .srch-field:focus-within { border-color: var(--line2); }
+.srch .srch-field input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; outline: none; color: var(--t1); font: inherit; }
+.srch .srch-field input::-webkit-search-cancel-button { display: none; }
+.srch-cancel { flex: none; min-height: var(--tap); padding: 0 10px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.srch .ui-chips { padding-top: 2px; }
+.srch-gap { flex: none; width: 1px; margin: 8px 4px; background: var(--line2); }
+.srch-res { flex: 1; min-height: 0; overflow-y: auto; padding: 0 16px calc(24px + var(--safe-b)); overscroll-behavior: contain; }
+.srch-g { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-top: 10px; color: var(--t3); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.srch-g span { flex: 1; min-width: 0; }
+.srch-g button { flex: none; min-height: var(--tap); margin: -8px -8px -8px 0; padding: 0 8px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 13px; letter-spacing: 0; text-transform: none; cursor: pointer; }
+.srch-i { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 12px; border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.srch-i:active { background: var(--s3); }
+.srch-i-icon { flex: none; width: 24px; display: inline-flex; justify-content: center; color: var(--t3); }
+.srch-i-body { flex: 1; min-width: 0; }
+.srch-i b { display: block; font-weight: 550; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srch-i small { display: block; margin-top: 2px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srch mark { background: var(--accent-soft); color: var(--t1); border-radius: 3px; padding: 0 1px; }
+.srch-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.srch-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 76px; padding: 8px 4px; border: 1px solid var(--line); border-radius: 14px; background: var(--s1); color: var(--t2); font: inherit; font-size: 13px; cursor: pointer; }
+.srch-tile:active { background: var(--s3); }
+.srch-more { display: block; width: 100%; min-height: var(--tap); border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.srch-empty { margin: 28px 0; text-align: center; color: var(--t3); }
+.srch-note { margin: 12px 0; color: var(--t3); font-size: 13px; text-align: center; }
+.srch-foot { display: none; }
+
+@media (min-width: 900px) {
+  dialog.srch-dialog {
+    position: fixed; top: 10vh; left: 50%; margin: 0; padding: 0; width: min(640px, calc(100vw - 24px)); height: auto; max-height: min(76vh, 640px);
+    background: var(--s1); color: var(--t1); border: 1px solid var(--line2); border-radius: var(--r3); box-shadow: 0 24px 70px rgb(0 0 0 / 0.55); overflow: hidden;
+    transform: translate(-50%, 0); opacity: 1; transition: transform 0.2s var(--ease-out), opacity 0.16s var(--ease-out);
+  }
+  dialog.srch-dialog[open] { display: flex; }
+  @starting-style { dialog.srch-dialog[open] { transform: translate(-50%, -8px); opacity: 0; } }
+  dialog.srch-dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+  .srch-dialog { background: var(--s1); }
+  .srch-dialog .srch-head { padding: 10px 10px 4px 12px; }
+  .srch-dialog .srch-cancel { display: none; }
+  .srch-dialog .srch-res { padding: 0 8px 8px; }
+  .srch-dialog .srch-i { min-height: 52px; }
+  .srch-dialog .srch-i.on, .srch-dialog .srch-tile.on { background: var(--s3); }
+  .srch-dialog .srch-i:hover { background: var(--s2); }
+  .srch-dialog .srch-i.on:hover { background: var(--s3); }
+  .srch-dialog .srch-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .srch-dialog .srch-tile { min-height: 64px; }
+  .srch-dialog .srch-foot { flex: none; display: flex; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--t3); }
+  .srch-dialog .srch-foot kbd { margin-right: 2px; padding: 0 5px; border: 1px solid var(--line2); border-radius: 4px; font: inherit; font-size: 10.5px; color: var(--t2); }
+}
+@media (prefers-reduced-motion: reduce) { dialog.srch-dialog { transition: none; } }
