@@ -12,6 +12,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async viewport => {
   const context = await browser.newContext({ viewport });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));

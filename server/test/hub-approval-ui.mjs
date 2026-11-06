@@ -16,6 +16,7 @@ const contexts = [];
 const fixtures = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'], ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));

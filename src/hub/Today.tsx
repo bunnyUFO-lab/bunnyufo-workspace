@@ -61,6 +61,8 @@ function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: numb
     } catch (failure) { setProblem(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false); window.dispatchEvent(new Event(HUB_WROTE)) }
   }
   const keys = alerts.map(event => event.key).filter((key): key is string => !!key)
+  // Nothing failed and nothing was just dismissed: the panel stays out of the way.
+  if (!alerts.length && !undo && !problem) return null
   return (
     <section className="hub-panel rise" style={stagger(index)} aria-label="Alerts">
       <h3>Alerts <span>{count ? `${count} failed` : ''}</span>
