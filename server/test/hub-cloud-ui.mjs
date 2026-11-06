@@ -186,7 +186,7 @@ try {
   await redoCard.waitFor();
   await firedCard.waitFor();
   await redoCard.evaluate(node => node.click());
-  const workPage = work.locator('[data-run-view]');
+  const workPage = work;
   await workPage.locator(`[data-run-view="${redo}"]`).waitFor();
   assert.equal(await work.locator('[data-run-drawer]').count(), 0, 'There is no drawer.');
   await work.goBack();

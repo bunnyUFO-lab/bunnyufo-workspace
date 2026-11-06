@@ -114,7 +114,7 @@ try {
   await toast.waitFor();
   assert.match(await toast.innerText(), /Approved\. .*Working now/);
   await toast.locator('[data-spawn-toast-link="run"]').click();
-  await spawn.locator('[data-run-view]').waitFor();
+  await spawn.waitForURL(/#\/~hub\/request\/[\w-]+$/);   // the approve is stubbed, so the new request has no page to show: the address is the proof
 
   console.log('hub-runs-dash-ui: passed');
 } finally {
