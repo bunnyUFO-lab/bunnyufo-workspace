@@ -5,6 +5,7 @@ import type { ChatMarks, ChatPatch, ChatSummary } from '../lib/hub'
 import { hubPost } from '../lib/hub'
 import { showUndo } from '../lib/undo'
 import { host } from '../lib/host'
+import { dismissChat } from './inProgress.ts'
 
 /** Chats this tab put in the Trash. Back onto one of their entries skips it (entries.skipGone); a link opened fresh still reads them. */
 const deletedHere = new Set<string>()
@@ -20,6 +21,7 @@ export const onChatMarks = (listener: Listener) => { listeners.add(listener); re
 export async function setChatMarks(id: string, patch: ChatPatch) {
   const answer = await hubPost<{ id: string; state: ChatMarks }>(`/chat/${encodeURIComponent(id)}/state`, patch)
   listeners.forEach(listener => listener(id, answer.state))
+  if (patch.archived || patch.trashed) dismissChat(id)   // set aside during a reply: it must not come back as in progress
   return answer
 }
 
