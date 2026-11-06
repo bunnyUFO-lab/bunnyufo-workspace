@@ -72,7 +72,7 @@ export function cachedLines(entry: ChatEntry): ChatLine[] {
 export function turnSaved(messages: ChatLine[], entry: Pick<ChatEntry, 'base' | 'ask'>): boolean {
   const lines = messages.filter(line => line.role !== 'context')
   const mine = lines[entry.base]
-  return !!mine && mine.role === 'user' && mine.text === entry.ask.text && (lines[entry.base + 1]?.role === 'assistant' || !!mine.stopped)
+  return !!mine && mine.role === 'user' && (!entry.ask.text || mine.text === entry.ask.text) && (lines[entry.base + 1]?.role === 'assistant' || !!mine.stopped)
 }
 
 /** What a read of the thread means for an entry. `live`: it is running, follow the stream. `saved`: the entry is done. `keep`: show the device's lines. */
@@ -203,7 +203,7 @@ export interface Begin { id: string | null; title: string; persona: string | nul
 /** A turn begins (sent here, or seen running in a chat that was opened). The same turn begun twice keeps its entry. Returns the entry's key. */
 export function beginChat(input: Begin): string {
   load()
-  const same = store.chats.find(entry => (input.id ? entry.id === input.id : false) && entry.ask.text === input.owner.text && entry.ask.at === input.owner.at)
+  const same = store.chats.find(entry => !!input.id && entry.id === input.id && !!input.owner.text && entry.ask.text === input.owner.text)
   if (same) return same.key
   const key = `c${Math.random().toString(36).slice(2, 10)}`
   const lines = [...input.before.map(line => plainLine(line)), plainLine(input.owner)]
@@ -275,7 +275,7 @@ export function settleChat(id: string, answer: { messages: ChatLine[]; running?:
 }
 
 /** The Hub's list: entries whose chat shows the turn saved leave, and one that had no id yet takes the id of the row it became. */
-export function settleList(rows: ChatSummary[], now = Date.now()) {
+export function settleList(rows: ChatSummary[]) {
   load()
   const taken = new Set(store.chats.map(entry => entry.id).filter(Boolean))
   let changed = false

@@ -3,6 +3,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { TouchEvent } from 'react'
 import type { ChatListAnswer, ChatPersona, ChatSummary } from '../lib/hub'
+import { cachedLines, dismissKey, getStore, lineCount, mergeChats, missingFromList, settleList, warnMissing } from './inProgress.ts'
+import type { ListRow } from './inProgress.ts'
+import { useInProgress } from './useInProgress.ts'
 import { HUB_WROTE, clock, hubGet } from '../lib/hub'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
@@ -45,7 +48,7 @@ function useNames(personas: ChatPersona[], agents: TeamAgent[], models: { id: st
 }
 
 /** One chat's row: a link (avatar, title, a quiet line, the time, an unread dot) and its "..." menu. A left swipe on a phone archives it. */
-function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ChatSummary; names: Names; activeId?: string; swipe: boolean; onRename: (chat: ChatSummary) => void }) {
+function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ListRow; names: Names; activeId?: string; swipe: boolean; onRename: (chat: ChatSummary) => void }) {
   const persona = chat.persona ? names.personas.find(entry => entry.id === chat.persona) : undefined
   const personaName = persona ? persona.name : chat.persona ? chat.persona : 'Hermes'
   const touch = useRef<{ x: number; y: number; lock: 'x' | 'y' | null; dx: number } | null>(null)
@@ -90,18 +93,27 @@ function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ChatSummary
     <div className="cl-swipe" data-swipe={chat.id} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={onEnd}>
       <div className="cl-swipe-bg" aria-hidden="true">Archive</div>
       <div className={`cl-row${chat.unread ? ' unread' : ''}${open ? ' on' : ''}`} ref={row}>
-        <a className="cl-link" href={hubHash('chat', chat.id)} data-conversation={chat.id} data-pinned={chat.pinned ? '' : undefined} data-unread={chat.unread ? '' : undefined}
-          aria-current={open ? 'page' : undefined} onClick={event => { if (Date.now() - swipedAt.current < 400) event.preventDefault() }}>
-          <Who id={persona ? chat.persona! : HERMES} name={personaName} agents={names.agents} size={32} bare />
-          <span className="cl-body">
-            <b className="cl-title">{chat.pinned && <span className="cl-pin" data-pin-mark title="Pinned"><Icon name="pin" size={14} /></span>}{chat.title}</b>
-            <small className="cl-snip">
-              {chat.running ? <span data-conversation-running>Replying… · </span> : <>{chat.count} messages · </>}<span data-conversation-persona>{personaName}</span>{chat.model && chat.model !== AUTO && <> · <span data-conversation-model>{names.modelName(chat.model)}</span></>}
-            </small>
-          </span>
-          <span className="cl-end"><span className="cl-when" data-conversation-time>{whenOf(chat.updated)}</span>{chat.unread && <span className="cl-dot" role="img" aria-label="Unread" data-unread-dot />}</span>
-        </a>
-        <RowMenu label={`More for ${chat.title}`} title={chat.title} items={chatMenu(chat, () => onRename(chat), open ? { leave: () => back(hubHash('chat')) } : undefined)} />
+        {(() => {
+          const inner = (
+            <>
+              <Who id={persona ? chat.persona! : HERMES} name={personaName} agents={names.agents} size={32} bare />
+              <span className="cl-body">
+                <b className="cl-title">{chat.pinned && <span className="cl-pin" data-pin-mark title="Pinned"><Icon name="pin" size={14} /></span>}{chat.title}</b>
+                <small className="cl-snip">
+                  {chat.local === 'unconfirmed' ? <span data-conversation-unconfirmed>The Hub never confirmed the reply · </span> : chat.running ? <span data-conversation-running>{chat.local === 'sending' ? 'Sending… · ' : 'Replying… · '}</span> : <>{chat.count} messages · </>}<span data-conversation-persona>{personaName}</span>{chat.model && chat.model !== AUTO && <> · <span data-conversation-model>{names.modelName(chat.model)}</span></>}{!!chat.jobsRunning && <> · <span data-conversation-jobs>{chat.jobsRunning} {chat.jobsRunning === 1 ? 'job' : 'jobs'} running</span></>}
+                </small>
+              </span>
+              <span className="cl-end"><span className="cl-when" data-conversation-time>{whenOf(chat.updated)}</span>{chat.unread && <span className="cl-dot" role="img" aria-label="Unread" data-unread-dot />}</span>
+            </>
+          )
+          // A chat the Hub has not named yet has no address to open.
+          return chat.id
+            ? <a className="cl-link" href={hubHash('chat', chat.id)} data-conversation={chat.id} data-pinned={chat.pinned ? '' : undefined} data-unread={chat.unread ? '' : undefined}
+              aria-current={open ? 'page' : undefined} onClick={event => { if (Date.now() - swipedAt.current < 400) event.preventDefault() }}>{inner}</a>
+            : <div className="cl-link" data-conversation-sending={chat.key}>{inner}</div>
+        })()}
+        {chat.local === 'unconfirmed' && chat.key && <button type="button" className="ui-btn" data-entry-dismiss={chat.key} onClick={() => dismissKey(chat.key!)}>Dismiss</button>}
+        {chat.id && <RowMenu label={`More for ${chat.title}`} title={chat.title} items={chatMenu(chat, () => onRename(chat), open ? { leave: () => back(hubHash('chat')) } : undefined)} />}
       </div>
     </div>
   )
@@ -153,13 +165,21 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
     return () => window.removeEventListener(HUB_WROTE, clear)
   }, [])
   const base = list.data?.conversations ?? []
-  const shown = [...base, ...extra.filter(item => !base.some(row => row.id === item.id))]
-  const total = list.data?.total ?? shown.length
-  const more = shown.length < total
+  const loaded = [...base, ...extra.filter(item => !base.some(row => row.id === item.id))]
+  // The device's chats in progress, merged by id with what the Hub listed: a read that comes back without one does not take it away.
+  const progress = useInProgress()
+  const shown: ListRow[] = mergeChats(loaded, progress)
+  const total = list.data?.total ?? loaded.length
+  const more = loaded.length < total
+  useEffect(() => {
+    if (!list.data) return
+    settleList(list.data.conversations)
+    if (list.data.conversations.length >= (list.data.total ?? 0)) for (const entry of missingFromList(list.data.conversations, getStore())) warnMissing(entry.id!, lineCount(cachedLines(entry)), null, entry.startedAt, null)
+  }, [list.data])
   const showMore = async () => {
     setPaging(true)
     try {
-      const page = await hubGet<ChatListAnswer>(`/chat?offset=${shown.length}`)
+      const page = await hubGet<ChatListAnswer>(`/chat?offset=${loaded.length}`)
       setExtra(current => [...current, ...page.conversations])
     } catch { /* the button stays: try again */ } finally { setPaging(false) }
   }
@@ -181,12 +201,12 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
     return () => window.clearTimeout(timer)
   }, [warming, settled, reloadHits])
 
-  const matching = typed ? shown.filter(chat => words.every(word => chat.title.toLowerCase().includes(word))) : shown
+  const matching = typed ? shown.filter(chat => words.every(word => chat.title.toLowerCase().includes(word) || !!chat.haystack?.includes(word))) : shown
   const pinned = matching.filter(chat => chat.pinned)
   const today = matching.filter(chat => !chat.pinned && isToday(chat.updated))
   const earlier = matching.filter(chat => !chat.pinned && !isToday(chat.updated))
   const counts = list.data?.counts
-  const group = (title: string, rows: ChatSummary[]) => rows.length > 0 && (
+  const group = (title: string, rows: ListRow[]) => rows.length > 0 && (
     <Section title={title} key={title}>
       <div className="ui-list cl-list" role="list" aria-label={title}>{rows.map(chat => <ChatRow key={chat.id} chat={chat} names={names} activeId={activeId} swipe={host.write} onRename={setRenaming} />)}</div>
     </Section>

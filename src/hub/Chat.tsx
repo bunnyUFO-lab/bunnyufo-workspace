@@ -38,6 +38,8 @@ import type { HubData } from './useHub'
 import { chooseModel, pauseNote } from './chatModel'
 import { MAX_MISSES, hasRunningDelegate, nextLookMs, replySaved, sameLines, type ChatAnswer } from './chatWatch'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
+import { addJobIds, beginChat, cachedLines, dismissKey, entryFor, expired, lineCount, mergeChatJobs, noteJobs, setChatId, setReply, settleChat, warnMissing } from './inProgress.ts'
+import { useInProgress } from './useInProgress.ts'
 
 const READ_KEY = 'buw.hub.readAloud'
 const JOB = '__job'
@@ -290,7 +292,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const [persona, setPersona] = useState(initialPersona)   // persona: who the chat talks to; fixed once the chat has a line
   // model: what the owner picked in this conversation (or the chat's own last choice), or null: then the persona's preferred model, else Auto.
   const [picked, setPicked] = useState<string | null>(initialModel)
-  const [messages, setMessages] = useState<Shown[]>(initial ?? [])
+  const [messages, setMessages] = useState<Shown[]>(() => initial ?? (id && !help && entryFor(id) ? cachedLines(entryFor(id)!) : []))   // in progress: the device's lines show at once
   const models = list.data?.models ?? []   // model: an older server sends none, and then there is no menu
   const personas = list.data?.personas ?? []   // persona: an older server sends none, and then there is no picker
   const who = personas.find(entry => entry.id === persona) ?? null   // null is Hermes
@@ -347,11 +349,24 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const scroller = useRef<HTMLDivElement>(null)
   const conversation = useRef<string | undefined>(help ? undefined : id)
   const [shownId, setShownId] = useState<string | undefined>(help ? undefined : id)
+  // In progress on this device (inProgress.ts): a read that comes back without the turn must not take its lines away.
+  const progress = useInProgress()
+  const entry = entryFor(shownId, progress)
+  const [degraded, setDegraded] = useState(false)   // the Hub has not saved what this device holds
+  const titleRef = useRef('')   // the header's title, for the entry of a turn sent in an existing chat
+  const reconcile = useCallback((name: string, answer: ChatAnswer): ChatLine[] => {
+    const mine = entryFor(name)
+    const verdict = mine ? settleChat(name, answer) : null
+    if (mine && verdict?.kind === 'keep') { warnMissing(name, lineCount(verdict.lines), lineCount(answer.messages), mine.startedAt, null); setDegraded(true); return verdict.lines }
+    setDegraded(false)
+    return answer.messages
+  }, [])
   // The jobs the replies name: read only when a line has some. Looked at again when a line gains ids, and every 20 s while a job is going.
   const jobIds = messages.flatMap(line => line.jobs ?? [])
   const jobKey = jobIds.join(',')
   const jobRead = useHubData<{ jobs: ChatJob[] }>(jobIds.length && shownId && !help ? `/chat/${encodeURIComponent(shownId)}/jobs` : null)
-  const jobs = jobRead.data?.jobs ?? []
+  const jobs = mergeChatJobs(jobRead.data?.jobs ?? [], progress, shownId)   // the Hub's rows win; a job only the device holds stays
+  useEffect(() => { if (shownId && jobRead.data) noteJobs(shownId, jobRead.data.jobs) }, [shownId, jobRead.data])
   const jobsLive = jobs.some(job => LIVE_JOB.has(job.state))
   const reloadJobs = jobRead.reload
   useEffect(() => { if (jobKey) reloadJobs() }, [jobKey, reloadJobs])
@@ -378,13 +393,25 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         if (stopped) return
         setMarks(answer.state ?? null)
         if (answer.state?.unread && host.write) void setChatMarks(id, { unread: false }).catch(() => { /* the dot stays until the next read */ })   // reading a chat clears its unread mark
-        setMessages(answer.messages); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
+        const lines = reconcile(id, answer)
+        setMessages(lines); setPicked([...answer.messages].reverse().find(line => line.role === 'user')?.model ?? AUTO); setPersona(answer.messages.find(line => line.persona)?.persona ?? HERMES)   // model: an old chat opens on its last choice
         takeView(number, answer)
         if (answer.running) void followRef.current(id, answer)   // opened while the reply is still coming: follow it live
       })
-      .catch(failure => { if (!stopped) setError(failure instanceof Error ? failure.message : 'The conversation could not be read.') })
+      .catch(failure => {
+        if (stopped) return
+        const mine = entryFor(id)
+        // Not there, or not answering, while the device holds the turn: keep its lines and look again (the effect below); never "not found".
+        if (mine) { warnMissing(id, lineCount(cachedLines(mine)), null, mine.startedAt, failure instanceof HubError ? failure.status : null); setMessages(cachedLines(mine)); setDegraded(true); return }
+        setError(failure instanceof Error ? failure.message : 'The conversation could not be read.')
+      })
     return () => { stopped = true }
-  }, [id, initial, help, stamp, takeView])
+  }, [id, initial, help, stamp, takeView, reconcile])
+  useEffect(() => {
+    if (!degraded || !shownId || help) return undefined
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void afterRef.current(shownId) }, 8000)
+    return () => window.clearInterval(timer)
+  }, [degraded, shownId, help])
 
   // A search hit opens at its message and flashes it. A line that is gone opens at the bottom, as every chat does.
   const landed = useRef(false)
@@ -453,11 +480,12 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
         if (stopped) return
         if (!recovering) {
-          setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+          const lines = reconcile(name, answer)
+          setMessages(current => (sameLines(current, lines) ? current : lines))
           takeView(number, answer)
           if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
         } else if (answer.running) { takeView(number, answer); if (answer.run) run.current = answer.run }   // the queue is shown while the reply is waited for too
-        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { land(answer.messages, null); return }
+        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { settleChat(name, answer); land(answer.messages, null); return }
         else missed()
       } catch (failure) {
         if (recovering && failure instanceof HubError && failure.status === 404) missed()   // anything else: offline for now, so look again
@@ -471,7 +499,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     window.addEventListener('online', onFront)
     timer = window.setTimeout(() => void look(), recovering ? 1000 : waitingQueue ? 2000 : nextLookMs(false, 0))
     return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onFront); window.removeEventListener('online', onFront) }
-  }, [watching, recovering, waitingQueue, id, reloadList, stamp, takeView])
+  }, [watching, recovering, waitingQueue, id, reloadList, stamp, takeView, reconcile])
 
   // Stop ends the run on the server; leaving the screen or losing the connection does not, so the reply is still saved.
   const stop = () => {
@@ -620,11 +648,15 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       const number = stamp()
       const answer = await hubGet<ChatAnswer>(`/chat/${encodeURIComponent(name)}`)
       if (live.current) return
-      setMessages(current => (sameLines(current, answer.messages) ? current : answer.messages))
+      const lines = reconcile(name, answer)
+      setMessages(current => (sameLines(current, lines) ? current : lines))
       takeView(number, answer)
       if (answer.running) void followRef.current(name, answer)
       else setStopping(false)   // the reply has ended on the server: Stopping… is over
-    } catch { setStopping(false) /* the watcher looks again while a message waits */ }
+    } catch {
+      setStopping(false)   // the watcher looks again while a message waits
+      if (entryFor(name)) setDegraded(true)   // the Hub does not answer for a turn the device holds: its lines stay, and a timer looks again
+    }
   }
   useEffect(() => { afterRef.current = afterTurn })
 
@@ -648,13 +680,15 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     let cut = false
     let idle = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
+    // Kept on this device from the moment it is sent, before the Hub has named the chat, until a read shows the turn saved.
+    const mine = beginChat({ id: conversation.current ?? null, title: titleRef.current || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic })
     const used: string[] = []
     let started: ChatDelegate[] = []
     try {
       await start({
-        onDelta: piece => { reply += piece; setPending(reply) },
+        onDelta: piece => { reply += piece; setPending(reply); setReply(mine, reply) },
         onCreated: items => { created = items },
-        onJobs: ids => { named = ids },
+        onJobs: ids => { named = ids; addJobIds(mine, ids) },
         onTool: tool => {
           if (!used.includes(tool.name)) used.push(tool.name)
           setTools(current => (current.some(item => item.id === tool.id) ? current.map(item => (item.id === tool.id ? { ...item, ...tool, summary: tool.summary ?? item.summary } : item)) : [...current, tool]))
@@ -665,6 +699,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
           run.current = runId
           if (name) {
             conversation.current = name; setKnown(true)   // a resend joins this conversation, not a second one
+            setChatId(mine, name)
             // A new chat gets its address now, not when the reply ends: leaving at any moment finds the way back. `notify` off: the view
             // stays mounted and goes on reading this stream.
             if (!id && !help && window.location.hash !== hubHash('chat', name)) swap(hubHash('chat', name), undefined, false)
@@ -685,12 +720,14 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       } else if (!controller.signal.aborted) {
         unhold()
         live.current = false
+        dismissKey(mine)   // nothing was saved: there is no turn to keep
         refused(failure)
         return
       }
     }
     unhold()
     live.current = false
+    setReply(mine, reply, true)
     stopWanted.current = false   // a Stop held for this turn's run id ends with the turn: it must never fire on a later message
     if (idle) {
       // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
@@ -858,6 +895,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const derived = stored?.about ? `Help: ${stored.about.title}` : firstUser?.text.trim().slice(0, 60) || ''
   const title = marks?.title ?? row?.title ?? (derived || (shownId ? 'Chat' : 'New chat'))
   const trashed = !!marks?.trashed
+  useEffect(() => { titleRef.current = title })
   const archived = !!marks?.archived
   const chatRef = shownId && !help ? { id: shownId, title, pinned: marks?.pinned ?? row?.pinned ?? null, archived: marks?.archived ?? null, trashed: marks?.trashed ?? null, unread: marks?.unread ?? false } : null
   const leave = () => back(hubHash('chat'))
@@ -959,6 +997,8 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         {stopProblem && <p className="hub-error" role="alert" data-chat-stop-error>{stopProblem}</p>}
         {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
+        {entry && degraded && <p className="hub-muted hub-chat-note" role="status" data-chat-unsaved>The Hub has not saved these lines yet. They are kept here, and this keeps trying.</p>}
+        {entry && expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unconfirmed>The Hub never confirmed this reply and may have restarted. <button type="button" className="hub-btn" data-entry-dismiss onClick={() => dismissKey(entry.key)}>Dismiss</button></p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {!trashed && (images.length > 0 || preparing > 0 || trayNote) && (
           <div className="hub-tray" data-tray>

@@ -12,7 +12,7 @@ const PR_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/
 /** What the approval page shows besides the text: the project, the repo and model it would run with, the time limit and the cost. */
 function facts(job: ChatJob): string {
   return [
-    `Project ${job.project}`,
+    job.project ? `Project ${job.project}` : '',
     job.repo ? `Repo ${job.repo}` : '',
     job.model ? `Model ${job.model} · API` : '',
     job.minutes ? `Up to ${job.minutes} minutes` : '',
