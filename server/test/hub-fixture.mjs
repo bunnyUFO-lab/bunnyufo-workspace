@@ -75,12 +75,18 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
   if (thirdSection) {
     // A third section with one card and an older one, for the project filter (more than two projects).
     const third = path.join(base, 'three');
+    // `thirdSection: 40` adds that many cards more, for a list that scrolls (Giraffe 1, Giraffe 2, ...).
+    const more = typeof thirdSection === 'number' ? Array.from({ length: thirdSection }, (_, i) => ({ id: `giraffe-${i + 1}`, folder: `giraffe-${i + 1}`, title: `Giraffe ${i + 1}`, description: 'A card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Notes', path: 'index.md' }] })) : [];
+    for (const card of more) { await mkdir(path.join(third, card.folder), { recursive: true }); await writeFile(path.join(third, card.folder, 'index.md'), `# ${card.title}
+
+A long list.
+`); }
     await mkdir(path.join(third, 'giraffe'), { recursive: true });
     await writeFile(path.join(third, 'giraffe', 'index.md'), '# Giraffe feeding\n\nA card in the third section.\n');
     await writeFile(path.join(third, 'workspace.json'), JSON.stringify({ entities: [{
       id: 'giraffe', folder: 'giraffe', title: 'Giraffe feeding', description: 'A card.', category: 'test', created: today, updated: today, status: 'active',
       steps: [{ name: 'Notes', path: 'index.md' }],
-    }] }, null, 2));
+    }, ...more] }, null, 2));
     await addWorkspace({ registryFile, path: third, name: 'Three', bucket: `s3://${fake.bucket}/sections/three` });
   }
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');

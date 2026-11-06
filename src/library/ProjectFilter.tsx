@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CardWorkspace } from '../types'
 import Icon from '../ui/Icon'
 import { Sheet } from '../ui/Sheet'
@@ -25,17 +25,26 @@ export default function ProjectFilter({ workspaces, picks, counts, total, onChan
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
+  // A keyboard starts in the list (the first box), and comes back to the button when it closes.
+  const button = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const trigger = button.current
+    list.current?.querySelector('input')?.focus()
+    return () => trigger?.focus()
+  }, [open])
   const label = filterLabel(picks, workspaces)
   const byId = new Map(workspaces.map(w => [w.id, w]))
   return (
     <>
-      <button type="button" className={`lib-filter${picks.length ? ' on' : ''}`} aria-haspopup="dialog" aria-expanded={open} data-project-filter="" title={label} onClick={() => setOpen(true)}>
+      <button ref={button} type="button" className={`lib-filter${picks.length ? ' on' : ''}`} aria-haspopup="dialog" aria-expanded={open} data-project-filter="" title={label} onClick={() => setOpen(true)}>
         <span className="lib-filter-label">{label}</span>
         <Icon name="down" size={18} />
       </button>
       {open && (
         <Sheet title="Projects" onClose={() => setOpen(false)}>
-          <div className="lib-picks" role="group" aria-label="Projects" data-project-list="">
+          <div ref={list} className="lib-picks" role="group" aria-label="Projects" data-project-list="">
             <label className="lib-pick" data-pick="">
               <input type="checkbox" checked={picks.length === 0} onChange={() => { if (picks.length) onChange([]) }} />
               <span className="lib-pick-name">All projects</span>

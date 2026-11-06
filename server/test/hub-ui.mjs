@@ -250,7 +250,7 @@ try {
   await tabs.locator('[data-search]').waitFor({ state: 'detached' });
   await go(tabs, '#/hub');
   await tabs.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
-  assert.equal(await tabs.locator('[data-tabs]').count(), 0, 'No tab bar while a card is open.');
+  assert.equal(await tabs.locator('[data-tabs]').count(), 1, 'The tab bar stays while a card is open, with Library lit.');
   assert.equal(await page.locator('[data-tabs]').count(), 0, 'No tab bar on desktop.');
 
   step('old links: #/~hub/inbox/asks lands on needs/question with Question selected, board lands on Work, roadmap on the Roadmap; an Ask link keeps its address');
