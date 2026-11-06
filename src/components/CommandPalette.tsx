@@ -115,17 +115,17 @@ export default function CommandPalette({ cards, items, waiting, home, onClose }:
       .sort((a, b) => Number(!a.row.first) - Number(!b.row.first) || a.rank - b.rank || a.index - b.index)
       .slice(0, limit)
       .map(entry => entry.row)
-    // A command, not a place: "Spawn: <what you typed>" opens the Spawn sheet with it. Typing "spawn" puts it first.
-    const typed = query.trim().replace(/^spawn\b[:\s]*/i, '').trim()
+    // A command, not a place: "New job: <what you typed>" opens the New job sheet with it. Typing "spawn" or "new job" puts it first.
+    const typed = query.trim().replace(/^(?:spawn|new job)\b[:\s]*/i, '').trim()
     const spawn: Row[] = host.hub && host.write
-      ? [{ group: 'Commands', label: typed ? `Spawn: ${typed}` : 'Spawn work', icon: '✦', run: () => openSpawn(typed ? { text: typed } : {}) }]
+      ? [{ group: 'Commands', label: typed ? `New job: ${typed}` : 'New job', icon: '✦', run: () => openSpawn(typed ? { text: typed } : {}) }]
       : []
     // An empty query shows where to go and what waits; Roadmaps and Cards need a word.
     if (!words.length) return [...goTo, ...pick(needs, 8), ...spawn]
     // Whatever is typed can be asked of Hermes: a new Chat conversation that sends it.
     const ask: Row[] = host.chat ? [{ group: 'Ask', label: `Ask Hermes: ${query.trim()}`, icon: '✎', run: () => askHermes(query, () => { go(hubHash('chat')) }) }] : []
     const rest = [...pick(goTo, 12), ...pick(needs, 8), ...pick(maps, 8), ...pick(found, 8)]
-    return /^spawn\b/i.test(query.trim()) ? [...spawn, ...rest, ...ask] : [...rest, ...spawn, ...ask]
+    return /^(?:spawn|new job)\b/i.test(query.trim()) ? [...spawn, ...rest, ...ask] : [...rest, ...spawn, ...ask]
   }, [query, cards, items, projects, waiting, home])
 
   const at = Math.min(selected, Math.max(rows.length - 1, 0))

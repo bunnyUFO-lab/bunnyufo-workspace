@@ -93,7 +93,7 @@ const DETAIL: Partial<Record<HubScreen, { title: string; parent: string }>> = {
   ask: { title: 'Question', parent: hubHash('needs') },
   checklist: { title: 'Steps', parent: hubHash('needs') },
   review: { title: 'Review', parent: hubHash('needs') },
-  request: { title: 'Request', parent: hubHash('needs') },
+  request: { title: 'Job', parent: hubHash('today') },
   work: { title: 'Work', parent: hubHash('today') },
   activity: { title: 'Work', parent: hubHash('today') },
   jobs: { title: 'Work', parent: hubHash('today') },

@@ -1,8 +1,4 @@
-/* Work > Jobs: one row per job, with what it delivered as pills. */
-.jb-seg { display: inline-flex; margin: 0 0 10px; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; font-size: 0.85rem; }
-.jb-seg a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; color: var(--text-dim); text-decoration: none; }
-.jb-seg a.on { background: var(--pink-dim); color: var(--pink-bright); }
-.jb-seg a:focus-visible, .jb-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* Work > Running and Delivered: one row per job, with what it delivered as pills. */
 .jb-list { display: flex; flex-direction: column; background: var(--surface-solid); border: 1px solid var(--hairline); border-radius: var(--radius); }
 .jb-row { display: flex; gap: 10px; padding: 12px; min-width: 0; min-height: 44px; color: inherit; text-decoration: none; border-top: 1px solid var(--hairline); }
 .jb-row:first-child { border-top: 0; }
