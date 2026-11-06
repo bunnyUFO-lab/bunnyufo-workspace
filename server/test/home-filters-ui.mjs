@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
-import { contextWithListOpen } from './shell-helpers.mjs';
+import { contextWithListOpen, libraryFilter, pickProject, projectRows } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -65,7 +65,7 @@ try {
     await blur();
   };
   const view = name => page.locator('[data-library] .ui-seg button', { hasText: new RegExp('^' + name) });
-  const chip = name => page.locator('[data-library] .ui-chips .ui-chip', { hasText: new RegExp('^' + name) });
+  const arrange = name => page.locator('[data-library] .ui-seg.lib-arrange button', { hasText: new RegExp('^' + name) });
   const searchFor = async term => {
     await search.fill(term);
     await page.locator('[data-matches]').waitFor();
@@ -112,20 +112,23 @@ try {
   await page.locator('[data-archive-note]').waitFor();
   assert.match(await page.locator('[data-archive-note]').innerText(), /7 days/);
   assert.deepEqual(await ids(), ['old']);
-  assert.equal(await chip('Two').locator('small').innerText(), '0', 'a section counts what the view would show');
-  await chip('One').click();
+  assert.deepEqual(await projectRows(page), [['All projects', 1], ['One', 1], ['Starter examples', 0], ['Two', 0]], 'a project counts what the view would show, the empty one last');
+  await pickProject(page, 'One');
   assert.equal(await view('Archive').getAttribute('aria-pressed'), 'true', 'picking a section keeps the view (replaces: All turned the archive off)');
   assert.deepEqual(await ids(), ['old']);
-  await chip('All').click();
+  await pickProject(page, 'One');
   await view('All').click();
 
   // All with no section: Pinned (none here), then Recent, newest first. One section: grouped by category, with the heading's menu.
   assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent');
   assert.deepEqual(await ids(), ['alpha', 'bravo', 'gamma', 'ghost'], 'newest first');
-  await chip('One').click();
-  assert.deepEqual(await ids(), ['alpha', 'bravo'], 'a section chip narrows');
-  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Test', 'one section is grouped by category');
-  await chip('All').click();
+  await pickProject(page, 'One');
+  assert.deepEqual(await ids(), ['alpha', 'bravo'], 'a project pick narrows');
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent', 'Recent stays one run with a project picked');
+  await arrange('By project').click();
+  assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Test', 'By project with one picked is grouped by category');
+  await arrange('Recent').click();
+  await pickProject(page, 'One');
   assert.equal(await page.locator('[data-library] .lib-head h2').innerText(), 'Recent');
   assert.equal(await page.evaluate(() => localStorage.getItem('buw.showRecent') ?? localStorage.getItem('buw.showArchived')), null, 'the old view keys are gone');
 

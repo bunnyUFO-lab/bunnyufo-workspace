@@ -71,12 +71,13 @@ try {
   await phone.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/today');
 
-  step('phone: a card link shows the card with no tabs and a Back button; Back goes to the Library and stays in the app');
+  step('phone: a card link shows the card with the tab bar (Library lit) and a Back button; Back goes to the Library and stays in the app');
   // A fresh tab: a link opened from somewhere else has nothing of ours behind it.
   const shared = await open({ width: 390, height: 800 });
   await shared.goto(`${fixture.url}#/hub`);
   await shared.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
-  assert.equal(await shared.locator('[data-tabs]').count(), 0, 'No tabs on a card.');
+  assert.equal(await shared.locator('[data-tabs]').count(), 1, 'The tab bar stays on a card.');
+  assert.equal(await shared.locator('[data-tabs] [data-nav="library"]').getAttribute('aria-current'), 'page', 'with the Library lit');
   await tall(shared, '.topbar [data-back]', 'The card page Back');
   await shared.locator('.topbar [data-back]').click();
   await shared.locator('[data-library]').waitFor();
