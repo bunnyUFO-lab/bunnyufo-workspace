@@ -76,3 +76,8 @@
   /* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
   .pp[data-sheet] { padding-right: 436px; }
 }
+
+/* The open Wayfinder list takes the height on a phone (else the map box turns wider than tall and flips its axis): the project's name row steps aside while it is open, as the search row does. Likewise for a project with roadmaps: the bar's first crumb already names the project. */
+@media (max-width: 640px) {
+  .pp[data-view="map"]:has(.hub-wayfinder[data-open="true"]) .pp-head, .pp[data-view="map"]:has(.hub-map-branchbar) .pp-head { display: none; }
+}

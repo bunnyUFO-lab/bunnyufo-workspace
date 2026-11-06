@@ -53,5 +53,5 @@ a.rm-crumb:focus-visible { outline: none; box-shadow: var(--focus-ring); border-
 }
 /* The bar is 44 px against about 30 px for the chips: a sheet in a project with roadmaps leaves the map the same room above it. */
 @media (max-width: 640px) {
-  .hub-mapview:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 386px)); }
+  .hub-mapview:has(.hub-map-branchbar) .hub-map-panel { max-height: min(75dvh, calc(100dvh - 520px)); }
 }
