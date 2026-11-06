@@ -4,7 +4,7 @@ import { HubError, fileUrl, hubPost } from '../lib/hub'
 import { authHeaders } from '../local/client'
 import type { DrawingIo } from '../components/DrawingEditor'
 import { annotationScene, blankScene, takeHandoff } from './drawing'
-import { KEEPALIVE_LIMIT, hold } from './heldSend'
+import { KEEPALIVE_LIMIT, bodyBytes, heldDraft, hold } from './heldSend'
 
 export interface Attached { scene: string; png: string; optionId: string | null }
 export interface Editing { optionId: string | null; image?: string; w: number; h: number; scene?: string }
@@ -35,6 +35,9 @@ export function avatarNotice(result: unknown): string | null {
   return avatar.started === false ? `The sprite sheet did not start: ${text(avatar.why)}` : `The sheet was not chosen: ${text(avatar.why)}`
 }
 
+/** What the owner had filled in when an answer was held. */
+interface AskDraft { choice: string | null; note: string; verdicts: Verdicts; drawing: Attached | null }
+
 export const VERDICTS: [DecisionVerdict, string][] = [['approve', 'Approve'], ['change', 'Change'], ['skip', 'Skip']]
 export interface Verdicts { [decision: string]: { verdict: DecisionVerdict; note: string } }
 
@@ -60,16 +63,18 @@ export function designKind(ask: Ask): 'review' | 'pick' | null {
  * The list card and the Ask's own view share it; only the own view (`handoff`) takes a drawing handed over from Sketch. `onSettled` runs after a write that took the Ask off the queue.
  */
 export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = false, help }: { reload: () => void; onSettled?: (verb: AskVerb, detail?: string) => void; onTaken?: (answer: AskAnswer | null) => void; handoff?: boolean; help?: { chat: string } }) {
-  const [choice, setChoice] = useState<string | null>(null)
-  const [note, setNote] = useState('')
-  const [verdicts, setVerdicts] = useState<Verdicts>({})
+  // What a held answer left behind (Undo, or a send that failed) comes back with the item, even to a form that mounted after it was answered elsewhere.
+  const [saved] = useState(() => heldDraft<AskDraft>(`ask-${ask.id}`))
+  const [choice, setChoice] = useState<string | null>(saved?.choice ?? null)
+  const [note, setNote] = useState(saved?.note ?? '')
+  const [verdicts, setVerdicts] = useState<Verdicts>(saved?.verdicts ?? {})
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   // A big picture cannot be held for Undo (a request that outlives the page carries 64 KB at most): the owner is asked first.
   const [bigConfirm, setBigConfirm] = useState(false)
-  const [drawing, setDrawing] = useState<Attached | null>(() => { const handed = handoff ? takeHandoff() : null; return handed ? { ...handed, optionId: null } : null })
+  const [drawing, setDrawing] = useState<Attached | null>(() => { const handed = handoff ? takeHandoff() : null; return handed ? { ...handed, optionId: null } : saved?.drawing ?? null })
   const [editing, setEditing] = useState<Editing | null>(null)
   const [sizes, setSizes] = useState<Record<string, { w: number; h: number }>>({})
 
@@ -136,10 +141,10 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const send = () => {
     const body = answerBody()
     if (!holdable) return sendNow()
-    if (JSON.stringify(body).length > KEEPALIVE_LIMIT) { setBigConfirm(true); return Promise.resolve() }
+    if (bodyBytes(body) > KEEPALIVE_LIMIT) { setBigConfirm(true); return Promise.resolve() }
     setProblem(null)
     setNotice(null)
-    if (hold({ key: `ask-${askId}`, title: text(ask.question).slice(0, 90), verb: kind ? 'Review sent' : 'Answered', send: keepalive => sendHeld(keepalive, body) })) onSettled?.(answerVerb)
+    if (hold({ key: `ask-${askId}`, title: text(ask.question).slice(0, 90), verb: kind ? 'Review sent' : 'Answered', draft: { choice, note, verdicts, drawing } satisfies AskDraft, send: keepalive => sendHeld(keepalive, body) })) onSettled?.(answerVerb)
     return Promise.resolve()
   }
   return {

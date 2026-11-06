@@ -20,7 +20,10 @@ const fixture = await startHubFixture({ discordAsks: true });
 const SECOND = askId('second-arc', 'a1a1');
 const THIRD = askId('third-arc', 'b2b2');
 const FOURTH = askId('fourth-arc', 'c3c3');
-for (const [id, question] of [[SECOND, 'Which landing sound?'], [THIRD, 'Which coyote time?'], [FOURTH, 'Which dust puff?']]) {
+const NOTE_FAIL = askId('note-fail', 'e5e5');
+const NOTE_UNDO = askId('note-undo', 'f6f6');
+const NOTE_PAGE = askId('note-page', 'a7a7');
+for (const [id, question] of [[SECOND, 'Which landing sound?'], [THIRD, 'Which coyote time?'], [FOURTH, 'Which dust puff?'], [NOTE_FAIL, 'Which rim light?'], [NOTE_UNDO, 'Which fog?'], [NOTE_PAGE, 'Which bloom?']]) {
   fixture.seed.ask(askJson({ id, bead: 'bd-7f3c', now: minutesAgo(fixture.now, 5), question, options: plainOptions(), allowDrawing: false }));
 }
 const browser = await chromium.launch({ headless: true, channel });
@@ -168,6 +171,43 @@ try {
   await desk.locator('.ni', { hasText: 'Which dust puff?' }).waitFor();
   assert.equal(postsFor(FOURTH), 1, 'A double tap made one POST.');
   assert.equal(fixture.fake.objects.has(`sections/inbox/asks/${FOURTH}/answer.json`), false);
+
+  step('desktop: a typed note survives a failed send from the Needs list, and Undo from the list');
+  await desk.route(`**/api/hub/asks/${NOTE_FAIL}/answer`, route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The store said no.' }) }));
+  const failing = desk.locator('.ni', { hasText: 'Which rim light?' });
+  await failing.waitFor();
+  await failing.locator('[data-option="A"] button').click();
+  await failing.locator('textarea').fill('Keep this note');
+  await failing.getByRole('button', { name: 'Send answer' }).click();
+  await desk.locator('[data-undo-toast]', { hasText: 'Not sent: Which rim light?' }).waitFor();
+  const back = desk.locator('.ni', { hasText: 'Which rim light?' });
+  await back.waitFor();
+  assert.equal(await back.locator('textarea').inputValue(), 'Keep this note', 'The note is still in the card after a failed send.');
+  assert.equal(await back.locator('[data-option="A"].sel').count(), 1, 'The picked option is still picked.');
+  await desk.evaluate(() => localStorage.setItem('hub.undoMs', '6000'));
+  const undoing = desk.locator('.ni', { hasText: 'Which fog?' });
+  await undoing.waitFor();
+  await undoing.locator('[data-option="A"] button').click();
+  await undoing.locator('textarea').fill('Undo keeps this');
+  await undoing.getByRole('button', { name: 'Send answer' }).click();
+  await desk.locator('[data-undo-toast]', { hasText: 'Answered: Which fog?' }).getByRole('button', { name: 'Undo' }).click();
+  const undone = desk.locator('.ni', { hasText: 'Which fog?' });
+  await undone.waitFor();
+  assert.equal(await undone.locator('textarea').inputValue(), 'Undo keeps this', 'The note is still in the card after Undo.');
+  assert.equal(postsFor(NOTE_UNDO), 0, 'Undo sent nothing.');
+
+  step('desktop: a typed note survives a failed send and Undo when the answer was given on the item page and the owner left it');
+  await desk.evaluate(() => localStorage.setItem('hub.undoMs', '1500'));
+  await desk.route(`**/api/hub/asks/${NOTE_PAGE}/answer`, route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The store said no.' }) }));
+  await desk.evaluate(id => { location.hash = `#/~hub/ask/${id}`; }, NOTE_PAGE);
+  await desk.locator('[data-option="A"] button').click();
+  await desk.locator('.hub-field textarea').fill('Page note');
+  await desk.locator('[data-send]').click();
+  await desk.evaluate(() => { location.hash = '#/~hub/library'; });
+  await desk.locator('[data-undo-toast]', { hasText: 'Not sent: Which bloom?' }).waitFor();
+  await desk.evaluate(id => { location.hash = `#/~hub/ask/${id}`; }, NOTE_PAGE);
+  await desk.locator('.hub-field textarea').waitFor();
+  assert.equal(await desk.locator('.hub-field textarea').inputValue(), 'Page note', 'The item page opens with the note after a failed send.');
 
   step('desktop: Settings turns "Next item after answering" on; then answering moves on by itself');
   const FIFTH = askId('fifth-arc', 'd4d4');

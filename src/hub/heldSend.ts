@@ -16,6 +16,8 @@ import { dismiss, showUndo } from '../lib/undo'
 const HOLD_MS = 7000
 /** Longest body a `keepalive` request may carry is 64 KB: a send with more (a drawing) is never held. */
 export const KEEPALIVE_LIMIT = 60_000
+/** The size a request body will have on the wire, in bytes (a note in another script is more than one byte a character). */
+export const bodyBytes = (body: unknown): number => new TextEncoder().encode(JSON.stringify(body)).length
 /** After a send lands, the item stays out of the lists a moment, so the refetch that follows can't show it for a flash. */
 const LINGER_MS = 4000
 const RESTORED_MS = 1800
@@ -30,6 +32,8 @@ export interface HoldOptions {
   verb: string
   /** The one write. `keepalive` is true when the page is going away. */
   send: (keepalive: boolean) => Promise<unknown>
+  /** What the owner typed or picked for it (a note, a verdict, a drawing). Kept until the send lands, so Undo or a failed send brings it back with the item, on whatever screen the form is mounted next. */
+  draft?: unknown
 }
 
 interface Pending extends HoldOptions { timer: number; toast: number }
@@ -37,6 +41,10 @@ interface Pending extends HoldOptions { timer: number; toast: number }
 interface Snapshot { phases: ReadonlyMap<string, HoldPhase>; restored: string; restoredN: number; counts: ReadonlyMap<string, number> }
 
 let pending: Pending | null = null
+/** Drafts by item key: they outlive the form that wrote them, and only a send that succeeded clears one. */
+const drafts = new Map<string, unknown>()
+/** The draft a held, undone or failed answer left for this item, for a form to start from. */
+export const heldDraft = <T,>(key: string): T | undefined => drafts.get(key) as T | undefined
 const phases = new Map<string, HoldPhase>()
 /** How many times Undo or a failed send has brought each item back: a screen compares it with what it saw when it settled the item. */
 const counts = new Map<string, number>()
@@ -77,6 +85,7 @@ async function run(item: Pending, keepalive: boolean) {
   setPhase(item.key, 'sending')
   try {
     await item.send(keepalive)
+    drafts.delete(item.key)
     setPhase(item.key, 'sent')
     window.setTimeout(() => { if (phases.get(item.key) === 'sent') setPhase(item.key, null) }, LINGER_MS)
   } catch (failure) {
@@ -121,6 +130,7 @@ export function hold(options: HoldOptions): boolean {
   if (phases.has(options.key)) return false
   flushHeld()
   const item = { ...options } as Pending
+  if (options.draft !== undefined) drafts.set(options.key, options.draft)
   const ms = holdMs()
   item.toast = showUndo(`${options.verb}: ${options.title}`, () => undoHeld(options.key))
   item.timer = window.setTimeout(() => { if (pending === item) flushHeld() }, ms)

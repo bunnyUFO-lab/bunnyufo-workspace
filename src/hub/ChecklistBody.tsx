@@ -12,7 +12,7 @@ import PlaytestReport from './PlaytestReport'
 import { usePlaytestReport } from './playtest'
 import { StepHelp } from './GetHelp'
 import { useAttachHelp } from './useAttachHelp'
-import { KEEPALIVE_LIMIT, hold } from './heldSend'
+import { KEEPALIVE_LIMIT, bodyBytes, heldDraft, hold } from './heldSend'
 
 const SIGN_IN = 'Sign in to tick items.'
 const finePointer = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -42,7 +42,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const [pending, setPending] = useState<Record<string, Pending>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean> | null>(null)
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(() => heldDraft<{ note?: string }>(`checklist-${data.id}`)?.note ?? '')
   const [warnedAt, setWarnedAt] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -188,7 +188,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     const body = { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) }
     const url = `/checklists/${encodeURIComponent(detail.id)}/submit`
     // A report that is too big to ride a keepalive request goes at once, as it always did.
-    if (JSON.stringify(body).length > KEEPALIVE_LIMIT) {
+    if (bodyBytes(body) > KEEPALIVE_LIMIT) {
       setSubmitting(true)
       try {
         await hubPost(url, body)
@@ -201,7 +201,7 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
       return
     }
     // The hold: seven seconds with Undo, then the one write. A second tap on a held list does nothing.
-    if (hold({ key: `checklist-${detail.id}`, title: text(detail.title).slice(0, 90), verb: playtest ? 'Report sent' : 'Submitted', send: keepalive => hubPost(url, body, undefined, false, keepalive) })) onSubmitted()
+    if (hold({ key: `checklist-${detail.id}`, title: text(detail.title).slice(0, 90), verb: playtest ? 'Report sent' : 'Submitted', draft: { note, report: report.snapshot() }, send: keepalive => hubPost(url, body, undefined, false, keepalive) })) onSubmitted()
   }
 
   const percent = total ? Math.round((doneCount / total) * 100) : 0
