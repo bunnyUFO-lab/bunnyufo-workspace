@@ -327,6 +327,7 @@ export default function ProjectPage({ project: wanted, route, view }: { project:
           </div>
         )}
       </header>
+      <div className="pp-nav">
       <nav className="ui-seg ui-seg-tabs pp-tabs" role="tablist" aria-label="Project" data-project-tabs>
         {PROJECT_TABS.map(key => (
           <a key={key} role="tab" href={projectHash(project, key)} className={key === tab ? 'on' : undefined} aria-selected={key === tab} data-project-tab={key}>
@@ -340,6 +341,7 @@ export default function ProjectPage({ project: wanted, route, view }: { project:
           <button type="button" className={view === 'map' ? 'on' : undefined} aria-pressed={view === 'map'} onClick={() => switchTo('map')} data-roadmap-view="map">Map</button>
         </div>
       )}
+      </div>
       {mapShown
         ? (
           <ProgressMap key={project} project={project} name={name} nodeId={node} model={model} error={error} loading={loading} at={modelAt} />

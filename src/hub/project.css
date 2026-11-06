@@ -26,6 +26,7 @@
 .pp-actions { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px; }
 .pp-actions .hub-btn, .pp-actions .ui-btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 .pp-note { margin: 8px 0 0; max-width: 46ch; }
+.pp-nav { flex: none; display: flex; flex-direction: column; }
 .pp-tabs { flex: none; margin: 8px 16px 8px; }
 .pp-switch { flex: none; margin: 0 16px 8px; max-width: 220px; }
 .pp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 32px; }
@@ -71,6 +72,10 @@
 @media (min-width: 900px) {
   .pp-head, .pp-tabs, .pp-switch, .pp-body { padding-inline: 24px; }
   .pp-tabs, .pp-switch { margin-inline: 24px; padding-inline: 3px; }
+  /* Tabs and the List/Map switch share one row, so the map keeps the height. */
+  .pp-nav { flex-direction: row; align-items: center; padding-right: 24px; }
+  .pp-nav .pp-tabs { flex: 1; min-width: 0; margin-right: 12px; }
+  .pp-nav .pp-switch { flex: none; width: 200px; margin: 8px 0; }
   .pp-sub, .pp-actions { flex-basis: auto; }
   .pp-actions { margin-left: auto; }
   /* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
