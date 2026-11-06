@@ -1,9 +1,8 @@
 // Run after npm run build. Isolated repository, registry and browser profile; the fixture
 // workspaces are the only files written.
 //
-// Pinning is a sidebar affordance: the grid shows every card once, in its own project's
-// section, and the pinned list lives beside it in the sidebar where the project filter
-// cannot hide it.
+// Pinning is a row menu action in the Library: every card is listed once, the pins sit in Pinned above the rest
+// where a section filter cannot hide them, and a pin's place is Move up and Move down in its menu.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
@@ -73,53 +72,6 @@ const listsUntouched = async () => {
 const published = [[one, await readFile(path.join(one, 'workspace.json'), 'utf8')], [two, await readFile(path.join(two, 'workspace.json'), 'utf8')]];
 
 
-// Dragging is a pointer gesture, not HTML5 drag-and-drop (see src/lib/drag.ts), so it is
-// driven here the way a hand drives it: press, move, release. `edge` aims at the top or
-// bottom of the target instead of its middle, which is how a place in the list is chosen.
-// The sidebar slides in and out; measure once it has stopped moving. Before the slide starts it
-// sits still off the left edge, which is not "settled" (that read made a drag start off screen).
-const settled = async source => {
-  await source.waitFor();
-  let last = null;
-  for (let tries = 0; tries < 100; tries++) {
-    const box = await source.boundingBox();
-    if (last && box.x >= 0 && box.x === last.x && box.y === last.y) break;
-    last = box;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-};
-
-const dragCard = async (page, source, target, edge) => {
-  await settled(source);
-  const from = await source.boundingBox();
-  const to = await target.boundingBox();
-  const y = edge === 'top' ? to.y + 3 : edge === 'bottom' ? to.y + to.height - 3 : to.y + to.height / 2;
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2 + 12, { steps: 4 });
-  await page.mouse.move(to.x + to.width / 2, y, { steps: 10 });
-  await page.mouse.up();
-};
-
-// A drop that comes before the page has drawn the drag. A person is never that quick, but a loaded machine is that
-// slow: the press, the move past the threshold and the release then reach the page in one go, before React has
-// rendered anything in between. The page must not lose the drop. (This is what made the drags above time out
-// now and then, ws-plv.) The events are sent in one task, so no render can come between them, however fast the machine is.
-const flick = async (page, source, target) => {
-  await settled(source);
-  await target.waitFor();
-  const sourceBox = await source.boundingBox();
-  const targetBox = await target.boundingBox();
-  await page.evaluate(({ a, b }) => {
-    const press = document.elementFromPoint(a.x, a.y);
-    const fire = (element, type, point) => element.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: point.x, clientY: point.y, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
-    fire(press, 'pointerdown', a);
-    fire(document.body, 'pointermove', { x: a.x + 12, y: a.y + 12 });
-    fire(document.body, 'pointermove', b);
-    fire(document.body, 'pointerup', b);
-  }, { a: { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }, b: { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 } });
-};
-
 const service = await createService({ repo, uiDir: path.join(root, 'dist'), registryFile });
 let browser;
 try {
@@ -128,95 +80,71 @@ try {
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
-  await page.locator('.entity-card').first().waitFor();
+  const rows = () => page.locator('[data-library] .lib-row');
+  const row = id => page.locator(`[data-library] .lib-row[data-entity="${id}"]`);
+  const chip = name => page.locator('[data-library] .ui-chips .ui-chip', { hasText: new RegExp('^' + name) });
+  /** A row's menu: open it, pick an item. */
+  const menu = async (id, item) => {
+    await row(id).locator('[data-row-menu]').click();
+    await page.getByRole('menuitem', { name: item, exact: true }).click();
+  };
+  const pinTitles = () => page.locator('[data-library] [role="list"][aria-label="Pinned"] .lib-row-body b').allInnerTexts();
+  await rows().first().waitFor();
 
-  // The grid holds each card once — no pinned strip repeating it above its own section.
-  assert.equal(await page.locator('.entity-card[data-entity="beta"]').count(), 1, 'The pinned card appears once in the grid.');
-  assert.equal(await page.locator('.home-section .section-title', { hasText: 'pinned' }).count(), 0, 'The grid has no pinned section.');
-  assert.equal(await page.locator('.entity-card').count(), 2);
+  // Each card is listed once: the pin is in Pinned, and Recent holds the rest.
+  assert.equal(await row('beta').count(), 1, 'The pinned card appears once.');
+  assert.equal(await rows().count(), 2);
+  assert.deepEqual(await pinTitles(), ['Beta'], 'The pin is listed at start.');
+  assert.equal(await page.locator('[data-library] .lib-head h2', { hasText: 'Pinned' }).count(), 1);
 
-  // The sidebar is where pinning shows: its own list, above the project sections. It opens by
-  // itself on a wide screen, so the pins are visible at start with no click.
-  await page.locator('.sidebar-label', { hasText: 'pinned' }).waitFor({ state: 'visible' });
-  assert.equal(await page.locator('.sidebar-item.pinned').count(), 1, 'The pin is listed at start.');
-  assert.equal(await page.locator('.sidebar-item.pinned').count(), 1);
-  assert.equal(await page.locator('.sidebar-item', { hasText: 'Beta' }).count(), 1, 'A pinned card is listed once in the sidebar.');
+  // A section chip narrows the cards but not the pins: a pin says "keep this in front of me".
+  await chip('One').click();
+  await page.waitForFunction(() => !document.querySelector('[data-library] .lib-head[data-section="Recent"]'));
+  assert.equal(await row('beta').count(), 1, 'The section filter does not hide a pin from another section.');
+  assert.equal(await row('alpha').count(), 1);
+  assert.equal(await rows().count(), 2, 'Still once each.');
+  await chip('All').click();
 
-  // Filtering to One takes the pinned card out of the grid — the filter means the grid shows
-  // that project — while the sidebar keeps it in reach.
-  await page.locator('.sidebar .project-chip', { hasText: 'One' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.entity-card').length === 1);
-  assert.equal(await page.locator('.entity-card[data-entity="beta"]').count(), 0, 'A pin from another project does not sit in a filtered grid.');
-  assert.equal(await page.locator('.sidebar-item', { hasText: 'Beta' }).count(), 1, 'The filter does not hide a pin from the sidebar.');
-
-  // The sidebar pushes the grid on a wide screen; put it away anyway before touching a card.
-  await page.getByRole('button', { name: 'Hide menu' }).click();
-
-  // Both card buttons are legible without hovering: a control that only appears under the
-  // pointer is one nobody finds.
-  const opacity = selector => page.locator(selector).first().evaluate(el => Number(getComputedStyle(el).opacity));
-  assert.ok(await opacity('.entity-card .card-pin') >= 0.7, 'The pin button is visible without hover.');
-  assert.ok(await opacity('.entity-card .card-archive') >= 0.7, 'The archive button is visible without hover.');
-  // …and they stay inside the card, whatever the chips before them are called.
-  const inside = await page.locator('.entity-card[data-entity="alpha"]').evaluate(card => {
-    const box = card.getBoundingClientRect();
-    return [...card.querySelectorAll('.card-action')].every(button => {
-      const rect = button.getBoundingClientRect();
-      return rect.right <= box.right + 1 && rect.left >= box.left - 1 && rect.bottom <= box.bottom + 1;
-    });
-  });
-  assert.ok(inside, 'The card buttons sit inside the card.');
-
-  // The button pins a card and writes it through, with no drag needed.
-  await page.locator('.entity-card[data-entity="alpha"] .card-pin').click();
-  // A folded list is not drawn: unfold it to see the pin arrive there.
-  await page.getByRole('button', { name: 'Show list' }).click();
-  await page.locator('.sidebar-item.pinned', { hasText: 'Alpha' }).waitFor({ state: 'attached' });
+  // The row menu pins and unpins, written as card state.
+  await menu('alpha', 'Pin');
+  await page.waitForFunction(() => document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row').length === 2);
   assert.equal(await pinnedInFile(one, 'alpha'), true);
-  await page.locator('.entity-card[data-entity="alpha"] .card-pin').click();
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-item.pinned').length === 1);
+  assert.equal(await rows().count(), 2, 'A card pinned still shows once.');
+  await menu('alpha', 'Unpin');
+  await page.waitForFunction(() => document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row').length === 1);
   assert.equal(await pinnedInFile(one, 'alpha'), false, 'Unpinning is remembered, so a card published pinned can be taken off the list.');
-
-  // A flick: the whole gesture lands before the page renders. Pinned and unpinned again, so the steps below start as they did.
-  await flick(page, page.locator('.sidebar-groups .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-pins'));
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 2);
-  assert.equal(await pinnedInFile(one, 'alpha'), true, 'A card flicked into the pinned list is pinned.');
-  await flick(page, page.locator('.sidebar-pins .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-groups'));
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 1);
-  assert.equal(await pinnedInFile(one, 'alpha'), false, 'A pin flicked out of the list is unpinned.');
   await listsUntouched();
 
-  // Dragging is the mouse's way in: a card dropped on the pinned list is pinned, and a pinned
-  // item dragged back out of it is unpinned. The sidebar overlays the grid, so the card has to
-  // be picked up with the menu open — which is exactly how it is done by hand.
-  await dragCard(page, page.locator('.sidebar-groups .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-pins'));
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 2);
-  assert.equal(await pinnedInFile(one, 'alpha'), true, 'A dropped card is pinned in the state file.');
+  // Move up and Move down change a pin's place, and the order is written per card (the list mixes workspaces). The last pin cannot
+  // move down and the first cannot move up.
+  await menu('alpha', 'Pin');
+  await page.waitForFunction(() => document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row').length === 2);
+  const start = await pinTitles();
+  assert.deepEqual([...start].sort(), ['Alpha', 'Beta']);
+  const [first, second] = start.map(title => title.toLowerCase());
+  const dir = { alpha: one, beta: two };
+  await row(first).locator('[data-row-menu]').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move up', exact: true }).isDisabled(), true, 'The first pin cannot move up.');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await row(second).locator('[data-row-menu]').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move down', exact: true }).isDisabled(), true, 'The last pin cannot move down.');
+  await page.getByRole('menuitem', { name: 'Move up', exact: true }).click();
+  await page.waitForFunction(want => [...document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row-body b')].map(e => e.textContent).join() === want, [start[1], start[0]].join());
+  await untilOrder(dir[second], second, 0);
+  await untilOrder(dir[first], first, 1);
+  await menu(first, 'Move up');
+  await page.waitForFunction(want => [...document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row-body b')].map(e => e.textContent).join() === want, start.join());
+  await untilOrder(dir[first], first, 0);
+  await menu('alpha', 'Unpin');
+  await page.waitForFunction(() => document.querySelectorAll('[data-library] [role="list"][aria-label="Pinned"] .lib-row').length === 1);
+  assert.equal(await pinnedInFile(one, 'alpha'), false);
   await listsUntouched();
 
-  // A pin dropped on the top half of another pin lands above it, and the order is written per
-  // card — the list mixes workspaces, so each file keeps its own card's place.
-  const pinTitles = () => page.locator('.sidebar-pins .sidebar-item .item-text').allInnerTexts();
-  assert.deepEqual(await pinTitles(), ['Beta', 'Alpha'], 'A fresh pin waits at the bottom.');
-  const beta = page.locator('.sidebar-pins .sidebar-item', { hasText: 'Beta' });
-  const alpha = page.locator('.sidebar-pins .sidebar-row', { hasText: 'Alpha' });
-  await dragCard(page, beta, alpha, 'top');
-  await page.waitForFunction(() => [...document.querySelectorAll('.sidebar-pins .item-text')].map(e => e.textContent).join() === 'Alpha,Beta');
-  await untilOrder(one, 'alpha', 0);
-  await untilOrder(two, 'beta', 1);
-
-  await dragCard(page, page.locator('.sidebar-pins .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-groups'));
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 1);
-  assert.equal(await pinnedInFile(one, 'alpha'), false, 'Dragging a pin out of the list unpins it.');
-  await listsUntouched();
-
-  // Opening a pin from another project moves the filter with it: the grid you come back to is
-  // the card's own project, not whichever one happened to be selected.
-  await page.locator('.sidebar-item', { hasText: 'Beta' }).click();
+  // A pin opens like any card, from its row.
+  await row('beta').locator('.lib-row-main').click();
   await page.frameLocator('iframe.report-frame').getByRole('heading', { name: 'Beta' }).waitFor();
-  // The sidebar is still open: opening a card puts it away only where it covers the screen.
-  await page.locator('.sidebar .project-chip.active', { hasText: 'Two' }).waitFor();
+  assert.equal(await row('beta').getAttribute('aria-current') ?? await row('beta').locator('.lib-row-main').getAttribute('aria-current'), 'page', 'The open card is lit in the list.');
 
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log('Pin UI passed: pinned lives in the sidebar, the grid shows each card once, pins drag into order, opening a pin follows its project.');
+  console.log('Pin UI passed: a pin shows once and survives the section filter, the row menu pins and orders them, and no card list was written.');
 } finally { await browser?.close(); await service.close(); }
