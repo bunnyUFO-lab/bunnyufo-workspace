@@ -150,6 +150,8 @@ try {
   await card.locator('textarea').fill('shorter hang here');
   await card.getByRole('button', { name: 'Send answer' }).click();
   await card.waitFor({ state: 'detached' });
+  // The card leaves when the answer is held; the write follows (at once here: hub.undoMs is 0), so wait for it to land.
+  await eventually(() => assert.ok(fixture.fake.objects.has(`sections/inbox/asks/${FIXTURE_ASK}/answer.json`)));
   assert.deepEqual([answerOf(FIXTURE_ASK).choice, answerOf(FIXTURE_ASK).note, answerOf(FIXTURE_ASK).by], ['B', 'shorter hang here', 'local']);
   await page.locator('[data-next-note]', { hasText: 'Answered' }).waitFor();
   await page.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '3');
