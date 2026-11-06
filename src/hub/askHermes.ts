@@ -1,4 +1,4 @@
-// "Ask Hermes: <text>" from the command palette: open a new Chat conversation and send the text. The text waits here
+// "Ask Hermes: <text>" from Search: open a new Chat conversation and send the text. The text waits here
 // until the Chat screen is on screen (it may have to mount first), then Chat takes it.
 let waiting: string | null = null
 const EVENT = 'buw-ask-hermes'

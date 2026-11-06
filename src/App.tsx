@@ -16,7 +16,7 @@ import { restore, trashOf } from './lib/trash'
 import { LibraryContext, canManage } from './lib/library'
 import ReportBoundary from './components/ReportBoundary'
 import Shortcuts from './components/Shortcuts'
-import CommandPalette from './components/CommandPalette'
+import Search from './search/Search'
 import { host } from './lib/host'
 import type { Today } from './lib/hub'
 import { TodayContext, useHubData } from './hub/useHub'
@@ -454,18 +454,12 @@ export default function App() {
       {desktop && <Rail lit={lit} needsYou={needsYou} />}
 
       {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
-      {searchOpen && (
-        <CommandPalette
-          cards={cards}
-          items={today.data?.needsYou ?? []}
-          waiting={needsYou}
-          home={homeAddress()}
-          onClose={() => back(hubHash('today'))}
-        />
-      )}
+      {searchOpen && desktop && <Search desktop onClose={() => back(hubHash('today'))} />}
 
       <main className="main">
-        {libraryScreen ? (
+        {searchOpen && !desktop ? (
+          <div className="content"><Screen key="search"><Search desktop={false} onClose={() => back(hubHash('today'))} /></Screen></div>
+        ) : libraryScreen ? (
           <Split
             list={showList ? (desktop ? list : <Screen key="library">{list}</Screen>) : null}
             detail={entity ? <div className="lib-detail">{body}</div> : undefined}

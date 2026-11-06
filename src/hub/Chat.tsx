@@ -757,7 +757,7 @@ function ChatView({ id }: { id?: string }) {
   }
 
 
-  // "Ask Hermes: <text>" from the palette: a new conversation that sends the text at once.
+  // "Ask Hermes: <text>" from Search: a new conversation that sends the text at once.
   const sendRef = useRef(send)
   useEffect(() => { sendRef.current = send })
   const takeQueued = useCallback(() => {
