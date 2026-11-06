@@ -53,6 +53,7 @@ async function setup() {
     `hermes-main=${sha('tok-hermes-main')}:read=*;write=inbox|assistant`,
     `agentish=${sha('tok-agentish')}:read=*;write=inbox`,
     `hermes-config=${sha('tok-hermes-config')}:write=inbox`,
+    `apply-action=${sha('tok-apply-action')}:read=*;write=inbox`,
   ].join(', '));
   const api = createCardApi({ bucket, tokens, today: () => '2026-10-12' });
   const call = async (method, rawPath, { token = 'tok-all', body, query, base64, headers = {} } = {}) => {
@@ -282,6 +283,30 @@ test('inbox: delivered.json and watch-<session>.json are create-only for a limit
     assert.equal((await put('tok-all', 'asks/x-1/delivered.json')).status, 200, 'The passphrase may replace.');
     assert.equal((await put('tok-all', 'checklists/x-2/delivered.json')).status, 200, 'The passphrase may replace a checklist copy too.');
     assert.equal((await call('DELETE', '/sections/inbox/files/asks/x-1/watch-abcd1234.json', { token: 'tok-all' })).status, 200, 'The passphrase may delete.');
+  } finally {
+    await fake.close();
+  }
+});
+
+test('inbox: asks/<id>/applied.json is the apply job\'s alone, once, and marked so the Hub can tell it from a forgery', async () => {
+  const { fake, call } = await setup();
+  try {
+    const file = 'asks/20261105-probe-ab12/applied.json';
+    const put = (token, headers = { 'If-None-Match': '*' }, name = file) => call('PUT', `/sections/inbox/files/${name}`, { token, body: Buffer.from('{"v":1}'), base64: true, headers });
+    for (const token of ['tok-agent', 'tok-cloud', 'tok-pc-runner', 'tok-hermes-main', 'tok-hermes-config', 'tok-agentish']) {
+      assert.equal((await put(token)).status, 403, `${token} cannot write it`);
+    }
+    assert.equal(fake.text(`sections/inbox/${file}`), null);
+    assert.equal((await put('tok-apply-action', { 'If-None-Match': '*', 'x-amz-meta-writer': 'none' })).status, 200);
+    assert.deepEqual(fake.objects.get(`sections/inbox/${file}`).metadata, { writer: 'apply-action' }, 'the mark is the handler\'s own');
+    assert.equal((await put('tok-apply-action')).status, 412, 'not replaced');
+    assert.equal((await put('tok-apply-action', {}, 'asks/20261105-probe-cd34/applied.json')).status, 403, 'create-only: a plain put is refused');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-apply-action', body: { files: [{ path: 'asks/20261105-probe-cd34/applied.json' }] } })).status, 403, 'no upload URL');
+    assert.equal((await call('POST', '/sections/inbox/uploads', { token: 'tok-agent', body: { files: [{ path: 'asks/20261105-probe-cd34/applied.json' }] } })).status, 403, 'an agent gets no upload URL for it');
+    assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-deleter' })).status, 403, 'a limited deleter keeps off it');
+    // The passphrase can still write it, with no mark, so the Hub ignores that copy.
+    assert.equal((await put('tok-all', { 'If-None-Match': '*' }, 'asks/20261105-probe-ef56/applied.json')).status, 200);
+    assert.deepEqual(fake.objects.get('sections/inbox/asks/20261105-probe-ef56/applied.json').metadata ?? {}, {});
   } finally {
     await fake.close();
   }

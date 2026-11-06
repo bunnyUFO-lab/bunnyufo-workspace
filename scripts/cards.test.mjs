@@ -2362,6 +2362,37 @@ test('plan apply: runs the approved rows in order with argument arrays, maps #n 
   } finally { await close(); }
 });
 
+test('plan apply records the ids its creates made in asks/<id>/applied.json, once, and only when the whole run finished', async () => {
+  const changes = [{ op: 'create', title: 'Epic', type: 'epic' }, { op: 'create', title: 'Child', parent: '#1' }, { op: 'close', bead: 'wk-5', reason: 'x' }];
+  const done = await planFixture({ changes });
+  try {
+    assert.equal((await done.cli('api', 'plan', 'apply', done.id, '--dry-run')).code, 0);
+    assert.equal(done.fake.text(`sections/inbox/asks/${done.id}/applied.json`), null, 'A dry run records nothing.');
+    const run = await done.cli('api', 'plan', 'apply', done.id);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    const record = JSON.parse(done.fake.text(`sections/inbox/asks/${done.id}/applied.json`));
+    assert.equal(record.v, 1);
+    assert.deepEqual(record.created, [{ ref: '#1', id: 'wk-new1' }, { ref: '#2', id: 'wk-new2' }]);
+    const again = await done.cli('api', 'plan', 'apply', done.id, '--again');
+    assert.equal(again.code, 0, 'A record that is there already is left alone and is no failure.');
+    assert.deepEqual(JSON.parse(done.fake.text(`sections/inbox/asks/${done.id}/applied.json`)).created, record.created);
+  } finally { await done.close(); }
+  const failing = await planFixture({ changes, extra: { BUW_BD_FAIL_ON: '3' } });
+  try {
+    assert.equal((await failing.cli('api', 'plan', 'apply', failing.id)).code, 1);
+    assert.equal(failing.fake.text(`sections/inbox/asks/${failing.id}/applied.json`), null, 'A run that stopped records nothing yet.');
+  } finally { await failing.close(); }
+  const journal = await planFixture({ changes, extra: { BUW_BD_FAIL_ON: '3' } });
+  try {
+    const file = path.join(journal.dir, 'journal.json');
+    assert.equal((await journal.cli('api', 'plan', 'apply', journal.id, '--journal', file)).code, 1);
+    journal.cli.env = { ...journal.cli.env, BUW_BD_FAIL_ON: '0' };
+    const resumed = await journal.cli('api', 'plan', 'apply', journal.id, '--journal', file, '--again');
+    assert.equal(resumed.code, 0, resumed.stdout + resumed.stderr);
+    assert.deepEqual(JSON.parse(journal.fake.text(`sections/inbox/asks/${journal.id}/applied.json`)).created.map(row => row.id), ['wk-new1', 'wk-new2'], 'A resumed run records the ids of both runs.');
+  } finally { await journal.close(); }
+});
+
 test('plan apply stops at the first failure and names the rows left; a row that needs a skipped create is skipped', async () => {
   const changes = [
     { op: 'create', title: 'A' },
