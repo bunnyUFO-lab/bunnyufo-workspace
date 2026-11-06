@@ -26,9 +26,9 @@ const open = async (options = {}) => {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
-  const lies = { hide: null, thread: null, jobs: false, jobsView: false, live: null, post: 0 };
+  const lies = { hide: null, thread: null, jobs: false, jobsView: false, live: null, post: 0, proxy: false };
   await context.route(url => url.pathname === '/api/hub/chat', async route => {
-    if (route.request().method() === 'POST' && lies.post) { await route.fulfill({ status: lies.post, json: { error: 'No such conversation.' } }); return; }
+    if (route.request().method() === 'POST' && lies.post) { await (lies.proxy ? route.fulfill({ status: lies.post, contentType: 'text/html', body: '<html>Bad gateway</html>' }) : route.fulfill({ status: lies.post, json: { error: 'Hermes did not answer (502).' } })); return; }
     if (route.request().method() !== 'GET') { await route.fallback(); return; }
     const response = await steadyFetch(route);
     const body = await response.json();
@@ -41,6 +41,9 @@ const open = async (options = {}) => {
       await route.fulfill({ response, json: { ...(await response.json()), state: { title: null, pinned: null, archived: new Date().toISOString(), trashed: null, unread: false } } });
     } else if (lies.thread === 'gap') {   // the end of a turn: the turn is saved, the running mark is not dropped yet
       await route.fulfill({ json: { messages: [{ role: 'user', text: 'Gap question', at: new Date().toISOString() }, { role: 'assistant', text: 'Gap answer', at: new Date().toISOString() }], running: true, asking: { text: 'Gap question', at: new Date().toISOString() } } });
+    } else if (lies.thread === 'same') {   // the same words sent twice: the first is answered, the second is being answered now
+      const now = Date.now();
+      await route.fulfill({ json: { messages: [{ role: 'user', text: 'again', at: new Date(now - 30_000).toISOString() }, { role: 'assistant', text: 'First answer', at: new Date(now - 20_000).toISOString() }], running: true, asking: { text: 'again', at: new Date(now).toISOString() } } });
     } else if (lies.thread === '404') await route.fulfill({ status: 404, json: { error: 'No such conversation.' } });
     else await route.fulfill({ json: { messages: [], running: false } });
   });
@@ -82,11 +85,12 @@ const rowOf = (page, chat) => page.locator(`[data-chat-list] [data-conversation=
 const lines = (page, role, text) => page.locator(`.hub-bubble.${role}`, { hasText: text });
 const release = async (index, text) => { fixture.hermes.release(fixture.hermes.runs[index].id, text); };
 let run = 0;
+const wanted = name => !process.env.ONLY || process.env.ONLY.split(',').includes(name);
 const longAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
 const entry = (id, title, extra = {}) => ({ key: `k${id}`, id, title, persona: null, model: null, startedAt: new Date().toISOString(), lines: [{ role: 'user', text: title, at: new Date().toISOString() }], base: 0, ask: { text: title, at: new Date().toISOString() }, reply: 'Half a sentence', jobs: [], ...extra });
 
 try {
-  {
+  if (wanted('main')) {
     const { page, lies } = await open();
     step('send in a new chat, leave, return with the list answering without it: the row is still there, Replying; a reload keeps it');
     const chat = await send(page, ASK);
@@ -134,7 +138,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('delete')) {
     const { page } = await open();
     step('delete a chat during its reply: it does not come back, including after a reload');
     const chat = await send(page, 'Delete me while you reply');
@@ -151,7 +155,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('archive')) {
     const { page } = await open();
     step('archive a chat during its reply: it does not come back, including after a reload');
     const chat = await send(page, 'Archive me while you reply');
@@ -168,7 +172,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('path')) {
     const { page, lies } = await open({ path: true });
     step('path routes (the real site): the row stays with the list lying, and the thread keeps its lines with the read answering 404');
     const chat = await send(page, 'Path routes reply');
@@ -190,7 +194,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('blocked')) {
     const { page } = await open({ blocked: true });
     step('storage blocked: chat still works');
     await page.goto(`${fixture.url}#/~hub/chat/new`);
@@ -203,7 +207,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('expired')) {
     const OLD = `${day}-old001`;
     const OLD2 = `${day}-old002`;
     const { page } = await open({ seed: { chats: [entry(OLD, 'Old reply', { startedAt: longAgo }), entry(OLD2, 'Another old reply', { startedAt: longAgo })], jobs: [] } });
@@ -225,7 +229,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('search')) {
     const SEARCH = `${day}-sea001`;
     const { page } = await open({ seed: { chats: [entry(SEARCH, 'Quiet title', { reply: 'The dragon sleeps under the bridge' })], jobs: [] } });
     step('chat search matches the words of a chat in progress, and a failed list read shows it beside the error');
@@ -240,7 +244,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('jobs')) {
     const job = (id, title, state) => ({ chat: SAVED_CHAT, addedAt: new Date().toISOString(), job: { id, title, text: 'Scan them.', project: 'probe', writer: 'hermes', verified: true, state, approvable: false, by: 'hermes', agent: 'Researcher' } });
     const request = { ...requestJson({ id: DONE_JOB, project: 'probe', by: 'hermes-main', text: 'Finished scan', now: new Date() }), title: 'Finished scan', preset: 'research', target: 'hermes', origin: { kind: 'agent', name: 'hermes' }, createdAt: new Date(Date.now() - 3_600_000).toISOString() };
     fixture.seed.request(request, { writer: 'agent' });
@@ -277,7 +281,7 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  {
+  if (wanted('b1a')) {
     const { page, lies } = await open();
     step("B1: a Hub error on /live does not delete the device's copy");
     const chat = await send(page, 'Live error question');
@@ -292,7 +296,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('b1b')) {
     const { page, lies } = await open();
     step("B1: a refused send from a degraded thread leaves the device's copy and its lines");
     const chat = await send(page, 'First words kept');
@@ -313,7 +317,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  for (const action of ['Archive', 'Delete']) {
+  for (const action of wanted('b2') ? ['Archive', 'Delete'] : []) {
     const { page } = await open();
     step('B2: ' + action + " from the thread's own menu does not bring the chat back");
     // The thread's menu exists once the chat has a saved file: finish a first turn, then send a second.
@@ -328,7 +332,9 @@ try {
     await page.locator('.hub-chat-head [data-row-menu]').click();
     await page.getByRole('menuitem', { name: action, exact: true }).click();
     await page.locator('[data-chat-list]').waitFor();
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2500);
+    assert.equal((await stored(page)).chats.length, 0, 'The entry is gone while the reply still runs.');
+    assert.equal(await rowOf(page, chat).count(), 0);
     await release(mine, 'Saved after the menu.');
     await page.waitForTimeout(2500);
     assert.equal((await stored(page)).chats.length, 0, 'The entry stays gone.');
@@ -341,7 +347,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('b3')) {
     const { page, lies } = await open();
     step('B3: a chat archived on another device does not come back as Replying');
     const chat = await send(page, 'Archived elsewhere');
@@ -356,7 +362,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('b4')) {
     const GAP = day + '-gap001';
     const { page, lies } = await open();
     step('B4: a read between saving the turn and dropping the running mark shows each line once');
@@ -370,7 +376,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('b5')) {
     const { page, lies } = await open();
     step('B5: following a turn that ends before its first word keeps the cached reply');
     const chat = await send(page, 'Cached reply stays');
@@ -384,7 +390,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('f4')) {
     const { page } = await open();
     step('F4: leaving a new chat does not pull the owner back when the reply ends');
     await send(page, 'Leave me be');
@@ -397,7 +403,7 @@ try {
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
 
-  {
+  if (wanted('f5')) {
     const { page } = await open({ seed: { chats: [entry('', 'Never named message', { id: null, key: 'ksend' })], jobs: [] } });
     step('F5: a row for a message the Hub never named can put the words back in the box');
     await page.goto(fixture.url + '#/~hub/chat');
@@ -406,6 +412,75 @@ try {
     await page.locator('textarea[aria-label="Message"]').waitFor();
     assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'Never named message');
     assert.equal((await stored(page)).chats.length, 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  const finishFirst = async (page, text) => {
+    const chat = await send(page, text);
+    await release(run++, 'First reply.');
+    await page.locator('[data-pending]').waitFor({ state: 'detached' });
+    await page.waitForFunction(({ key }) => JSON.parse(localStorage.getItem(key) || '{"chats":[]}').chats.length === 0, { key: KEY });
+    return chat;
+  };
+
+  if (wanted('n1a')) {
+    const { page, lies } = await open();
+    step("N1: the Hub's own 502 on a new chat, three tries: no entry, no Sending row, the words back in the box");
+    await page.goto(fixture.url + '#/~hub/chat/new');
+    lies.post = 502;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const box = page.locator('textarea[aria-label="Message"]');
+      if (attempt === 0) await box.fill('Plan nothing');
+      await page.keyboard.press('Enter');
+      await page.locator('.hub-error').waitFor();
+      await page.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]').value === 'Plan nothing');
+      assert.equal((await stored(page)).chats.length, 0, 'Try ' + (attempt + 1) + ': nothing was saved, so nothing is kept.');
+    }
+    await page.evaluate(() => { location.hash = '#/~hub/chat'; });
+    await page.locator('[data-chat-list]').waitFor();
+    assert.equal(await page.locator('[data-conversation-sending]').count(), 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  if (wanted('n1b')) {
+    const { page, lies } = await open();
+    step("N1: the Hub's own 502 in an existing chat: no Replying row, no 'keeps trying' note, even after a reload");
+    const chat = await finishFirst(page, 'Existing chat for a refusal');
+    lies.post = 502;
+    await page.locator('textarea[aria-label="Message"]').fill('Refused message');
+    await page.keyboard.press('Enter');
+    await page.locator('.hub-error').waitFor();
+    assert.equal((await stored(page)).chats.length, 0);
+    await page.waitForFunction(() => document.querySelector('textarea[aria-label="Message"]').value === 'Refused message');
+    await page.reload();
+    await lines(page, 'assistant', 'Working on it.').waitFor();
+    assert.equal(await page.locator('[data-chat-unsaved]').count(), 0);
+    await page.evaluate(() => { location.hash = '#/~hub/chat'; });
+    await rowOf(page, chat).waitFor();
+    assert.equal(await rowOf(page, chat).locator('[data-conversation-running]').count(), 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  if (wanted('n1c')) {
+    const { page, lies } = await open();
+    step('N1: a 502 from a proxy (no JSON from the Hub) proves nothing, so the copy is kept');
+    await page.goto(fixture.url + '#/~hub/chat/new');
+    lies.post = 502; lies.proxy = true;
+    await page.locator('textarea[aria-label="Message"]').fill('Proxy refused this');
+    await page.keyboard.press('Enter');
+    await page.locator('.hub-error').waitFor();
+    assert.equal((await stored(page)).chats.length, 1);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  if (wanted('n2')) {
+    const SAME = day + '-same01';
+    const { page, lies } = await open();
+    step('N2: the same words sent twice: a device opening the chat during the second reply sees both messages and can stop it');
+    lies.thread = 'same'; lies.live = 'idle';
+    await page.goto(fixture.url + '#/~hub/chat/' + SAME);
+    await page.waitForFunction(() => document.querySelectorAll('.hub-bubble.user').length === 2);
+    await page.locator('[data-chat-stop]').waitFor();
     await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
   console.log('ok');
