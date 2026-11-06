@@ -167,6 +167,8 @@ try {
   await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
   assert.equal(await odd.locator('dialog.pal .pal-g', { hasText: /^roadmaps$/i }).count(), 0, 'The unreadable list shows no roadmaps.');
   await odd.keyboard.press('Escape');
+  // Esc is a step back: wait for it to land before the next Ctrl+K, which toggles.
+  await odd.locator('dialog.pal').waitFor({ state: 'detached' });
   unreadable = false;
   await odd.keyboard.press('Control+k');
   await odd.locator('dialog.pal').waitFor();
