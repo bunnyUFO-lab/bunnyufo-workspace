@@ -42,8 +42,11 @@ const shot = async (page, name) => { if (shots) await page.screenshot({ path: pa
 /** Approve a proposal from Needs you and wait for the note that says what comes next. */
 async function approve(page, fixture, ident) {
   await page.goto(`${fixture.url}#/~hub/needs`);
+  // The answer is held for Undo (here 0 ms) and then sent: wait for the POST to finish, so what a test sets next applies to the fire that follows it.
+  const sent = page.waitForResponse(response => /\/requests\/[^/]+\/(approve|again)$/.test(response.url()) && response.request().method() === 'POST');
   await page.locator(`[data-need="approval-${ident}"] [data-approval-approve]`).click();
   await page.locator('[data-next-note]').waitFor();
+  await sent;
 }
 // Every JSON answer the pages read from the hub, to check as well as the page text.
 const bodies = [];

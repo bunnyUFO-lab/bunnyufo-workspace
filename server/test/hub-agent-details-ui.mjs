@@ -488,9 +488,9 @@ try {
   await noSideways(desk, 'Agent-edit Ask at 1280');
   await desk.locator('[data-option="apply"] button').click();
   await desk.locator('[data-send]').click();
-  // Answering leaves the Ask page for the next item, so the line under Send is gone within a moment; the same line stays in the note there.
-  await desk.locator('[data-next-detail]').waitFor();
-  assert.match(await desk.locator('[data-next-detail]').innerText(), /^Applied\. The persona has a new version/);
+  // Answering stays on the Ask (nothing moves by itself), so the line under Send is still there.
+  await desk.locator('[data-avatar-notice]').waitFor();
+  assert.match(await desk.locator('[data-avatar-notice]').innerText(), /^Applied\. The persona has a new version/);
   await desk.goto(`${fresh.url}#/~hub/agent-edit/planner`);
   await desk.locator('[data-agent-edit="planner"] [data-edit-form]').waitFor();
   assert.equal(await desk.locator('[data-edit-prompt]').inputValue(), 'You are Planner. Ask one question at a time.');

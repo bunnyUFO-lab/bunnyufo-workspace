@@ -57,11 +57,11 @@ try {
     };
     const open = async id => { await page.goto(`${fixture.url}#/~hub/ask/${id}`); await page.locator('[data-option="allowed"]').waitFor(); };
     const answerWith = async option => { await page.locator(`[data-option="${option}"]`).click(); await page.locator('[data-send]').click(); };
-    // Answering from the Ask's own page moves on to the next item at once, so the notice lives in the note there (the owner reads it on the next page).
-    const noticeText = async () => { await page.locator('[data-next-note]').waitFor(); await page.locator('[data-next-detail]').waitFor(); return (await page.locator('[data-next-detail]').innerText()).replace(/^\s*·\s*/, ''); };
-    // The notice is its own wrapped line under "Answered · next: …": nothing of it is clipped (no ellipsis, no sideways overflow).
+    // Answering from the Ask's own page stays on it (nothing moves by itself), so the notice is the line under Send.
+    const noticeText = async () => { await page.locator('[data-settled-bar]').waitFor(); await page.locator('[data-avatar-notice]').waitFor(); return (await page.locator('[data-avatar-notice]').innerText()).replace(/^\s*·\s*/, ''); };
+    // The notice is its own wrapped line under Send: nothing of it is clipped (no ellipsis, no sideways overflow).
     const noticeUnclipped = async what => {
-      const box = await page.locator('[data-next-detail]').evaluate(node => { const style = getComputedStyle(node); return { sw: node.scrollWidth, cw: node.clientWidth, sh: node.scrollHeight, ch: node.clientHeight, overflow: style.overflow, ellipsis: style.textOverflow, nowrap: style.whiteSpace === 'nowrap' }; });
+      const box = await page.locator('[data-avatar-notice]').evaluate(node => { const style = getComputedStyle(node); return { sw: node.scrollWidth, cw: node.clientWidth, sh: node.scrollHeight, ch: node.clientHeight, overflow: style.overflow, ellipsis: style.textOverflow, nowrap: style.whiteSpace === 'nowrap' }; });
       assert.ok(box.sw <= box.cw && box.sh <= box.ch && !box.nowrap && box.ellipsis !== 'ellipsis', `${what}: the notice is clipped: ${JSON.stringify(box)}`);
     };
 
@@ -74,8 +74,8 @@ try {
 
     step(`${name}: "Keep it denied" shows no notice`);
     await answerWith('denied');
-    await page.locator('[data-next-note]').waitFor();
-    assert.equal(await page.locator('[data-next-detail]').count(), 0);
+    await page.locator('[data-settled-bar]').waitFor();
+    assert.equal(await page.locator('[data-avatar-notice]').count(), 0);
 
     step(`${name}: an Ask whose run is gone says why it did not run again`);
     await open(asks[name].lost);
