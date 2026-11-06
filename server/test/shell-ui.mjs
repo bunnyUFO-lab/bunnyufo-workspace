@@ -79,7 +79,7 @@ try {
   assert.equal(await shared.locator('[data-tabs]').count(), 0, 'No tabs on a card.');
   await tall(shared, '.topbar [data-back]', 'The card page Back');
   await shared.locator('.topbar [data-back]').click();
-  await shared.locator('.home').waitFor();
+  await shared.locator('[data-library]').waitFor();
   assert.equal(await hashOf(shared), '#/~hub/library');
   assert.equal(new URL(shared.url()).origin, new URL(fixture.url).origin, 'Back did not leave the app.');
   assert.equal(await shared.locator('[data-tabs] [data-nav="library"]').getAttribute('aria-current'), 'page');
@@ -102,7 +102,7 @@ try {
   assert.equal(motion.length, 2, 'Both directions are defined.');
   for (const text of motion) { assert.match(text, /14px/); assert.doesNotMatch(text, /opacity/); }
   await phone.locator('[data-tabs] [data-nav="library"]').click();
-  await phone.locator('.home').waitFor();
+  await phone.locator('[data-library]').waitFor();
   assert.match(await phone.evaluate(() => getComputedStyle(document.querySelector('.ui-screen')).animationName), /ui-from-(right|left)/);
   const calm = await open({ width: 390, height: 800 }, { reducedMotion: 'reduce' });
   await calm.goto(`${fixture.url}#/~hub/today`);
@@ -125,21 +125,21 @@ try {
 
   step('desktop: the Library is the card list on the left with no Hub links in it; the rail lights Library');
   await openLibrary(desk);
-  assert.equal(await desk.locator('.sidebar [data-hub-link], .sidebar [data-hub-group], .sidebar-palette').count(), 0);
+  assert.equal(await desk.locator('[data-library] [data-hub-link], [data-library] [data-hub-group], [data-library] .sidebar-palette').count(), 0);
   assert.equal(await desk.locator('[data-rail] [data-nav="library"]').getAttribute('aria-current'), 'page');
 
   step('desktop at 1280: a card folds the list, with a Show list button that brings it back');
   await desk.goto(`${fixture.url}#/hub`);
   await desk.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
-  assert.equal(await desk.locator('.sidebar').count(), 0, 'The list is folded beside a card at 1280.');
+  assert.equal(await desk.locator('[data-library]').count(), 0, 'The list is folded beside a card at 1280.');
   await desk.locator('[data-show-list]').click();
-  await desk.locator('.sidebar-list').waitFor();
+  await desk.locator('[data-library] .lib-scroll').waitFor();
   await desk.keyboard.press('[');
-  await desk.locator('.sidebar').waitFor({ state: 'detached' });
+  await desk.locator('[data-library]').waitFor({ state: 'detached' });
   const wide = await open({ width: 1500, height: 900 });
   await wide.goto(`${fixture.url}#/hub`);
   await wide.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
-  await wide.locator('.sidebar-list').waitFor();
+  await wide.locator('[data-library] .lib-scroll').waitFor();
   assert.equal(await wide.locator('[data-show-list]').count(), 0, 'At 1500 the list stays beside the card.');
 
   step('desktop: Ctrl+K and / open search, Esc closes it and you are where you were');

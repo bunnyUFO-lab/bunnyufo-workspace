@@ -8,11 +8,10 @@ export async function nav(page, screen) {
   else await page.evaluate(hash => { location.hash = hash; }, `#/~hub/${screen}`);
 }
 
-/** The Library: the card list. At 900 px and up that is the list beside the screen, below it the grid. */
+/** The Library: the card list, the screen itself on a phone and the pane beside a card at 900 px and up. */
 export async function openLibrary(page) {
-  const wide = await page.evaluate(() => matchMedia('(min-width: 900px)').matches);
   if (!/#\/~hub\/library$/.test(await page.evaluate(() => location.hash))) await nav(page, 'library');
-  await page.locator(wide ? '.sidebar-list' : '.home').first().waitFor();
+  await page.locator('[data-library] .lib-scroll').first().waitFor();
 }
 
 /** The serial of the history entry the page is on (lib/entries stamps one on each), and where it is. */
