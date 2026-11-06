@@ -69,6 +69,9 @@ export function installEntries() {
   stamp()
   if (!firstSerial) { firstSerial = currentSerial; write(FIRST_KEY, firstSerial) }
   window.addEventListener('hashchange', onHashChange)
+  // On a path-routes host the app also redraws on `popstate`, which fires before `hashchange` and renders the new screen at once:
+  // the entry must be stamped by then, or a screen that mounts on Back reads the entry it left. Stamping twice is harmless.
+  window.addEventListener('popstate', onHashChange)
 }
 
 const normal = (hash: string) => (hash.startsWith('#') ? hash : `#${hash}`)
