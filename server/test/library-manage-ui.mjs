@@ -68,36 +68,43 @@ try {
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   let page = await open(desktop, '#/deck/0');
   await page.locator('.step-tab.active').waitFor();
-  await page.locator('.step-tab-more').click();
-  assert.equal(await page.getByRole('menu').count(), 1, 'the tab menu opens');
-  await pick(page, 'Rename');
-  await page.locator('.step-tab-rename').fill('Intro');
+  const organize = () => page.getByRole('button', { name: 'Organize', exact: true });
+  const sheet = () => page.getByRole('dialog', { name: 'Organize tabs' });
+  assert.equal(await page.locator('.step-tab-more').count(), 0, 'no control sits over a tab');
+  await organize().click();
+  await sheet().waitFor();
+  assert.deepEqual(await sheet().locator('li[data-tab-row] .tab-org-name').allInnerTexts(), ['Overview', 'Rules', 'Art'], 'the sheet lists every tab in order');
+  await page.getByRole('button', { name: 'Rename the Overview tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Intro');
   await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'rename wrote the tab name');
   assert.ok((await readFile(path.join(alpha, 'deck/overview.md'), 'utf8')).includes('Body of Overview'), 'the file keeps its name');
-  // Rename offers Undo, too.
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  // Rename back (the sheet has no undo toast; the name is just edited again).
+  await page.getByRole('button', { name: 'Rename the Intro tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Overview');
+  await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Overview', exact: true }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Overview', 'Rules', 'Art'], 'undo of the rename');
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Rename');
-  await page.locator('.step-tab-rename').fill('Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Overview', 'Rules', 'Art'], 'renamed back');
+  await page.getByRole('button', { name: 'Rename the Overview tab', exact: true }).click();
+  await page.locator('.tab-org-name-input').fill('Intro');
   await page.keyboard.press('Enter');
   await page.getByRole('tab', { name: 'Intro', exact: true }).waitFor();
 
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Move right');
-  await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Intro' && document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
+  // Move down, then up, with the buttons; the open tab goes with its tab.
+  await page.getByRole('button', { name: 'Move Intro down', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('.step-tab.active')?.textContent === 'Intro' && document.querySelectorAll('.step-tab[role="tab"]')[1]?.textContent === 'Intro');
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'move wrote the order');
-  // Move offers Undo, too (and sends the tab's path).
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[0]?.textContent === 'Intro');
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'undo of the move');
-  await page.locator('.step-tab-more').click();
-  await pick(page, 'Move right');
-  await page.waitForFunction(() => document.querySelectorAll('.step-tab')[1]?.textContent === 'Intro');
+  await page.getByRole('button', { name: 'Move Intro up', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab[role="tab"]')[0]?.textContent === 'Intro');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Rules', 'Art'], 'moved back up');
+  await page.getByRole('button', { name: 'Move Intro down', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.step-tab[role="tab"]')[1]?.textContent === 'Intro');
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art']);
+  // Back closes the sheet and stays on the card.
+  await page.goBack();
+  await sheet().waitFor({ state: 'detached' });
+  assert.match(await page.locator('.crumb-current').innerText(), /Deck/, 'Back closed the sheet and stayed on the card');
 
   // The card menu by keyboard: Enter opens it, arrows move, Esc closes and gives the focus back.
   const more = page.getByRole('button', { name: 'More for this card' });
@@ -115,14 +122,19 @@ try {
   assert.ok(await more.evaluate(el => el === document.activeElement), 'Esc returns the focus to the button');
   assert.match(await page.locator('.crumb-current').innerText(), /Deck/, 'Esc did not leave the card');
 
+  // Remove: a right-click on a tab opens the same sheet. The file stays, the tab is listed under Removed tabs, and Bring back restores it in place.
   await page.getByRole('tab', { name: 'Rules', exact: true }).click({ button: 'right' });
-  await pick(page, 'Delete');
-  await toast(page).filter({ hasText: 'Deleted the' }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Art'], 'delete took the tab off');
+  await sheet().waitFor();
+  await page.getByRole('button', { name: 'Remove the Rules tab', exact: true }).click();
+  await sheet().getByRole('status').waitFor();
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Intro', 'Art'], 'remove took the tab off');
   assert.ok((await readFile(path.join(alpha, 'deck/rules.md'), 'utf8')).includes('Body of Rules'), 'the file stays');
-  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  assert.match(await sheet().getByRole('status').innerText(), /bring it back/i, 'the sheet says it can be brought back');
+  await page.getByRole('button', { name: 'Bring back the Rules tab', exact: true }).click();
   await page.getByRole('tab', { name: 'Rules', exact: true }).waitFor();
-  assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'undo put the tab back where it was');
+  assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'bringing it back put the tab where it was');
+  await page.goBack();
+  await sheet().waitFor({ state: 'detached' });
 
   // 2. Home: rename a category, then merge one into another.
   // The service remembers the last route (now every tab click is one), so Home is asked for by its address.
@@ -275,10 +287,11 @@ try {
   assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll with the list used');
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Overview', exact: true }).tap();
-  await page.locator('.step-tab-more').tap();
-  box = await page.locator('.item-menu.sheet').boundingBox();
-  assert.ok(box && box.y + box.height >= 800, 'the tab menu is a sheet');
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Organize', exact: true }).tap();
+  box = await page.getByRole('dialog', { name: 'Organize tabs' }).boundingBox();
+  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Organize sheet is a sheet at the bottom (${JSON.stringify(box)})`);
+  await page.goBack();
+  await page.getByRole('dialog', { name: 'Organize tabs' }).waitFor({ state: 'detached' });
 
   // The Trash on a phone: a sheet with Restore.
   await page.evaluate(() => { location.hash = ''; });

@@ -9,6 +9,7 @@ import { libraryHash } from '../lib/route'
 import ItemMenu from './ItemMenu'
 import { useCardMenu } from './CardMenu'
 import StepTab from './TabEdits'
+import TabOrganize from './TabOrganize'
 
 /** The ⋯ beside the pencil: Rename, Category, Move to workspace, Delete. */
 function CardMore({ card }: { card: WorkspaceCard }) {
@@ -57,6 +58,7 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
     for (const child of el.children) observer.observe(child)
     return () => observer.disconnect()
   }, [])
+  const [organizing, setOrganizing] = useState(false)
   const tabs = useRef<HTMLDivElement>(null)
   const [adding, setAdding] = useState(0)
   const overflow = useOverflowEdges(tabs, [entity?.id, entity?.steps.length, stepIndex, adding])
@@ -170,7 +172,7 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
             <div className="step-tabs-wrap" data-overflow={overflow}>
               <div className="step-tabs" role="tablist" ref={tabs}>
                 {entity.steps.map((_, i) => (
-                  <StepTab key={i} card={entity} index={i} active={i === stepIndex} activeIndex={stepIndex} onStep={onStep} editable={editable} />
+                  <StepTab key={i} card={entity} index={i} active={i === stepIndex} onStep={onStep} onOrganize={editable ? () => setOrganizing(true) : undefined} />
                 ))}
                 {editable && <AddSection key={entity.id} card={entity} onStep={onStep} onNaming={() => setAdding(n => n + 1)} />}
               </div>
@@ -181,6 +183,9 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
                 <button type="button" className="step-tabs-arrow" data-edge="end" tabIndex={-1} aria-hidden="true" onClick={() => scrollTabs(1)}>›</button>
               )}
             </div>
+          )}
+          {editable && entity.steps.length > 0 && (
+            <button type="button" className="step-tab step-tab-organize" onClick={() => setOrganizing(true)} aria-haspopup="dialog">Organize</button>
           )}
           {liveAppUrl && (
             <a className="open-ext" href={liveAppUrl} target="_blank" rel="noreferrer"
@@ -207,6 +212,9 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
             </a>
           )}
         </div>
+      )}
+      {organizing && editable && entity && (
+        <TabOrganize key={entity.id} card={entity} activePath={entity.steps[stepIndex]?.path ?? ''} onClose={() => setOrganizing(false)} />
       )}
     </div>
   )
