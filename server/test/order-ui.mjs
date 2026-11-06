@@ -1,9 +1,8 @@
 // Run after npm run build. Isolated repository, registry and browser profile; the fixture
 // workspaces are the only files written.
 //
-// The menu from the pointer and the keyboard: a pin button on every row, cards / project chips /
-// section headings dragged into an order that is remembered, and J/K/↑/↓/Alt+↑↓ through the list
-// without opening the search box.
+// Order in the Library: pin and unpin from a row's menu, Move up and Move down in a pinned row's menu, the pinned order
+// remembered across a reload, and a chip / heading / card order saved in this browser still applied.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
@@ -52,43 +51,31 @@ const pinnedInFile = async id => {
   } catch { return undefined; }
 };
 
-// Dragging is a pointer gesture (src/lib/drag.ts): press, move past the threshold, release.
-// `at` aims inside the target — a fraction of its width and height — which is how a place in a
-// row (top or bottom half) or in a line of chips and cards (left or right half) is chosen.
-const drag = async (page, source, target, at = { x: 0.5, y: 0.5 }) => {
-  await source.waitFor();
-  let settled = null;
-  for (let tries = 0; tries < 40; tries++) {
-    const box = await source.boundingBox();
-    if (settled && box.x === settled.x && box.y === settled.y) break;
-    settled = box;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  const from = await source.boundingBox();
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2 + 12, { steps: 4 });
-  // Lifting a card opens the empty pinned list and pushes the rows down: aim at where the target is now.
-  await new Promise(resolve => setTimeout(resolve, 150));
-  const to = await target.boundingBox();
-  await page.mouse.move(to.x + to.width * at.x, to.y + to.height * at.y, { steps: 10 });
-  await page.mouse.up();
-};
-const TOP = { x: 0.5, y: 0.15 }, BOTTOM = { x: 0.5, y: 0.85 }, LEFT = { x: 0.15, y: 0.5 }, RIGHT = { x: 0.85, y: 0.5 };
-
 const service = await createService({ repo, uiDir: path.join(root, 'dist'), registryFile });
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await contextWithListOpen(browser, { viewport: { width: 1280, height: 950 } })).newPage();
-  page.setDefaultTimeout(ms(10000));
-  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const open = async init => {
+    const context = await contextWithListOpen(browser, { viewport: { width: 1280, height: 950 } });
+    if (init) await context.addInitScript(init);
+    const page = await context.newPage();
+    page.setDefaultTimeout(ms(10000));
+    page.on('pageerror', error => errors.push(error.message));
+    return page;
+  };
+  const errors = [];
+  const page = await open();
   await page.goto(service.urls.workspace);
-  await page.locator('.sidebar-item').first().waitFor();
-
-  const texts = selector => page.locator(selector).evaluateAll(els => els.map(el => el.querySelector('.item-text')?.textContent ?? el.textContent));
-  const sidebarCards = (section) => page.locator(`.sidebar-groups > div:has(> [data-section="${section}"]) .sidebar-item .item-text`).allInnerTexts();
-  const chips = () => page.locator('.sidebar .project-chip').evaluateAll(els => els.map(el => el.textContent.replace(/[0-9]/g, '').trim()).filter(Boolean));
+  const rows = () => page.locator('[data-library] .lib-row');
+  const row = title => page.locator('[data-library] .lib-row', { has: page.locator('.lib-row-body b', { hasText: new RegExp(`^${title}$`) }) });
+  const menu = async (title, item) => {
+    await row(title).locator('[data-row-menu]').click();
+    await page.getByRole('menuitem', { name: item, exact: true }).click();
+  };
+  const pinned = () => page.locator('[data-library] [role="list"][aria-label="Pinned"] .lib-row-body b').allInnerTexts();
+  const heads = () => page.locator('[data-library] .lib-head[data-section]').evaluateAll(els => els.map(el => el.dataset.section));
+  const titles = () => page.locator('[data-library] .lib-row-body b').allInnerTexts();
+  const chips = () => page.locator('[data-library] .ui-chips .ui-chip').evaluateAll(els => els.map(el => el.firstChild.textContent.trim()));
   const until = async (read, expected, what) => {
     for (let tries = 0; tries < 50; tries++) {
       const got = await read();
@@ -97,105 +84,55 @@ try {
     }
     assert.deepEqual(await read(), expected, what);
   };
+  await rows().first().waitFor();
+  assert.equal(await rows().count(), 5);
 
-  // —— The pin button on a row ————————————————————————————————————————————
-  // A row's text starts with its icon, so match on the title element.
-  const itemOf = title => page.locator('.sidebar-item', { has: page.locator('.item-text', { hasText: new RegExp(`^${title}$`) }) });
-  const rowOf = title => page.locator('.sidebar-row', { has: page.locator('.item-text', { hasText: new RegExp(`^${title}$`) }) });
-  const pinButton = title => rowOf(title).locator('.sidebar-item-pin');
-  assert.equal(await page.locator('.sidebar-item-pin').count(), 5, 'Every row has a pin button.');
-  assert.ok(await page.locator('.sidebar-item-pin').first().evaluate(el => Number(getComputedStyle(el).opacity)) >= 0.5, 'The pin button is legible without hovering.');
-  await pinButton('A2').click();
-  await page.locator('.sidebar-pins .sidebar-item', { hasText: 'A2' }).waitFor();
-  assert.equal(await pinnedInFile('a2'), true, 'The button pins the card and writes it through.');
-  assert.equal(await page.locator('.sidebar-pins .sidebar-item-pin.on').count(), 1, 'A pinned row shows the pin lit.');
-  await page.locator('.sidebar-pins .sidebar-item-pin').click();
-  await page.waitForFunction(() => document.querySelectorAll('.sidebar-pins .sidebar-item').length === 0);
-  assert.equal(await pinnedInFile('a2'), false, 'The same button unpins it.');
+  // —— Pin from a row menu ————————————————————————————————————————————————
+  await menu('A2', 'Pin');
+  await until(pinned, ['A2'], 'The menu pins the card.');
+  assert.equal(await pinnedInFile('a2'), true, 'It writes through.');
+  assert.equal(await rows().count(), 5, 'A pinned card is still listed once.');
+  await menu('A2', 'Unpin');
+  await until(pinned, [], 'The same menu unpins it.');
+  assert.equal(await pinnedInFile('a2'), false);
 
-  // —— Cards inside a section ——————————————————————————————————————————————
-  await until(() => sidebarCards('One'), ['A1', 'A2', 'A3', 'A4'], 'With nothing arranged, the list follows freshness.');
-  await drag(page, itemOf('A3'), rowOf('A1'), TOP);
-  await until(() => sidebarCards('One'), ['A3', 'A1', 'A2', 'A4'], 'A card dropped on the top half of another lands above it.');
-  await drag(page, itemOf('A3'), rowOf('A2'), BOTTOM);
-  await until(() => sidebarCards('One'), ['A1', 'A2', 'A3', 'A4'], '…and on the bottom half, below it.');
-  // The board is the same list.
-  await until(() => page.locator('.home-section:has(.section-title:text("One")) .card-title').allInnerTexts(), ['A1', 'A2', 'A3', 'A4'], 'The board shows the same order.');
-  await drag(page, page.locator('.entity-card[data-entity="a4"]'), page.locator('.entity-card[data-entity="a1"]'), LEFT);
-  await until(() => sidebarCards('One'), ['A4', 'A1', 'A2', 'A3'], 'Dragging on the board rearranges the menu too.');
-  // Dropped on a card of another section, nothing moves.
-  await drag(page, itemOf('A4'), rowOf('B1'));
-  await until(() => sidebarCards('One'), ['A4', 'A1', 'A2', 'A3'], 'A card dropped in another project\'s section stays where it was.');
-  assert.equal(await itemOf('A4').count(), 1);
-
+  // —— A pinned list in a chosen order: Move up and Move down, remembered across a reload ——
+  await menu('A1', 'Pin'); await until(pinned, ['A1']);
+  await menu('A3', 'Pin'); await until(pinned, ['A1', 'A3']);
+  await menu('B1', 'Pin'); await until(pinned, ['A1', 'A3', 'B1'], 'A fresh pin goes to the end.');
+  await menu('B1', 'Move up');
+  await until(pinned, ['A1', 'B1', 'A3'], 'Move up goes one place up, across workspaces.');
+  await menu('A1', 'Move down');
+  await until(pinned, ['B1', 'A1', 'A3'], 'Move down goes one place down.');
+  await row('B1').locator('[data-row-menu]').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move up', exact: true }).isDisabled(), true, 'The first pin cannot move up.');
+  await page.getByRole('button', { name: 'Close' }).click();
+  await row('A3').locator('[data-row-menu]').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move down', exact: true }).isDisabled(), true, 'The last pin cannot move down.');
+  await page.getByRole('button', { name: 'Close' }).click();
   await page.reload();
-  await page.locator('.sidebar-item').first().waitFor();
-  await until(() => sidebarCards('One'), ['A4', 'A1', 'A2', 'A3'], 'The order is remembered across a reload.');
+  await rows().first().waitFor();
+  await until(pinned, ['B1', 'A1', 'A3'], 'The order is remembered across a reload.');
+  // A row not pinned has no Move items.
+  await row('A4').locator('[data-row-menu]').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Move up', exact: true }).count(), 0, 'Only a pinned row can move.');
+  await page.getByRole('button', { name: 'Close' }).click();
+  for (const title of ['B1', 'A1', 'A3']) await menu(title, 'Unpin');
+  await until(pinned, []);
 
-  // —— Projects ————————————————————————————————————————————————————————————
-  await until(chips, ['All', 'One', 'Two', 'Recent'].filter(Boolean).map(label => label), 'Chips follow the registry at first.').catch(() => {});
-  const names = async () => (await chips()).filter(name => /^(One|Two)/.test(name)).map(name => name.slice(0, 3));
-  assert.deepEqual(await names(), ['One', 'Two']);
-  await drag(page, page.locator('.sidebar .project-chip', { hasText: 'Two' }), page.locator('.sidebar .project-chip', { hasText: 'One' }), LEFT);
-  await until(names, ['Two', 'One'], 'A chip dropped on the left half of another goes before it.');
-  assert.deepEqual(await page.locator('.sidebar-groups [data-section]').evaluateAll(els => els.map(el => el.dataset.section)), ['Two', 'One'], 'The project sections follow the chips.');
-  assert.equal(await page.locator('.sidebar .project-chip.active').count(), 1, 'A drag is not a click: the filter did not change.');
-  assert.ok(await page.locator('.sidebar .project-chip.active', { hasText: 'All' }).count() === 1);
-  // The number keys follow the new order.
-  await page.locator('.main').click({ position: { x: 5, y: 5 } });
-  // (The starter examples are registered too, and were first before and after.)
-  await page.keyboard.press('2');
-  await page.locator('.sidebar .project-chip.active', { hasText: 'Two' }).waitFor();
-  await page.keyboard.press('0');
-  await page.locator('.sidebar .project-chip.active', { hasText: 'All' }).waitFor();
-  // A project's heading moves it as well.
-  await drag(page, page.locator('.sidebar-groups [data-section="One"]'), page.locator('.sidebar-groups [data-section="Two"]'), TOP);
-  await until(names, ['One', 'Two'], 'A project heading dragged above another moves the project.');
-
-  // —— Category headings (inside one project) ——————————————————————————————
-  await page.locator('.sidebar .project-chip', { hasText: 'One' }).click();
-  await until(() => page.locator('.sidebar-groups [data-section]').evaluateAll(els => els.map(el => el.dataset.section)), ['alpha', 'bravo']);
-  await drag(page, page.locator('.sidebar-groups [data-section="bravo"]'), page.locator('.sidebar-groups [data-section="alpha"]'), TOP);
-  await until(() => page.locator('.sidebar-groups [data-section]').evaluateAll(els => els.map(el => el.dataset.section)), ['bravo', 'alpha'], 'A category heading moves among the categories.');
-  await page.locator('.sidebar .project-chip', { hasText: 'All' }).click();
-
-  // —— The keyboard ————————————————————————————————————————————————————————
-  await page.locator('.main').click({ position: { x: 5, y: 5 } });
-  const focused = () => page.evaluate(() => {
-    const el = document.activeElement;
-    return el?.classList.contains('sidebar-item') ? `card:${el.querySelector('.item-text').textContent}` : el?.dataset?.section ? `section:${el.dataset.section}` : el?.tagName;
+  // —— An order saved in this browser still orders the chips, the headings and the cards (nothing here sets it any more) ——
+  const saved = await open(() => {
+    if (!localStorage.getItem('buw.order')) localStorage.setItem('buw.order', JSON.stringify({ projects: ['two', 'one'], sections: ['bravo', 'alpha'], cards: { 'category:alpha': ['one/a3', 'one/a1', 'one/a2'] } }));
   });
-  await page.keyboard.press('j');
-  assert.equal(await focused(), 'section:One', 'J lands on the first heading of the menu (no search box needed).');
-  await page.keyboard.press('j');
-  assert.equal(await focused(), 'card:A4', 'J goes down one row.');
-  await page.keyboard.press('ArrowDown');
-  assert.equal(await focused(), 'card:A1', '↓ does the same once focus is in the list.');
-  await page.keyboard.press('ArrowUp');
-  assert.equal(await focused(), 'card:A4');
-  await page.keyboard.press('k');
-  assert.equal(await focused(), 'section:One', 'K goes back up.');
-  await page.keyboard.press('Space');
-  await page.waitForFunction(() => document.querySelector('.sidebar-groups [data-section="One"]')?.getAttribute('aria-expanded') === 'false');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.querySelector('.sidebar-groups [data-section="One"]')?.getAttribute('aria-expanded') === 'true');
-  await page.keyboard.press('j');
-  await page.keyboard.press('Alt+ArrowDown');
-  await until(() => sidebarCards('One'), ['A1', 'A4', 'A2', 'A3'], 'Alt+↓ moves the focused card one place down.');
-  assert.equal(await focused(), 'card:A4', '…and keeps the focus on it, so it can be moved again.');
-  await page.keyboard.press('Alt+ArrowDown');
-  await until(() => sidebarCards('One'), ['A1', 'A2', 'A4', 'A3']);
-  await page.keyboard.press('Alt+ArrowUp');
-  await until(() => sidebarCards('One'), ['A1', 'A4', 'A2', 'A3']);
-  await page.keyboard.press('Enter');
-  await page.frameLocator('iframe.report-frame').getByRole('heading', { name: 'A4' }).waitFor();
-
-  // Typing in the search box is untouched: J is a letter there.
-  await page.keyboard.press('Control+Shift+F');
-  await page.waitForFunction(() => document.activeElement?.matches('.sidebar-search input'));
-  await page.keyboard.type('jk');
-  assert.equal(await page.locator('.sidebar-search input').inputValue(), 'jk');
+  await saved.goto(service.urls.workspace);
+  await saved.locator('[data-library] .lib-row').first().waitFor();
+  const savedChips = (await saved.locator('[data-library] .ui-chips .ui-chip').evaluateAll(els => els.map(el => el.firstChild.textContent.trim()))).filter(name => /^(One|Two)$/.test(name));
+  assert.deepEqual(savedChips, ['Two', 'One'], 'order.projects orders the section chips.');
+  await saved.locator('[data-library] .ui-chips .ui-chip', { hasText: /^One/ }).click();
+  await saved.locator('[data-library] .lib-head[data-section]').first().waitFor();
+  assert.deepEqual(await saved.locator('[data-library] .lib-head[data-section]').evaluateAll(els => els.map(el => el.dataset.section)), ['bravo', 'alpha'], 'order.sections orders the category headings.');
+  assert.deepEqual(await saved.locator('[data-library] [role="list"][aria-label="alpha"] .lib-row-body b').allInnerTexts(), ['A3', 'A1', 'A2'], 'order.cards orders the cards of a category.');
 
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log('Order UI passed: pin buttons on rows, cards / chips / headings drag into a remembered order, the menu moves by keyboard.');
+  console.log('Order UI passed: pinned Move up and Move down and their order after a reload; a saved chip, heading and card order still applies.');
 } finally { await browser?.close(); await service.close(); }
