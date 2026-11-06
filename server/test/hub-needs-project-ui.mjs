@@ -282,7 +282,8 @@ try {
   assert.equal(await page.locator('[data-pp-open-section]').getAttribute('href'), '/magic-loops');
   await goPage(page, '#/~hub/project/sprite-studio/cards');
   await page.locator('[data-pp-no-library]').waitFor();
-  assert.equal((await page.locator('[data-pp-no-library]').innerText()).trim(), 'No Library section for this project.');
+  assert.match((await page.locator('[data-pp-no-library]').innerText()).trim(), /^This project has no cards yet, because it has no Library section\./);
+  assert.match(await page.locator('[data-pp-no-library] [data-pp-library-link]').getAttribute('href'), /#\/~hub\/library/, 'It says where to go next.');
   await goPage(page, '#/~hub/project/no-such-thing');
   assert.match((await page.locator('[data-project-missing]').innerText()).trim(), /^No project called no-such-thing\./);
   assert.equal(await page.locator('[data-project-action]').count(), 0);

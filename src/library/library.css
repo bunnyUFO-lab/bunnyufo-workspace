@@ -7,7 +7,8 @@
 .lib-new { flex: none; padding: 0 16px 8px; }
 .lib-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); color: var(--t3); border: 1px solid var(--line); }
 .lib-search:focus-within { border-color: var(--line2); }
-.lib-search input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); border: 0; background: none; color: var(--t1); font: inherit; outline: none; }
+/* .app-shell input draws a field; the label around this one is the field, so its input draws nothing (the same weight, so the longer selector). */
+.app-shell .lib-search input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); padding: 0; border: 0; border-radius: 0; background: none; color: var(--t1); font: inherit; outline: none; }
 .lib-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px calc(24px + var(--safe-b)); overscroll-behavior: contain; }
 .lib-head { display: flex; align-items: center; gap: 4px; min-height: 36px; color: var(--t2); font-size: 13px; font-weight: 600; text-transform: capitalize; }
 .lib-head h2 { flex: 1; margin: 0; font-size: inherit; font-weight: inherit; }

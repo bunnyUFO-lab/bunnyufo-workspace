@@ -843,7 +843,8 @@ try {
     bar: [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().top)),
     hint: document.querySelector('[data-hint]')?.getBoundingClientRect().height,
   }));
-  assert.ok(tops.bar.length >= 6, `The toolbar has its buttons (${tops.bar}).`);
+  assert.ok(tops.bar.length >= 5, `The toolbar has its buttons (${tops.bar}).`);
+  assert.ok(new Set(tops.bar).size <= 2, `The toolbar takes at most two lines on a phone (${tops.bar}).`);
   assert.equal(await phone.locator('.hub-map-wrap .hub-map-controls').count(), 0, 'The toolbar is a row of its own, not an overlay inside the map.');
   const place = await phone.evaluate(() => {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
@@ -855,7 +856,7 @@ try {
   assert.ok(place.barBottom <= place.boxTop + 1, `and above the map, which it does not cover (${place.barBottom} vs ${place.boxTop}).`);
   if (place.wayTop !== null) assert.ok(place.barBottom <= place.wayTop + 1, `and above the Destination row (${place.barBottom} vs ${place.wayTop}).`);
   assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar wraps.');
-  assert.ok(place.sizes.length >= 6 && place.sizes.every(size => size >= 43.5), `Every control is at least 44 px tall (${place.sizes}).`);
+  assert.ok(place.sizes.length >= 5 && place.sizes.every(size => size >= 43.5), `Every control is at least 44 px tall (${place.sizes}).`);
   assert.ok(await phone.locator('.hub-hint-touch').isVisible() && !(await phone.locator('.hub-hint-mouse').isVisible()), 'The phone shows the touch hint.');
   assert.ok(tops.hint > 0 && tops.hint < 22, `The hint is one line (${tops.hint}).`);
   const phoneBox = await phone.locator('.hub-map-box').boundingBox();
@@ -978,10 +979,11 @@ try {
   assert.ok(small390.scroll <= 1, `The Hub does not scroll (${small390.scroll}).`);
   assert.ok(Math.abs(small390.box - (small390.tabs - 8)) <= 10, `The box reaches the tab bar (${small390.box} vs ${small390.tabs}).`);
   assert.equal(await phone.locator('.hub-map-box').getAttribute('data-axis'), 'y', 'The phone map stays vertical.');
-  await phone.locator('.hub-map-controls button:has-text("Key")').tap();
+  await phone.locator('.hub-map-controls [data-row-menu]').tap();
+  await phone.getByRole('menuitem', { name: 'Key', exact: true }).tap();
   const legendBox = await phone.locator('.hub-legend').boundingBox();
   assert.ok(legendBox.x >= 0 && legendBox.x + legendBox.width <= 390 && legendBox.y >= 0 && legendBox.y + legendBox.height <= 844, 'The Key fits on the screen.');
-  await phone.locator('.hub-map-controls button:has-text("Key")').tap();
+  await phone.locator('.hub-legend [data-key-close]').tap();
   await phone.locator('.hub-legend').waitFor({ state: 'detached' });
   await stillNode(phone, 'ml-m2');
   await phone.locator('[data-node="ml-m2"] > circle').tap({ force: true });

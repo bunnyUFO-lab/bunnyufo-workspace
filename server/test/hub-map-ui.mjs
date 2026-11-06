@@ -139,6 +139,12 @@ const wayfinder = async (page, what) => {
   return rows;
 };
 
+/** On a phone the rarely used buttons are in one overflow button. */
+const more = async (page, name) => {
+  await page.locator('.hub-map-controls [data-row-menu]').tap();
+  await page.getByRole('menuitem', { name, exact: true }).tap();
+};
+
 try {
 {
   step('a phone held upright reads top to bottom: the box is vertical and "now" is below the first milestone');
@@ -182,7 +188,8 @@ try {
   assert.equal(await axisOf(phone), 'y', 'Zooming does not change the axis.');
 
   step('Expand all: still no sideways scroll, and no text past the box');
-  await phone.locator('button:has-text("Expand all")').tap();
+  assert.equal(await phone.locator('.hub-map-controls button:has-text("Expand all")').count(), 0, 'On a phone Expand all is in the overflow button.');
+  await more(phone, 'Expand all');
   await phone.waitForTimeout(500);
   await noSideways(phone, 'Roadmap upright, expanded');
   await inside('upright, expanded');
@@ -204,7 +211,7 @@ try {
   });
   assert.ok(lowest.top >= lowest.bar - 1, `After Expand all the first label (${lowest.top}) is below the control bar (${lowest.bar}).`);
   assert.ok(await phone.locator('[data-kind="t"]').count() >= 9, 'Every task is drawn.');
-  await phone.locator('.hub-map-controls button:has-text("Sprints")').tap();
+  await more(phone, 'Show sprints');
   await phone.waitForTimeout(500);
   assert.equal(await phone.locator('[data-band="sprint-3"]').count(), 1, 'The sprint bar is drawn.');
   await noSideways(phone, 'Roadmap upright, expanded, with sprints');

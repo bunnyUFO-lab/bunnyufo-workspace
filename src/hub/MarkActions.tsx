@@ -86,7 +86,8 @@ export default function MarkActions({ task, title, project, projectName, eligibl
   return (
     <div className={`hub-map-panel-mark${compact ? ' compact' : ''}`} data-mark-actions>
       <div className="hub-actions start">
-        <button type="button" className="hub-btn pri" disabled={busy} onClick={() => close('done')} data-mark-done>Mark done</button>
+        {/* The main action is for an item that waits on the owner. On a job in progress it is a quiet one: it is not what the owner came to do. */}
+        <button type="button" className={waiting ? 'hub-btn pri' : 'hub-btn'} disabled={busy} onClick={() => close('done')} data-mark-done>Mark done</button>
         <button type="button" className="hub-btn" disabled={busy} aria-expanded={asking} onClick={() => setAsking(value => !value)} data-mark-not-needed>No longer needed</button>
         {waiting && <button type="button" className="hub-btn" disabled={busy} onClick={() => void send('unblock')} data-mark-unblock>Unblock</button>}
       </div>

@@ -77,6 +77,8 @@ try {
   const listed = phone.locator('[data-chat-hit]', { hasText: 'Plan the redesign' });
   await listed.waitFor();
   assert.match(await listed.locator('mark').first().innerText(), /lantern/i);
+  assert.equal((await listed.locator('[data-hit-kind]').innerText()).trim(), 'Message', 'A matching message says it is one, beside its matched text.');
+  assert.ok(await phone.getByRole('heading', { name: 'Messages that match' }).count() + await phone.getByText('Messages that match', { exact: true }).count() > 0, 'The group is named.');
   await noSideways(phone, 'chat list search at 390');
   await listed.tap();
   await landed(phone, ID.plan);

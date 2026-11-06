@@ -207,11 +207,11 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
         {group('Today', today)}
         {group('Earlier', earlier)}
         {typed && hits.length > 0 && (
-          <Section title="In messages">
-            <div className="ui-list cl-list" role="list" aria-label="Messages that match">
+          <Section title="Messages that match">
+            <div className="ui-list cl-list" role="list" aria-label="Matching messages">
               {hits.map(hit => (
                 <a key={`${hit.chat}/${hit.line}`} className="ui-row cl-hit" role="listitem" href={`${hubHash('chat', hit.chat)}/m/${hit.line}`} data-chat-hit={`${hit.chat}/${hit.line}`}>
-                  <span className="ui-row-body"><b>{hit.title}{hit.archived && <span className="cl-mark" data-conversation-mark> · Archived</span>}</b><small><Marked text={hit.snippet} q={q} /></small></span>
+                  <span className="ui-row-body"><b>{hit.title}{hit.archived && <span className="cl-mark" data-conversation-mark> · Archived</span>}</b><small className="cl-hit-text"><span className="cl-kind" data-hit-kind>Message</span> <Marked text={hit.snippet} q={q} /></small></span>
                 </a>
               ))}
             </div>

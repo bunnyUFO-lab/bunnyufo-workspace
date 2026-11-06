@@ -71,7 +71,9 @@ try {
   await phone.locator('[data-send]').tap();
   const toast = phone.locator('[data-undo-toast]');
   await toast.waitFor();
-  assert.match(await toast.innerText(), /^Answered: Which jump arc feels right\?/);
+  assert.match(await toast.innerText(), /^Answered: Which jump arc feels right\? Sending in 7 seconds\./, 'The toast says how long the wait is, with no stray full stop after the question mark.');
+  assert.match(await phone.locator('[data-settled-title]').innerText(), /^Sending in [1-7] seconds?$/);
+  assert.equal(await phone.locator('[data-settled-title]').evaluate(node => getComputedStyle(node).textTransform), 'none', 'The label is not shouted.');
   assert.equal(await toast.getByRole('button', { name: 'Undo' }).count(), 1);
   await phone.locator('[data-settled-bar][data-settled-phase="held"]').waitFor();
   assert.equal(await phone.locator('[data-send]').isVisible(), false, 'The form is out of the way while the answer is held.');
@@ -167,7 +169,7 @@ try {
   await desk.locator('[data-undo-toast]', { hasText: 'Answered: Which dust puff?' }).waitFor();
   await desk.waitForTimeout(400);
   assert.equal(await desk.locator('.ni:not(.leaving)', { hasText: 'Which dust puff?' }).count(), 0, 'The card is out of the list while it is held, with a double tap too.');
-  await desk.locator('[data-undo-toast]', { hasText: 'Not sent: Which dust puff?. The store said no.' }).waitFor();
+  await desk.locator('[data-undo-toast]', { hasText: 'Not sent: Which dust puff? The store said no.' }).waitFor();
   await desk.locator('.ni', { hasText: 'Which dust puff?' }).waitFor();
   assert.equal(postsFor(FOURTH), 1, 'A double tap made one POST.');
   assert.equal(fixture.fake.objects.has(`sections/inbox/asks/${FOURTH}/answer.json`), false);

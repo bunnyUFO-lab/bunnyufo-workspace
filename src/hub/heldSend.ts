@@ -36,7 +36,7 @@ export interface HoldOptions {
   draft?: unknown
 }
 
-interface Pending extends HoldOptions { timer: number; toast: number }
+interface Pending extends HoldOptions { timer: number; toast: number; until: number }
 
 interface Snapshot { phases: ReadonlyMap<string, HoldPhase>; restored: string; restoredN: number; counts: ReadonlyMap<string, number> }
 
@@ -65,6 +65,16 @@ export function holdMs(): number {
   } catch { return HOLD_MS }
 }
 
+/** A title as the end of a sentence: it keeps its own question mark or full stop and gets no second one. */
+export const sentence = (title: string): string => { const text = title.trim(); return /[.?!…]$/.test(text) ? text : `${text}.` }
+
+/** Whole seconds until the waiting answer for `key` goes out (at least 1), or null when that item is not the one waiting. */
+export function heldSecondsLeft(key: string): number | null {
+  return pending && pending.key === key ? Math.max(1, Math.ceil((pending.until - Date.now()) / 1000)) : null
+}
+
+const seconds = (ms: number) => { const count = Math.max(1, Math.ceil(ms / 1000)); return `${count} second${count === 1 ? '' : 's'}` }
+
 const reason = (failure: unknown) => (failure instanceof Error && failure.message ? failure.message : 'It did not work.')
 
 function setPhase(key: string, phase: HoldPhase | null) {
@@ -92,7 +102,7 @@ async function run(item: Pending, keepalive: boolean) {
     // The item comes back, with the words of the error.
     setPhase(item.key, null)
     flash(item.key)
-    showUndo(`Not sent: ${item.title}. ${reason(failure)}`)
+    showUndo(`Not sent: ${sentence(item.title)} ${reason(failure)}`)
     window.dispatchEvent(new Event(HUB_WROTE))
   }
 }
@@ -132,7 +142,8 @@ export function hold(options: HoldOptions): boolean {
   const item = { ...options } as Pending
   if (options.draft !== undefined) drafts.set(options.key, options.draft)
   const ms = holdMs()
-  item.toast = showUndo(`${options.verb}: ${options.title}`, () => undoHeld(options.key))
+  item.until = Date.now() + ms
+  item.toast = showUndo(`${options.verb}: ${sentence(options.title)} Sending in ${seconds(ms)}.`, () => undoHeld(options.key))
   item.timer = window.setTimeout(() => { if (pending === item) flushHeld() }, ms)
   pending = item
   setPhase(options.key, 'held')

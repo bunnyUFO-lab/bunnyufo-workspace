@@ -576,3 +576,7 @@ button.hub-cl-text { cursor: pointer; }
 
 /* A section a screen hides while something is held for Undo keeps `hidden` working over `.hub-panel`. */
 .hub [hidden] { display: none !important; }
+
+/* The bar that says what became of an answer reads as a sentence, not a shouted label. */
+.hub .settled-bar h3 { font-size: 1rem; letter-spacing: 0; text-transform: none; color: var(--text-bright); }
+.hub-legend-close { flex: 1 0 100%; min-height: 44px; justify-content: center; }

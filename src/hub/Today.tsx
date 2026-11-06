@@ -177,6 +177,7 @@ export default function Today() {
         <div>
           <h2 data-today-title>{title}</h2>
           {data.cloud && <p className="today-cloud" data-today-cloud title={`Cloud runs fired today. The count starts again at ${clock(data.cloud.next)}.`}>Cloud: {data.cloud.used} of {data.cloud.cap} today</p>}
+          {data.cloud && <p className="today-cloud" data-today-cloud-note>Cloud runs started today, out of the {data.cloud.cap} a day agents may start. The count starts again at {clock(data.cloud.next)}.</p>}
         </div>
         <div className="today-actions">
           <span className="hub-muted">Updated {at ? clock(at.toISOString()) : ''}</span>

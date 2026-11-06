@@ -29,7 +29,11 @@ import { COST, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
 import PlanInHermes from './PlanInHermes'
 import { host } from '../lib/host'
+import { useMedia } from '../lib/chrome'
+import RowMenu from '../ui/RowMenu'
 
+/** The smallest scale Fit and the first view settle on a phone: below this the labels cannot be read. */
+const READABLE = 0.6
 const HINT_KEY = 'hub-map-hint-seen'
 const FILTER_KEY = 'hub-map-filter'
 /** The viewer's saved filter; a missing or bad value is the default (Open). */
@@ -203,6 +207,9 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
     const hint = hintBar.current?.getBoundingClientRect()
     return { top: frame && hint && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0, bottom: 0 }
   }, [])
+  /** A phone: the bar keeps its everyday buttons and Fit stops at a readable size. */
+  const phone = useMedia('(max-width: 640px)')
+  const contentSize = useRef({ w: 0, h: 0 })
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
   /** The spine runs down when the box is taller than wide, as a phone held upright is. */
@@ -262,16 +269,17 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
     picture.setAttribute('height', String(h))
     origin.current = { x: bounds.x - PAD, y: bounds.y - PAD }
     pz.setContent({ w, h })
+    contentSize.current = { w, h }
     const todo = forNewAxis ? null : after.current
     if (!forNewAxis) after.current = null
     if (wrap.current && (todo === 'init' || todo === 'fit' || (todo && todo.how === 'centre'))) placedFor.current = { w: wrap.current.clientWidth, h: wrap.current.clientHeight }
     const size = pz.box()
     if (todo === 'init') {
       // Fitted and centred; a long map on a phone would be too small to read, so it starts at a readable size on "now".
-      if (fitScale({ w, h }, size, FIT_MAX) < 0.6) pz.go(viewOnNow(0.6, freeRect()), false)
+      if (fitScale({ w, h }, size, FIT_MAX) < READABLE) pz.go(viewOnNow(READABLE, freeRect()), false)
       else pz.fit(false)
     } else if (todo === 'fit') {
-      pz.fit(true)
+      fitReadable(true)
     } else if (todo && todo.how === 'centre') {
       // The axis switched: the selected node (else "now") goes to the middle of what the panel leaves free, at the scale it had.
       const node = todo.id ? layout.nodes.find(item => item.id === todo.id) : null
@@ -416,6 +424,11 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   const empty = tasksIn(model) === 0 && tasksIn(fullModel) > 0
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
+  /** Fit the whole map. On a phone a large map would shrink past reading, so Fit stops at a readable size, centred on now, and the owner pans from there. */
+  function fitReadable(animate: boolean) {
+    if (phone && fitScale(contentSize.current, pz.box(), FIT_MAX) < READABLE) pz.go(viewOnNow(READABLE, freeRect()), animate)
+    else pz.fit(animate)
+  }
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
 
   /** Glide a match into the middle of the free part of the box; one the owner folded away is unfolded first and centred by the layout effect. */
@@ -500,17 +513,27 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   return (
     <>
       <div className="hub-map-controls" onKeyDown={onEscape}>
-          <button type="button" className="hub-btn" onClick={() => pz.fit(true)} aria-label="Fit the whole map">Fit</button>
+          <button type="button" className="hub-btn" onClick={() => fitReadable(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
-          <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
-          <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
-          <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
+          {!phone && <>
+            <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
+            <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
+            <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
+          </>}
           <button type="button" className={`hub-btn${filterOpen ? ' pri' : ''}`} ref={filterButton} aria-expanded={filterOpen} aria-controls="hub-map-filter" onClick={() => { setFilterOpen(value => !value); setKeyOpen(false) }}>Filter</button>
           <span className={`hub-filter-chip${isOpenFilter(filter) ? '' : ' changed'}`} data-filter-chip>
             <button type="button" className="hub-filter-chip-text" title="Change the filter" onClick={() => { setFilterOpen(true); setKeyOpen(false) }}>{filterLabel(filter)}</button>
             {!isOpenFilter(filter) && <button type="button" className="hub-filter-chip-x" aria-label="Reset the filter to Open" onClick={() => applyFilter(OPEN_FILTER)}>×</button>}
           </span>
+          {!phone && (
           <button type="button" className={`hub-btn${keyOpen ? ' pri' : ''}`} ref={keyButton} aria-expanded={keyOpen} aria-controls="hub-map-key" onClick={() => { setKeyOpen(value => !value); setFilterOpen(false) }}>Key</button>
+          )}
+          {phone && <RowMenu label="More map options" title="Map options" items={[
+            { label: 'Expand all', onSelect: expandAll },
+            { label: 'Collapse', onSelect: () => refit(() => setOpen(new Set())) },
+            { label: sprints ? 'Hide sprints' : 'Show sprints', onSelect: () => refit(() => setSprints(value => !value)) },
+            { label: 'Key', onSelect: () => { setKeyOpen(true); setFilterOpen(false) } },
+          ]} />}
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
@@ -626,6 +649,7 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
         {filterOpen && <MapFilterPanel filter={filter} shown={tasksIn(model)} total={tasksIn(fullModel)} onChange={applyFilter} onClose={() => { setFilterOpen(false); filterButton.current?.focus() }} />}
         {keyOpen && (
           <div className="hub-legend" id="hub-map-key" aria-label="Legend">
+            {phone && <button type="button" className="hub-btn hub-legend-close" data-key-close aria-label="Close the key" onClick={() => setKeyOpen(false)}>Close</button>}
             {model.ageMinutes != null && <p className="hub-muted hub-legend-age">Beads copy from {copyAge(model.ageMinutes)}</p>}
             {(Object.keys(STATE_LABEL) as TaskState[]).map(state => <span key={state}><i style={{ background: STATE_COLOR[state] }} />{STATE_LABEL[state]}</span>)}
             {(['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed'] as const).map(sign => <span key={sign}><b>{SIGN_GLYPH[sign]}</b>{SIGN_LABEL[sign]}</span>)}

@@ -36,6 +36,7 @@ export default function UnaskedPanel({ project = '' }: { project?: string }) {
   return (
     <section className="hub-panel rise" aria-label="Says it needs you" data-today-unasked>
       {n > 0 && <h3>⚠ {n} {n === 1 ? 'item says it needs' : 'items say they need'} you but {n === 1 ? 'asks' : 'ask'} nothing</h3>}
+      {n > 0 && <p className="hub-muted" data-unasked-explain>An agent marked each of these as waiting on you, but it posted no question or checklist to answer. Open one to see its notes, or mark it done or no longer needed here.</p>}
       {items.slice(0, SHOWN).map(item => <Row key={`${item.project}/${item.id}`} item={item} projectName={nameOf(item.project)} />)}
       {items.length > SHOWN && <p className="hub-muted"><a href={project ? hubHash('work', project) : '#/~hub/work/all'}>+{items.length - SHOWN} more</a></p>}
     </section>

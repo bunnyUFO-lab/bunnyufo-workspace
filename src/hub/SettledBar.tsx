@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SettledVerb } from '../lib/nextItem.mjs'
 import { NOTE_VERB } from '../lib/nextItem.mjs'
 import { hubHash } from '../lib/route'
-import { undoHeld, useHeld } from './heldSend'
+import { heldSecondsLeft, sentence, undoHeld, useHeld } from './heldSend'
 import { goNext, useHasNext } from './useGoNext'
 
 /**
@@ -35,13 +35,21 @@ export default function SettledBar({ itemKey, kind, id, title, verb, phase, back
 }) {
   const hasNext = useHasNext(itemKey)
   const [moving, setMoving] = useState(false)
-  if (!verb && !phase) return null
   const waiting = phase === 'held'
+  // The wait counts down in whole seconds.
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (!waiting) return undefined
+    const timer = window.setInterval(() => tick(count => count + 1), 250)
+    return () => window.clearInterval(timer)
+  }, [waiting])
+  if (!verb && !phase) return null
+  const left = waiting ? heldSecondsLeft(itemKey) : null
   const word = verb ? NOTE_VERB[verb] : 'Done'
   return (
     <section className="hub-panel settled-bar" role="status" aria-label="Settled" data-settled-bar data-settled-phase={phase ?? 'done'}>
-      <h3 data-settled-title>{waiting ? 'Sending in a few seconds' : `${word}.`}</h3>
-      {waiting && <p className="hub-muted">{word}: {title}. Nothing reaches the agent until the seconds are up.</p>}
+      <h3 data-settled-title>{waiting ? `Sending in ${left ?? 7} ${left === 1 ? 'second' : 'seconds'}` : `${word}.`}</h3>
+      {waiting && <p className="hub-muted">{word}: {sentence(title)} Nothing reaches the agent until the time is up. Undo cancels it.</p>}
       <div className="hub-actions start">
         {waiting && <button type="button" className="hub-btn" data-held-undo onClick={() => undoHeld(itemKey)}>Undo</button>}
         {hasNext

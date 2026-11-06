@@ -35,6 +35,8 @@
 .cl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
 .cl-place .cl-count { margin: 0; }
 .cl-place .cl-chev { display: flex; color: var(--t3); }
+.cl-hit-text { display: block; margin-top: 2px; }
+.cl-kind { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line2); color: var(--t2); font-size: 11px; line-height: 16px; vertical-align: 1px; }
 .cl-hit mark, .cl-snip mark { background: var(--accent-soft); color: var(--t1); border-radius: 3px; padding: 0 1px; }
 
 /* Rename sheet */

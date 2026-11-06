@@ -179,7 +179,7 @@ function CardsTab({ project }: { project: string }) {
   const { data, error, loading, at } = useCardSection(project, true)
   if (!data) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
   const note = <RefreshNote error={error} hasData at={at} />
-  if (!data.section) return <>{note}<p className="hub-empty" data-pp-no-library>No Library section for this project.</p></>
+  if (!data.section) return <>{note}<p className="hub-empty" data-pp-no-library>This project has no cards yet, because it has no Library section. A section is a Library folder with the project&apos;s name: <a href={hubHash('library')} data-pp-library-link>open the Library</a> to see what exists, or ask an agent to start a card for it.</p></>
   const cards = data.cards.filter(card => SAFE_CARD.test(card.href))
   return (
     <section className="hub-panel" aria-label="Cards">
