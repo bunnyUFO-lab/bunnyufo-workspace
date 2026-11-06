@@ -167,6 +167,18 @@ try {
   await phone.locator('textarea[aria-label="Message"]').waitFor();
   assert.equal(fixture.fake.text(keyOf(ID.c)), bytes[ID.c]);
 
+  step('390: a chat deleted in this tab opens from its row in the Trash, with its banner and Restore (no reload between)');
+  await phone.locator('[data-back]').first().click();
+  await phone.locator('[data-chat-list]').waitFor();
+  await menuOf(phone, ID.c, 'Delete');
+  await phone.locator(`[data-conversation="${ID.c}"]`).waitFor({ state: 'detached' });
+  await phone.locator('[data-chat-place="trash"]').click();
+  await phone.locator(`[data-chat-set-aside] [data-conversation="${ID.c}"]`).click();
+  await phone.locator('[data-chat-trashed]').waitFor();
+  await phone.locator('.hub-bubble', { hasText: `Done: ${TITLE.c}.` }).waitFor();
+  await phone.locator('[data-chat-trashed] [data-chat-restore]').click();
+  await phone.locator('[data-chat-trashed]').waitFor({ state: 'detached' });
+
   step('390: Delete from a thread goes back to the list');
   await phone.goto(`${fixture.url}#/~hub/chat`);
   await phone.locator('[data-chat-list]').waitFor();
@@ -202,7 +214,7 @@ try {
   await wide.goBack();
   await wide.locator('[data-chat-sheet]').waitFor({ state: 'detached' });
 
-  step('1280: Back skips a chat that was deleted here, going back; going forward lands on the list');
+  step('1280: Back skips a chat that was deleted here, going back; going forward opens it in the Trash');
   await wide.goto(`${fixture.url}#/~hub/chat`);
   await wide.locator('[data-chat-list] [data-conversation]').first().waitFor();
   await link(wide, ID.a).click();
@@ -219,8 +231,9 @@ try {
   await wide.waitForURL(new RegExp(`${ID.a}$`));
   assert.equal(await wide.evaluate(() => history.length), entries, 'Skipping added no entry.');
   await wide.goForward();
-  await wide.waitForURL(/#\/~hub\/chat$/);
-  assert.equal(await wide.evaluate(() => history.length), entries, 'Forward onto it replaced it with the list: no entry added.');
+  await wide.waitForURL(new RegExp(`${ID.b}$`));
+  await wide.locator('[data-chat-trashed]').waitFor();
+  assert.equal(await wide.evaluate(() => history.length), entries, 'Forward onto it opened it, in the Trash: no entry added.');
 
   step('1280: the Archived list sits beside the chat list; Ctrl+K finds an archived chat and marks it');
   await menuOf(wide, ID.d, 'Archive');

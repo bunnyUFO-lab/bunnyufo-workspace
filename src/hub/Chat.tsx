@@ -5,7 +5,7 @@ import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
 import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
-import { ROUTE_EVENT, afterPop, back, entrySerial, skipGone, swap } from '../lib/entries'
+import { ROUTE_EVENT, afterPop, back, direction, entrySerial, skipGone, swap } from '../lib/entries'
 import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
 import { Icon } from '../local/Icons'
@@ -368,8 +368,8 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     if (!id || help) return undefined
     // A view that a finished turn handed its lines to has them already: it only looks at what the turn left behind (a queued message, a hold).
     if (initial) { const timer = window.setTimeout(() => void afterRef.current(id), 0); return () => window.clearTimeout(timer) }   // after the effects below have set the refs
-    // A chat this tab just put in the Trash: Back onto its entry goes on past it. A link to a trashed chat still opens it.
-    if (wasDeletedHere(id)) { skipGone(hubHash('chat')); return undefined }
+    // A chat this tab just put in the Trash: Back onto its entry goes on past it. Going forward to it (its row in the Trash, a link) opens it, with its banner and Restore.
+    if (wasDeletedHere(id) && direction() === 'back') { skipGone(hubHash('chat')); return undefined }
     let stopped = false
     const number = stamp()
     hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`)
