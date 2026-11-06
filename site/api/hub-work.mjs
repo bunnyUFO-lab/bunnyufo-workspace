@@ -180,7 +180,15 @@ export const unaskedOf = cards => cards.filter(card => card.nothingAsked || card
  * @param needs       [{ bead, kind, id }]: every other Needs you item that names a bead
  * @param status      the PC status or null
  */
-export function buildWork({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], checklists = [], needs = [], status = null, now = new Date() }) {
+export function buildWork(input) {
+  const { lanes, counts, now } = buildLanes(input);
+  lanes.backlog = lanes.backlog.slice(0, BACKLOG_KEEP);
+  lanes.done = lanes.done.slice(0, DONE_KEEP);
+  return { lanes, counts, totals: { ...counts }, at: now.toISOString() };
+}
+
+/** Every lane, uncut and newest first. `buildWork` cuts Backlog and Done; `workPage` reads the rest from the same lanes. */
+function buildLanes({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], checklists = [], needs = [], status = null, now = new Date() }) {
   const all = [...beadCards({ issues, events, asks, checklists, needs, status, now }), ...requestCards({ requests, events }), ...runCards(hermesRuns)];
   const lanes = Object.fromEntries(LANES.map(lane => [lane, []]));
   const counts = Object.fromEntries(LANES.map(lane => [lane, 0]));
@@ -191,7 +199,17 @@ export function buildWork({ issues = [], requests = [], hermesRuns = [], events 
     counts[card.lane] += 1;
   }
   for (const lane of LANES) lanes[lane].sort(newest);
-  lanes.backlog = lanes.backlog.slice(0, BACKLOG_KEEP);
-  lanes.done = lanes.done.slice(0, DONE_KEEP);
-  return { lanes, counts, at: now.toISOString() };
+  return { lanes, counts, now };
+}
+
+export const PAGE_LANES = ['backlog', 'done'];
+export const PAGE_SIZE = 50;
+
+/**
+ * The next cards of a lane `buildWork` cut: `PAGE_SIZE` from `offset`, in the same order, so the page after the first answer starts where it ended
+ * (Backlog keeps 50 and Done 30, so the client asks from the count it already holds). `totals` is every lane's real size.
+ */
+export function workPage(input, lane, offset) {
+  const { lanes, counts, now } = buildLanes(input);
+  return { lane, offset, cards: lanes[lane].slice(offset, offset + PAGE_SIZE), total: counts[lane], totals: { ...counts }, at: now.toISOString() };
 }

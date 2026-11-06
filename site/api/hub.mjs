@@ -44,7 +44,7 @@ import { defaultsOf } from './project-defaults.mjs';
 import { SEED_KINDS, beadSeed, createBeadsReader, searchRows } from './hub-beads.mjs';
 import { createChat, isChatRoute } from './hub-chat.mjs';
 import { createPlanPauses } from './plan-pauses.mjs';
-import { buildWork, unaskedOf } from './hub-work.mjs';
+import { buildWork, PAGE_LANES, unaskedOf, workPage } from './hub-work.mjs';
 import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, checkAvatar } from './hub-team.mjs';
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
@@ -1925,7 +1925,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           } else if (route === '/hub/projects') {
             reply({ projects: await projects(at) });
           } else if (route === '/hub/work') {
-            reply(buildWork(await loadWorkInputs(query.get('project'), at)));
+            const lane = query.get('lane');
+            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at))); } else {
+              // The rest of a lane the board cut: Backlog and Done only, from an offset the client already holds.
+              const offset = Number(query.get('offset') ?? 0);
+              if (!PAGE_LANES.includes(lane)) throw fail('Only the Backlog and Done lanes have more.', 400);
+              if (!Number.isInteger(offset) || offset < 0 || offset > 100_000) throw fail('The offset must be a whole number.', 400);
+              reply(workPage(await loadWorkInputs(query.get('project'), at), lane, offset));
+            }
           } else if (route === '/hub/search-text') {
             // The text the Work search reads: one project, or every project with Beads. Loaded only while a search is on.
             const only = query.get('project');
