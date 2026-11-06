@@ -30,7 +30,7 @@ export interface HoldOptions {
   title: string
   /** Past tense, for the toast: "Answered", "Approved", "Marked done". */
   verb: string
-  /** The one write. `keepalive` is true when the page is going away. */
+  /** The one write. `keepalive` is always true: the page may go away while it is in flight. */
   send: (keepalive: boolean) => Promise<unknown>
   /** What the owner typed or picked for it (a note, a verdict, a drawing). Kept until the send lands, so Undo or a failed send brings it back with the item, on whatever screen the form is mounted next. */
   draft?: unknown
@@ -107,14 +107,15 @@ async function run(item: Pending, keepalive: boolean) {
   }
 }
 
-/** Send the waiting answer now. `keepalive` is for a page that is going away. */
-export function flushHeld(keepalive = false): void {
+/** Send the waiting answer now. Every held send carries `keepalive`. */
+export function flushHeld(): void {
   const item = pending
   if (!item) return
   pending = null
   window.clearTimeout(item.timer)
   dismiss(item.toast)
-  void run(item, keepalive)
+  // Always `keepalive`: a send the timer started must survive the page being closed or reloaded a moment later, as one a hide starts does. Every held body is under the limit.
+  void run(item, true)
 }
 
 /** Whether an item is held, sending or just sent, for code that is not a component (a handler that runs right after `hold`). */
@@ -151,8 +152,8 @@ export function hold(options: HoldOptions): boolean {
 }
 
 if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushHeld(true) })
-  window.addEventListener('pagehide', () => flushHeld(true))
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushHeld() })
+  window.addEventListener('pagehide', () => flushHeld())
 }
 
 export interface HeldView {

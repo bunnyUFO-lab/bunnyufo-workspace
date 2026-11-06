@@ -223,11 +223,13 @@ try {
   await desk.locator('[data-settings-pc]').waitFor();
   await next.check();
   assert.equal(await desk.evaluate(() => localStorage.getItem('hub.autoNext')), '1');
+  await desk.evaluate(() => { window.__keepalive = []; const real = window.fetch; window.fetch = (url, init) => { if (/\/asks\/[^/]+\/answer$/.test(String(url))) window.__keepalive.push(!!init?.keepalive); return real(url, init); }; });
   await desk.evaluate(id => { location.hash = `#/~hub/ask/${id}`; }, FIFTH);
   await desk.locator('[data-option="A"] button').click();
   await desk.locator('[data-send]').click();
   await desk.waitForFunction(id => !location.hash.includes(id), FIFTH, { timeout: ms(10000) });
   await eventually(() => assert.equal(postsFor(FIFTH), 1));
+  assert.deepEqual(await desk.evaluate(() => window.__keepalive), [true], 'A send the timer started carries keepalive too, so closing the page a moment later does not cancel it.');
 
   step('read-only: a guest reads an item, with no answer controls and no project picker on Today');
   const http = await import('node:http');
