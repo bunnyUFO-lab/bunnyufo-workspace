@@ -3,7 +3,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { TouchEvent } from 'react'
 import type { ChatListAnswer, ChatPersona, ChatSummary } from '../lib/hub'
-import { cachedLines, dismissKey, getStore, lineCount, mergeChats, missingFromList, settleList, warnMissing } from './inProgress.ts'
+import { applyRead, cachedLines, dismissKey, getStore, lineCount, mergeChats, missingFromList, settleList, warnMissing } from './inProgress.ts'
+import type { ChatAnswer } from './chatWatch'
+import { startChat } from './chatStart'
 import type { ListRow } from './inProgress.ts'
 import { useInProgress } from './useInProgress.ts'
 import { HUB_WROTE, clock, hubGet } from '../lib/hub'
@@ -32,6 +34,15 @@ const DEBOUNCE_MS = 300
 const MIN_TEXT = 2
 const SWIPE = 96
 
+/** A message the Hub never named: it may not have gone out, and its words are only here. They go back into a new chat's box. */
+function putBack(key: string) {
+  const entry = getStore().chats.find(item => item.key === key)
+  if (!entry) return
+  startChat({ persona: entry.persona ?? HERMES, draft: entry.ask.text })
+  dismissKey(key)
+  window.location.hash = hubHash('chat')   // as every start does: the Chat screen shows the waiting start as a thread
+}
+
 /** The time a row shows: the clock today, the day before. */
 function whenOf(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -56,7 +67,7 @@ function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ListRow; na
   const swipedAt = useRef(0)
   const open = chat.id === activeId
   const onStart = (event: TouchEvent) => {
-    if (!swipe || (event.target as Element).closest('button')) return
+    if (!swipe || !chat.id || (event.target as Element).closest('button')) return
     const point = event.touches[0]
     touch.current = { x: point.clientX, y: point.clientY, lock: null, dx: 0 }
   }
@@ -112,6 +123,7 @@ function ChatRow({ chat, names, activeId, swipe, onRename }: { chat: ListRow; na
               aria-current={open ? 'page' : undefined} onClick={event => { if (Date.now() - swipedAt.current < 400) event.preventDefault() }}>{inner}</a>
             : <div className="cl-link" data-conversation-sending={chat.key}>{inner}</div>
         })()}
+        {chat.local === 'sending' && chat.key && <button type="button" className="ui-btn" data-entry-putback={chat.key} onClick={() => putBack(chat.key!)}>Put back in the box</button>}
         {chat.local === 'unconfirmed' && chat.key && <button type="button" className="ui-btn" data-entry-dismiss={chat.key} onClick={() => dismissKey(chat.key!)}>Dismiss</button>}
         {chat.id && <RowMenu label={`More for ${chat.title}`} title={chat.title} items={chatMenu(chat, () => onRename(chat), open ? { leave: () => back(hubHash('chat')) } : undefined)} />}
       </div>
@@ -168,12 +180,21 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
   const loaded = [...base, ...extra.filter(item => !base.some(row => row.id === item.id))]
   // The device's chats in progress, merged by id with what the Hub listed: a read that comes back without one does not take it away.
   const progress = useInProgress()
+  const asked = useRef(new Map<string, number>())
   const shown: ListRow[] = mergeChats(loaded, progress)
   const total = list.data?.total ?? loaded.length
   const more = loaded.length < total
   useEffect(() => {
     if (!list.data) return
     settleList(list.data.conversations)
+    // An entry the list does not hold may be on a later page, or its chat was set aside elsewhere: one read of the chat says which (and a saved turn leaves).
+    const now = Date.now()
+    for (const entry of getStore().chats) {
+      const id = entry.id
+      if (!id || list.data.conversations.some(row => row.id === id) || now - (asked.current.get(id) ?? 0) < 60_000) continue
+      asked.current.set(id, now)
+      hubGet<ChatAnswer>(`/chat/${encodeURIComponent(id)}`).then(answer => { applyRead(id, answer) }, () => { /* the Hub does not know it: the device keeps it */ })
+    }
     if (list.data.conversations.length >= (list.data.total ?? 0)) for (const entry of missingFromList(list.data.conversations, getStore())) warnMissing(entry.id!, lineCount(cachedLines(entry)), null, entry.startedAt, null)
   }, [list.data])
   const showMore = async () => {
@@ -208,7 +229,7 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
   const counts = list.data?.counts
   const group = (title: string, rows: ListRow[]) => rows.length > 0 && (
     <Section title={title} key={title}>
-      <div className="ui-list cl-list" role="list" aria-label={title}>{rows.map(chat => <ChatRow key={chat.id} chat={chat} names={names} activeId={activeId} swipe={host.write} onRename={setRenaming} />)}</div>
+      <div className="ui-list cl-list" role="list" aria-label={title}>{rows.map(chat => <ChatRow key={chat.id || chat.key} chat={chat} names={names} activeId={activeId} swipe={host.write} onRename={setRenaming} />)}</div>
     </Section>
   )
   const settledNow = !textTyped || !!found.data || !!found.error

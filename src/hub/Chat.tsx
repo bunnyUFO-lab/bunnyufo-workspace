@@ -38,7 +38,7 @@ import type { HubData } from './useHub'
 import { chooseModel, pauseNote } from './chatModel'
 import { MAX_MISSES, hasRunningDelegate, nextLookMs, replySaved, sameLines, type ChatAnswer } from './chatWatch'
 import type { TeamAgent, TeamView } from '../lib/hubTeam'
-import { addJobIds, beginChat, cachedLines, dismissKey, entryFor, expired, lineCount, mergeChatJobs, noteJobs, setChatId, setReply, settleChat, warnMissing } from './inProgress.ts'
+import { addJobIds, applyRead, askedAt, beginChat, cachedLines, dismissKey, entryFor, expired, lineCount, markFailed, mergeChatJobs, noteJobs, refuseChat, setChatId, setReply, turnSaved, warnMissing } from './inProgress.ts'
 import { useInProgress } from './useInProgress.ts'
 
 const READ_KEY = 'buw.hub.readAloud'
@@ -353,10 +353,12 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const progress = useInProgress()
   const entry = entryFor(shownId, progress)
   const [degraded, setDegraded] = useState(false)   // the Hub has not saved what this device holds
+  const hubLines = useRef(0)   // how many lines the Hub held at the last read: a turn sent from a degraded thread counts from there
   const titleRef = useRef('')   // the header's title, for the entry of a turn sent in an existing chat
   const reconcile = useCallback((name: string, answer: ChatAnswer): ChatLine[] => {
     const mine = entryFor(name)
-    const verdict = mine ? settleChat(name, answer) : null
+    hubLines.current = lineCount(answer.messages)
+    const verdict = mine ? applyRead(name, answer) : null
     if (mine && verdict?.kind === 'keep') { warnMissing(name, lineCount(verdict.lines), lineCount(answer.messages), mine.startedAt, null); setDegraded(true); return verdict.lines }
     setDegraded(false)
     return answer.messages
@@ -408,11 +410,12 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       })
     return () => { stopped = true }
   }, [id, initial, help, stamp, takeView, reconcile])
+  const holding = !!entry && !expired(entry)   // the device still holds a turn the Hub has not confirmed
   useEffect(() => {
-    if (!degraded || !shownId || help) return undefined
+    if (!degraded || !holding || !shownId || help) return undefined
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void afterRef.current(shownId) }, 8000)
     return () => window.clearInterval(timer)
-  }, [degraded, shownId, help])
+  }, [degraded, holding, shownId, help])
 
   // A search hit opens at its message and flashes it. A line that is gone opens at the bottom, as every chat does.
   const landed = useRef(false)
@@ -470,7 +473,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     const missed = () => {
       misses += 1
       if (misses < MAX_MISSES) return
-      if (cutTurn.current) land(cutTurn.current.fallback, LOST_NOTE)
+      if (cutTurn.current) { const held = entryFor(name); if (held) markFailed(held.key); land(cutTurn.current.fallback, LOST_NOTE) }   // the Hub saves the owner's line alone
       else { setPending(null); setStreaming(false); setRecovering(false); setNote(null); setStopping(false) }
     }
     const look = async () => {
@@ -487,7 +490,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
           takeView(number, answer)
           if (answer.running && !live.current) { void followRef.current(name, answer); return }   // a turn began that this page did not start: the queue's
         } else if (answer.running) { takeView(number, answer); if (answer.run) run.current = answer.run }   // the queue is shown while the reply is waited for too
-        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { settleChat(name, answer); land(answer.messages, null); return }
+        else if (!cutTurn.current || replySaved(answer.messages, cutTurn.current.text, cutTurn.current.sentAt)) { applyRead(name, answer); land(answer.messages, null); return }
         else missed()
       } catch (failure) {
         if (recovering && failure instanceof HubError && failure.status === 404) missed()   // anything else: offline for now, so look again
@@ -666,7 +669,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
    * Reads one turn from a stream: the reply as it comes, its tools and delegates, and how it ends. For a turn this page sent (`streamChat`)
    * and for one it only follows (`streamLive`: the queue's, or one started elsewhere). A stream that breaks leaves the reply to the saved chat.
    */
-  const readTurn = async (turn: { start: (handlers: ChatHandlers, signal: AbortSignal) => Promise<void>; before: Shown[]; optimistic: Shown; previews: string[]; model: string; persona: string; refused: (failure: unknown) => void }) => {
+  const readTurn = async (turn: { start: (handlers: ChatHandlers, signal: AbortSignal) => Promise<void>; before: Shown[]; optimistic: Shown; previews: string[]; model: string; persona: string; refused: (failure: unknown) => void; /** a turn only followed: a Hub error must never remove the device's copy */ follow?: boolean; /** nothing to keep: the chat is set aside */ track?: boolean; base?: number }) => {
     const { start, before, optimistic, previews, model: askedModel, persona: askedPersona, refused } = turn
     const text = optimistic.text
     const controller = new AbortController()
@@ -679,11 +682,12 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     let saved: ChatLine | undefined
     let savedContext: ChatLine | undefined
     let problem: string | null = null
+    let errored = false
     let cut = false
     let idle = false
     const unhold = holdReload()   // an update reload waits until the reply has ended
     // Kept on this device from the moment it is sent, before the Hub has named the chat, until a read shows the turn saved.
-    const mine = beginChat({ id: conversation.current ?? null, title: (conversation.current && titleRef.current) || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic })
+    const mine = turn.track === false ? '' : beginChat({ id: conversation.current ?? null, title: (conversation.current && titleRef.current) || text.trim().slice(0, 60) || 'New chat', persona: askedPersona !== HERMES ? askedPersona : null, model: askedModel !== AUTO ? askedModel : null, before, owner: optimistic, ...(turn.base !== undefined ? { base: turn.base } : {}) })
     const used: string[] = []
     let started: ChatDelegate[] = []
     try {
@@ -711,7 +715,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         onApproval: setApproval,
         onApprovalSettled: () => setApproval(null),
         onDone: (name, user, context) => { finished = name; saved = user; savedContext = context },
-        onError: message => { problem = message },
+        onError: message => { problem = message; errored = true },
         onIdle: () => { idle = true },
       }, controller.signal)
     } catch (failure) {
@@ -722,7 +726,9 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       } else if (!controller.signal.aborted) {
         unhold()
         live.current = false
-        if (failure instanceof HubError) dismissKey(mine)   // the Hub answered no: nothing was saved. A dropped connection may still have reached it, so that entry stays
+        // A send the Hub refused (a 4xx) saved nothing: the entry it made goes and the one it replaced comes back. A followed turn, a 5xx
+        // and a dropped connection prove nothing about what the Hub holds, so they keep the copy.
+        if (!turn.follow && failure instanceof HubError && failure.status < 500) refuseChat(mine)
         refused(failure)
         return
       }
@@ -730,6 +736,8 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     unhold()
     live.current = false
     setReply(mine, reply, true)
+    if (errored && !reply.trim() && !cut) markFailed(mine)   // the Hub saves the owner's line alone
+    if (left.current) return   // the screen was left: it is not this view's to draw, to hand over or to follow again
     stopWanted.current = false   // a Stop held for this turn's run id ends with the turn: it must never fire on a later message
     if (idle) {
       // /live found nothing running (the turn ended meanwhile): the saved chat has the rest.
@@ -781,13 +789,21 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
 
   /** A turn that is running here and that this page did not start (the queue's own, or one begun on another device): read it live. */
   const followLive = async (name: string, answer: ChatAnswer) => {
-    if (live.current) return
+    if (live.current || left.current) return
+    const asked = answer.asking
+    // Between saving the turn and dropping the running mark the Hub answers both: the lines are saved, so show them and look again.
+    if (asked?.text && turnSaved(answer.messages, { ask: asked })) {
+      setMessages(answer.messages)
+      window.setTimeout(() => { if (!left.current) void afterRef.current(name) }, 1500)
+      return
+    }
     live.current = true   // before anything is awaited: two looks must not follow the same turn twice
     cutTurn.current?.previews.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
     cutTurn.current = null
     setRecovering(false)
     const asking = answer.asking
-    const before = answer.messages
+    const at = asking?.text ? askedAt(answer.messages, asking) : -1
+    const before = at >= 0 ? answer.messages.slice(0, at) : answer.messages   // the owner's line may be saved already: it is drawn as this turn's
     const optimistic: Shown = { role: 'user', text: asking?.text ?? '', at: asking?.at ?? new Date().toISOString() }
     conversation.current = name
     setKnown(true)
@@ -804,7 +820,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     setMessages(asking?.text ? [...before, optimistic] : before)
     await readTurn({
       start: (handlers, signal) => streamLive(name, handlers, signal),
-      before, optimistic, previews: [], model, persona,
+      before, optimistic, previews: [], model, persona, follow: true, track: !answer.state?.archived && !answer.state?.trashed, base: lineCount(before),
       refused: () => { setNote(REOPEN_NOTE); setRecovering(true) },   // the stream would not open: the saved chat has the reply when it ends
     })
   }
@@ -843,6 +859,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     await readTurn({
       start: async (handlers, signal) => streamChat({ ...(conversation.current ? { conversation: conversation.current } : {}), ...(askedModel !== AUTO ? { model: askedModel } : {}), ...(askedPersona !== HERMES && !conversation.current && !help ? { persona: askedPersona } : {}), ...(help && !conversation.current && !gone ? { about: { kind: help.kind, id: help.id, ...(help.step ? { step: help.step } : {}) } } : {}), text, ...(sending.length ? { images: await Promise.all(sending.map(async item => ({ type: item.type, data: await toBase64(item.blob) }))) } : {}) }, handlers, signal),
       before, optimistic, previews, model: askedModel, persona: askedPersona,
+      ...(conversation.current && entryFor(conversation.current) ? { base: hubLines.current } : {}),   // a degraded thread shows lines only the device has
       refused: failure => {
         // Refused before anything streamed: nothing was saved, so the text and the pictures go back.
         setMessages(before)
@@ -999,7 +1016,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         {stopProblem && <p className="hub-error" role="alert" data-chat-stop-error>{stopProblem}</p>}
         {stopping && <p className="hub-muted hub-chat-note" role="status" data-chat-stopping>Stopping…</p>}
         {note && <p className="hub-muted hub-chat-note" role="status" data-chat-note>{note}</p>}
-        {entry && degraded && <p className="hub-muted hub-chat-note" role="status" data-chat-unsaved>The Hub has not saved these lines yet. They are kept here, and this keeps trying.</p>}
+        {entry && degraded && !expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unsaved>The Hub has not saved these lines yet. They are kept here, and this keeps trying.</p>}
         {entry && expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unconfirmed>The Hub never confirmed this reply and may have restarted. <button type="button" className="hub-btn" data-entry-dismiss onClick={() => dismissKey(entry.key)}>Dismiss</button></p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
         {!trashed && (images.length > 0 || preparing > 0 || trayNote) && (

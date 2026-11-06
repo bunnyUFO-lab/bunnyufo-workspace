@@ -18,7 +18,7 @@ const [LOCAL_JOB, DONE_JOB] = [jobId('scan-tilesets', 'c111'), jobId('finished-s
 const SAVED_CHAT = `${day}-sav123`;
 const ASK = 'Plan the forest level';
 
-const fixture = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { runScripts: Array.from({ length: 8 }, () => ['Working on it. ', { hold: true }]) } });
+const fixture = await startHubFixture({ hermes: true, chatRuns: true, hermesOptions: { runScripts: Array.from({ length: 30 }, () => ['Working on it. ', { hold: true }]) } });
 const browser = await chromium.launch({ headless: true, channel });
 const stored = page => page.evaluate(key => JSON.parse(localStorage.getItem(key) || '{"chats":[],"jobs":[]}'), KEY);
 const open = async (options = {}) => {
@@ -26,8 +26,9 @@ const open = async (options = {}) => {
   const page = await context.newPage();
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
-  const lies = { hide: null, thread: null, jobs: false, jobsView: false };
+  const lies = { hide: null, thread: null, jobs: false, jobsView: false, live: null, post: 0 };
   await context.route(url => url.pathname === '/api/hub/chat', async route => {
+    if (route.request().method() === 'POST' && lies.post) { await route.fulfill({ status: lies.post, json: { error: 'No such conversation.' } }); return; }
     if (route.request().method() !== 'GET') { await route.fallback(); return; }
     const response = await steadyFetch(route);
     const body = await response.json();
@@ -35,8 +36,18 @@ const open = async (options = {}) => {
   });
   await context.route(url => /^\/api\/hub\/chat\/[^/]+$/.test(url.pathname), async route => {
     if (route.request().method() !== 'GET' || !lies.thread) { await route.fallback(); return; }
-    if (lies.thread === '404') await route.fulfill({ status: 404, json: { error: 'No such conversation.' } });
+    if (lies.thread === 'archived') {   // the chat was set aside on another device
+      const response = await steadyFetch(route);
+      await route.fulfill({ response, json: { ...(await response.json()), state: { title: null, pinned: null, archived: new Date().toISOString(), trashed: null, unread: false } } });
+    } else if (lies.thread === 'gap') {   // the end of a turn: the turn is saved, the running mark is not dropped yet
+      await route.fulfill({ json: { messages: [{ role: 'user', text: 'Gap question', at: new Date().toISOString() }, { role: 'assistant', text: 'Gap answer', at: new Date().toISOString() }], running: true, asking: { text: 'Gap question', at: new Date().toISOString() } } });
+    } else if (lies.thread === '404') await route.fulfill({ status: 404, json: { error: 'No such conversation.' } });
     else await route.fulfill({ json: { messages: [], running: false } });
+  });
+  await context.route(url => /^\/api\/hub\/chat\/[^/]+\/live$/.test(url.pathname), async route => {
+    if (lies.live === '502') await route.fulfill({ status: 502, json: { error: 'The Hub could not reach Hermes.' } });
+    else if (lies.live === 'idle') await route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: 'event: idle\ndata: {}\n\n' });
+    else await route.fallback();
   });
   await context.route(url => /^\/api\/hub\/chat\/[^/]+\/jobs$/.test(url.pathname), route => (lies.jobs ? route.abort() : route.fallback()));
   await context.route(url => url.pathname === '/api/hub/jobs', route => (lies.jobsView ? route.abort() : route.fallback()));
@@ -71,6 +82,8 @@ const rowOf = (page, chat) => page.locator(`[data-chat-list] [data-conversation=
 const lines = (page, role, text) => page.locator(`.hub-bubble.${role}`, { hasText: text });
 const release = async (index, text) => { fixture.hermes.release(fixture.hermes.runs[index].id, text); };
 let run = 0;
+const longAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
+const entry = (id, title, extra = {}) => ({ key: `k${id}`, id, title, persona: null, model: null, startedAt: new Date().toISOString(), lines: [{ role: 'user', text: title, at: new Date().toISOString() }], base: 0, ask: { text: title, at: new Date().toISOString() }, reply: 'Half a sentence', jobs: [], ...extra });
 
 try {
   {
@@ -190,8 +203,6 @@ try {
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
   }
 
-  const longAgo = new Date(Date.now() - 3 * 3_600_000).toISOString();
-  const entry = (id, title, extra = {}) => ({ key: `k${id}`, id, title, persona: null, model: null, startedAt: new Date().toISOString(), lines: [{ role: 'user', text: title, at: new Date().toISOString() }], base: 0, ask: { text: title, at: new Date().toISOString() }, reply: 'Half a sentence', jobs: [], ...extra });
   {
     const OLD = `${day}-old001`;
     const OLD2 = `${day}-old002`;
@@ -264,6 +275,138 @@ try {
     await done.waitFor();
     assert.equal(await done.getAttribute('data-job-local'), null);
     await page.context().unrouteAll({ behavior: "ignoreErrors" }); await page.context().close();
+  }
+
+  {
+    const { page, lies } = await open();
+    step("B1: a Hub error on /live does not delete the device's copy");
+    const chat = await send(page, 'Live error question');
+    const mine = run++;
+    await page.evaluate(() => { location.hash = '#/~hub/today'; });
+    lies.live = '502';
+    await page.evaluate(h => { location.hash = h; }, '#/~hub/chat/' + chat);
+    await page.locator('.hub-bubble.assistant', { hasText: 'Working on it.' }).waitFor();
+    await page.waitForTimeout(1500);
+    assert.equal((await stored(page)).chats[0]?.reply, 'Working on it. ');
+    await release(mine, 'Done after the error.');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const { page, lies } = await open();
+    step("B1: a refused send from a degraded thread leaves the device's copy and its lines");
+    const chat = await send(page, 'First words kept');
+    const mine = run++;
+    lies.hide = chat; lies.thread = '404';
+    await page.reload();
+    await page.locator('[data-chat-unsaved]').waitFor();
+    lies.post = 404;
+    await page.locator('textarea[aria-label="Message"]').fill('A second message');
+    await page.keyboard.press('Enter');
+    await page.locator('.hub-error').waitFor();
+    assert.equal((await stored(page)).chats.length, 1);
+    assert.equal((await stored(page)).chats[0].reply, 'Working on it. ');
+    await page.reload();
+    await lines(page, 'user', 'First words kept').waitFor();
+    await lines(page, 'assistant', 'Working on it.').waitFor();
+    await release(mine, 'Done.');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  for (const action of ['Archive', 'Delete']) {
+    const { page } = await open();
+    step('B2: ' + action + " from the thread's own menu does not bring the chat back");
+    // The thread's menu exists once the chat has a saved file: finish a first turn, then send a second.
+    const chat = await send(page, action + ' from the thread');
+    await release(run++, 'First reply.');
+    await page.locator('[data-pending]').waitFor({ state: 'detached' });
+    await page.waitForFunction(({ key }) => JSON.parse(localStorage.getItem(key) || '{"chats":[]}').chats.length === 0, { key: KEY });
+    await page.locator('textarea[aria-label="Message"]').fill('Second message while you answer');
+    await page.keyboard.press('Enter');
+    await page.locator('.hub-bubble.assistant.pending', { hasText: 'Working on it.' }).waitFor();
+    const mine = run++;
+    await page.locator('.hub-chat-head [data-row-menu]').click();
+    await page.getByRole('menuitem', { name: action, exact: true }).click();
+    await page.locator('[data-chat-list]').waitFor();
+    await page.waitForTimeout(1500);
+    await release(mine, 'Saved after the menu.');
+    await page.waitForTimeout(2500);
+    assert.equal((await stored(page)).chats.length, 0, 'The entry stays gone.');
+    await page.reload();
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => { location.hash = '#/~hub/chat'; });
+    await page.locator('[data-chat-list]').waitFor();
+    assert.equal(await rowOf(page, chat).count(), 0);
+    assert.equal((await stored(page)).chats.length, 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const { page, lies } = await open();
+    step('B3: a chat archived on another device does not come back as Replying');
+    const chat = await send(page, 'Archived elsewhere');
+    const mine = run++;
+    await page.evaluate(() => { location.hash = '#/~hub/today'; });
+    lies.hide = chat; lies.thread = 'archived';
+    await page.evaluate(() => { location.hash = '#/~hub/chat'; });
+    await page.locator('[data-chat-list]').waitFor();
+    await page.waitForFunction(({ key }) => JSON.parse(localStorage.getItem(key) || '{"chats":[]}').chats.length === 0, { key: KEY });
+    assert.equal(await rowOf(page, chat).count(), 0);
+    await release(mine, 'Done.');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const GAP = day + '-gap001';
+    const { page, lies } = await open();
+    step('B4: a read between saving the turn and dropping the running mark shows each line once');
+    lies.thread = 'gap'; lies.live = 'idle';
+    await page.goto(fixture.url + '#/~hub/chat/' + GAP);
+    await lines(page, 'assistant', 'Gap answer').waitFor();
+    await page.waitForTimeout(1500);
+    assert.equal(await page.locator('.hub-bubble.user', { hasText: 'Gap question' }).count(), 1);
+    assert.equal(await page.locator('.hub-bubble.assistant', { hasText: 'Gap answer' }).count(), 1);
+    assert.equal(await page.locator('[data-chat-unsaved]').count(), 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const { page, lies } = await open();
+    step('B5: following a turn that ends before its first word keeps the cached reply');
+    const chat = await send(page, 'Cached reply stays');
+    const mine = run++;
+    await page.evaluate(() => { location.hash = '#/~hub/today'; });
+    lies.live = 'idle';
+    await page.evaluate(h => { location.hash = h; }, '#/~hub/chat/' + chat);
+    await page.waitForTimeout(2500);
+    assert.equal((await stored(page)).chats[0]?.reply, 'Working on it. ');
+    await release(mine, 'Done.');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const { page } = await open();
+    step('F4: leaving a new chat does not pull the owner back when the reply ends');
+    await send(page, 'Leave me be');
+    const mine = run++;
+    await page.evaluate(() => { location.hash = '#/~hub/jobs'; });
+    await page.waitForTimeout(1000);
+    await release(mine, 'Finished while away.');
+    await page.waitForTimeout(3000);
+    assert.equal(await hashOf(page), '#/~hub/jobs');
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
+  }
+
+  {
+    const { page } = await open({ seed: { chats: [entry('', 'Never named message', { id: null, key: 'ksend' })], jobs: [] } });
+    step('F5: a row for a message the Hub never named can put the words back in the box');
+    await page.goto(fixture.url + '#/~hub/chat');
+    await page.locator('[data-conversation-sending]').waitFor();
+    await page.locator('[data-entry-putback]').click();
+    await page.locator('textarea[aria-label="Message"]').waitFor();
+    assert.equal(await page.locator('textarea[aria-label="Message"]').inputValue(), 'Never named message');
+    assert.equal((await stored(page)).chats.length, 0);
+    await page.context().unrouteAll({ behavior: 'ignoreErrors' }); await page.context().close();
   }
   console.log('ok');
 } finally {
