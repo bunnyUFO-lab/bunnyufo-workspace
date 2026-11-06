@@ -29,9 +29,9 @@ test('an unknown or empty room is Ops, with the agents kept in their order', () 
   assert.deepEqual(rooms[2].agents.map(agent => agent.id), ['briefs', 'stray', 'blank']);
 });
 
-test('the view is Roster unless Floor was stored', () => {
-  assert.equal(viewOf(null), 'roster');
-  assert.equal(viewOf('nonsense'), 'roster');
+test('the view is Floor unless the List (roster) was stored (ws-cl0.6.10: Team opens on the Floor)', () => {
+  assert.equal(viewOf(null), 'floor');
+  assert.equal(viewOf('nonsense'), 'floor');
   assert.equal(viewOf('floor'), 'floor');
   assert.equal(viewOf('roster'), 'roster');
 });
