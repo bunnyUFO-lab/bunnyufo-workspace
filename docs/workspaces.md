@@ -692,7 +692,7 @@ shows it as its own kind (picture left, decisions right), and it never gets Disc
 ### Plans (change-list Asks)
 
 A **plan** is an Ask with `changes` (and `"kind": "decision"`): the Planner agent in Chat, or any agent, proposes edits to a project's Beads and
-Library, and the owner approves them row by row. Nothing in Beads changes until the PC (within minutes) or a session applies the approved rows. The Ask's page says "Waiting for the PC to apply it." until `pickup.json` exists, then "Applied <date>".
+Library, and the owner approves them row by row. Nothing in Beads changes until the PC (within minutes) or a session applies the approved rows. The Ask's page says "Approved. It's applied within a minute or two, and the PC doesn't need to be on." until `pickup.json` exists, then "Applied <date>".
 
 The Planner works in five stages: Ask, Explore, Decide, Plan and Hand off. It starts no jobs and files no requests. When research is missing it says that Hermes can propose a job. Main Hermes follows the same stages from a skill on its own host.
 

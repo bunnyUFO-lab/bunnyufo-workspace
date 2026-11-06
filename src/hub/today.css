@@ -1,31 +1,14 @@
 /* Today, after the mission-control mockup. Loaded after hub.css, so these win on equal weight. */
 .today-head { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 22px; }
-.today-eyebrow { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); font-variant-numeric: tabular-nums; }
-.hub .today-head h2 { font-family: var(--font); font-size: 34px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; margin-top: 6px; }
-.today-head p { margin: 8px 0 0; color: var(--t2); font-size: 0.95rem; }
 .today-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .today-icon { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 999px; }
 .today-icon svg { width: 15px; height: 15px; }
-.hub-btn.today-primary { background: var(--t1); color: var(--ground); border-color: var(--t1); font-weight: 600; text-decoration: none; border-radius: 999px; height: 34px; padding: 0 14px; display: inline-flex; align-items: center; gap: 4px; }
-.hub-btn.today-primary:hover:not(:disabled) { background: var(--text-bright); }
-.hub .hub-btn.today-primary { color: var(--ground); }
-.today-num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-.today-project { margin: -8px 0 16px; }
-.today-project .hub-chips-wrap { margin-bottom: 0; }
-@media (max-width: 640px) { .today-project .hub-project-pick { margin-bottom: 0; } }
-.today-project .hub-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }
-.today-project .hub-chip .n { font: 600 11px var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
-.today-project .hub-chip.on .n { color: inherit; }
-.today-elsewhere { margin: 8px 0 0; }
-.today-linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--pink-bright); cursor: pointer; text-decoration: underline; }
-.today-linkbtn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 3px; }
-.today .hub-kpis { gap: 16px; margin-bottom: 16px; }
-.today .hub-kpi { gap: 0; padding: 18px; background: var(--s1); border-color: var(--line); border-radius: var(--r3); transition: border-color 0.2s, transform 0.2s; }
-.today .hub-kpi:hover { background: var(--s1); border-color: var(--line2); transform: translateY(-2px); }
-.kpi-label { gap: 8px; display: flex; align-items: center; justify-content: space-between; font: 600 11px var(--font); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); }
-.today .hub-kpi-v { font: 600 30px/1.1 var(--mono); letter-spacing: -0.03em; margin-top: 10px; font-variant-numeric: tabular-nums; color: var(--t1); }
-.kpi-sub { font-size: 12px; color: var(--t3); margin-top: 6px; }
+/* One line under the title: what runs, the PC, Away. It links to Settings, where those are changed. */
+.today-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: var(--tap, 44px); margin: -10px 0 14px; color: var(--t2); text-decoration: none; }
+.today-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--s1); font-size: 12.5px; color: var(--t2); }
+.today-status:hover .today-pill { border-color: var(--line2); }
+.nrow.flash { background: var(--accent-soft, var(--s2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .today .dot { position: relative; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--t3)); flex: none; }
 .today .dot.st-needs { --c: var(--st-needs); }
@@ -68,16 +51,12 @@
 
 .today .rise { animation: today-rise 0.2s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 40ms); }
 @keyframes today-rise { from { opacity: 0; transform: translateY(8px); } }
-@media (prefers-reduced-motion: reduce) { .today .rise { animation: none; } .today .hub-kpi { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .today .rise { animation: none; }  }
 
 @media (max-width: 760px) {
-  .today-project .hub-chip, .today-linkbtn { min-height: 44px; }
   .today-linkbtn { padding: 0 4px; }
   .today-cols { grid-template-columns: minmax(0, 1fr); }
-  .today .hub-kpis { gap: 10px; }
-  .today .hub-kpi { padding: 14px; }
-  .kpi-label { gap: 8px; letter-spacing: 0.1em; }
-  .hub .today-head h2 { font-size: 28px; }
+    .hub .today-head h2 { font-size: 28px; }
 }
 
 /* Dismiss, Clear all and Undo on the Alerts panel. */

@@ -417,13 +417,13 @@ if (typeof window !== 'undefined') {
   window.addEventListener('bunnyufo-workspace-changed', () => clearHub('/project-cards'))
 }
 
-/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. */
-export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false): Promise<T> {
+/** `quiet`: a write that no badge or list depends on (a queued chat message) does not make every screen fetch again. `keepalive`: the browser finishes the request even if the page goes away (a held answer flushed as the phone sleeps); the body must stay under 64 KB. */
+export async function hubPost<T>(path: string, data: unknown = {}, signal?: AbortSignal, quiet = false, keepalive = false): Promise<T> {
   const changed = () => { if (!quiet) window.dispatchEvent(new Event(HUB_WROTE)) }
   const release = holdReload()   // an update reload waits for this write
   try {
     const answer = await parse<T>(await fetch(`/api/hub${path}`, {
-      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal,
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal, ...(keepalive ? { keepalive: true } : {}),
     }))
     changed()
     return answer

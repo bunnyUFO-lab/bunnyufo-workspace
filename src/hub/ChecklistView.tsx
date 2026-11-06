@@ -6,7 +6,8 @@ import ChecklistBody from './ChecklistBody'
 import { useState } from 'react'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
-import { goNext, useQueueOrder } from './useGoNext'
+import { autoNext, goNext, useQueueOrder } from './useGoNext'
+import SettledBar, { useSettledHere } from './SettledBar'
 import Md from './Md'
 import HubImage from './HubImage'
 import { VERDICT_LABEL } from './playtest'
@@ -24,6 +25,7 @@ export default function ChecklistView({ id }: { id: string }) {
   const { data: detail, error, reload, at: loadedAt } = useHubData<Checklist>(`/checklists/${encodeURIComponent(id)}`)
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
+  const here = useSettledHere(`checklist-${id}`)
   if (!detail) {
     return (
       <>
@@ -50,10 +52,18 @@ export default function ChecklistView({ id }: { id: string }) {
       {typeof detail.context === 'string' && detail.context && <Md text={detail.context} />}
       {card && <p><a className="hub-btn" href={card} target="_blank" rel="noopener noreferrer">Open the card</a></p>}
 
-      <ChecklistBody
-        data={detail} loadedAt={loadedAt} reload={reload}
-        onSubmitted={() => void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, detail.kind === 'playtest' ? 'reported' : 'submitted', queue(), hubHash('checklist', detail.id))}
-      />
+      <SettledBar itemKey={`checklist-${detail.id}`} kind="checklist" id={detail.id} title={text(detail.title)} verb={here.verb} phase={here.phase} backHash={hubHash('checklist', detail.id)} />
+      {/* Kept mounted while the answer is held, so Undo finds the ticks and the note as they were left. */}
+      <div hidden={here.covered}>
+        <ChecklistBody
+          data={detail} loadedAt={loadedAt} reload={reload}
+          onSubmitted={() => {
+            const verb = detail.kind === 'playtest' ? 'reported' : 'submitted'
+            here.settle(verb)
+            if (autoNext()) void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, verb, queue(), hubHash('checklist', detail.id))
+          }}
+        />
+      </div>
 
       {submitted && detail.submit && (
         <section className="hub-panel" aria-label="Submitted" data-submitted>

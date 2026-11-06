@@ -582,3 +582,6 @@ button.hub-cl-text { cursor: pointer; }
 .hub-review-details { margin: 12px 0; }
 .hub-review-details > summary { cursor: pointer; font-weight: 600; padding: 6px 0; min-height: 32px; }
 .hub-done-means { margin: 6px 0 0; }
+
+/* A section a screen hides while something is held for Undo keeps `hidden` working over `.hub-panel`. */
+.hub [hidden] { display: none !important; }

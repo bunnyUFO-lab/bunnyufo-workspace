@@ -5,7 +5,8 @@ import { MarkdownView } from '../components/MarkdownDocument'
 import { entityHash, reviewHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
-import { goNext, useQueueOrder } from './useGoNext'
+import { autoNext, goNext, useQueueOrder } from './useGoNext'
+import SettledBar, { useSettledHere } from './SettledBar'
 import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
 import Md from './Md'
@@ -99,6 +100,7 @@ export default function ReviewView({ route }: { route: string }) {
   const { data: detail, error, at } = useHubData<ReviewDetail>(`/reviews/${encodeURIComponent(id)}`)
   const [handoff] = useState(takeHandoff)
   const queue = useQueueOrder()
+  const here = useSettledHere(`review-${id}`)
   const root = useRef<HTMLDivElement>(null)
   const title = useRef<HTMLHeadingElement>(null)
   const pushes = useRef(0)
@@ -241,13 +243,18 @@ export default function ReviewView({ route }: { route: string }) {
             <p data-try-it>{detail.tryIt}</p>
             <p><a className="hub-btn" href={detail.deployUrl} target="_blank" rel="noopener noreferrer">Open the build</a></p>
           </section>}
-          <section className="hub-panel" aria-label="Mark done">
+          <SettledBar itemKey={`review-${id}`} kind="review" id={id} title={detail.title} verb={here.verb} phase={here.phase} backHash={reviewHash(id)} />
+          <section className="hub-panel" aria-label="Mark done" hidden={here.covered}>
             {detail.done
                 ? <p data-done>Marked done {ago(detail.doneAt ?? detail.at)}{detail.doneBy ? ` by ${detail.doneBy}` : ''}</p>
                 : (
                   <>
-                    <ReviewActions item={item} links={false} primary={nothingToDo(detail.ask) || prs.length === 0} onDone={() => void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id))} />
-                    <p className="hub-muted hub-done-means" data-done-hint>{detail.doneMeans ?? DONE_HINT}</p>
+                    {!here.covered && !here.verb && (
+                      <>
+                        <ReviewActions item={item} links={false} primary={nothingToDo(detail.ask) || prs.length === 0} onDone={() => { here.settle('done'); if (autoNext()) void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id)) }} />
+                        <p className="hub-muted hub-done-means" data-done-hint>{detail.doneMeans ?? DONE_HINT}</p>
+                      </>
+                    )}
                   </>
                 )}
           </section>

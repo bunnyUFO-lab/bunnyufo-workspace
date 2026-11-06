@@ -7,3 +7,8 @@
 .settings-card section { padding: 12px 0; border-bottom: 1px solid var(--line); }
 .settings-card section:last-child { border-bottom: 0; }
 .settings-card .workspace-theme-picker select { min-height: var(--tap); }
+
+.settings-switch { display: flex; align-items: center; gap: 12px; min-height: var(--tap); cursor: pointer; }
+.settings-switch input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+.settings-card .pc-tile { margin: 12px 0 0; }
+.settings-card .away { padding-top: 10px; }
