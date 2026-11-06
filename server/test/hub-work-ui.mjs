@@ -245,7 +245,7 @@ try {
   await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
   assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');
 
-  step('requests: one card per lane by state; a click opens the job's page, a proposal opens its page');
+  step('requests: one card per lane by state; a click opens the job page, a proposal opens its page');
   const reqs = await startHubFixture({ work: true });
   fixtures.push(reqs);
   const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
