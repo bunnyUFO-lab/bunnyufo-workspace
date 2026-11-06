@@ -72,6 +72,10 @@ function MilestoneRow({ project, milestone, current, open, shown, onToggle, onMo
       </button>
       {open && (
         <div className="ui-list pj-tasks" role="list" aria-label={`Tasks in ${milestone.title}`}>
+          <a role="listitem" className="ui-row pj-task pj-details" href={projectNodeHash(project, milestone.id)} onClick={event => onOpen(event, projectNodeHash(project, milestone.id))} data-pp-details={milestone.id} data-pp-node={milestone.id}>
+            <span className="ui-row-body"><b>Milestone details</b><small>Sprint, questions and what it holds</small></span>
+            <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
+          </a>
           {tasks.length === 0 && <p className="hub-empty">No tasks yet.</p>}
           {tasks.slice(0, shown).map(task => <TaskRow key={task.id} project={project} task={task} onOpen={onOpen} />)}
           {tasks.length > shown && (
