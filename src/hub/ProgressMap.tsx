@@ -107,7 +107,7 @@ function Branched({ model, project, projectName, param, header }: { model: MapMo
 function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: string; repoName: string; wayfinder: MapWayfinder; plan?: ReactNode }) {
   const root = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 700) }, [])
+  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 600) }, [])
   const { destination, decisions, open: questions } = wayfinder
   const ready = preparable(wayfinder)
   if (!destination && !decisions && !questions.length) return null

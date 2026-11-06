@@ -133,9 +133,9 @@ const wayfinder = async (page, what) => {
   const rows = page.locator('.hub-wayfinder');
   await rows.first().waitFor();
   assert.equal(await rows.count(), 1, `${what}: the Wayfinder row is mounted once.`);
-  // The owner's order: project chips, then the controls, then the Destination row, then the map.
-  const order = await page.evaluate(() => ['.hub-map-chips', '.hub-map-controls', '.hub-wayfinder', '.hub-map-wrap'].map(selector => Math.round(document.querySelector(selector).getBoundingClientRect().top)));
-  assert.ok(order.every((top, k) => k === 0 || top >= order[k - 1]) && new Set(order).size === 4, `${what}: chips, controls, Destination row, map in that order (${order}).`);
+  // The owner's order: the project header and tabs (the page's), then the controls, then the Destination row, then the map.
+  const order = await page.evaluate(() => ['.pp-tabs', '.hub-map-controls', '.hub-wayfinder', '.hub-map-wrap'].map(selector => Math.round(document.querySelector(selector).getBoundingClientRect().top)));
+  assert.ok(order.every((top, k) => k === 0 || top >= order[k - 1]) && new Set(order).size === 4, `${what}: tabs, controls, Destination row, map in that order (${order}).`);
   return rows;
 };
 
@@ -302,48 +302,44 @@ try {
   await noSideways(big, 'Roadmap at 1920');
 }
 {
-  step('Magic Loops opens, and the chips follow the table order');
+  step('Magic Loops opens by address, with the project page around the map and no project picker');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
   await desk.goto(`${fixture.url}#/~hub/map/magic-loops`);
   await desk.locator('.hub-map-wrap').waitFor();
-  assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'The address names the project.');
-  const names = await desk.locator('.hub-map-chips .hub-chip').allInnerTexts();
-  assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Aardwolf', 'Nosprint', 'Wayfind']);
+  assert.equal(await desk.locator('[data-project-title]').innerText(), 'Magic Loops', 'The address names the project.');
+  assert.equal(await desk.locator('.hub-map-chips, #hub-map-project').count(), 0, 'The picker is gone: the Projects list is beside the map.');
+  assert.equal(await desk.locator('[data-roadmap-view="map"]').getAttribute('aria-pressed'), 'true');
 
   step('the Runs on chip: full text at desktop width, the rule as its title');
   const chip = desk.locator('.hub-runs');
   assert.equal(await chip.innerText(), 'Runs on: Gaming PC');
   assert.equal(await chip.getAttribute('title'), 'Work for this project runs on the PC by default.');
-  await desk.locator('.hub-chip', { hasText: 'Workspace app' }).click();
-  await desk.locator('.hub-chip.on', { hasText: 'Workspace app' }).waitFor();
+  await go(desk, '#/~hub/map/workspace-app');
+  await desk.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
   assert.equal(await chip.innerText(), 'Runs on: cloud');
   assert.equal(await chip.getAttribute('title'), 'This project lives in a GitHub repository, so its work runs in the cloud.');
-  await desk.locator('.hub-chip', { hasText: 'Nosprint' }).click();
-  await desk.locator('.hub-chip.on', { hasText: 'Nosprint' }).waitFor();
+  await go(desk, '#/~hub/map/nosprint');
+  await desk.locator('[data-project-title]', { hasText: 'Nosprint' }).waitFor();
   assert.equal(await desk.locator('.hub-runs').count(), 0, 'A project outside the table has no chip.');
 
   step('at phone width: short text, one line, nothing sideways');
   const phone = await open({ width: 390, height: 888 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map/magic-loops`);
   await phone.locator('.hub-map-wrap').waitFor();
-  // Phone width: the project is one native select (ws-ubo.2.1); its shown option is the chosen project.
-  const shown = () => phone.locator('.hub-map-chips select').evaluate(select => select.selectedOptions[0]?.textContent);
+  const shown = () => phone.locator('[data-project-title]').innerText();
   assert.equal(await shown(), 'Magic Loops');
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs on PC');
   assert.equal(await phone.locator('.hub-runs').getAttribute('title'), 'Work for this project runs on the PC by default.');
   assert.match(await phone.locator('.hub-runs').getAttribute('aria-label'), /^Runs on: Gaming PC/);
   await noSideways(phone, 'Roadmap at 390');
-  const heights = await phone.evaluate(() => ({ row: document.querySelector('.hub-map-chips').getBoundingClientRect().height, chips: document.querySelector('.hub-map-chips select').getBoundingClientRect().height }));
-  console.log(`  chips row height at 390: ${heights.row} (the select alone: ${heights.chips})`);
-  assert.ok(Math.abs(heights.row - heights.chips) <= 1, `The row stays one line, the height of the select (${heights.row} vs ${heights.chips}).`);
-  await phone.locator('.hub-map-chips select').selectOption({ label: 'Workspace app' });
-  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Workspace app');
+  await go(phone, '#/~hub/map/workspace-app');
+  await phone.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs in cloud');
   await noSideways(phone, 'Roadmap at 390 with the longer chip');
 
   step('a tap on the Runs on chip shows the rule; a second tap, Escape and a tap outside hide it');
-  await phone.locator('.hub-map-chips select').selectOption({ label: 'Magic Loops' });
-  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Magic Loops');
+  await go(phone, '#/~hub/map/magic-loops');
+  await phone.locator('[data-project-title]', { hasText: 'Magic Loops' }).waitFor();
   const ruleText = 'Work for this project runs on the PC by default.';
   const rule = phone.locator('.hub-runs-rule');
   assert.equal(await rule.count(), 0);
@@ -360,8 +356,8 @@ try {
   await phone.locator('.hub-runs').tap();
   await phone.touchscreen.tap(20, 600);
   assert.equal(await rule.count(), 0, 'A tap outside hides it.');
-  await phone.locator('.hub-map-chips select').selectOption({ label: 'Workspace app' });
-  await phone.waitForFunction(() => document.querySelector('.hub-map-chips select').selectedOptions[0]?.textContent === 'Workspace app');
+  await go(phone, '#/~hub/map/workspace-app');
+  await phone.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');
@@ -513,8 +509,8 @@ try {
   await settle(desk, '.rm-full');
   assert.deepEqual(await rowsOnPage(desk).evaluateAll(list => list.map(row => [row.dataset.roadmapRow, row.dataset.depth])), [['aw-rm1', '0'], ['aw-rm2', '1'], ['~unfiled', '0']], 'Nested rows, then the unfiled row.');
   assert.equal(await desk.locator('.hub-map-box').count(), 0, 'The full map draws no map.');
-  const layout = await desk.evaluate(() => ({ chips: document.querySelector('.hub-map-chips').getBoundingClientRect().bottom, bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect(), rows: document.querySelector('.rm-full').getBoundingClientRect(), scroll: document.scrollingElement.scrollHeight, inner: innerHeight, hubScroll: document.querySelector('.hub').scrollHeight, hubClient: document.querySelector('.hub').clientHeight }));
-  assert.ok(layout.bar.top >= layout.chips - 1 && layout.rows.top >= layout.bar.bottom - 1, 'The chips, then the bar, then the rows.');
+  const layout = await desk.evaluate(() => ({ chips: document.querySelector('.pp-switch').getBoundingClientRect().bottom, bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect(), rows: document.querySelector('.rm-full').getBoundingClientRect(), scroll: document.scrollingElement.scrollHeight, inner: innerHeight, hubScroll: document.querySelector('.hub').scrollHeight, hubClient: document.querySelector('.hub').clientHeight }));
+  assert.ok(layout.bar.top >= layout.chips - 1 && layout.rows.top >= layout.bar.bottom - 1, 'The project tabs and switch, then the bar, then the rows.');
   assert.ok(layout.scroll <= layout.inner && layout.hubScroll <= layout.hubClient, 'The Hub does not scroll.');
   assert.equal(await desk.locator('[data-roadmap-toggle="full"]').getAttribute('aria-current'), 'page');
   await desk.locator('[data-roadmap-row="aw-rm1"]').click();
@@ -605,14 +601,13 @@ try {
   await stuck.locator('[data-roadmap-row="aw-rm1"]').click();
   await settle(stuck, '.hub-map-box svg');
 
-  step('roadmaps, phone: the box stays vertical at rest, after Full to branch and with a sheet; the bar takes the chips\' place; every control is 44 px');
+  step('roadmaps, phone: the box stays vertical at rest, after Full to branch and with a sheet; every control is 44 px');
   const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map/${RW}`);
   await settle(phone, '.rm-full');
   const sized = async what => {
-    const sizes = await phone.evaluate(() => ({ bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect().height, chips: getComputedStyle(document.querySelector('.hub-map-chips')).display, toggles: [...document.querySelectorAll('.rm-toggle a')].map(item => item.getBoundingClientRect().height), rows: [...document.querySelectorAll('[data-roadmap-row]')].map(item => item.getBoundingClientRect().height) }));
+    const sizes = await phone.evaluate(() => ({ bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect().height, toggles: [...document.querySelectorAll('.rm-toggle a')].map(item => item.getBoundingClientRect().height), rows: [...document.querySelectorAll('[data-roadmap-row]')].map(item => item.getBoundingClientRect().height) }));
     assert.ok(sizes.bar >= 44 && sizes.toggles.every(height => height >= 44) && sizes.rows.every(height => height >= 44), `${what}: bar, toggle and rows are at least 44 px (${JSON.stringify(sizes)}).`);
-    assert.equal(sizes.chips, 'none', `${what}: the bar takes the chips' place.`);
   };
   await sized('full map');
   await noSideways(phone, 'full map at 390');
