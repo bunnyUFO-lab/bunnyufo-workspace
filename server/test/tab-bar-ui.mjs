@@ -48,7 +48,7 @@ await mkdir(path.dirname(registryFile), { recursive: true });
 await addWorkspace({ registryFile, path: dir, name: 'Fixture', activate: true });
 
 const oneRow = async (page, label) => {
-  const tops = await page.$$eval('.step-tab', tabs => tabs.map(tab => tab.offsetTop));
+  const tops = await page.$$eval('.step-tabs .step-tab[role="tab"]', tabs => tabs.map(tab => tab.offsetTop));
   assert.ok(tops.length > 0, `${label}: tabs render`);
   assert.equal(new Set(tops).size, 1, `${label}: every tab sits on one row (${[...new Set(tops)]})`);
 };
