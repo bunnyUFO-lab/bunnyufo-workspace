@@ -72,6 +72,11 @@ try {
   // so without it a slow round trip (CI) emulates the light scheme while the app is still on plain dark.
   await expect(page.getByLabel('Workspace theme', { exact: true })).toHaveValue('system');
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'dark');
+  // A media query's change event is delivered by the browser's rendering update, not on the spot. This window is
+  // not the one last driven, so make it the visible one and let it draw two frames first: a window that is not
+  // drawing never reports the new scheme, and the check below would then sit on 'dark' until it timed out.
+  await page.bringToFront();
+  await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-workspace-theme', 'light');
   await page.getByLabel('Workspace theme', { exact: true }).selectOption('light');
