@@ -1577,7 +1577,7 @@ test('inbox: chat/ (the queue and the stored lines) is the Hub\'s, so a limited 
   const { fake, call } = await setup();
   try {
     const put = (token, file) => call('PUT', `/sections/inbox/files/${file}`, { token, body: Buffer.from('{}'), base64: true });
-    for (const file of ['chat/queue/20261104-abcdef.json', 'chat/20261104-abcdef.jsonl', 'chat/20261104-abcdef/pic.png']) {
+    for (const file of ['chat/queue/20261104-abcdef.json', 'chat/20261104-abcdef.jsonl', 'chat/20261104-abcdef/pic.png', 'chat/state.json']) {
       for (const token of ['tok-cloud', 'tok-hermes']) {
         const refused = await put(token, file);
         assert.equal(refused.status, 403, `${token} ${file}`);
@@ -1587,6 +1587,7 @@ test('inbox: chat/ (the queue and the stored lines) is the Hub\'s, so a limited 
       assert.equal((await call('DELETE', `/sections/inbox/files/${file}`, { token: 'tok-cloud' })).status, 403, `${file} delete`);
     }
     assert.equal(fake.text('sections/inbox/chat/queue/20261104-abcdef.json'), null, 'nothing was planted');
+    assert.equal(fake.text('sections/inbox/chat/state.json'), null, 'no chat state was planted');
     assert.equal((await put('tok-all', 'chat/queue/20261104-abcdef.json')).status, 200, 'The passphrase may.');
   } finally {
     await fake.close();

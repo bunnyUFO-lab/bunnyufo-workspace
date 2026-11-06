@@ -693,7 +693,7 @@ test('runs on: reading a conversation says a reply is still coming, and stops sa
     const early = await call('GET', `/hub/chat/${turn.conversation}`);
     assert.equal(early.status, 200, 'A new chat has no file yet, and is not a 404 while its reply comes.');
     const { asking, ...shown } = await early.json();
-    assert.deepEqual(shown, { id: turn.conversation, messages: [], queued: [], held: null, running: true, run: turn.run });
+    assert.deepEqual(shown, { id: turn.conversation, messages: [], state: { title: null, pinned: null, archived: null, trashed: null, unread: false }, queued: [], held: null, running: true, run: turn.run });
     assert.equal(asking.text, 'first', 'A page that comes back sees what the running turn was asked.');
     const other = await call('GET', `/hub/chat/${turn.conversation}`, undefined, { 'Remote-User': 'someone-else', Origin: 'https://site.example' });
     assert.equal((await other.json()).run, null, 'Only who started it gets the run to stop.');
