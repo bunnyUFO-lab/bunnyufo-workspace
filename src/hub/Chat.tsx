@@ -726,9 +726,9 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
       } else if (!controller.signal.aborted) {
         unhold()
         live.current = false
-        // A send the Hub refused (a 4xx) saved nothing: the entry it made goes and the one it replaced comes back. A followed turn, a 5xx
-        // and a dropped connection prove nothing about what the Hub holds, so they keep the copy.
-        if (!turn.follow && failure instanceof HubError && failure.status < 500) refuseChat(mine)
+        // A send the Hub refused saved nothing: a 4xx, or a 5xx with the Hub's own JSON error (Hermes busy or down). The entry it made goes and the
+        // one it replaced comes back; the words go back in the box. A followed turn, a proxy's 5xx and a dropped connection prove nothing, so they keep the copy.
+        if (!turn.follow && failure instanceof HubError && (failure.status < 500 || typeof failure.body?.error === 'string')) refuseChat(mine)
         refused(failure)
         return
       }
@@ -792,7 +792,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     if (live.current || left.current) return
     const asked = answer.asking
     // Between saving the turn and dropping the running mark the Hub answers both: the lines are saved, so show them and look again.
-    if (asked?.text && turnSaved(answer.messages, { ask: asked })) {
+    if (asked?.text && turnSaved(answer.messages, { ask: asked }, 1000)) {
       setMessages(answer.messages)
       window.setTimeout(() => { if (!left.current) void afterRef.current(name) }, 1500)
       return
@@ -802,7 +802,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     cutTurn.current = null
     setRecovering(false)
     const asking = answer.asking
-    const at = asking?.text ? askedAt(answer.messages, asking) : -1
+    const at = asking?.text ? askedAt(answer.messages, asking, { within: 1000 }) : -1
     const before = at >= 0 ? answer.messages.slice(0, at) : answer.messages   // the owner's line may be saved already: it is drawn as this turn's
     const optimistic: Shown = { role: 'user', text: asking?.text ?? '', at: asking?.at ?? new Date().toISOString() }
     conversation.current = name

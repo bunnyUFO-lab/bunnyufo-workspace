@@ -72,19 +72,22 @@ export function cachedLines(entry: ChatEntry): ChatLine[] {
 }
 
 /** Whether the saved lines hold this turn: the owner's message where it was added, answered (or stopped before any reply). */
-export function turnSaved(messages: ChatLine[], entry: Pick<ChatEntry, 'ask' | 'failed'>): boolean {
-  const at = askedAt(messages, entry.ask)
+export function turnSaved(messages: ChatLine[], entry: Pick<ChatEntry, 'ask' | 'failed'> & { base?: number }, within?: number): boolean {
+  const at = askedAt(messages, entry.ask, { base: entry.base, within })
   if (at < 0) return false
   const rest = messages.slice(at + 1).filter(line => line.role !== 'context')
   return rest[0]?.role === 'assistant' || !!messages[at].stopped || !!entry.failed
 }
 
 /** Where the owner's message of a turn is among the saved lines: searched from the end, so it does not depend on how many lines came before. -1 when it is not there. */
-export function askedAt(messages: ChatLine[], ask: { text: string; at: string }): number {
+export function askedAt(messages: ChatLine[], ask: { text: string; at: string }, options: { base?: number; within?: number } = {}): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const line = messages[index]
     if (line.role !== 'user' || (ask.text && line.text !== ask.text)) continue
-    return !ask.at || time(line.at) >= time(ask.at) - SKEW_MS ? index : -1   // the same words long before are another turn
+    // The turn begins after the lines the Hub held (the same words again are not the turn before), and a live ask carries the saved line's own time.
+    if (options.base !== undefined && messages.slice(0, index).filter(other => other.role !== 'context').length < options.base) return -1
+    if (!ask.at) return index
+    return (options.within !== undefined ? Math.abs(time(line.at) - time(ask.at)) <= options.within : time(line.at) >= time(ask.at) - SKEW_MS) ? index : -1
   }
   return -1
 }
@@ -117,7 +120,7 @@ export function judge(entry: ChatEntry, answer: { messages: ChatLine[]; running?
 // ---- the store
 
 let store: Store = EMPTY
-let loaded = false
+let lastRaw: string | null = null   // what this tab last read from or wrote to storage: a different value there is another tab's
 const listeners = new Set<() => void>()
 const warned = new Set<string>()
 
@@ -132,12 +135,16 @@ function parse(raw: string | null): Store {
   } catch { return EMPTY }
 }
 
+/** Reads storage again when another tab (or a restored page) changed it, so a change made here starts from what is there now. */
 function load() {
-  if (loaded) return
-  loaded = true
   const disk = storage()
   if (!disk) return
-  try { store = parse(disk.getItem(STORE_KEY)) } catch { /* blocked: memory only */ }
+  try {
+    const raw = disk.getItem(STORE_KEY)
+    if (raw === lastRaw) return
+    lastRaw = raw
+    store = parse(raw)
+  } catch { /* blocked: memory only */ }
 }
 
 const emit = () => listeners.forEach(listener => listener())
@@ -170,11 +177,13 @@ export function cap(next: Store, now = Date.now()): Store {
 function write() {
   const disk = storage()
   if (!disk) return
-  try { disk.setItem(STORE_KEY, JSON.stringify(store)) } catch {
+  try { const text = JSON.stringify(store); disk.setItem(STORE_KEY, text); lastRaw = text } catch {
     // Full: keep the newest half and try once more. Blocked: memory only.
     try {
       store = { chats: store.chats.slice(-Math.ceil(store.chats.length / 2)), jobs: store.jobs.slice(-Math.ceil(store.jobs.length / 2)) }
-      disk.setItem(STORE_KEY, JSON.stringify(store))
+      const text = JSON.stringify(store)
+      disk.setItem(STORE_KEY, text)
+      lastRaw = text
     } catch { /* memory only */ }
   }
 }
@@ -198,9 +207,9 @@ export function clearInProgress() {
 
 /** Another tab wrote the list: read it again. */
 export function reloadFromStorage() {
-  const disk = storage()
-  if (!disk) return
-  try { store = parse(disk.getItem(STORE_KEY)); loaded = true; emit() } catch { /* blocked */ }
+  const before = store
+  load()
+  if (store !== before) emit()
 }
 
 // ---- the reply, written at most about once a second
@@ -435,5 +444,6 @@ export const lineCount = (lines: ChatLine[]) => countOf(lines)
 if (typeof globalThis.addEventListener === 'function') {
   globalThis.addEventListener('storage', event => { if (event.key === STORE_KEY || event.key === null) reloadFromStorage() })
   globalThis.addEventListener('pagehide', flushReplies)
+  globalThis.addEventListener('pageshow', reloadFromStorage)   // a page restored from the back-forward cache holds an old copy
   globalThis.addEventListener('visibilitychange', () => { if (globalThis.document?.visibilityState === 'hidden') flushReplies() })
 }

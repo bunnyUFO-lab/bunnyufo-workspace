@@ -234,7 +234,8 @@ test('blocked storage: the list lives in memory and nothing throws', () => {
 
 test('full storage: the newest half is kept', () => {
   let calls = 0;
-  globalThis.localStorage = { getItem: () => null, setItem() { calls += 1; if (calls === 1) throw new Error('quota'); } };
+  const held = new Map();
+  globalThis.localStorage = { getItem: key => held.get(key) ?? null, setItem(key, value) { calls += 1; if (calls === 1) throw new Error('quota'); held.set(key, value); } };
   begin({ id: 'a', owner: user('a') });
   begin({ id: 'b', owner: user('b') });
   assert.ok(getStore().chats.length >= 1);
@@ -244,8 +245,8 @@ test('full storage: the newest half is kept', () => {
 
 import { applyRead, markFailed, refuseChat } from '../../src/hub/inProgress.ts';
 
-test('B4: the turn is found from the end of the saved lines, whatever the entry\'s base says', () => {
-  const entry = { base: 4, ask: { text: 'Go', at } };   // a base that is too high, as a read in the end-of-turn gap gave
+test('B4: the turn is found from the end of the saved lines', () => {
+  const entry = { base: 2, ask: { text: 'Go', at } };
   assert.equal(turnSaved([user('a'), bot('b'), user('Go'), bot('Done')], entry), true);
   assert.equal(turnSaved([user('a'), bot('b'), user('Go')], entry), false);
   assert.equal(turnSaved([user('Go', '2026-11-05T09:00:00.000Z'), bot('Old')], entry), false, 'the same words long before are another turn');
@@ -333,4 +334,28 @@ test('F7: the same words much later are another turn', () => {
   const first = begin({ owner: user('yes', '2026-11-05T10:00:00.000Z') });
   const second = begin({ owner: user('yes', '2026-11-05T10:20:00.000Z') });
   assert.notEqual(first, second);
+});
+
+import { askedAt } from '../../src/hub/inProgress.ts';
+
+test('N2: the same words again are not the earlier turn: a match must be at or after the base, and a live ask must match its time', () => {
+  const lines = [user('again', '2026-11-05T10:00:00.000Z'), bot('First answer')];
+  const ask = { text: 'again', at: '2026-11-05T10:00:30.000Z' };
+  assert.equal(askedAt(lines, ask), 0, 'by the time window alone it looks like the first');
+  assert.equal(askedAt(lines, ask, { base: 2 }), -1, 'but this turn begins after the two lines the Hub held');
+  assert.equal(turnSaved(lines, { base: 2, ask }), false);
+  assert.equal(askedAt(lines, ask, { within: 1000 }), -1, 'a live ask carries the saved line\'s own time');
+  assert.equal(askedAt(lines, { text: 'again', at: '2026-11-05T10:00:00.400Z' }, { within: 1000 }), 0);
+});
+
+test('F8: another tab\'s newer entries are not overwritten by this tab\'s stale copy', () => {
+  begin({ id: 'mine' });
+  const other = { ...getStore().chats[0], key: 'kother', id: 'theirs', title: 'Their chat' };
+  disk.setItem(STORE_KEY, JSON.stringify({ chats: [...getStore().chats, other], jobs: [] }));   // the other tab wrote; no storage event reached this one
+  begin({ id: 'mine-too', owner: user('Another') });
+  assert.deepEqual(getStore().chats.map(entry => entry.id).sort(), ['mine', 'mine-too', 'theirs']);
+  const key = getStore().chats[0].key;
+  disk.setItem(STORE_KEY, JSON.stringify({ chats: [], jobs: [] }));   // the other tab removed everything
+  setReply(key, 'late words', true);
+  assert.equal(getStore().chats.length, 0, 'a removed entry is not brought back by a late write');
 });
