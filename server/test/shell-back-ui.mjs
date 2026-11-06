@@ -143,9 +143,9 @@ try {
 
   step('a card opened from the Library adds exactly one entry');
   await desk.locator('[data-rail] [data-nav="library"]').click();
-  await desk.locator('.sidebar-list').waitFor();
+  await desk.locator('[data-library] .lib-scroll').waitFor();
   const inLibrary = await entryOf(desk);
-  await desk.locator('.sidebar-item', { hasText: 'Framed card' }).click();
+  await desk.locator('.lib-row-main', { hasText: 'Framed card' }).click();
   const frame = desk.frameLocator('iframe.report-frame');
   await frame.getByRole('heading', { name: 'Framed card' }).waitFor();
 
@@ -157,7 +157,7 @@ try {
   await innerIs(desk, '');
   assert.equal(await hashOf(desk), '#/frame', 'The first Back undid the move inside the frame.');
   await desk.locator('.topbar [data-back]').click();
-  await desk.locator('.sidebar-list').waitFor();
+  await desk.locator('[data-library] .lib-scroll').waitFor();
   assert.equal(await hashOf(desk), '#/~hub/library', 'The second Back left the card.');
   assert.equal((await entryOf(desk)).serial, inLibrary.serial, 'Opening the card added exactly one entry: two Backs (one inside the frame) are back at the Library.');
 
@@ -166,15 +166,15 @@ try {
   await link.goto(`${fixture.url}#/frame`);
   await link.frameLocator('iframe.report-frame').getByRole('heading', { name: 'Framed card' }).waitFor();
   await link.locator('.topbar [data-back]').click();
-  await link.locator('.sidebar-list').waitFor();
+  await link.locator('[data-library] .lib-scroll').waitFor();
   assert.equal(await hashOf(link), '#/~hub/library');
   assert.equal(new URL(link.url()).origin, new URL(fixture.url).origin);
 
   step('Esc on a card is Back too: it walks the same history');
-  await desk.locator('.sidebar-item', { hasText: 'Framed card' }).click();
+  await desk.locator('.lib-row-main', { hasText: 'Framed card' }).click();
   await desk.frameLocator('iframe.report-frame').getByRole('heading', { name: 'Framed card' }).waitFor();
   await desk.keyboard.press('Escape');
-  await desk.locator('.sidebar-list').waitFor();
+  await desk.locator('[data-library] .lib-scroll').waitFor();
   assert.equal(await hashOf(desk), '#/~hub/library');
 
   step('a leftover sheet marker with no sheet open (a reload) is dropped from the address');

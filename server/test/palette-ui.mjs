@@ -101,7 +101,7 @@ try {
   step('Ctrl+K works from inside a text field, and Esc closes it and gives the focus back');
   // A text field to type in: the Library's card filter (Today has none).
   await page.evaluate(() => { location.hash = '#/~hub/library'; });
-  const search = page.locator('.sidebar-search input');
+  const search = page.locator('.lib-search input');
   await search.waitFor();
   await search.focus();
   await page.keyboard.press('Control+k');

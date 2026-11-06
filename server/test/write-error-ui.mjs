@@ -48,8 +48,9 @@ try {
   const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
   page.setDefaultTimeout(ms(15000));
   await page.goto(`${origin}/agent-plans`);
-  await page.locator('.entity-card .card-pin').waitFor();
-  await page.locator('.entity-card .card-pin').click();
+  await page.locator('.lib-row [data-row-menu]').first().waitFor();
+  await page.locator('.lib-row [data-row-menu]').first().click();
+  await page.getByRole('menuitem', { name: /^(Pin|Unpin)$/ }).click();
   const bar = page.locator('.write-error');
   await bar.waitFor();
   const text = await bar.textContent();
@@ -61,7 +62,7 @@ try {
   assert.equal(await page.locator('.write-error').count(), 1);
 
   // The source link, which has to carry the section's folder inside the repository.
-  await page.locator('.entity-card .card-link').click();
+  await page.locator('.lib-row-main').click();
   const source = page.locator('a[href*="/blob/"]').first();
   await source.waitFor();
   const href = await source.getAttribute('href');

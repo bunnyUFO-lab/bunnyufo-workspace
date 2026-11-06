@@ -37,7 +37,7 @@ try {
     const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
     page.setDefaultTimeout(ms(15000));
     await page.goto(`${origin}/agent-plans`);
-    await page.locator('.entity-card').waitFor();
+    await page.locator('.lib-row').waitFor();
     return page;
   };
 

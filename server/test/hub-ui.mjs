@@ -243,7 +243,7 @@ try {
   assert.equal(await tabs.locator('[data-tabs] [data-nav="project"]').getAttribute('aria-current'), 'page', 'Projects is lit on its own tab.');
   await noSideways(tabs, 'Projects with the tab bar');
   await tabs.locator('[data-tabs] [data-nav="library"]').tap();
-  await tabs.locator('.entity-card, .home-grid, [data-home]').first().waitFor();
+  await tabs.locator('[data-library]').first().waitFor();
   assert.equal(await tabs.locator('.hub').count(), 0);
   await tabs.locator('[data-tabs] [data-nav="search"]').tap();
   await tabs.locator('dialog.pal input').waitFor();
