@@ -21,9 +21,9 @@ export function ChipRow({ children, label }: { children: ReactNode; label: strin
   return <div className="ui-chips" role="group" aria-label={label}>{children}</div>
 }
 
-export function Segment<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; count?: number }[]; onChange: (id: T) => void; label: string }) {
+export function Segment<T extends string>({ value, options, onChange, label, className = '' }: { value: T; options: { id: T; label: string; count?: number }[]; onChange: (id: T) => void; label: string; className?: string }) {
   return (
-    <div className="ui-seg" role="group" aria-label={label}>
+    <div className={`ui-seg ${className}`.trim()} role="group" aria-label={label}>
       {options.map(option => (
         <button key={option.id} type="button" className={option.id === value ? 'on' : undefined} aria-pressed={option.id === value} onClick={() => onChange(option.id)}>
           {option.label}{option.count !== undefined && <small>{option.count}</small>}

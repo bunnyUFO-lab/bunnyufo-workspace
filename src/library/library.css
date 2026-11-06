@@ -40,3 +40,25 @@
 .lib-trash-notice button { min-height: var(--tap); }
 .ui-sec .lib-rows { margin-bottom: 4px; }
 .lib-detail { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+
+/* The project filter and the Recent | By project toggle share one line. The filter gives way first: its label truncates. */
+.lib-bar { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 16px 10px; min-width: 0; }
+.lib-filter { flex: 1 1 0; min-width: 0; min-height: var(--tap); display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--s1); color: var(--t1); font: inherit; font-weight: 550; text-align: left; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.lib-filter:hover { background: var(--s2); border-color: var(--line2); }
+.lib-filter.on { border-color: var(--accent); background: var(--accent-soft); }
+.lib-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-filter .ui-icon { flex: none; color: var(--t3); }
+.ui-seg.lib-arrange { flex: none; margin: 0; }
+.ui-seg.lib-arrange button { flex: none; padding: 0 10px; }
+.lib-head.project { text-transform: none; }
+
+/* The filter's list, in the app's Sheet (a bottom sheet on a phone, a dialog from 900 px). */
+.lib-picks { display: flex; flex-direction: column; }
+.lib-pick { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 0 4px; cursor: pointer; border-radius: 10px; }
+.lib-pick:hover { background: var(--s2); }
+.lib-pick + .lib-pick { box-shadow: inset 0 1px 0 var(--line); }
+.lib-pick input { flex: none; width: 22px; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.lib-pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-pick small { color: var(--t3); font-size: 13px; }
+.lib-pick.dim { opacity: 0.5; }
+.lib-pick input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

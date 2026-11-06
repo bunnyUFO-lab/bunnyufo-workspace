@@ -39,7 +39,7 @@ const HOGS = [
   { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
 ];
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -71,6 +71,17 @@ export async function startHubFixture({ hermes = false, hermesOptions = {}, seed
       steps: [{ name: 'Notes', path: 'index.md' }],
     }] }, null, 2));
     await addWorkspace({ registryFile, path: other, name: 'Two', bucket: `s3://${fake.bucket}/sections/two` });
+  }
+  if (thirdSection) {
+    // A third section with one card and an older one, for the project filter (more than two projects).
+    const third = path.join(base, 'three');
+    await mkdir(path.join(third, 'giraffe'), { recursive: true });
+    await writeFile(path.join(third, 'giraffe', 'index.md'), '# Giraffe feeding\n\nA card in the third section.\n');
+    await writeFile(path.join(third, 'workspace.json'), JSON.stringify({ entities: [{
+      id: 'giraffe', folder: 'giraffe', title: 'Giraffe feeding', description: 'A card.', category: 'test', created: today, updated: today, status: 'active',
+      steps: [{ name: 'Notes', path: 'index.md' }],
+    }] }, null, 2));
+    await addWorkspace({ registryFile, path: third, name: 'Three', bucket: `s3://${fake.bucket}/sections/three` });
   }
   fake.seed('state.json', '{"version":1,"cards":{}}', 'application/json');
 

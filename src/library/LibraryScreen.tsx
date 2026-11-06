@@ -10,23 +10,27 @@ import { ARCHIVE_DAYS } from '../lib/workspace'
 import { useCanWrite } from '../lib/writes'
 import TopBar from '../ui/TopBar'
 import Icon from '../ui/Icon'
-import { Button, Chip, ChipRow, IconButton, Segment } from '../ui/Controls'
+import { Button, IconButton, Segment } from '../ui/Controls'
 import { Section } from '../ui/Layout'
 import NewCard from '../components/NewCard'
 import WorkspaceSwitcher from '../components/WorkspaceSwitcher'
 import { TrashRows } from '../components/TrashList'
 import LibraryRow, { CategoryHead, type PinMove } from './LibraryRow'
 import { movePin } from './cardActions'
-import { PAGE, libraryList, pageOf, sortPins, type LibraryView } from './libraryModel'
+import ProjectFilter from './ProjectFilter'
+import { PAGE, arrangeApplies, libraryList, pageOf, projectOrder, sortPins, type Arrange, type LibraryView } from './libraryModel'
 import './library.css'
 
 export interface LibraryProps {
-  /** In the order the section chips are drawn. */
+  /** In the order the project filter lists them. */
   workspaces: CardWorkspace[]
   cards: WorkspaceCard[]
-  /** The section chip that is on, or '' for all. Kept by the app: on a site it is the first path segment. */
-  section: string
-  onSection: (id: string) => void
+  /** The projects picked, or none for all. Kept by the app: one pick is the first path segment on a site; several are kept on this device. */
+  projects: string[]
+  onProjects: (ids: string[]) => void
+  /** Recent (one newest-first run) or By project (a heading per project), kept on this device by the app. */
+  arrange: Arrange
+  onArrange: (next: Arrange) => void
   /** The open card, so its row is lit. */
   active: WorkspaceCard | null
   offline: boolean
@@ -40,11 +44,11 @@ export interface LibraryProps {
 }
 
 /**
- * The Library: every card, as rows. A top bar, a search field, a chip for each section, the views All, Pinned, Archive and Trash,
- * then the rows. The view, the search text, how many rows are shown and the scroll are kept against the history entry, so Back
+ * The Library: every card, as rows. A top bar, a search field, one line with the project filter and the Recent | By project toggle,
+ * the views All, Pinned, Archive and Trash, then the rows. The view, the search text, how many rows are shown and the scroll are kept against the history entry, so Back
  * from a card finds the list as it was; none of them adds an entry. Cards live here and nowhere else.
  */
-export default function LibraryScreen({ workspaces, cards, section, onSection, active, offline, lastSync, notice, searchRef, onCollapse }: LibraryProps) {
+export default function LibraryScreen({ workspaces, cards, projects, onProjects, arrange, onArrange, active, offline, lastSync, notice, searchRef, onCollapse }: LibraryProps) {
   const { order } = useOrder()
   const canWrite = useCanWrite()
   const [view, setView] = useEntryMemo<LibraryView>('lib.view', 'all')
@@ -54,10 +58,16 @@ export default function LibraryScreen({ workspaces, cards, section, onSection, a
   const [newCard, setNewCard] = useState(false)
   const box = useRef<HTMLDivElement>(null)
 
-  // A section that is gone from the registry would otherwise filter every card away with no chip to undo it.
-  const chip = workspaces.some(w => w.id === section) ? section : ''
-  const list = libraryList(cards, order, { query, section: chip, view })
-  const inScope = chip ? workspaces.filter(w => w.id === chip) : workspaces
+  // A project that is gone from the registry is dropped by the app, so a pick can never filter every card away with nothing to undo it.
+  // With one project there is nothing to pick: it is the one in view, and By project shows its categories.
+  const only = workspaces.length === 1 ? [workspaces[0].id] : projects
+  const shownProjects = only
+  // The filter's list and By project's headings: projects with cards under this search and view first.
+  const first = libraryList(cards, order, { query, projects: [], view })
+  const rank = projectOrder(workspaces, first.counts)
+  const list = libraryList(cards, order, { query, projects: shownProjects, view, arrange, projectOrder: rank })
+  const inScope = shownProjects.length ? workspaces.filter(w => shownProjects.includes(w.id)) : workspaces
+  const trashCounts = new Map(workspaces.map(w => [w.id, trashOf([w]).length]))
   const trash = trashOf(inScope).filter(t => !query.trim() || [t.entity.title, t.entity.description, t.entity.category, t.id, t.workspace.name].some(s => s && s.toLowerCase().includes(query.trim().toLowerCase())))
   const trashCount = trashOf(inScope).length
   // A purge that stopped partway leaves a pending tombstone and maybe no card in the Trash: opening the Trash retries it.
@@ -104,7 +114,7 @@ export default function LibraryScreen({ workspaces, cards, section, onSection, a
         {!host.hub && <IconButton icon="settings" label="Settings" data-nav="settings" onClick={() => go(hubHash('settings'))} />}
         {onCollapse && <IconButton icon="back" label="Hide menu" title="Hide the list ( [ )" data-hide-list="" onClick={onCollapse} />}
       </>} />
-      {host.cards && newCard && <div className="lib-new"><NewCard workspaces={workspaces} project={chip} open onOpen={setNewCard} /></div>}
+      {host.cards && newCard && <div className="lib-new"><NewCard workspaces={workspaces} project={projects.length === 1 ? projects[0] : ''} open onOpen={setNewCard} /></div>}
       {notice}
 
       <label className="lib-search">
@@ -126,13 +136,24 @@ export default function LibraryScreen({ workspaces, cards, section, onSection, a
         />
       </label>
 
-      {workspaces.length >= 2 && (
-        <ChipRow label="Section">
-          <Chip on={!chip} count={view === 'trash' ? trashOf(workspaces).length : list.total} onClick={() => { onSection(''); setLimit(PAGE) }}>All</Chip>
-          {workspaces.map(w => (
-            <Chip key={w.id} on={chip === w.id} count={view === 'trash' ? trashOf([w]).length : list.counts.get(w.id) ?? 0} onClick={() => { onSection(chip === w.id ? '' : w.id); setLimit(PAGE) }}>{w.name}</Chip>
-          ))}
-        </ChipRow>
+      {(workspaces.length >= 2 || arrangeApplies(view, query)) && (
+        <div className="lib-bar">
+          {workspaces.length >= 2 && (
+            <ProjectFilter
+              workspaces={workspaces}
+              picks={projects}
+              counts={view === 'trash' ? trashCounts : list.counts}
+              total={view === 'trash' ? trashOf(workspaces).length : list.total}
+              onChange={ids => { onProjects(ids); setLimit(PAGE) }}
+            />
+          )}
+          {arrangeApplies(view, query) && (
+            <Segment<Arrange>
+              label="Arrange" className="lib-arrange" value={arrange} onChange={next => { onArrange(next); setLimit(PAGE) }}
+              options={[{ id: 'recent', label: 'Recent' }, { id: 'project', label: 'By project' }]}
+            />
+          )}
+        </div>
       )}
       <Segment<LibraryView>
         label="View"
@@ -162,7 +183,7 @@ export default function LibraryScreen({ workspaces, cards, section, onSection, a
             <Section key={group.label ?? `run${index}`}>
               {group.label && (group.category
                 ? <CategoryHead label={group.label} workspace={group.cards[0]?.workspace.id ?? null} />
-                : <div className="lib-head" data-section={group.label}><h2>{group.label}</h2></div>)}
+                : <div className={`lib-head${group.project ? ' project' : ''}`} data-section={group.label} {...(group.project ? { 'data-project-head': group.project } : {})}><h2>{group.label}</h2></div>)}
               <div className="lib-rows" role="list" aria-label={group.label ?? 'Cards'}>{group.cards.map(row)}</div>
             </Section>
           ))
