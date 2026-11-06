@@ -7,7 +7,7 @@ import { List, Row, Section, Split } from '../../ui/Layout'
 import { Segment } from '../../ui/Controls'
 import SearchField from '../SearchField'
 import { useRoute } from './useRoute'
-import { agentCount, agentGroups, BY_KEY, byOf, exportLine, GUEST_LINE, groupByFolder, NO_PLUGINS_LINE, PLUGINS_LINE, pluginRows, profileText, SHARED_LINE, sharedText, skillHash, skillMatches, sourceText, type AgentGroup, type PluginRow, type SkillsBy } from './skillsModel'
+import { agentCount, agentGroups, BY_KEY, byOf, exportLine, GUEST_LINE, groupByFolder, NO_PLUGINS_LINE, PLUGINS_LINE, pluginRows, profileText, SHARED_LINE, sharedText, openSkill, skillHash, skillMatches, sourceText, type AgentGroup, type PluginRow, type SkillsBy } from './skillsModel'
 
 const Tags = ({ skill }: { skill: TeamSkill }) => (
   <span className="tk-tags">
@@ -142,7 +142,9 @@ export default function SkillsTab({ id, head, desktop }: { id: string | null; he
     remember(BY_KEY, next)
     if (next === 'agent' && id) swap(hubHash('team', 'skills'))
   }
-  const selected = id ?? (desktop && by === 'skill' && data?.skills[0]?.id) ?? null
+  // Beside the list (900 px and up) the open skill is the current one while it matches the search, else the first match. An address with no search is kept as it is.
+  const shownId = !data ? id : (id && !query.trim()) || !desktop ? id : openSkill(data.skills.map(item => item.id), id, query)
+  const selected = by === 'skill' ? shownId : null
   const note = data ? exportLine(data, data.exportedAt ? ago(data.exportedAt) : '') : null
   const skills = data ? data.skills.filter(skill => skillMatches(skill.id, query)) : []
 
@@ -182,9 +184,8 @@ export default function SkillsTab({ id, head, desktop }: { id: string | null; he
     </div>
   )
   if (by === 'agent') return <Split list={list} fill />
-  const skill = id && data ? data.skills.find(item => item.id === id) ?? null : null
-  const detail = id
-    ? (data ? <SkillPage skill={skill} /> : <div className="team-detail">{guest ? <p className="hub-empty">{GUEST_LINE}</p> : <p className={load.error ? 'hub-error' : 'hub-empty'}>{load.error ?? 'Loading…'}</p>}</div>)
-    : desktop && data?.skills[0] ? <SkillPage skill={data.skills[0]} /> : undefined
+  const detail = id && !data
+    ? <div className="team-detail">{guest ? <p className="hub-empty">{GUEST_LINE}</p> : <p className={load.error ? 'hub-error' : 'hub-empty'}>{load.error ?? 'Loading…'}</p>}</div>
+    : data && shownId !== null ? <SkillPage skill={data.skills.find(item => item.id === shownId) ?? null} /> : undefined
   return <Split list={list} detail={detail} empty="Pick a skill from the list." />
 }
