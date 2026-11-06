@@ -64,15 +64,15 @@ try {
   await page.keyboard.press('Enter');
   await page.locator('.hub[data-screen="ask"]').waitFor();
 
-  step('a roadmap and a card are found by name');
+  step('a project and a card are found by name');
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.type('magic');
-  // The roadmaps come from a second fetch; until they land only the "New job: magic" command matches, and Enter would open that.
-  await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
+  // The projects come from a second fetch; until they land only the "New job: magic" command matches, and Enter would open that.
+  await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^projects$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
   await page.keyboard.press('Enter');
-  await page.locator('.hub[data-screen="map"]').waitFor();
-  assert.match(await hashOf(page), /^#\/~hub\/map\/magic-loops/);
+  await page.locator('[data-project-page="magic-loops"]').waitFor();
+  assert.match(await hashOf(page), /^#\/~hub\/project\/magic-loops/);
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.type('hub card');
@@ -165,7 +165,7 @@ try {
   await odd.keyboard.type('magic');
   await odd.locator('dialog.pal [role="option"]', { hasText: /new job/i }).first().waitFor();
   await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
-  assert.equal(await odd.locator('dialog.pal .pal-g', { hasText: /^roadmaps$/i }).count(), 0, 'The unreadable list shows no roadmaps.');
+  assert.equal(await odd.locator('dialog.pal .pal-g', { hasText: /^projects$/i }).count(), 0, 'The unreadable list shows no roadmaps.');
   await odd.keyboard.press('Escape');
   // Esc is a step back: wait for it to land before the next Ctrl+K, which toggles.
   await odd.locator('dialog.pal').waitFor({ state: 'detached' });
@@ -173,7 +173,7 @@ try {
   await odd.keyboard.press('Control+k');
   await odd.locator('dialog.pal').waitFor();
   await odd.keyboard.type('magic');
-  await odd.locator('dialog.pal [role="group"]', { has: odd.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
+  await odd.locator('dialog.pal [role="group"]', { has: odd.locator('.pal-g', { hasText: /^projects$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
   assert.deepEqual(errors, []);
   await odd.keyboard.press('Escape');
 

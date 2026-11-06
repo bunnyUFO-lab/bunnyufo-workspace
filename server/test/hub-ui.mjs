@@ -267,7 +267,7 @@ try {
   assert.equal(await old.evaluate(() => location.hash), '#/~hub/work');
   assert.match(await old.locator('.hub h2').first().innerText(), /^Work/);
   await go(old, '#/~hub/roadmap/magic-loops');
-  await old.locator('.hub[data-screen="map"]').waitFor();
+  await old.locator('.pp[data-view="map"]').waitFor();
   assert.equal(await old.evaluate(() => location.hash), '#/~hub/map/magic-loops');
   await go(old, `#/~hub/ask/${FIXTURE_ASK}`);
   await old.locator('.hub[data-screen="ask"]').waitFor();

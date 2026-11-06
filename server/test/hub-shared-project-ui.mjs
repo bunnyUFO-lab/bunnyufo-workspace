@@ -1,5 +1,5 @@
-// Run after npm run build. One project choice across Today, Needs you, Work, the Roadmap and Project (ws-ubo.2.5), at 390 and at 1280 px.
-// A pick on any of the five shows on the other four. All stays on Today and Needs you and carries between them; it leaves Work's
+// Run after npm run build. One project choice across Today, Needs you and Work (ws-ubo.2.5; the Roadmap and the project page left it in ws-cl0.6.9: a project is opened from the Projects list), at 390 and at 1280 px.
+// A pick on any of the three shows on the others. All stays on Today and Needs you and carries between them; it leaves Work's
 // project alone. An address wins on Needs you and writes nothing. Activity's filter is local. A pick of a project without a Beads copy
 // shows on Today and Needs you but never paints a board on Work. How it feels on a real phone waits for the owner's play test.
 import { chromium, expect } from '@playwright/test';
@@ -16,8 +16,8 @@ const contexts = [];
 let fixture;
 
 const WIDTHS = [{ label: '390', width: 390, height: 844, phone: true }, { label: '1280', width: 1280, height: 800, phone: false }];
-const SCOPE = { today: '[data-today-project]', work: '.work', map: '.hub-map-chips', project: '.pp', needs: '[data-needs-project]', activity: '.hub-top' };
-const HASH = { today: '#/~hub/today', work: '#/~hub/work', map: '#/~hub/map', project: '#/~hub/project', needs: '#/~hub/needs', activity: '#/~hub/activity' };
+const SCOPE = { today: '[data-today-project]', work: '.work', needs: '[data-needs-project]', activity: '.hub-top' };
+const HASH = { today: '#/~hub/today', work: '#/~hub/work', needs: '#/~hub/needs', activity: '#/~hub/activity' };
 const NAME = { lanes: /^\s*lanes/i, 'magic-loops': /^\s*magic/i, probe: /^\s*probe/i, all: /^\s*all/i };
 const KEYS = ['hub-today-project', 'buw.hub.project'];
 
@@ -97,13 +97,13 @@ try {
       await page.context().close();
     }
 
-    step(`A pick on Today reaches Work, the Roadmap and Project ${at}`);
+    step(`A pick on Today reaches Work ${at}`);
     {
       const page = await open(view);
       await arrive(page, 'today');
       await pick(page, view, 'today', 'magic-loops');
       await shows(page, 'today', 'magic-loops');
-      for (const screen of ['work', 'map', 'project']) { await arrive(page, screen); await shows(page, screen, 'magic-loops'); }
+      for (const screen of ['work']) { await arrive(page, screen); await shows(page, screen, 'magic-loops'); }
       await page.context().close();
     }
 

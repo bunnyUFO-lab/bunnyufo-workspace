@@ -4,7 +4,7 @@ import type { WorkspaceCard } from '../types'
 import { host } from '../lib/host'
 import { hubRows } from '../lib/hubNav'
 import { hubGet, type HubProject, type Item } from '../lib/hub'
-import { entityHash, hubHash, mapHash, reviewHash } from '../lib/route'
+import { entityHash, hubHash, projectHash, reviewHash } from '../lib/route'
 import { openSpawn } from '../hub/spawnStore'
 import { afterBack, go } from '../lib/entries'
 import { askHermes } from '../hub/askHermes'
@@ -78,7 +78,7 @@ export default function CommandPalette({ cards, items, waiting, home, onClose }:
     }
   }, [])
 
-  // Roadmaps come from the Hub; read once a minute at most.
+  // Projects come from the Hub; read once a minute at most.
   useEffect(() => {
     if (!host.hub) return undefined
     if (projectsCache && Date.now() - projectsCache.at < PROJECTS_TTL) return undefined
@@ -105,7 +105,7 @@ export default function CommandPalette({ cards, items, waiting, home, onClose }:
     const needs: Row[] = host.hub ? items.map(item => ({
       group: 'Needs you', label: item.title, icon: '✉', hash: itemHash(item), hint: item.project,
     })) : []
-    const maps: Row[] = host.hub ? projects.map(project => ({ group: 'Roadmaps', label: project.name || project.id, icon: '◈', hash: mapHash(project.id) })) : []
+    const maps: Row[] = host.hub ? projects.map(project => ({ group: 'Projects', label: project.name || project.id, icon: '◈', hash: projectHash(project.id) })) : []
     // With more than one section, the hint names the card's section; with one, its category.
     const sections = new Set(cards.map(card => card.workspace.id)).size > 1
     const found: Row[] = cards.map(card => ({ group: 'Cards', label: card.title, icon: '▢', hash: entityHash(card.id), hint: sections ? card.workspace.name : card.category, first: card.workspace.active }))
@@ -120,7 +120,7 @@ export default function CommandPalette({ cards, items, waiting, home, onClose }:
     const spawn: Row[] = host.hub && host.write
       ? [{ group: 'Commands', label: typed ? `New job: ${typed}` : 'New job', icon: '✦', run: () => openSpawn(typed ? { text: typed } : {}) }]
       : []
-    // An empty query shows where to go and what waits; Roadmaps and Cards need a word.
+    // An empty query shows where to go and what waits; Projects and Cards need a word.
     if (!words.length) return [...goTo, ...pick(needs, 8), ...spawn]
     // Whatever is typed can be asked of Hermes: a new Chat conversation that sends it.
     const ask: Row[] = host.chat ? [{ group: 'Ask', label: `Ask Hermes: ${query.trim()}`, icon: '✎', run: () => askHermes(query, () => { go(hubHash('chat')) }) }] : []

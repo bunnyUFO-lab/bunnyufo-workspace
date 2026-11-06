@@ -65,7 +65,7 @@ try {
   await phone.locator('.hub[data-screen="work"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/work');
   await phone.goto(`${fixture.url}#/~hub/roadmap/magic-loops`);
-  await phone.locator('.hub[data-screen="map"]').waitFor();
+  await phone.locator('.pp[data-view="map"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/map/magic-loops');
   await phone.goto(`${fixture.url}#/~hub/nonsense`);
   await phone.locator('.hub[data-screen="today"]').waitFor();
