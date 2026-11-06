@@ -21,9 +21,11 @@
 //   npm run cards -- login                             ask for the passphrase once and keep it
 //   npm run cards -- sections                          the sections this token may use, and how: write, add (a project section, new cards and tabs only) or read
 //   npm run cards -- list <section>                    a section's cards
-//   npm run cards -- get <link | section/card | name> [--into <folder>]
+//   npm run cards -- get <link | section/card | name> [--into <folder>] [--text | --all]
 //        fetch a card into <folder>/<card folder>/ and add its entry to <folder>/workspace.json; the version of each file read
-//        goes to <folder>/.cards-base.json, which `put --edit` needs (never uploaded)
+//        goes to <folder>/.cards-base.json, which `put --edit` needs (never uploaded). Eight files at a time. Media over 1 MB
+//        is left out and listed (--text: all non-text files left out; --all: nothing left out); what was left out goes to
+//        <folder>/.cards-skipped.json, and `put` never removes those, even with --remove
 //   npm run cards -- link <link | section/card | name>
 //        print the address a person opens the card at (<site>/<section>#/<card>). The site is BUW_SITE_URL, else "siteUrl" in
 //        ~/.buw/hub.json or config.json, else the card API's address without its leading "api.". `get` and `put` print it too.
@@ -180,7 +182,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && !process.env.NODE_US
 }
 
 const MAX_INLINE = 4 * 1024 * 1024;
-const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] | link <ref> | put <folder> --section <s> --card <id> [--dry-run] [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]  [--via s3|api]\n'
+const USAGE = 'Usage: npm run cards -- login | sections | list <section> | get <ref> [--into <folder>] [--text | --all] | link <ref> | put <folder> --section <s> --card <id> [--dry-run] [--agent <name> --why <text> [--context chat|job:<id>] [--edit] [--remove]]  [--via s3|api]\n'
   + '       npm run cards -- event <kind> --title <t> [--pr-closed-at <iso>] | pr-sync --repo <owner/repo> --project <p> --prefix <p> [--days 7] [--dry-run] | ask create|list|get|pickup|cancel | checklist create|list|get|wait|pickup|cancel | request list|take|create [--preset <id> ...]|verify|brief|run|finish|state|card | sheet put | beads push --project <p> | mark list|apply|applied --project <p> | apply pending --project <p> --json | feedback list|show|body|filed --project <p>\n'
   + '       ask create --project <p> (--file ask.json | --question <t>) [--option <id>=<label>[@<image>]]... [--decision <text[|detail]>]... [--image <file>]... [--kind approval|verify|design|decision] [--changes <changes.json>] [--agent-edit <edit.json>]\n'
   + '       beads show --project <p> [--open] [--json] | plan apply <ask id> [--dry-run] [--again] [--journal <file>] | apply pending --project <p> --json\n'
@@ -451,38 +453,116 @@ async function printCardLink(section, id) {
   if (address) console.log(`Link to give people: ${address}`);
 }
 
-async function get(ref, into) {
+/** Files `get` reads as text. Anything else is media: skipped by --text, and over MEDIA_LIMIT skipped by default (--all takes everything). */
+const TEXT_EXT = new Set(['.md', '.markdown', '.txt', '.json', '.jsonl', '.html', '.htm', '.css', '.js', '.mjs', '.ts', '.csv', '.tsv', '.yaml', '.yml', '.toml', '.xml', '.svg', '.log']);
+const MEDIA_LIMIT = 1024 * 1024;
+const GET_PARALLEL = 8;
+/** What `get` left out, beside .cards-base.json: { "<section>/<path>": size }. `put` never reads these as removed. */
+const SKIPPED_FILE = '.cards-skipped.json';
+
+async function readSkipped(folder) {
+  try {
+    const value = JSON.parse(await readFile(path.join(folder, SKIPPED_FILE), 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+const isText = file => TEXT_EXT.has(path.extname(file).toLowerCase());
+const mb = bytes => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+async function get(ref, into, { text = false, all = false } = {}) {
   const { section, id } = await resolveCard(ref);
   const card = await call('GET', `/sections/${section}/cards/${encodeURIComponent(id)}`);
   const etags = {};
-  for (const file of card.files) {
-    const target = path.join(into, ...file.path.split('/'));
-    await mkdir(path.dirname(target), { recursive: true });
-    // Small files through the API, so a session that may reach only the API host still works;
-    // bigger ones from the bucket by their short-lived URL.
-    let body;
-    if (file.size <= MAX_INLINE) {
-      // The etag of the very bytes read, so a later edit is conditional on what was seen and not on a newer listing.
-      const route = `/sections/${section}/files/${enc(file.path)}`;
-      const response = await send('GET', route, { headers: {} });
-      if (response.status === 401 && transport.anonymous) throw Object.assign(new Error(noPassphrase()), { status: 401 });
-      if (!response.ok) throw new Error(`GET ${route}: ${response.status} ${await response.text()}`);
-      body = Buffer.from(await response.arrayBuffer());
-      const etag = response.headers.get('etag')?.replace(/^W\//, '').replace(/^"|"$/g, '');
-      if (etag) etags[`${section}/${file.path}`] = etag;
-    } else {
-      body = Buffer.from(await (await fetch(file.url)).arrayBuffer());
+  const skipped = card.files.filter(file => !all && !isText(file.path) && (text || file.size > MEDIA_LIMIT));
+  const left = new Set(skipped);
+  const wanted = card.files.filter(file => !left.has(file));
+  // A few at a time: one by one took minutes on a card of hundreds of files. The API host throttles
+  // (429): the pool halves when it does, waits as long as Retry-After says, and grows back after a run of successes.
+  const pool = { allowed: GET_PARALLEL, active: 0, streak: 0, bucket: true };
+  const base429 = Number(process.env.BUW_CARDS_RETRY_MS) || 500;
+  const readInline = async route => {
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await send('GET', route, { headers: {} }, { retry: false }).catch(error => {
+        if (attempt >= 8) throw error;
+        return null;
+      });
+      if (response && response.status !== 429 && response.status < 500) { pool.streak += 1; if (pool.streak >= 20 && pool.allowed < GET_PARALLEL) { pool.allowed += 1; pool.streak = 0; } return response; }
+      if (attempt >= 8) return response;
+      pool.streak = 0;
+      pool.allowed = Math.max(1, Math.floor(pool.allowed / 2));
+      const told = Number(response?.headers.get('retry-after'));
+      await delay(Math.min(10000, told > 0 ? told * 1000 : base429 * 2 ** Math.min(attempt, 4)) * (0.8 + Math.random() * 0.4));
     }
-    await writeFile(target, body);
-  }
+  };
+  await mapLimit(wanted, GET_PARALLEL, async file => {
+    while (pool.active >= pool.allowed) await delay(20);
+    pool.active += 1;
+    try {
+      const target = path.join(into, ...file.path.split('/'));
+      await mkdir(path.dirname(target), { recursive: true });
+      // From the bucket by the short-lived URL the card listing gave (the API host throttles per request, and
+      // 850 requests through it took minutes). A session that reaches only the API host fails that fetch once, and
+      // every file after it goes through the API instead (up to 4 MB each; a bigger one has only its URL).
+      let body;
+      let response;
+      if (pool.bucket) {
+        try {
+          response = await fetch(file.url);
+        } catch {
+          if (file.size > MAX_INLINE) throw new Error(`Could not download ${file.path}: the bucket is not reachable from here.`);
+          pool.bucket = false;
+        }
+        if (response && !response.ok) {
+          if (file.size > MAX_INLINE) throw new Error(`GET ${file.path}: ${response.status}`);
+          response = undefined;
+        }
+      }
+      if (!response) {
+        if (file.size > MAX_INLINE) response = await fetch(file.url);
+        else {
+          const route = `/sections/${section}/files/${enc(file.path)}`;
+          response = await readInline(route);
+          if (response.status === 401 && transport.anonymous) throw Object.assign(new Error(noPassphrase()), { status: 401 });
+          if (!response.ok) throw new Error(`GET ${route}: ${response.status} ${await response.text()}`);
+        }
+      }
+      body = Buffer.from(await response.arrayBuffer());
+      // The etag of the very bytes read, so a later edit is conditional on what was seen and not on a newer listing.
+      const etag = response.headers.get('etag')?.replace(/^W\//, '').replace(/^"|"$/g, '');
+      if (etag && file.size <= MAX_INLINE) etags[`${section}/${file.path}`] = etag;
+      await writeFile(target, body);
+    } finally {
+      pool.active -= 1;
+    }
+  });
   const registry = await readRegistry(into);
   const entities = [...(registry.entities ?? []).filter(item => item?.id !== card.entity.id), card.entity];
   await mkdir(into, { recursive: true });
-  await writeFile(path.join(into, 'workspace.json'), `${JSON.stringify({ ...registry, entities }, null, 2)}\n`);
+  await writeFile(path.join(into, 'workspace.json'), `${JSON.stringify({ ...registry, entities }, null, 2)}
+`);
+  const prefix = `${section}/${card.entity.folder}/`;
   const base = { ...(await readBase(into)) };
-  for (const key of Object.keys(base)) if (key.startsWith(`${section}/${card.entity.folder}/`)) delete base[key];
-  await writeFile(path.join(into, BASE_FILE), `${JSON.stringify({ ...base, ...etags }, null, 2)}\n`);
-  console.log(`${section}/${id} -> ${path.join(into, card.entity.folder)} (${card.files.length} file(s)); entry in ${path.join(into, 'workspace.json')}`);
+  for (const key of Object.keys(base)) if (key.startsWith(prefix)) delete base[key];
+  await writeFile(path.join(into, BASE_FILE), `${JSON.stringify({ ...base, ...etags }, null, 2)}
+`);
+  const before = { ...(await readSkipped(into)) };
+  for (const key of Object.keys(before)) if (key.startsWith(prefix)) delete before[key];
+  const left_out = Object.fromEntries(skipped.map(file => [`${section}/${file.path}`, file.size]));
+  const record = { ...before, ...left_out };
+  if (Object.keys(record).length) await writeFile(path.join(into, SKIPPED_FILE), `${JSON.stringify(record, null, 2)}
+`);
+  else await rm(path.join(into, SKIPPED_FILE), { force: true });
+  console.log(`${section}/${id} -> ${path.join(into, card.entity.folder)} (${wanted.length} file(s)); entry in ${path.join(into, 'workspace.json')}`);
+  if (skipped.length) {
+    const total = skipped.reduce((sum, file) => sum + file.size, 0);
+    console.log(`Left out ${skipped.length} file(s), ${mb(total)}, ${text ? 'not text' : 'media over 1 MB'}:`);
+    for (const file of skipped.slice(0, 10)) console.log(`  ${file.path}  (${mb(file.size)})`);
+    if (skipped.length > 10) console.log(`  ... and ${skipped.length - 10} more`);
+    console.log('get --all brings everything. They stay in the section: put will not remove them.');
+  }
   await printCardLink(section, id);
 }
 
@@ -525,6 +605,7 @@ async function put(folder, section, id, dryRun, { agent, why, context, edit = fa
   }
   const remoteByPath = new Map(remote.map(file => [file.path, file]));
   const base = await readBase(folder);
+  const leftOut = await readSkipped(folder);
   const fresh = [];
   const changed = [];
   for (const file of local) {
@@ -536,9 +617,11 @@ async function put(folder, section, id, dryRun, { agent, why, context, edit = fa
   }
   const upload = [...fresh, ...changed];
   const localKeys = new Set(local.map(file => `${entity.folder}/${file}`));
-  const gone = remote.map(file => file.path).filter(key => !localKeys.has(key));
+  const absent = remote.map(file => file.path).filter(key => !localKeys.has(key));
+  const notFetched = absent.filter(key => `${section}/${key}` in leftOut);   // get left these out: not here, never removed
+  const gone = absent.filter(key => !notFetched.includes(key));
   const remove = removeGone ? gone : [];
-  const kept = removeGone ? [] : gone;
+  const kept = [...(removeGone ? [] : gone), ...notFetched];
   const unchanged = local.length - upload.length;
 
   if (library) {
@@ -562,8 +645,9 @@ async function put(folder, section, id, dryRun, { agent, why, context, edit = fa
   for (const { key } of fresh) console.log(`  + ${key}`);
   for (const { key } of changed) console.log(`  ~ ${key}`);
   for (const key of remove) console.log(`  - ${key}`);
-  for (const key of kept) console.log(`  = ${key}  (kept)`);
-  if (kept.length && !library) console.log('Note: put removes nothing without --remove. Before, a file gone from this folder was removed from the section.');
+  for (const key of kept) console.log(`  = ${key}  (kept${notFetched.includes(key) ? ', left out by get' : ''})`);
+  if (notFetched.length) console.log(`${notFetched.length} left out by get, not removed (get --all brings them).`);
+  if (kept.length > notFetched.length && !library) console.log('Note: put removes nothing without --remove. Before, a file gone from this folder was removed from the section.');
   if (refusals.length) {
     for (const text of refusals) console.error(`Refused: ${text}`);
     throw new Exit(2);
@@ -2486,7 +2570,7 @@ const takesText = change => ['create', 'update', 'close'].includes(change.op);
 async function copyPlanCard(change, section) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'cards-plan-'));
   try {
-    await get(change.card, tmp);
+    await get(change.card, tmp, { all: true });
     const entity = (await readRegistry(tmp)).entities?.[0];
     if (!entity?.id) throw new Error(`${change.card} has no card entry.`);
     let there = true;
@@ -2987,6 +3071,8 @@ async function main() {
   const dryRun = flag('--dry-run');
   const edit = flag('--edit');
   const removeGone = flag('--remove');
+  const textOnly = flag('--text');
+  const everything = flag('--all');
   const agent = option('--agent');
   const why = option('--why');
   const context = option('--context');
@@ -3005,7 +3091,7 @@ async function main() {
   } else if (command === 'list' && target) {
     for (const item of (await call('GET', `/sections/${target}`)).cards) console.log(`${item.id}\t${item.updated ?? ''}\t${item.title}`);
   } else if (command === 'get' && target) {
-    await get(target, into);
+    await get(target, into, { text: textOnly, all: everything });
   } else if (command === 'link' && target) {
     await link(target);
   } else if (command === 'put' && target && section && card) {
