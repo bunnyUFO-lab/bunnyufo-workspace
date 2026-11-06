@@ -249,7 +249,7 @@ export default function ApprovalView({ id }: { id: string }) {
       {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{title}</h2>
-        <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill">{detail.request.id}</span></span>
+        <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill" data-request-id>{detail.request.id}</span></span>
       </div>
       <section className="hub-panel ap-page" aria-label="Request">
         <ApprovalBody id={id} onSettled={settle} page />
