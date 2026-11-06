@@ -128,8 +128,8 @@ try {
   // The service remembers the last route (now every tab click is one), so Home is asked for by its address.
   await page.evaluate(() => { location.hash = '#/'; });
   await page.reload();
-  await page.locator('.section-head-row').first().waitFor();
-  const heading = label => page.locator('.section-head-row', { hasText: label });
+  await page.locator('.lib-head[data-section]').first().waitFor();
+  const heading = label => page.locator('.lib-head[data-section]', { hasText: label });
   await heading('ideas').getByRole('button', { name: /More for the ideas category/ }).click();
   await pick(page, 'Rename…');
   await page.getByLabel('New name').fill('Game Ideas');
@@ -154,11 +154,11 @@ try {
   await page.getByRole('button', { name: 'Merge…' }).click();
   await page.getByText(/Merge 1 card into game ideas\?/).waitFor();
   await page.getByRole('button', { name: 'Merge', exact: true }).click();
-  await page.waitForFunction(() => ![...document.querySelectorAll('.section-title')].some(el => /notes/.test(el.textContent)));
+  await page.waitForFunction(() => ![...document.querySelectorAll('.lib-head h2')].some(el => /notes/.test(el.textContent)));
   assert.deepEqual([...new Set((await listOf(alpha)).entities.map(item => item.category))], ['game-ideas']);
 
   // 3. A card's category by its menu.
-  const card = id => page.locator(`.buw-card[data-entity="${id}"]`);
+  const card = id => page.locator(`.lib-row[data-entity="${id}"]`);
   await card('brief').getByRole('button', { name: /More for Brief/ }).click();
   await pick(page, 'Category…');
   await page.getByLabel('New category').fill('spend');
@@ -172,14 +172,14 @@ try {
   await card('plan').waitFor({ state: 'detached' });
   assert.ok((await listOf(alpha)).retired.plan.entity, 'the card is in the Trash record');
   assert.ok((await readFile(path.join(alpha, 'plan/overview.md'), 'utf8')).includes('Body of Overview'), 'its files stay');
-  await page.locator('[data-trash-link]').click();
+  await page.locator('[data-library] .ui-seg button', { hasText: /^Trash/ }).click();
   const row = page.locator('[data-trash="plan"]');
   await row.waitFor();
   assert.ok(!/forever/i.test(await row.innerText()), 'the local app deletes nothing, so it promises nothing');
   await row.getByRole('button', { name: 'Restore' }).click();
+  await page.locator('[data-library] .ui-seg button', { hasText: /^All/ }).click();
   await card('plan').waitFor();
   assert.equal((await listOf(alpha)).retired, undefined, 'restore emptied the Trash record');
-  await page.keyboard.press('Escape');
 
   // A link to a deleted card says so, and offers Restore.
   await card('plan').getByRole('button', { name: /More for Plan/ }).click();
@@ -282,17 +282,20 @@ try {
 
   // The Trash on a phone: a sheet with Restore.
   await page.evaluate(() => { location.hash = ''; });
-  const phoneCard = id => page.locator(`.buw-card[data-entity="${id}"]`);
+  const phoneCard = id => page.locator(`.lib-row[data-entity="${id}"]`);
   await phoneCard('brief').getByRole('button', { name: /More for Brief/ }).tap();
+  // A row's menu is a sheet at the bottom of the screen (replaces: each menu was a popover or a sheet by width).
+  box = await page.locator('.ui-sheet').boundingBox();
+  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the row menu is a sheet at the bottom (${JSON.stringify(box)})`);
   await pick(page, 'Delete');
   await phoneCard('brief').waitFor({ state: 'detached' });
-  // No side bar on a phone: the Trash link sits above the grid.
-  await page.locator('[data-trash-link]').tap();
-  box = await page.locator('.lib-dialog').boundingBox();
-  assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Trash is a sheet (${JSON.stringify(box)})`);
+  // The Trash is a view of the Library itself, not a dialog: its rows sit in the list, with Restore.
+  await page.locator('[data-library] .ui-seg button', { hasText: /^Trash/ }).tap();
+  await page.locator('[data-library] [data-trash="brief"]').waitFor();
+  assert.equal(await page.locator('.lib-dialog').count(), 0, 'the Trash is inline, not a dialog');
   assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), 'no sideways scroll in the Trash');
   await page.locator('[data-trash="brief"]').getByRole('button', { name: 'Restore' }).tap();
-  await page.keyboard.press('Escape');
+  await page.locator('[data-library] .ui-seg button', { hasText: /^All/ }).tap();
   await phoneCard('brief').waitFor();
   assert.equal((await listOf(alpha)).entities.some(item => item.id === 'brief'), true, 'Restore on the phone brought the card back');
   await phone.close();
@@ -304,6 +307,8 @@ try {
     old: { name: 'Old Stuff', archived: true, entities: [] },
   };
   const siteCalls = [];
+  // The workspace list is open as a sheet (its entry is the address plus /~o), so a hash change is not the reload: wait for the page to come back without the sheet's marker.
+  const reloaded = page => page.waitForNavigation({ url: url => !url.hash.includes('~o') });
   const sendJson = (response, status, value) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); };
   const siteServer = http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://site');
@@ -386,7 +391,7 @@ try {
       await menu.getByRole('button', { name: 'Manage Section One' }).click();
       await menu.getByRole('button', { name: 'Rename…' }).click();
       await field.fill('Section Uno');
-      await Promise.all([sitePage.waitForNavigation(), field.press('Enter')]);
+      await Promise.all([reloaded(sitePage), field.press('Enter')]);
       assert.deepEqual(siteCalls[0], ['/api/sections/rename', { workspace: 'one', name: 'Section Uno' }]);
       assert.equal(new URL(sitePage.url()).pathname, '/one', 'the address does not change');
       await reveal();
@@ -401,11 +406,11 @@ try {
 
       // Archive the idle one, then restore it from the Archived list.
       await menu.getByRole('button', { name: 'Manage Section Two' }).click();
-      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Archive' }).click()]);
+      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Archive' }).click()]);
       assert.equal(siteData.two.archived, true);
       await pop('Section Uno');
       assert.equal(await menu.getByRole('menuitemradio', { name: 'Section Two' }).count(), 0, 'an archived workspace leaves the switcher');
-      await Promise.all([sitePage.waitForNavigation(), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
+      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
       assert.equal(siteData.two.archived, undefined, 'Restore clears the flag');
       await pop('Section Uno');
       await menu.getByRole('menuitemradio', { name: 'Section Two' }).waitFor();
