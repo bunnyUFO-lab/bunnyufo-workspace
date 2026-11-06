@@ -6,6 +6,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 import { askJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -60,7 +61,7 @@ try {
   await shot(desk, 'plan-in-hermes-roadmap-desktop');
   await button.click();
   await desk.waitForURL(/#\/~hub\/chat$/);
-  await desk.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(desk);
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'planner');
   const draft = await desk.locator('textarea[aria-label="Message"]').inputValue();
   assert.match(draft, /^I want to plan work on the .* Roadmap \(project wayfind\)\./);
@@ -69,6 +70,7 @@ try {
   assert.equal(await desk.locator('.hub-bubble').count(), 0, 'Nothing was sent.');
   assert.equal(await desk.locator('[data-chat-model] option:checked').innerText(), 'Codex 6.1 Sol');
   assert.deepEqual(writes, [], 'Opening it wrote nothing.');
+  await closeChatSheet(desk);
   await shot(desk, 'chat-planner-desktop');
 
   step('desktop: with a node open the draft names it; a project without a map has the button above the map');
@@ -76,7 +78,7 @@ try {
   await desk.locator('.hub-map-panel').waitFor();
   await desk.locator('.hub-wayfinder-row [data-plan-in-hermes]').click();
   await desk.waitForURL(/#\/~hub\/chat$/);
-  await desk.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(desk);
   assert.match(await desk.locator('textarea[aria-label="Message"]').inputValue(), /I am looking at "Which project comes first\?" \(wf-q1\)\./);
   await desk.goto(`${fx.url}#/~hub/map/magic-loops`);
   await desk.locator('.hub-map-wrap').waitFor();
@@ -148,9 +150,10 @@ try {
   await phone.goto(`${fx.url}#/~hub/map/wayfind`);
   await phone.locator('[data-plan-in-hermes]').tap();
   await phone.waitForURL(/#\/~hub\/chat$/);
-  await phone.locator('[data-chat-persona]').waitFor();
+  await openChatSheet(phone);
   assert.equal(await phone.locator('[data-chat-persona]').inputValue(), 'planner');
   await noSideways(phone, 'Chat with the Planner at 390');
+  await closeChatSheet(phone);
   await shot(phone, 'chat-planner-phone');
 
   console.log('hub-plan-ui: passed');

@@ -25,7 +25,7 @@ try {
   const rows = page.locator('[data-queued]');
   const send = async text => { await field.fill(text); await page.keyboard.press('Enter'); };
   const noSideways = async what => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `${what}: nothing scrolls sideways`);
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
 
   step('Send stays while a reply runs, with Stop beside it, and the row waits above the composer');
   await send('Plan the forest');

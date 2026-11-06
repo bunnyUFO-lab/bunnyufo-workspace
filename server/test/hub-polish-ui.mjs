@@ -128,9 +128,9 @@ try {
   const times = await guest.locator('[data-conversation]').evaluateAll(list => list.map(item => item.querySelector('[data-conversation-time]')?.textContent ?? null));
   assert.ok(times[0] && times[1], `Both "Plan the week" chats show a time: ${times}`);
   assert.notEqual(times[0], times[1], 'The two times differ.');
-  assert.equal(times[2], null, 'A title that is alone shows no time.');
+  assert.ok(times[2], 'Every row shows its time (the list is rows now, not a drawer that only told twins apart).');
   assert.match(times[0], /^\d{2}:\d{2} (AM|PM)$/, 'Today is just the time, in the Hub clock.');
-  assert.match(times[1], /^Oct 2\d, \d{2}:\d{2} (AM|PM)$/, 'Another day carries its date.');
+  assert.match(times[1], /^Oct 2\d$/, 'Another day carries its date, without the clock (a row has little room).');
 
   step('read-only: Chat is on the rail and the tab bar, and its screen carries the note; none for a visitor who has Chat');
   canned['/api/capabilities'].chat = false;

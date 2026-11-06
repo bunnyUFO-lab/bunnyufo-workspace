@@ -7,6 +7,7 @@ import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
+import { closeChatSheet, openChatSheet } from './shell-helpers.mjs';
 import { askJson, minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -129,6 +130,7 @@ try {
   await desk.locator('[data-q-item-action="chat"]').click();
   await desk.waitForURL(/#\/~hub\/chat$/);
   await desk.locator('textarea[aria-label="Message"]').waitFor();
+  await openChatSheet(desk);
   assert.equal(await desk.locator('[data-chat-persona]').inputValue(), 'hermes', 'Plain Hermes, not a persona.');
   const draft = await desk.locator('textarea[aria-label="Message"]').inputValue();
   assert.match(draft, /Question wf-q2 \(research\)/);

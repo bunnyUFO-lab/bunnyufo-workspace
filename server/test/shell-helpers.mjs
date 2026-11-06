@@ -35,3 +35,21 @@ export async function contextWithListOpen(browser, options) {
   await context.addInitScript(() => { try { localStorage.setItem('buw.menuCollapsed', '0'); } catch { /* none */ } });
   return context;
 }
+
+/**
+ * The sheet the Chat thread's title opens: Talk to (a new chat only) and Model. A test that picks either opens it first; it stays open
+ * until Back closes it. Returns the sheet's locator.
+ */
+export async function openChatSheet(page) {
+  const sheet = page.locator('[data-chat-sheet]');
+  if (!(await sheet.count())) await page.locator('[data-chat-options]').click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/** Closes the chat sheet the way Back does, and waits for it to go. */
+export async function closeChatSheet(page) {
+  if (!(await page.locator('[data-chat-sheet]').count())) return;
+  await page.goBack();
+  await page.locator('[data-chat-sheet]').waitFor({ state: 'detached' });
+}

@@ -22,7 +22,7 @@ try {
   const field = page.locator('textarea[aria-label="Message"]');
   const send = page.getByRole('button', { name: 'Send', exact: true });
   const rows = page.locator('[data-queued]');
-  await page.goto(`${fx.url}#/~hub/chat`);
+  await page.goto(`${fx.url}#/~hub/chat/new`);
 
   step('before the chat has a name: Send looks enabled with text, the first tap makes a Queued row at once');
   await field.fill('First message');

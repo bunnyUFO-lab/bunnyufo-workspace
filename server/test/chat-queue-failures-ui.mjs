@@ -31,7 +31,7 @@ try {
     });
     const field = page.locator('textarea[aria-label="Message"]');
     const send = page.getByRole('button', { name: 'Send', exact: true });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('First message');
     await send.tap();
     await field.fill('Second message');
@@ -55,7 +55,7 @@ try {
     await page.route(POST_CHAT, async route => { if (route.request().method() === 'POST') await new Promise(resolve => setTimeout(resolve, 1200)); return route.continue(); });
     const field = page.locator('textarea[aria-label="Message"]');
     const send = page.getByRole('button', { name: 'Send', exact: true });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('Name me');
     await send.tap();
     await field.fill('Waiting row');
@@ -71,7 +71,7 @@ try {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
     const send = page.getByRole('button', { name: 'Send', exact: true });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('Run something');
     await send.tap();
     await page.locator('[data-chat-stop]').waitFor();
@@ -91,7 +91,7 @@ try {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
     await page.route(/\/api\/hub\/chat\/stop$/, route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"no"}' }));
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('A long one');
     await page.keyboard.press('Enter');
     const stop = page.locator('[data-chat-stop]');
@@ -108,7 +108,7 @@ try {
   {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('Start a reply');
     await page.keyboard.press('Enter');
     await page.locator('[data-chat-stop]').waitFor();
@@ -127,7 +127,7 @@ try {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
     const send = page.getByRole('button', { name: 'Send', exact: true });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('Name this chat');
     await send.tap();
     await page.locator('[data-chat-stop]').waitFor();

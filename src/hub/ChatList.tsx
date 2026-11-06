@@ -194,7 +194,7 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
   const settledNow = !textTyped || !!found.data || !!found.error
   return (
     <div className="cl" data-chat-list>
-      <TopBar title="Chat" actions={<a className="ui-icobtn pri" href={hubHash('chat')} role="button" aria-label="New chat" title="New chat" data-new-chat><Icon name="plus" /></a>} />
+      <TopBar title="Chat" actions={<a className="ui-icobtn pri" href={hubHash('chat', 'new')} role="button" aria-label="New chat" title="New chat" data-new-chat><Icon name="plus" /></a>} />
       <div className="cl-search">
         <SearchField value={q} onChange={setQ} label="Search chats" placeholder="Search chats and messages" data={{ 'data-chat-search': '' }} />
       </div>

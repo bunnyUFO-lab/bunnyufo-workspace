@@ -21,7 +21,7 @@ import { LIVE_JOB } from './jobStates'
 import Md, { CodeBlock } from './Md'
 import { splitFences } from './chatText'
 import { useHubData } from './useHub'
-import { onAsk, takeAsk } from './askHermes'
+import { onAsk, peekAsk, takeAsk } from './askHermes'
 import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
@@ -229,14 +229,28 @@ function ChatScreen({ id }: { id?: string }) {
   const team = useHubData<TeamView>('/team')   // persona: the sprites of the picker, the header and the rows
   const agents = team.data?.agents ?? []
   const place = id === 'archived' || id === 'trash' ? id : null
-  const target = parseChatId(place ? undefined : id)
+  const blank = id === 'new'   // `chat/new`: the + button's address, a thread with nobody in it yet
+  const target = parseChatId(place || blank ? undefined : id)
+  // A start ("Chat with Researcher", Plan in Hermes) or a question from Search is waiting for a composer: on a phone the thread shows,
+  // not the list, until the person leaves this address.
+  const [wanted, setWanted] = useState(false)
+  const waiting = !target.id && !place && (!!peekChatStart() || !!peekAsk())
+  if (waiting && !wanted) setWanted(true)
+  useEffect(() => { if (target.id || place) setWanted(false) }, [target.id, place])
+  useEffect(() => {
+    const want = () => { if (!target.id && !place) setWanted(true) }
+    const offStart = onChatStart(want)
+    const offAsk = onAsk(want)
+    return () => { offStart(); offAsk() }
+  }, [target.id, place])
+  const threadOnly = !!target.id || blank || wanted
   const thread = <ChatShell id={target.id} line={target.line} list={list} team={team} />
   const setAside = place ? <ChatSetAside view={place} agents={agents} personas={list.data?.personas ?? []} models={list.data?.models ?? []} /> : null
-  const showList = desktop || (!place && target.id === undefined)
+  const showList = desktop || (!place && !threadOnly)
   return (
-    <div className="hub-chat" data-chat-screen={place ?? (target.id ? 'thread' : 'list')}>
+    <div className="hub-chat" data-chat-screen={place ?? (threadOnly ? 'thread' : 'list')}>
       {showList && <aside className="hub-chat-pane list" aria-label="Conversations"><ChatList list={list} agents={agents} activeId={target.id} /></aside>}
-      {setAside ? <section className="hub-chat-pane main">{setAside}</section> : (desktop || target.id !== undefined) && thread}
+      {setAside ? <section className="hub-chat-pane main">{setAside}</section> : (desktop || threadOnly) && thread}
     </div>
   )
 }
@@ -852,12 +866,15 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
                 <span>Talk to</span>
                 {pickable
                   ? (
-                    <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
-                      <option value={HERMES}>Hermes</option>
-                      {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
-                    </select>
+                    <span className="hub-chat-sheet-who" data-sheet-who={persona}>
+                      <Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} bare />
+                      <select className="hub-persona" aria-label="Talk to" data-chat-persona value={personas.some(entry => entry.id === persona) ? persona : HERMES} onChange={event => setPersona(event.target.value)}>
+                        <option value={HERMES}>Hermes</option>
+                        {personas.map(entry => <option key={entry.id} value={entry.id} title={entry.role}>{entry.name}</option>)}
+                      </select>
+                    </span>
                   )
-                  : <span className="hub-chat-sheet-who" data-chat-with={persona}><Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} /></span>}
+                  : <span className="hub-chat-sheet-who" data-sheet-who={persona}><Who id={who ? persona : HERMES} name={who?.name ?? 'Hermes'} agents={agents} size={24} /></span>}
               </label>
               {models.length > 0 && (
                 <label>

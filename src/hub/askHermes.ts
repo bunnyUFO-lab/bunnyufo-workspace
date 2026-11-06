@@ -11,6 +11,9 @@ export function askHermes(text: string, go: () => void) {
   window.dispatchEvent(new Event(EVENT))
 }
 
+/** The queued question, without taking it. */
+export const peekAsk = (): string | null => waiting
+
 /** The queued question, once. */
 export function takeAsk(): string | null {
   const text = waiting

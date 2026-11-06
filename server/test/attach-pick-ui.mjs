@@ -30,7 +30,7 @@ try {
   await check('checklist step', page.locator('[data-item] [data-attach-input]'));
 
   step('the Chat: the attach button has no capture');
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
   await check('chat', page.locator('.hub-compose [data-attach-input]'));
   console.log('ok');
 } finally {

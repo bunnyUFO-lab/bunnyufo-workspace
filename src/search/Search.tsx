@@ -158,7 +158,7 @@ export default function Search({ desktop, onClose }: {
       const list: Option[] = []
       const bare = text.replace(/^(?:spawn|new job)\b[:\s]*/i, '').trim()
       if (!text) {
-        if (host.chat) list.push({ id: 'start:chat', title: 'New chat', sub: 'Talk to Hermes', icon: 'chat', run: () => go(hubHash('chat')) })
+        if (host.chat) list.push({ id: 'start:chat', title: 'New chat', sub: 'Talk to Hermes', icon: 'chat', run: () => go(hubHash('chat', 'new')) })
         if (host.hub && host.write) list.push({ id: 'start:job', title: 'New job', sub: 'Ask an agent to do something', icon: 'job', run: () => startJob() })
         return list
       }

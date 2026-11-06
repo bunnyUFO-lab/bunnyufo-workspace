@@ -12,18 +12,20 @@ let fx;
 try {
   fx = await startHubFixture({ hermes: true, chatRuns: true });
   for (const [name, viewport] of [['phone', { width: 390, height: 844 }], ['wide', { width: 1280, height: 900 }]]) {
-    step(`${name}: Send keeps its place while the Model menu arrives late`);
+    step(`${name}: Send keeps its place while the model (now in the header, from the list) arrives late`);
     const context = await browser.newContext({ viewport, serviceWorkers: 'block', reducedMotion: 'reduce', ...(name === 'phone' ? { isMobile: true, hasTouch: true } : {}) });
     const page = await context.newPage();
     page.setDefaultTimeout(ms(15000));
     page.on('pageerror', error => { throw error; });
     await page.route(/\/api\/hub\/chat(\?.*)?$/, async route => { await new Promise(resolve => setTimeout(resolve, 1500)); await route.continue(); });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    const listed = page.waitForResponse(response => /\/api\/hub\/chat(\?.*)?$/.test(response.url()) && response.request().method() === 'GET');
+    await page.goto(`${fx.url}#/~hub/chat${name === 'phone' ? '/new' : ''}`);
     const send = page.getByRole('button', { name: 'Send', exact: true });
     await send.waitFor();
     const before = await send.boundingBox();
-    assert.equal(await page.locator('[data-chat-model]').count(), 0, 'the menu is not there yet (the test holds the list back)');
-    await page.locator('[data-chat-model]').waitFor();
+    assert.equal(await page.locator('[data-chat-with]').innerText().then(text => text.includes('·')), false, 'the model name is not there yet (the test holds the list back)');
+    await listed;
+    await page.locator('[data-chat-with]', { hasText: '·' }).waitFor();
     const after = await send.boundingBox();
     assert.deepEqual([after.x, after.y, after.width, after.height], [before.x, before.y, before.width, before.height], `Send moved when the menu arrived: ${JSON.stringify(before)} then ${JSON.stringify(after)}`);
     await context.close();

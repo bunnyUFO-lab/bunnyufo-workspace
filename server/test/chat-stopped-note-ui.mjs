@@ -24,7 +24,7 @@ try {
   {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('Say hello');
     await page.keyboard.press('Enter');
     await page.locator('[data-chat-stop]').waitFor();
@@ -35,7 +35,7 @@ try {
     await shot(page, 'stopped');
     await page.waitForTimeout(500);
     await page.reload();   // a new chat has no address until its first reply is done, so the owner opens it from the list
-    await page.getByRole('button', { name: 'Chats' }).tap();
+    await page.evaluate(() => { location.hash = '#/~hub/chat'; });   // the phone's Chat tab is the list
     await page.locator('[data-conversation]').first().tap();
     await page.locator('[data-chat-stopped]').waitFor({ timeout: 8000 });
     assert.equal(await page.locator('.hub-bubble.assistant').count(), 0, 'still no reply bubble after a reload');
@@ -52,7 +52,7 @@ try {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
     await page.route(/\/api\/hub\/chat$/, async route => { if (route.request().method() === 'POST') await new Promise(resolve => setTimeout(resolve, 1200)); return route.continue(); });
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     const stopsBefore = fx.hermes.stops.length;
     await field.fill('Early stop');
     await page.keyboard.press('Enter');
@@ -72,7 +72,7 @@ try {
   {
     const page = await open();
     const field = page.locator('textarea[aria-label="Message"]');
-    await page.goto(`${fx.url}#/~hub/chat`);
+    await page.goto(`${fx.url}#/~hub/chat/new`);
     await field.fill('First ask');
     await page.keyboard.press('Enter');
     await page.locator('[data-chat-stop]').waitFor();

@@ -40,7 +40,7 @@ try {
   };
   const hidden = async value => page.evaluate(state => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state }); document.dispatchEvent(new Event('visibilitychange')); }, value);
 
-  await page.goto(`${fixture.url}#/~hub/chat`);
+  await page.goto(`${fixture.url}#/~hub/chat/new`);
   await send('Hi');
   await page.locator('.hub-bubble.assistant', { hasText: 'Hello.' }).waitFor();
   await page.waitForFunction(() => /chat\/\d{8}-/.test(location.hash));
@@ -62,7 +62,6 @@ try {
 
   step('the Chats list, then the chat again');
   await page.evaluate(() => { window.location.hash = '#/~hub/chat'; });
-  await page.getByRole('button', { name: 'Chats' }).click();
   await page.locator('[data-conversation]').first().click();
   await seen('Chats list');
 
