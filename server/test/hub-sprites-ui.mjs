@@ -55,7 +55,7 @@ const noSideways = async (page, what) => {
 };
 // Choose a sheet for Claude Code the way the owner does: Custom tab, Use this. The real avatar route saves it and the team response then carries a real custom sprite.
 const chooseSheet = async (page, sheet) => {
-  await page.goto(`${fixture.url}#/~hub/team`);
+  await page.goto(`${fixture.url}#/~hub/agent/claude`);
   await page.locator('[data-sprite-open="claude"]').click();
   const dialog = page.locator('dialog[data-sprite-sheet="claude"]');
   await dialog.locator('[data-sheet-mode="custom"]').click();
@@ -69,7 +69,7 @@ try {
   const { page: desk, errors } = await open({ width: 1280, height: 900 });
   await chooseSheet(desk, SHEET_ID);
   await desk.goto(`${fixture.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('.team-row').first().waitFor();
   const expected = { 'sx-needs': 'waiting', 'sx-failed': 'failed', 'sx-done': 'jumping', 'sx-old': 'idle', 'sx-review': 'review', 'sx-off': 'idle', claude: 'running' };
   for (const [agent, row] of Object.entries(expected)) assert.equal(await spriteOf(desk, agent).getAttribute('data-row'), row, `${agent} shows the ${row} row`);
   assert.equal(await spriteOf(desk, 'sx-done').getAttribute('data-state'), 'done');
@@ -103,7 +103,7 @@ try {
   for (const [state, row] of wn) assert.equal(row, state === 'working' ? 'running' : state === 'needs-you' ? 'waiting' : 'idle');
 
   step('the Custom tab lists the sheets, the current one marked; Use this switches, Undo restores');
-  await desk.goto(`${fixture.url}#/~hub/team`);
+  await desk.goto(`${fixture.url}#/~hub/agent/claude`);
   await desk.locator('[data-sprite-open="claude"]').click();
   const sheet = desk.locator('dialog[data-sprite-sheet="claude"]');
   await sheet.waitFor();
@@ -130,6 +130,7 @@ try {
 
   step('with no sheets the Custom tab says so');
   await desk.route('**/api/hub/team/*/sheets', route => route.fulfill({ json: { sheets: [] } }));
+  await desk.goto(`${fixture.url}#/~hub/agent/hermes`);
   await desk.locator('[data-sprite-open="hermes"]').click();
   const hermes = desk.locator('dialog[data-sprite-sheet="hermes"]');
   await hermes.locator('[data-sheet-mode="custom"]').click();
@@ -167,7 +168,7 @@ try {
   step('reduced motion: no animation runs and frame 0 of the row shows');
   const { page: calm } = await open({ width: 1280, height: 900 }, { reducedMotion: 'reduce' });
   await calm.goto(`${fixture.url}#/~hub/team`);
-  await calm.locator('.team-card').first().waitFor();
+  await calm.locator('.team-row').first().waitFor();
   assert.equal(await spriteOf(calm, 'claude').evaluate(node => { const s = getComputedStyle(node); return `${s.animationName}|${s.backgroundPositionX}`; }), 'none|0px');
   assert.equal(await spriteOf(calm, 'claude').getAttribute('data-row'), 'running', 'It still shows its state row.');
   for (const agent of ['sx-needs', 'sx-failed', 'sx-done', 'sx-review']) assert.equal(await spriteOf(calm, agent).evaluate(node => getComputedStyle(node).animationName), 'none', `${agent} is still`);
@@ -179,8 +180,9 @@ try {
   for (const width of [375, 390]) {
     const { page: phone } = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
     await phone.goto(`${fixture.url}#/~hub/team`);
-    await phone.locator('.team-card').first().waitFor();
+    await phone.locator('.team-row').first().waitFor();
     await noSideways(phone, `Team at ${width}`);
+    await phone.locator('.team-row[data-agent="claude"]').tap();
     await phone.locator('[data-sprite-open="claude"]').tap();
     await phone.locator('dialog[data-sprite-sheet="claude"] [data-sheet-mode="custom"]').tap();
     await phone.locator('[data-sheet-item]').first().waitFor();
