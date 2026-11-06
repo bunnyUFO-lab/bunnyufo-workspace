@@ -16,6 +16,7 @@ export const SHORTCUT_GROUPS: { title: string; items: Shortcut[] }[] = [
       { keys: ['Ctrl', 'Shift', 'F'], does: 'Search the Library, even while you are typing in a note' },
       { keys: ['/'], does: 'Search: screens, items, roadmaps and cards' },
       { keys: ['['], does: 'Show or hide the card list beside an open card' },
+      { keys: ['Shift', 'R'], does: 'Library: Recent or By project' },
       { keys: ['Alt', '←'], does: 'Back one screen (the browser’s own; the Back buttons do the same)' },
     ],
   },

@@ -31,7 +31,16 @@ const open = async (viewport, options = {}, make = options => browser.newContext
   return page;
 };
 const rows = page => page.locator('[data-library] .lib-row');
-const chip = (page, name) => page.locator('[data-library] .ui-chips .ui-chip', { hasText: new RegExp('^' + name) });
+const filter = page => page.locator('[data-library] [data-project-filter]');
+// Opens the project filter (a sheet), ticks or unticks one row, and closes it the way Back does.
+const pickProject = async (page, name) => {
+  await filter(page).click();
+  const list = page.locator('.ui-sheet [data-project-list]');
+  await list.waitFor();
+  await list.locator('label.lib-pick', { hasText: name }).click();
+  await page.goBack();
+  await list.waitFor({ state: 'detached' });
+};
 const view = (page, name) => page.locator('[data-library] .ui-seg button', { hasText: new RegExp('^' + name) });
 const sizes = (page, selector) => page.locator(selector).evaluateAll(list => list.map(item => { const box = item.getBoundingClientRect(); return [Math.round(box.width), Math.round(box.height)]; }));
 const tall = async (page, selector, what) => {
@@ -68,18 +77,19 @@ try {
   await openLibrary(phone);
   const lefts = await phone.locator('[data-library] .lib-row').evaluateAll(list => list.map(item => Math.round(item.getBoundingClientRect().left)));
   assert.equal(new Set(lefts).size, 1, `rows share one column (${lefts})`);
-  assert.equal(await phone.locator('[data-library] .ui-chips').evaluate(el => getComputedStyle(el).overflowX), 'auto', 'the chips scroll sideways inside their own row');
+  assert.equal(await phone.locator('[data-library] .ui-chips').count(), 0, 'no row of chips to scroll sideways: one filter button');
+  assert.equal((await filter(phone).innerText()).trim(), 'All projects');
   await noSideways(phone, 'Library at 390');
-  await tall(phone, '[data-library] .lib-row-main, [data-library] [data-row-menu], [data-library] .ui-chip, [data-library] .ui-seg button, [data-library] .lib-search', 'Library');
+  await tall(phone, '[data-library] .lib-row-main, [data-library] [data-row-menu], [data-library] .lib-filter, [data-library] .ui-seg button, [data-library] .lib-search', 'Library');
   await phone.setViewportSize({ width: 320, height: 700 });
   await noSideways(phone, 'Library at 320');
   await phone.setViewportSize({ width: 390, height: 800 });
 
   step('phone: a section chip narrows the list and adds no step; Back leaves the Library');
   const before = await entryOf(phone);
-  await chip(phone, 'Two').click();
+  await pickProject(phone, 'Two');
   await phone.waitForFunction(() => document.querySelectorAll('[data-library] .lib-row').length === 1);
-  assert.equal(await chip(phone, 'Two').getAttribute('aria-pressed'), 'true');
+  assert.equal((await filter(phone).innerText()).trim(), 'Two');
   assert.deepEqual(await entryOf(phone), before, 'a chip changes neither the address nor the history entry');
   await view(phone, 'Pinned').click();
   await view(phone, 'All').click();
@@ -93,11 +103,12 @@ try {
   assert.equal(await phone.locator('[data-library]').count(), 0, 'a card is alone on a phone');
   await phone.locator('.topbar [data-back]').click();
   await phone.locator('[data-library] .lib-scroll').waitFor();
-  assert.equal(await chip(phone, 'Two').getAttribute('aria-pressed'), 'true', 'the chip is as it was');
+  assert.equal((await filter(phone).innerText()).trim(), 'Two', 'the project is as it was');
   assert.equal(await phone.locator('[data-library] .lib-search input').inputValue(), 'Zebra', 'the search is as it was');
   assert.equal(await view(phone, 'All').getAttribute('aria-pressed'), 'true', 'and the view');
   await phone.locator('[data-matches] .lib-clear').click();
-  await chip(phone, 'All').click();
+  await pickProject(phone, 'Two');
+  assert.equal((await filter(phone).innerText()).trim(), 'All projects');
   await phone.goBack();
   await phone.locator('.hub[data-screen="today"]').waitFor();
   assert.equal(await hashOf(phone), '#/~hub/today', 'Back left the Library; it did not undo the chip');

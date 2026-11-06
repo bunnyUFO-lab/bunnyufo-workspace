@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { WorkspaceCard } from '../types'
 import { cardFile } from '../local/client'
 import { host } from '../lib/host'
@@ -6,6 +6,8 @@ import { publishedCardUrl, repoFileUrl } from '../lib/links'
 import { AddSection, EditCard } from './CardEdits'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { libraryHash } from '../lib/route'
+import { behindHash } from '../lib/entries'
+import Icon from '../ui/Icon'
 import ItemMenu from './ItemMenu'
 import { useCardMenu } from './CardMenu'
 import StepTab from './TabEdits'
@@ -47,17 +49,9 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
 
 export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onShowList, onProject, showProject, liveAppUrl }: TopbarProps) {
   const [copied, setCopied] = useState(false)
-  // Its own height, which a phone needs to slide it out of view (global.css): at most two rows
-  // (the breadcrumb, then the tabs), but the breadcrumb and the inline forms can change that.
-  const bar = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = bar.current
-    if (!el) return
-    const observer = new ResizeObserver(() => el.style.setProperty('--topbar-height', `${el.offsetHeight}px`))
-    observer.observe(el)
-    for (const child of el.children) observer.observe(child)
-    return () => observer.disconnect()
-  }, [])
+  // Where Back goes, in words: the Library when that is the screen behind this one (or nothing of ours is, and Back falls to it).
+  const behind = behindHash()
+  const backLabel = !behind || /^#\/~hub\/library$/.test(behind) ? 'Library' : 'Back'
   const [organizing, setOrganizing] = useState(false)
   const tabs = useRef<HTMLDivElement>(null)
   const [adding, setAdding] = useState(0)
@@ -122,7 +116,7 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
   }
 
   return (
-    <div className="topbar" ref={bar}>
+    <div className="topbar">
       <nav className="breadcrumb" aria-label="Breadcrumb">
         {onShowList && (
           <button type="button" className="crumb-link ui-showlist" onClick={onShowList} data-show-list title="Show the card list ( [ )">
@@ -139,10 +133,17 @@ export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onSh
             onBack()
           }}
           title={entity ? 'Back ( Esc )' : 'Home'}
+          aria-label={entity ? (backLabel === 'Library' ? 'Back to the Library' : 'Back') : undefined}
           data-home-link="crumb"
           data-back=""
         >
-          {entity ? <><span aria-hidden="true">←</span> Back</> : 'Workspace'}
+          {entity ? (
+            <>
+              {/* A desktop's small pill keeps its arrow and word; a phone gets a chevron and where it goes (global.css). */}
+              <span className="crumb-back-wide" aria-hidden="true">← Back</span>
+              <span className="crumb-back-phone" aria-hidden="true"><Icon name="back" size={22} />{backLabel}</span>
+            </>
+          ) : 'Workspace'}
         </a>
         {entity && showProject && (
           <>

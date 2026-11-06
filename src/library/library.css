@@ -1,12 +1,14 @@
 /* The Library screen. Tokens only. Phone first: one column; the list pane is 384 px beside a card (ui.css .ui-pane-list). */
-.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: clip; }
 .lib .ui-top { padding-right: 4px; }
 .lib .workspace-switcher { min-width: 0; margin-left: auto; }
 .lib .workspace-switcher-button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: var(--tap); padding-top: 0; padding-bottom: 0; }
 .lib .workspace-switcher + .ui-icobtn { margin-left: 0; }
 .lib-new { flex: none; padding: 0 16px 8px; }
 .lib-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); color: var(--t3); border: 1px solid var(--line); }
-.lib-search:focus-within { border-color: var(--line2); }
+.lib-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+/* One ring, on the rounded field. The shell draws a square outline on every focused input (local.css); this one is inside the field, so it draws none. */
+.app-shell .lib-search input:focus, .app-shell .lib-search input:focus-visible { outline: none; box-shadow: none; }
 /* .app-shell input draws a field; the label around this one is the field, so its input draws nothing (the same weight, so the longer selector). */
 .app-shell .lib-search input { flex: 1; min-width: 0; min-height: calc(var(--tap) - 2px); padding: 0; border: 0; border-radius: 0; background: none; color: var(--t1); font: inherit; outline: none; }
 .lib-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px calc(24px + var(--safe-b)); overscroll-behavior: contain; }
@@ -40,3 +42,28 @@
 .lib-trash-notice button { min-height: var(--tap); }
 .ui-sec .lib-rows { margin-bottom: 4px; }
 .lib-detail { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+
+/* The project filter and the Recent | By project toggle share one line. The filter gives way first: its label truncates. */
+.lib-bar { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 16px 10px; min-width: 0; }
+.lib-filter { flex: 1 1 0; min-width: 0; min-height: var(--tap); display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--s1); color: var(--t1); font: inherit; font-weight: 550; text-align: left; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.lib-filter:hover { background: var(--s2); border-color: var(--line2); }
+.lib-filter.on { border-color: var(--accent); background: var(--accent-soft); }
+.lib-filter-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-filter .ui-icon { flex: none; color: var(--t3); }
+.ui-seg.lib-arrange { flex: none; margin: 0; }
+.ui-seg.lib-arrange button { flex: none; padding: 0 10px; }
+.lib-head.project { text-transform: none; }
+
+/* The filter's list, in the app's Sheet (a bottom sheet on a phone, a dialog from 900 px). */
+.lib-picks { display: flex; flex-direction: column; }
+.lib-pick { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 0 4px; cursor: pointer; border-radius: 10px; }
+.lib-pick:hover { background: var(--s2); }
+.lib-pick + .lib-pick { box-shadow: inset 0 1px 0 var(--line); }
+.lib-pick input { flex: none; width: 22px; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.lib-pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-pick small { color: var(--t3); font-size: 13px; }
+.lib-pick.dim { opacity: 0.5; }
+.lib-pick input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Below 16 px a phone's browser zooms the page in when a field takes focus and leaves it panned sideways (the title cut off, everything shifted). */
+@media (max-width: 899px), (pointer: coarse) { .app-shell .lib-search input { font-size: 16px; } }

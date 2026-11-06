@@ -53,3 +53,23 @@ export async function closeChatSheet(page) {
   await page.goBack();
   await page.locator('[data-chat-sheet]').waitFor({ state: 'detached' });
 }
+
+/** The Library's project filter: the button that says "All projects", the one project's name, or "3 projects". */
+export const libraryFilter = page => page.locator('[data-library] [data-project-filter]');
+
+/** Opens the project filter's sheet, runs `fn` on its list, and closes it the way Back does (so a test also sees that Back leaves no step). */
+export async function withProjectList(page, fn) {
+  await libraryFilter(page).click();
+  const list = page.locator('.ui-sheet [data-project-list]');
+  await list.waitFor();
+  const result = await fn(list);
+  await page.goBack();
+  await list.waitFor({ state: 'detached' });
+  return result;
+}
+
+/** Ticks or unticks one row of the filter's list ("All projects" clears the picks), then closes it. */
+export const pickProject = (page, name) => withProjectList(page, list => list.locator('label.lib-pick', { hasText: new RegExp('^' + name) }).click());
+
+/** The filter's rows in the order drawn: [name, count]. */
+export const projectRows = page => withProjectList(page, list => list.locator('label.lib-pick').evaluateAll(els => els.map(el => [el.querySelector('.lib-pick-name').textContent, Number(el.querySelector('small').textContent)])));

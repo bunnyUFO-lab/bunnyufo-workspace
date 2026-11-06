@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
-import { contextWithListOpen } from './shell-helpers.mjs';
+import { contextWithListOpen, pickProject } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -82,7 +82,6 @@ try {
   await page.goto(service.urls.workspace);
   const rows = () => page.locator('[data-library] .lib-row');
   const row = id => page.locator(`[data-library] .lib-row[data-entity="${id}"]`);
-  const chip = name => page.locator('[data-library] .ui-chips .ui-chip', { hasText: new RegExp('^' + name) });
   /** A row's menu: open it, pick an item. */
   const menu = async (id, item) => {
     await row(id).locator('[data-row-menu]').click();
@@ -97,13 +96,13 @@ try {
   assert.deepEqual(await pinTitles(), ['Beta'], 'The pin is listed at start.');
   assert.equal(await page.locator('[data-library] .lib-head h2', { hasText: 'Pinned' }).count(), 1);
 
-  // A section chip narrows the cards but not the pins: a pin says "keep this in front of me".
-  await chip('One').click();
-  await page.waitForFunction(() => !document.querySelector('[data-library] .lib-head[data-section="Recent"]'));
+  // A project pick narrows the cards but not the pins: a pin says "keep this in front of me".
+  await pickProject(page, 'One');
+  await page.waitForFunction(() => document.querySelectorAll('[data-library] .lib-row').length === 2);
   assert.equal(await row('beta').count(), 1, 'The section filter does not hide a pin from another section.');
   assert.equal(await row('alpha').count(), 1);
   assert.equal(await rows().count(), 2, 'Still once each.');
-  await chip('All').click();
+  await pickProject(page, 'One');
 
   // The row menu pins and unpins, written as card state.
   await menu('alpha', 'Pin');

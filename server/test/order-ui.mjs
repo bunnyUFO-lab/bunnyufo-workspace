@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
-import { contextWithListOpen } from './shell-helpers.mjs';
+import { contextWithListOpen, pickProject, projectRows } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -75,7 +75,6 @@ try {
   const pinned = () => page.locator('[data-library] [role="list"][aria-label="Pinned"] .lib-row-body b').allInnerTexts();
   const heads = () => page.locator('[data-library] .lib-head[data-section]').evaluateAll(els => els.map(el => el.dataset.section));
   const titles = () => page.locator('[data-library] .lib-row-body b').allInnerTexts();
-  const chips = () => page.locator('[data-library] .ui-chips .ui-chip').evaluateAll(els => els.map(el => el.firstChild.textContent.trim()));
   const until = async (read, expected, what) => {
     for (let tries = 0; tries < 50; tries++) {
       const got = await read();
@@ -126,9 +125,10 @@ try {
   });
   await saved.goto(service.urls.workspace);
   await saved.locator('[data-library] .lib-row').first().waitFor();
-  const savedChips = (await saved.locator('[data-library] .ui-chips .ui-chip').evaluateAll(els => els.map(el => el.firstChild.textContent.trim()))).filter(name => /^(One|Two)$/.test(name));
-  assert.deepEqual(savedChips, ['Two', 'One'], 'order.projects orders the section chips.');
-  await saved.locator('[data-library] .ui-chips .ui-chip', { hasText: /^One/ }).click();
+  const savedChips = (await projectRows(saved)).map(([name]) => name).filter(name => /^(One|Two)$/.test(name));
+  assert.deepEqual(savedChips, ['Two', 'One'], 'order.projects orders the filter list.');
+  await pickProject(saved, 'One');
+  await saved.locator('[data-library] .ui-seg.lib-arrange button', { hasText: 'By project' }).click();
   await saved.locator('[data-library] .lib-head[data-section]').first().waitFor();
   assert.deepEqual(await saved.locator('[data-library] .lib-head[data-section]').evaluateAll(els => els.map(el => el.dataset.section)), ['bravo', 'alpha'], 'order.sections orders the category headings.');
   assert.deepEqual(await saved.locator('[data-library] [role="list"][aria-label="alpha"] .lib-row-body b').allInnerTexts(), ['A3', 'A1', 'A2'], 'order.cards orders the cards of a category.');

@@ -26,11 +26,20 @@ import Tabs from './ui/Tabs'
 import TopBar from './ui/TopBar'
 import { Screen, Split } from './ui/Layout'
 import LibraryScreen from './library/LibraryScreen'
-import { isArchived, orderedSections } from './library/libraryModel'
+import { isArchived, orderedSections, pickedProjects, type Arrange } from './library/libraryModel'
 import { setArchived, setPinned } from './library/cardActions'
 import { Button } from './ui/Controls'
-import { useAutoHideHeader, useIsDesktop, useMedia } from './lib/chrome'
+import { useIsDesktop, useKeyboardUp, useMedia } from './lib/chrome'
 import { cardFile, cardUrl, reportError } from './local/client'
+
+const PICKS_KEY = 'buw.projects'
+/** The several projects picked on this device; one pick (or none) is the address, not this. */
+function readPicks(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(PICKS_KEY) ?? '[]')
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []
+  } catch { return [] }
+}
 
 const Compare3D = lazy(() => import('./components/Compare3D'))
 const ReportViewer = lazy(() => import('./components/ReportViewer'))
@@ -105,9 +114,18 @@ export default function App() {
   // so a filtered view can be linked, bookmarked and reached with the back button. In the
   // local app there is no address bar, so it is remembered instead. Never allowed to hide
   // everything (see `project`).
-  const [chosenProject, setChosenProject] = useState(
-    () => (host.routes === 'hash' ? localStorage.getItem('buw.project') ?? '' : pathId()),
-  )
+  // One pick is that address; several are kept on this device (`buw.projects`), because an address holds one.
+  const [picks, setPicks] = useState<string[]>(() => {
+    const one = host.routes === 'hash' ? localStorage.getItem('buw.project') ?? '' : pathId()
+    return one ? [one] : readPicks()
+  })
+  // Recent or By project, remembered on this device; Recent until it is changed.
+  const [arrange, setArrange] = useState<Arrange>(() => {
+    try { return localStorage.getItem('buw.arrange') === 'project' ? 'project' : 'recent' } catch { return 'recent' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('buw.arrange', arrange) } catch { /* storage blocked */ }
+  }, [arrange])
   // Beside an open card the list takes 384 px, which a wide HTML report cannot spare below 1400 px: there it starts folded, with a
   // "Show list" button. The choice is remembered here once made, like the collapsed sections (lib/collapse).
   const wide = useMedia('(min-width: 1400px)')
@@ -122,8 +140,11 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (host.routes === 'hash') localStorage.setItem('buw.project', chosenProject)
-  }, [chosenProject])
+    try {
+      if (host.routes === 'hash') localStorage.setItem('buw.project', picks.length === 1 ? picks[0] : '')
+      if (picks.length > 1) localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); else localStorage.removeItem(PICKS_KEY)
+    } catch { /* storage blocked */ }
+  }, [picks])
 
   // Back and forward move between filtered views on a site, because the filter is the path.
   useEffect(() => {
@@ -131,7 +152,7 @@ export default function App() {
     // Both halves of the address at once. Back fires popstate before hashchange, so updating
     // only the project here leaves one render where the filter has moved but the open card has
     // not — long enough for the effect below to rewrite the entry you just came back to.
-    const onPop = () => { setChosenProject(pathId()); setRoute(readRoute()) }
+    const onPop = () => { const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); setRoute(readRoute()) }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [setRoute])
@@ -144,8 +165,10 @@ export default function App() {
   )
   const cards = useMemo(() => data?.cards ?? [], [data])
   // A project that is gone from the registry (unregistered, or a site that stopped publishing)
-  // would otherwise filter every card away with no visible chip to undo it.
-  const project = workspaces.some(w => w.id === chosenProject) ? chosenProject : ''
+  // would otherwise filter every card away with nothing to undo it: it is dropped.
+  const projects = useMemo(() => pickedProjects(picks, workspaces), [picks, workspaces])
+  // The one project in view, for the things that follow the address: '' for none or several.
+  const project = projects.length === 1 ? projects[0] : ''
 
   // Card ids are unique inside a workspace, not across them: the active workspace wins a tie.
   const open = cards.filter(e => e.id === view.id)
@@ -165,8 +188,8 @@ export default function App() {
   const step = entity?.steps[stepIndex]
   const reportUrl = entity && step ? cardUrl(entity, step.path) : null
   const liveUrl = step?.url && /^https?:\/\//i.test(step.url) ? step.url : null
-  // A phone's header slides away while you read down the page (lib/chrome).
-  useAutoHideHeader(`${entity?.id ?? ''}:${stepIndex}`)
+  // The tab bar steps aside for the on-screen keyboard, and while a page is being edited (global.css).
+  const keyboard = useKeyboardUp()
 
   // The address says what is open: a folder link is rewritten to the card's id.
   const openId = entity?.id
@@ -270,6 +293,12 @@ export default function App() {
         goStep(open.id, (at + (ev.key === 'ArrowRight' ? 1 : count - 1)) % count)
         return
       }
+      // Shift+R: Recent or By project, as it was on the card list before the Library.
+      if (key === 'r' && ev.shiftKey) {
+        ev.preventDefault()
+        setArrange(now => (now === 'recent' ? 'project' : 'recent'))
+        return
+      }
       if (key === 'p' && !ev.shiftKey && open && pin) {
         ev.preventDefault()
         void pin(open, !open.pinned)
@@ -311,16 +340,19 @@ export default function App() {
     // filter moves here too rather than being derived — a derived filter would snap back to
     // the old project the moment the card is closed, leaving the path behind.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setChosenProject(openProject)
+    setPicks([openProject])
     if (host.routes === 'path') swap(window.location.hash, projectPath(openProject))
   }, [openProject, project])
 
-  const pickProject = useCallback((id: string) => {
-    setChosenProject(id)
-    // The path is the filter on a site: /magic-loops, or / for every project. Replaced in place, so switching project
-    // does not reload the app, lose the open card or add a step to Back; a reload or a shared link keeps the filter.
-    if (host.routes === 'path') swap(window.location.hash, projectPath(id))
+  const pickProjects = useCallback((ids: string[]) => {
+    setPicks(ids)
+    // The path is the filter on a site: /magic-loops, or / for every project (or several, which the address cannot hold). Replaced
+    // in place, so switching project does not reload the app, lose the open card or add a step to Back; a reload or a shared link
+    // keeps the filter.
+    if (host.routes === 'path') swap(window.location.hash, projectPath(ids.length === 1 ? ids[0] : ''))
   }, [])
+  /** Just this project (a card's crumb), or all of them. */
+  const pickProject = useCallback((id: string) => pickProjects(id ? [id] : []), [pickProjects])
 
   // A tab clicked is a step of its own; the arrow keys walk the tabs in place, or each press would fill the history.
   const selectStep = useCallback((id: string, index: number) => { go(entityHash(id, index)) }, [])
@@ -370,8 +402,10 @@ export default function App() {
     <LibraryScreen
       workspaces={workspaces}
       cards={cards}
-      section={project}
-      onSection={pickProject}
+      projects={projects}
+      onProjects={pickProjects}
+      arrange={arrange}
+      onArrange={setArrange}
       active={entity}
       offline={offline}
       lastSync={lastSync}
@@ -468,7 +502,7 @@ export default function App() {
           />
         ) : body}
       </main>
-      {!desktop && host.hub && showsTabs(route) && <Tabs lit={lit} needsYou={needsYou} />}
+      {!desktop && host.hub && showsTabs(route) && !keyboard && <Tabs lit={lit} needsYou={needsYou} />}
     </div>
     </TodayContext.Provider>
     </LibraryContext.Provider>

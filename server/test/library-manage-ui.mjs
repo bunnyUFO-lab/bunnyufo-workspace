@@ -140,6 +140,8 @@ try {
   // The service remembers the last route (now every tab click is one), so Home is asked for by its address.
   await page.evaluate(() => { location.hash = '#/'; });
   await page.reload();
+  // One project is picked: it shows its categories under By project (Recent, the default, is one run).
+  await page.locator('[data-library] .lib-arrange button', { hasText: 'By project' }).click();
   await page.locator('.lib-head[data-section]').first().waitFor();
   const heading = label => page.locator('.lib-head[data-section]', { hasText: label });
   await heading('ideas').getByRole('button', { name: /More for the ideas category/ }).click();
