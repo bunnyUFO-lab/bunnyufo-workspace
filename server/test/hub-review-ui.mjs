@@ -242,6 +242,9 @@ try {
   assert.match(await page.locator('[data-done-hint]').innerText(), /doesn't merge or approve anything/);
   const before = await page.evaluate(() => history.length);
   await page.getByRole('button', { name: 'Mark done' }).click();
+  await page.locator('[data-settled-title]', { hasText: /^Marked done\./ }).waitFor();
+  assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/review\//, 'Mark done stays on the review: nothing moves by itself.');
+  await page.locator('[data-next-item]').click();
   await page.locator('[data-next-note]', { hasText: 'Marked done · next:' }).waitFor();
   assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/(review|needs)/, 'Mark done moves on to the next item.');
   assert.equal(await page.locator('[data-next-back]').getAttribute('href'), `#/~hub/review/${oldFile}`, 'Back opens the review that was marked done.');

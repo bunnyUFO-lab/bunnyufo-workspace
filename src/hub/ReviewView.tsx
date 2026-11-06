@@ -243,7 +243,7 @@ export default function ReviewView({ route }: { route: string }) {
             <p data-try-it>{detail.tryIt}</p>
             <p><a className="hub-btn" href={detail.deployUrl} target="_blank" rel="noopener noreferrer">Open the build</a></p>
           </section>}
-          <SettledBar itemKey={`review-${id}`} kind="review" id={id} title={detail.title} verb={here.verb} phase={here.phase} backHash={reviewHash(id)} />
+          <SettledBar itemKey={`review-${id}`} kind="review" id={id} title={detail.title} verb={here.verb} phase={here.phase} backHash={reviewHash(id)} order={here.order} />
           <section className="hub-panel" aria-label="Mark done" hidden={here.covered}>
             {detail.done
                 ? <p data-done>Marked done {ago(detail.doneAt ?? detail.at)}{detail.doneBy ? ` by ${detail.doneBy}` : ''}</p>
@@ -251,7 +251,7 @@ export default function ReviewView({ route }: { route: string }) {
                   <>
                     {!here.covered && !here.verb && (
                       <>
-                        <ReviewActions item={item} links={false} primary={nothingToDo(detail.ask) || prs.length === 0} onDone={() => { here.settle('done'); if (autoNext()) void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id)) }} />
+                        <ReviewActions item={item} links={false} primary={nothingToDo(detail.ask) || prs.length === 0} onDone={() => { here.settle('done', queue()); if (autoNext()) void goNext({ kind: 'review', id, title: detail.title }, 'done', queue(), reviewHash(id)) }} />
                         <p className="hub-muted hub-done-means" data-done-hint>{detail.doneMeans ?? DONE_HINT}</p>
                       </>
                     )}

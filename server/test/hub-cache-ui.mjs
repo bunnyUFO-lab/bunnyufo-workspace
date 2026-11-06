@@ -90,7 +90,7 @@ try {
   step('after a write: Today and Needs show Loading, never the pre-write data');
   await go(page, '#/~hub/today');
   await page.locator('[data-today-open]').waitFor();
-  const oldCount = await page.locator('[data-today-open] .today-num').innerText();
+  const oldCount = await page.locator('[data-today-title]').innerText();
   await go(page, '#/~hub/needs');
   const card = page.locator(`.ni[data-need="ask-${FIXTURE_ASK}"]`);
   await card.waitFor();
@@ -107,8 +107,8 @@ try {
   await loading(page).waitFor({ state: 'detached' });
   assert.equal(await card.count(), 0);
   await go(page, '#/~hub/today');
-  await page.locator('[data-today-open] .today-num').waitFor();
-  assert.notEqual(await page.locator('[data-today-open] .today-num').innerText(), oldCount, 'The count dropped by the answered Ask.');
+  await page.locator('[data-today-title]').waitFor();
+  assert.notEqual(await page.locator('[data-today-title]').innerText(), oldCount, 'The count dropped by the answered Ask.');
   await page.unroute(WRITTEN);
 
   step('a GET held open across a write does not leave its old answer in the cache');

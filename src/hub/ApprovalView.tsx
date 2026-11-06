@@ -250,7 +250,7 @@ export default function ApprovalView({ id }: { id: string }) {
   const settle = (verb: SettledVerb) => {
     if (verb === 'done') { window.location.assign(hubHash('needs')); return }
     // The answer is held (or sent) and the page stays on the request, unless the owner asked for the next item after every answer.
-    here.settle(verb)
+    here.settle(verb, queue())
     if (autoNext()) void goNext({ kind, id, title }, verb, queue(), hubHash('request', id))
   }
   if (!detail) return <p className="hub-empty">{error ?? 'Loading…'}</p>
@@ -261,7 +261,7 @@ export default function ApprovalView({ id }: { id: string }) {
         <h2>{title}</h2>
         <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill" data-request-id>{detail.request.id}</span></span>
       </div>
-      <SettledBar itemKey={`${kind}-${id}`} kind={kind} id={id} title={title} verb={here.verb} phase={here.phase} backHash={hubHash('request', id)} />
+      <SettledBar itemKey={`${kind}-${id}`} kind={kind} id={id} title={title} verb={here.verb} phase={here.phase} backHash={hubHash('request', id)} order={here.order} />
       {/* Kept mounted while held, so Undo finds the page as it was left. */}
       <section className="hub-panel ap-page" aria-label="Request" hidden={here.covered}>
         <ApprovalBody id={id} onSettled={settle} page />

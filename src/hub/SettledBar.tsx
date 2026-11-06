@@ -3,7 +3,7 @@ import type { SettledVerb } from '../lib/nextItem.mjs'
 import { NOTE_VERB } from '../lib/nextItem.mjs'
 import { hubHash } from '../lib/route'
 import { undoHeld, useHeld } from './heldSend'
-import { goNext, useHasNext, useQueueOrder } from './useGoNext'
+import { goNext, useHasNext } from './useGoNext'
 
 /**
  * What an item's own page knows about the answer it just gave: stay on the page, say what was done, offer Next item. Nothing
@@ -13,15 +13,16 @@ import { goNext, useHasNext, useQueueOrder } from './useGoNext'
 export function useSettledHere(key: string) {
   const held = useHeld()
   // The verb counts only while the item has not been brought back since: Undo and a failed send both bump the count.
-  const [settled, setSettled] = useState<{ verb: SettledVerb; restores: number } | null>(null)
+  const [settled, setSettled] = useState<{ verb: SettledVerb; restores: number; order: string[] } | null>(null)
   const restores = held.restoreCount(key)
   const verb = settled && settled.restores === restores ? settled.verb : null
   const phase = held.phase(key)
-  return { phase, verb, settle: (value: SettledVerb) => setSettled({ verb: value, restores }), covered: !!phase }
+  // `order` is the queue as the page saw it when the answer was given: the refetch after the write drops the item, and Next item follows what was seen.
+  return { phase, verb, order: settled?.order ?? [], settle: (value: SettledVerb, order: string[] = []) => setSettled({ verb: value, restores, order }), covered: !!phase }
 }
 
 /** The bar under (or in place of) a settled item's form: "Sending in a few seconds" with Undo, then "Answered", and always Next item. */
-export default function SettledBar({ itemKey, kind, id, title, verb, phase, backHash }: {
+export default function SettledBar({ itemKey, kind, id, title, verb, phase, backHash, order }: {
   itemKey: string
   kind: 'ask' | 'checklist' | 'review' | 'approval' | 'request'
   id: string
@@ -29,9 +30,10 @@ export default function SettledBar({ itemKey, kind, id, title, verb, phase, back
   verb: SettledVerb | null
   phase?: 'held' | 'sending' | 'sent'
   backHash: string
+  /** The order of the queue as the page saw it when the answer was given (`useSettledHere`): Next item follows it. */
+  order: string[]
 }) {
   const hasNext = useHasNext(itemKey)
-  const queue = useQueueOrder()
   const [moving, setMoving] = useState(false)
   if (!verb && !phase) return null
   const waiting = phase === 'held'
@@ -43,7 +45,7 @@ export default function SettledBar({ itemKey, kind, id, title, verb, phase, back
       <div className="hub-actions start">
         {waiting && <button type="button" className="hub-btn" data-held-undo onClick={() => undoHeld(itemKey)}>Undo</button>}
         {hasNext
-          ? <button type="button" className="hub-btn pri" disabled={moving} data-next-item onClick={() => { setMoving(true); void goNext({ kind, id, title }, verb ?? 'done', queue(), backHash) }}>Next item</button>
+          ? <button type="button" className="hub-btn pri" disabled={moving} data-next-item onClick={() => { setMoving(true); void goNext({ kind, id, title }, verb ?? 'done', order, backHash) }}>Next item</button>
           : <a className="hub-btn pri" href={hubHash('today')} data-back-today>Back to Today</a>}
       </div>
     </section>

@@ -196,6 +196,9 @@ try {
   await tall(page.locator('[data-submit]'), 'Submit with open');
   await noSideways(page, 'the Submit warning');
   await page.locator('[data-submit]').tap();
+  await page.locator('[data-settled-title]', { hasText: /^Submitted\./ }).waitFor();
+  assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/checklist\//, 'Submit stays on the list: nothing moves by itself.');
+  await page.locator('[data-next-item]').tap();
   await page.locator('[data-next-note]', { hasText: 'Submitted · next:' }).waitFor();
   assert.match(await page.evaluate(() => location.hash), /^#\/~hub\/review\//, 'The next item in the queue is the review: its own page opens.');
   assert.equal(await page.locator('[data-next-back]').getAttribute('href'), `#/~hub/checklist/${FIXTURE_CHECKLIST}`);

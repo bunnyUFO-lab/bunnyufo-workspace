@@ -75,11 +75,11 @@ export default function AskView({ id }: { id: string }) {
       </ol>
       {ask.rerunBlocked && <p className="hub-muted" role="note" data-rerun-blocked>This Ask asks to run something again. Answering it starts nothing: {text(ask.rerunBlocked)}</p>}
       {ask.agentEditBlocked && <p className="hub-muted" role="note" data-agent-edit-blocked>This Ask proposes an edit. Answering it changes nothing: {text(ask.agentEditBlocked)}</p>}
-      <SettledBar itemKey={`ask-${ask.id}`} kind="ask" id={ask.id} title={text(ask.question)} verb={here.verb} phase={here.phase} backHash={hubHash('ask', ask.id)} />
+      <SettledBar itemKey={`ask-${ask.id}`} kind="ask" id={ask.id} title={text(ask.question)} verb={here.verb} phase={here.phase} backHash={hubHash('ask', ask.id)} order={here.order} />
       {/* Kept mounted while the answer is held, so Undo finds the form as it was left. */}
       <section className="hub-panel" hidden={here.covered}>
         <p className="hub-muted">{from.tool || from.host ? `From ${from.tool || 'an agent'}${from.host ? ` on ${from.host}` : ''}, ` : 'From an unknown sender, '}{when(ask.createdAt)}.</p>
-        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => { here.settle(verb); if (autoNext()) void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail) }} view />
+        <AskBody ask={ask} reload={reload} onTaken={setTaken} onSettled={(verb, detail) => { here.settle(verb, queue()); if (autoNext()) void goNext({ kind: 'ask', id: ask.id, title: ask.question }, verb, queue(), hubHash('ask', ask.id), detail) }} view />
       </section>
       {answer && <AnswerSummary ask={ask} answer={answer} />}
       {answer && isPlan && !ask.pickup && !ask.cancel && <p className="hub-muted" data-plan-state="waiting">Approved. It&apos;s applied within a minute or two, and the PC doesn&apos;t need to be on.</p>}

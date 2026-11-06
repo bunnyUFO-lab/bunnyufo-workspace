@@ -326,7 +326,7 @@ try {
   assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'No open milestone to sprint on.');
   assert.equal(await page.locator('button[data-project-action="sprint"]').isDisabled(), true);
 
-  step('the name links: Needs, Work, the Roadmap, an item page and Today open the page; a list chip in Needs still filters');
+  step('the name links: Needs, Work, the Roadmap and an item page open the page; a list chip in Needs still filters');
   await go('#/~hub/needs/all/magic-loops');
   await page.locator('[data-project-link="magic-loops"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
@@ -340,14 +340,37 @@ try {
   await page.locator('.hub-top [data-project-chip="magic-loops"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await go('#/~hub/today');
-  await page.locator('.today-project .hub-chip', { hasText: 'Magic Loops' }).click();
-  await page.locator('.today-project [data-project-link="magic-loops"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
-  await page.evaluate(() => localStorage.removeItem('hub-today-project'));
+  await page.locator('[data-today-title]').waitFor();
+  assert.equal(await page.locator('[data-today-project], .today-project').count(), 0, 'Today has no project picker, so it has no name link either.');
   await go('#/~hub/needs/all');
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
   await page.locator('.ni [data-project-chip="bunnylink"]').first().click();
   await page.waitForFunction(() => location.hash === '#/~hub/needs/all/bunnylink');
+
+  step('an address wins on Needs you and writes nothing; a bare address is All, whatever another screen picked (moved from hub-shared-project-ui)');
+  await page.evaluate(() => { localStorage.setItem('buw.hub.project', 'sprite-studio'); });
+  await page.goto(`${fixture.url}#/~hub/needs`);
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
+  assert.equal(await hash(), '#/~hub/needs', 'A bare address stays bare: no project is filled in from memory.');
+  await go('#/~hub/needs/question/magic-loops');
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 2);
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null, 'A link is a look, not a pick.');
+  assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), 'sprite-studio', 'Work and the Roadmap keep what they had.');
+  await go('#/~hub/needs/question');
+  await page.waitForFunction(() => document.querySelectorAll('.ni').length === 3);
+
+  step('the Activity project filter is local: it writes nothing anyone else reads (moved from hub-shared-project-ui)');
+  await go('#/~hub/activity');
+  const activity = page.locator('.hub-top:has([aria-label="Project"])').first();
+  await activity.waitFor();
+  const activityChips = activity.locator('.hub-chips[aria-label="Project"] .hub-chip');
+  if (await activityChips.count()) await activityChips.filter({ hasText: /Bunnylink/i }).first().click();
+  else {
+    await activity.getByRole('combobox', { name: 'Project' }).click();
+    await activity.locator('[role="option"]', { hasText: /Bunnylink/i }).first().click();
+  }
+  assert.equal(await page.evaluate(() => localStorage.getItem('hub-today-project')), null);
+  assert.equal(await page.evaluate(() => localStorage.getItem('buw.hub.project')), 'sprite-studio', 'Activity left the remembered project alone.');
 
   step('at 390 px: the page fits, the three buttons share a row, every control is 44 px, and More has Projects');
   const narrow = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });

@@ -52,14 +52,14 @@ export default function ChecklistView({ id }: { id: string }) {
       {typeof detail.context === 'string' && detail.context && <Md text={detail.context} />}
       {card && <p><a className="hub-btn" href={card} target="_blank" rel="noopener noreferrer">Open the card</a></p>}
 
-      <SettledBar itemKey={`checklist-${detail.id}`} kind="checklist" id={detail.id} title={text(detail.title)} verb={here.verb} phase={here.phase} backHash={hubHash('checklist', detail.id)} />
+      <SettledBar itemKey={`checklist-${detail.id}`} kind="checklist" id={detail.id} title={text(detail.title)} verb={here.verb} phase={here.phase} backHash={hubHash('checklist', detail.id)} order={here.order} />
       {/* Kept mounted while the answer is held, so Undo finds the ticks and the note as they were left. */}
       <div hidden={here.covered}>
         <ChecklistBody
           data={detail} loadedAt={loadedAt} reload={reload}
           onSubmitted={() => {
             const verb = detail.kind === 'playtest' ? 'reported' : 'submitted'
-            here.settle(verb)
+            here.settle(verb, queue())
             if (autoNext()) void goNext({ kind: 'checklist', id: detail.id, title: detail.title }, verb, queue(), hubHash('checklist', detail.id))
           }}
         />
