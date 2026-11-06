@@ -56,10 +56,12 @@
 .ui-chip small { color: var(--t3); font-size: 12px; }
 .ui-chip.on small { color: var(--accent); }
 .ui-seg { display: flex; gap: 2px; background: var(--s1); border-radius: 12px; padding: 3px; margin: 2px 16px 10px; flex: none; }
-.ui-seg button { flex: 1; min-width: 0; min-height: var(--tap); border: 0; border-radius: 9px; background: none; text-align: center; color: var(--t2); font: inherit; font-weight: 550; font-size: 14px; padding: 0 4px; cursor: pointer; white-space: nowrap; transition: background 0.18s, color 0.18s; }
-.ui-seg button:hover { color: var(--t1); }
-.ui-seg button.on { background: var(--s3); color: var(--t1); }
-.ui-seg button small { color: var(--t3); font-size: 12px; margin-left: 3px; }
+.ui-seg button, .ui-seg a { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; min-height: var(--tap); border: 0; border-radius: 9px; background: none; text-align: center; color: var(--t2); font: inherit; font-weight: 550; font-size: 14px; padding: 0 4px; cursor: pointer; white-space: nowrap; text-decoration: none; transition: background 0.18s, color 0.18s; }
+.ui-seg-tabs { margin: 0 0 12px; }
+.ui-seg button:hover, .ui-seg a:hover { color: var(--t1); }
+.ui-seg button.on, .ui-seg a.on { background: var(--s3); color: var(--t1); }
+.ui-seg a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.ui-seg button small, .ui-seg a small { color: var(--t3); font-size: 12px; margin-left: 3px; }
 
 /* ── Sections, lists, rows ── */
 .ui-sec { margin-top: 18px; }
@@ -109,7 +111,7 @@
   .ui-showlist { display: inline-flex; }
 }
 
-@media (max-width: 360px) { .ui-seg button { font-size: 13px; } .ui-tab { font-size: 11px; } }
+@media (max-width: 360px) { .ui-seg button, .ui-seg a { font-size: 13px; } .ui-tab { font-size: 11px; } }
 @media (prefers-reduced-motion: reduce) {
   .ui-screen, .ui-sheet, .ui-btn, .ui-icobtn, .ui-chip { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

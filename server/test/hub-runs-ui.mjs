@@ -1,6 +1,6 @@
-// Run after npm run build. The run drawer through a real browser, over the fixture service with a throwaway signing key and
-// the fake Hermes: a research request is approved, its drawer shows the text arriving and a tool line, then the card link;
-// Stop on a held run ends in "Stopped"; the drawer is a bottom sheet at 375 px; a request signed by policy, a retried one and
+// Run after npm run build. A job's page through a real browser, over the fixture service with a throwaway signing key and
+// the fake Hermes: a research request is approved, its page shows the text arriving and a tool line, then the card link;
+// Stop on a held run ends in "Stopped"; the page fits 375 px with a Back button and no tabs; a request signed by policy, a retried one and
 // one that ended in a question read right on the request's page.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
@@ -53,10 +53,12 @@ try {
   await page.locator('[data-next-note]').waitFor();
   await page.goto(`${live.url}#/~hub/needs/requests`);
   await page.locator(`[data-request-open="${ids.live}"]`).click();
-  const drawer = page.locator('[data-run-drawer]');
+  const drawer = page.locator('[data-run-view]');
   await drawer.waitFor();
-  assert.equal((await drawer.locator('[data-run-id]').innerText()).trim(), ids.live);
-  assert.match(await drawer.locator('[data-run-preset]').innerText(), /research/);
+  assert.match(page.url(), new RegExp(`#/~hub/request/${ids.live}$`), 'The row opens the job as a page.');
+  assert.equal(await page.locator('[data-run-drawer]').count(), 0, 'There is no drawer.');
+  assert.equal((await page.locator('[data-request-id]').innerText()).trim(), ids.live);
+  assert.match(await page.locator('[data-approval-preset]').innerText(), /research/i);
   assert.equal(await drawer.locator('[data-run-state-chip]').count(), 1);
   await drawer.locator('[data-run-text]', { hasText: 'Reading sources.' }).waitFor();
   await drawer.locator('[data-run-tool]', { hasText: 'web_search' }).waitFor();
@@ -68,9 +70,9 @@ try {
   assert.match(await drawer.locator('[data-run-by]').innerText(), /Approved by local/);
   assert.ok(await drawer.locator('[data-step]').count() >= 3, 'The timeline lists approved, the result and who wrote it.');
   assert.equal(await drawer.locator('[data-run-stop]').count(), 0, 'A finished run has no Stop.');
-  await page.keyboard.press('Escape');
-  await drawer.waitFor({ state: 'detached' });
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-request-open')), ids.live, 'The focus went back to the row.');
+  await page.locator('[data-run-back]').click();
+  await page.locator(`[data-request-open="${ids.live}"]`).waitFor();
+  assert.match(page.url(), /#\/~hub\/needs\/requests$/, 'Back returns to the list the row was in.');
 
   step('the request page shows the same view: a policy signature, a retry note, usage, and a question with Answer');
   await page.goto(`${live.url}#/~hub/request/${encodeURIComponent(ids.policy)}`);
@@ -88,19 +90,17 @@ try {
   assert.equal((await page.locator('[data-run-state-chip]').innerText()).trim(), 'Asking you');
   assert.equal(await page.locator('[data-run-answer-link]').getAttribute('href'), '#/~hub/needs/question');
 
-  step('phone: the drawer is a bottom sheet the width of the screen with no sideways scroll');
+  step('phone: the job page fits the screen, has a Back button and no tab bar, and does not scroll sideways');
   live.seed.request(proposal(live.now, 'phone', 'Research for the phone'));
   const phone = await open({ width: 375, height: 812 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${live.url}#/~hub/needs/requests`);
   await phone.locator(`[data-request-open="${ids.policy}"]`).click();
-  await phone.locator('[data-run-drawer] [data-run-view]').waitFor();
-  const box = await phone.locator('[data-run-drawer]').boundingBox();
-  assert.equal(Math.round(box.x), 0);
-  assert.equal(Math.round(box.width), 375);
-  assert.ok(Math.round(box.y + box.height) >= 811, 'The drawer sits on the bottom edge.');
-  assert.ok(box.y > 0, 'It is a sheet, not the whole screen.');
-  const widths = await phone.evaluate(() => ({ scroll: document.querySelector('[data-run-drawer]').scrollWidth, inner: document.querySelector('[data-run-drawer]').clientWidth }));
-  assert.ok(widths.scroll <= widths.inner, 'The drawer does not scroll sideways.');
+  await phone.locator('[data-run-view]').waitFor();
+  const back = await phone.locator('[data-back]').boundingBox();
+  assert.ok(back.width >= 44 && back.height >= 44, 'Back is a tap target.');
+  assert.equal(await phone.locator('[data-tabs]').count(), 0, 'No tab bar on a job.');
+  const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+  assert.ok(widths.scroll <= widths.inner, 'The page does not scroll sideways.');
 
   step('Stop on a held run: the request ends Stopped, with the stop in its timeline');
   const held = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Working on it. ', { hold: true }] } });
@@ -111,7 +111,7 @@ try {
   await stopper.goto(`${held.url}#/~hub/needs`);
   await stopper.locator(`[data-need="approval-${ids.hold}"] [data-approval-approve]`).click();
   await stopper.locator('[data-next-note]').waitFor();
-  // The first events connection drops before any data: the drawer opens it again and shows the text once.
+  // The first events connection drops before any data: the page opens it again and shows the text once.
   let eventCalls = 0;
   await stopper.route('**/api/hub/requests/*/events', async route => {
     eventCalls += 1;
@@ -119,18 +119,19 @@ try {
   });
   await stopper.goto(`${held.url}#/~hub/needs/requests`);
   await stopper.locator(`[data-request-open="${ids.hold}"]`).click();
-  const heldDrawer = stopper.locator('[data-run-drawer]');
+  const heldDrawer = stopper.locator('[data-run-view]');
   await heldDrawer.locator('[data-run-text]', { hasText: 'Working on it.' }).waitFor();
-  assert.ok(eventCalls >= 2, 'The drawer reconnected after the drop.');
+  assert.ok(eventCalls >= 2, 'The page reconnected after the drop.');
   assert.equal(await heldDrawer.locator('[data-run-text]').count(), 1, 'The text is not doubled by the reconnect.');
   assert.equal((await heldDrawer.locator('[data-run-text]').innerText()).trim(), 'Working on it.');
   await heldDrawer.locator('[data-run-stop]').click();
+  await heldDrawer.locator('[data-run-stop-confirm]').click();
   await heldDrawer.locator('[data-run-state-chip]', { hasText: /^(Stopping|Stopped)$/ }).waitFor();
   await heldDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   assert.ok(held.fake.objects.has(`sections/inbox/requests/${ids.hold}/stop.json`), 'A signed stop was written.');
   assert.equal(await heldDrawer.locator('[data-run-stop]').count(), 0, 'A stopped run has no Stop.');
 
-  step('Stop from the drawer over Work: the card leaves Running within 3 s, and a quiet drawer sends nothing more');
+  step('Stop from the job page opened from Work: after Back the card has left Running within 3 s, and a quiet page sends nothing more');
   held.seed.request(proposal(held.now, 'work', 'A research on the board'));
   const board = await open({ width: 1280, height: 900 });
   await board.addInitScript(() => { window.__wrote = 0; window.addEventListener('buw:hub-wrote', () => { window.__wrote += 1; }); });
@@ -142,16 +143,20 @@ try {
   await board.locator('.wk-lane').first().waitFor();
   await board.locator('.wk-lane[data-lane="running"] [data-card="request:' + ids.work + '"]').waitFor({ state: 'attached', timeout: ms(30000) });
   await card.evaluate(node => node.click());
-  const boardDrawer = board.locator('[data-run-drawer]');
+  const boardDrawer = board.locator('[data-run-view]');
   await boardDrawer.locator('[data-run-text]', { hasText: 'Working on it.' }).waitFor();
+  assert.match(board.url(), new RegExp(`#/~hub/request/${ids.work}$`), 'The card opens the job as a page.');
   await boardDrawer.locator('[data-run-stop]').click();
+  await boardDrawer.locator('[data-run-stop-confirm]').click();
   await boardDrawer.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   const stoppedAt = Date.now();
-  await board.locator(`[data-card="request:${ids.work}"]`).waitFor({ state: 'detached', timeout: ms(3000) });
+  await board.locator('[data-run-back]').click();
+  await board.locator('.wk-lane').first().waitFor();
+  await board.locator(`.wk-lane[data-lane="running"] [data-card="request:${ids.work}"]`).waitFor({ state: 'detached', timeout: ms(3000) });
   assert.ok(Date.now() - stoppedAt <= 3200, 'Work heard of the stop within 3 s.');
   const wrote = await board.evaluate(() => window.__wrote);
   await board.waitForTimeout(2500);
-  assert.equal(await board.evaluate(() => window.__wrote), wrote, 'A drawer left open on a finished run does not keep announcing.');
+  assert.equal(await board.evaluate(() => window.__wrote), wrote, 'A finished run does not keep announcing.');
 
   step('a tool step that takes a while shows its running time, then done with no time');
   const slow = await startHubFixture({ signing: true, hermes: true, hermesOptions: { runScript: ['Starting. ', { tool: 'cards', preview: 'pull the project', until: 'finish' }, 'Finished.'] } });
@@ -164,7 +169,7 @@ try {
   await waiter.locator('[data-next-note]').waitFor();
   await waiter.goto(`${slow.url}#/~hub/needs/requests`);
   await waiter.locator(`[data-request-open="${ids.slow}"]`).click();
-  const running = waiter.locator('[data-run-drawer] [data-run-tool="running"]');
+  const running = waiter.locator('[data-run-view] [data-run-tool="running"]');
   await running.waitFor();
   // The step runs until the test lets it finish, so a slow PC cannot end it before the page has watched the clock tick.
   const seen = new Set();
@@ -174,8 +179,8 @@ try {
   }
   assert.ok([...seen].filter(text => /running · \d+ s/.test(text)).length >= 3, `The time ticks (saw ${[...seen].join(' | ')}).`);
   slow.hermes.go('finish');
-  const finished = waiter.locator('[data-run-drawer] [data-run-tool="done"]');
-  await openLog(waiter.locator('[data-run-drawer]'), { finished: true });
+  const finished = waiter.locator('[data-run-view] [data-run-tool="done"]');
+  await openLog(waiter.locator('[data-run-view]'), { finished: true });
   await finished.waitFor();
   assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');
 

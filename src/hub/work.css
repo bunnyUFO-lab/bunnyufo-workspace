@@ -1,4 +1,7 @@
 /* Work: the Lanes tab and the tabs over it. M0 tokens only. */
+/* The Work header: the phone's top bar already says Work, so only the New job button stays beside the tabs. */
+.wk-top > .hub-btn { margin-left: auto; }
+@media (max-width: 899px) { .wk-top h2 { display: none; } .wk-top.bare { display: none; } }
 .wk-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
 .wk-tab { padding: 8px 14px; margin-bottom: -1px; font-size: 13px; font-weight: 500; color: var(--t3); text-decoration: none; border-bottom: 2px solid transparent; }
 .wk-tab:hover { color: var(--t1); }

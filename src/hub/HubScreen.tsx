@@ -12,7 +12,6 @@ import Board from './Board'
 import ChecklistView from './ChecklistView'
 import Md from './Md'
 import ReviewView from './ReviewView'
-import RunDrawerHost from './RunDrawer'
 import Chat from './Chat'
 import Jobs from './Jobs'
 import Needs from './Needs'
@@ -55,18 +54,17 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'request' && (route.id ? <ApprovalView key={route.id} id={route.id} /> : <Needs filter="approvals" />)}
-      {route.screen === 'work' && <WorkTabs tab="lanes"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
+      {route.screen === 'work' && <WorkTabs tab="board"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
       {route.screen === 'team' && <Team />}
       {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
-      {route.screen === 'jobs' && <WorkTabs tab="jobs"><Jobs tab={route.id} /></WorkTabs>}
+      {route.screen === 'jobs' && <Jobs tab={route.id} />}
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'project' && <ProjectPage route={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && (chatNote(host) ? <p className="hub-empty" data-hub-chat-note>{chatNote(host)}</p> : <Chat id={route.id} />)}
       {host.write && <SpawnHost />}
-      <RunDrawerHost />
     </div>
   )
 }

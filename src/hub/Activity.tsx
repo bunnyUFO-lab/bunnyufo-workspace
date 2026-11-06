@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import type { HubEvent, HubProject } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import { swap } from '../lib/entries'
 import ItemRow from './ItemRow'
 import ProjectPicker from './ProjectPicker'
 import RefreshNote from './RefreshNote'
@@ -13,6 +14,9 @@ const FILTERS: [string, string, (kind: string) => boolean][] = [
   ['ci', 'CI', kind => kind.startsWith('pr-') || kind.startsWith('ci-')],
   ['alerts', 'Alerts', kind => kind === 'alert'],
 ]
+
+/** A plain left click. A filter is a chip, not a place: it rewrites the address and adds no step. A modified click is left to the browser. */
+const plain = (event: MouseEvent) => event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
 
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
 
@@ -39,7 +43,7 @@ export default function Activity({ filter }: { filter?: string }) {
       </div>
       <div className="hub-chips">
         {FILTERS.map(([key, label]) => (
-          <a key={key} className={`hub-chip${key === active[0] ? ' on' : ''}`} href={hubHash('activity', key)} aria-current={key === active[0] ? 'true' : undefined}>{label}</a>
+          <a key={key} className={`hub-chip${key === active[0] ? ' on' : ''}`} href={hubHash('activity', key)} aria-current={key === active[0] ? 'true' : undefined} data-activity-filter={key} onClick={event => plain(event) && (event.preventDefault(), swap(hubHash('activity', key)))}>{label}</a>
         ))}
       </div>
       <RefreshNote error={error} hasData={!!data} at={at} />

@@ -80,15 +80,17 @@ try {
       assert.ok(actionsBox.y >= titleBox.y + titleBox.height - 1, 'the buttons sit under the title');
     }
 
-    step(`${label}: the Working now row opens the run drawer`);
+    step(`${label}: the Working now row opens the job's page, and Back returns to Today`);
     await page.goto(`${fx.url}#/~hub/today`);
     await page.locator('[aria-label="Working now"] [data-run-open]').click();
-    await page.locator('dialog[data-run-drawer][open]').waitFor();
-    await page.locator('dialog[data-run-drawer]', { hasText: 'Help me make a deck' }).waitFor();
-    await page.keyboard.press('Escape');
+    await page.locator('[data-run-view]').waitFor();
+    await page.locator('.hub-top', { hasText: 'Help me make a deck' }).waitFor();
+    await page.goBack();
+    await page.locator('[aria-label="Working now"]').waitFor();
+    assert.match(page.url(), /#\/~hub\/today$/);
   }
 
-  step('the drawer of the finished run links to the card in the assistant section');
+  step('the page of the finished run links to the card in the assistant section');
   const page = await open({ width: 1280, height: 900 });
   await page.goto(`${fx.url}#/~hub/today`);
   await page.locator('[aria-label="Since yesterday"] [data-run-event="run-finished"] [data-run-event-open]').click();
@@ -112,7 +114,7 @@ try {
   await toast.waitFor();
   assert.match(await toast.innerText(), /Approved\. .*Working now/);
   await toast.locator('[data-spawn-toast-link="run"]').click();
-  await spawn.locator('dialog[data-run-drawer][open]').waitFor();
+  await spawn.waitForURL(/#\/~hub\/request\/[\w-]+$/);   // the approve is stubbed, so the new request has no page to show: the address is the proof
 
   console.log('hub-runs-dash-ui: passed');
 } finally {

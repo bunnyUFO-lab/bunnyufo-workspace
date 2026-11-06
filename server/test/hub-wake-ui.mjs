@@ -71,7 +71,7 @@ try {
   await view.locator('[data-next-note]').waitFor();
   await view.goto(`${drawerFixture.url}#/~hub/needs/requests`);
   await view.locator(`[data-request-open="${PC_REQUEST}"]`).click();
-  const drawer = view.locator('[data-run-drawer]');
+  const drawer = view.locator('[data-run-view]');
   await drawer.waitFor();
   assert.match(await drawer.locator('[data-run-pc-start]').innerText(), /Starts on the PC within a few minutes/);
   await drawer.locator('[data-wake-button]').waitFor();

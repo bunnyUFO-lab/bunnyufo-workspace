@@ -339,9 +339,8 @@ try {
     const page = await open({ width: 390, height: 844 });
     await go(page);
     const spawn = page.locator('[data-spawn-open]');
-    assert.equal((await spawn.innerText()).trim(), 'Spawn');
-    assert.equal(await spawn.getAttribute('aria-label'), 'Spawn work');
-    assert.equal(await page.getByRole('button', { name: 'Spawn work' }).count(), 1);
+    assert.equal((await spawn.innerText()).trim(), 'New job');
+    assert.equal(await page.getByRole('button', { name: 'New job' }).count(), 1);
     await spawn.tap();
     await page.locator('[data-spawn-sheet]').waitFor();
     await page.keyboard.press('Escape');
@@ -370,7 +369,7 @@ try {
       await go(page);
       assert.equal(await page.locator('[data-work-bar], [data-work-filters]').count(), 0, `No bar at ${width}.`);
       assert.deepEqual(await page.locator('.work').evaluate(node => [...node.children].map(child => child.className)), baseChildren, `The children of .work at ${width} are the base branch's.`);
-      assert.equal((await page.locator('[data-spawn-open]').innerText()).trim(), 'Spawn work');
+      assert.equal((await page.locator('[data-spawn-open]').innerText()).trim(), 'New job');
       assert.match(await page.locator('.work-spawn').innerText(), /Project/);
       assert.equal(await page.locator('[role="dialog"]').count(), 0);
       await page.close();

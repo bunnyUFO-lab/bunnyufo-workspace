@@ -40,7 +40,7 @@ const go = (page, hash) => page.evaluate(next => { location.hash = next; }, hash
 const SCREENS = [
   { name: 'Today', hash: '#/~hub/today', scope: '[data-today-project]' },
   { name: 'Work', hash: '#/~hub/work', scope: '.work' },
-  { name: 'Roadmap', hash: '#/~hub/map', scope: '.hub-map-chips' },
+  { name: 'Roadmap', hash: '#/~hub/map/magic-loops', scope: '.hub-map-chips' },
   { name: 'Project', hash: '#/~hub/project/magic-loops', scope: '.pp' },
   { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]' },
   { name: 'Needs', hash: '#/~hub/needs', scope: '[data-needs-project]' },
@@ -100,7 +100,7 @@ try {
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
     await none(page, 'Work after a pick');
 
-    await go(page, '#/~hub/map');
+    await go(page, '#/~hub/map/magic-loops');
     select = await ready(page, '.hub-map-chips');
     const values = await select.locator('option:not([hidden])').evaluateAll(list => list.map(item => item.value));
     const current = await select.inputValue();
@@ -141,7 +141,7 @@ try {
     await page.goto(`${fixture.url}#/~hub/work`);
     await (await ready(page, '.work')).selectOption('lanes');
     await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
-    await go(page, '#/~hub/map');
+    await go(page, '#/~hub/map/lanes');
     await expect(await ready(page, '.hub-map-chips')).toHaveValue('lanes');
     await go(page, '#/~hub/project');
     await expect(await ready(page, '.pp')).toHaveValue('lanes');
@@ -180,7 +180,7 @@ try {
     await select.selectOption('all');
     await page.waitForFunction(() => location.hash === '#/~hub/work/all');
 
-    for (const [hash, scope] of [['#/~hub/map', '.hub-map-chips'], ['#/~hub/project/magic-loops', '.pp']]) {
+    for (const [hash, scope] of [['#/~hub/map/magic-loops', '.hub-map-chips'], ['#/~hub/project/magic-loops', '.pp']]) {
       await go(page, hash);
       select = await ready(page, scope);
       assert.equal(await select.locator('option[value="all"]').count(), 0, `${scope}: no All.`);
@@ -273,7 +273,7 @@ try {
   step('Above ten projects at 390 px: still one native select, 44 px high, with every project');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${many.url}#/~hub/map`);
+    await page.goto(`${many.url}#/~hub/map/magic-loops`);
     const select = await ready(page, '.hub-map-chips');
     assert.equal(await select.evaluate(node => node.tagName), 'SELECT', 'A select above ten projects.');
     assert.equal(await page.locator('.hub-map-chips input[role="combobox"]').count(), 0, 'No text field above ten projects.');

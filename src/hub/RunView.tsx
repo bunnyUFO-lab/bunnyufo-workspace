@@ -5,11 +5,11 @@ import type { Deliverable } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
 import { hubHash, mapHash } from '../lib/route'
+import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
 import RunReply from './RunReply'
-import { RUN_EVENT, takeRun } from './runStore'
 import type { LiveLine } from './runLines'
 import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
@@ -187,9 +187,9 @@ function DeliverableCard({ item }: { item: Deliverable }) {
   }
   if (item.kind === 'task') {
     return (
-      <div className="rd-dl" data-run-deliverable="task">
+      <div className="rd-dl" data-run-deliverable="task" data-task-id={item.id}>
         <b>{item.title ?? item.id}</b>
-        <span className="hub-muted">Task · {item.id}</span>
+        <span className="hub-muted">Task · <span className="hub-id" data-run-task-id>{item.id}</span></span>
         <div className="rd-links"><a className="hub-btn pri" href={mapHash(item.project, item.id)} data-run-task>Open</a></div>
       </div>
     )
@@ -216,6 +216,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const [report, setReport] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  const [confirmStop, setConfirmStop] = useState(false)
   // A copy made by the cloud move names the request it replaces; that one's stop says it was moved.
   const replaces = detail?.request.replaces
   const { data: older } = useHubData<RunDetail>(replaces ? `/requests/${encodeURIComponent(replaces)}` : null)
@@ -328,6 +329,13 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       )}
     </>
   )
+  // A job that is still going shows its log open, under the timeline; a delivered one keeps the same log closed under what it delivered.
+  const liveFold = (live || lines.length > 0) && (
+    <details className="rd-did rd-livelog" data-run-livelog open>
+      <summary>Live log</summary>
+      <Live lines={lines} ended={ended} />
+    </details>
+  )
   const resultBlock = (
     <>
       {result && (result.outcome !== 'question' || result.summary) && (
@@ -389,7 +397,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   const deliverablesBlock = (
     <>
       {/* A failed job with nothing to open has no Deliverables block at all: the failure above is the whole answer. */}
-      {(dlist.length > 0 || !failed) && <h4 className="rd-h">Deliverables</h4>}
+      {(dlist.length > 0 || !failed) && <h4 className="rd-h">What it delivered</h4>}
       {(dlist.length > 0 || !failed) && <div className="rd-dls" data-run-deliverables>
         {dlist.map(item => <DeliverableCard key={deliverableKey(item)} item={item} />)}
         {!dlist.length && (
@@ -408,7 +416,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         {!page && request.preset && <span className="ni-chip" data-run-preset>{request.preset.replace(/-/g, ' ')}</span>}
         <span className={`ni-chip rd-state ${detail.stale ? 'stale' : state}`} data-run-state-chip>{requestStateWord(state, detail.stale, STATE_WORD)}</span>
         {delivered && kind && <span className="ni-chip" data-run-agent>{kind}</span>}
-        {page && delivered && <a className="rd-back" href={hubHash('jobs', 'finished')} data-run-back>← Jobs</a>}
+        {page && <a className="rd-back" href={hubHash('jobs', delivered || failed ? 'finished' : 'running')} onClick={event => { event.preventDefault(); back(hubHash('jobs', delivered || failed ? 'finished' : 'running')) }} data-run-back>← Work</a>}
       </div>
       {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
       {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
@@ -443,7 +451,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         <>
           {failed && !result && failure}
           {timeline}
-          {liveBlock}
+          {liveFold}
           {resultBlock}
         </>
       )}
@@ -451,7 +459,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
       {delivered && didSomething && (
         <details className="rd-did" data-run-did>
-          <summary>What it did</summary>
+          <summary>Live log</summary>
           {startFailed && result?.summary && <p className="hub-muted" data-run-failure-detail>{result.summary}</p>}
           {timeline}
           {liveBlock}
@@ -462,7 +470,14 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       {problem && <p className="hub-error" role="alert" data-run-error>{problem}</p>}
       {(stoppable || again) && (
         <div className="ni-a rd-foot">
-          {stoppable && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => void act(async () => { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) })} data-run-stop>{state === 'asking' ? 'Stop this job' : 'Stop'}</button>}
+          {stoppable && !confirmStop && <button type="button" className="hub-btn danger" disabled={busy || state === 'stopping'} onClick={() => setConfirmStop(true)} data-run-stop>{state === 'asking' ? 'Stop this job' : 'Stop'}</button>}
+          {stoppable && confirmStop && (
+            <span className="rd-confirm" role="group" aria-label="Stop this job?" data-run-stop-ask>
+              <span>Stop this job?</span>
+              <button type="button" className="hub-btn danger" disabled={busy} onClick={() => void act(async () => { try { await hubPost(`/requests/${encodeURIComponent(id)}/stop`, {}) } finally { setConfirmStop(false) } })} data-run-stop-confirm>Yes, stop it</button>
+              <button type="button" className="hub-btn" disabled={busy} onClick={() => setConfirmStop(false)} data-run-stop-cancel>Keep going</button>
+            </span>
+          )}
           {again && <button type="button" className="hub-btn pri" disabled={busy} onClick={() => void act(async () => {
             const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(id)}/again`, { target })
             onGone?.(made.id)
@@ -474,37 +489,6 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   )
 }
 
-/** The drawer: a side panel on a desktop and a bottom sheet on a phone (runs.css). A modal dialog, so Escape and the focus trap come with it. */
-function RunDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  const [shown, setShown] = useState(id)
-  useEffect(() => {
-    const node = dialog.current
-    if (node && !node.open) node.showModal()
-    node?.querySelector<HTMLElement>('.rd-close')?.focus()
-  }, [])
-  return (
-    <dialog ref={dialog} className="run-drawer" aria-labelledby="run-drawer-title" data-run-drawer onClose={onClose} onClick={event => {
-      if (event.target !== dialog.current) return
-      // A click on the backdrop closes the drawer and then goes on to what is under it, so the first click on the board is not lost.
-      const { clientX, clientY } = event
-      dialog.current?.close()
-      // Only to what opens a run (a card, a row, an Open run link): never to a button, a link or a field that acts, so a tap that meant to dismiss cannot Approve, Stop or Retry.
-      const under = document.elementFromPoint(clientX, clientY)
-      if (!(under instanceof HTMLElement) || under.closest('button, input, select, textarea, label, summary')) return
-      under.closest<HTMLElement>('[data-run-open]')?.click()
-    }}>
-      <div className="sp-head">
-        <h2 id="run-drawer-title">Run</h2>
-        <a className="hub-btn rd-page" href={hubHash('request', shown)} onClick={() => dialog.current?.close()}>Open as a page</a>
-        <button type="button" className="hub-btn sp-x rd-close" aria-label="Close" onClick={() => dialog.current?.close()}>×</button>
-      </div>
-      <div className="sp-body"><RunView key={shown} id={shown} onGone={setShown} /></div>
-    </dialog>
-  )
-}
-
-/** Mounted once in the Hub screen: opens the drawer when `openRun` is called, and gives the focus back to what opened it. */
 /** An approved PC request starts at the watcher's next tick, within a few minutes; when the PC reads as asleep or off, it can be woken from here. */
 function PcStart() {
   const wake = usePcWake()
@@ -514,30 +498,4 @@ function PcStart() {
       <WakeButton wake={wake} />
     </div>
   )
-}
-
-export default function RunDrawerHost() {
-  // An object per opening: the close event of a drawer that a click re-opened (even on the same run) belongs to the old one.
-  const [shown, setShown] = useState<{ id: string; n: number } | null>(null)
-  const opened = useRef(0)
-  const opener = useRef<HTMLElement | null>(null)
-  useEffect(() => {
-    const open = () => {
-      const next = takeRun()
-      if (!next) return
-      if (!(document.activeElement instanceof HTMLElement && document.activeElement.closest('dialog'))) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      setShown({ id: next, n: ++opened.current })
-    }
-    window.addEventListener(RUN_EVENT, open)
-    return () => window.removeEventListener(RUN_EVENT, open)
-  }, [])
-  const showing = !!shown
-  useEffect(() => {
-    if (showing) return
-    const back = opener.current
-    opener.current = null
-    if (back && document.contains(back)) back.focus({ preventScroll: true })
-  }, [showing])
-  // The close event comes a moment after close(): by then a click that went on to another run may have set the next id, which stays.
-  return shown ? <RunDrawer key={shown.n} id={shown.id} onClose={() => setShown(current => (current === shown ? null : current))} /> : null
 }

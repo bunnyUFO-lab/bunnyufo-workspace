@@ -68,7 +68,7 @@ try {
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.type('magic');
-  // The roadmaps come from a second fetch; until they land only the "Spawn: magic" command matches, and Enter would open that.
+  // The roadmaps come from a second fetch; until they land only the "New job: magic" command matches, and Enter would open that.
   await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
   await page.keyboard.press('Enter');
   await page.locator('.hub[data-screen="map"]').waitFor();
@@ -111,7 +111,7 @@ try {
   await dialog.waitFor({ state: 'detached' });
   assert.ok(await search.evaluate(el => el === document.activeElement), 'The search box has the focus again.');
 
-  step('Tab stays inside, arrows move the selection, no match leaves only the Spawn command');
+  step('Tab stays inside, arrows move the selection, no match leaves only the New job command');
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.press('Tab');
@@ -120,9 +120,9 @@ try {
   assert.equal(await dialog.locator('[role="option"][aria-selected="true"]').evaluate(el => el.id), await dialog.locator('input').getAttribute('aria-activedescendant'));
   assert.equal(await dialog.locator('[role="option"]').nth(1).getAttribute('aria-selected'), 'true');
   await page.keyboard.type('zzzzqq');
-  // Nothing matches a place or a card; with the Hub on and write allowed, what is left is the Spawn command for those words.
-  await dialog.locator('[role="option"]', { hasText: 'Spawn: zzzzqq' }).waitFor();
-  assert.equal(await dialog.locator('[role="option"]').count(), 1, 'Only the Spawn command is left.');
+  // Nothing matches a place or a card; with the Hub on and write allowed, what is left is the New job command for those words.
+  await dialog.locator('[role="option"]', { hasText: 'New job: zzzzqq' }).waitFor();
+  assert.equal(await dialog.locator('[role="option"]').count(), 1, 'Only the New job command is left.');
   await page.keyboard.press('Escape');
 
   step('the rail button opens it and shows the key; the shortcut sheet lists it');
@@ -163,7 +163,7 @@ try {
   await odd.keyboard.press('Control+k');
   await odd.locator('dialog.pal').waitFor();
   await odd.keyboard.type('magic');
-  await odd.locator('dialog.pal [role="option"]', { hasText: /spawn/i }).first().waitFor();
+  await odd.locator('dialog.pal [role="option"]', { hasText: /new job/i }).first().waitFor();
   await odd.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
   assert.equal(await odd.locator('dialog.pal .pal-g', { hasText: /^roadmaps$/i }).count(), 0, 'The unreadable list shows no roadmaps.');
   await odd.keyboard.press('Escape');

@@ -9,7 +9,7 @@ import { hubHash } from '../lib/route'
 import { takeHandoff } from './flash'
 import NextNote from './NextNote'
 import Combobox from './Combobox'
-import { RunView } from './RunDrawer'
+import { RunView } from './RunView'
 import { cachedPresets, loadPresets } from './spawnData'
 import { openSpawn } from './spawnStore'
 import { goNext, useQueueOrder } from './useGoNext'
@@ -249,7 +249,7 @@ export default function ApprovalView({ id }: { id: string }) {
       {handoff && <NextNote note={handoff} />}
       <div className="hub-top">
         <h2>{title}</h2>
-        <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill">{detail.request.id}</span></span>
+        <span><PageProjectChip id={detail.request.project} /> <span className="hub-pill" data-request-id>{detail.request.id}</span></span>
       </div>
       <section className="hub-panel ap-page" aria-label="Request">
         <ApprovalBody id={id} onSettled={settle} page />

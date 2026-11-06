@@ -130,7 +130,7 @@ try {
   await page.keyboard.press('Control+k');
   await page.locator('.pal input[role="combobox"]').fill('spawn teardown of how balatro teaches its rules');
   const first = page.locator('.pal-i').first();
-  assert.equal((await first.locator('.pal-i-label').innerText()).trim(), 'Spawn: teardown of how balatro teaches its rules');
+  assert.equal((await first.locator('.pal-i-label').innerText()).trim(), 'New job: teardown of how balatro teaches its rules');
   await page.keyboard.press('Enter');
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-spawn-text]').inputValue(), 'teardown of how balatro teaches its rules');
@@ -141,10 +141,10 @@ try {
   await page.evaluate(() => { location.hash = '#/hub'; });
   await page.keyboard.press('Control+k');
   await page.locator('.pal input[role="combobox"]').fill('market research on tug-of-war');
-  await page.locator('.pal-i', { hasText: 'Spawn: market research on tug-of-war' }).click();
+  await page.locator('.pal-i', { hasText: 'New job: market research on tug-of-war' }).click();
   await page.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await page.locator('[data-preset="market-research"]').getAttribute('aria-pressed'), 'true');
-  assert.match(page.url(), /#\/~hub\/today$/);
+  assert.match(page.url(), /#\/~hub\/today\/~o$/, 'The Hub is Today, and the open sheet is its own history entry.');
   await page.keyboard.press('Escape');
 
   step('Approve: with the capability on the button reads Approve and each target has its toast, and a wait says why');

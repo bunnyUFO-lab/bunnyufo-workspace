@@ -200,7 +200,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
         <AwayToggle />
         {(waiting > 0 || host.write) && (
           <div className="needs-actions">
-            {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>Spawn</button>}
+            {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>}
             {waiting > 0 && <button type="button" className="hub-btn needs-next" data-answer-next onClick={answerNext}>Answer the next one</button>}
           </div>
         )}

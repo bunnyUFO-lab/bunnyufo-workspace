@@ -6,14 +6,14 @@ import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
 import { needsHref } from '../lib/needsView.mjs'
-import ItemRow, { openFromClick } from './ItemRow'
+import ItemRow from './ItemRow'
 import PcTile from './PcTile'
 import ProjectPicker from './ProjectPicker'
 import { ProjectLink } from './ProjectChip'
 import UnaskedPanel from './UnaskedPanel'
 import WorkingNow from './WorkingNow'
 import NeedsRows, { Icon } from './NeedsRows'
-import { openRun } from './runStore'
+import { go } from '../lib/entries'
 import { openSpawn } from './spawnStore'
 import { todayFor } from './todayFilter.ts'
 import RefreshNote from './RefreshNote'
@@ -88,7 +88,7 @@ function AlertsPanel({ alerts, count, index, project }: { alerts: HubEvent[]; co
       {alerts.length ? alerts.slice(0, 5).map(event => (
         <div key={event.key ?? event.file} className="alert-row" data-alert>
           <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
-          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} onClick={click => openFromClick(click, event.request as string)} data-alert-run={event.request} data-run-open={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} data-alert-run={event.request} data-run-open={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
           {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
           {host.write && event.key && <button type="button" className="hub-btn alert-dismiss" disabled={busy} onClick={() => void send('dismiss', [event.key as string])} aria-label={`Dismiss: ${event.title}`} data-alert-dismiss>Dismiss</button>}
         </div>
@@ -107,7 +107,7 @@ function MoveTile({ offer }: { offer: MoveOffer }) {
     try {
       const made = await hubPost<{ id: string }>(`/requests/${encodeURIComponent(offer.request)}/move-to-cloud`, {})
       window.dispatchEvent(new Event(HUB_WROTE))
-      openRun(made.id)
+      go(hubHash('request', made.id))
     } catch (failure) { setProblem(failure instanceof Error ? failure.message : 'It did not work.') } finally { setBusy(false) }
   }
   return (
@@ -206,7 +206,7 @@ export default function Today() {
         <div className="today-actions">
           <span className="hub-muted">Updated {at ? clock(at.toISOString()) : ''}</span>
           <button type="button" className="hub-btn today-icon" onClick={reload} aria-label="Refresh"><Icon paths={ICON_REFRESH} /></button>
-          {host.write && <button type="button" className="hub-btn" onClick={() => openSpawn(project ? { project } : {})} data-spawn-open>Spawn</button>}
+          {host.write && <button type="button" className="hub-btn" onClick={() => openSpawn(project ? { project } : {})} data-spawn-open>New job</button>}
           <a className="hub-btn today-primary" href={needsLink} data-today-open>Open Needs you · <span className="today-num">{counts.needsYou}</span></a>
         </div>
       </header>

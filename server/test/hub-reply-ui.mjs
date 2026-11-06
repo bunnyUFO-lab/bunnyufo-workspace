@@ -244,6 +244,7 @@ try {
   // the page then stops following the run and shows the reply as sent until its next minute poll.
   await stopper.locator(`[data-run-view="${steerIds.stopped}"][data-run-state="running"]`).waitFor();
   await held.locator('[data-run-stop]').click();
+  await held.locator('[data-run-stop-confirm]').click();
   await held.locator('[data-run-state-chip]', { hasText: 'Stopped' }).waitFor();
   await openLog(held, { finished: true });
   const queuedRow = held.locator('[data-step="reply"]');

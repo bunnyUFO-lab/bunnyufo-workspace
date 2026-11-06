@@ -130,7 +130,7 @@ test('a sheet is a /~o tail, and its action takes it off first', async () => {
   assert.equal(ran, 2, 'With no sheet open the action runs at once.');
 });
 
-test('no source file calls pushState outside lib/entries', () => {
+test('no source file calls pushState or replaceState(null) outside lib/entries', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src');
   const bad = [];
   const walk = dir => {
@@ -140,6 +140,8 @@ test('no source file calls pushState outside lib/entries', () => {
       if (!/\.(ts|tsx)$/.test(name) || file.endsWith(`${path.sep}entries.ts`)) continue;
       const text = readFileSync(file, 'utf8');
       if (/history\.pushState\(/.test(text)) bad.push(`${path.relative(root, file)}: pushState`);
+      // From the Work item on: replaceState(null) wipes the entry's serial, so every rewrite goes through swap().
+      if (/replaceState\(\s*null/.test(text)) bad.push(`${path.relative(root, file)}: replaceState(null`);
     }
   };
   walk(root);

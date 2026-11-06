@@ -7,7 +7,6 @@ import type { ReactNode } from 'react'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
 import { stateOf } from './team/spriteState'
-import { openFromClick } from './ItemRow'
 import { RUNNER_LABEL, STATE_DOT, duration, presetLabel, runStateLabel } from './working'
 import './working.css'
 
@@ -55,7 +54,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
   const what: ReactNode[] = isRun ? [item.preset ? presetLabel(item.preset) : '', projectLink].filter(Boolean) : where
   const title = item.state === 'needs-you' && !isRun
     ? <a href={needsHref(item, blocked)}>{item.title}</a>
-    : runHref && isRun ? <a href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>{item.title}</a> : item.title
+    : runHref && isRun ? <a href={runHref} data-run-open={item.request}>{item.title}</a> : item.title
   return (
     <div className={`wn-row wn-${item.state}`} data-working={item.state} data-source={item.source}>
       <span className="wn-sprite"><AgentSprite sprite={sprite} size={32} name={name} state={stateOf({ status: item.state === 'idle' || item.state === 'stale' ? 'idle' : item.state === 'stopping' ? 'working' : item.state, now })} /></span>
@@ -71,7 +70,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
         <span className="wn-state"><span className={`dot st-${STATE_DOT[item.state]}${item.state === 'working' ? ' live' : ''}`} aria-hidden="true" />{runStateLabel(item, now)}</span>
         {item.runner && <span className="wn-runner" data-runner={item.runner}>{RUNNER_LABEL[item.runner]}</span>}
         {since && <small>{since}</small>}
-        {!isRun && item.request && <a className="wn-open" href={runHref} onClick={event => openFromClick(event, item.request as string)} data-run-open={item.request}>Open run</a>}
+        {!isRun && item.request && <a className="wn-open" href={runHref} data-run-open={item.request}>Open run</a>}
         {link && <a className="wn-open" href={link} target="_blank" rel="noopener noreferrer">Open session</a>}
       </span>
     </div>
