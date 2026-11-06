@@ -129,21 +129,16 @@ try {
   await page.locator('.hub-row', { hasText: 'Update the router settings' }).waitFor();
   assert.equal(await page.locator('.ni').count(), 0, 'Answered is history, not cards.');
 
-  step('a Today row opens the list on its item, flashed');
+  step('a Today row opens its own page for an item that has one (the flash on the list on a linked item is the event-file step below)');
   await go(page, '#/~hub/today');
   const row = page.locator('.nrow[data-nrow="steps"]');
   await row.waitFor();
   await row.click();
-  await page.locator('.hub[data-screen="needs"]').waitFor();
-  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor();
-  const top = await page.evaluate(id => {
-    const card = document.querySelector(`[data-need="checklist-${id}"]`).getBoundingClientRect();
-    const hub = document.querySelector('.hub').getBoundingClientRect();
-    return card.top - hub.top;
-  }, FIXTURE_CHECKLIST);
-  assert.ok(top >= 0 && top < 120, `The item is scrolled to the top of the list (${top} px).`);
-  await page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"].flash`).waitFor({ state: 'detached', timeout: ms(4000) });
+  await page.locator('.hub-cl').waitFor();
+  assert.equal(await page.evaluate(() => location.hash), `#/~hub/checklist/${FIXTURE_CHECKLIST}`);
 
+  await go(page, '#/~hub/needs');
+  await page.locator('.ni').first().waitFor();
   assert.equal(await page.locator('.ni').first().evaluate(node => getComputedStyle(node).transitionDuration), '0s', 'No collapse animation with reduced motion.');
 
   step('an Ask is answered where it stands: pick B, write a note, send; the card leaves with no animation under reduced motion');
@@ -398,6 +393,9 @@ try {
   assert.equal(await reduced.locator('[data-next-note]').count(), 0, 'No note on the settled item itself.');
 
   step('next item, from a deep link: Submit lands on the next item with the note, and the browser Back returns to the list');
+  // The old behaviour is now the Settings choice "Next item after answering": a page stays on the item unless it is on.
+  await reduced.evaluate(() => localStorage.setItem('hub.autoNext', '1'));
+
   await go(reduced, `#/~hub/checklist/${listOne.id}`);
   await reduced.locator('[data-submit]').waitFor();
   await reduced.locator('[data-submit]').click();

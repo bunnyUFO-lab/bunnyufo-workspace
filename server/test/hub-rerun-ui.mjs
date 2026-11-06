@@ -47,6 +47,7 @@ try {
 
   for (const [name, viewport] of [['1280', { width: 1280, height: 900 }], ['375', { width: 375, height: 800 }]]) {
     const context = await browser.newContext({ viewport, serviceWorkers: 'block' });
+    await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
     const page = await context.newPage();
     page.setDefaultTimeout(ms(15000));
     page.on('pageerror', error => { throw error; });

@@ -162,7 +162,8 @@ try {
   await card.locator('[data-option="A"] button').click();
   await card.getByRole('button', { name: 'Send answer' }).dblclick();
   await desk.locator('[data-undo-toast]', { hasText: 'Answered: Which dust puff?' }).waitFor();
-  assert.equal(await desk.locator('.ni', { hasText: 'Which dust puff?' }).count(), 0, 'The card is out of the list while it is held, with a double tap too.');
+  await desk.waitForTimeout(400);
+  assert.equal(await desk.locator('.ni:not(.leaving)', { hasText: 'Which dust puff?' }).count(), 0, 'The card is out of the list while it is held, with a double tap too.');
   await desk.locator('[data-undo-toast]', { hasText: 'Not sent: Which dust puff?. The store said no.' }).waitFor();
   await desk.locator('.ni', { hasText: 'Which dust puff?' }).waitFor();
   assert.equal(postsFor(FOURTH), 1, 'A double tap made one POST.');

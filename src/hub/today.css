@@ -79,3 +79,6 @@
 .unasked-row .hub-map-panel-mark.marked { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
 .hub-map-panel-confirm { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--s2); font-size: 13px; }
 .hub-map-panel-confirm p { margin: 0 0 8px; }
+
+/* The Project page keeps this small label above its name. */
+.today-eyebrow { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--t3); font-variant-numeric: tabular-nums; }

@@ -66,6 +66,7 @@ const browser = await chromium.launch({ headless: true, channel });
 const contexts = [];
 const open = async (viewport, options = {}) => {
   const context = await browser.newContext({ viewport, reducedMotion: 'reduce', ...options });
+  await context.addInitScript(() => { try { localStorage.setItem('hub.undoMs', '0'); } catch { /* no storage */ } });
   contexts.push(context);
   // These tests draw the whole map; the Roadmap's default filter (Open) is covered by hub-map-filter-ui.mjs.
   await context.addInitScript(() => {

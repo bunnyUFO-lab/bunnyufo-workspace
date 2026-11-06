@@ -125,13 +125,21 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const holdable = ask.requirePasskey !== true && !ask.rerun && !ask.agentEdit && !ask.avatar
   const answerVerb: AskVerb = kind ? 'reviewed' : 'answered'
   const sendNow = () => { setBigConfirm(false); return act(() => hubPost(`${base}/answer`, answerBody()), answerVerb) }
+  // A held answer that loses the race says who answered first, in the words the open form used to show.
+  const sendHeld = async (keepalive: boolean, body: unknown) => {
+    try { return await hubPost(`${base}/answer`, body, undefined, false, keepalive) } catch (failure) {
+      const existing = failure instanceof HubError && failure.status === 409 ? (failure.body?.answer ?? null) as AskAnswer | null : null
+      if (existing) throw new Error(`Already answered by ${existing.by} at ${when(existing.at)}.`)
+      throw failure
+    }
+  }
   const send = () => {
     const body = answerBody()
     if (!holdable) return sendNow()
     if (JSON.stringify(body).length > KEEPALIVE_LIMIT) { setBigConfirm(true); return Promise.resolve() }
     setProblem(null)
     setNotice(null)
-    if (hold({ key: `ask-${askId}`, title: text(ask.question).slice(0, 90), verb: kind ? 'Review sent' : 'Answered', send: keepalive => hubPost(`${base}/answer`, body, undefined, false, keepalive) })) onSettled?.(answerVerb)
+    if (hold({ key: `ask-${askId}`, title: text(ask.question).slice(0, 90), verb: kind ? 'Review sent' : 'Answered', send: keepalive => sendHeld(keepalive, body) })) onSettled?.(answerVerb)
     return Promise.resolve()
   }
   return {
