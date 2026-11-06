@@ -1,8 +1,7 @@
 // A project's page, the parts with no screen in them: which tab an address names, which milestone a sprint would run on, and the tab counts.
 // `.ts` imports with the suffix so node can test this file.
 import type { HubProject, MapMilestone, MapTask, ProgressMap, Today } from '../lib/hub.ts'
-import { isLater, tallyOf } from './mapCount.ts'
-import type { Tally } from './mapCount.ts'
+import { isLater } from './mapCount.ts'
 import { todayFor } from './todayFilter.ts'
 
 export const PROJECT_TABS = ['roadmap', 'work', 'cards'] as const
