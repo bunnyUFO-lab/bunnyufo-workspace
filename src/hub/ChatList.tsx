@@ -233,11 +233,31 @@ export default function ChatList({ list, agents, activeId }: { list: HubData<Cha
   )
 }
 
+const SET_ASIDE_PAGE = 100
+
 /** `#/~hub/chat/archived` and `chat/trash`: the chats set aside, each with Restore. Opening one reads it. */
 export function ChatSetAside({ view, agents, personas, models }: { view: 'archived' | 'trash'; agents: TeamAgent[]; personas: ChatPersona[]; models: { id: string; label: string }[] }) {
-  const read = useHubData<ChatListAnswer>(`/chat?view=${view}&limit=100`)
+  const read = useHubData<ChatListAnswer>(`/chat?view=${view}&limit=${SET_ASIDE_PAGE}`)
   const names = useNames(personas, agents, models)
-  const rows = read.data?.conversations ?? []
+  // Later pages are read by offset, as the main list does, and dropped when anything is written (a Restore takes a row out of every offset).
+  const [extra, setExtra] = useState<{ view: string; rows: ChatSummary[] }>({ view, rows: [] })
+  const [paging, setPaging] = useState(false)
+  useEffect(() => {
+    const clear = () => setExtra(current => ({ ...current, rows: [] }))
+    window.addEventListener(HUB_WROTE, clear)
+    return () => window.removeEventListener(HUB_WROTE, clear)
+  }, [])
+  const base = read.data?.conversations ?? []
+  const more = extra.view === view ? extra.rows : []
+  const rows = [...base, ...more.filter(item => !base.some(row => row.id === item.id))]
+  const total = read.data?.total ?? rows.length
+  const showMore = async () => {
+    setPaging(true)
+    try {
+      const page = await hubGet<ChatListAnswer>(`/chat?view=${view}&limit=${SET_ASIDE_PAGE}&offset=${rows.length}`)
+      setExtra(current => ({ view, rows: [...(current.view === view ? current.rows : []), ...page.conversations] }))
+    } catch { /* the button stays: try again */ } finally { setPaging(false) }
+  }
   const title = view === 'trash' ? 'Trash' : 'Archived chats'
   return (
     <div className="cl" data-chat-set-aside={view}>
@@ -260,7 +280,7 @@ export function ChatSetAside({ view, agents, personas, models }: { view: 'archiv
             ))}
           </div>
         )}
-        {read.data?.more && <p className="cl-note">Showing the newest {rows.length} of {read.data.total}.</p>}
+        {rows.length > 0 && rows.length < total && <div className="cl-more"><Button wide disabled={paging} data-chat-more onClick={() => void showMore()}>Show more ({total - rows.length} left)</Button></div>}
       </div>
     </div>
   )
