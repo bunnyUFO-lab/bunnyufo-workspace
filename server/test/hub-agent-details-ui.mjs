@@ -52,13 +52,13 @@ await new Promise(resolve => setTimeout(resolve, 150));
 const bare = await startHubFixture({});
 
 try {
-  step('Team: every card has a Details link, and the one for Hermes opens #/~hub/agent/hermes');
+  step('Team: every row is a link to its page, and the one for Hermes opens #/~hub/agent/hermes');
   const desk = await open({ width: 1280, height: 800 });
   await desk.goto(`${fresh.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
-  assert.equal(await desk.locator('[data-details-open]').count(), 7);
-  assert.equal(await desk.locator('[data-details-open="claude"]').getAttribute('href'), '#/~hub/agent/claude');
-  await desk.locator('[data-details-open="hermes"]').click();
+  await desk.locator('.team-row').first().waitFor();
+  assert.equal(await desk.locator('.team-row').count(), 7);
+  assert.equal(await desk.locator('.team-row[data-agent="claude"]').getAttribute('href'), '#/~hub/agent/claude');
+  await desk.locator('.team-row[data-agent="hermes"]').click();
   await details(desk, 'hermes').locator('.ad-facts').waitFor();
   assert.equal(new URL(desk.url()).hash, '#/~hub/agent/hermes');
   assert.equal(await desk.locator('[data-rail] [data-nav="team"]').getAttribute('aria-current'), 'page', 'Team stays the current entry on the rail.');
@@ -66,20 +66,24 @@ try {
   step('who it is, and the profile it runs on');
   const page = details(desk, 'hermes');
   assert.equal(await page.locator('h2').innerText(), 'Hermes');
-  assert.equal(flat(await page.locator('.ad-facts').innerText()), 'Room Command Runs as Hermes profile main Profile main');
+  assert.equal(flat(await page.locator('.ad-facts').innerText()), 'Room Command Runs as Hermes profile main Model gpt-6-sol · then claude-sonnet-5-5, deepseek-v4-pro Profile main');
   assert.match(await page.locator('[data-details-status]').innerText(), /Idle|Offline|Working/);
 
   step('the model, in order, from the seeded export');
   assert.equal(flat(await page.locator('[data-model-primary]').innerText()), 'openai-codex · gpt-6-sol');
   assert.deepEqual((await page.locator('[data-model-fallbacks] li').allInnerTexts()).map(flat), ['then anthropic · claude-sonnet-5-5', 'then deepseek · deepseek-v4-pro']);
 
-  step('the profile: toolsets, platforms, skills and the sandbox');
+  step('the profile: toolsets, platforms and the sandbox; what it can use is rows, with Every reply on the auto-loaded one');
   const profile = flat(await page.locator('[data-details-profile]').innerText());
   assert.match(profile, /Toolsets web terminal/);
   assert.match(profile, /Per platform discord web/);
-  assert.match(profile, /Skills loaded on every reply simplify-text/);
-  assert.match(profile, /Installed skills spend-digest brief-writer/);
   assert.match(profile, /Sandbox docker · 512 MB/);
+  assert.deepEqual(await page.locator('[data-can-use]').evaluateAll(list => list.map(row => row.getAttribute('data-can-use'))), ['brief-writer', 'simplify-text', 'spend-digest'], 'Installed and auto-loaded skills, once each, by name.');
+  assert.match(flat(await page.locator('[data-can-use="simplify-text"]').innerText()), /Every reply/);
+  assert.doesNotMatch(flat(await page.locator('[data-can-use="spend-digest"]').innerText()), /Every reply/);
+  assert.match(flat(await page.locator('[data-can-use-shared]').innerText()), /^Agents on one profile share a list\.$/);
+  assert.equal(await page.locator('[data-can-use="simplify-text"]').getAttribute('href'), '#/~hub/team/skills/simplify-text', 'A row opens that skill.');
+  assert.equal(await desk.locator('[role="switch"]').count(), 0, 'Nothing to switch: the Hub holds no list of who can use what.');
 
   step('fresh: a muted line with how long ago it was checked and changed');
   assert.match(flat(await page.locator('[data-details-freshness]').innerText()), /^Settings checked 12 min ago · last changed 2 days ago$/);
@@ -131,7 +135,7 @@ try {
 
   step('keyboard: Tab reaches each details summary, and Enter opens it');
   await visit(desk, fresh.url, 'teardown');
-  await desk.locator('[data-details-back]').focus();
+  await desk.locator('[data-agent-details="teardown"] .ad-actions > :last-child').focus();
   const reached = new Set();
   for (let i = 0; i < 20 && reached.size < 3; i += 1) {
     await desk.keyboard.press('Tab');
@@ -172,8 +176,8 @@ try {
   await edit.locator('[data-version="default"] summary').click();
   assert.match(await edit.locator('[data-version="default"] pre').innerText(), /^You are Teardown, one of the owner's agents/);
   await desk.goto(`${fresh.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
-  assert.match(flat(await desk.locator('[data-agent="teardown"] .team-facts').innerText()), /chat: Haiku/);
+  await visit(desk, fresh.url, 'teardown');
+  assert.match(flat(await details(desk, 'teardown').locator('[data-details-model-line]').innerText()), /chat: Haiku/);
 
   step("Edit: a 409 keeps what was typed and offers a reload; Back to the app's text follows the app again");
   await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
@@ -363,10 +367,9 @@ try {
   assert.match(flat(await details(desk, 'teardown').locator('[data-details-change]').innerText()), /^Running: claude-sonnet-5-5, since .+\.$/);
   assert.equal(flat(await details(desk, 'teardown').locator('[data-model-primary]').innerText()), 'anthropic · claude-sonnet-5-5');
   assert.deepEqual((await details(desk, 'teardown').locator('[data-model-fallbacks] li').allInnerTexts()).map(flat), ['then anthropic · claude-haiku-5-5', 'then openai-codex · gpt-6-sol']);
-  await desk.goto(`${fresh.url}#/~hub/team`);
-  await desk.locator('.team-card').first().waitFor();
+  await visit(desk, fresh.url, 'teardown');
   // A screen seen before shows its last answer at once, so wait for the fresh one (ws-ubo.1.1).
-  await desk.waitForFunction(() => /Model claude-sonnet-5-5 · then claude-haiku-5-5, gpt-6-sol/.test((document.querySelector('[data-agent="teardown"] .team-facts')?.innerText ?? '').replace(/\s+/g, ' ')));
+  await desk.waitForFunction(() => /^claude-sonnet-5-5 · then claude-haiku-5-5, gpt-6-sol/.test((document.querySelector('[data-agent-details="teardown"] [data-details-model-line]')?.innerText ?? '').replace(/\s+/g, ' ')));
   await desk.goto(`${fresh.url}#/~hub/agent-edit/teardown`);
   await desk.locator('[data-edit-profile="main"]').waitFor();
   // The same here: the last answer shows first, and the export the test just made arrives with the refresh.
@@ -466,11 +469,10 @@ try {
   assert.equal(flat(await details(desk, 'researcher').locator('[data-details-freshness]').innerText()), 'The Hermes host has not published its settings yet. The prompts from the app are below.');
   assert.deepEqual(await details(desk, 'researcher').locator('[data-prompt]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-prompt'))), ['persona', 'job']);
 
-  step('an unknown agent says so, and Back goes to Team');
+  step('an unknown agent says so, with the list still beside it');
   await desk.goto(`${bare.url}#/~hub/agent/stranger`);
   await desk.locator('.hub-error').waitFor();
-  await desk.locator('[data-details-back]').click();
-  await desk.locator('.team-card').first().waitFor();
+  await desk.locator('.team-row').first().waitFor();
 
   step('Ask: an agent-edit Ask shows the old and the new text in full, the agent\'s words under their label, and Apply writes one version');
   await desk.goto(`${fresh.url}#/~hub/ask/${EDIT_ASK}`);
@@ -504,10 +506,11 @@ try {
     await noSideways(phone, `${id} details at 390`);
   }
   await phone.goto(`${fresh.url}#/~hub/team`);
-  await phone.locator('.team-card').first().waitFor();
+  await phone.locator('.team-row').first().waitFor();
   await noSideways(phone, 'Team at 390');
-  const link = await phone.locator('[data-details-open="hermes"]').boundingBox();
-  assert.ok(link.height >= 44, 'The Details link is a touch target.');
+  const link = await phone.locator('.team-row[data-agent="hermes"]').boundingBox();
+  assert.ok(link.height >= 44, 'The row is a touch target.');
+  await visit(phone, fresh.url, 'teardown');
   const editLink = await phone.locator('[data-edit-open="teardown"]').boundingBox();
   assert.ok(editLink.height >= 44, 'The Edit link is a touch target.');
   await phone.goto(`${fresh.url}#/~hub/agent-edit/teardown`);

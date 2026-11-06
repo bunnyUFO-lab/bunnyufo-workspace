@@ -4,7 +4,6 @@ import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
 import { chatNote } from '../lib/hubNav'
 import Activity from './Activity'
-import AgentDetails from './AgentDetails'
 import AgentEdit from './AgentEdit'
 import ApprovalView from './ApprovalView'
 import AskView from './AskView'
@@ -54,8 +53,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'request' && (route.id ? <ApprovalView key={route.id} id={route.id} /> : <Needs filter="approvals" />)}
       {route.screen === 'work' && <WorkTabs tab="board"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
-      {route.screen === 'team' && <Team />}
-      {route.screen === 'agent' && (route.id ? <AgentDetails key={route.id} id={route.id} /> : <Team />)}
+      {(route.screen === 'team' || route.screen === 'agent') && <Team routeId={route.screen === 'team' ? route.id : undefined} agentId={route.screen === 'agent' ? route.id : undefined} />}
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'jobs' && <Jobs tab={route.id} />}
