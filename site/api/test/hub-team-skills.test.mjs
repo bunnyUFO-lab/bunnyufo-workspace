@@ -22,7 +22,7 @@ test('no export: nothing is claimed, and the answer says it is not known', () =>
   const view = teamSkills({ exported: null, agents: AGENTS, at: NOW });
   assert.deepEqual([view.exportedAt, view.fresh, view.skills], [null, false, []]);
   assert.ok(view.agents.every(agent => agent.skills === null), 'no agent is given a list it does not have');
-  assert.deepEqual(view.plugins, { known: false, text: PLUGINS_LINE });
+  assert.deepEqual(view.plugins, { known: false, text: PLUGINS_LINE, items: [] });
 });
 
 test('skills are joined to the agents of their profile; the owner flag and the sources come from the export', () => {
@@ -72,6 +72,26 @@ test('a profile the export lacks gives its agents no list', () => {
   const view = teamSkills({ exported, agents: AGENTS, at: NOW });
   assert.equal(view.agents.find(agent => agent.id === 'briefs').skills, null);
   assert.deepEqual(rowOf(view, 'spend-digest').profiles, ['main']);
+});
+
+test('plugins: not known until the export lists them; then one row per plugin with its status on each profile', () => {
+  assert.deepEqual(teamSkills({ exported: exportOf(), agents: AGENTS, at: NOW }).plugins, { known: false, text: PLUGINS_LINE, items: [] });
+  const exported = exportOf();
+  exported.profiles.main.plugins = [
+    { name: 'disk-cleanup', status: 'enabled', version: '2.0.0', source: 'bundled', description: 'Clean up.' },
+    { name: 'my-tool', status: 'enabled', version: '0.3', source: 'user', description: 'Mine.' },
+  ];
+  exported.profiles.briefs.plugins = [{ name: 'disk-cleanup', status: 'not enabled', version: '2.0.0', source: 'bundled', description: 'Clean up.' }];
+  const { plugins } = teamSkills({ exported, agents: AGENTS, at: NOW });
+  assert.equal(plugins.known, true);
+  assert.equal(plugins.text, PLUGINS_LINE);
+  assert.deepEqual(plugins.items.map(item => item.name), ['disk-cleanup', 'my-tool']);
+  assert.deepEqual(plugins.items[0].profiles, [{ profile: 'main', status: 'enabled' }, { profile: 'briefs', status: 'not enabled' }]);
+  assert.deepEqual(plugins.items[1].profiles, [{ profile: 'main', status: 'enabled' }]);
+  assert.deepEqual([plugins.items[1].version, plugins.items[1].source, plugins.items[1].description], ['0.3', 'user', 'Mine.']);
+  const half = exportOf();
+  half.profiles.main.plugins = [];
+  assert.equal(teamSkills({ exported: half, agents: AGENTS, at: NOW }).plugins.known, true, 'one profile with a list (even empty) is a list');
 });
 
 async function fixture({ requireRemoteUser = true } = {}) {

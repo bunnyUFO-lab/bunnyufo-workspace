@@ -27,6 +27,9 @@ const MAX_INSTALLED = 100;
 const MAX_CRON = 20;
 const MAX_PLATFORMS = 20;
 const MAX_OWNER_SKILLS = 100;
+const MAX_PLUGINS = 100;
+const PLUGIN_STATUSES = ['enabled', 'disabled', 'not enabled'];
+const PLUGIN_SOURCES = ['bundled', 'user', 'git', 'entrypoint'];
 
 /** An ID string: a model, provider, toolset or skill name. Anything else is dropped, not cut. */
 export const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$/;
@@ -110,6 +113,23 @@ function cleanJob(raw) {
   };
 }
 
+/** A short free-text field (a plugin's name, version or description): redacted, then cut. */
+const shortText = (value, max) => (typeof value === 'string' ? redactSecrets(value.trim().slice(0, max)).text : '');
+
+/** One plugin of a profile (ws-cl0.6.10): name, status, version, source and a short description. Anything else is dropped. */
+function cleanPlugin(raw) {
+  if (!isObject(raw)) return null;
+  const name = shortText(raw.name, 80);
+  if (!name || name === REDACTED) return null;
+  return {
+    name,
+    status: PLUGIN_STATUSES.includes(raw.status) ? raw.status : 'not enabled',
+    version: shortText(raw.version, 20),
+    source: PLUGIN_SOURCES.includes(raw.source) ? raw.source : 'user',
+    description: shortText(raw.description, 160),
+  };
+}
+
 /** One profile's block from the allow-list, or null when it is not an object. Absent parts are omitted. */
 function cleanProfile(raw) {
   if (!isObject(raw)) return null;
@@ -136,6 +156,8 @@ function cleanProfile(raw) {
   }
   const skills = isObject(raw.skills) ? raw.skills : {};
   out.skills = { autoLoad: ids(skills.autoLoad, MAX_AUTOLOAD), installed: ids(skills.installed, MAX_INSTALLED) };
+  // Plugins (ws-cl0.6.10): kept only when the export has the list, so an older exporter's profile reads as "not listed", not "none".
+  if (Array.isArray(raw.plugins)) out.plugins = raw.plugins.map(cleanPlugin).filter(Boolean).slice(0, MAX_PLUGINS);
   if (isObject(raw.terminal)) {
     const terminal = {};
     if (id(raw.terminal.backend)) terminal.backend = raw.terminal.backend;

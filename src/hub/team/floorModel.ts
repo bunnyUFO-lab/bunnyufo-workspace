@@ -32,10 +32,10 @@ export function floorRooms<T extends { room: string }>(agents: T[]): { room: Roo
     .filter(entry => entry.agents.length > 0)
 }
 
-/** The Floor reads the view the owner chose last; Roster until then. */
+/** Team opens on the Floor; the view the owner chose last (List or Floor) is kept in this browser. */
 export type TeamViewMode = 'roster' | 'floor'
 export const VIEW_KEY = 'hub.team.view'
-export const viewOf = (stored: string | null): TeamViewMode => (stored === 'floor' ? 'floor' : 'roster')
+export const viewOf = (stored: string | null): TeamViewMode => (stored === 'roster' ? 'roster' : 'floor')
 
 export const TICKER_MAX = 12
 export const TICKER_ROTATE_MS = 4000

@@ -24,12 +24,12 @@ export function Row({ title, sub, end, onClick, href, on }: { title: ReactNode; 
   return <div role="listitem" className={className}>{body}</div>
 }
 
-/** Master and detail: the phone shows `detail` when there is one, else `list`; 900 px and up shows both side by side. */
-export function Split({ list, detail, empty = 'Pick something from the list.', folded = false }: { list: ReactNode; detail?: ReactNode; empty?: ReactNode; folded?: boolean }) {
+/** Master and detail: the phone shows `detail` when there is one, else `list`; 900 px and up shows both side by side. `fill`: a page with no detail, whose list takes the whole pane. */
+export function Split({ list, detail, empty = 'Pick something from the list.', folded = false, fill = false }: { list: ReactNode; detail?: ReactNode; empty?: ReactNode; folded?: boolean; fill?: boolean }) {
   return (
-    <div className={`ui-split${detail ? ' has-detail' : ''}${folded ? ' folded' : ''}`}>
+    <div className={`ui-split${detail ? ' has-detail' : ''}${folded ? ' folded' : ''}${fill ? ' fill' : ''}`}>
       <section className="ui-pane ui-pane-list">{list}</section>
-      <section className="ui-pane ui-pane-detail">{detail ?? <p className="ui-placeholder">{empty}</p>}</section>
+      {!(fill && !detail) && <section className="ui-pane ui-pane-detail">{detail ?? <p className="ui-placeholder">{empty}</p>}</section>}
     </div>
   )
 }
