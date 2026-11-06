@@ -1,3 +1,4 @@
+import { openSpawn } from './spawnStore'
 import { useCallback, useEffect, useState } from 'react'
 import { ago, HubError, hubGet } from '../lib/hub'
 import { hubHash } from '../lib/route'
@@ -159,6 +160,7 @@ export default function AgentDetails({ id }: { id: string }) {
           {live && <span className="team-status" data-details-status><span className={`dot st-${STATUS_DOT[live.status]}`} aria-hidden="true" />{STATUS_LABEL[live.status]}</span>}
           <p className="team-dim">{agent.role}</p>
           {agent.editable && host.write && <a className="team-details-link" href={hubHash('agent-edit', agent.id)} data-edit-open={agent.id}>{agent.editable.persona ? 'Edit the persona and model' : 'Edit the model'}</a>}
+          {host.write && <button type="button" className="hub-btn" data-spawn-open onClick={() => openSpawn()}>New job</button>}
         </div>
       </header>
       <dl className="ad-facts">
