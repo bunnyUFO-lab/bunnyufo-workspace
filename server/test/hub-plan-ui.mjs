@@ -151,6 +151,8 @@ try {
   await phone.goto(`${fx.url}#/~hub/map/wayfind`);
   await phone.locator('[data-plan-in-hermes]').tap();
   await phone.waitForURL(/#\/~hub\/chat$/);
+  // The thread has mounted and taken the start once the draft is in the composer; a sheet opened before that is closed again by the remount.
+  await phone.waitForFunction(() => /^I want to plan/.test(document.querySelector('textarea[aria-label="Message"]')?.value ?? ''));
   await openChatSheet(phone);
   assert.equal(await phone.locator('[data-chat-persona]').inputValue(), 'planner');
   await noSideways(phone, 'Chat with the Planner at 390');
