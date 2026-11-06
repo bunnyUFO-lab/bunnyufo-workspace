@@ -59,6 +59,6 @@ test('tabs show on a tab\'s own list and on no deeper screen', () => {
   assert.equal(showsTabs(hub('project')), true);
   assert.equal(showsTabs(hub('project', 'p1')), false);
   for (const screen of ['needs', 'ask', 'work', 'team', 'sketch', 'settings', 'map']) assert.equal(showsTabs(hub(screen)), false, screen);
-  assert.equal(showsTabs({ id: 'a-card', step: -1 }), false, 'No tabs while a card is open.');
+  assert.equal(showsTabs({ id: 'a-card', step: -1 }), true, 'The tab bar stays on an open card, Library lit (ws-cl0.6.12).');
   assert.equal(showsTabs({ id: null, step: -1 }), true);
 });
