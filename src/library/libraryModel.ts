@@ -34,32 +34,74 @@ export const matchesQuery = (e: WorkspaceCard, query: string) => {
 }
 
 export interface Group {
-  /** The heading ("Pinned", "Recent", a category), or null for one run with none. */
+  /** The heading ("Pinned", "Recent", a project, a category), or null for one run with none. */
   label: string | null
   cards: WorkspaceCard[]
   /** A category heading: it can be renamed and merged. */
   category?: boolean
+  /** A project heading: the project's id. */
+  project?: string
 }
+
+/** How the live and archived cards are laid out: one newest-first run, or a heading per project. */
+export type Arrange = 'recent' | 'project'
 
 export interface LibraryList {
   groups: Group[]
-  /** What each section would show if picked, under this search and view (they add up to `total`). */
+  /** What each project would show if picked, under this search and view (they add up to `total`). */
   counts: Map<string, number>
   total: number
-  /** Put-away cards in the section in view: the Archive segment's count. */
+  /** Put-away cards in the projects in view: the Archive segment's count. */
   archivedCount: number
   /** Rows across all groups. */
   shown: number
   searching: boolean
 }
 
+/** The projects the filter picked: ids the registry no longer has are dropped, and repeats. Empty is all of them. */
+export function pickedProjects(picks: readonly string[], workspaces: readonly { id: string }[]): string[] {
+  const known = new Set(workspaces.map(w => w.id))
+  return [...new Set(picks)].filter(id => known.has(id))
+}
+
+/** One tap on a project in the filter's list: in the picks it comes out, otherwise it goes in. Unticking the last one leaves none, which is all. */
+export const togglePick = (picks: readonly string[], id: string): string[] => (picks.includes(id) ? picks.filter(p => p !== id) : [...picks, id])
+
+/** The filter's list and the headings of By project: projects with cards under the view first, in `workspaces` order, the empty ones after. */
+export function projectOrder(workspaces: readonly { id: string }[], counts: ReadonlyMap<string, number>): string[] {
+  const ids = workspaces.map(w => w.id)
+  return [...ids.filter(id => (counts.get(id) ?? 0) > 0), ...ids.filter(id => !(counts.get(id) ?? 0))]
+}
+
+/** What the filter's button says: "All projects", the project's name, or "3 projects". */
+export function filterLabel(picks: readonly string[], workspaces: readonly { id: string; name: string }[]): string {
+  if (picks.length === 0) return 'All projects'
+  if (picks.length === 1) return workspaces.find(w => w.id === picks[0])?.name ?? 'All projects'
+  return `${picks.length} projects`
+}
+
+export interface LibraryInput {
+  query: string
+  /** The projects picked; empty is all. */
+  projects: readonly string[]
+  view: LibraryView
+  arrange?: Arrange
+  /** The projects in the order their headings come (see `projectOrder`); the order cards arrive in when left out. */
+  projectOrder?: readonly string[]
+}
+
+/** Whether the Recent | By project toggle changes anything: All and Archive, with no search. */
+export const arrangeApplies = (view: LibraryView, query: string) => (view === 'all' || view === 'archive') && query.trim().length === 0
+
 /**
- * The rows for a view. `All` with no search and no section is Pinned, then Recent. With one section and no search it is the
- * pins (a pin crosses the section: it says "keep this in front of me"), then that section's cards by category. A search is one
- * newest-first run. Pinned and Archive are flat runs. Trash is drawn by its own rows, not here.
+ * The rows for a view. A pin crosses the project filter ("keep this in front of me"), so All is Pinned first, then the rest of the
+ * picked projects (none picked is all of them). Recent is one newest-first run; By project is a heading per project, or, with exactly
+ * one project picked, that project's categories. A search is one newest-first run. Pinned is a flat run. Archive follows the toggle
+ * without the Pinned group. Trash is drawn by its own rows, not here.
  */
-export function libraryList(cards: WorkspaceCard[], order: Order, input: { query: string; section: string; view: LibraryView }): LibraryList {
-  const { query, section, view } = input
+export function libraryList(cards: WorkspaceCard[], order: Order, input: LibraryInput): LibraryList {
+  const { query, projects, view } = input
+  const arrange = input.arrange ?? 'recent'
   const searching = query.trim().length > 0
   const matching = cards.filter(e => matchesQuery(e, query))
   const live = matching.filter(e => !isArchived(e))
@@ -67,32 +109,46 @@ export function libraryList(cards: WorkspaceCard[], order: Order, input: { query
   const pool = view === 'archive' ? archivedAll : view === 'pinned' ? live.filter(e => e.pinned) : live
   const counts = new Map<string, number>()
   for (const e of pool) counts.set(e.workspace.id, (counts.get(e.workspace.id) ?? 0) + 1)
-  const inSection = (e: WorkspaceCard) => !section || e.workspace.id === section
-  const visible = pool.filter(inSection)
-  const archivedCount = archivedAll.filter(inSection).length
+  const inProjects = (e: WorkspaceCard) => projects.length === 0 || projects.includes(e.workspace.id)
+  const visible = pool.filter(inProjects)
+  const archivedCount = archivedAll.filter(inProjects).length
 
-  const groups: Group[] = []
-  if (view === 'pinned') {
-    groups.push({ label: null, cards: sortPins(visible) })
-  } else if (view === 'archive' || searching) {
-    groups.push({ label: null, cards: [...visible].sort(byFreshness) })
-  } else {
-    const pins = sortPins(live)
-    if (pins.length) groups.push({ label: 'Pinned', cards: pins })
-    const rest = visible.filter(e => !e.pinned).sort(byFreshness)
-    if (!section) {
-      if (rest.length) groups.push({ label: 'Recent', cards: rest })
-    } else {
+  const byProject = (list: WorkspaceCard[]): Group[] => {
+    if (projects.length === 1) {
       const byCategory = new Map<string, WorkspaceCard[]>()
-      for (const e of rest) {
+      for (const e of list) {
         const key = e.category || 'other'
         if (!byCategory.has(key)) byCategory.set(key, [])
         byCategory.get(key)!.push(e)
       }
-      for (const [label, list] of applyOrder([...byCategory], ([name]) => name, order.sections, 'last')) {
-        groups.push({ label, category: true, cards: applyOrder(list, cardKey, order.cards[`category:${label}`], 'first') })
-      }
+      return applyOrder([...byCategory], ([name]) => name, order.sections, 'last')
+        .map(([label, run]) => ({ label, category: true, cards: applyOrder(run, cardKey, order.cards[`category:${label}`], 'first') }))
     }
+    const rank = new Map((input.projectOrder ?? []).map((id, i) => [id, i]))
+    const per = new Map<string, WorkspaceCard[]>()
+    for (const e of list) {
+      if (!per.has(e.workspace.id)) per.set(e.workspace.id, [])
+      per.get(e.workspace.id)!.push(e)
+    }
+    return [...per.values()]
+      .sort((a, b) => (rank.get(a[0].workspace.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b[0].workspace.id) ?? Number.MAX_SAFE_INTEGER))
+      .map(run => ({ label: run[0].workspace.name, project: run[0].workspace.id, cards: run }))
+  }
+
+  const groups: Group[] = []
+  if (view === 'pinned') {
+    groups.push({ label: null, cards: sortPins(visible) })
+  } else if (searching) {
+    groups.push({ label: null, cards: [...visible].sort(byFreshness) })
+  } else if (view === 'archive') {
+    const sorted = [...visible].sort(byFreshness)
+    if (arrange === 'project') groups.push(...byProject(sorted)); else groups.push({ label: null, cards: sorted })
+  } else {
+    const pins = sortPins(live)
+    if (pins.length) groups.push({ label: 'Pinned', cards: pins })
+    const rest = visible.filter(e => !e.pinned).sort(byFreshness)
+    if (arrange === 'project') groups.push(...byProject(rest))
+    else if (rest.length) groups.push({ label: 'Recent', cards: rest })
   }
   return { groups, counts, total: pool.length, archivedCount, shown: groups.reduce((n, g) => n + g.cards.length, 0), searching }
 }
