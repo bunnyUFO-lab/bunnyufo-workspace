@@ -129,7 +129,7 @@ export function useAskAnswer(ask: Ask, { reload, onSettled, onTaken, handoff = f
   const sendHeld = async (keepalive: boolean, body: unknown) => {
     try { return await hubPost(`${base}/answer`, body, undefined, false, keepalive) } catch (failure) {
       const existing = failure instanceof HubError && failure.status === 409 ? (failure.body?.answer ?? null) as AskAnswer | null : null
-      if (existing) throw new Error(`Already answered by ${existing.by} at ${when(existing.at)}.`)
+      if (existing) { const taken = new Error(`Already answered by ${existing.by} at ${when(existing.at)}.`); (taken as Error & { cause?: unknown }).cause = failure; throw taken }
       throw failure
     }
   }
