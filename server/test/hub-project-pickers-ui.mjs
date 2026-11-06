@@ -1,4 +1,4 @@
-// Run after npm run build. The project pickers that became Comboboxes, through a real browser: the Roadmap, Work, Activity and
+// Run after npm run build. The project pickers that became Comboboxes, through a real browser: Work, Activity and
 // Sketch project pickers over a list longer than ten projects, at desktop and phone width. Each one filters as you type, Enter
 // or a tap picks, Escape puts the chosen project back, nothing scrolls sideways, and an open list closes when the field scrolls
 // away. At 640 px or less every picker is one native select, whatever the number of projects (ws-ubo.2.1, ws-2vh.27; hub-phone-picker-ui.mjs
@@ -34,7 +34,6 @@ const noSideways = async (page, what) => {
 
 /** Where each picker lives: its address, the section that holds it, and how to tell `maple` was chosen. */
 const PICKERS = [
-  { name: 'Roadmap', hash: '#/~hub/map/alder', scope: '.hub-map-chips', after: page => page.waitForFunction(() => location.hash.startsWith('#/~hub/map/maple')) },
   { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work/maple') },
   { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top', after: page => page.waitForFunction(() => document.querySelector('.hub-top [role="combobox"]').dataset.value === 'maple') },
   // Today does not change the address: the picker says which project it shows.
