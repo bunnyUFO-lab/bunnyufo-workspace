@@ -74,7 +74,7 @@ const EVENT_CAP = 2000;
 const POOL = 16;
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
-const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|unasked|map\/[^/]+)$/;
+const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|chat\/search|unasked|map\/[^/]+)$/;
 /** Rows of a Needs you answer that carry their detail (`detail=1`); the rest come without. */
 const INBOX_DETAIL_CAP = 30;
 
@@ -1758,7 +1758,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     } finally { mapRequests = null; }
   }
 
-  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), jobRows, approveJob, log: line => log(scrub(line, 400)) });
+  const chat = createChat({ env, fetchImpl, key, fresh, bucket, loadAsks, loadRequests, loadHelpItem, readJson, json, fail, now, pool, hermesRuns: hermesDispatch.runs, planPauses, personas: () => personaStore.table(), autoFirst: autoFirstLabel, copyApproval: hermesApprovals.copyApproval, readApproval: id => hermesApprovals.detail(id, now()), jobRows, approveJob, log: line => log(scrub(line, 400)) });
 
   const self = {
     enabled: on,
