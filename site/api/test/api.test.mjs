@@ -732,7 +732,7 @@ test('archiving hides a workspace, waits until a card is active as the app count
 test('the date rule the server counts with is the one the app uses', async () => {
   const { readFile } = await import('node:fs/promises');
   const { ARCHIVE_DAYS } = await import('../card-liveness.mjs');
-  const app = await readFile(new URL('../../../src/lib/workspace.ts', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../../../src/lib/archiveRule.ts', import.meta.url), 'utf8');
   assert.equal(Number(/export const ARCHIVE_DAYS = (\d+)/.exec(app)?.[1]), ARCHIVE_DAYS);
 });
 
