@@ -245,6 +245,68 @@ try {
   for (const [selector, scroll, client] of await fitsAcross(desk)) assert.ok(scroll <= client, `${selector} at 1200 (${scroll} > ${client})`);
   await withProjectList(desk, async () => {});
 
+  step('zoom is not a keyboard: a pinch-zoomed card keeps its tab bar, a real keyboard hides it');
+  const viewport = (page, height, scale) => page.evaluate(([h, k]) => {
+    const view = window.visualViewport;
+    Object.defineProperty(view, 'height', { configurable: true, get: () => h });
+    Object.defineProperty(view, 'scale', { configurable: true, get: () => k });
+    view.dispatchEvent(new Event('resize'));
+  }, [height, scale]);
+  await phone.goto(`${fixture.url}#/giraffe`);
+  await phone.locator('.buw-markdown h1', { hasText: 'Giraffe feeding' }).waitFor();
+  await viewport(phone, 740 - 300, 1);
+  await phone.locator('[data-tabs]').waitFor({ state: 'detached' });
+  await viewport(phone, 740 - 300, 2.5);
+  await phone.locator('[data-tabs]').waitFor();
+  await viewport(phone, 740, 1);
+
+  step('1200 px: Escape with the project filter open closes the sheet and leaves the card open');
+  const beside = await open({ width: 1200, height: 800 });
+  await beside.context().addInitScript(() => { try { localStorage.setItem('buw.menuCollapsed', '0'); } catch { /* none */ } });
+  await beside.goto(`${fixture.url}#/hub`);
+  await beside.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
+  await libraryFilter(beside).click();
+  await beside.locator('.ui-sheet [data-project-list]').waitFor();
+  await beside.locator('.ui-sheet-h h2').click();
+  await beside.keyboard.press('Escape');
+  await beside.locator('.ui-sheet').waitFor({ state: 'detached' });
+  await beside.waitForTimeout(300);
+  assert.equal(await hashOf(beside), '#/hub', 'the card is still open');
+  await beside.keyboard.press('Escape');
+  await beside.waitForFunction(() => /library$/.test(location.hash));
+
+  step('two picks come back on Back after the project crumb of a card narrowed to one (the popstate half runs in the same function, restorePicks)');
+  const site = await open({ width: 1200, height: 800 });
+  await site.context().addInitScript(() => { try { localStorage.setItem('buw.menuCollapsed', '0'); } catch { /* none */ } });
+  await site.goto(`${fixture.url}#/~hub/library`);
+  await site.locator('[data-library] .lib-scroll').waitFor();
+  await pickProject(site, 'Two');
+  await pickProject(site, 'Three');
+  assert.equal(await label(site), '2 projects');
+  await site.locator('.lib-row-main', { hasText: 'Zebra crossing' }).click();
+  await site.locator('.buw-markdown h1', { hasText: 'Zebra crossing' }).waitFor();
+  await site.locator('.topbar .breadcrumb button.crumb-link').click();
+  await site.waitForFunction(() => /library$/.test(location.hash));
+  await site.waitForFunction(() => document.querySelector('[data-project-filter]')?.textContent.trim() === 'Two');
+  await site.goBack();
+  await site.goBack();
+  await site.locator('[data-library] .lib-scroll').waitFor();
+  await site.waitForTimeout(300);
+  assert.equal(await label(site), '2 projects', 'Back brings the two picks back');
+
+  step('the Library tab from a card whose history has extra entries (a page inside a frame navigated) still reaches the list');
+  await phone.goto(`${fixture.url}#/~hub/library`);
+  await phone.locator('[data-library] .lib-search input').waitFor();
+  await phone.locator('[data-library] .lib-search input').fill('giraffe');
+  await phone.locator('.lib-row-main', { hasText: 'Giraffe 1' }).first().tap();
+  await phone.locator('.buw-markdown h1', { hasText: 'Giraffe 1' }).waitFor();
+  await phone.evaluate(() => history.pushState(history.state, '', location.href));
+  await phone.locator('[data-tabs] [data-nav="library"]').tap();
+  await phone.locator('[data-library] .lib-scroll').waitFor();
+  await phone.waitForTimeout(900);
+  assert.match(await hashOf(phone), /#\/~hub\/library$/, 'the list opened');
+  assert.equal(await phone.locator('[data-library] .lib-search input').inputValue(), 'giraffe', 'with the search it last had');
+
   assert.deepEqual(errors, [], 'no page errors');
   console.log('library-phone-ui: passed');
 } finally {

@@ -180,7 +180,7 @@ export default function LibraryScreen({ workspaces, cards, projects, onProjects,
           <p className="lib-empty">{offline ? 'Could not load workspace.json. Is the public/workspace link in place?' : 'No cards here'}{searching ? ` for “${query.trim()}”` : ''}</p>
         ) : (
           shownGroups.map((group, index) => (
-            <Section key={group.label ?? `run${index}`}>
+            <Section key={group.project ? `project:${group.project}` : group.label ?? `run${index}`}>
               {group.label && (group.category
                 ? <CategoryHead label={group.label} workspace={group.cards[0]?.workspace.id ?? null} />
                 : <div className={`lib-head${group.project ? ' project' : ''}`} data-section={group.label} {...(group.project ? { 'data-project-head': group.project } : {})}><h2>{group.label}</h2></div>)}

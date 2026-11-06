@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { WorkspaceCard } from './types'
 import { useWorkspace } from './lib/workspace'
 import { parseHash, parseChatId, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
-import { ROUTE_EVENT, back, go, hasOverlay, swap } from './lib/entries'
+import { ROUTE_EVENT, back, go, hasOverlay, screenSerial, swap } from './lib/entries'
 import { canonicalAddress } from './lib/redirects'
 import { useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -33,6 +33,8 @@ import { useIsDesktop, useKeyboardUp, useMedia } from './lib/chrome'
 import { cardFile, cardUrl, reportError } from './local/client'
 
 const PICKS_KEY = 'buw.projects'
+/** The several projects picked while each history entry was on screen: Back to an entry brings them back, though a card's crumb narrowed to one in between. */
+const picksAt = new Map<number, string[]>()
 /** The several projects picked on this device; one pick (or none) is the address, not this. */
 function readPicks(): string[] {
   try {
@@ -123,6 +125,12 @@ export default function App() {
   const [arrange, setArrange] = useState<Arrange>(() => {
     try { return localStorage.getItem('buw.arrange') === 'project' ? 'project' : 'recent' } catch { return 'recent' }
   })
+  // Where the several picks were, per entry: the entry a Back lands on gets them again (see `picksAt`).
+  useEffect(() => { if (picks.length > 1) picksAt.set(screenSerial(), picks) }, [picks])
+  const restorePicks = useCallback(() => {
+    const kept = picksAt.get(screenSerial())
+    if (kept && kept.length > 1) setPicks(now => (now.length > 1 || now.join() === kept.join() ? now : kept))
+  }, [])
   useEffect(() => {
     try { localStorage.setItem('buw.arrange', arrange) } catch { /* storage blocked */ }
   }, [arrange])
@@ -152,10 +160,10 @@ export default function App() {
     // Both halves of the address at once. Back fires popstate before hashchange, so updating
     // only the project here leaves one render where the filter has moved but the open card has
     // not — long enough for the effect below to rewrite the entry you just came back to.
-    const onPop = () => { const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); setRoute(readRoute()) }
+    const onPop = () => { const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); restorePicks(); setRoute(readRoute()) }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [setRoute])
+  }, [setRoute, restorePicks])
 
   // The section chips' order, if one was ever saved (lib/order).
   const { order } = useOrder()
@@ -199,14 +207,14 @@ export default function App() {
 
   // Hash → state: links navigate natively; this also covers back/forward, and `swap`, which changes the address with no hashchange.
   useEffect(() => {
-    const onHash = () => setRoute(readRoute())
+    const onHash = () => { restorePicks(); setRoute(readRoute()) }
     window.addEventListener('hashchange', onHash)
     window.addEventListener(ROUTE_EVENT, onHash)
     return () => {
       window.removeEventListener('hashchange', onHash)
       window.removeEventListener(ROUTE_EVENT, onHash)
     }
-  }, [setRoute])
+  }, [setRoute, restorePicks])
 
   const goHome = useCallback(() => { go(homeAddress()) }, [])
   /** Every in-app Back: one step of history, or the Library when this page was opened from a link. */
@@ -271,7 +279,7 @@ export default function App() {
       if (ev.altKey || ev.ctrlKey || ev.metaKey) return
       if (ev.key === 'Escape') {
         // Leaving a field, a menu or a dialog comes first; Esc on the page itself goes home.
-        if (typing || editing || document.querySelector('dialog[open]')) return
+        if (typing || editing || hasOverlay() || document.querySelector('dialog[open]')) return
         if (!keyState.current.entity) return
         ev.preventDefault()
         goBack()
@@ -345,6 +353,7 @@ export default function App() {
   }, [openProject, project])
 
   const pickProjects = useCallback((ids: string[]) => {
+    picksAt.set(screenSerial(), ids)
     setPicks(ids)
     // The path is the filter on a site: /magic-loops, or / for every project (or several, which the address cannot hold). Replaced
     // in place, so switching project does not reload the app, lose the open card or add a step to Back; a reload or a shared link
