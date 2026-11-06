@@ -14,8 +14,12 @@ function leaveCard(event: MouseEvent<HTMLAnchorElement>, hash: string) {
   if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !parseHash().id) return
   event.preventDefault()
   const steps = stepsBackTo(at => at === hash)
-  if (steps) window.history.go(-steps)
-  else { carryStateOnce(); go(hash) }
+  if (!steps) { carryStateOnce(); go(hash); return }
+  // A page inside a card's frame that navigated left extra entries in the history: the jump then lands in the frame, and the address
+  // does not move. Then open the Library with the state it last had.
+  const start = window.location.hash
+  window.history.go(-steps)
+  window.setTimeout(() => { if (window.location.hash === start) { carryStateOnce(); go(hash) } }, 500)
 }
 
 /** The phone's bottom tabs: Today, Chat, Library, Projects, Search. Each is 44 px or more; the Needs count sits on Today. */

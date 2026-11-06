@@ -30,7 +30,8 @@ const subscribeKeyboard = (changed: () => void) => {
   return () => view?.removeEventListener('resize', changed)
 }
 /** The on-screen keyboard is up: the visible area is well under the window (a phone's keyboard covers a third of it or more). */
-const keyboardUp = () => !!window.visualViewport && window.innerHeight - window.visualViewport.height > 150
+// A pinch-zoomed page shrinks the visual viewport too, so only an unzoomed one counts.
+const keyboardUp = () => { const view = window.visualViewport; return !!view && Math.abs(view.scale - 1) < 0.05 && window.innerHeight - view.height > 150 }
 
 /** Whether the on-screen keyboard is showing now, for what should step aside for it (the tab bar). */
 export function useKeyboardUp() { return useSyncExternalStore(subscribeKeyboard, keyboardUp) }

@@ -132,6 +132,13 @@ export function skipGone(parent: string) {
   else swap(parent)
 }
 
+/** The serial of the screen's own entry: the current one, or with sheets open over it the entry under them. */
+export function screenSerial(): number {
+  let serial = currentSerial
+  for (let depth = overlayDepth(window.location.hash); depth > 0 && parentOf.has(serial); depth--) serial = parentOf.get(serial)!
+  return serial
+}
+
 /** The tab's serial now, for the things kept against an entry. */
 export const entrySerial = () => currentSerial
 

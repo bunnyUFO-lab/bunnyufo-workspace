@@ -1,5 +1,5 @@
 /* The Library screen. Tokens only. Phone first: one column; the list pane is 384 px beside a card (ui.css .ui-pane-list). */
-.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: clip; }
+.lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; overflow: clip; }
 .lib .ui-top { padding-right: 4px; }
 .lib .workspace-switcher { min-width: 0; margin-left: auto; }
 .lib .workspace-switcher-button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: var(--tap); padding-top: 0; padding-bottom: 0; }
