@@ -354,6 +354,18 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       throw new HttpError(403, 'agent-config/export-<stamp>.json and changes/<id>/result.json are create-only (If-None-Match: *), never by upload URL.');
     }
   };
+  /**
+   * `asks/<id>/applied.json`: the ids a change list's creates made (ws-ch8). Only the apply job's token, named `apply-action`, may write it,
+   * once (If-None-Match: *, never an upload URL), and the handler marks it `writer: apply-action`, which is what the Hub trusts. The passphrase can
+   * write it too, with no mark, and the Hub ignores that copy.
+   */
+  const APPLIED_RECORD = /^asks\/[^/]+\/applied\.json$/i;
+  const APPLY_TOKEN = 'apply-action';
+  const appliedOnly = (caller, sectionId, file, { ifNoneMatch, upload = false } = {}) => {
+    if (!INBOXES.has(sectionId) || caller.rights.write === null || !APPLIED_RECORD.test(file)) return;
+    if (caller.name !== APPLY_TOKEN) throw new HttpError(403, 'Only the apply job writes applied.json.');
+    if (upload || ifNoneMatch !== '*') throw new HttpError(403, 'applied.json is create-only (If-None-Match: *), never by upload URL.');
+  };
   const ownerOnly = (caller, sectionId, file) => {
     if (INBOXES.has(sectionId) && caller.rights.write !== null && OWNER_FILES.test(file)) {
       throw new HttpError(403, 'Only the Hub writes answers.');
@@ -412,6 +424,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
     if (file === 'library-writes.json') return { writer: 'card-api' };
     // An export the Hermes host published: the only provenance the Hub accepts for it.
     if (caller.rights.write !== null && caller.name === 'hermes-config' && AGENT_CONFIG_FILE.test(file)) return { writer: 'hermes-config' };
+    // The apply job's record of the tasks a change list made: the Hub trusts it only with this mark.
+    if (caller.rights.write !== null && caller.name === APPLY_TOKEN && APPLIED_RECORD.test(file)) return { writer: APPLY_TOKEN };
     if (caller.rights.write !== null && /^asks\/[^/]+\/ask\.json$/i.test(file)) {
       return { writer: caller.name === 'pc-runner' ? 'pc-runner' : /^agent(-[\w.-]+)?$/.test(caller.name ?? '') ? 'agent' : 'other' };
     }
@@ -474,7 +488,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
   };
   /** A limited deleter keeps its hands off the Hub's files: asks, answers, snoozes and declines. */
   const hubFilesStay = (caller, sectionId, file) => {
-    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || /^bead-marks\//i.test(file) || /^feedback\//i.test(file) || /^agent-config\//i.test(file))) {
+    if (INBOXES.has(sectionId) && caller.rights.delete !== null && (ASK_FILE.test(file) || OWNER_FILES.test(file) || RUNNER_FILES.test(file) || APPLIED_RECORD.test(file) || /^bead-marks\//i.test(file) || /^feedback\//i.test(file) || /^agent-config\//i.test(file))) {
       throw new HttpError(403, 'Only the Hub removes asks, answers, checklists, ticks, marks and request files.');
     }
   };
@@ -739,6 +753,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
       if (limited && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
       ownerOnly(caller, sectionId, file);
+      appliedOnly(caller, sectionId, file, { ifNoneMatch });
       agentConfigOnly(caller, sectionId, file, { ifNoneMatch });
       markFiles(caller, sectionId, file, { ifNoneMatch });
       feedbackFiles(caller, sectionId, file, { ifNoneMatch });
@@ -839,6 +854,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
         if (INBOXES.has(sectionId) && /^card-writes\//i.test(file)) throw new HttpError(403, 'card-writes/ is written by the card API itself.');
         if (caller.rights.write !== null && !INBOXES.has(sectionId) && reservedName(file.split('/')[0])) throw new HttpError(403, `"${file.split('/')[0]}" is not a card folder here.`);
         ownerOnly(caller, sectionId, file);
+        appliedOnly(caller, sectionId, file, { upload: true });
         // A presigned URL carries no metadata, so an upload there would land unmarked and count: refused for every caller, the passphrase too.
         if (INBOXES.has(sectionId) && /^team\/[^/]+\/persona-/i.test(file)) throw new HttpError(403, 'Persona files are written by the Hub only, never by upload URL.');
         agentConfigOnly(caller, sectionId, file, { upload: true });

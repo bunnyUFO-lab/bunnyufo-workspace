@@ -2561,6 +2561,7 @@ async function planApply(rawId, flags) {
     applied += 1;
     if (!dry) await journalRow(flags.journal, journal, row, change.op === 'create' ? { ref: `#${index + 1}`, bead: made.get(`#${index + 1}`) } : undefined);
   }
+  if (!dry && made.size) await recordApplied(id, made);
   console.log(`${dry ? 'Would apply' : 'Applied'} ${applied} of ${ask.changes.length} row(s); ${skipped} skipped.${dry ? '' : ' Next: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup ' + id}`);
 }
 
@@ -2584,6 +2585,24 @@ async function journalRow(file, journal, row, made) {
   await writeFile(tmp, `${JSON.stringify(journal, null, 2)}
 `);
   await rename(tmp, file);
+}
+
+/**
+ * The ids the creates of a finished plan made, as `asks/<id>/applied.json` (create-only): the Hub lists them as the tasks the job that filed the
+ * Ask delivered. Only the apply job's token is let write it (the card API refuses everyone else), so for any other caller this is a warning and
+ * nothing more: a record that cannot be written never fails an apply that already changed Beads.
+ */
+async function recordApplied(id, made) {
+  const created = [...made].map(([ref, bead]) => ({ ref, id: bead })).filter(row => BEAD_ID.test(row.id));
+  if (!created.length) return;
+  const body = `${JSON.stringify({ v: 1, ask: id, at: isoNow(), by: hostName(), created }, null, 2)}
+`;
+  try {
+    const state = await mustPut(inboxPath('asks', id, 'applied.json'), body, { createOnly: true });
+    if (state !== 'ok' && state !== 'exists') console.log(`Note: applied.json was not recorded (${state}).`);
+  } catch (error) {
+    console.log(`Note: applied.json was not recorded (${clip(error.message, 160)}).`);
+  }
 }
 
 /** The ending of a plan that stopped: what is left, and exit 1. */

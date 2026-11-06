@@ -51,7 +51,7 @@ import { CHAT_MODELS } from './chat-models.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
-import { deliverablesOf, jobsList } from './job-deliverables.mjs';
+import { createdIds, deliverablesOf, jobsList } from './job-deliverables.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
@@ -72,6 +72,8 @@ const LIMITS = { big: 8 * MB, chat: 64 * 1024, small: 256 * 1024 };
 const CACHE_MAX = 5000;
 const EVENT_CAP = 2000;
 const POOL = 16;
+/** The card API's mark on an Ask's applied.json: the name of the apply job's token (site/card-api/handler.mjs). */
+const APPLY_WRITER = 'apply-action';
 
 /** The read routes that may see the listing cache. Anything else, writes included, lists live; add a route only after reading what it calls. */
 const LIST_CACHED_ROUTES = /^\/hub\/(?:today|inbox|work|jobs|projects|team|events|search-text|unasked|map\/[^/]+)$/;
@@ -214,6 +216,20 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     return { ...ask, id };
   };
 
+  /**
+   * The task ids a change list made, from `asks/<id>/applied.json`. Counted only when the card API marked the file `writer: apply-action` (its own
+   * stamp for the apply job's token); an agent's or the passphrase's copy has another mark or none. The file is create-only, so the answer is kept.
+   */
+  async function appliedOf(id) {
+    const name = `${key(`asks/${id}/applied.json`)}#applied`;
+    if (cache.has(name)) return cache.get(name);
+    let head;
+    try { head = await bucket.head(key(`asks/${id}/applied.json`)); } catch (error) { if (error.status === 404) { remember(name, null); } return null; }
+    const ids = head?.metadata?.writer === APPLY_WRITER ? createdIds(await cached(`asks/${id}/applied.json`)) : null;
+    remember(name, ids);
+    return ids;
+  }
+
   async function loadAsks(at) {
     const folders = await listFolders('asks', at);
     const rows = await pool(POOL, [...folders], async ([id, names]) => {
@@ -223,7 +239,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
       const state = askState(names, ask, at, snooze);
       const clean = readAsk(ask, id);
-      return { ask: clean, names, state, item: askItem(clean, state) };
+      const created = names.has('applied.json') ? await appliedOf(id) : null;
+      return { ask: clean, names, state, item: askItem(clean, state), ...(created?.length ? { created } : {}) };
     });
     return rows.filter(Boolean);
   }
@@ -1720,7 +1737,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const issues = (await loadBeads(project).catch(() => null))?.issues ?? [];
       titles.set(project, new Map(issues.map(issue => [issue.id, issue.title])));
     });
-    const input = { asks: asks.map(row => row.item), checklists: checklists.map(row => row.item), requests, card: ref => cards(ref) ?? undefined, taskTitle: (project, id) => titles.get(project)?.get(id) };
+    const input = { asks: asks.map(row => (row.created ? { ...row.item, created: row.created } : row.item)), checklists: checklists.map(row => row.item), requests, card: ref => cards(ref) ?? undefined, taskTitle: (project, id) => titles.get(project)?.get(id) };
     return { requests, of: (item, result, reportText) => deliverablesOf({ ...input, item, result, reportText, touched: touched.get(item.run?.session) ?? null }) };
   }
   /** `GET /hub/jobs?project=&tab=`: the jobs of the last two months with what each delivered. Reads no report. */
