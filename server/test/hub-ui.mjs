@@ -246,10 +246,10 @@ try {
   await tabs.locator('[data-library]').first().waitFor();
   assert.equal(await tabs.locator('.hub').count(), 0);
   await tabs.locator('[data-tabs] [data-nav="search"]').tap();
-  await tabs.locator('dialog.pal input').waitFor();
-  assert.ok(await tabs.locator('dialog.pal input').evaluate(el => el === document.activeElement), 'Search opens the palette and focuses its field.');
-  await tabs.keyboard.press('Escape');
-  await tabs.locator('dialog.pal').waitFor({ state: 'detached' });
+  await tabs.locator('[data-search="screen"] input').waitFor();
+  assert.ok(await tabs.locator('[data-search="screen"] input').evaluate(el => el !== document.activeElement), 'Search opens as a screen and leaves the keyboard closed.');
+  await tabs.locator('[data-search-cancel]').tap();
+  await tabs.locator('[data-search]').waitFor({ state: 'detached' });
   await go(tabs, '#/hub');
   await tabs.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
   assert.equal(await tabs.locator('[data-tabs]').count(), 0, 'No tab bar while a card is open.');

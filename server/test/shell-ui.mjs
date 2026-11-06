@@ -146,17 +146,17 @@ try {
   await desk.goto(`${fixture.url}#/~hub/today`);
   await desk.locator('.hub[data-screen="today"]').waitFor();
   await desk.keyboard.press('Control+k');
-  await desk.locator('dialog.pal').waitFor();
+  await desk.locator('dialog[data-search="dialog"]').waitFor();
   assert.equal(await hashOf(desk), '#/~hub/search');
   await desk.keyboard.press('Escape');
-  await desk.locator('dialog.pal').waitFor({ state: 'detached' });
+  await desk.locator('dialog[data-search="dialog"]').waitFor({ state: 'detached' });
   assert.equal(await hashOf(desk), '#/~hub/today');
   await desk.locator('.hub[data-screen="today"]').waitFor();
   await desk.locator('.hub').click({ position: { x: 5, y: 5 } });
   await desk.keyboard.press('/');
-  await desk.locator('dialog.pal').waitFor();
+  await desk.locator('dialog[data-search="dialog"]').waitFor();
   await desk.keyboard.press('Control+k');
-  await desk.locator('dialog.pal').waitFor({ state: 'detached' });
+  await desk.locator('dialog[data-search="dialog"]').waitFor({ state: 'detached' });
   assert.equal(await hashOf(desk), '#/~hub/today');
 
   step('settings: theme, shortcuts and skill packs are in one screen, reached from the rail');

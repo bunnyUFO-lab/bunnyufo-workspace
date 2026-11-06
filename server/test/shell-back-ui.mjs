@@ -128,16 +128,20 @@ try {
   step('search: Ctrl+K adds one entry, and a result opened from it leaves search behind it in history');
   const beforeSearch = await entryOf(desk);
   await desk.keyboard.press('Control+k');
-  await desk.locator('dialog.pal').waitFor();
+  await desk.locator('dialog[data-search="dialog"]').waitFor();
   assert.equal(await hashOf(desk), '#/~hub/search');
-  await desk.locator('dialog.pal input').fill('hub card');
-  await desk.locator('dialog.pal [role="option"]', { hasText: 'The hub card' }).first().click();
+  await desk.locator('dialog[data-search="dialog"] input').fill('hub card');
+  await desk.locator('[data-search-chip="library"]').click();
+  assert.equal(await hashOf(desk), '#/~hub/search', 'A filter chip leaves search where it is.');
+  await desk.locator('dialog[data-search="dialog"] [role="option"]', { hasText: 'The hub card' }).first().click();
   await desk.locator('.buw-markdown h1', { hasText: 'The hub card' }).waitFor();
   await desk.goBack();
-  await desk.locator('dialog.pal').waitFor();
+  await desk.locator('dialog[data-search="dialog"]').waitFor();
   assert.equal(await hashOf(desk), '#/~hub/search', 'Back from a result returns to search.');
+  assert.equal(await desk.locator('dialog[data-search="dialog"] input').inputValue(), 'hub card', 'With its text.');
+  assert.equal(await desk.locator('[data-search-chip="library"]').getAttribute('aria-pressed'), 'true', 'And its chip.');
   await desk.goBack();
-  await desk.locator('dialog.pal').waitFor({ state: 'detached' });
+  await desk.locator('dialog[data-search="dialog"]').waitFor({ state: 'detached' });
   assert.equal(await hashOf(desk), '#/~hub/today');
   assert.equal((await entryOf(desk)).serial, beforeSearch.serial, 'Search was one entry: two Backs (result, then search) are where it began.');
 

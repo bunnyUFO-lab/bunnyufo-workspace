@@ -41,9 +41,11 @@ try {
   const phone = await open(PHONE);
 
   step('a card with no agent writes shows no strip at all');
+  // Waiting starts before the page loads: the answer can arrive before a wait that is attached after goto.
+  const answered = phone.waitForResponse(response => response.url().includes('/hub/card-writes'));
   await phone.goto(`${fixture.url}#/hub`);
   await phone.locator('.content').waitFor();
-  await phone.waitForResponse(response => response.url().includes('/hub/card-writes'));
+  await answered;
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(await phone.locator('[data-cw-strip]').count(), 0);
 
