@@ -1,4 +1,5 @@
 import { hubHash, parseHash } from '../lib/route'
+import { go } from '../lib/entries'
 
 /** What to prefill when the Spawn sheet opens. */
 export interface SpawnOptions {
@@ -24,7 +25,7 @@ let pending: SpawnOptions | null = null
  */
 export function openSpawn(options: SpawnOptions = {}) {
   pending = options
-  if (!parseHash().hub) window.location.hash = hubHash('today')
+  if (!parseHash().hub) go(hubHash('today'))
   window.dispatchEvent(new Event(EVENT))
 }
 

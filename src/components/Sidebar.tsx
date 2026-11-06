@@ -3,10 +3,10 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import type { CardWorkspace, WorkspaceCard } from '../types'
 import type { DragItem, DropTarget } from '../lib/drag'
 import { cardKey } from '../lib/order'
-import { entityHash, homeLink, hubHash, type HubScreen } from '../lib/route'
+import { go } from '../lib/entries'
+import { entityHash, homeLink } from '../lib/route'
 import { host } from '../lib/host'
 import { canManage } from '../lib/library'
-import { chatNote, hubGroups } from '../lib/hubNav'
 import { categoryIcon, groupIcon } from '../lib/categories'
 import { useCollapsedSections } from '../lib/collapse'
 import { cardUrl } from '../local/client'
@@ -21,10 +21,6 @@ import TrashList from './TrashList'
 import { trashOf } from '../lib/trash'
 
 interface SidebarProps {
-  /** The Hub screen on show, when one is. */
-  hubScreen?: HubScreen | null
-  /** How many things wait for the visitor (the Hub's Today count), for the badge. */
-  hubNeedsYou?: number
   pinned: WorkspaceCard[]
   grouped: Map<string, WorkspaceCard[]>
   /** What the section headings mean: projects, categories, or one date-sorted run. */
@@ -33,8 +29,6 @@ interface SidebarProps {
   query: string
   onQuery: (q: string) => void
   searchRef: RefObject<HTMLInputElement | null>
-  /** Opens the Ctrl+K palette. */
-  onPalette: () => void
   workspaces: CardWorkspace[]
   project: string
   counts: Map<string, number>
@@ -51,7 +45,8 @@ interface SidebarProps {
   cardCount: number
   offline: boolean
   lastSync: Date | null
-  onCollapse: () => void
+  /** Folds the list away beside an open card. Left out where the list is the screen (Library). */
+  onCollapse?: () => void
   /** Back to the cards: the logo and the name are links to it. */
   onHome: () => void
   /** Pin, unpin and archive write card state: only where something can (the local service, a site's write API). */
@@ -137,38 +132,6 @@ function Heading({
     {context.menu}
     {category && dialogs}
     </>
-  )
-}
-
-/**
- * The Hub: where the things that need you are. Its own block above the search box, as buttons two
- * to a row, so it does not read as more cards; the Needs you count is the phone's pink badge. Only where
- * the host has a Hub.
- */
-function HubNav({ screen, needsYou, library, onHome }: { screen: HubScreen | null; needsYou: number; library: boolean; onHome: () => void }) {
-  const groups = hubGroups(host)
-  return (
-    <nav className="sidebar-hub" data-hub-nav aria-label="Hub">
-      {groups.map(group => (
-        <div key={group.id} className="sidebar-hub-group" role="group" aria-labelledby={`hub-group-${group.id}`} data-hub-group={group.id}>
-          <div className="sidebar-hub-heading" id={`hub-group-${group.id}`}>{group.label}</div>
-          {group.rows.map(([key, label, icon]) => key === 'library' ? (
-            <a key={key} {...homeLink(onHome)} className={`hub-link${library ? ' active' : ''}`} aria-current={library ? 'page' : undefined} title="Library" data-hub-link="library">
-              <span className="hub-link-icon" aria-hidden="true">{icon}</span>
-              <span className="hub-link-text">Library</span>
-            </a>
-          ) : (
-            <a key={key} href={hubHash(key)} className={`hub-link${screen === key ? ' active' : ''}`} aria-current={screen === key ? 'page' : undefined} title={label} data-hub-link={key}>
-              <span className="hub-link-icon" aria-hidden="true">{icon}</span>
-              <span className="hub-link-text">{label}</span>
-              {key === 'today' && needsYou > 0 && <span className="sidebar-count hub-badge" data-hub-badge>{needsYou}</span>}
-              {key === 'needs' && needsYou > 0 && <span className="hub-inbox-badge" data-hub-inbox-badge role="img" title={`${needsYou} waiting for you`} aria-label={`Needs you, ${needsYou} waiting for you`}>{needsYou}</span>}
-            </a>
-          ))}
-          {group.id === 'plan' && chatNote(host) && <p className="hub-link-note" data-hub-chat-note>{chatNote(host)}</p>}
-        </div>
-      ))}
-    </nav>
   )
 }
 
@@ -274,7 +237,6 @@ export default function Sidebar({
   query,
   onQuery,
   searchRef,
-  onPalette,
   workspaces,
   project,
   counts,
@@ -304,8 +266,6 @@ export default function Sidebar({
   onPin,
   onArchive,
   isArchived,
-  hubScreen = null,
-  hubNeedsYou = 0,
 }: SidebarProps) {
   // Which sections are folded shut. A view preference, kept in this browser (lib/collapse).
   const { isClosed, toggle } = useCollapsedSections()
@@ -395,7 +355,7 @@ export default function Sidebar({
       const row = cursorRow && 'card' in cursorRow ? cursorRow : rows.find(r => 'card' in r)
       if (!row || !('card' in row)) return
       ev.preventDefault()
-      window.location.hash = entityHash(row.card.id)
+      go(entityHash(row.card.id))
     } else if (ev.key === 'Tab' && !ev.altKey && !ev.ctrlKey && !ev.metaKey && workspaces.length > 1) {
       ev.preventDefault()
       const order = ['', ...workspaces.map(w => w.id)]
@@ -481,23 +441,17 @@ export default function Sidebar({
           </a>
           <WorkspaceSwitcher />
         </div>
-        <button
-          className="sidebar-collapse"
-          onClick={onCollapse}
-          title="Hide menu ( [ )"
-          aria-label="Hide menu"
-        >
-          ‹
-        </button>
+        {onCollapse && (
+          <button
+            className="sidebar-collapse"
+            onClick={onCollapse}
+            title="Hide the list ( [ )"
+            aria-label="Hide menu"
+          >
+            ‹
+          </button>
+        )}
       </div>
-
-      {host.hub && <HubNav screen={hubScreen} needsYou={hubNeedsYou} library={!hubScreen && activeId === null} onHome={onHome} />}
-
-      <button type="button" className="sidebar-palette" onClick={onPalette} data-palette-open>
-        <span aria-hidden="true">{'⌕'}</span>
-        <span className="sidebar-palette-text">Search</span>
-        <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
-      </button>
 
       <div className="sidebar-search">
         <span className="search-icon" aria-hidden="true">

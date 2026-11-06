@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { WorkspaceCard } from './types'
+import type { CardWorkspace, WorkspaceCard } from './types'
 import { useWorkspace, archiveCutoff } from './lib/workspace'
-import { parseHash, canonicalHubHash, hubHash, navScreen, entityHash, resolveStep, type Route } from './lib/route'
+import { parseHash, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
+import { ROUTE_EVENT, back, go, hasOverlay, swap } from './lib/entries'
+import { canonicalAddress } from './lib/redirects'
 import { useCardDrag, type DragItem, type DropTarget } from './lib/drag'
 import { applyOrder, cardKey, moveBeside, moveBy, useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -21,14 +23,20 @@ import CommandPalette from './components/CommandPalette'
 import { host } from './lib/host'
 import type { Today } from './lib/hub'
 import { TodayContext, useHubData } from './hub/useHub'
-import HubTabs from './components/HubTabs'
-import { useAutoHideHeader } from './lib/chrome'
+import Rail from './ui/Rail'
+import Tabs from './ui/Tabs'
+import TopBar from './ui/TopBar'
+import { Screen } from './ui/Layout'
+import TrashList from './components/TrashList'
+import { Button } from './ui/Controls'
+import { useAutoHideHeader, useIsDesktop, useMedia } from './lib/chrome'
 import { api, cardFile, cardUrl, reportError } from './local/client'
 
 const Compare3D = lazy(() => import('./components/Compare3D'))
 const ReportViewer = lazy(() => import('./components/ReportViewer'))
 const HubScreen = lazy(() => import('./hub/HubScreen'))
 const WebView = lazy(() => import('./components/WebView'))
+const Settings = lazy(() => import('./hub/Settings'))
 
 // Freshly-touched work always burns at the top: sort by `updated` (falls back
 // to `created`), regardless of status — a report an agent just edited must not sink
@@ -53,23 +61,71 @@ const sortPins = (cards: WorkspaceCard[]) =>
 /** A Hub screen is remounted when its address changes, except the map's panel (`map/<project>/<node>`), a project page's tab (`project/<id>/<tab>`) and a review's file (`review/<event>/<path>`), which keep the screen alive. Work keeps it for every address: the board remounts itself when the resolved board changes (Board.tsx). */
 const hubKey = (hub: NonNullable<Route['hub']>) => JSON.stringify(hub.screen === 'work' ? { ...hub, id: undefined } : hub.screen === 'map' || hub.screen === 'project' || hub.screen === 'review' ? { ...hub, id: hub.id?.split('/')[0] } : hub)
 
-/** The route in the address. An old Hub screen name (`inbox`, `board`) is rewritten in place to the new one, so the bar shows it. */
-function readRoute(): Route {
-  const canonical = canonicalHubHash()
-  if (canonical) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + canonical)
+/**
+ * The route in the address. An old or wrong address (an old Hub screen name, an empty hash, a leftover sheet marker) is rewritten
+ * in place to the right one (lib/redirects), with no history entry, so the bar shows it. `first` is the page's first render,
+ * where an empty address means the home screen, Today; after that it means Back to the cards.
+ */
+function readRoute(first = false): Route {
+  const target = canonicalAddress({
+    pathname: window.location.pathname, hash: window.location.hash, hub: host.hub, routes: host.routes,
+    first, overlayOpen: hasOverlay(),
+    // The project page's Work and Cards tabs arrive with item 9; until then its old tab names stand.
+    projectTabs: false,
+  })
+  if (target) {
+    const at = target.indexOf('#')
+    swap(target.slice(at), at > 0 ? target.slice(0, at) : undefined, false)
+  }
   return parseHash()
 }
 
+/** Where the cards are: the Library screen with a Hub, the bare address without one. */
+const homeAddress = () => (host.hub ? libraryHash() : '#/')
+
+/** What an unknown underlay falls back to under Search: Today, or the Library where there is no Hub. */
+const fallbackRoute = (): Route => (host.hub ? { id: null, step: -1, hub: { screen: 'today' } } : { id: null, step: -1 })
+
+/** The Hub screens that are a page of their own, opened on top of the tabs: a Back button and no tab bar. */
+const DETAIL: Partial<Record<HubScreen, { title: string; parent: string }>> = {
+  needs: { title: 'Needs you', parent: hubHash('today') },
+  ask: { title: 'Question', parent: hubHash('needs') },
+  checklist: { title: 'Steps', parent: hubHash('needs') },
+  review: { title: 'Review', parent: hubHash('needs') },
+  request: { title: 'Request', parent: hubHash('needs') },
+  work: { title: 'Work', parent: hubHash('today') },
+  activity: { title: 'Work', parent: hubHash('today') },
+  jobs: { title: 'Work', parent: hubHash('today') },
+  team: { title: 'Team', parent: hubHash('today') },
+  agent: { title: 'Team', parent: hubHash('team') },
+  'agent-edit': { title: 'Team', parent: hubHash('team') },
+  map: { title: 'Roadmap', parent: hubHash('project') },
+  sketch: { title: 'Sketch', parent: hubHash('today') },
+  settings: { title: 'Settings', parent: homeAddress() },
+}
+
 /**
- * The route at the first render only. A phone opens on the Hub's Today, not the cards' home, when there is no hash. It is not
- * `readRoute`, which also runs on Back and on hashchange: there an empty address is the cards' home and must stay it. Replaced in
- * place, so Back does not return to an empty address.
+ * On a phone the card list is the grid alone, so what the list used to hold is one row above it: the pinned cards, the Trash, and where there
+ * is no Hub (so no tabs) a way to Search and Settings. Replaced by the Library screen in item 3.
  */
-function initialRoute(): Route {
-  if (host.hub && !window.location.hash && window.matchMedia('(max-width: 640px)').matches) {
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + hubHash('today'))
-  }
-  return readRoute()
+function PhoneLibraryBar({ pinned, workspaces }: { pinned: WorkspaceCard[]; workspaces: CardWorkspace[] }) {
+  const trashed = trashOf(workspaces)
+  const purgePending = host.purge && workspaces.some(w => canManage(w) && Object.values(w.retired ?? {}).some(r => r.kind === 'purged' && r.pending))
+  const [trashOpen, setTrashOpen] = useState(false)
+  if (!pinned.length && !trashed.length && !purgePending && host.hub) return null
+  return (
+    <div className="ui-libbar" data-phone-library-bar>
+      {pinned.length > 0 && (
+        <nav className="ui-pins" aria-label="Pinned cards" data-phone-pins>
+          {pinned.map(card => <a key={`${card.workspace.id}/${card.id}`} href={entityHash(card.id)}>{card.title}</a>)}
+        </nav>
+      )}
+      {(trashed.length > 0 || purgePending) && <Button small tone="ghost" data-trash-link="" onClick={() => setTrashOpen(true)}>Trash ({trashed.length})</Button>}
+      {!host.hub && <Button small tone="ghost" data-nav="search" onClick={() => go(hubHash('search'))}>Search</Button>}
+      {!host.hub && <Button small tone="ghost" data-nav="settings" onClick={() => go(hubHash('settings'))}>Settings</Button>}
+      {trashOpen && <TrashList entries={trashed} onClose={() => setTrashOpen(false)} />}
+    </div>
+  )
 }
 
 export default function App() {
@@ -78,7 +134,15 @@ export default function App() {
   // service, or a published site running the write API. Everywhere else the cards stay
   // read-only, which is what a site without that API has always been.
   const canWrite = useCanWrite()
-  const [route, setRoute] = useState<Route>(initialRoute)
+  // `under` is the last screen that was not Search: Search is drawn over it, and a card under it stays open.
+  const [{ route, under }, setNav] = useState(() => {
+    const first = readRoute(true)
+    return { route: first, under: first.hub?.screen === 'search' ? fallbackRoute() : first }
+  })
+  const setRoute = useCallback((next: Route) => setNav(now => ({ route: next, under: next.hub?.screen === 'search' ? now.under : next })), [])
+  const searchOpen = route.hub?.screen === 'search'
+  const view = searchOpen ? under : route
+  const desktop = useIsDesktop()
   // The Hub's one `/today` poll: the sidebar badge, the phone's tab bar and the Today screen all read it.
   const today = useHubData<Today>(host.hub ? '/today' : null)
   const needsYou = today.data?.counts.needsYou ?? 0
@@ -99,17 +163,20 @@ export default function App() {
   })
   const [busyCard, setBusyCard] = useState<string | null>(null)
 
-  // Where the menu covers the whole screen rather than sitting beside the content (global.css).
-  const overlayMenu = () => window.matchMedia('(max-width: 960px)').matches
-  const [collapsed, setCollapsed] = useState(
-    // A phone opens on the cards, not on a menu covering them.
-    () => overlayMenu() || localStorage.getItem('buw.menuCollapsed') === '1',
-  )
+  // Beside an open card the list takes 384 px, which a wide HTML report cannot spare below 1400 px: there it starts folded, with a
+  // "Show list" button. The choice is remembered here once made, like the collapsed sections (lib/collapse).
+  const wide = useMedia('(min-width: 1400px)')
+  const [menuPref, setMenuPref] = useState<boolean | null>(() => {
+    const saved = localStorage.getItem('buw.menuCollapsed')
+    return saved === '1' ? true : saved === '0' ? false : null
+  })
+  const collapsed = menuPref ?? !wide
+  const setCollapsed = useCallback((next: boolean) => {
+    setMenuPref(next)
+    try { localStorage.setItem('buw.menuCollapsed', next ? '1' : '0') } catch { /* storage blocked */ }
+  }, [])
   const searchRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    localStorage.setItem('buw.menuCollapsed', collapsed ? '1' : '0')
-  }, [collapsed])
   useEffect(() => {
     localStorage.setItem('buw.showArchived', showArchived ? '1' : '0')
   }, [showArchived])
@@ -129,7 +196,7 @@ export default function App() {
     const onPop = () => { setChosenProject(pathId()); setRoute(readRoute()) }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [])
+  }, [setRoute])
 
   // Stable between loads: the keyboard shortcuts depend on the list, and a fresh [] every
   // render would rebind the listener on each one.
@@ -145,20 +212,17 @@ export default function App() {
   const project = workspaces.some(w => w.id === chosenProject) ? chosenProject : ''
 
   // Card ids are unique inside a workspace, not across them: the active workspace wins a tie.
-  const open = cards.filter(e => e.id === route.id)
+  const open = cards.filter(e => e.id === view.id)
   // A Hub run names its card by folder (`assistant/<folder>`), and a move keeps the folder: when no card has
   // that id, open the one whose folder matches.
-  const byFolder = open.length || !route.id ? [] : cards.filter(e => e.folder === route.id)
+  const byFolder = open.length || !view.id ? [] : cards.filter(e => e.folder === view.id)
   const entity = open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
   // A link to a card that was deleted: say where it is, with a way back.
-  const inTrash = !entity && route.id ? trashOf(workspaces).find(t => t.id === route.id) ?? null : null
+  const inTrash = !entity && view.id ? trashOf(workspaces).find(t => t.id === view.id) ?? null : null
   const library = useMemo(() => ({ workspaces, cards }), [workspaces, cards])
 
-  // The palette finds every card; it ranks the open section's first (CommandPalette reads `workspace.active`).
-  const paletteCards = cards
-
   const stepIndex = entity
-    ? resolveStep(entity.steps.length, route.step, entity.defaultStep)
+    ? resolveStep(entity.steps.length, view.step, entity.defaultStep)
     : -1
   const step = entity?.steps[stepIndex]
   const reportUrl = entity && step ? cardUrl(entity, step.path) : null
@@ -169,38 +233,33 @@ export default function App() {
   // The address says what is open: a folder link is rewritten to the card's id.
   const openId = entity?.id
   useEffect(() => {
-    if (openId && route.id && openId !== route.id) history.replaceState(null, '', entityHash(openId, route.step) + '')
-  }, [openId, route.id, route.step])
+    if (openId && route.id && openId !== route.id && !searchOpen) swap(entityHash(openId, route.step))
+  }, [openId, route.id, route.step, searchOpen])
 
-  // Hash → state: entity links navigate natively; this also covers back/forward.
+  // Hash → state: links navigate natively; this also covers back/forward, and `swap`, which changes the address with no hashchange.
   useEffect(() => {
-    // Opening a card puts the menu away when the menu is the whole screen — otherwise you
-    // land on the card behind a menu you have to dismiss by hand.
-    const onHash = () => { setRoute(readRoute()); if (overlayMenu()) setCollapsed(true) }
+    const onHash = () => setRoute(readRoute())
     window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
+    window.addEventListener(ROUTE_EVENT, onHash)
+    return () => {
+      window.removeEventListener('hashchange', onHash)
+      window.removeEventListener(ROUTE_EVENT, onHash)
+    }
+  }, [setRoute])
 
   const goHome = useCallback(() => {
-    history.pushState(null, '', window.location.pathname + window.location.search)
-    setRoute({ id: null, step: -1 })
+    go(homeAddress())
     // Back on the board means the whole board: a search left running would hide cards with only a
     // "matches" line to say why.
     setQuery('')
   }, [])
+  /** Every in-app Back: one step of history, or the Library when this page was opened from a link. */
+  const goBack = useCallback(() => { back(homeAddress()); setQuery('') }, [])
 
   // The keyboard map lives in lib/shortcuts, which the Ctrl+H sheet reads too, so the two cannot
   // drift. Ctrl+W is not on it: the browser keeps that one (close tab) and never lets a page
   // have it, so Esc is the way back to the cards.
   const [showKeys, setShowKeys] = useState(false)
-  const [showPalette, setShowPalette] = useState(false)
-  // The rail (outside this tree) has the Shortcuts button, and tells the app the way it tells it
-  // about changed cards: a window event.
-  useEffect(() => {
-    const toggle = () => setShowKeys(v => !v)
-    window.addEventListener('bunnyufo-shortcuts', toggle)
-    return () => window.removeEventListener('bunnyufo-shortcuts', toggle)
-  }, [])
   // Read by the key handler, which is bound once: the open card and what can be done to it.
   // Assigned after each render, so the handlers declared further down are already there.
   const keyState = useRef<{
@@ -210,8 +269,10 @@ export default function App() {
     stepIndex: number
     pin?: (card: WorkspaceCard, pinned: boolean) => void
     archive?: (card: WorkspaceCard, archived: boolean) => void
-    selectStep?: (id: string, index: number) => void
-  }>({ entity, reportUrl, step, stepIndex })
+    walkStep?: (id: string, index: number) => void
+    searching: boolean
+    folded: boolean
+  }>({ entity, reportUrl, step, stepIndex, searching: searchOpen, folded: collapsed })
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null
@@ -226,11 +287,11 @@ export default function App() {
         if (!ev.shiftKey && key === 'k' && !ev.defaultPrevented) {
           // Works while typing, like Ctrl+Shift+F. Toggles: the same key shuts it.
           ev.preventDefault()
-          setShowPalette(v => !v)
+          if (keyState.current.searching) back(hubHash('today')); else go(hubHash('search'))
         } else if (ev.shiftKey && key === 'f') {
           ev.preventDefault()
           setCollapsed(false)
-          // The menu slides in; focus once it is there, or the browser scrolls to a hidden field.
+          // The list is drawn once it is unfolded; focus then, or the browser scrolls to a hidden field.
           window.setTimeout(() => { searchRef.current?.focus(); searchRef.current?.select() }, 0)
         } else if (!ev.shiftKey && key === 'h') {
           ev.preventDefault()
@@ -264,15 +325,15 @@ export default function App() {
         if (typing || editing || document.querySelector('dialog[open]')) return
         if (!keyState.current.entity) { setQuery(''); return }
         ev.preventDefault()
-        goHome()
+        goBack()
         return
       }
       if (typing || editing || ev.repeat) return
-      const { entity: open, stepIndex: at, selectStep: goStep, pin } = keyState.current
-      // Q, under the left hand, is the way back to the cards; Esc does the same.
+      const { entity: open, stepIndex: at, walkStep: goStep, pin } = keyState.current
+      // Q, under the left hand, is the way back; Esc does the same.
       if (key === 'q' && !ev.shiftKey && open) {
         ev.preventDefault()
-        goHome()
+        goBack()
         return
       }
       // ← and → walk the open card's tabs. The page itself is a frame, so the arrows were not
@@ -290,13 +351,15 @@ export default function App() {
       }
       if (ev.key === '/') {
         ev.preventDefault()
-        searchRef.current?.focus()
+        if (!keyState.current.searching) go(hubHash('search'))
       } else if (ev.key === '?') {
         ev.preventDefault()
         setShowKeys(v => !v)
       } else if (ev.key === '[') {
+        // Folds and unfolds the card list beside an open card; there is nothing to fold anywhere else.
+        if (!open) return
         ev.preventDefault()
-        setCollapsed(v => !v)
+        setCollapsed(!keyState.current.folded)
       } else if (key === 'a' && ev.shiftKey) {
         // Shift+A, not A: a bare A is too easy to hit by accident, and a board that suddenly
         // shows only archived cards looks like everything was put away.
@@ -316,7 +379,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [workspaces, goHome])
+  }, [workspaces, goBack, setCollapsed])
 
   useEffect(() => {
     const title = entity ? `bunnyUFO Workspace — ${entity.title}` : 'bunnyUFO Workspace'
@@ -337,16 +400,16 @@ export default function App() {
     // the old project the moment the card is closed, leaving the path behind.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setChosenProject(openProject)
-    if (host.routes === 'path') history.replaceState(null, '', projectPath(openProject) + window.location.hash)
+    if (host.routes === 'path') swap(window.location.hash, projectPath(openProject))
   }, [openProject, project])
 
   const pickProject = useCallback((id: string) => {
     setChosenProject(id)
     setQuery('')
     if (!id) setShowArchived(false)
-    // The path is the filter on a site: /magic-loops, or / for every project. pushState rather
-    // than a navigation, so switching project does not reload the app or lose the open card.
-    if (host.routes === 'path') history.pushState(null, '', projectPath(id) + window.location.hash)
+    // The path is the filter on a site: /magic-loops, or / for every project. Replaced in place, so switching project
+    // does not reload the app, lose the open card or add a step to Back; a reload or a shared link keeps the filter.
+    if (host.routes === 'path') swap(window.location.hash, projectPath(id))
   }, [])
 
   // The archive button on a card. Only the local app has a service to write
@@ -415,10 +478,9 @@ export default function App() {
     }
   }, [])
 
-  const selectStep = useCallback((id: string, index: number) => {
-    history.replaceState(null, '', entityHash(id, index))
-    setRoute({ id, step: index })
-  }, [])
+  // A tab clicked is a step of its own; the arrow keys walk the tabs in place, or each press would fill the history.
+  const selectStep = useCallback((id: string, index: number) => { go(entityHash(id, index)) }, [])
+  const walkStep = useCallback((id: string, index: number) => { swap(entityHash(id, index)) }, [])
 
   // The key handler's view of the open card, refreshed after every render.
   useEffect(() => {
@@ -426,7 +488,9 @@ export default function App() {
       entity, reportUrl, step, stepIndex,
       pin: canWrite ? setPinned : undefined,
       archive: canWrite ? setArchived : undefined,
-      selectStep,
+      walkStep,
+      searching: searchOpen,
+      folded: collapsed,
     }
   })
 
@@ -592,6 +656,20 @@ export default function App() {
     )
   }
 
+  const hubScreen = view.hub?.screen
+  // The Hub's own screens; the Library, Settings and Search are drawn here, on every host.
+  const hubOnly = !!view.hub && host.hub && hubScreen !== 'library' && hubScreen !== 'settings'
+  const showSettings = hubScreen === 'settings'
+  const detail = entity || !view.hub ? null
+    : showSettings ? DETAIL.settings
+      : host.hub ? (hubScreen === 'project' && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen ? DETAIL[hubScreen] : undefined)
+        : undefined
+  // The list beside the screen: on the Library, on a card (unless folded) and where there is no Hub. A phone has no such column.
+  const showSidebar = desktop && !hubOnly && !showSettings && !(entity && collapsed)
+  const lit = searchOpen && !desktop ? 'search' : view.hub ? navScreen(view.hub.screen) : 'library'
+  const screenKey = hubOnly ? hubKey(view.hub!) : showSettings ? 'settings' : liveUrl || reportUrl || 'home'
+  const fallback = <div className="boot"><BrandLogo size={56} animated={false} /></div>
+
   return (
     <LibraryContext.Provider value={library}>
     <TodayContext.Provider value={host.hub ? today : null}>
@@ -604,93 +682,92 @@ export default function App() {
         {host.dev.pr && <span>· PR #{host.dev.pr}</span>}
       </div>
     )}
-    <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`} data-entity={route.id}>
-      <Sidebar
-        onHome={goHome}
-        hubScreen={host.hub ? navScreen(route.hub?.screen) : null}
-        hubNeedsYou={needsYou}
-        canWrite={canWrite}
-        dragItem={drag.item}
-        dragOver={drag.over}
-        onDragStart={drag.begin}
-        onDragItem={drag.beginItem}
-        afterDrag={drag.afterDrag}
-        sectionOf={sectionOf}
-        sectionItem={sectionItem}
-        onNudge={nudge}
-        collapsed={collapsed}
-        onReveal={() => setCollapsed(false)}
-        onArchive={canWrite ? setArchived : undefined}
-        onPin={canWrite ? setPinned : undefined}
-        isArchived={isArchived}
-        pinned={pinned}
-        grouped={sidebarGrouped}
-        groupBy={groupBy}
-        activeId={entity?.id ?? null}
-        query={query}
-        onQuery={setQuery}
-        searchRef={searchRef}
-        workspaces={workspaces}
-        project={project}
-        counts={counts}
-        total={pool.length}
-        onProject={pickProject}
-        archivedCount={archivedCount}
-        showArchived={showArchived}
-        onToggleArchived={() => setShowArchived(v => !v)}
-        showRecent={showRecent}
-        onToggleRecent={() => setShowRecent(v => !v)}
-        cardCount={cards.length}
-        offline={offline}
-        lastSync={lastSync}
-        onCollapse={() => setCollapsed(true)}
-        onPalette={() => setShowPalette(true)}
-      />
-
-      <button
-        className="sidebar-reopen"
-        onClick={() => setCollapsed(false)}
-        // Dragging a card at the hidden menu opens it, so the pinned list is there to drop on.
-        onPointerEnter={() => { if (drag.card) setCollapsed(false) }}
-        title="Show menu — press the logo button ( [ )"
-        aria-label="Show menu"
-      >
-        <BrandLogo size={38} animated={route.id !== 'my-dream-game'} />
-      </button>
+    <div className="app-layout" data-entity={view.id}>
+      {desktop && <Rail lit={lit} needsYou={needsYou} />}
+      {showSidebar && (
+        <Sidebar
+          onHome={goHome}
+          canWrite={canWrite}
+          dragItem={drag.item}
+          dragOver={drag.over}
+          onDragStart={drag.begin}
+          onDragItem={drag.beginItem}
+          afterDrag={drag.afterDrag}
+          sectionOf={sectionOf}
+          sectionItem={sectionItem}
+          onNudge={nudge}
+          collapsed={false}
+          onReveal={() => setCollapsed(false)}
+          onArchive={canWrite ? setArchived : undefined}
+          onPin={canWrite ? setPinned : undefined}
+          isArchived={isArchived}
+          pinned={pinned}
+          grouped={sidebarGrouped}
+          groupBy={groupBy}
+          activeId={entity?.id ?? null}
+          query={query}
+          onQuery={setQuery}
+          searchRef={searchRef}
+          workspaces={workspaces}
+          project={project}
+          counts={counts}
+          total={pool.length}
+          onProject={pickProject}
+          archivedCount={archivedCount}
+          showArchived={showArchived}
+          onToggleArchived={() => setShowArchived(v => !v)}
+          showRecent={showRecent}
+          onToggleRecent={() => setShowRecent(v => !v)}
+          cardCount={cards.length}
+          offline={offline}
+          lastSync={lastSync}
+          onCollapse={entity ? () => setCollapsed(true) : undefined}
+        />
+      )}
 
       {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
-      {showPalette && (
+      {searchOpen && (
         <CommandPalette
-          cards={paletteCards}
+          cards={cards}
           items={today.data?.needsYou ?? []}
           waiting={needsYou}
-          onHome={goHome}
-          onClose={() => setShowPalette(false)}
+          home={homeAddress()}
+          onClose={() => back(hubHash('today'))}
         />
       )}
 
       <main className="main">
-        <Topbar
-          entity={entity}
-          stepIndex={stepIndex}
-          onStep={selectStep}
-          onHome={goHome}
-          onProject={pickProject}
-          showProject={workspaces.length > 1}
-          liveAppUrl={liveUrl}
-        />
+        {entity && (
+          <Topbar
+            entity={entity}
+            stepIndex={stepIndex}
+            onStep={selectStep}
+            onBack={goBack}
+            onHome={goHome}
+            onShowList={desktop && collapsed ? () => setCollapsed(false) : undefined}
+            onProject={pickProject}
+            showProject={workspaces.length > 1}
+            liveAppUrl={liveUrl}
+          />
+        )}
+        {detail && <TopBar title={detail.title} parent={detail.parent} phoneOnly />}
 
-        {host.hub && entity && !route.hub && !entity.workspace.builtin && <CardWritesStrip key={`${entity.workspace.id}/${entity.folder}`} section={entity.workspace.id} folder={entity.folder} />}
+        {host.hub && entity && !view.hub && !entity.workspace.builtin && <CardWritesStrip key={`${entity.workspace.id}/${entity.folder}`} section={entity.workspace.id} folder={entity.folder} />}
 
         <div className="content">
-          {route.hub && host.hub ? (
-            <ReportBoundary key={hubKey(route.hub)} onHome={goHome} title="This Hub screen could not be shown.">
-              <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><HubScreen route={route.hub} /></Suspense>
+          <Screen key={screenKey}>
+          {hubOnly ? (
+            <ReportBoundary key={hubKey(view.hub!)} onHome={goHome} title="This Hub screen could not be shown.">
+              <Suspense fallback={fallback}><HubScreen route={view.hub!} /></Suspense>
+            </ReportBoundary>
+          ) : showSettings ? (
+            <ReportBoundary key="settings" onHome={goHome} title="Settings could not be shown.">
+              <Suspense fallback={fallback}><Settings /></Suspense>
             </ReportBoundary>
           ) : (
           <ReportBoundary key={liveUrl || reportUrl || 'home'} onHome={goHome}>
           {entity && step && liveUrl ? (
-            <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><WebView
+            <Suspense fallback={fallback}><WebView
               key={liveUrl}
               url={liveUrl}
               title={step.name}
@@ -698,13 +775,13 @@ export default function App() {
               helpPath={cardFile(entity, step.path)}
             /></Suspense>
           ) : entity && reportUrl && step?.viewer === 'compare3d' ? (
-            <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><Compare3D
+            <Suspense fallback={fallback}><Compare3D
               key={reportUrl}
               manifestUrl={reportUrl}
               baseUrl={reportUrl.slice(0, reportUrl.lastIndexOf('/'))}
             /></Suspense>
           ) : entity && reportUrl ? (
-            <Suspense fallback={<div className="boot"><BrandLogo size={56} animated={false} /></div>}><ReportViewer key={reportUrl} url={reportUrl} title={step?.name ?? entity.title} relativePath={cardFile(entity, step?.path ?? '')}
+            <Suspense fallback={fallback}><ReportViewer key={reportUrl} url={reportUrl} title={step?.name ?? entity.title} relativePath={cardFile(entity, step?.path ?? '')}
               card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path, ...(step.agentTab ? { agentTab: true } : {}) } : undefined}
               stepIndex={stepIndex} onStep={index => selectStep(entity.id, index)} /></Suspense>
           ) : (
@@ -715,6 +792,7 @@ export default function App() {
                 {canManage(inTrash.workspace) && <button type="button" className="home-filter-clear" onClick={() => void restore(inTrash)}>Restore</button>}
               </p>
             )}
+            {!desktop && <PhoneLibraryBar pinned={pinned} workspaces={project ? workspaces.filter(w => w.id === project) : workspaces} />}
             <HomeGrid
               hero={hero}
               grouped={grouped}
@@ -750,9 +828,10 @@ export default function App() {
           )}
           </ReportBoundary>
           )}
+          </Screen>
         </div>
       </main>
-      {host.hub && !entity && <HubTabs screen={navScreen(route.hub?.screen)} needsYou={needsYou} onHome={goHome} onSearch={() => setShowPalette(true)} />}
+      {!desktop && host.hub && showsTabs(route) && <Tabs lit={lit} needsYou={needsYou} />}
     </div>
     </TodayContext.Provider>
     </LibraryContext.Provider>

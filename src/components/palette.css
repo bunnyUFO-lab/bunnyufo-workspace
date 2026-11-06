@@ -67,23 +67,3 @@ dialog.pal::backdrop { background: rgb(0 0 0 / 0.5); }
 @media (pointer: coarse) { .pal-i { min-height: 44px; } }
 @media (max-width: 640px) { .pal-f { display: none; } }
 @media (prefers-reduced-motion: reduce) { dialog.pal { transition: none; } }
-
-/* The sidebar's way in: a button that looks like a search field and opens the palette. */
-.sidebar-palette {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: calc(100% - 24px);
-  margin: 0 12px 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r1);
-  background: var(--s1);
-  color: var(--t2);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-.sidebar-palette:hover { border-color: var(--line2); color: var(--t1); }
-.sidebar-palette-text { flex: 1; text-align: left; }
-.sidebar-palette kbd { padding: 0 5px; border: 1px solid var(--line2); border-radius: 4px; font: inherit; font-size: 10.5px; color: var(--t3); }

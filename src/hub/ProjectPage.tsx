@@ -7,6 +7,7 @@ import ItemMenu from '../components/ItemMenu'
 import { useIsPhone } from '../lib/chrome'
 import { needsHref } from '../lib/needsView.mjs'
 import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash } from '../lib/route'
+import { swap } from '../lib/entries'
 import MapPanel from './MapPanel'
 import { CardWriteRows } from './CardWrites'
 import { useCardWrites } from './cardWriteText'
@@ -236,13 +237,13 @@ export default function ProjectPage({ route }: { route?: string }) {
   const lastNode = useRef<string | null>(null)
   const openNode: OpenNode = (event, href) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    if (node) { event.preventDefault(); window.location.replace(href); return }
+    if (node) { event.preventDefault(); swap(href); return }
     pushed.current = true
   }
   const closeNode = () => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(projectHash(project))
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(projectHash(project))
   }
-  const openRelated = (id: string) => { if (project) window.location.replace(projectNodeHash(project, id)) }
+  const openRelated = (id: string) => { if (project) swap(projectNodeHash(project, id)) }
   // Whatever closes the sheet (the button, the scrim, Escape, Back), focus goes back to the row that opened it.
   useEffect(() => {
     if (node) { lastNode.current = node; return }

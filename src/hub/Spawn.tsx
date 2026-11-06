@@ -10,6 +10,7 @@ import { hubHash } from '../lib/route'
 import { openFromClick } from './ItemRow'
 import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
+import { afterPop, go, useOverlayEntry } from '../lib/entries'
 import { startChat } from './chatStart'
 import Combobox from './Combobox'
 import type { ComboOption } from './comboboxLogic'
@@ -86,6 +87,8 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [personas, setPersonas] = useState<ChatPersona[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // The open sheet is a history entry: Back closes it and stays on the screen (lib/entries).
+  useOverlayEntry(true, onClose)
   useEffect(() => {
     const node = dialog.current
     if (node && !node.open) node.showModal()
@@ -179,7 +182,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     if (chatting) {
       // Files nothing: no request, no card, no write. Chat opens on a new conversation with the agent and the text as a draft.
       startChat({ persona: chatPersona?.id ?? HERMES, draft: trimmed })
-      window.location.hash = hubHash('chat')
+      afterPop(() => go(hubHash('chat')))
       onClose()
       return
     }

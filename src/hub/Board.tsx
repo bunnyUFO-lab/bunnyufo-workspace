@@ -11,6 +11,7 @@ import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
 import { hubHash, mapHash, workHash } from '../lib/route'
+import { swap } from '../lib/entries'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { openFromClick } from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
@@ -173,15 +174,15 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const boardHash = hubHash('work', board)
   const openFromCard = useCallback((event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-    if (focus) { event.preventDefault(); window.location.replace(href); return }
+    if (focus) { event.preventDefault(); swap(href); return }
     pushed.current = true
   }, [focus])
   const closeSheet = useCallback(() => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else window.location.replace(boardHash)
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(boardHash)
   }, [boardHash])
   const openRelated = useCallback((id: string) => {
     if (sheetOf) setCarried({ id, project: sheetOf })
-    window.location.replace(workHash(board, id))
+    swap(workHash(board, id))
   }, [board, sheetOf, setCarried])
   // Whatever closes the sheet (the button, Escape, Back), focus goes back to the card that opened it.
   useEffect(() => {

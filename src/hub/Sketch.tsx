@@ -4,6 +4,7 @@ import type { Ask, HubProject, Item } from '../lib/hub'
 import { HubError, fileUrl, hubGet, hubPost } from '../lib/hub'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
+import { go, swap } from '../lib/entries'
 import { authHeaders } from '../local/client'
 import { blankScene, setHandoff, type Drawn } from './drawing'
 import HubImage from './HubImage'
@@ -98,7 +99,7 @@ function SketchPage({ routeId }: { routeId: string }) {
           etag.current = created.etag
           setDraft(created.id)
           // The address now names the draft, so a reload comes back to it; no history entry is added.
-          history.replaceState(null, '', hubHash('sketch', created.id))
+          swap(hubHash('sketch', created.id))
           return { etag: created.etag }
         }
         const saved = await hubPost<{ etag: string }>(`/drawings/${encodeURIComponent(draftRef.current)}`, { scene, png, base: base ?? etag.current })
@@ -115,14 +116,14 @@ function SketchPage({ routeId }: { routeId: string }) {
   const close = () => {
     setEditing(false)
     setVersion(value => value + 1)
-    if (!draftRef.current) window.location.assign(hubHash('sketch'))
+    if (!draftRef.current) go(hubHash('sketch'))
   }
 
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const remove = async () => {
     if (!draftRef.current) return
     try {
-      if (await deleteSketch(draftRef.current)) window.location.assign(hubHash('sketch'))
+      if (await deleteSketch(draftRef.current)) go(hubHash('sketch'))
     } catch (failure) {
       setDeleteError((failure as Error).message)
     }
@@ -220,7 +221,7 @@ function AnswerAsk({ draft }: { draft: string }) {
   const choose = async (ask: Ask) => {
     try {
       setHandoff(await loadDrawn(draft))
-      window.location.assign(hubHash('ask', ask.id))
+      go(hubHash('ask', ask.id))
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The sketch could not be read.')
     }

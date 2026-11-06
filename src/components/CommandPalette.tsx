@@ -6,6 +6,7 @@ import { hubRows } from '../lib/hubNav'
 import { hubGet, type HubProject, type Item } from '../lib/hub'
 import { entityHash, hubHash, mapHash, reviewHash } from '../lib/route'
 import { openSpawn } from '../hub/spawnStore'
+import { afterBack, go } from '../lib/entries'
 import { askHermes } from '../hub/askHermes'
 import './palette.css'
 
@@ -44,13 +45,15 @@ function matchRank(row: Pick<Row, 'group' | 'label'>, words: string[]): number |
   return label.split(/[\s\-_/·:]+/).some(part => part.startsWith(words[0])) ? 1 : 2
 }
 
-export default function CommandPalette({ cards, items, waiting, onHome, onClose }: {
+export default function CommandPalette({ cards, items, waiting, home, onClose }: {
   /** Every card. Those of the open section (`workspace.active`) are listed first. */
   cards: WorkspaceCard[]
   /** The open items from the Hub's Today. */
   items: Item[]
   waiting: number
-  onHome: () => void
+  /** The Library's address. */
+  home: string
+  /** Cancel, Esc and the backdrop: one step back (lib/entries). Picking a row does not call it: the search stays in history behind the result. */
   onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -97,7 +100,7 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const goTo: Row[] = [
       ...(host.hub ? hubRows(host).map(([screen, label, icon]): Row => ({ group: 'Go to', label, icon, hash: hubHash(screen), hint: screen === 'needs' && waiting > 0 ? `${waiting} waiting` : undefined })) : []),
-      { group: 'Go to', label: 'Library', icon: '▤', run: onHome },
+      { group: 'Go to', label: 'Library', icon: '▤', hash: home },
     ]
     const needs: Row[] = host.hub ? items.map(item => ({
       group: 'Needs you', label: item.title, icon: '✉', hash: itemHash(item), hint: item.project,
@@ -120,10 +123,10 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
     // An empty query shows where to go and what waits; Roadmaps and Cards need a word.
     if (!words.length) return [...goTo, ...pick(needs, 8), ...spawn]
     // Whatever is typed can be asked of Hermes: a new Chat conversation that sends it.
-    const ask: Row[] = host.chat ? [{ group: 'Ask', label: `Ask Hermes: ${query.trim()}`, icon: '✎', run: () => askHermes(query, () => { window.location.hash = hubHash('chat') }) }] : []
+    const ask: Row[] = host.chat ? [{ group: 'Ask', label: `Ask Hermes: ${query.trim()}`, icon: '✎', run: () => askHermes(query, () => { go(hubHash('chat')) }) }] : []
     const rest = [...pick(goTo, 12), ...pick(needs, 8), ...pick(maps, 8), ...pick(found, 8)]
     return /^spawn\b/i.test(query.trim()) ? [...spawn, ...rest, ...ask] : [...rest, ...spawn, ...ask]
-  }, [query, cards, items, projects, waiting, onHome])
+  }, [query, cards, items, projects, waiting, home])
 
   const at = Math.min(selected, Math.max(rows.length - 1, 0))
   useEffect(() => {
@@ -132,9 +135,9 @@ export default function CommandPalette({ cards, items, waiting, onHome, onClose 
 
   const choose = (row: Row | undefined) => {
     if (!row) return
-    onClose()
-    if (row.hash) window.location.hash = row.hash
-    else row.run?.()
+    // A place is a step forward from the search, so Back returns to it. A command (Spawn, Ask) leaves the search first, then runs.
+    if (row.hash) go(row.hash)
+    else afterBack(hubHash('today'), () => row.run?.())
   }
 
   const onKey = (event: ReactKeyboardEvent) => {

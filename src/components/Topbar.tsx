@@ -5,7 +5,7 @@ import { host } from '../lib/host'
 import { publishedCardUrl, repoFileUrl } from '../lib/links'
 import { AddSection, EditCard } from './CardEdits'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
-import { homeLink } from '../lib/route'
+import { libraryHash } from '../lib/route'
 import ItemMenu from './ItemMenu'
 import { useCardMenu } from './CardMenu'
 import StepTab from './TabEdits'
@@ -20,7 +20,12 @@ interface TopbarProps {
   entity: WorkspaceCard | null
   stepIndex: number
   onStep: (id: string, index: number) => void
+  /** The first crumb: one step back (lib/entries `back`), or the Library when nothing of ours is behind. */
+  onBack: () => void
+  /** The Library, for the crumbs that name a place rather than a step back. */
   onHome: () => void
+  /** The card list is folded away (beside a card below 1400 px): the button that brings it back. */
+  onShowList?: () => void
   /** Home, filtered to one project: the breadcrumb's middle step. */
   onProject: (id: string) => void
   /** Only show that step when there is more than one project to tell apart. */
@@ -39,7 +44,7 @@ const FADE = 28
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, showProject, liveAppUrl }: TopbarProps) {
+export default function Topbar({ entity, stepIndex, onStep, onBack, onHome, onShowList, onProject, showProject, liveAppUrl }: TopbarProps) {
   const [copied, setCopied] = useState(false)
   // Its own height, which a phone needs to slide it out of view (global.css): at most two rows
   // (the breadcrumb, then the tabs), but the breadcrumb and the inline forms can change that.
@@ -117,14 +122,25 @@ export default function Topbar({ entity, stepIndex, onStep, onHome, onProject, s
   return (
     <div className="topbar" ref={bar}>
       <nav className="breadcrumb" aria-label="Breadcrumb">
-        {/* With a card open the first crumb is a plain way back, not just a word in a path. */}
+        {onShowList && (
+          <button type="button" className="crumb-link ui-showlist" onClick={onShowList} data-show-list title="Show the card list ( [ )">
+            Show list
+          </button>
+        )}
+        {/* The first crumb is the way back: one step of history, or the Library when this card was opened from a link. */}
         <a
           className={`crumb-link${entity ? ' crumb-back' : ''}`}
-          {...homeLink(onHome)}
-          title={entity ? 'Back to the Library ( Esc )' : 'Home'}
+          href={libraryHash()}
+          onClick={event => {
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+            event.preventDefault()
+            onBack()
+          }}
+          title={entity ? 'Back ( Esc )' : 'Home'}
           data-home-link="crumb"
+          data-back=""
         >
-          {entity ? <><span aria-hidden="true">←</span> Library</> : 'Workspace'}
+          {entity ? <><span aria-hidden="true">←</span> Back</> : 'Workspace'}
         </a>
         {entity && showProject && (
           <>

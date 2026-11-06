@@ -1,8 +1,9 @@
 // Hash routing: #/<entityId>/<stepIndex>. Step -1 uses the card's default.
 // Plain <a href> hash links do the navigation; App listens to hashchange.
 import type { MouseEvent as ReactMouseEvent } from 'react'
+import { withoutOverlay } from './entries.ts'
 
-export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'project', 'map', 'work', 'team', 'activity', 'jobs', 'sketch', 'chat', 'request', 'agent', 'agent-edit'] as const
+export const HUB_SCREENS = ['today', 'needs', 'ask', 'checklist', 'review', 'project', 'map', 'work', 'team', 'activity', 'jobs', 'sketch', 'chat', 'request', 'agent', 'agent-edit', 'library', 'search', 'settings'] as const
 export type HubScreen = (typeof HUB_SCREENS)[number]
 
 /** `#/~hub/<screen>[/<rest>]`. Card ids cannot contain `~`, so this never collides with a card. */
@@ -15,6 +16,8 @@ export interface Route {
   id: string | null
   step: number
   hub?: HubRoute
+  /** The address ends in `/~o`: a sheet is open over this screen. Nothing keyed on the route reads it, so the screen under a sheet never remounts. */
+  overlay?: boolean
 }
 
 const safeDecode = (value: string) => { try { return decodeURIComponent(value) } catch { return value } }
@@ -25,29 +28,25 @@ export const HUB_ALIASES: Record<string, HubScreen> = { inbox: 'needs', board: '
 const isAlias = (raw: string) => Object.prototype.hasOwnProperty.call(HUB_ALIASES, raw)
 const hubScreenOf = (raw: string) => (isAlias(raw) ? HUB_ALIASES[raw] : raw)
 
-/** The same address with an old screen name swapped for the new one, or null when it already uses the new name. */
-export function canonicalHubHash(): string | null {
-  const match = /^#\/?~hub\/([^/?#]+)(.*)$/.exec(window.location.hash)
-  if (!match || !isAlias(match[1])) return null
-  return `#/~hub/${HUB_ALIASES[match[1]]}${match[2]}`
-}
-
 export function parseHash(): Route {
-  const raw = window.location.hash.replace(/^#\/?/, '')
-  if (!raw) return { id: null, step: -1 }
+  const full = window.location.hash.replace(/^#\/?/, '')
+  const raw = withoutOverlay(`/${full}`).slice(1)
+  const overlay = raw !== full
+  const open = <T extends Route>(route: T): T => (overlay ? { ...route, overlay: true } : route)
+  if (!raw) return open({ id: null, step: -1 })
   if (raw === '~hub' || raw.startsWith('~hub/')) {
     const [, first, ...rest] = raw.split('/')
     const screen = hubScreenOf(first)
     const known = (HUB_SCREENS as readonly string[]).includes(screen) ? screen as HubScreen : 'today'
     const id = known === screen ? safeDecode(rest.join('/')) : ''
-    return { id: null, step: -1, hub: { screen: known, ...(id ? { id } : {}) } }
+    return open({ id: null, step: -1, hub: { screen: known, ...(id ? { id } : {}) } })
   }
   const [id, stepRaw] = raw.split('/')
   const step = Number(stepRaw)
-  return {
+  return open({
     id: decodeURIComponent(id),
     step: Number.isInteger(step) && step >= 0 ? step : -1,
-  }
+  })
 }
 
 export function entityHash(id: string, step = -1): string {
@@ -126,8 +125,41 @@ export function parseHelpId(id: string | undefined): { kind: HelpKind; step?: st
   return { kind: match[1] as HelpKind, ...(step ? { step } : {}), id: match[3] }
 }
 
-/** The screen the Hub's navigation marks as current: an Ask or a review is opened from Needs you, so Needs you stays lit. A checklist is the same. Activity and Jobs are Work's other tabs, so Work stays lit. An agent's details page and its Edit page are opened from Team, so Team stays lit. */
-export const navScreen = (screen: HubScreen | undefined): HubScreen | null => (screen === 'review' || screen === 'ask' || screen === 'checklist' || screen === 'request' ? 'needs' : screen === 'activity' || screen === 'jobs' ? 'work' : screen === 'agent' || screen === 'agent-edit' ? 'team' : screen ?? null)
+/** What the rail and the tab bar can light. */
+export type NavId = 'today' | 'chat' | 'library' | 'project' | 'search' | 'work' | 'team' | 'sketch' | 'settings'
+
+/**
+ * The rail entry a screen lights. An Ask, a review, a checklist or a request awaiting approval is opened from Today, so Today
+ * stays lit; Activity and Jobs are Work's tabs; an agent's page is Team's; the Map is the project's. The cards' own pages are
+ * the Library's (`null` route, or no Hub screen).
+ */
+export function navScreen(screen: HubScreen | undefined): NavId | null {
+  switch (screen) {
+    case undefined: return null
+    case 'today': case 'needs': case 'ask': case 'checklist': case 'review': case 'request': return 'today'
+    case 'chat': return 'chat'
+    case 'library': return 'library'
+    case 'project': case 'map': return 'project'
+    case 'search': return 'search'
+    case 'work': case 'activity': case 'jobs': return 'work'
+    case 'team': case 'agent': case 'agent-edit': return 'team'
+    case 'sketch': return 'sketch'
+    case 'settings': return 'settings'
+    default: return null
+  }
+}
+
+/** The phone shows its tab bar on a tab's own list, and on no other screen: not on an item, a thread, a project, Work, Team, Sketch or Settings. */
+export function showsTabs(route: Route): boolean {
+  if (route.id) return false
+  const hub = route.hub
+  if (!hub) return true
+  if (hub.screen === 'today' || hub.screen === 'library' || hub.screen === 'search') return true
+  return (hub.screen === 'chat' || hub.screen === 'project') && !hub.id
+}
+
+/** Where the cards' list is: the Library screen. */
+export const libraryHash = (): string => hubHash('library')
 
 export function resolveStep(count: number, requested: number, preferred?: number): number {
   const valid = (value: number | undefined): value is number =>

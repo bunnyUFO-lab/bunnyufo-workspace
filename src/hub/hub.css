@@ -18,20 +18,20 @@
 .hub a { color: inherit; }
 .hub code { font-family: var(--font-mono); font-size: 0.8em; }
 
-.hub-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 12px; }
+.hub-top { min-height: var(--tap); display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; margin-bottom: 12px; }
 .hub-muted { color: var(--text-dim); font-size: 0.8rem; }
-.hub-empty { color: var(--text-dim); font-size: 0.85rem; padding: 10px 2px; margin: 0; }
+.hub-empty { color: var(--t2); font-size: 0.85rem; padding: 10px 2px; margin: 0; }
 .hub-error { color: var(--red); background: var(--red-dim); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.85rem; margin: 8px 0; }
 .hub-ok { color: var(--green); background: var(--green-dim); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 0.85rem; margin: 8px 0; }
 .hub-banner { background: var(--amber-dim); color: var(--amber); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 0.82rem; margin: 0 0 14px; }
 
 .hub-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 36px; padding: 6px 12px;
-  background: var(--surface-2); color: var(--text); border: 1px solid var(--hairline-strong); border-radius: var(--radius);
+  min-height: var(--tap); padding: 6px 14px;
+  background: var(--s3); color: var(--t1); border: 1px solid var(--line2); border-radius: 12px;
   font: inherit; font-size: 0.82rem; cursor: pointer; text-decoration: none;
 }
-.hub-btn:hover:not(:disabled) { background: var(--surface-3); }
+.hub-btn:hover:not(:disabled) { background: var(--s4); }
 .hub-btn:disabled { opacity: 0.45; cursor: default; }
 .hub-btn.pri { background: var(--pink-dim); border-color: var(--pink); color: var(--pink-bright); }
 .hub-btn.danger { background: var(--red-dim); border-color: var(--red); color: var(--red); }
@@ -50,7 +50,7 @@
 .hub-kpi-v { font-family: var(--font-display); font-size: 1.8rem; line-height: 1.1; color: var(--text-bright); }
 
 .hub-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-.hub-panel { background: var(--surface-1); border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: 12px 14px; margin-bottom: 12px; min-width: 0; }
+.hub-panel { background: var(--s1); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; min-width: 0; }
 .hub-panels .hub-panel { margin-bottom: 0; }
 
 .hub-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-top: 1px solid var(--hairline); text-decoration: none; min-width: 0; }

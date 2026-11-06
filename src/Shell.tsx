@@ -4,6 +4,7 @@ import { dismissError, sendEvent, startService, useService } from './local/clien
 import FilesRail from './local/FilesRail'
 import { BrandMark } from './local/Icons'
 import { host } from './lib/host'
+import { withoutOverlay } from './lib/entries'
 import './local/local.css'
 
 // Reading a file is not part of first paint.
@@ -19,7 +20,14 @@ export default function Shell() {
   useEffect(() => { if (host.live) void startService() }, [])
   useEffect(() => {
     if (!host.live) return
-    const route = () => sendEvent({ type: 'workspace-route', route: location.hash })
+    // A sheet's `/~o` tail is not part of the route to restore; a repeat of the same route is not sent again.
+    let sent = location.hash
+    const route = () => {
+      const next = withoutOverlay(location.hash)
+      if (next === sent) return
+      sent = next
+      sendEvent({ type: 'workspace-route', route: next })
+    }
     window.addEventListener('hashchange', route)
     return () => window.removeEventListener('hashchange', route)
   }, [])

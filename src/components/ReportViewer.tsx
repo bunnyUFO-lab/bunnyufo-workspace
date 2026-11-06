@@ -136,7 +136,8 @@ function ReportPage({ url, title, relativePath, card }: ViewerProps) {
   const shown = saves ? `${framed}${framed.includes('?') ? '&' : '?'}buw-saved=${saves}` : framed
   return <div className="report-document" aria-busy={!ready}>
     {canEdit && ready && <button type="button" className="report-edit" onClick={() => setEditing(true)} title="Edit the text on this page ( Ctrl+E )">✎ Edit</button>}
-    <ReportFrame url={shown} title={title} bridge={bridgeFor(card)} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
+    {/* A new element per address: changing `src` in place would add an entry to the browser's joint history (lib/entries). */}
+    <ReportFrame key={shown} url={shown} title={title} bridge={bridgeFor(card)} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
     {!ready && <div className="report-loading" role="status">Opening report…</div>}
   </div>
 }

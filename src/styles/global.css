@@ -53,8 +53,11 @@ button:focus-visible {
   position: relative;
   z-index: 1;
   display: flex;
+  flex-direction: column;
   height: 100%;
 }
+/* The rail and the card list sit beside the screen from 900 px; below that the tabs sit under it. */
+@media (min-width: 900px) { .app-layout { flex-direction: row; } }
 
 /* The development copy's strip above everything; the layout gives up its height. */
 .dev-banner {
@@ -77,8 +80,6 @@ button:focus-visible {
 .dev-banner > span { flex: none; }
 @media (max-width: 600px) { .dev-banner { justify-content: flex-start; } }
 /* The phone menu button is fixed to the screen: keep it, and its open menu, below the bar. */
-body:has(.dev-banner) .rail-toggle { top: 38px; }
-body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .dev-banner > .dev-banner-branch { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dev-banner + .app-layout { height: calc(100% - 28px); }
 
@@ -125,17 +126,6 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
   transition: margin-left 0.32s var(--ease);
 }
 
-/* ─── Collapsible sidebar (clean screen for recording) ─── */
-.app-layout.sidebar-collapsed .sidebar {
-  margin-left: calc(-1 * var(--sidebar-w));
-}
-
-/* Keep the embedded game wiki responsive when its two reader frames resize. */
-.app-layout[data-entity="my-dream-game"] > .sidebar {
-  transition: none;
-  backdrop-filter: none;
-}
-
 /* the ‹ button that hides the menu (lives in the brand row) */
 .sidebar-collapse {
   margin-left: auto;
@@ -160,72 +150,6 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
   background: var(--surface-2);
   color: var(--text-bright);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-/* ── A narrow screen gets the menu whole ──────────────────────────────────────
-   Beside the content, the menu costs 300px. On a phone that left about eighty
-   pixels for a card, which set its title one letter per line. Below the width
-   where a page still reads comfortably next to it — the menu plus a 660px
-   column — the menu stops taking a column and covers the screen instead, and
-   a card opened from it closes the menu behind you (see App). */
-@media (max-width: 960px) {
-  .app-layout .sidebar {
-    position: fixed;
-    /* The tool rail (48px, see local.css) keeps its column; the menu covers the rest. */
-    inset: 0 48px 0 0;
-    width: calc(100% - 48px);
-    height: 100%;
-    z-index: 60;
-    margin-left: 0;
-    border-right: none;
-    visibility: visible;
-    transform: translateX(0);
-    transition: transform 0.28s var(--ease);
-  }
-  .app-layout.sidebar-collapsed .sidebar {
-    margin-left: 0;
-    transform: translateX(-100%);
-  }
-  /* Room for the floating button that brings it back, and for a thumb to reach it. */
-  .sidebar-reopen { top: 10px; left: 12px; }
-  .app-layout.sidebar-collapsed .topbar { padding-left: 64px; }
-  /* The whole width is the menu's, so its own rows can breathe. */
-  .sidebar-item { padding-top: 10px; padding-bottom: 10px; }
-  .sidebar-collapse { width: 34px; height: 34px; }
-}
-
-/* the floating gamepad button that brings the menu back — only when collapsed */
-.sidebar-reopen {
-  position: absolute;
-  top: 8px;
-  left: 10px;
-  z-index: 40;
-  width: 40px;
-  height: 40px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 3px;
-  border: 1px solid var(--hairline);
-  border-radius: 50%;
-  background: transparent;
-  backdrop-filter: blur(14px);
-  cursor: pointer;
-  opacity: 0.85;
-  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease),
-    box-shadow var(--t-fast) var(--ease);
-}
-.sidebar-reopen:hover {
-  opacity: 1;
-  transform: scale(1.08);
-  box-shadow: var(--glow-pink);
-}
-.app-layout.sidebar-collapsed .sidebar-reopen {
-  display: flex;
-}
-/* shift the topbar content clear of the floating gamepad button while collapsed */
-.app-layout.sidebar-collapsed .topbar {
-  padding-left: 62px;
 }
 
 .sidebar-brand {
@@ -362,61 +286,6 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 
 .home .project-filter { padding: 0 0 18px; }
 .home .project-chip { font-size: 0.74rem; padding: 5px 13px; }
-
-/* The Hub: one column of rows under the headings Operate, Plan and Know, above the search box, set
-   apart from the cards below by a line, so its rows do not read as more cards. The Needs you count
-   is the phone tab bar's pink badge. */
-.sidebar-hub {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 12px 12px;
-  border-bottom: 1px solid var(--hairline);
-}
-.sidebar-hub-group { display: flex; flex-direction: column; gap: 2px; }
-.sidebar-hub-heading,
-.hub-more-heading {
-  padding: 0 9px 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.hub-link-note,
-.hub-more-note { margin: 2px 0 0; padding: 0 9px; font-size: 0.74rem; line-height: 1.35; color: var(--text-muted); }
-.hub-link {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  min-height: 34px;
-  padding: 0 9px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  text-decoration: none;
-  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
-}
-.hub-link:hover,
-.hub-link:focus-visible { border-color: var(--hairline-strong); color: var(--text); }
-.hub-link.active { border-color: var(--pink); color: var(--text-bright); box-shadow: var(--glow-pink); }
-.hub-link-icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 0.85rem; }
-.hub-link-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hub-link .hub-badge { margin-left: auto; }
-.hub-inbox-badge {
-  margin-left: auto;
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--pink);
-  color: var(--surface-solid);
-  font-size: 0.66rem;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-}
 
 /* Entity list */
 .sidebar-list {
@@ -670,6 +539,7 @@ body:has(.dev-banner) .files-container.menu-open .files-rail { top: 86px; }
 .main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -721,6 +591,7 @@ a.crumb-link { text-decoration: none; color: inherit; }
 .crumb-back {
   display: inline-flex;
   align-items: center;
+  min-height: var(--tap);
   gap: 5px;
   margin-left: 0;
   padding: 3px 9px;
@@ -926,7 +797,7 @@ button.open-ext {
 /* .markdown-reader scrolls itself, but it is a flex child of this block parent, so `flex: 1` does
    nothing: without a height of its own it grows to the whole document and .content clips the rest,
    leaving a long card page unscrollable. Reports are sized by .report-document instead. */
-.content > .markdown-reader {
+.content > .markdown-reader, .content > .ui-screen > .markdown-reader {
   height: 100%;
 }
 
@@ -1823,7 +1694,6 @@ button.open-ext {
    rows here, as everywhere: the breadcrumb, then the card's tabs (one row that
    scrolls sideways, see .step-tabs). */
 @media (max-width: 640px) {
-  .app-layout .sidebar { inset: 0; width: 100%; }
   .topbar {
     padding: 10px 14px;
     gap: 8px;
@@ -1831,86 +1701,13 @@ button.open-ext {
   }
   html[data-chrome-hidden] .topbar { margin-top: calc(-1 * var(--topbar-height, 0px)); }
   /* Room on the first row for the round buttons in both corners: the menu's and the tools'. */
-  .app-layout.sidebar-collapsed .topbar { padding-left: 14px; }
-  .breadcrumb { min-height: 40px; padding-right: 50px; }
-  .app-layout.sidebar-collapsed .breadcrumb { padding-left: 50px; }
+  .breadcrumb { min-height: 40px; }
   .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) { gap: 8px; }
   .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .breadcrumb { min-height: 40px; }
   .app-layout:not([data-entity="my-dream-game"]) .topbar:has(.step-tabs) .topbar-right { align-items: center; }
   /* The project is one tap away in the menu; the card's title needs the width. */
   .breadcrumb .crumb-sep + .crumb-link, .breadcrumb .crumb-sep + .crumb-link + .crumb-sep { display: none; }
   .crumb-link { white-space: nowrap; }
-  .sidebar-reopen { transition: transform 0.25s var(--ease), opacity 0.25s var(--ease); }
-  html[data-chrome-hidden] .sidebar-reopen { transform: translateY(-64px); opacity: 0; pointer-events: none; }
-}
-
-/* ── The Hub's tab bar (a phone only) ─────────────────────────────────────────
-   The Hub group lives in the menu, which a phone keeps shut. This bar puts Today, Needs you and Work,
-   then More (Roadmap, Activity, Chat where it is set up, Library) and Search, one tap away. App leaves it out while a card
-   is open, where the reader needs the height. It stays put when the header slides away. */
-.hub-tabs { display: none; }
-@media (max-width: 640px) {
-  .hub-tabs {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 50;
-    display: flex;
-    padding-bottom: env(safe-area-inset-bottom);
-    border-top: 1px solid var(--hairline-strong);
-    background: var(--surface-solid);
-  }
-  .hub-tab {
-    position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 56px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    color: var(--text-dim);
-    font-size: 11px;
-    text-decoration: none;
-  }
-  button.hub-tab { border: 0; background: none; font: inherit; font-size: 11px; color: var(--text-dim); cursor: pointer; }
-  .hub-more {
-    position: absolute;
-    right: 8px;
-    bottom: calc(100% + 6px);
-    min-width: 180px;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--hairline-strong);
-    border-radius: 10px;
-    background: var(--surface-solid);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
-    overflow: hidden;
-  }
-  .hub-more a { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--text); text-decoration: none; font-size: 15px; }
-  .hub-more a.active { color: var(--pink); }
-  .hub-more .hub-more-search { min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border: 0; border-top: 1px solid var(--hairline); background: none; color: var(--text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
-  .hub-more-heading { padding: 10px 16px 2px; }
-  .hub-more-note { margin: 0; padding: 8px 16px; font-size: 13px; border-top: 1px solid var(--hairline); }
-  .hub-tab.active { color: var(--pink); }  .hub-tab-icon { font-size: 18px; line-height: 1; }
-  .hub-tab-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hub-tab-badge {
-    position: absolute;
-    top: 6px;
-    left: calc(50% + 6px);
-    min-width: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--pink);
-    color: var(--surface-solid);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 16px;
-    text-align: center;
-  }
-  .app-layout:has(.hub-tabs) .content { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
 }
 
 /* Numbers that must line up: counts, times, sizes. */

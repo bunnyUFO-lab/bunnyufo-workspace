@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import './hub.css'
 import { parseWorkId, type HubRoute } from '../lib/route'
 import { host } from '../lib/host'
+import { chatNote } from '../lib/hubNav'
 import Activity from './Activity'
 import AgentDetails from './AgentDetails'
 import AgentEdit from './AgentEdit'
@@ -45,7 +46,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {noSite && <div className="hub-banner" role="alert" data-hub-no-site>{noSite} <button type="button" className="hub-btn" onClick={() => setNoSite('')}>Close</button></div>}
       {!host.write && (
         <div className="hub-banner" role="note">
-          <Md text={`${host.reason ?? 'Read-only here.'} Answering Asks, ticking checklists, marking reviews done, Sketch and sending requests to agents need you to be signed in.`} />
+          <Md text={host.reason ?? 'Read-only here. Sign in to change anything.'} />
         </div>
       )}
       {route.screen === 'today' && <Today />}
@@ -63,7 +64,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'project' && <ProjectPage route={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
-      {route.screen === 'chat' && <Chat id={route.id} />}
+      {route.screen === 'chat' && (host.chat ? <Chat id={route.id} /> : <p className="hub-empty" data-hub-chat-note>{chatNote(host) ?? 'Chat is not set up here.'}</p>)}
       {host.write && <SpawnHost />}
       <RunDrawerHost />
     </div>

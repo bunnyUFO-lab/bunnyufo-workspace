@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { Item } from '../lib/hub'
 import { hubHash } from '../lib/route'
+import { swap } from '../lib/entries'
+import type { MouseEvent } from 'react'
 import { host } from '../lib/host'
 import { useIsPhone } from '../lib/chrome'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
@@ -53,6 +55,13 @@ const reducedMotion = () => typeof window.matchMedia === 'function' && window.ma
  */
 const BARE_NEEDS = hubHash('needs')
 
+/** A filter chip is state on the screen, not a place: a plain click replaces the address and adds no step to Back. A modified click is left to the browser. */
+const inPlace = (event: MouseEvent<HTMLAnchorElement>) => {
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  swap(event.currentTarget.getAttribute('href') ?? BARE_NEEDS)
+}
+
 export default function Needs({ filter: address }: { filter?: string }) {
   // The address is `<filter>[/<project>]`, or the name of one item to focus where a filter would go.
   const route = parseNeedsRoute(address, isKnownFilter)
@@ -85,7 +94,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
   useEffect(() => { if (gone) saveScope('') }, [gone])
   // A bare arrival on a remembered project settles on its address, so Back after picking All shows it again. replace adds no history entry.
   // Only while the address is still bare: a link followed just now has moved it, and the route has not caught up, so a replace here would undo that link.
-  useEffect(() => { if (!address && project && names && window.location.hash === BARE_NEEDS) window.location.replace(needsHref('all', project)) }, [address, project, names])
+  useEffect(() => { if (!address && project && names && window.location.hash === BARE_NEEDS) swap(needsHref('all', project)) }, [address, project, names])
 
   // The note belongs to the list it was left on: another chip starts clean.
   const listKey = `${active}/${project}`
@@ -200,12 +209,12 @@ export default function Needs({ filter: address }: { filter?: string }) {
       {(options.length > 0 || project) && (
         <div className="needs-project" data-needs-project>
           <ProjectPicker id="hub-needs-project" projects={options} value={project || 'all'} allValue="all" allLabel="All projects" counts={Object.fromEntries(options.map(option => [option.id, option.count]))} allCount={total}
-            onChange={id => { window.location.hash = needsHref(active, id === 'all' ? '' : id) }} alwaysList inRow />
+            onChange={id => swap(needsHref(active, id === 'all' ? '' : id))} alwaysList inRow />
           {project && <ProjectLink id={project} name={chosenName} />}
         </div>
       )}
       {phone ? (
-        <select className="needs-filter-select" aria-label="Needs you filter" data-needs-filter-select="" value={kind} onChange={event => { window.location.hash = needsHref(event.target.value, project) }}>
+        <select className="needs-filter-select" aria-label="Needs you filter" data-needs-filter-select="" value={kind} onChange={event => swap(needsHref(event.target.value, project))}>
           {visible.map(([key, label]) => {
             const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
             return <option key={key} value={key}>{count === undefined ? label : `${label} (${count})`}</option>
@@ -217,7 +226,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
         {visible.map(([key, label]) => {
           const count = key === 'answered' || key === 'requests' ? undefined : counts?.[key]
           return (
-            <a key={key} className={`hub-chip${key === kind ? ' on' : ''}`} href={needsHref(key, project)} aria-current={key === kind ? 'true' : undefined} data-filter={key}>
+            <a key={key} className={`hub-chip${key === kind ? ' on' : ''}`} href={needsHref(key, project)} onClick={inPlace} aria-current={key === kind ? 'true' : undefined} data-filter={key}>
               {label}{count !== undefined && <span className="n">{count}</span>}
             </a>
           )
@@ -232,7 +241,7 @@ export default function Needs({ filter: address }: { filter?: string }) {
             const key = name ? `${kind}:${name}` : kind
             const count = data?.subCounts?.[key] ?? (name ? undefined : counts?.[kind])
             return (
-              <a key={key} className={`hub-chip${name === sub ? ' is-on' : ''}`} href={needsHref(key, project)} aria-current={name === sub ? 'true' : undefined} data-sub-filter={name || 'all'}>
+              <a key={key} className={`hub-chip${name === sub ? ' is-on' : ''}`} href={needsHref(key, project)} onClick={inPlace} aria-current={name === sub ? 'true' : undefined} data-sub-filter={name || 'all'}>
                 {label}{count !== undefined && <span className="n">{count}</span>}
               </a>
             )

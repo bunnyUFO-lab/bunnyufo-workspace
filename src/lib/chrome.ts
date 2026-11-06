@@ -9,6 +9,18 @@ const subscribePhone = (changed: () => void) => {
   query.addEventListener('change', changed)
   return () => query.removeEventListener('change', changed)
 }
+const subscribeQuery = (query: string) => (changed: () => void) => {
+  const list = window.matchMedia(query)
+  list.addEventListener('change', changed)
+  return () => list.removeEventListener('change', changed)
+}
+/** Whether a media query matches now, followed through resize and rotation. */
+export function useMedia(query: string) { return useSyncExternalStore(subscribeQuery(query), () => window.matchMedia(query).matches) }
+
+/** Where the rail, the card list and sheets as dialogs appear: the one breakpoint of the shell. */
+export const DESKTOP = '(min-width: 900px)'
+export const useIsDesktop = () => useMedia(DESKTOP)
+
 /** Whether the screen is a phone's now. Read before the first paint and followed through resize and rotation. */
 export function useIsPhone() { return useSyncExternalStore(subscribePhone, isPhone) }
 

@@ -12,19 +12,19 @@ export const SHORTCUT_GROUPS: { title: string; items: Shortcut[] }[] = [
   {
     title: 'Getting around',
     items: [
-      { keys: ['Q'], does: 'Back to the cards, clearing the search (or Esc)' },
-      { keys: ['Ctrl', 'Shift', 'F'], does: 'Open the menu and search it, even while you are typing in a note' },
-      { keys: ['/'], does: 'Search with the menu left as it is (hidden stays hidden; matches fill the board)' },
-      { keys: ['['], does: 'Show or hide the menu' },
+      { keys: ['Q'], does: 'Back from an open card, to where you came from (or Esc)' },
+      { keys: ['Ctrl', 'Shift', 'F'], does: 'Search the card list, even while you are typing in a note' },
+      { keys: ['/'], does: 'Search: screens, items, roadmaps and cards' },
+      { keys: ['['], does: 'Show or hide the card list beside an open card' },
       { keys: ['1–9'], does: 'Show one project' },
       { keys: ['0'], does: 'Show every project’s live cards (or Alt+A, even while searching)' },
       { keys: ['Shift', 'A'], does: 'Archived cards instead of live ones, and back' },
       { keys: ['Shift', 'R'], does: 'Recent: every card in one run, newest first, and back' },
-      { keys: ['Alt', '←'], does: 'Back to the card or view before (the browser’s own)' },
+      { keys: ['Alt', '←'], does: 'Back one screen (the browser’s own; the Back buttons do the same)' },
     ],
   },
   {
-    title: 'The menu, without the search box',
+    title: 'The card list, without the search box',
     items: [
       { keys: ['J', 'K'], does: 'Step down / up through the headings and cards (↑ ↓ once you are in the list)' },
       { keys: ['Enter'], does: 'Open the card, or fold or open the heading' },
@@ -56,7 +56,7 @@ export const SHORTCUT_GROUPS: { title: string; items: Shortcut[] }[] = [
   {
     title: 'Anywhere',
     items: [
-      { keys: ['Ctrl', 'K'], does: 'Open the palette: go to a screen, an item, a roadmap or a card' },
+      { keys: ['Ctrl', 'K'], does: 'Open search: go to a screen, an item, a roadmap or a card (again to close)' },
       { keys: ['Ctrl', 'H'], does: 'This list (or ?)' },
       { keys: ['Esc'], does: 'Close a dialog, or stop editing a page' },
     ],
