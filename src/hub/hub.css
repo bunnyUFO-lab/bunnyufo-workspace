@@ -166,9 +166,11 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
   mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 /* Wide by nature: the lanes and the team's roster leave the reading width and use the whole content area. */
-.hub[data-screen="work"], .hub[data-screen="team"], .hub[data-screen="project"] { max-width: none; padding-inline: clamp(16px, 2vw, 32px); }
-.hub[data-screen="map"] { max-width: none; display: flex; flex-direction: column; overflow: hidden; padding: 8px; }
-.hub[data-screen="map"] > .hub-map-chips { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.hub[data-screen="work"], .hub[data-screen="team"] { max-width: none; padding-inline: clamp(16px, 2vw, 32px); }
+/* Projects draws a Split: the list and the project each scroll in their own pane, so the screen itself neither pads nor scrolls. */
+.hub[data-screen="project"] { max-width: none; padding: 0; overflow: hidden; }
+/* The project page's Map view: a box that takes what the header and tabs leave. */
+.hub-mapview { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px; }
 .hub-map-chips > .hub-chips-wrap { flex: 1; min-width: 0; margin: 0; }
 /* Where the project's work runs: a pill beside the project chips, short text on a phone. */
 /* The Wayfinder destination: a row between the chips and the map, never over it, so the map box shrinks. */
@@ -201,8 +203,8 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
   .hub-runs-full { display: none; }
   .hub-runs-short { display: inline; }
 }
-.hub[data-screen="map"] > .hub-wayfinder { flex: none; }
-.hub[data-screen="map"] > .hub-error, .hub[data-screen="map"] > .hub-empty, .hub[data-screen="map"] > .hub-stale { flex: none; }
+.hub-mapview > .hub-wayfinder { flex: none; }
+.hub-mapview > .hub-error, .hub-mapview > .hub-empty, .hub-mapview > .hub-stale { flex: none; }
 /* The control bar is a row of its own just under the project chips (above the Wayfinder row). The map takes everything below; the hint and Key float over it. Overlays are siblings of the box, so its wheel and pointer handlers never see them. */
 .hub-map-wrap { position: relative; flex: 1; min-height: 0; }
 .hub-map-top, .hub-legend {
@@ -274,7 +276,7 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
   /* A sheet covers the bottom of the screen: the search row gives its height back to the map until the sheet closes. */
   .hub-map-search[data-sheet] { display: none; }
   /* The open Wayfinder list takes the height instead (else the box turns wider than tall and flips its axis); a search in progress keeps its row. */
-  .hub[data-screen="map"]:has(.hub-wayfinder[data-open="true"]) .hub-map-search:not([data-query]) { display: none; }
+  .hub-mapview:has(.hub-wayfinder[data-open="true"]) .hub-map-search:not([data-query]) { display: none; }
   .hub-map-found { flex: 1 1 0; }
 }
 .hub-map-dim { opacity: 0.28; }

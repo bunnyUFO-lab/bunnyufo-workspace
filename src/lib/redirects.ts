@@ -14,8 +14,6 @@ export interface RedirectInput {
   first?: boolean
   /** A sheet is open in memory. A `/~o` tail with none (a reload) is dropped. */
   overlayOpen?: boolean
-  /** The project page has its Work and Cards tabs (item 9); until then its old tab names stay. */
-  projectTabs?: boolean
 }
 
 const TODAY = '#/~hub/today'
@@ -27,7 +25,7 @@ const SCREENS: readonly string[] = HUB_SCREENS
  * (`/<section>#/~hub/library`) where the path changes too.
  */
 export function canonicalAddress(input: RedirectInput): string | null {
-  const { pathname, hub, routes, first = false, overlayOpen = false, projectTabs = false } = input
+  const { pathname, hub, routes, first = false, overlayOpen = false } = input
   const tail = /(?:\/~o)+$/.exec(input.hash)?.[0] ?? ''
   const keepTail = tail && overlayOpen ? tail : ''
   const hash = withoutOverlay(input.hash)
@@ -50,7 +48,7 @@ export function canonicalAddress(input: RedirectInput): string | null {
     if (!SCREENS.includes(screen)) return result(TODAY)
     const tailPath = rest ? `/${rest}` : ''
     if (screen === 'map' && !rest) return result('#/~hub/project')
-    if (screen === 'project' && projectTabs) {
+    if (screen === 'project') {
       const [id, tab, ...more] = rest.split('/')
       if (id && (tab === 'running' || tab === 'needs')) return result(`#/~hub/project/${id}/work${more.length ? `/${more.join('/')}` : ''}`)
       if (id && tab === 'library') return result(`#/~hub/project/${id}/cards${more.length ? `/${more.join('/')}` : ''}`)

@@ -17,8 +17,7 @@ import Jobs from './Jobs'
 import Needs from './Needs'
 import Sketch from './Sketch'
 import SpawnHost from './Spawn'
-import ProgressMap from './ProgressMap'
-import ProjectPage from './ProjectPage.tsx' // the extension: projectPage.ts differs from this file's name only in casing
+import ProjectsScreen from './ProjectsList'
 import Team from './Team'
 import Today from './Today'
 import WorkTabs from './WorkTabs'
@@ -41,7 +40,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
     return () => document.removeEventListener('click', onClick)
   }, [])
   return (
-    <div className="hub" data-screen={route.screen}>
+    <div className="hub" data-screen={route.screen === 'map' ? 'project' : route.screen}>
       {noSite && <div className="hub-banner" role="alert" data-hub-no-site>{noSite} <button type="button" className="hub-btn" onClick={() => setNoSite('')}>Close</button></div>}
       {!host.write && (
         <div className="hub-banner" role="note">
@@ -60,8 +59,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}
       {route.screen === 'jobs' && <Jobs tab={route.id} />}
-      {route.screen === 'map' && <ProgressMap project={route.id} />}
-      {route.screen === 'project' && <ProjectPage route={route.id} />}
+      {(route.screen === 'project' || route.screen === 'map') && <ProjectsScreen route={route} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
       {route.screen === 'chat' && (chatNote(host) ? <p className="hub-empty" data-hub-chat-note>{chatNote(host)}</p> : <Chat id={route.id} />)}
       {host.write && <SpawnHost />}

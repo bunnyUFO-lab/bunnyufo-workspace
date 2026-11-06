@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
-import { hubHash, mapHash } from '../lib/route'
+import { mapHash } from '../lib/route'
 import { swap } from '../lib/entries'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
@@ -20,9 +20,7 @@ import { SIGN_GLYPH, SIGN_LABEL, groupSigns } from './signs'
 import { STATE_COLOR, STATE_LABEL, find } from './mapState'
 import { tallyFraction } from './mapCount.ts'
 import RefreshNote from './RefreshNote'
-import { useHeldHubData, useHubData } from './useHub'
-import ProjectPicker from './ProjectPicker'
-import { useProject } from './useProject'
+import { useHubData } from './useHub'
 import RoadmapRows, { RoadmapBar } from './RoadmapRows'
 import { FULL, branchModel, resolveBranch } from './mapBranch.ts'
 import { saveBranch, savedBranch } from './branchMemory.ts'
@@ -30,8 +28,6 @@ import QuestionActions from './QuestionActions'
 import { COST, preparable, questionSeed } from './questionSeed'
 import { openSpawn } from './spawnStore'
 import PlanInHermes from './PlanInHermes'
-import { ProjectLink } from './ProjectChip'
-import RunsOnChip from './RunsOnChip'
 import { host } from '../lib/host'
 
 const HINT_KEY = 'hub-map-hint-seen'
@@ -56,32 +52,21 @@ const axisFor = (w: number, h: number): Axis | null => (h >= TALL * w ? 'y' : w 
 /** A zoom step's relayout may not be followed by another this soon (ms). */
 const SETTLE_MS = 150
 
-/** The screen's id is `<project>[/<node>]`: the project alone decides what is fetched and drawn, so opening a panel never reloads the map. Project and bead ids have no `/`. */
-const splitId = (id?: string): [string | undefined, string | undefined] => {
-  const at = id ? id.indexOf('/') : -1
-  return at < 0 ? [id, undefined] : [id?.slice(0, at), id?.slice(at + 1) || undefined]
-}
-
-export default function ProgressMap({ project: routeId }: { project?: string }) {
-  const [wanted, nodeId] = splitId(routeId)
-  const { list, project, early, loading: listing } = useProject(wanted)
-  const target = project ?? early
-  const { data: model, error, loading: mapping, at } = useHeldHubData<MapModel>(target ? `/map/${encodeURIComponent(target)}` : null, !!project)
+/**
+ * The Map view of a project: what the project page draws under its tabs when the address is `#/~hub/map/<project>[/<node>]`. The page owns the
+ * project (a known one), the read of the map and the header; this draws the map inside a box that takes the room left. The project alone decides
+ * what is fetched and drawn, so opening a panel never reloads the map.
+ */
+export default function ProgressMap({ project, name, nodeId, model, error, loading, at }: { project: string; name: string; nodeId?: string; model: MapModel | null; error: string | null; loading: boolean; at: Date | null }) {
   return (
-    <>
-      <h2 className="hub-sr">Roadmap{project ? ` · ${list.find(item => item.id === project)?.name ?? project}` : ''}</h2>
-      <div className="hub-map-chips">
-        <ProjectPicker id="hub-map-project" projects={list} value={project ?? ''} onChange={id => { window.location.hash = hubHash('map', id) }} href={id => hubHash('map', id)} oneRow inRow />
-        <RunsOnChip key={project} runsOn={list.find(item => item.id === project)?.runsOn} />
-        {project && <ProjectLink id={project} label="Project" className="pp-map-link" />}
-      </div>
+    <div className="hub-mapview" data-map-view>
+      <h2 className="hub-sr">Roadmap · {name}</h2>
       <RefreshNote error={error} hasData={!!model} at={at} />
-      {!model && !error && (listing || mapping) && <p className="hub-empty">Loading…</p>}
+      {!model && !error && loading && <p className="hub-empty">Loading…</p>}
       {model && !model.meta && <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>}
-      {model?.meta && project && (
+      {model?.meta && (
         <Fragment key={project}>
           {(() => {
-            const name = list.find(item => item.id === project)?.name ?? project
             const found = nodeId ? find(model, nodeId) : null
             const selected = found ? { id: nodeId as string, title: found.kind === 'm' ? found.milestone.title : found.kind === 'f' ? found.feature.title : found.task.title } : null
             const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
@@ -96,7 +81,7 @@ export default function ProgressMap({ project: routeId }: { project?: string }) 
           })()}
         </Fragment>
       )}
-    </>
+    </div>
   )
 }
 

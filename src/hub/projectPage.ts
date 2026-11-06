@@ -1,15 +1,25 @@
 // A project's page, the parts with no screen in them: which tab an address names, which milestone a sprint would run on, and the tab counts.
 // `.ts` imports with the suffix so node can test this file.
-import type { MapMilestone, MapTask, ProgressMap, Today } from '../lib/hub.ts'
+import type { HubProject, MapMilestone, MapTask, ProgressMap, Today } from '../lib/hub.ts'
 import { isLater, tallyOf } from './mapCount.ts'
 import type { Tally } from './mapCount.ts'
 import { todayFor } from './todayFilter.ts'
 
-export const PROJECT_TABS = ['roadmap', 'running', 'needs', 'library'] as const
+export const PROJECT_TABS = ['roadmap', 'work', 'cards'] as const
 export type ProjectTab = (typeof PROJECT_TABS)[number]
 
-/** The tab an address names (`running`, `needs`, `library`); anything else, and none, is the Roadmap. */
-export const tabOf = (raw: string | undefined): ProjectTab => ((PROJECT_TABS as readonly string[]).includes(raw ?? '') ? raw as ProjectTab : 'roadmap')
+/** The tab an address names. The old names (`running`, `needs`, `library`) still read as the tab that took their place; anything else, and none, is the Roadmap. */
+export function tabOf(raw: string | undefined): ProjectTab {
+  if (raw === 'work' || raw === 'running' || raw === 'needs') return 'work'
+  if (raw === 'cards' || raw === 'library') return 'cards'
+  return 'roadmap'
+}
+
+/** The projects the Projects list shows: those with a Beads copy, or all of them while none has one. */
+export const listed = (all: HubProject[]): HubProject[] => {
+  const withBeads = all.filter(item => item.beads)
+  return withBeads.length ? withBeads : all
+}
 
 export const tasksOfMilestone = (milestone: MapMilestone): MapTask[] => milestone.features.flatMap(feature => feature.tasks)
 
@@ -26,29 +36,28 @@ export function currentMilestone(model: Pick<ProgressMap, 'milestones'>): MapMil
     ?? milestones.find(milestone => tasksOfMilestone(milestone).some(task => task.state !== 'done' && !isLater(task)))
 }
 
-/** The counts on the Running and Needs you tabs: the same filtering as Today at this project. */
+/** The counts on the Work tab: what runs and what waits on you: the same filtering as Today at this project. */
 export function tabCounts(today: Today, project: string): { running: number; needs: number } {
   const { counts } = todayFor(today, project).data
   return { running: counts.running, needs: counts.needsYou }
 }
 
-/** A phone's tab row: Roadmap, then the current tab (Needs you when Roadmap is current). The rest go behind More. Both lists keep PROJECT_TABS order. */
-export function phoneTabs(tab: ProjectTab): { row: ProjectTab[]; more: ProjectTab[] } {
-  const second = tab === 'roadmap' ? 'needs' : tab
-  return {
-    row: PROJECT_TABS.filter(key => key === 'roadmap' || key === second),
-    more: PROJECT_TABS.filter(key => key !== 'roadmap' && key !== second),
-  }
+const RANK: Record<string, number> = { doing: 0, you: 1, next: 2, later: 3, done: 4 }
+
+/** A milestone's tasks with the open ones first (doing, waiting on you, next, later, done), each group in its own order. */
+export function orderedTasks(milestone: MapMilestone): MapTask[] {
+  return tasksOfMilestone(milestone).map((task, index) => ({ task, index })).sort((a, b) => (RANK[a.task.state] ?? 3) - (RANK[b.task.state] ?? 3) || a.index - b.index).map(row => row.task)
 }
 
-/** The number on a phone's More button: what the tabs behind it hold. */
-export const moreCount = (more: readonly ProjectTab[], counts: { running: number; needs: number } | null) =>
-  !counts ? 0 : more.reduce((sum, key) => sum + (key === 'running' ? counts.running : key === 'needs' ? counts.needs : 0), 0)
+/** A milestone opens with this many tasks, and "Show more" adds this many each time. */
+export const TASK_PAGE = 20
 
-/** A milestone's row on the Roadmap tab: its tally over every task, and the tasks to show as chips (open ones first, at most `limit`). */
-export function milestoneRow(milestone: MapMilestone, limit = 6): { tally: Tally; chips: MapTask[]; more: number } {
-  const tasks = tasksOfMilestone(milestone)
-  const rank: Record<string, number> = { doing: 0, you: 1, next: 2, later: 3, done: 4 }
-  const ordered = tasks.map((task, index) => ({ task, index })).sort((a, b) => (rank[a.task.state] ?? 3) - (rank[b.task.state] ?? 3) || a.index - b.index).map(row => row.task)
-  return { tally: tallyOf(tasks), chips: ordered.slice(0, limit), more: Math.max(0, tasks.length - limit) }
+/**
+ * The Roadmap list: the milestones that are not done, each with its tasks (the current one starts open), and the finished ones folded
+ * into one "Done (n)" group. `current` is the milestone the work is in, or the first that is not done.
+ */
+export function roadmapList(model: Pick<ProgressMap, 'milestones'>): { current?: string; open: MapMilestone[]; done: MapMilestone[] } {
+  const done = model.milestones.filter(milestone => milestone.state === 'done')
+  const open = model.milestones.filter(milestone => milestone.state !== 'done')
+  return { current: (currentMilestone(model) ?? open[0])?.id, open, done }
 }

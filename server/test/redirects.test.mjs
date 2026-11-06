@@ -64,13 +64,17 @@ test('an unknown Hub screen, or a bare ~hub, is Today', () => {
   assert.equal(at('#/~hub/'), '#/~hub/today');
 });
 
-test('a project tab by its old name goes to the new tab, once the project page has them', () => {
-  assert.equal(at('#/~hub/project/p/running'), null);
-  assert.equal(at('#/~hub/project/p/running', { projectTabs: true }), '#/~hub/project/p/work');
-  assert.equal(at('#/~hub/project/p/needs', { projectTabs: true }), '#/~hub/project/p/work');
-  assert.equal(at('#/~hub/project/p/library', { projectTabs: true }), '#/~hub/project/p/cards');
-  assert.equal(at('#/~hub/project/p/work', { projectTabs: true }), null);
-  assert.equal(at('#/~hub/project/p/roadmap/n1', { projectTabs: true }), null);
+test('a project tab by its old name goes to the new tab', () => {
+  assert.equal(at('#/~hub/project/p/running'), '#/~hub/project/p/work');
+  assert.equal(at('#/~hub/project/p/needs'), '#/~hub/project/p/work');
+  assert.equal(at('#/~hub/project/p/library'), '#/~hub/project/p/cards');
+  assert.equal(at('#/~hub/project/p/work'), null);
+  assert.equal(at('#/~hub/project/p/cards'), null);
+  assert.equal(at('#/~hub/project/p/roadmap/n1'), null);
+  assert.equal(at('#/~hub/project/p/library/x'), '#/~hub/project/p/cards/x', 'Anything after the tab stays.');
+  assert.equal(at('#/~hub/map/p'), null, 'The map of a project stands: it is the project page, in its Map view.');
+  assert.equal(at('#/~hub/map/p/n1'), null);
+  assert.equal(at('#/~hub/project'), null, 'No id is the Projects list, not the last project chosen.');
 });
 
 test('a /~o tail with no sheet in memory is dropped; with one it stays', () => {
@@ -83,7 +87,7 @@ test('a /~o tail with no sheet in memory is dropped; with one it stays', () => {
 });
 
 test('a rewrite adds no loop: the answer is itself a fixed point', () => {
-  const inputs = ['', '#/', '#/~hub/inbox', '#/~hub/map', '#/~hub/zzz', '#/~hub/work/~o'];
+  const inputs = ['', '#/', '#/~hub/inbox', '#/~hub/map', '#/~hub/zzz', '#/~hub/work/~o', '#/~hub/project/p/running', '#/~hub/project/p/library/x'];
   for (const hash of inputs) {
     const first = at(hash, { first: true });
     if (!first) continue;
