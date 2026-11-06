@@ -68,7 +68,7 @@ try {
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
   await page.keyboard.type('magic');
-  // The roadmaps come from a second fetch; until they land only the "Spawn: magic" command matches, and Enter would open that.
+  // The roadmaps come from a second fetch; until they land only the "New job: magic" command matches, and Enter would open that.
   await dialog.locator('[role="group"]', { has: page.locator('.pal-g', { hasText: /^roadmaps$/i }) }).locator('[role="option"]', { hasText: /magic/i }).first().waitFor();
   await page.keyboard.press('Enter');
   await page.locator('.hub[data-screen="map"]').waitFor();
@@ -121,7 +121,7 @@ try {
   assert.equal(await dialog.locator('[role="option"]').nth(1).getAttribute('aria-selected'), 'true');
   await page.keyboard.type('zzzzqq');
   // Nothing matches a place or a card; with the Hub on and write allowed, what is left is the Spawn command for those words.
-  await dialog.locator('[role="option"]', { hasText: 'Spawn: zzzzqq' }).waitFor();
+  await dialog.locator('[role="option"]', { hasText: 'New job: zzzzqq' }).waitFor();
   assert.equal(await dialog.locator('[role="option"]').count(), 1, 'Only the Spawn command is left.');
   await page.keyboard.press('Escape');
 

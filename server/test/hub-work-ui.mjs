@@ -196,7 +196,7 @@ try {
   step('CUJ 5: Spawn replaces the old request form; a job from Work lands in the bucket as a proposal for that project');
   assert.equal(await desk.locator('.wk-lane').count(), 6);
   assert.equal(await desk.locator('button:has-text("Ask an agent to do something")').count(), 0, 'The old request form is gone.');
-  await desk.locator('button[data-spawn-open]', { hasText: 'Spawn work' }).click();
+  await desk.locator('button[data-spawn-open]', { hasText: 'New job' }).click();
   await desk.locator('[data-spawn-sheet]').waitFor();
   assert.equal(await desk.locator('[data-spawn-project]').getAttribute('data-value'), 'magic-loops', 'Spawn opens on the project Work shows.');
   await desk.locator('[data-spawn-text]').fill('Add wall-slide dust particles');
