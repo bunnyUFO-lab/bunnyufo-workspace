@@ -152,7 +152,7 @@ try {
   assert.match(await page.locator('.hub-review-reader').innerText(), /Pick a file to read it here\./);
   await page.locator('[data-back-top]').waitFor();
   assert.equal(await page.locator('[data-back-top]').getAttribute('href'), '#/~hub/needs/pr', 'Back goes to the chip the list was left on.');
-  assert.equal(await page.locator('[data-hub-link="needs"]').getAttribute('aria-current'), 'page', 'The sidebar keeps Needs you current.');
+  assert.equal(await page.locator('[data-rail] [data-nav="today"]').getAttribute('aria-current'), 'page', 'The rail keeps Today current: a review is opened from Today.');
   await go(page, `#/~hub/review/${partFile}`);
   await expand(page);
   await page.locator('[data-section="status"]').waitFor();
@@ -305,11 +305,8 @@ try {
   await phone.locator('.hub-review h2', { hasText: 'Detail probe' }).waitFor();
   await expand(phone);
   await phone.waitForFunction(() => [...document.querySelectorAll('[data-pair] img')].every(image => image.complete));
-  assert.equal(await phone.locator('[data-hub-tab="needs"]').getAttribute('aria-current'), 'page', 'Needs you is the current tab on a review.');
-  assert.equal(await phone.locator('[data-hub-tab="more"].active').count(), 0, 'More is not active.');
-  const tabStyle = key => phone.locator(`[data-hub-tab="${key}"]`).evaluate(node => { const style = getComputedStyle(node); return `${style.color}|${style.fontWeight}`; });
-  assert.equal(await tabStyle('more'), await tabStyle('work'), 'More looks like the other idle tabs.');
-  assert.notEqual((await tabStyle('more')).split('|')[0], (await tabStyle('needs')).split('|')[0], 'The Needs you tab is lit and More is not.');
+  assert.equal(await phone.locator('[data-tabs]').count(), 0, 'A review is a page of its own on a phone: no tab bar, a Back button instead.');
+  assert.equal(await phone.locator('[data-top="detail"] [data-back]').count(), 1);
   await noSideways(phone, 'review view at 390 px');
   const wide = await phone.evaluate(() => [...document.querySelectorAll('.hub-review img')].filter(image => image.getBoundingClientRect().right > innerWidth + 0.5).length);
   assert.equal(wide, 0, 'No image is wider than the screen.');

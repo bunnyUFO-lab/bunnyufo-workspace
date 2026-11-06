@@ -17,7 +17,7 @@ try {
   page.setDefaultTimeout(ms(15000));
   page.on('pageerror', error => { throw error; });
   await page.goto(fixture.url);
-  await page.locator('[data-hub-link="chat"]').click();
+  await page.locator('[data-nav="chat"]').click();
 
   step('a fenced block in the owner\'s message shows as code, without its backticks');
   await page.locator('textarea[aria-label="Message"]').fill('Is this right?\n```\nPS> git pull\nYou are not currently on a branch.\n```');

@@ -61,7 +61,7 @@ try {
   await desk.locator('[data-details-open="hermes"]').click();
   await details(desk, 'hermes').locator('.ad-facts').waitFor();
   assert.equal(new URL(desk.url()).hash, '#/~hub/agent/hermes');
-  assert.equal(await desk.locator('[data-hub-link="team"]').getAttribute('aria-current'), 'page', 'Team stays the current row in the sidebar.');
+  assert.equal(await desk.locator('[data-rail] [data-nav="team"]').getAttribute('aria-current'), 'page', 'Team stays the current entry on the rail.');
 
   step('who it is, and the profile it runs on');
   const page = details(desk, 'hermes');
@@ -147,7 +147,7 @@ try {
   await details(desk, 'teardown').locator('[data-edit-open="teardown"]').click();
   await edit.locator('[data-edit-form]').waitFor();
   assert.equal(new URL(desk.url()).hash, '#/~hub/agent-edit/teardown');
-  assert.equal(await desk.locator('[data-hub-link="team"]').getAttribute('aria-current'), 'page', 'Team stays the current row in the sidebar.');
+  assert.equal(await desk.locator('[data-rail] [data-nav="team"]').getAttribute('aria-current'), 'page', 'Team stays the current entry on the rail.');
   assert.match(await edit.locator('[data-edit-prompt]').inputValue(), /^You are Teardown, one of the owner's agents: how a public game works/);
   assert.equal(await edit.locator('[data-edit-model]').inputValue(), 'codex');
   assert.equal(flat(await edit.locator('[data-edit-model-note]').innerText()), "Chat only, this agent only. Jobs and Auto use the profile's model below.");
@@ -292,7 +292,7 @@ try {
   step('Profile: the press signs at once: no Ask, no Needs you item, the page waits, and the host\'s file is the Hub\'s own signed one');
   const needsRows = async () => {
     await reader.goto(`${fresh.url}#/~hub/needs`);
-    await reader.locator('[data-hub-link="needs"]').waitFor();
+    await reader.locator('[data-nav="today"]').waitFor();
     await reader.waitForTimeout(ms(800));
     return ((await reader.locator('body').innerText()).match(/Change the model of the Hermes main profile\?/g) ?? []).length;
   };

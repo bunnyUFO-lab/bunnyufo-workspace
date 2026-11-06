@@ -125,8 +125,8 @@ try {
   assert.deepEqual(await stepNames(alpha, 'deck'), ['Rules', 'Intro', 'Art'], 'undo put the tab back where it was');
 
   // 2. Home: rename a category, then merge one into another.
-  await page.goto(service.urls.workspace + '#');
-  await page.evaluate(() => history.pushState(null, '', location.pathname));
+  // The service remembers the last route (now every tab click is one), so Home is asked for by its address.
+  await page.evaluate(() => { location.hash = '#/'; });
   await page.reload();
   await page.locator('.section-head-row').first().waitFor();
   const heading = label => page.locator('.section-head-row', { hasText: label });
@@ -286,7 +286,7 @@ try {
   await phoneCard('brief').getByRole('button', { name: /More for Brief/ }).tap();
   await pick(page, 'Delete');
   await phoneCard('brief').waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Show menu' }).tap();
+  // No side bar on a phone: the Trash link sits above the grid.
   await page.locator('[data-trash-link]').tap();
   box = await page.locator('.lib-dialog').boundingBox();
   assert.ok(box && box.width >= 370 && box.y + box.height >= 800, `the Trash is a sheet (${JSON.stringify(box)})`);
@@ -341,7 +341,7 @@ try {
       await sitePage.goto(`${siteOrigin}/one`);
       const opener = name => sitePage.getByRole('button', { name: new RegExp(`^Workspace: ${name}`) }).first();
       // On a phone the switcher sits in the slide-over menu.
-      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show menu' }); if (await show.isVisible()) await show.click(); };
+      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show list' }); if (await show.isVisible()) await show.click(); };
       const pop = async name => { await reveal(); await opener(name).click(); };
       await pop('Section One');
       const menu = sitePage.getByRole('menu', { name: 'Workspaces' });

@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
+import { contextWithListOpen } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -79,7 +80,7 @@ const service = await createService({ repo, uiDir: path.join(root, 'dist'), regi
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 950 } })).newPage();
+  const page = await (await contextWithListOpen(browser, { viewport: { width: 1280, height: 950 } })).newPage();
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
@@ -190,7 +191,8 @@ try {
   await page.frameLocator('iframe.report-frame').getByRole('heading', { name: 'A4' }).waitFor();
 
   // Typing in the search box is untouched: J is a letter there.
-  await page.keyboard.press('/');
+  await page.keyboard.press('Control+Shift+F');
+  await page.waitForFunction(() => document.activeElement?.matches('.sidebar-search input'));
   await page.keyboard.type('jk');
   assert.equal(await page.locator('.sidebar-search input').inputValue(), 'jk');
 

@@ -64,7 +64,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'map' && <ProgressMap project={route.id} />}
       {route.screen === 'project' && <ProjectPage route={route.id} />}
       {route.screen === 'sketch' && <Sketch id={route.id} />}
-      {route.screen === 'chat' && (host.chat ? <Chat id={route.id} /> : <p className="hub-empty" data-hub-chat-note>{chatNote(host) ?? 'Chat is not set up here.'}</p>)}
+      {route.screen === 'chat' && (chatNote(host) ? <p className="hub-empty" data-hub-chat-note>{chatNote(host)}</p> : <Chat id={route.id} />)}
       {host.write && <SpawnHost />}
       <RunDrawerHost />
     </div>

@@ -34,7 +34,7 @@ const noSideways = async (page, what) => {
 
 /** Where each picker lives: its address, the section that holds it, and how to tell `maple` was chosen. */
 const PICKERS = [
-  { name: 'Roadmap', hash: '#/~hub/map', scope: '.hub-map-chips', after: page => page.waitForFunction(() => location.hash.startsWith('#/~hub/map/maple')) },
+  { name: 'Roadmap', hash: '#/~hub/map/alder', scope: '.hub-map-chips', after: page => page.waitForFunction(() => location.hash.startsWith('#/~hub/map/maple')) },
   { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work/maple') },
   { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top', after: page => page.waitForFunction(() => document.querySelector('.hub-top [role="combobox"]').dataset.value === 'maple') },
   // Today does not change the address: the picker says which project it shows.

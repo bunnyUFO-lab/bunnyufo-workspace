@@ -158,7 +158,7 @@ try {
   await page.locator('[data-next-note]', { hasText: 'Answered' }).waitFor();
   await page.waitForFunction(() => document.querySelector('.hub-chip[data-filter="all"] .n')?.textContent === '3');
   assert.equal(await page.locator('.hub-chip[data-filter="question"]').count(), 0, 'The Question chip hides when nothing is left.');
-  await page.waitForFunction(() => document.querySelector('[data-hub-tab-badge]')?.textContent === '3');
+  await page.waitForFunction(() => document.querySelector('[data-hub-badge]')?.textContent === '3');
 
   step('a step is ticked in place: it shows at once, and a new mark file is written');
   const list = page.locator(`.ni[data-need="checklist-${FIXTURE_CHECKLIST}"]`);
@@ -449,8 +449,7 @@ try {
   const back = await phoneNote.locator('[data-next-back]').boundingBox();
   assert.ok(back && back.height >= 44, `Back is ${back?.height} px tall.`);
   const box = await phoneNote.boundingBox();
-  const bar = await phone2.locator('nav.hub-tabs').boundingBox();
-  assert.ok(box && box.y >= 0 && box.y + box.height <= (bar?.y ?? 812), 'The note is on screen and above the phone bar.');
+  assert.ok(box && box.y >= 0 && box.y + box.height <= 812, 'The note is on screen.');
   assert.ok(back.x + back.width <= 375, 'Back is not pushed off screen.');
   assert.ok(await phoneNote.locator('.nq-next-text').evaluate(node => node.getBoundingClientRect().height < 70), 'The note is at most two lines.');
   await noSideways(phone2, 'the next-item note at 375 px');

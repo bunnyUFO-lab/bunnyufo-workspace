@@ -26,3 +26,13 @@ export async function noSideways(page, what) {
   const widths = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   if (widths.scroll > widths.inner) throw new Error(`${what}: the page scrolls sideways (${widths.scroll} > ${widths.inner}).`);
 }
+
+/**
+ * A browser context whose card list stays open beside a card. Below 1400 px the list starts folded beside a card (a wide report needs
+ * the room), and the choice is remembered; a test that works the list while a card is open says so.
+ */
+export async function contextWithListOpen(browser, options) {
+  const context = await browser.newContext(options);
+  await context.addInitScript(() => { try { localStorage.setItem('buw.menuCollapsed', '0'); } catch { /* none */ } });
+  return context;
+}

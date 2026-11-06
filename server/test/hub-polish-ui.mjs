@@ -132,18 +132,18 @@ try {
   assert.match(times[0], /^\d{2}:\d{2} (AM|PM)$/, 'Today is just the time, in the Hub clock.');
   assert.match(times[1], /^Oct 2\d, \d{2}:\d{2} (AM|PM)$/, 'Another day carries its date.');
 
-  step('read-only: a note where Chat would be, in the sidebar and in the phone\'s More sheet; none for a visitor who has Chat');
+  step('read-only: Chat is on the rail and the tab bar, and its screen carries the note; none for a visitor who has Chat');
   canned['/api/capabilities'].chat = false;
   const readOnly = await open({ width: 1280, height: 800 });
   await readOnly.goto(`${site}/one#/~hub/today`);
-  const note = readOnly.locator('.sidebar-hub [data-hub-chat-note]');
+  await readOnly.locator('[data-rail] [data-nav="chat"]').click();
+  const note = readOnly.locator('[data-hub-chat-note]');
   await note.waitFor();
   assert.match(await note.innerText(), /Chat .*signed in/);
-  assert.equal(await readOnly.locator('.sidebar-hub [data-hub-link="chat"]').count(), 0);
   const phone = await open({ width: 390, height: 800 });
   await phone.goto(`${site}/one#/~hub/today`);
-  await phone.locator('[data-hub-tab="more"]').click();
-  await phone.locator('.hub-more [data-hub-chat-note]').waitFor();
+  await phone.locator('[data-tabs] [data-nav="chat"]').click();
+  await phone.locator('[data-hub-chat-note]').waitFor();
   const width = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
   assert.ok(width.scroll <= width.inner, 'No sideways scroll at 390 px.');
   assert.equal(await guest.locator('[data-hub-chat-note]').count(), 0, 'A visitor who has Chat is not told it needs signing in.');

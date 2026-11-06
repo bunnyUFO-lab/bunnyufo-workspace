@@ -56,7 +56,7 @@ try {
     assert.ok(chip <= 240, `Lane chips top (${chip}).`);
     assert.ok(card <= 390, `First card top (${card}).`);
     await page.locator('[data-lane-chip="backlog"]').tap();
-    const above = await page.evaluate(() => { const tabs = document.querySelector('nav.hub-tabs').getBoundingClientRect().top; return [...document.querySelectorAll('.wk-lane')].filter(lane => getComputedStyle(lane).display !== 'none').flatMap(lane => [...lane.querySelectorAll('.wk-card')]).filter(node => node.getBoundingClientRect().bottom <= tabs).length; });
+    const above = await page.evaluate(() => { const tabs = innerHeight; return [...document.querySelectorAll('.wk-lane')].filter(lane => getComputedStyle(lane).display !== 'none').flatMap(lane => [...lane.querySelectorAll('.wk-card')]).filter(node => node.getBoundingClientRect().bottom <= tabs).length; });
     assert.ok(above >= 4, `At least 4 cards lie wholly above the bottom bar (${above}).`);
     assert.equal(await page.locator('.wk-search, .wk-filters').count(), 0, 'The fields are not in the page.');
     const bar = await page.locator('[data-work-bar]').evaluate(node => [...node.children].map(child => { const box = child.getBoundingClientRect(); return { tag: child.tagName, top: Math.round(box.top), height: box.height, left: box.left, right: box.right }; }));
@@ -212,8 +212,8 @@ try {
   {
     const page = await open({ width: 390, height: 844 });
     await go(page);
-    await openSheet(page);
     const before = await page.evaluate(() => location.hash);
+    await openSheet(page);
     const chip = await page.locator('[data-lane-chip="done"]').boundingBox();
     await page.touchscreen.tap(chip.x + chip.width / 2, chip.y + chip.height / 2);
     await sheet(page).waitFor({ state: 'detached' });
@@ -348,8 +348,7 @@ try {
     await page.locator('[data-spawn-sheet]').waitFor({ state: 'hidden' });
     assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-spawn-open')), true, 'The focus returns to Spawn.');
     assert.equal(await page.locator('.work-spawn').count(), 0);
-    await page.locator('[data-hub-tab="more"]').tap();
-    await page.locator('[data-hub-more="project"]').tap();
+    await page.evaluate(() => { location.hash = '#/~hub/project'; });
     await page.waitForFunction(() => location.hash.startsWith('#/~hub/project'));
     await page.waitForFunction(() => /lanes/i.test(document.body.innerText));
     await go(page, `${fixture.url}#/~hub/work/all`);

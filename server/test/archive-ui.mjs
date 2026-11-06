@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
+import { contextWithListOpen } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -59,7 +60,7 @@ const service = await createService({ repo, uiDir: path.join(root, 'dist') });
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await browser.newContext({ viewport: { width: 1200, height: 900 } })).newPage();
+  const page = await (await contextWithListOpen(browser, { viewport: { width: 1200, height: 900 } })).newPage();
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
@@ -97,7 +98,7 @@ try {
   assert.equal(await gridChip.count(), 0, 'With the filter off and nothing archived the chip goes.');
 
   // The sidebar archives too, so putting work away never means hunting the card down in the grid.
-  await page.getByRole('button', { name: 'Show menu' }).click();
+  await page.getByRole('button', { name: 'Show list' }).click();
   await page.getByRole('button', { name: 'Archive Card one' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.sidebar-groups .sidebar-row').length === 1);
   assert.equal(await status('one'), 'archived');

@@ -133,8 +133,9 @@ try {
   assert.deepEqual(await chipsOf(), [['all', '2'], ['question', '1'], ['unstick', '1'], ['answered', null]]);
   assert.equal(await page.locator('.needs-project input').inputValue(), 'Sprite Studio (2)');
 
-  step('Back restores All');
-  await page.goBack();
+  step('picking All restores All: a project pick is state on the screen and added no step to Back');
+  await page.locator('.needs-project input').click();
+  await page.locator('.needs-project [role="option"][data-value="all"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.ni').length === 7);
   assert.equal(await hash(), '#/~hub/needs/all');
 
@@ -210,8 +211,8 @@ try {
   assert.deepEqual(await small(page, '[data-project-actions] .hub-btn, .pp-tabs .wk-tab, .pp-more, .pp .hub-chip, .pp select, .pp .hub-runs'), [], 'Every control is at least 44 px high.');
   assert.equal(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator('[data-project-note]').count(), 0, 'Magic Loops runs on the PC: no note.');
-  assert.equal(await page.locator('[data-hub-link="project"]').getAttribute('aria-current'), 'page', 'Projects is lit in the sidebar.');
-  assert.deepEqual(await page.locator('[data-hub-group="plan"] [data-hub-link]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-link'))), ['project', 'map', 'chat']);
+  assert.equal(await page.locator('[data-rail] [data-nav="project"]').getAttribute('aria-current'), 'page', 'Projects is lit on the rail.');
+  assert.deepEqual((await page.locator('[data-rail] [data-nav]').evaluateAll(list => list.map(item => item.getAttribute('data-nav')))).filter(name => name === 'project' || name === 'chat'), ['chat', 'project'], 'Chat, then Projects, as in the mockup; the Roadmap has no entry of its own.');
 
   step('project page, Roadmap tab: one row per milestone with the map counts; finished ones fold; a chip opens that task over the page, and Back returns');
   const rows = page.locator('[data-pp-roadmap] [data-pp-milestone]');
@@ -356,10 +357,8 @@ try {
   const tops = await narrow.locator('[data-project-actions] .hub-btn').evaluateAll(list => list.map(item => Math.round(item.getBoundingClientRect().top)));
   assert.equal(new Set(tops).size, 1, 'The three buttons share a row.');
   assert.equal(await narrow.locator('[aria-label="Working now"]').count(), 0, 'Below 1000 px the Running panel is the Running tab only.');
-  assert.deepEqual(await narrow.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'map', 'more'], 'The phone bar is unchanged.');
-  assert.equal(await narrow.locator('[data-hub-tab="more"]').getAttribute('class').then(value => value.includes('active')), true, 'More is lit on the page: Projects lives there.');
-  await narrow.locator('[data-hub-tab="more"]').tap();
-  assert.equal(await narrow.locator('[data-hub-more="project"]').getAttribute('aria-current'), 'page');
+  assert.equal(await narrow.locator('[data-tabs]').count(), 0, 'A project page is a page of its own on a phone: no tab bar, a Back button instead.');
+  assert.equal(await narrow.locator('[data-top="detail"] [data-back]').count(), 1);
 
   console.log('hub-needs-project-ui: passed');
 } finally {

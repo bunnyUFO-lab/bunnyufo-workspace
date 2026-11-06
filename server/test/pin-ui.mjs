@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
+import { contextWithListOpen } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -123,7 +124,7 @@ const service = await createService({ repo, uiDir: path.join(root, 'dist'), regi
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 950 } })).newPage();
+  const page = await (await contextWithListOpen(browser, { viewport: { width: 1280, height: 950 } })).newPage();
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(service.urls.workspace);
@@ -168,13 +169,13 @@ try {
 
   // The button pins a card and writes it through, with no drag needed.
   await page.locator('.entity-card[data-entity="alpha"] .card-pin').click();
+  // A folded list is not drawn: unfold it to see the pin arrive there.
+  await page.getByRole('button', { name: 'Show list' }).click();
   await page.locator('.sidebar-item.pinned', { hasText: 'Alpha' }).waitFor({ state: 'attached' });
   assert.equal(await pinnedInFile(one, 'alpha'), true);
   await page.locator('.entity-card[data-entity="alpha"] .card-pin').click();
   await page.waitForFunction(() => document.querySelectorAll('.sidebar-item.pinned').length === 1);
   assert.equal(await pinnedInFile(one, 'alpha'), false, 'Unpinning is remembered, so a card published pinned can be taken off the list.');
-
-  await page.getByRole('button', { name: 'Show menu' }).click();
 
   // A flick: the whole gesture lands before the page renders. Pinned and unpinned again, so the steps below start as they did.
   await flick(page, page.locator('.sidebar-groups .sidebar-item', { hasText: 'Alpha' }), page.locator('.sidebar-pins'));

@@ -1,5 +1,5 @@
 import type { HostCapabilities } from './host'
-import { hubHash, type HubScreen, type NavId } from './route'
+import { hubHash, type HubScreen, type NavId } from './route.ts'
 
 /** The Hub's screens the search lists under "Go to", in order: [screen, label, icon]. Sketch needs writes and Chat needs the assistant. */
 export function hubRows(caps: Pick<HostCapabilities, 'write' | 'chat'>): [HubScreen, string, string][] {

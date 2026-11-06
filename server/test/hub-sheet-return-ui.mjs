@@ -27,7 +27,7 @@ const open = async (viewport, options = {}) => {
 const PHONE = { hasTouch: true, isMobile: true };
 const hashOf = page => page.evaluate(() => location.hash);
 const panelOf = page => page.locator('dialog#hub-map-panel');
-const litTab = page => page.locator('.hub-tab.active').innerText();
+const noTabs = page => page.locator('[data-tabs]').count();
 const list = '[data-project-page="lanes"] [data-pp-roadmap]';
 const sheetUrl = id => `#/~hub/project/lanes/roadmap/${encodeURIComponent(id)}`;
 /** The address settles on the list, the sheet is gone and the list shows. */
@@ -78,12 +78,12 @@ try {
         await press(opener);
         await panelOf(page).locator('h3').waitFor();
         assert.equal(await hashOf(page), sheetUrl(id), `A ${kind} opens at its Project address.`);
-        if (phone) assert.match(await litTab(page), /More/, 'More is lit while the sheet is open.');
+        if (phone) assert.equal(await noTabs(page), 0, 'A project page has no tab bar while the sheet is open.');
         await leave();
         await backOnList(page, `${kind}, ${how}`);
         const after = await page.evaluate(() => document.querySelector('.hub').scrollTop);
         assert.ok(Math.abs(after - scrolled) <= 2, `The scroll holds (${scrolled} -> ${after}).`);
-        if (phone) assert.match(await litTab(page), /More/, 'More stays lit.');
+        if (phone) assert.equal(await noTabs(page), 0, 'Still no tab bar.');
         await page.waitForFunction(value => document.activeElement?.getAttribute('data-pp-node') === value, id);
         await leaveThePage(page);
       }

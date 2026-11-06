@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
+import { contextWithListOpen } from './shell-helpers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 await mkdir(path.join(root, '.cache'), { recursive: true });
@@ -47,7 +48,7 @@ const service = await createService({ repo, uiDir: path.join(root, 'dist'), regi
 let browser;
 try {
   browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
-  const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  const page = await (await contextWithListOpen(browser, { viewport: { width: 1280, height: 900 } })).newPage();
   page.setDefaultTimeout(ms(10000));
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const logs = []; page.on('console', message => logs.push(message.text()));
@@ -89,7 +90,7 @@ try {
 
   await startSearch('Bravo');
   await openCard('bravo');
-  await page.getByRole('link', { name: /Library/ }).click();
+  await page.getByRole('link', { name: /Back/ }).click();
   await assertBoardWhole('← Library');
 
   // With a search running and the box blurred, Esc on the board clears it; so does the Clear link.
@@ -102,6 +103,8 @@ try {
   await blur();
   await page.getByRole('button', { name: 'Hide menu' }).click();
   await page.locator('.home .home-filter-clear').click();
+  // The folded list is not drawn: bring it back to read its search box.
+  await page.getByRole('button', { name: 'Show list' }).click();
   await assertBoardWhole('Clear');
 
   // Item 3: the header counts the list. The card dated ten days ago is archived, not active.
@@ -180,12 +183,11 @@ try {
   await page.reload();
   // The app may reopen the card last read (then the board is one click back) or land on the board.
   await page.locator('.home .entity-card, .crumb-back').first().waitFor();
-  if (await page.locator('.crumb-back').count()) await page.getByRole('link', { name: /Library/ }).click();
+  if (await page.locator('.crumb-back').count()) await page.getByRole('link', { name: /Back/ }).click();
   await page.locator('.home .entity-card').first().waitFor();
   assert.equal(await recentOn(), true, 'Recent survives a reload');
   assert.equal(await page.locator('.home .home-section').count(), 1);
   // Shift+R does nothing while typing in the search box.
-  await page.keyboard.press('/');
   await search.focus();
   await page.keyboard.press('Shift+R');
   assert.equal(await search.inputValue(), 'R');

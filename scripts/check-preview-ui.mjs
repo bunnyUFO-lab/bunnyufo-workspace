@@ -169,15 +169,15 @@ try {
   await dialog.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
 
-  // One shell on every host: the site's rail offers the tools it can serve, and no others, and the
-  // top bar carries no tools of its own.
-  for (const name of ['Toggle skills', 'Toggle settings', 'Keyboard shortcuts']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 1, `${name} is on the rail`);
-  for (const name of ['Toggle files', 'Toggle mcp']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${name} needs a host with files`);
+  // One shell on every host: a site has no tool column (that is for local files), the top bar carries no tools of its own,
+  // and Settings is a screen on the shell's rail.
+  for (const name of ['Toggle skills', 'Toggle settings', 'Keyboard shortcuts', 'Toggle files', 'Toggle mcp']) assert.equal(await page.getByRole('button', { name, exact: true }).count(), 0, `${name} needs a host with local files`);
+  assert.equal(await page.locator('[data-rail] [data-nav="settings"]').count(), 1);
   assert.equal(await page.locator('.browser-settings').count(), 0);
   // Browser-only Settings use local storage and style embedded reports too.
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
+  await page.locator('[data-rail] [data-nav="settings"]').click();
   await page.getByLabel('Workspace theme', { exact: true }).selectOption('light');
-  await page.getByRole('button', { name: 'Toggle settings', exact: true }).click();
+  await page.goBack();
   assert.equal(await page.locator('html').getAttribute('data-workspace-theme'), 'light');
   assert.equal(await page.locator('.buw-markdown h1').evaluate(node => getComputedStyle(node).color), 'rgb(17, 21, 33)');
   await page.getByRole('img', { name: 'Reference', exact: true }).click();

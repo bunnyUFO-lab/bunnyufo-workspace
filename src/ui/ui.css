@@ -106,6 +106,7 @@
 /* ── Desktop ── */
 .ui-top.phone-only { display: flex; }
 .ui-showlist { display: none; }
+.ui-showbar { display: none; }
 @media (min-width: 900px) {
   .ui-top.phone-only { display: none; }
   .ui-top h1 { font-size: 24px; }
@@ -114,6 +115,7 @@
   .ui-split.folded .ui-pane-list { display: none; }
   .ui-sheet { left: 50%; right: auto; bottom: auto; top: 12%; width: 460px; max-height: 76%; border-radius: 18px; transform: translateX(-50%); animation: none; box-shadow: 0 20px 70px rgba(0, 0, 0, 0.6); }
   .ui-showlist { display: inline-flex; }
+  .ui-showbar { display: flex; flex: none; padding: 8px 16px 0; }
 }
 
 @media (max-width: 360px) { .ui-seg button { font-size: 13px; } .ui-tab { font-size: 11px; } }

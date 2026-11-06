@@ -28,6 +28,7 @@ import Tabs from './ui/Tabs'
 import TopBar from './ui/TopBar'
 import { Screen } from './ui/Layout'
 import TrashList from './components/TrashList'
+import WorkspaceSwitcher from './components/WorkspaceSwitcher'
 import { Button } from './ui/Controls'
 import { useAutoHideHeader, useIsDesktop, useMedia } from './lib/chrome'
 import { api, cardFile, cardUrl, reportError } from './local/client'
@@ -105,16 +106,16 @@ const DETAIL: Partial<Record<HubScreen, { title: string; parent: string }>> = {
 }
 
 /**
- * On a phone the card list is the grid alone, so what the list used to hold is one row above it: the pinned cards, the Trash, and where there
+ * On a phone the card list is the grid alone, so what the list used to hold is one row above it: the section switcher, the pinned cards, the Trash, and where there
  * is no Hub (so no tabs) a way to Search and Settings. Replaced by the Library screen in item 3.
  */
 function PhoneLibraryBar({ pinned, workspaces }: { pinned: WorkspaceCard[]; workspaces: CardWorkspace[] }) {
   const trashed = trashOf(workspaces)
   const purgePending = host.purge && workspaces.some(w => canManage(w) && Object.values(w.retired ?? {}).some(r => r.kind === 'purged' && r.pending))
   const [trashOpen, setTrashOpen] = useState(false)
-  if (!pinned.length && !trashed.length && !purgePending && host.hub) return null
   return (
     <div className="ui-libbar" data-phone-library-bar>
+      <WorkspaceSwitcher />
       {pinned.length > 0 && (
         <nav className="ui-pins" aria-label="Pinned cards" data-phone-pins>
           {pinned.map(card => <a key={`${card.workspace.id}/${card.id}`} href={entityHash(card.id)}>{card.title}</a>)}
@@ -170,7 +171,6 @@ export default function App() {
     const saved = localStorage.getItem('buw.menuCollapsed')
     return saved === '1' ? true : saved === '0' ? false : null
   })
-  const collapsed = menuPref ?? !wide
   const setCollapsed = useCallback((next: boolean) => {
     setMenuPref(next)
     try { localStorage.setItem('buw.menuCollapsed', next ? '1' : '0') } catch { /* storage blocked */ }
@@ -217,6 +217,8 @@ export default function App() {
   // that id, open the one whose folder matches.
   const byFolder = open.length || !view.id ? [] : cards.filter(e => e.folder === view.id)
   const entity = open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
+  // Beside a card the list starts folded below 1400 px; on the Library it is the screen, and folds only when asked.
+  const listFolded = entity ? (menuPref ?? !wide) : menuPref === true
   // A link to a card that was deleted: say where it is, with a way back.
   const inTrash = !entity && view.id ? trashOf(workspaces).find(t => t.id === view.id) ?? null : null
   const library = useMemo(() => ({ workspaces, cards }), [workspaces, cards])
@@ -272,7 +274,7 @@ export default function App() {
     walkStep?: (id: string, index: number) => void
     searching: boolean
     folded: boolean
-  }>({ entity, reportUrl, step, stepIndex, searching: searchOpen, folded: collapsed })
+  }>({ entity, reportUrl, step, stepIndex, searching: searchOpen, folded: false })
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null
@@ -292,7 +294,7 @@ export default function App() {
           ev.preventDefault()
           setCollapsed(false)
           // The list is drawn once it is unfolded; focus then, or the browser scrolls to a hidden field.
-          window.setTimeout(() => { searchRef.current?.focus(); searchRef.current?.select() }, 0)
+          window.setTimeout(() => { searchRef.current?.focus(); searchRef.current?.select() }, 60)
         } else if (!ev.shiftKey && key === 'h') {
           ev.preventDefault()
           setShowKeys(v => !v)
@@ -490,7 +492,7 @@ export default function App() {
       archive: canWrite ? setArchived : undefined,
       walkStep,
       searching: searchOpen,
-      folded: collapsed,
+      folded: listFolded,
     }
   })
 
@@ -665,7 +667,7 @@ export default function App() {
       : host.hub ? (hubScreen === 'project' && view.hub.id ? { title: 'Project', parent: hubHash('project') } : hubScreen ? DETAIL[hubScreen] : undefined)
         : undefined
   // The list beside the screen: on the Library, on a card (unless folded) and where there is no Hub. A phone has no such column.
-  const showSidebar = desktop && !hubOnly && !showSettings && !(entity && collapsed)
+  const showSidebar = desktop && !hubOnly && !showSettings && !listFolded
   const lit = searchOpen && !desktop ? 'search' : view.hub ? navScreen(view.hub.screen) : 'library'
   const screenKey = hubOnly ? hubKey(view.hub!) : showSettings ? 'settings' : liveUrl || reportUrl || 'home'
   const fallback = <div className="boot"><BrandLogo size={56} animated={false} /></div>
@@ -721,7 +723,7 @@ export default function App() {
           cardCount={cards.length}
           offline={offline}
           lastSync={lastSync}
-          onCollapse={entity ? () => setCollapsed(true) : undefined}
+          onCollapse={() => setCollapsed(true)}
         />
       )}
 
@@ -744,13 +746,16 @@ export default function App() {
             onStep={selectStep}
             onBack={goBack}
             onHome={goHome}
-            onShowList={desktop && collapsed ? () => setCollapsed(false) : undefined}
+            onShowList={desktop && listFolded ? () => setCollapsed(false) : undefined}
             onProject={pickProject}
             showProject={workspaces.length > 1}
             liveAppUrl={liveUrl}
           />
         )}
         {detail && <TopBar title={detail.title} parent={detail.parent} phoneOnly />}
+        {desktop && listFolded && !entity && !hubOnly && !showSettings && (
+          <div className="ui-showbar"><Button small tone="ghost" data-show-list="" onClick={() => setCollapsed(false)}>Show list</Button></div>
+        )}
 
         {host.hub && entity && !view.hub && !entity.workspace.builtin && <CardWritesStrip key={`${entity.workspace.id}/${entity.folder}`} section={entity.workspace.id} folder={entity.folder} />}
 

@@ -98,8 +98,8 @@ function SketchPage({ routeId }: { routeId: string }) {
           draftRef.current = created.id
           etag.current = created.etag
           setDraft(created.id)
-          // The address now names the draft, so a reload comes back to it; no history entry is added.
-          swap(hubHash('sketch', created.id))
+          // The address now names the draft, so a reload comes back to it; no history entry is added, and the screen is not told: it already shows this draft.
+          swap(hubHash('sketch', created.id), undefined, false)
           return { etag: created.etag }
         }
         const saved = await hubPost<{ etag: string }>(`/drawings/${encodeURIComponent(draftRef.current)}`, { scene, png, base: base ?? etag.current })

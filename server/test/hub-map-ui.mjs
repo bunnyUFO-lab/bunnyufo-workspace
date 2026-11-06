@@ -302,11 +302,11 @@ try {
   await noSideways(big, 'Roadmap at 1920');
 }
 {
-  step('a first visit opens Magic Loops, and the chips follow the table order');
+  step('Magic Loops opens, and the chips follow the table order');
   const desk = await open({ width: 1280, height: 800 }, { reducedMotion: 'reduce' });
-  await desk.goto(`${fixture.url}#/~hub/map`);
+  await desk.goto(`${fixture.url}#/~hub/map/magic-loops`);
   await desk.locator('.hub-map-wrap').waitFor();
-  assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'A first visit opens the first project in table order.');
+  assert.equal(await desk.locator('.hub-chip.on').innerText(), 'Magic Loops', 'The address names the project.');
   const names = await desk.locator('.hub-map-chips .hub-chip').allInnerTexts();
   assert.deepEqual(names, ['Magic Loops', 'Workspace app', 'Aardvark', 'Aardwolf', 'Nosprint', 'Wayfind']);
 
@@ -324,7 +324,7 @@ try {
 
   step('at phone width: short text, one line, nothing sideways');
   const phone = await open({ width: 390, height: 888 }, { hasTouch: true, isMobile: true });
-  await phone.goto(`${fixture.url}#/~hub/map`);
+  await phone.goto(`${fixture.url}#/~hub/map/magic-loops`);
   await phone.locator('.hub-map-wrap').waitFor();
   // Phone width: the project is one native select (ws-ubo.2.1); its shown option is the chosen project.
   const shown = () => phone.locator('.hub-map-chips select').evaluate(select => select.selectedOptions[0]?.textContent);
@@ -621,7 +621,7 @@ try {
   await axisIs(phone, 'y', 'The box is vertical after Full map to a branch.');
   await sized('branch');
   await noSideways(phone, 'branch at 390');
-  const fill = await phone.evaluate(() => ({ bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, tabs: document.querySelector('nav.hub-tabs')?.getBoundingClientRect().top ?? innerHeight }));
+  const fill = await phone.evaluate(() => ({ bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, tabs: document.querySelector('[data-tabs]')?.getBoundingClientRect().top ?? innerHeight }));
   assert.ok(Math.abs(fill.bottom - (fill.tabs - 8)) <= 10, `The box fills down to the tab bar (${fill.bottom} vs ${fill.tabs}).`);
   await phone.locator('[data-node="aw-f1"] > circle').first().tap({ force: true });
   const sheet = phone.locator('.hub-map-panel');

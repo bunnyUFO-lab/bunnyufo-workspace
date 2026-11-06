@@ -20,14 +20,8 @@ export default function Shell() {
   useEffect(() => { if (host.live) void startService() }, [])
   useEffect(() => {
     if (!host.live) return
-    // A sheet's `/~o` tail is not part of the route to restore; a repeat of the same route is not sent again.
-    let sent = location.hash
-    const route = () => {
-      const next = withoutOverlay(location.hash)
-      if (next === sent) return
-      sent = next
-      sendEvent({ type: 'workspace-route', route: next })
-    }
+    // A sheet's `/~o` tail is not part of the route to restore.
+    const route = () => sendEvent({ type: 'workspace-route', route: withoutOverlay(location.hash) })
     window.addEventListener('hashchange', route)
     return () => window.removeEventListener('hashchange', route)
   }, [])

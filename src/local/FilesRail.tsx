@@ -199,7 +199,7 @@ export default function FilesRail() {
     // Nothing else clears the gesture now that the shell no longer reports the drop.
     dragEnd: () => { if (!internalDrag.current?.handled) setStatus(''); internalDrag.current = null; setDropTarget('') },
     // Where the panel overlays the content, a chosen file takes the screen: put the panel away.
-    preview: entry => { setSelected(entry.path); setDestination(entry.path.replace(/[\\/][^\\/]+$/, '')); api<Preview>(`/preview?path=${encodeURIComponent(entry.path)}`).then(setPreview).catch(reportError) },
+    preview: entry => { if (window.matchMedia('(max-width: 960px)').matches) setOpen(false); setSelected(entry.path); setDestination(entry.path.replace(/[\\/][^\\/]+$/, '')); api<Preview>(`/preview?path=${encodeURIComponent(entry.path)}`).then(setPreview).catch(reportError) },
     drag: (event, path, directory) => {
       // A plain browser drag. text/plain still drops the path into a terminal or an
       // editor, and the tree's own drop handler still moves the file.

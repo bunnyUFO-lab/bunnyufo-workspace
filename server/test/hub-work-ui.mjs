@@ -116,11 +116,11 @@ try {
   await page.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
   assert.equal(await page.locator('[data-work-tab="activity"]').getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator('.hub h2').first().innerText(), 'Work');
-  assert.equal(await page.locator('[data-hub-link="work"]').getAttribute('aria-current'), 'page', 'Work stays lit on the Activity tab.');
-  assert.equal(await page.locator('[data-hub-link="activity"]').count(), 0, 'Activity has left the nav.');
+  assert.equal(await page.locator('[data-rail] [data-nav="work"]').getAttribute('aria-current'), 'page', 'Work stays lit on the Activity tab.');
+  assert.equal(await page.locator('[data-nav="activity"]').count(), 0, 'Activity has left the nav.');
   await go(page, '#/~hub/activity/agents');
   await page.locator('.hub-chip.on', { hasText: 'Agents' }).waitFor();
-  assert.equal(await page.locator('[data-hub-link="work"]').getAttribute('aria-current'), 'page');
+  assert.equal(await page.locator('[data-rail] [data-nav="work"]').getAttribute('aria-current'), 'page');
   await page.locator('[data-work-tab="lanes"]').click();
   await page.locator('.wk-lane').first().waitFor();
 
@@ -152,9 +152,8 @@ try {
   await phone.locator('.hub[data-screen="activity"] .hub-row').first().waitFor();
   await phone.waitForTimeout(250);
   await noSideways(phone, 'Activity at 390 px');
-  assert.equal(await phone.locator('[data-hub-tab="work"]').getAttribute('class').then(value => value.includes('active')), true, 'The phone bar lights Work on Activity.');
-  await phone.locator('[data-hub-tab="more"]').tap();
-  assert.deepEqual(await phone.locator('[data-hub-more]').evaluateAll(list => list.map(item => item.getAttribute('data-hub-more'))), ['project', 'library', 'sketch']);
+  assert.equal(await phone.locator('[data-tabs]').count(), 0, 'Work is a page of its own on a phone: no tab bar, a Back button instead.');
+  assert.equal(await phone.locator('[data-top="detail"] [data-back]').count(), 1);
 
   step('phone: with nothing running, Blocked is the lane that opens');
   const quiet = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -241,7 +240,7 @@ try {
   const none = await open({ width: 1200, height: 800 });
   await none.route('**/api/hub/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{"projects":[]}' }));
   await none.goto(plain.url);
-  await none.locator('.sidebar-list').waitFor();
+  await none.locator('[data-rail]').waitFor();
   await go(none, '#/~hub/work');
   await none.locator('.hub-empty', { hasText: 'No projects yet' }).waitFor();
   assert.equal(await none.locator('.hub-empty', { hasText: 'Loading…' }).count(), 0, 'Work keeps loading with an empty project list.');

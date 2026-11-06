@@ -99,7 +99,10 @@ try {
   await dialog.waitFor({ state: 'detached' });
 
   step('Ctrl+K works from inside a text field, and Esc closes it and gives the focus back');
+  // A text field to type in: the Library's card filter (Today has none).
+  await page.evaluate(() => { location.hash = '#/~hub/library'; });
   const search = page.locator('.sidebar-search input');
+  await search.waitFor();
   await search.focus();
   await page.keyboard.press('Control+k');
   await dialog.waitFor();
@@ -122,14 +125,14 @@ try {
   assert.equal(await dialog.locator('[role="option"]').count(), 1, 'Only the Spawn command is left.');
   await page.keyboard.press('Escape');
 
-  step('the sidebar button opens it and shows the key; the shortcut sheet lists it');
-  const button = page.locator('[data-palette-open]');
+  step('the rail button opens it and shows the key; the shortcut sheet lists it');
+  const button = page.locator('[data-rail] [data-nav="search"]');
   assert.match(await button.innerText(), /Search\s+Ctrl K/);
   await button.click();
   await dialog.waitFor();
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+h');
-  await page.locator('dialog.shortcuts', { hasText: 'Open the palette' }).waitFor();
+  await page.locator('dialog.shortcuts', { hasText: 'Open search' }).waitFor();
   await page.keyboard.press('Escape');
 
   step('an answer that is not JSON for the roadmaps leaves the palette working and raises no page error');
@@ -180,12 +183,11 @@ try {
   await calm.locator('dialog.pal').waitFor();
   assert.equal(await calm.locator('dialog.pal').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
 
-  step('375 px: Search under More opens it and the rows fit and are 44 px tall');
+  step('375 px: the Search tab opens it and the rows fit and are 44 px tall');
   const phone = await open({ width: 375, height: 800 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/today`);
   await phone.locator('.hub[data-screen="today"]').waitFor();
-  await phone.locator('[data-hub-tab="more"]').click();
-  await phone.locator('[data-hub-more-search]').click();
+  await phone.locator('[data-tabs] [data-nav="search"]').click();
   await phone.locator('dialog.pal').waitFor();
   const box = await phone.locator('dialog.pal').boundingBox();
   assert.ok(box.x >= 0 && box.x + box.width <= 375, `The palette fits the screen (${box.x}, ${box.width}).`);

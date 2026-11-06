@@ -56,8 +56,8 @@ try {
   assert.equal(await desk.locator('[data-preset="game-teardown"]').getAttribute('aria-pressed'), 'true', 'Give work opens Spawn on the preset of that agent.');
   await desk.keyboard.press('Escape');
   await desk.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
-  assert.equal(await desk.locator('[data-hub-group="operate"] [data-hub-link="team"]').count(), 1, 'Team is in Operate.');
-  assert.equal(await desk.locator('[data-hub-link="team"]').getAttribute('aria-current'), 'page', 'Team is the current row in the sidebar.');
+  assert.equal(await desk.locator('[data-rail] [data-nav="team"]').count(), 1, 'Team is on the rail.');
+  assert.equal(await desk.locator('[data-rail] [data-nav="team"]').getAttribute('aria-current'), 'page', 'Team is the current entry on the rail.');
   assert.match(await desk.locator('[data-team-online]').innerText(), /^\d\/7$/);
   assert.equal(await desk.locator('[data-agent="hermes"] .team-facts').innerText().then(t => t.replace(/\s+/g, ' ')), 'Model Codex gpt-6-sol · Sonnet, then DeepSeek fallback Runs as Hermes profile main');
   assert.match(await desk.locator('[data-agent="briefs"] .team-facts').innerText(), /Haiku 5\.5 · DeepSeek fallback/);
@@ -196,22 +196,14 @@ try {
   await desk.locator('.team-card').first().waitFor();
   assert.equal(await domSignature(cardSprite(desk, 'claude')), seen[1], 'The randomized sprite is the card after a reload.');
 
-  step('phone: Team is on the bar, every tab is 44 px high with its label whole, the sheet is a bottom sheet, nothing scrolls sideways');
+  step('phone: Team is a page with a 44 px Back button and no tab bar, the sheet is a bottom sheet, nothing scrolls sideways');
   for (const width of [375, 390]) {
     const phone = await open({ width, height: 844 }, { hasTouch: true, isMobile: true });
     await phone.goto(`${fixture.url}#/~hub/team`);
     await phone.locator('.team-card').first().waitFor();
-    assert.deepEqual(await phone.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => item.getAttribute('data-hub-tab'))), ['today', 'needs', 'work', 'team', 'map', 'more']);
-    assert.equal(await phone.locator('[data-hub-tab="team"]').getAttribute('aria-current'), 'page');
-    const tabs = await phone.locator('nav.hub-tabs > .hub-tab').evaluateAll(list => list.map(item => {
-      const label = item.querySelector('.hub-tab-label');
-      const rect = item.getBoundingClientRect();
-      return { key: item.getAttribute('data-hub-tab'), width: rect.width, height: rect.height, clipped: label.scrollWidth > label.clientWidth };
-    }));
-    for (const tab of tabs) {
-      assert.ok(tab.height >= 44 && tab.width >= 44, `${tab.key} at ${width}: ${tab.width} x ${tab.height} is a 44 px target.`);
-      assert.equal(tab.clipped, false, `${tab.key} at ${width}: the label is whole.`);
-    }
+    assert.equal(await phone.locator('[data-tabs]').count(), 0, 'Team is a page of its own: no tab bar.');
+    const back = await phone.locator('[data-top="detail"] [data-back]').boundingBox();
+    assert.ok(back.height >= 44 && back.width >= 44, `Back at ${width}: ${back.width} x ${back.height} is a 44 px target.`);
     await noSideways(phone, `Team at ${width}`);
     for (const target of await phone.locator('.team-card [data-main-action], .team-card .team-details-link, .team-card [data-sprite-open]').evaluateAll(list => list.map(item => item.getBoundingClientRect().height))) assert.ok(target >= 44 - 0.5, `A main button, Details or Sprite is ${target} px high.`);
     await phone.locator('[data-sprite-open="hermes"]').tap();
