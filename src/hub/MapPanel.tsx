@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type MouseEvent } from 'react'
 import type { HubProject, Item, MapCard, MapTask, ProgressMap as MapModel, Sign } from '../lib/hub'
 import { safeUrl } from '../lib/hub'
-import { hubHash } from '../lib/route'
+import { hubHash, mapHash, projectAtHash, workAtHash } from '../lib/route'
+import { swap } from '../lib/entries'
+import { useHasMapRoom } from '../lib/chrome'
+import { useScope } from '../lib/useScope'
+import TaskWindow from './TaskWindow'
 import ItemRow from './ItemRow'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
 import { useHubData } from './useHub'
@@ -83,32 +87,41 @@ function TaskRows({ tasks, onOpen, inboxBeads }: { tasks: MapTask[]; onOpen: (id
   )
 }
 
+/** A plain click follows the link by replacing the window's entry, so Back returns to the screen the window was over; Ctrl, Cmd, Shift and a middle click are the browser's own. */
+function showClick(event: MouseEvent<HTMLAnchorElement>, href: string) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  swap(href)
+}
+
+/** Where this node can be shown: its row on the Roadmap, its card on the Work board (a task with a real id), and the Map when there is room for one. */
+function ShowLinks({ model, id, task, board, onMap }: { model: MapModel; id: string; task: boolean; board?: string; onMap: boolean }) {
+  const { sprint } = useScope()
+  const mapRoom = useHasMapRoom()
+  const roadmap = projectAtHash(model.project, id, sprint)
+  const work = task && !id.includes('~') ? workAtHash(board ?? model.project, id, sprint) : null
+  const map = mapRoom && !onMap ? mapHash(model.project, id, sprint) : null
+  return (
+    <p className="hub-map-panel-roadmap" data-show-links>
+      <a href={roadmap} onClick={event => showClick(event, roadmap)} data-show-on-roadmap>Show on roadmap</a>
+      {work && <a href={work} onClick={event => showClick(event, work)} data-show-on-work>Show on Work board</a>}
+      {map && <a href={map} onClick={event => showClick(event, map)} data-show-on-map>Show on map</a>}
+    </p>
+  )
+}
+
 /**
- * The details of one milestone, feature or task: a side panel on a desktop, a bottom sheet on a
- * phone (hub.css). A non-modal dialog, so the map behind it stays usable and App's Escape, which
- * leaves an open dialog alone, does not also fire. It only reads and links; the model decides what it shows.
+ * The details of one milestone, feature or task: a window centred over the dimmed screen from 900 px, a bottom sheet below (TaskWindow). It
+ * is modal, so the screen behind does not move. It only reads and links; the model decides what it shows. `board` is the Work board the
+ * node was opened from (an All board stays on All); `onMap` is set on the Map, which needs no link to itself.
  */
-export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, headerExtra }: { model: MapModel; nodeId: string; onClose: () => void; onOpen: (id: string) => void; /** Something a host screen puts right under the title row (Work's "Show on roadmap"). */ headerExtra?: ReactNode; /** Set when the Roadmap's filter hides this node: what the filter is, and how to show everything. */ hiddenBy?: { filter: string; onShowAll: () => void } }) {
-  const dialog = useRef<HTMLDialogElement>(null)
-  const heading = useRef<HTMLHeadingElement>(null)
+export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, board, onMap = false }: { model: MapModel; nodeId: string; onClose: () => void; onOpen: (id: string) => void; board?: string; onMap?: boolean; /** Set when the Roadmap's filter hides this node: what the filter is, and how to show everything. */ hiddenBy?: { filter: string; onShowAll: () => void } }) {
   const found = find(model, nodeId)
   // What waits on you for this node's tasks (open Asks, reviews, blocked sessions), once per panel.
   const { data: inbox } = useHubData<{ items: Item[] }>('/inbox?filter=needs-you')
   // A refusal from the Hub, kept with the node it was for so it does not follow the owner to another one.
   const [markFailure, setMarkFailure] = useState<{ id: string; message: string }>({ id: '', message: '' })
   const { data: projects } = useHubData<{ projects: HubProject[] }>('/projects')
-
-  useEffect(() => {
-    const element = dialog.current
-    if (element && !element.open) element.show()
-  }, [])
-  // The title takes the focus on open and on every switch, so a screen reader reads the new node.
-  useEffect(() => { heading.current?.focus({ preventScroll: true }) }, [nodeId])
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   if (!found) return null
   const tasks = tasksOf(found)
@@ -141,6 +154,22 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
     const words = task.signs.map(sign => (sign in SIGN_WORDS ? SIGN_WORDS[sign as keyof typeof SIGN_WORDS] : SIGN_LABEL[sign].toLowerCase()))
     body = (
       <>
+        {(task.state === 'you' || task.mark) && (
+          <div className="hub-map-panel-needed" data-whats-needed>
+            <h4>What&apos;s needed</h4>
+            {task.ask
+              ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('ask', task.ask)} data-needed-link="ask">Open the Ask</a></div>
+              : task.checklist
+                ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('checklist', task.checklist)} data-needed-link="checklist">Open the checklist</a></div>
+                : hasNeedsItem(task, inboxBeads)
+                  ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs', 'all')} data-needed-link="needs">Open in Needs you</a></div>
+                  : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
+            <MarkActions
+              task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
+              eligible={task.state !== 'done'} waiting={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
+            />
+          </div>
+        )}
         <Summary text={task.summary} show />
         {resolving && model.wayfinder && (
           <div className="hub-map-panel-resolve" data-resolve>
@@ -165,22 +194,6 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
           })}</p>
         )}
         {closed && <p className="hub-muted" data-closed>{closed}</p>}
-        {(task.state === 'you' || task.mark) && (
-          <div className="hub-map-panel-needed" data-whats-needed>
-            <h4>What&apos;s needed</h4>
-            {task.ask
-              ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('ask', task.ask)} data-needed-link="ask">Open the Ask</a></div>
-              : task.checklist
-                ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('checklist', task.checklist)} data-needed-link="checklist">Open the checklist</a></div>
-                : hasNeedsItem(task, inboxBeads)
-                  ? <div className="hub-actions start"><a className="hub-btn pri" href={hubHash('needs', 'all')} data-needed-link="needs">Open in Needs you</a></div>
-                  : task.state === 'you' && <p className="hub-map-panel-nothing" data-nothing-asked><span aria-hidden="true">⚠</span> Nothing asked yet: no Ask or checklist says what you need to do.</p>}
-            <MarkActions
-              task={task} title={task.title} project={model.project} projectName={projects?.projects.find(item => item.id === model.project)?.name ?? model.project}
-              eligible={task.state !== 'done'} waiting={task.state === 'you'} error={markFailure.id === nodeId ? markFailure.message : ''} onError={message => setMarkFailure({ id: nodeId, message })}
-            />
-          </div>
-        )}
         {/* Any other open task: Mark done and No longer needed (the PC applies them within minutes). Unblock is only for a task that waits on you. */}
         {!(task.state === 'you' || task.mark) && task.state !== 'done' && (
           <div className="hub-map-panel-needed" data-mark-open>
@@ -214,7 +227,7 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
         {found.kind === 'm'
           ? found.milestone.features.filter(feature => feature.tasks.length).map(feature => (
             <section key={feature.id} className="hub-map-panel-group">
-              <h5>{feature.id.endsWith('~other') ? 'Not in a feature' : feature.title}</h5>
+              <h5>{feature.id.endsWith('~other') || feature.id.includes('~') ? 'Not in a feature' : <button type="button" className="hub-map-panel-link" onClick={() => onOpen(feature.id)} data-open-feature={feature.id}>{feature.title}</button>}</h5>
               <TaskRows tasks={feature.tasks} onOpen={onOpen} inboxBeads={inboxBeads} />
             </section>
           ))
@@ -223,28 +236,22 @@ export default function MapPanel({ model, nodeId, onClose, onOpen, hiddenBy, hea
     )
   }
 
+  const sprintNames = found.kind === 't' ? found.task.sprints : [...new Set(tasks.flatMap(task => task.sprints))]
+  const status = (
+    <div className="hub-muted" data-sheet-status>
+      {!synthetic && <><span className="hub-id">{idOf(found)}</span>{' · '}</>}
+      <span style={{ color: STATE_COLOR[state] }}>{STATE_LABEL[state]}</span>
+      {found.kind !== 't' && ` · ${tasks.length ? `${done} of ${tasks.length} tasks done` : 'No tasks yet'}`}
+      {sprintNames.length > 0 && ` · ${sprintNames.length === 1 ? 'Sprint' : 'Sprints'}: ${sprintNames.join(', ')}`}
+    </div>
+  )
   return (
-    <>
-      <div className="hub-map-scrim" onClick={onClose} aria-hidden="true" />
-      <dialog ref={dialog} id="hub-map-panel" className="hub-map-panel" aria-labelledby="hub-map-panel-title">
-        <div className="hub-map-grab" aria-hidden="true" />
-        <div className="hub-map-panel-head">
-          <div className="hub-map-panel-heading">
-            <h3 id="hub-map-panel-title" ref={heading} tabIndex={-1}>{titleOf(found)}</h3>
-            <div className="hub-muted">
-              {!synthetic && <><span className="hub-id">{idOf(found)}</span>{' · '}</>}
-              <span style={{ color: STATE_COLOR[state] }}>{STATE_LABEL[state]}</span>
-              {found.kind !== 't' && ` · ${done} of ${tasks.length} tasks done`}
-            </div>
-          </div>
-          <button type="button" className="hub-map-panel-close" aria-label="Close details" onClick={onClose}>×</button>
-        </div>
-        {headerExtra}
-        {hiddenBy && (
-          <p className="hub-muted hub-map-panel-hidden" data-hidden-by-filter>Hidden by your filter ({hiddenBy.filter}) · <button type="button" className="hub-link-btn" onClick={hiddenBy.onShowAll}>Show all</button></p>
-        )}
-        {body}
-      </dialog>
-    </>
+    <TaskWindow title={titleOf(found)} status={status} switchKey={nodeId} onClose={onClose}>
+      <ShowLinks model={model} id={idOf(found)} task={found.kind === 't'} board={board} onMap={onMap} />
+      {hiddenBy && (
+        <p className="hub-muted hub-map-panel-hidden" data-hidden-by-filter>Hidden by your filter ({hiddenBy.filter}) · <button type="button" className="hub-link-btn" onClick={hiddenBy.onShowAll}>Show all</button></p>
+      )}
+      {body}
+    </TaskWindow>
   )
 }

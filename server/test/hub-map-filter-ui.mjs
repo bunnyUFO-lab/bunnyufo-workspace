@@ -337,50 +337,7 @@ try {
   await broken.waitForTimeout(400);
   assert.equal(await chip(broken), 'All', 'the choice applies for this visit');
 
-  step('a phone: the panel is a sheet along the bottom, nothing scrolls sideways');
-  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
-  await showMap(phone);
-  assert.equal(await chip(phone), 'Open');
-  await phone.getByRole('button', { name: 'Filter', exact: true }).tap();
-  const sheet = phone.locator('#hub-map-filter');
-  await sheet.waitFor();
-  const rect = await sheet.boundingBox();
-  const wrap = await phone.locator('.hub-map-wrap').boundingBox();
-  assert.ok(Math.abs(rect.x - wrap.x) <= 1 && Math.abs(rect.width - wrap.width) <= 1, `the sheet spans the map's width (${rect.x}, ${rect.width})`);
-  assert.ok(rect.width >= 360, 'nearly the whole phone');
-  assert.ok(Math.abs(rect.y + rect.height - (wrap.y + wrap.height)) <= 2, 'and sits on the bottom edge of the map');
-  const widths = await phone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
-  assert.ok(widths.scroll <= widths.inner, 'no sideways scroll');
-  await phone.locator('[data-preset="all"]').tap();
-  await phone.waitForTimeout(400);
-  assert.equal(await chip(phone), 'All');
-
-  step('a phone: the search field is full width, the step buttons are 44 px and step, nothing scrolls sideways');
-  const searchPhone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
-  await showMap(searchPhone);
-  await searchPhone.locator('[data-map-search]').fill('gizmo');
-  await searchPhone.waitForFunction(() => /3 matches/.test(document.querySelector('[data-map-count]').textContent));
-  const fieldBox = await searchPhone.locator('.hub-map-search .sf').boundingBox();
-  const wrapBox = await searchPhone.locator('.hub-map-wrap').boundingBox();
-  assert.ok(fieldBox.width >= wrapBox.width - 4, `the field spans the width (${fieldBox.width} of ${wrapBox.width})`);
-  for (const which of ['prev', 'next']) {
-    const button = await searchPhone.locator(`[data-map-step="${which}"]`).boundingBox();
-    assert.ok(button.width >= 44 && button.height >= 44, `the ${which} button is at least 44 px (${button.width} by ${button.height})`);
-  }
-  await searchPhone.locator('[data-map-step="next"]').tap();
-  await searchPhone.waitForTimeout(300);
-  assert.match(await searchPhone.locator('[data-map-count]').innerText(), /^2 of 3 · /);
-  const stepped = await searchPhone.locator('.hub-map-ring-current').evaluate(ring => ring.parentElement.getAttribute('data-node'));
-  assert.ok(await inside(searchPhone, stepped), 'the stepped-to match is in view');
-  const searchWidths = await searchPhone.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
-  assert.ok(searchWidths.scroll <= searchWidths.inner, 'no sideways scroll');
-  // hub-ui.mjs guards the same clearance; this faster file fails first when the search row grows.
-  await searchPhone.locator(`[data-node="${stepped}"] > circle`).first().tap({ force: true });
-  const sheetPanel = searchPhone.locator('.hub-map-panel');
-  await sheetPanel.waitFor();
-  const panelTop = (await sheetPanel.boundingBox()).y;
-  const mapTop = (await searchPhone.locator('.hub-map-box').boundingBox()).y;
-  assert.ok(panelTop - mapTop >= 100, `an open sheet leaves the map at least 100 px above it with a query set (${panelTop - mapTop})`);
+  // A phone has no Map (ws-cl0.16.7): its filter sheet and its search row retire with it. The list has its own search (hub-roadmap-accordion-ui).
 
   console.log('hub-map-filter-ui: passed');
 } finally {

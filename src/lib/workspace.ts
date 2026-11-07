@@ -3,6 +3,7 @@ import type { CardWorkspace, WorkspaceCard, WorkspaceEntity, WorkspaceState } fr
 import { api } from '../local/client'
 import { host } from './host'
 import { activeSite, allSites, contentBase } from './sites'
+import { applyCardState } from './archiveRule.ts'
 
 const POLL_MS = 30_000
 export { ARCHIVE_DAYS, archiveCutoff } from './archiveRule.ts'
@@ -59,21 +60,6 @@ async function cardState(): Promise<Record<string, Partial<WorkspaceEntity> & { 
   }
 }
 
-/** The published card, with whatever has been pinned or archived since laid over it. */
-function overlay(entity: WorkspaceEntity, state?: Partial<WorkspaceEntity> & { restoredAt?: string }): WorkspaceEntity {
-  if (!state) return entity
-  const merged = { ...entity }
-  if (state.pinned === true) merged.pinned = true
-  if (state.pinned === false) { delete merged.pinned; delete merged.pinOrder }
-  if (state.pinned !== false && typeof state.pinOrder === 'number') merged.pinOrder = state.pinOrder
-  if (state.status) merged.status = state.status
-  if (Array.isArray(state.tags)) merged.tags = state.tags.filter(tag => typeof tag === 'string')
-  // Restoring a card counts as a touch, or the 7-day rule would archive it again on the spot.
-  // Never backwards: a later real edit to the card still wins.
-  if (state.restoredAt && (!merged.updated || state.restoredAt > merged.updated)) merged.updated = state.restoredAt
-  return merged
-}
-
 /**
  * A published site has no service, so each workspace it serves is fetched from its own base
  * (lib/sites). A site that fails to answer is skipped rather than emptying the whole list — one
@@ -111,7 +97,7 @@ async function loadSite(): Promise<WorkspaceData> {
   return {
     workspaces: reachable.map(item => item.workspace),
     cards: reachable.flatMap(item =>
-      tag(item.workspace, item.entities.map(e => overlay(e, state[`${item.workspace.id}/${e.id}`]))),
+      tag(item.workspace, item.entities.map(e => applyCardState(e, state[`${item.workspace.id}/${e.id}`]))),
     ),
   }
 }

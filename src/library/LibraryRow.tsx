@@ -8,7 +8,7 @@ import { useCardMenu } from '../components/CardMenu'
 import { useCategoryMenu } from '../components/CategoryMenu'
 import RowMenu from '../ui/RowMenu'
 import IconDialog, { CardIcon } from './IconDialog'
-import { setArchived, setIcon, setPinned } from './cardActions'
+import { setArchived, setIcon, setPinned, setPurpose } from './cardActions'
 import { isArchived } from './libraryModel'
 
 /** Where a pinned row can go: one place up or down the pinned list, or nowhere (the end of it, or nothing to write with). */
@@ -16,7 +16,7 @@ export interface PinMove { up: (() => void) | null; down: (() => void) | null }
 
 /**
  * One card: its icon, title, section and date, a dot for its status, and the menu. The row is a link; the menu is a button beside it,
- * so neither sits inside the other. The menu holds Pin, Archive or Restore, Change icon and, for a pinned card, Move up and Move down,
+ * so neither sits inside the other. The menu holds Pin, Archive or Restore, Keep as reference or Treat as report, Change icon and, for a pinned card, Move up and Move down,
  * then what `useCardMenu` gives (Rename, Category, Move to workspace, Delete). A visitor who may write nothing gets no menu at all.
  */
 export default function LibraryRow({ card, active, pinMove }: { card: WorkspaceCard; active: boolean; pinMove?: PinMove }) {
@@ -27,6 +27,11 @@ export default function LibraryRow({ card, active, pinMove }: { card: WorkspaceC
   const mine: MenuItem[] = canWrite ? [
     { label: card.pinned ? 'Unpin' : 'Pin', onSelect: () => void setPinned(card, !card.pinned) },
     { label: archived ? 'Restore' : 'Archive', onSelect: () => void setArchived(card, !archived) },
+    // Not on a card put away by hand (the choice would show nothing; Restore comes first) or a starter example.
+    ...(card.status === 'archived' || card.sample ? [] : [
+      ...(card.purpose === 'reference' ? [] : [{ label: 'Keep as reference', onSelect: () => void setPurpose(card, 'reference') }]),
+      ...(card.purpose === 'report' ? [] : [{ label: 'Treat as report', onSelect: () => void setPurpose(card, 'report') }]),
+    ]),
     { label: 'Change icon…', onSelect: () => setPicking(true) },
     ...(card.pinned && pinMove ? [
       { label: 'Move up', onSelect: () => pinMove.up?.(), disabled: !pinMove.up },

@@ -29,6 +29,7 @@ import { contentTypeOf, createBucket, typeOf } from '../api/s3.mjs';
 import { validateChanges } from '../api/ask-changes.mjs';
 import { validateAgentEdit } from '../api/agent-edit.mjs';
 import { RESERVED } from '../api/card-purge.mjs';
+import { PURPOSES } from '../api/card-liveness.mjs';
 
 const CLIENT = new URL('./cards.mjs', import.meta.url);
 
@@ -63,7 +64,7 @@ const skippedName = name => SYNC_SKIPPED.has(String(name).toLowerCase());
 const SCRIPT_FILE = /\.(js|mjs|cjs|wasm)$/i;
 const lower = value => String(value).toLowerCase();
 const stepPathOk = value => typeof value === 'string' && value.split('/').every(segmentOk);
-const ENTRY_FIELDS = new Set(['id', 'title', 'description', 'type', 'category', 'created', 'updated', 'folder', 'steps', 'defaultStep', 'status']);
+const ENTRY_FIELDS = new Set(['id', 'title', 'description', 'type', 'category', 'created', 'updated', 'folder', 'steps', 'defaultStep', 'status', 'purpose']);
 const AGENT = /^[A-Za-z0-9][\w .-]{0,39}$/;
 const CONTEXT = /^(chat|job)(:[A-Za-z0-9._-]{1,120})?$/;
 const BATCH = /^[a-z0-9]{8,32}$/;
@@ -163,6 +164,7 @@ const summary = entity => ({
   category: entity.category,
   folder: entity.folder,
   status: entity.status,
+  purpose: entity.purpose,
   updated: entity.updated ?? entity.created,
 });
 
@@ -596,6 +598,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       if (entity.id !== id) throw new HttpError(400, `The entry's id must be "${id}", the id in the path.`);
       if (typeof entity.title !== 'string' || !entity.title.trim()) throw new HttpError(400, 'The entry needs a title.');
       if (!Array.isArray(entity.steps)) throw new HttpError(400, 'The entry needs a steps array.');
+      if (entity.purpose !== undefined && !PURPOSES.includes(entity.purpose)) throw new HttpError(422, `purpose is "report" or "reference"; leave it out when unsure.`, { fields: ['purpose'] });
       if (typeof entity.folder !== 'string' || !cardPath(`${entity.folder}/x`) || entity.folder.includes('/')) {
         throw new HttpError(400, 'The entry needs a folder: one name, not starting with "_" or ".".');
       }
@@ -678,7 +681,8 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
           if (!added.length && before.updated === today()) return { section: sectionId, entity: before, created: false, unchanged: true, ignored };
           stored = { ...before, steps: [...(before.steps ?? []), ...added], updated: today() };
         } else {
-          stored = { ...entity, ...(library ? { steps: posted } : {}), updated: entity.updated ?? today() };
+          // A writer that rebuilds its entry without `purpose` keeps the stored one.
+          stored = { ...entity, ...(library ? { steps: posted } : {}), ...(entity.purpose === undefined && before?.purpose !== undefined ? { purpose: before.purpose } : {}), updated: entity.updated ?? today() };
         }
         const entities = index >= 0 ? registry.entities.with(index, stored) : [...registry.entities, stored];
         let put;

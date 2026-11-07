@@ -20,6 +20,8 @@ COPY public ./public
 # vite.config.ts loads a plugin from scripts/, so the build needs both here.
 COPY server ./server
 COPY scripts ./scripts
+# The archive rule is shared with the services (src/lib/archiveRule.ts imports it), so it is a build input too.
+COPY site/api/card-liveness.* ./site/api/
 # The report stylesheet is imported by the UI's own CSS, so it is a build input too.
 COPY workspace/_shared ./workspace/_shared
 # `cp -r public/assets dist/assets` would nest them, because Vite has already made dist/assets.

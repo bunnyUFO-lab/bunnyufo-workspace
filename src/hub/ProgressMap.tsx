@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
-import type { MapWayfinder, ProgressMap as MapModel, TaskState } from '../lib/hub'
+import type { ProgressMap as MapModel, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { mapHash } from '../lib/route'
 import { useScope } from '../lib/useScope'
@@ -25,13 +25,9 @@ import { useHubData } from './useHub'
 import RoadmapRows, { RoadmapBar } from './RoadmapRows'
 import { FULL, branchModel, resolveBranch } from './mapBranch.ts'
 import { saveBranch, savedBranch } from './branchMemory.ts'
-import QuestionActions from './QuestionActions'
-import { COST, preparable, questionSeed } from './questionSeed'
-import { openSpawn } from './spawnStore'
+import WayfinderHeader from './WayfinderHeader'
 import PlanInHermes from './PlanInHermes'
 import { host } from '../lib/host'
-import { useMedia } from '../lib/chrome'
-import RowMenu from '../ui/RowMenu'
 
 /** The smallest scale Fit and the first view settle on a phone: below this the labels cannot be read. */
 const READABLE = 0.6
@@ -77,7 +73,7 @@ export default function ProgressMap({ project, name, nodeId, model, panelModel, 
             const plan = <PlanInHermes project={project} projectName={name} selected={selected} />
             const way = model.wayfinder
             const header = way && (way.destination || way.decisions || way.open.length)
-              ? <WayfinderHeader project={project} repoName={name} wayfinder={way} plan={plan} />
+              ? <WayfinderHeader project={project} repoName={name} wayfinder={way} plan={plan} nodeHref={id => mapHash(project, id)} />
               : host.write && host.chat ? <div className="hub-plan-row">{plan}</div> : null
             // A project with roadmaps shows one part of them at a time; one without draws the map as it always has.
             return model.roadmaps?.length
@@ -106,52 +102,6 @@ function Branched({ model, project, projectName, param, header }: { model: MapMo
   }
   const noMatch = <a className="hub-link-btn" href={mapHash(project, FULL)} data-map-full>Search the full map ›</a>
   return <>{bar}<MapView key={branch} model={shown} panelModel={model} closeTo={branch} noMatch={noMatch} project={project} nodeId={node} header={header} /></>
-}
-
-/** The Wayfinder destination above the map: one row, with the open questions as links to their nodes. Starts open on a wide box and closed on a narrow one; the state is not remembered. */
-function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: string; repoName: string; wayfinder: MapWayfinder; plan?: ReactNode }) {
-  const root = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
-  useLayoutEffect(() => { setOpen((root.current?.clientWidth ?? 0) > 600) }, [])
-  const { destination, decisions, open: questions } = wayfinder
-  const ready = preparable(wayfinder)
-  if (!destination && !decisions && !questions.length) return null
-  return (
-    <div className="hub-wayfinder" data-open={open} ref={root}>
-      <div className="hub-wayfinder-row">
-        <span className="hub-wayfinder-eyebrow">Destination</span>
-        {destination && (
-          <button type="button" className="hub-wayfinder-text" aria-expanded={open} aria-controls="hub-wayfinder-list" onClick={() => setOpen(value => !value)}>
-            <span className="hub-wayfinder-dest">{destination}</span>
-            <span className="hub-wayfinder-cue" aria-hidden="true">{open ? 'Less' : 'More ›'}</span>
-          </button>
-        )}
-        {decisions > 0 && <span className="hub-wayfinder-count">{decisions} {decisions === 1 ? 'decision' : 'decisions'}</span>}
-        {questions.length > 0 && (
-          <button type="button" className="hub-wayfinder-toggle" aria-expanded={open} aria-controls="hub-wayfinder-list" onClick={() => setOpen(value => !value)}>
-            Open questions · {questions.length}
-          </button>
-        )}
-        {plan}
-        {open && host.write && ready.length > 0 && (
-          <span className="hub-wayfinder-all">
-            <button type="button" className="hub-btn pri" data-q-all onClick={() => openSpawn({ preset: 'question', project, text: questionSeed(project, wayfinder, ready.map(item => item.id), 'grilling') })}>Prepare all · {ready.length}</button>
-            <span className="hub-q-cost" data-q-all-cost>{COST.prepareAll}</span>
-          </span>
-        )}
-      </div>
-      {open && questions.length > 0 && (
-        <ul className="hub-wayfinder-list" id="hub-wayfinder-list">
-          {questions.map(item => (
-            <li key={item.id} className="hub-q-row" data-q-row={item.id}>
-              <span className="hub-q-title"><a href={mapHash(project, item.id)}><span className="hub-wayfinder-type">{item.type}</span> {item.title}</a></span>
-              <QuestionActions project={project} repoName={repoName} wayfinder={wayfinder} item={item} layout="row" />
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
 }
 
 /** `panelModel`, `closeTo` and `noMatch` are for a branch (ws-im1.3.2): the panel reads the whole project, closing it stays in the branch, and an empty search offers the full map. */
@@ -209,8 +159,6 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
     const hint = hintBar.current?.getBoundingClientRect()
     return { top: frame && hint && hint.height ? Math.max(0, hint.bottom - frame.top + 8) : 0, bottom: 0 }
   }, [])
-  /** A phone: the bar keeps its everyday buttons and Fit stops at a readable size. */
-  const phone = useMedia('(max-width: 640px)')
   const contentSize = useRef({ w: 0, h: 0 })
   const pz = usePanZoom(box, stage, { onGesture: dismissHint, onZoom: zoom => zoomFn.current(zoom), fitMax: FIT_MAX, insets })
 
@@ -224,23 +172,11 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   const toStage = (point: { x: number; y: number }) => ({ x: point.x - origin.current.x, y: point.y - origin.current.y })
   const nowPoint = () => toStage(layout.now)
 
-  /** The part of the box the details panel leaves free: the panel is at the right on a desktop and a sheet below on a phone. */
+  /** The part of the box the map may use: what the hint at the top leaves. The details window is centred over the dimmed screen, so it takes none. */
   const freeRect = () => {
-    const element = box.current
     const size = pz.box()
     const { top, bottom } = insets()
-    // With no panel open, the map's room is what the hint leaves.
-    const clear = { x: 0, y: top, w: size.w, h: Math.max(size.h - top - bottom, 60) }
-    const whole = { x: 0, y: 0, w: size.w, h: size.h }
-    const panel = document.getElementById('hub-map-panel')
-    if (!element || !panel) return clear
-    const rect = element.getBoundingClientRect()
-    const cover = panel.getBoundingClientRect()
-    if (!cover.width || !cover.height) return clear
-    const free = cover.width < window.innerWidth * 0.8
-      ? { ...whole, w: clamp(cover.left - rect.left, 0, size.w) }
-      : { ...whole, h: clamp(cover.top - rect.top, 0, size.h) }
-    return free.w < 60 || free.h < 60 ? clear : free
+    return { x: 0, y: top, w: size.w, h: Math.max(size.h - top - bottom, 60) }
   }
 
   /** "Now" in the middle of `free` at scale k, without cutting off the text at either side of the spine: the whole width is centred when it fits, else it is pulled in from the nearer edge. */
@@ -426,10 +362,9 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
   const empty = tasksIn(model) === 0 && tasksIn(fullModel) > 0
   const refit = (change: () => void) => { after.current = 'fit'; auto.current = new Set(); change() }
   const expandAll = () => refit(() => setOpen(new Set(model.milestones.flatMap(milestone => [milestone.id, ...milestone.features.map(feature => feature.id)]))))
-  /** Fit the whole map. On a phone a large map would shrink past reading, so Fit stops at a readable size, centred on now, and the owner pans from there. */
+  /** Fit the whole map. */
   function fitReadable(animate: boolean) {
-    if (phone && fitScale(contentSize.current, pz.box(), FIT_MAX) < READABLE) pz.go(viewOnNow(READABLE, freeRect()), animate)
-    else pz.fit(animate)
+    pz.fit(animate)
   }
   const goNow = () => pz.go(viewOnNow(Math.max(pz.current().k, 1), freeRect()), true)
 
@@ -517,25 +452,15 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
       <div className="hub-map-controls" onKeyDown={onEscape}>
           <button type="button" className="hub-btn" onClick={() => fitReadable(true)} aria-label="Fit the whole map">Fit</button>
           <button type="button" className="hub-btn" onClick={goNow} aria-label="Go to now">Now</button>
-          {!phone && <>
-            <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
-            <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
-            <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
-          </>}
+          <button type="button" className="hub-btn" onClick={expandAll}>Expand all</button>
+          <button type="button" className="hub-btn" onClick={() => refit(() => setOpen(new Set()))}>Collapse</button>
+          <button type="button" className={`hub-btn${sprints ? ' pri' : ''}`} aria-pressed={sprints} onClick={() => refit(() => setSprints(value => !value))}>Sprints</button>
           <button type="button" className={`hub-btn${filterOpen ? ' pri' : ''}`} ref={filterButton} aria-expanded={filterOpen} aria-controls="hub-map-filter" onClick={() => { setFilterOpen(value => !value); setKeyOpen(false) }}>Filter</button>
           <span className={`hub-filter-chip${isOpenFilter(filter) ? '' : ' changed'}`} data-filter-chip>
             <button type="button" className="hub-filter-chip-text" title="Change the filter" onClick={() => { setFilterOpen(true); setKeyOpen(false) }}>{filterLabel(filter)}</button>
             {!isOpenFilter(filter) && <button type="button" className="hub-filter-chip-x" aria-label="Reset the filter to Open" onClick={() => applyFilter(OPEN_FILTER)}>×</button>}
           </span>
-          {!phone && (
           <button type="button" className={`hub-btn${keyOpen ? ' pri' : ''}`} ref={keyButton} aria-expanded={keyOpen} aria-controls="hub-map-key" onClick={() => { setKeyOpen(value => !value); setFilterOpen(false) }}>Key</button>
-          )}
-          {phone && <RowMenu label="More map options" title="Map options" items={[
-            { label: 'Expand all', onSelect: expandAll },
-            { label: 'Collapse', onSelect: () => refit(() => setOpen(new Set())) },
-            { label: sprints ? 'Hide sprints' : 'Show sprints', onSelect: () => refit(() => setSprints(value => !value)) },
-            { label: 'Key', onSelect: () => { setKeyOpen(true); setFilterOpen(false) } },
-          ]} />}
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1 / 1.25, true)} aria-label="Zoom out">−</button>
           <button type="button" className="hub-btn hub-map-zoom" onClick={() => pz.zoomBy(1.25, true)} aria-label="Zoom in">+</button>
         </div>
@@ -651,14 +576,13 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
         {filterOpen && <MapFilterPanel filter={filter} shown={tasksIn(model)} total={tasksIn(fullModel)} onChange={applyFilter} onClose={() => { setFilterOpen(false); filterButton.current?.focus() }} />}
         {keyOpen && (
           <div className="hub-legend" id="hub-map-key" aria-label="Legend">
-            {phone && <button type="button" className="hub-btn hub-legend-close" data-key-close aria-label="Close the key" onClick={() => setKeyOpen(false)}>Close</button>}
             {model.ageMinutes != null && <p className="hub-muted hub-legend-age">Beads copy from {copyAge(model.ageMinutes)}</p>}
             {(Object.keys(STATE_LABEL) as TaskState[]).map(state => <span key={state}><i style={{ background: STATE_COLOR[state] }} />{STATE_LABEL[state]}</span>)}
             {(['working', 'idle', 'new', 'pr', 'ci-failed', 'review', 'deployed'] as const).map(sign => <span key={sign}><b>{SIGN_GLYPH[sign]}</b>{SIGN_LABEL[sign]}</span>)}
           </div>
         )}
       </div>
-      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} hiddenBy={find(model, shownId) || (panelModel && !find(fullModel, shownId)) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
+      {shownId && <MapPanel model={panelModel ?? fullModel} nodeId={shownId} onClose={closePanel} onOpen={openPanel} onMap hiddenBy={find(model, shownId) || (panelModel && !find(fullModel, shownId)) ? undefined : { filter: filterLabel(filter), onShowAll: () => showAll(shownId) }} />}
     </>
   )
 }

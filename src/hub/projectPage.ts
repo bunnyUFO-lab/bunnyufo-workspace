@@ -43,20 +43,13 @@ export function tabCounts(today: Today, project: string): { running: number; nee
 
 const RANK: Record<string, number> = { doing: 0, you: 1, next: 2, later: 3, done: 4 }
 
-/** A milestone's tasks with the open ones first (doing, waiting on you, next, later, done), each group in its own order. */
-export function orderedTasks(milestone: MapMilestone): MapTask[] {
-  return tasksOfMilestone(milestone).map((task, index) => ({ task, index })).sort((a, b) => (RANK[a.task.state] ?? 3) - (RANK[b.task.state] ?? 3) || a.index - b.index).map(row => row.task)
+/** Tasks with the open ones first (doing, waiting on you, next, later, done), each group in its own order. */
+export function orderTasks(tasks: MapTask[]): MapTask[] {
+  return tasks.map((task, index) => ({ task, index })).sort((a, b) => (RANK[a.task.state] ?? 3) - (RANK[b.task.state] ?? 3) || a.index - b.index).map(row => row.task)
 }
+
+/** A milestone's tasks with the open ones first. */
+export const orderedTasks = (milestone: MapMilestone): MapTask[] => orderTasks(tasksOfMilestone(milestone))
 
 /** A milestone opens with this many tasks, and "Show more" adds this many each time. */
 export const TASK_PAGE = 20
-
-/**
- * The Roadmap list: the milestones that are not done, each with its tasks (the current one starts open), and the finished ones folded
- * into one "Done (n)" group. `current` is the milestone the work is in, or the first that is not done.
- */
-export function roadmapList(model: Pick<ProgressMap, 'milestones'>): { current?: string; open: MapMilestone[]; done: MapMilestone[] } {
-  const done = model.milestones.filter(milestone => milestone.state === 'done')
-  const open = model.milestones.filter(milestone => milestone.state !== 'done')
-  return { current: (currentMilestone(model) ?? open[0])?.id, open, done }
-}

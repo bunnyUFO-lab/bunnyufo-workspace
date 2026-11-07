@@ -153,7 +153,7 @@ test('5. the narrow token writes nothing else, and the routes match exactly', as
       ['POST', `/hub/asks/${ask.id}/answer`, { choice: 'A' }], ['POST', `/hub/asks/${ask.id}/snooze`, { hours: 1 }], ['POST', `/hub/asks/${ask.id}/cancel`, {}],
       ['POST', `/hub/reviews/${review}/done`, {}], ['POST', '/hub/requests', { project: 'probe', text: 'x', when: 'record' }], ['POST', '/hub/drawings', {}],
       ['POST', '/workspace/pin', { workspace: 'inbox', id: 'x', pinned: true }], ['POST', '/workspace/status', { workspace: 'inbox', id: 'x', status: 'archived' }],
-      ['POST', '/workspace/tags', { workspace: 'inbox', id: 'x', tags: [] }], ['POST', '/workspace/icon', { workspace: 'inbox', id: 'x', emoji: '' }],
+      ['POST', '/workspace/tags', { workspace: 'inbox', id: 'x', tags: [] }], ['POST', '/workspace/icon', { workspace: 'inbox', id: 'x', emoji: '' }], ['POST', '/workspace/purpose', { workspace: 'inbox', id: 'x', purpose: 'report' }],
       ['POST', '/workspace/pins', { list: [{ id: 'x' }] }], ['POST', '/sections', { name: 'Sneaky' }],
       ['POST', '/cards/markdown', {}], ['POST', '/cards/drawing', {}],
     ];

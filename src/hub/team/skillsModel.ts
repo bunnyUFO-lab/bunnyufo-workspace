@@ -135,17 +135,7 @@ export const previewOf = (names: string[], shown = 3): string => (names.length <
 export const SHORT_LIST = 8
 /** What the user opened or closed, kept in this browser as JSON `{ [foldKey]: boolean }`. Only the overrides are stored. */
 export const OPEN_KEY = 'hub.team.skillsOpen'
-export function readOpen(raw: string | null): Record<string, boolean> {
-  try {
-    const value: unknown = raw ? JSON.parse(raw) : null
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'))
-  } catch {
-    return {}
-  }
-}
-/** Whether a fold is open: what the user chose, else the fallback. */
-export const foldOpen = (key: string, stored: Record<string, boolean>, fallback: boolean): boolean => (typeof stored[key] === 'boolean' ? stored[key] : fallback)
+export { readOpen, foldOpen } from '../../ui/foldState.ts'
 
 /** The skill to show beside the list: the current one while it still matches the search, else the first match; null when nothing matches. */
 export function openSkill(ids: string[], current: string | null, query: string): string | null {
