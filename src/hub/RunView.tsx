@@ -127,7 +127,7 @@ function OpenAtPc({ id, session }: { id: string; session?: string }) {
     <div className="rd-openrun" data-run-open>
       <h4 className="rd-h">Continue it at the PC</h4>
       <p className="hub-muted">Paste this in a terminal on the PC that ran the job. It will not work from another computer, or while that project has a run going.</p>
-      <CodeBlock exact><code data-run-open-command>{`node ~/.config/pc-dispatch/dispatch.mjs open-run ${id}`}</code></CodeBlock>
+      <CodeBlock exact><code data-run-open-command>{`node $HOME/.config/pc-dispatch/dispatch.mjs open-run ${id}`}</code></CodeBlock>
       {session && <p className="hub-muted">Session <span className="hub-id" data-run-open-session>{session}</span></p>}
     </div>
   )

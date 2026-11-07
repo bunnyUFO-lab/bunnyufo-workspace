@@ -204,7 +204,7 @@ try {
     await view.goto(`${openRun.url}#/~hub/request/${pcIds.withId}`);
     const block = view.locator('[data-run-open]');
     await block.waitFor();
-    assert.equal((await block.locator('[data-run-open-command]').innerText()).trim(), `node ~/.config/pc-dispatch/dispatch.mjs open-run ${pcIds.withId}`);
+    assert.equal((await block.locator('[data-run-open-command]').innerText()).trim(), `node $HOME/.config/pc-dispatch/dispatch.mjs open-run ${pcIds.withId}`);
     assert.match(await block.innerText(), /only|not work from another computer/i, 'It says the command works on the PC only.');
     assert.equal((await block.locator('[data-run-open-session]').innerText()).trim(), sessionId);
     assert.equal(await block.locator('[data-copy]').count(), 1, 'The command has a Copy button.');
