@@ -287,6 +287,25 @@ test('a card icon is one emoji in the state, and an empty one clears it', async 
   } finally { await close(); }
 });
 
+test('a card’s purpose is a choice stored in the state: report or reference, the other choice replaces it, nothing else', async () => {
+  const { request, stateOf, entity, fake, close } = await fixture();
+  try {
+    const answer = await request('/workspace/purpose', { workspace: 'one', id: 'alpha', purpose: 'reference' });
+    assert.equal(answer.status, 200);
+    assert.deepEqual(await answer.json(), { id: 'alpha', purpose: 'reference' });
+    assert.deepEqual(stateOf('one', 'alpha'), { purpose: 'reference' });
+    assert.equal((await (await request('/workspace/purpose', { workspace: 'one', id: 'alpha', purpose: 'report' })).json()).purpose, 'report');
+    assert.deepEqual(stateOf('one', 'alpha'), { purpose: 'report' });
+    assert.equal(entity('one', 'alpha').purpose, undefined, 'The card’s own entry is not written.');
+    for (const purpose of ['', null, 'draft', 'Report', undefined]) {
+      assert.equal((await request('/workspace/purpose', { workspace: 'one', id: 'alpha', purpose })).status, 400, JSON.stringify(purpose));
+    }
+    assert.equal((await request('/workspace/purpose', { workspace: 'one', id: 'nope', purpose: 'report' })).status, 404);
+    assert.deepEqual(stateOf('one', 'alpha'), { purpose: 'report' });
+    assert.ok(!fake.log.some(entry => entry.method === 'PUT' && entry.key === 'sections/one/workspace.json'), 'No card list is written.');
+  } finally { await close(); }
+});
+
 test('tags are a list on the card, and an empty list clears them', async () => {
   const { request, stateOf, close } = await fixture();
   try {
@@ -764,8 +783,11 @@ test('archiving hides a workspace, waits until a card is active as the app count
   const request = (route, data) => bare(route, data, undefined, { 'Remote-User': 'owner' });
   const today = new Date().toISOString().slice(0, 10);
   const publishCards = (...entities) => fake.seed('sections/one/workspace.json', `${JSON.stringify({ name: 'Section One', entities }, null, 2)}\n`, 'application/json');
+  // A report untouched for months is archived by date; an old card with no purpose or a reference stays among the active ones.
+  const old = (id, extra = {}) => card(id, { purpose: 'report', ...extra });
   try {
-    // alpha and gamma were last touched long ago and carry no state: the Library shows them as archived already.
+    publishCards(old('alpha'), old('gamma'));
+    // alpha and gamma are old reports and carry no state: the Library shows them as archived already.
     const done = await request('/sections/archive', { workspace: 'one', archived: true });
     assert.equal(done.status, 200, 'An idle workspace can be archived with no clicks first.');
     assert.deepEqual(await done.json(), { id: 'one', archived: true });
@@ -785,11 +807,24 @@ test('archiving hides a workspace, waits until a card is active as the app count
     assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: true })).status, 200);
     assert.match(await refused(), /1 active card\./, 'A pinned card counts.');
     assert.equal((await request('/workspace/pin', { workspace: 'one', id: 'alpha', pinned: false })).status, 200);
-    publishCards(card('alpha'), card('gamma', { updated: today }));
+    publishCards(old('alpha'), old('gamma', { updated: today }));
     assert.match(await refused(), /1 active card\./, 'A card touched today counts.');
-    publishCards(card('alpha'), card('gamma'), card('sample', { sample: true }));
+    publishCards(old('alpha'), old('gamma'), old('sample', { sample: true }));
     assert.match(await refused(), /1 active card\./, 'A sample card counts.');
-    publishCards(card('alpha'), card('gamma'));
+    publishCards(old('alpha'), old('gamma'));
+    // An old card with no purpose, and an old reference, stay among the active ones; an old done card does not.
+    publishCards(old('alpha'), old('gamma', { purpose: undefined }));
+    assert.match(await refused(), /1 active card\./, 'An old card with no purpose counts.');
+    publishCards(old('alpha'), old('gamma', { purpose: 'reference' }));
+    assert.match(await refused(), /1 active card\./, 'An old reference counts.');
+    publishCards(old('alpha'), old('gamma', { purpose: undefined, status: 'done' }));
+    assert.equal((await request('/sections/archive', { workspace: 'one', archived: true })).status, 200, 'An old done card does not.');
+    assert.equal((await request('/sections/archive', { workspace: 'one', archived: false })).status, 200);
+    // The owner's choice beats the entry: a reference in state keeps an old report live.
+    assert.equal((await request('/workspace/purpose', { workspace: 'one', id: 'gamma', purpose: 'reference' })).status, 200);
+    publishCards(old('alpha'), old('gamma'));
+    assert.match(await refused(), /1 active card\./, 'The owner’s reference beats the entry’s report.');
+    assert.equal((await request('/workspace/purpose', { workspace: 'one', id: 'gamma', purpose: 'report' })).status, 200);
     assert.equal((await request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'archived' })).status, 200);
     assert.equal((await request('/workspace/status', { workspace: 'one', id: 'alpha', status: 'active' })).status, 200, 'Restoring a card touches it.');
     assert.match(await refused(), /1 active card\./, 'A card restored today counts.');
@@ -799,11 +834,45 @@ test('archiving hides a workspace, waits until a card is active as the app count
   } finally { await close(); }
 });
 
-test('the date rule the server counts with is the one the app uses', async () => {
-  const { readFile } = await import('node:fs/promises');
-  const { ARCHIVE_DAYS } = await import('../card-liveness.mjs');
-  const app = await readFile(new URL('../../../src/lib/archiveRule.ts', import.meta.url), 'utf8');
-  assert.equal(Number(/export const ARCHIVE_DAYS = (\d+)/.exec(app)?.[1]), ARCHIVE_DAYS);
+test('the archive rule, row by row (the one table both the app and the server read)', async () => {
+  const { isArchivedCard, isLiveCard, applyCardState, archiveCutoff, ARCHIVE_DAYS, PURPOSES } = await import('../card-liveness.mjs');
+  const now = new Date('2026-11-07T12:00:00Z');
+  assert.equal(ARCHIVE_DAYS, 7);
+  assert.deepEqual(PURPOSES, ['report', 'reference']);
+  assert.equal(archiveCutoff(now), '2026-10-31');
+  const old = '2026-10-30', edge = '2026-10-31';
+  const base = { status: 'active', created: old, updated: old };
+  const archived = (extra, state) => !isLiveCard({ ...base, ...extra }, state, now);
+  // 1: archived by hand wins over everything, a pin and a reference included.
+  assert.equal(archived({ status: 'archived', updated: '2026-11-07' }), true);
+  assert.equal(archived({ status: 'archived', pinned: true, purpose: 'reference' }), true);
+  // 2: pinned, sample, reference stay.
+  assert.equal(archived({ purpose: 'report', pinned: true }), false);
+  assert.equal(archived({ status: 'done', pinned: true }), false, 'A pinned done card stays.');
+  assert.equal(archived({ purpose: 'report', sample: true }), false);
+  assert.equal(archived({ purpose: 'reference' }), false);
+  assert.equal(archived({ purpose: 'reference', status: 'done' }), false, 'A reference that is also done stays.');
+  // 3: neither a report nor done stays.
+  assert.equal(archived({}), false, 'Active with no purpose stays however old.');
+  assert.equal(archived({ created: '2020-01-01', updated: undefined }), false);
+  // 4: no date at all stays.
+  assert.equal(archived({ purpose: 'report', created: undefined, updated: undefined }), false, 'A report with no date stays.');
+  // 5: the date. Before the cutoff is archived; the cutoff day itself is not.
+  assert.equal(archived({ purpose: 'report' }), true);
+  assert.equal(archived({ status: 'done' }), true);
+  assert.equal(archived({ purpose: 'report', updated: edge }), false);
+  assert.equal(archived({ purpose: 'report', created: old, updated: undefined }), true, 'created stands in for updated.');
+  // The state overlay is laid first: the owner's choice beats the entry, a pin beats a report, a restore is a touch.
+  assert.equal(archived({ purpose: 'report' }, { purpose: 'reference' }), false);
+  assert.equal(archived({ purpose: 'reference' }, { purpose: 'report' }), true);
+  assert.equal(archived({ purpose: 'report' }, { pinned: true }), false);
+  assert.equal(archived({ purpose: 'report', pinned: true }, { pinned: false }), true);
+  assert.equal(archived({ purpose: 'report' }, { status: 'active', restoredAt: '2026-11-07' }), false, 'A restored report gets seven more days.');
+  assert.equal(archived({}, { purpose: 'report' }), true, 'Treat as report on an old card sends it away at once.');
+  assert.equal(archived({}, { purpose: 'bogus' }), false, 'A purpose outside the list is ignored.');
+  // The overlay also lays the owner's icon, which the app's own copy used to miss.
+  assert.equal(applyCardState({ id: 'x' }, { emoji: '🐰' }).emoji, '🐰');
+  assert.equal(isArchivedCard({ ...base, purpose: 'report' }, now), true);
 });
 
 test('a workspace name with control characters, line breaks or direction marks is refused', async () => {
@@ -832,7 +901,8 @@ test('rename and archive that lose a 412 race keep the other writer, and archive
       }
       return original(key, body, options);
     };
-    race = list => ({ ...list, tracked: { by: 'publish' }, entities: [...list.entities, card('zeta')] });
+    // Old reports are archived by date; old cards with no purpose would count as active.
+    race = list => ({ ...list, tracked: { by: 'publish' }, entities: [...list.entities.map(item => ({ ...item, purpose: 'report' })), card('zeta', { purpose: 'report' })] });
     assert.equal((await request('/sections/rename', { workspace: 'one', name: 'Renamed' })).status, 200);
     let list = fake.json('sections/one/workspace.json');
     assert.equal(list.name, 'Renamed');

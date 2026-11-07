@@ -17,6 +17,7 @@ import { addWorkspace, createWorkspace, listWorkspaces, loadRegistry, removeWork
 // Two modules shared with the published site's API (site/api is rsynced whole to the server, so
 // the files travel with that deploy and this service imports them from where they live).
 import { createBucketCardStore, createCardStore, validEmoji } from '../site/api/card-state.mjs';
+import { PURPOSES } from '../site/api/card-liveness.mjs';
 import { createBucket, loadCredentials, parseS3Url } from '../site/api/s3.mjs';
 import { cardRoute, cardWriter, folderStore } from '../site/api/card-writes.mjs';
 import { createHub } from '../site/api/hub.mjs';
@@ -286,6 +287,13 @@ export async function createService({ repo, uiDir, stateDir, token = secret(), m
           const state = await cardState.setEmoji(data.workspace ?? active.id, data.id, data.emoji);
           broadcast('workspace-changed', {});
           return json(response, 200, { id: data.id, emoji: state.emoji ?? null });
+        }
+        if (method === 'POST' && url.pathname === '/api/workspace/purpose') {
+          if (!PURPOSES.includes(data.purpose)) throw new Error('A card is a report or a reference.');
+          await findCard(data.workspace, data.id);
+          const state = await cardState.setPurpose(data.workspace ?? active.id, data.id, data.purpose);
+          broadcast('workspace-changed', {});
+          return json(response, 200, { id: data.id, purpose: state.purpose });
         }
         // The whole pinned list in one write. A reorder moves several cards at once and they can
         // live in different workspaces; one request per card left the list visibly half-sorted.

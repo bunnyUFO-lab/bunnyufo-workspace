@@ -34,7 +34,7 @@ async function workspace(name, cards) {
   return dir;
 }
 // One: two live cards and one untouched for ten days. Two: a live card and one whose page is missing.
-const one = await workspace('one', [card('alpha', 'Alpha'), card('bravo', 'Bravo', { created: day(1), updated: day(1) }), card('old', 'Old', { created: day(10), updated: day(10) })]);
+const one = await workspace('one', [card('alpha', 'Alpha'), card('bravo', 'Bravo', { created: day(1), updated: day(1) }), card('old', 'Old', { created: day(10), updated: day(10), purpose: 'report' })]);
 const two = await workspace('two', [card('gamma', 'Gamma', { created: day(2), updated: day(2) }), card('ghost', 'Ghost', { created: day(3), updated: day(3) })]);
 const repo = await mkdtemp(path.join(root, '.cache/home-filters-ui-app-'));
 for (const dir of ['workspace', 'inbox', 'projects']) await mkdir(path.join(repo, dir), { recursive: true });

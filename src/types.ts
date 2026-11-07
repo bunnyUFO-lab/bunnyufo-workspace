@@ -52,6 +52,9 @@ export interface WorkspaceEntity {
   tags?: string[]
   /** An icon picked in the app (one emoji), kept with the tags; wins over `icon` and the category's. */
   emoji?: string
+  /** What the card is for. A `report` goes to the Archive 7 days after its last change, a `reference` stays.
+   *  No purpose is normal and the card stays. The owner's choice from the row menu is laid over this. */
+  purpose?: 'report' | 'reference'
   /** Starter examples remain visible until explicitly archived. */
   sample?: boolean
   /** Tabs deleted from this card, newest last. The file stays in the folder; the "+" form can put one back. */

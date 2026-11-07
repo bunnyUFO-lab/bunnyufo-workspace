@@ -1,8 +1,2 @@
-// The archive date rule, with nothing to import: the Library's model and its tests read it without a browser.
-export const ARCHIVE_DAYS = 7
-
-export function archiveCutoff(): string {
-  const d = new Date()
-  d.setDate(d.getDate() - ARCHIVE_DAYS)
-  return d.toISOString().slice(0, 10)
-}
+// The archive rule lives in site/api/card-liveness.mjs, which the services share; the app reads it from there too.
+export { ARCHIVE_DAYS, archiveCutoff, applyCardState, isArchivedCard, PURPOSES } from '../../site/api/card-liveness.mjs'

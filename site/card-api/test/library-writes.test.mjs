@@ -151,6 +151,41 @@ test('a new card may set only the allowed fields, and a step has no url', async 
   } finally { await finish(t); }
 });
 
+test('purpose: a new card may carry it, anything else is a 422 on every path, a Library edit cannot change it, a full write keeps it', async () => {
+  const t = await setup();
+  try {
+    await t.put('magic-loops', '2026-11-05_p/a.md', 'a');
+    const base = { id: 'p', title: 'P', folder: '2026-11-05_p', steps: [{ name: 'A', path: 'a.md' }] };
+    for (const bad of ['', null, 'draft', 'Report', 7]) {
+      assert.equal((await t.entry('magic-loops', 'p', { ...base, purpose: bad })).status, 422, `new card, ${JSON.stringify(bad)}`);
+      assert.equal((await t.entry('magic-loops', 'owner-card', { ...owned, purpose: bad }, EDIT('x'))).status, 422, `existing card, ${JSON.stringify(bad)}`);
+      assert.equal((await t.entry('magic-loops', 'owner-card', { ...owned, purpose: bad }, {}, 'tok-all')).status, 422, `full write, ${JSON.stringify(bad)}`);
+    }
+    assert.equal(t.listOf('magic-loops').entities.length, 1, 'Nothing was written.');
+
+    const made = await t.entry('magic-loops', 'p', { ...base, purpose: 'report' });
+    assert.equal(made.status, 200, JSON.stringify(made.data));
+    assert.equal(t.listOf('magic-loops').entities.find(item => item.id === 'p').purpose, 'report');
+    const listed = await t.call('GET', '/sections/magic-loops');
+    assert.equal(listed.data.cards.find(item => item.id === 'p').purpose, 'report', 'the section listing carries it');
+    assert.equal(listed.data.cards.find(item => item.id === 'owner-card').purpose, undefined, 'and leaves it out when unset');
+
+    // A Library write to the existing card cannot change it; a repeat of the same value is not an ignored field.
+    const edit = await t.entry('magic-loops', 'p', { ...base, purpose: 'reference' });
+    assert.equal(edit.status, 200, JSON.stringify(edit.data));
+    assert.ok(edit.data.ignored.includes('purpose'));
+    assert.equal(t.listOf('magic-loops').entities.find(item => item.id === 'p').purpose, 'report');
+
+    // A full write that rebuilds its entry without the field keeps it; one that sends it replaces it.
+    const { purpose: dropped, ...rebuilt } = t.listOf('magic-loops').entities.find(item => item.id === 'p');
+    assert.equal(dropped, 'report');
+    assert.equal((await t.entry('magic-loops', 'p', rebuilt, {}, 'tok-all')).status, 200);
+    assert.equal(t.listOf('magic-loops').entities.find(item => item.id === 'p').purpose, 'report', 'kept');
+    assert.equal((await t.entry('magic-loops', 'p', { ...rebuilt, purpose: 'reference' }, {}, 'tok-all')).status, 200);
+    assert.equal(t.listOf('magic-loops').entities.find(item => item.id === 'p').purpose, 'reference', 'replaced');
+  } finally { await finish(t); }
+});
+
 test('nothing is deleted or removed: DELETE is 403 and an append keeps the list top-level fields', async () => {
   const t = await setup();
   try {

@@ -163,7 +163,7 @@ export default function LibraryScreen({ workspaces, cards, projects, onProjects,
       />
 
       <div className="lib-scroll" ref={box} onScroll={onScroll} data-scroll="lib">
-        {view === 'archive' && <p className="lib-note" data-archive-note>Cards untouched for {ARCHIVE_DAYS} days are archived automatically. Pin a card to keep it live.</p>}
+        {view === 'archive' && <p className="lib-note" data-archive-note>Reports and done cards come here {ARCHIVE_DAYS} days after their last change. Pin a card or choose Keep as reference to keep it in the list.</p>}
         {searching && view !== 'trash' && (
           <p className="lib-note" data-matches>
             {list.shown === 0 ? 'No matches for' : `${list.shown} match${list.shown === 1 ? '' : 'es'} for`} “{query.trim()}”{view === 'archive' && ' in the archive'}{' '}
