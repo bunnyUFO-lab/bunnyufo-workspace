@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openSkill, agentGroups, exportLine, groupByFolder, isSkillsRoute, NO_PLUGINS_LINE, pluginRows, profileText, sharedText, skillHash, skillMatches, skillOf, sourceText } from '../../src/hub/team/skillsModel.ts';
+import { agentGroups, agentsLine, autoOf, exportLine, foldOpen, groupByFolder, groupPluginRows, isSkillsRoute, listGroups, NO_PLUGINS_LINE, openSkill, pluginRows, previewOf, profileText, readOpen, sharedText, skillHash, skillMatches, skillOf } from '../../src/hub/team/skillsModel.ts';
 
 const skill = over => ({ id: 'plan', autoLoad: false, owner: false, profiles: ['main'], autoLoadProfiles: [], sources: ['installed'], agents: [], ...over });
 
@@ -25,9 +25,7 @@ test('the export line says when, or says there is none', () => {
   assert.match(exportLine({ exportedAt: null, fresh: false }, '').text, /not published/);
 });
 
-test('sources and profiles are plain words', () => {
-  assert.equal(sourceText(skill({ autoLoad: true, sources: ['autoLoad', 'installed'] })), 'loaded on every reply');
-  assert.equal(sourceText(skill({ owner: true, sources: ['installed', 'owner'] })), 'installed · one of yours');
+test('profiles are plain words', () => {
   assert.equal(profileText(skill({ profiles: [] })), 'No profile has it installed.');
   assert.equal(profileText(skill({ profiles: ['main', 'briefs'] })), 'On the profiles main, briefs.');
 });
@@ -101,4 +99,77 @@ test('plugin rows: the status on that profile, enabled first, and unknown until 
   assert.deepEqual(pluginRows(known, 'main').map(row => [row.name, row.status]), [['beta', 'enabled'], ['zed', 'enabled'], ['alpha', 'not enabled']]);
   assert.deepEqual(pluginRows(known, 'briefs').map(row => row.name), ['alpha'], 'a plugin a profile does not list is not shown for it');
   assert.equal(pluginRows(known, null), null, 'Claude Code has none listed');
+});
+
+const lists = (...rows) => view({ agents: rows.map(([id, name, profile, skills, autoLoad]) => ({ id, name, profile, skills, autoLoad: skills ? autoLoad ?? [] : null, ...(skills ? {} : { note: 'on the PC' }) })) });
+
+test('listGroups merges profiles with the same set of skills, in any order, and keeps the first key and place', () => {
+  const groups = listGroups(lists(['hermes', 'Hermes', 'main', ['b', 'a/one', 'c']], ['planner', 'Planner', 'main', ['b', 'a/one', 'c']], ['briefs', 'Briefs', 'briefs', ['c', 'b', 'a/one']], ['lone', 'Lone', null, null]));
+  assert.deepEqual(groups.map(group => group.key), ['profile:main', 'agent:lone']);
+  assert.deepEqual(groups[0].agents.map(agent => agent.name), ['Hermes', 'Planner', 'Briefs']);
+  assert.deepEqual(groups[0].profiles, ['main', 'briefs']);
+  assert.equal(groups[0].parts.length, 2);
+  assert.equal(sharedText(groups[0]), 'Hermes, Planner and Briefs have the same skills.');
+  assert.equal(sharedText(agentGroups(view())[0]), 'Hermes, Planner and Researcher share one list.', 'one profile still says share one list');
+});
+
+test('listGroups leaves different lists apart, never merges a list that is not known, and does not merge on auto-load', () => {
+  const apart = listGroups(lists(['a', 'A', 'main', ['x', 'y']], ['b', 'B', 'briefs', ['x', 'z']]));
+  assert.deepEqual(apart.map(group => group.key), ['profile:main', 'profile:briefs']);
+  const unknown = listGroups(lists(['a', 'A', null, null], ['b', 'B', null, null]));
+  assert.deepEqual(unknown.map(group => group.key), ['agent:a', 'agent:b'], 'two unknown lists are not the same');
+  const same = listGroups(lists(['a', 'A', 'main', ['x', 'y'], ['x']], ['b', 'B', 'briefs', ['x', 'y'], []]));
+  assert.equal(same.length, 1, 'auto-load differs, the list is the same');
+  assert.deepEqual(same[0].autoLoad, ['x']);
+});
+
+test('autoOf: every profile loads it, some do (named), or none', () => {
+  const [group] = listGroups(lists(['a', 'A', 'main', ['x', 'y'], ['x', 'y']], ['p', 'P', 'main', ['x', 'y'], ['x', 'y']], ['b', 'B', 'briefs', ['x', 'y'], ['x']]));
+  assert.deepEqual(autoOf(group, 'x'), { all: true, only: null });
+  assert.deepEqual(autoOf(group, 'y'), { all: false, only: 'Only for A, P' });
+  assert.equal(autoOf(group, 'z'), null);
+});
+
+test('agentsLine: all agents with a list, some, one and none', () => {
+  const six = view({ agents: ['a', 'b', 'c', 'd', 'e', 'f'].map(id => person(id, id.toUpperCase(), 'main')).concat([person('claude', 'Claude Code', null)]) });
+  const on = ids => ({ agents: ids.map(id => ({ id, name: id.toUpperCase(), profile: 'main' })) });
+  assert.equal(agentsLine(on(['a', 'b', 'c', 'd', 'e', 'f']), six), 'All 6 agents with a list');
+  assert.equal(agentsLine(on(['a', 'b', 'c', 'd']), six), 'A, B, C +1');
+  assert.equal(agentsLine(on(['a', 'b', 'c']), six), 'A, B, C');
+  assert.equal(agentsLine(on(['b']), six), 'B');
+  assert.equal(agentsLine(on([]), six), 'No agent known');
+  assert.equal(agentsLine(on(['a']), view({ agents: [person('a', 'A', 'main')] })), 'A', 'one agent with a list is not all 1');
+});
+
+test('previewOf: fewer than three names, exactly three, and more', () => {
+  assert.equal(previewOf([]), '');
+  assert.equal(previewOf(['a', 'b']), 'a, b');
+  assert.equal(previewOf(['a', 'b', 'c']), 'a, b, c');
+  assert.equal(previewOf(['a', 'b', 'c', 'd', 'e']), 'a, b, c +2');
+});
+
+test('readOpen survives bad JSON, null, an array, and values that are not booleans', () => {
+  assert.deepEqual(readOpen(null), {});
+  assert.deepEqual(readOpen('{not json'), {});
+  assert.deepEqual(readOpen('[true]'), {});
+  assert.deepEqual(readOpen('7'), {});
+  assert.deepEqual(readOpen('{"a":true,"b":false,"c":"yes"}'), { a: true, b: false });
+  assert.equal(foldOpen('a', { a: false }, true), false, 'what the user chose wins');
+  assert.equal(foldOpen('b', { a: false }, true), true, 'no choice: the start state');
+});
+
+test('a plugin with different statuses across a merged group is Differs, with who has it how', () => {
+  const [group] = listGroups(lists(['h', 'Hermes', 'main', ['x']], ['p', 'Planner', 'main', ['x']], ['b', 'Briefs', 'briefs', ['x']]));
+  const items = [
+    { name: 'same', version: '1', source: 'bundled', description: '', profiles: [{ profile: 'main', status: 'enabled' }, { profile: 'briefs', status: 'enabled' }] },
+    { name: 'split', version: '1', source: 'bundled', description: '', profiles: [{ profile: 'main', status: 'enabled' }, { profile: 'briefs', status: 'disabled' }] },
+    { name: 'missing', version: '1', source: 'bundled', description: '', profiles: [{ profile: 'main', status: 'enabled' }] },
+    { name: 'off', version: '1', source: 'bundled', description: '', profiles: [{ profile: 'main', status: 'not enabled' }, { profile: 'briefs', status: 'not enabled' }] },
+  ];
+  const rows = groupPluginRows(view({ plugins: { known: true, text: 'x', items } }), group);
+  assert.deepEqual(rows.map(row => [row.name, row.status]), [['same', 'enabled'], ['missing', 'differs'], ['split', 'differs'], ['off', 'not enabled']]);
+  assert.equal(rows.find(row => row.name === 'split').line, 'On for Hermes, Planner. Off for Briefs.');
+  assert.equal(rows.find(row => row.name === 'missing').line, 'On for Hermes, Planner. Not on for Briefs.');
+  assert.equal(groupPluginRows(view(), group), null, 'no plugin list in the export');
+  assert.equal(groupPluginRows(view({ plugins: { known: true, text: 'x', items } }), agentGroups(view())[2]), null, 'Claude Code has no profile');
 });

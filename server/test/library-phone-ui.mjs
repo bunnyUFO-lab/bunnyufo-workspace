@@ -209,6 +209,20 @@ try {
   assert.equal(await phone.locator('[data-library] .lib-search input').inputValue(), 'giraffe', 'the search is carried over');
   assert.equal(await label(phone), listState.label, 'and the projects');
 
+  step('the Library tab from a card, then the same card again at once: the jump back worked, so the tab does not open the Library a second time');
+  await phone.evaluate(() => { location.hash = '#/~hub/library'; });
+  await scroller.waitFor();
+  await rows(phone).nth(9).locator('.lib-row-main').tap();
+  await phone.locator('.topbar').waitFor();
+  const cardHash = await phone.evaluate(() => location.hash);
+  await phone.clock.install();   // the tab's 500 ms fallback runs on this clock, so the test decides when it is due
+  await phone.locator('[data-tabs] [data-nav="library"]').tap();
+  await scroller.waitFor();
+  await phone.evaluate(h => { location.hash = h; }, cardHash);
+  await phone.locator('.topbar').waitFor();
+  await phone.clock.runFor(1000);
+  assert.equal(await phone.evaluate(() => location.hash), cardHash, 'still on the card');
+
   step('1200 px: the same list in a dialog, a keyboard can use it, one focus ring on the search, nothing sideways');
   const desk = await open({ width: 1200, height: 800 });
   await library(desk);

@@ -89,6 +89,29 @@ test('sites.json lists every section in the bucket, named by its card list', asy
   } finally { await close(); }
 });
 
+test('a file stored with a generic type is served with the type its name gives, and old ETags are not trusted', async () => {
+  const { raw, fake, close } = await fixture();
+  try {
+    fake.seed('sections/one/alpha/octet.html', '<h1>o</h1>', 'application/octet-stream');
+    fake.seed('sections/one/alpha/binary.html', '<h1>b</h1>', 'binary/octet-stream');
+    fake.seed('sections/one/alpha/style.css', 'body{}', 'application/octet-stream');
+    fake.seed('sections/one/alpha/data.xyz', 'x', 'application/octet-stream');
+    fake.seed('sections/one/alpha/pic.html', 'x', 'image/png');
+    const type = async file => (await raw(`/w/one/alpha/${file}`)).headers;
+    assert.equal((await type('octet.html')).get('content-type'), 'text/html; charset=utf-8');
+    assert.equal((await type('binary.html')).get('content-type'), 'text/html; charset=utf-8');
+    assert.equal((await type('style.css')).get('content-type'), 'text/css; charset=utf-8');
+    assert.equal((await type('data.xyz')).get('content-type'), 'application/octet-stream', 'An unknown extension still downloads.');
+    const kept = await type('pic.html');
+    assert.equal(kept.get('content-type'), 'image/png', 'A real stored type is kept.');
+    assert.equal(kept.get('x-content-type-options'), 'nosniff');
+    const first = await raw('/w/one/alpha/octet.html');
+    const plain = first.headers.get('etag').replace(/-t1"$/, '"');
+    assert.equal((await raw('/w/one/alpha/octet.html', { headers: { 'If-None-Match': plain } })).status, 200, 'An ETag from before the fix gets the full answer.');
+    assert.equal((await raw('/w/one/alpha/octet.html', { headers: { 'If-None-Match': first.headers.get('etag') } })).status, 304);
+  } finally { await close(); }
+});
+
 test('a section file is streamed from the bucket with its type and ETag', async () => {
   const { raw, fake, close } = await fixture();
   try {
@@ -97,7 +120,7 @@ test('a section file is streamed from the bucket with its type and ETag', async 
     assert.equal(page.headers.get('content-type'), 'text/html; charset=utf-8');
     assert.equal(await page.text(), '<h1>alpha</h1>');
     const etag = page.headers.get('etag');
-    assert.match(etag, /^"[0-9a-f]{32}"$/);
+    assert.match(etag, /^"[0-9a-f]{32}-t1"$/);
     const again = await raw('/w/one/alpha/index.html', { headers: { 'If-None-Match': etag } });
     assert.equal(again.status, 304, 'A browser that has it is told so.');
     const head = await raw('/w/one/_shared/report.css', { method: 'HEAD' });
