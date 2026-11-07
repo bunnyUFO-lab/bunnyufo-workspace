@@ -270,9 +270,9 @@ export function checklistState(names) {
   const list = nameList(names);
   const revision = checklistRevision(list);
   if (list.includes('cancel.json')) return 'cancelled';
-  if (list.includes(checklistRoundFile('pickup', revision))) return 'picked-up';
-  if (list.includes(checklistRoundFile('submit', revision))) return 'submitted';
-  return 'open';
+  // A pickup counts only for a round that was submitted: an early pickup file must not shut the owner out of Submit.
+  if (!list.includes(checklistRoundFile('submit', revision))) return 'open';
+  return list.includes(checklistRoundFile('pickup', revision)) ? 'picked-up' : 'submitted';
 }
 
 /**

@@ -2628,6 +2628,11 @@ async function markFixture() {
   ask('on-other-3333', 'dr-zz');
   ask('on-h-4444', 'dr-h');
   s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-5555/checklist.json`, JSON.stringify({ project: 'dev-roadmap', bead: 'dr-a', title: 'T', items: [{ id: '01', text: 'x' }] }), 'application/json');
+  // A list the owner reopened is open again (withdrawn); one that is just submitted is not; a pickup with no submission of its round does not stop the withdrawal.
+  for (const [slug, files] of [['6666', ['submit.json', 'reopen-2.json']], ['7777', ['submit.json']], ['8888', ['submit.json', 'reopen-2.json', 'pickup-2.json']]]) {
+    s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-${slug}/checklist.json`, JSON.stringify({ project: 'dev-roadmap', bead: 'dr-a', title: 'T', items: [{ id: '01', text: 'x' }] }), 'application/json');
+    for (const file of files) s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-${slug}/${file}`, '{}', 'application/json');
+  }
   const calls = async () => (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   const markKeys = () => [...s.fake.objects.keys()].filter(key => key.includes('/bead-marks/')).sort();
   return { ...s, calls, stateFile, markKeys, day };
@@ -2655,6 +2660,7 @@ test('mark apply: the documented bd calls for each verdict, a no-op on a closed 
     assert.deepEqual(markKeys(), before, 'It wrote no verdict and no applied note.');
     const cancelled = key => fake.objects.has(`sections/inbox-dev/${key}/cancel.json`);
     assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-a-1111`), cancelled(`asks/${day}-dev-roadmap-on-f-2222`), cancelled(`checklists/${day}-dev-roadmap-list-5555`)], [true, true, true]);
+    assert.deepEqual([cancelled(`checklists/${day}-dev-roadmap-list-6666`), cancelled(`checklists/${day}-dev-roadmap-list-8888`), cancelled(`checklists/${day}-dev-roadmap-list-7777`)], [true, true, false], 'A reopened list is withdrawn (even with an early pickup-2.json); a merely submitted one is not.');
     assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-other-3333`), cancelled(`asks/${day}-dev-roadmap-on-h-4444`)], [false, false], 'An Ask about another bead, and about a bead that failed, stays open.');
     // A second run writes nothing in Beads for what is closed now; the failed one is tried again.
     const seen = (await calls()).length;

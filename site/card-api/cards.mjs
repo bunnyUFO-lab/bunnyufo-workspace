@@ -1658,7 +1658,8 @@ const roundFile = (kind, revision) => (revision > 1 ? `${kind}-${revision}.json`
 /** cancel.json → cancelled, the round's pickup → picked-up, its submit → submitted, else open (a reopened list is open again). */
 const checklistState = names => {
   const revision = checklistRevision(names);
-  return names.has('cancel.json') ? 'cancelled' : names.has(roundFile('pickup', revision)) ? 'picked-up' : names.has(roundFile('submit', revision)) ? 'submitted' : 'open';
+  // A pickup counts only for a round that was submitted: an early pickup file must not shut the owner out of Submit.
+  return names.has('cancel.json') ? 'cancelled' : !names.has(roundFile('submit', revision)) ? 'open' : names.has(roundFile('pickup', revision)) ? 'picked-up' : 'submitted';
 };
 
 /** The winning mark per item: the greatest stamp in the file name, the greater rand4 on a tie. → Map<item, { done, at }> */
@@ -2174,7 +2175,9 @@ async function checklistPickup(id) {
   const names = await checklistNames(id);
   const state = checklistState(names);
   if (state === 'picked-up') { console.error(`checklists/${id} was picked up already.`); throw new Exit(3); }
-  if (state !== 'submitted') { console.error(`checklists/${id} is ${state}, not submitted: nothing to pick up.`); throw new Exit(2); }
+  const revision = checklistRevision(names);
+  if (state !== 'submitted') { console.error(`checklists/${id} is ${state}, not submitted: nothing to pick up${revision > 1 && state === 'open' ? ` (the owner reopened it: revision ${revision}; wait for the new submission)` : ''}.`); throw new Exit(2); }
+  if (revision > 1) console.log(`(revision ${revision}: the owner reopened this checklist; you are picking up the new submission, not the earlier one)`);
   return claim('checklists', id, roundFile('pickup', checklistRevision(names)), { at: isoNow(), host: hostName(), ...(sessionEnv() ? { session: sessionEnv() } : {}) });
 }
 
@@ -2928,7 +2931,8 @@ async function cancelAskedAbout(project, beads) {
   const open = (folders, file, skip) => [...folders].filter(([id, names]) => wanted.test(id) && names.has(file) && !skip.some(name => names.has(name))).map(([id]) => id);
   const targets = [
     ...open(asks, 'ask.json', ['cancel.json', 'pickup.json', 'answer.json']).map(id => ({ folder: 'asks', id, file: 'ask.json' })),
-    ...open(lists, 'checklist.json', ['cancel.json', 'pickup.json', 'submit.json']).map(id => ({ folder: 'checklists', id, file: 'checklist.json' })),
+    // A reopened list is open again, so it is withdrawn too: the state comes from the round's files, not from any submit.json.
+    ...[...lists].filter(([id, names]) => wanted.test(id) && names.has('checklist.json') && checklistState(names) === 'open').map(([id]) => id).map(id => ({ folder: 'checklists', id, file: 'checklist.json' })),
   ];
   await mapLimit(targets, 8, async ({ folder, id, file }) => {
     const body = await readJson(inboxPath(folder, id, file));

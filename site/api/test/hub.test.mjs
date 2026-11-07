@@ -970,6 +970,8 @@ test('checklistState with reopen files: the latest round decides, and the earlie
   assert.equal(checklistState(['checklist.json', 'submit.json', 'pickup.json', 'reopen-2.json', 'submit-2.json', 'pickup-2.json']), 'picked-up');
   assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'submit-3.json']), 'open', 'A submit of another round does not count.');
   assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'cancel.json']), 'cancelled');
+  assert.equal(checklistState(['checklist.json', 'pickup.json']), 'open', 'A pickup before the submission does not count.');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'pickup-2.json']), 'open', 'Nor in a reopened round.');
 });
 
 test('reopen: the owner takes a submitted list back, keeps what was typed and pictured, and the next submit lands beside the first', async () => {
@@ -1069,6 +1071,22 @@ test('reopen: a cancelled list cannot be reopened, a lost event does not undo it
     const detail = (await get(`/hub/checklists/${list.id}`)).body;
     assert.equal(detail.state, 'submitted');
     assert.equal(detail.delivery.state, 'none', 'The old delivered.json is about round 1.');
+  } finally { await close(); }
+});
+
+test('an early pickup file does not shut the owner out: the list stays open and Submit works, in round 1 and in a reopened round', async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('early', 'e666'), now: at(-30) });
+    seed.checklist(list);
+    seed.put(`checklists/${list.id}/pickup.json`, { at: at().toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'open');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {})).status, 201);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'picked-up', 'Once submitted, the pickup stands.');
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).status, 201);
+    seed.put(`checklists/${list.id}/pickup-2.json`, { at: at().toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'open');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {})).status, 201, 'Not a 409.');
   } finally { await close(); }
 });
 
