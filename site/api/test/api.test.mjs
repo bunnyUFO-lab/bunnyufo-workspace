@@ -16,8 +16,9 @@ import { listenOnGoodPort } from '../../../server/listen.mjs';
 const asHost = (...args) => repeatConnect(() => asHostOnce(...args), error => error?.code);
 const asHostOnce = (origin, host, route, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const request = http.request(`${origin}${route}`, { method, headers: { ...headers, Host: host } }, response => {
-    response.resume();
-    response.on('end', () => resolve({ status: response.statusCode, headers: new Headers(Object.entries(response.headers).map(([k, v]) => [k, String(v)])) }));
+    const chunks = [];
+    response.on('data', chunk => chunks.push(chunk));
+    response.on('end', () => resolve({ status: response.statusCode, text: Buffer.concat(chunks).toString(), headers: new Headers(Object.entries(response.headers).map(([k, v]) => [k, String(v)])) }));
   });
   request.on('error', reject);
   request.end(body);
@@ -327,7 +328,7 @@ test('a hidden section is listed with hidden: true, a normal one carries no such
 });
 
 test('a data section is not served under /w/', async () => {
-  const { raw, fake, close } = await fixture({ contentOrigin: 'http://cards.example.localhost' });
+  const { origin, raw, fake, close } = await fixture({ contentOrigin: 'http://cards.example.localhost' });
   try {
     const seed = (key, text) => fake.seed(key, text, key.endsWith('.jsonl') ? 'application/x-ndjson' : 'application/json');
     seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n');
@@ -347,14 +348,18 @@ test('a data section is not served under /w/', async () => {
     ];
     const dataKeys = key => /^sections\/(inbox|inbox-dev|other-data)\/|card-responses/.test(key);
     const before = fake.log.length;
+    // A real Host header: fetch drops it, so asHost sends both hosts' requests.
+    const hosts = { 'the app host': '127.0.0.1', 'the content host': 'cards.example.localhost' };
+    const control = await asHost(origin, hosts['the content host'], '/w/one/alpha/index.html');
+    assert.equal(control.status, 200, 'A card file is served on the content host.');
+    assert.match(control.headers.get('content-security-policy') ?? '', /^sandbox /, 'The Host reached the content-host rules.');
     for (const base of ['', '/api']) {
-      for (const host of [undefined, 'cards.example.localhost']) {
+      for (const [hostName, host] of Object.entries(hosts)) {
         for (const route of paths) {
           for (const init of [{}, { method: 'HEAD' }, { headers: { 'If-None-Match': '"x-t1"' } }]) {
-            const headers = { ...(init.headers ?? {}), ...(host ? { Host: host } : {}) };
-            const answer = await raw(`${base}${route}`, { ...init, headers });
-            assert.equal(answer.status, 404, `${init.method ?? 'GET'} ${base}${route} on ${host ?? 'app host'}`);
-            assert.ok(!(await answer.text()).includes('fake'), 'No stored text comes back.');
+            const answer = await asHost(origin, host, `${base}${route}`, init);
+            assert.equal(answer.status, 404, `${init.method ?? 'GET'} ${base}${route} on ${hostName}`);
+            assert.ok(!answer.text.includes('fake'), 'No stored text comes back.');
           }
         }
       }
