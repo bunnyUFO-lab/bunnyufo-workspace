@@ -52,7 +52,7 @@ export function plan(section, entities, stateCards = {}, now = new Date()) {
     if (card.purpose !== undefined || state?.purpose !== undefined) continue;
     const reason = classify(section, card);
     if (!reason) continue;
-    found.push({ card, reason, effect: effectOf(shown, now) });
+    found.push({ card, reason, effect: effectOf(shown, now), status: shown.status, touched: shown.updated ?? shown.created });
   }
   return found;
 }
@@ -129,8 +129,8 @@ export function listMarkdown(sections, now = new Date()) {
   ];
   for (const section of sections.filter(item => item.found.length)) {
     lines.push(`## ${section.id} (${section.found.length} of ${section.cards})`, '', '| Id | Title | Reason | Status | Last touched | Effect now |', '|---|---|---|---|---|---|');
-    for (const { card, reason, effect } of section.found) {
-      lines.push(`| ${cell(card.id)} | ${cell(card.title)} | ${reason} | ${cell(card.status)} | ${cell(card.updated ?? card.created)} | ${effect} |`);
+    for (const { card, reason, effect, status, touched } of section.found) {
+      lines.push(`| ${cell(card.id)} | ${cell(card.title)} | ${reason} | ${cell(status)} | ${cell(touched)} | ${effect} |`);
     }
     lines.push('');
   }

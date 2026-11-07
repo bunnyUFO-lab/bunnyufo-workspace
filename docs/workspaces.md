@@ -234,6 +234,7 @@ A card's **content** is what `npm run publish` uploads. Pinned, archived, tags a
 the pinned list are not content: they say which cards you want in front of you and they change
 often. They live in `state.json` in the bucket, one object for every section, and the page lays
 it over the card lists when it reads them, so a pin shows at once and no card file is touched.
+
 **What the Archive holds.** A card goes there by itself only when it is a **report** or **done**, and
 has not changed for 7 days. A card may say what it is for: `purpose` in its `workspace.json` entry is
 `report` or `reference`, and no purpose is normal (the card stays). A pinned card, a starter example

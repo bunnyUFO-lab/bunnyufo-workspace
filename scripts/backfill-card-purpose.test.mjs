@@ -43,10 +43,10 @@ test('classify: the four rules in order, and what they miss', () => {
   assert.equal(classify('agent-plans', entry('brief-x', { steps: [{ name: 'Guide' }] })), 'id starts with brief-', 'rule 1 comes first');
   for (const id of ['qa', 'thing-qa', 'thing-qa-wizard', 'thing-qa-9']) assert.equal(classify('x', entry(id)), 'QA report', id);
   for (const id of ['sprint-qa-fixes-and-more', 'qatar', 'thing-qa-two-words', 'aqa']) assert.equal(classify('x', entry(id)), null, id);
-  assert.equal(classify('assistant', entry('spend-2026-10-26')), 'dated card in assistant');
-  assert.equal(classify('assistant', entry('spend-2026-10-26', { steps: [{ name: 'Research' }] })), null);
+  assert.equal(classify('assistant', entry('digest-2026-09-14')), 'dated card in assistant');
+  assert.equal(classify('assistant', entry('digest-2026-09-14', { steps: [{ name: 'Research' }] })), null);
   assert.equal(classify('assistant', entry('no-date-here')), null);
-  assert.equal(classify('other', entry('spend-2026-10-26')), null, 'only in assistant');
+  assert.equal(classify('other', entry('digest-2026-09-14')), null, 'only in assistant');
   assert.equal(classify('x', entry('plain')), null);
 });
 
@@ -178,4 +178,11 @@ test('the bucket comes from BUW_S3_BUCKET, else the registry, and the options ar
   assert.deepEqual(parseArgs(['--apply', '--out', 'x.md']), { apply: true, out: 'x.md' });
   assert.throws(() => parseArgs(['--now']), /Unknown option/);
   assert.throws(() => parseArgs(['--out']), /needs a file/);
+});
+
+test('the list shows the status as the Library sees it, with the state laid over the entry', () => {
+  const found = plan('x', [entry('brief-a')], { 'x/brief-a': { status: 'archived' } }, NOW);
+  assert.equal(found[0].status, 'archived');
+  assert.equal(found[0].effect, 'none: archived by hand');
+  assert.ok(listMarkdown([{ id: 'x', cards: 1, found }], NOW).includes('| id starts with brief- | archived |'));
 });
