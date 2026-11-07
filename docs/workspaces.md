@@ -820,6 +820,7 @@ itself off after that).
 
 An agent with the card API's `@library` right adds cards and tabs to Library sections (see `site/card-api/README.md`). The Hub shows
 every such write and lets the owner undo it. Nothing an agent does is a delete, and nothing Revert does is a delete either.
+An agent asked to move a card copies it and leaves the original; only the owner removes it (Delete in the card's menu, or Move to workspace).
 
 - **Rows.** `GET /hub/card-writes?section=<s>[&folder=<f>][&limit=<n>]` reads the card API's records
   (`card-writes/<section>/<folder>/<stamp>-<rand>.json` in the inbox) into up to 20 groups, newest first, grouped by the
