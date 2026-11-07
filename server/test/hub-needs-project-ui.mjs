@@ -40,7 +40,7 @@ try {
   const approval = id('bunnylink', 'look-at-the-gate', 'e5e5');
   seed.request({ id: approval, project: 'bunnylink', createdAt: minutesAgo(now, 70).toISOString(), by: 'owner', text: 'Look at the gate script', preset: 'code-task', repo: 'example/bunnylink', target: 'at-pc', origin: { kind: 'owner', name: 'owner' } });
   // The project page: Magic Loops has a finished milestone and an open one (two done, one doing, one next); Sprite Studio only a finished one;
-  // Workspace app and Bunnylink have an open one but no PC runs. Magic Loops alone has a Library section.
+  // Discord bots and Bunnylink have an open one but no PC runs. Magic Loops alone has a Library section.
   const stamp = { created: '2026-10-01T10:00:00Z' };
   const closedTask = (taskId, title, parent) => beadsIssue({ id: taskId, title, parent, status: 'closed', closed: '2026-10-05T10:00:00Z', ...stamp });
   const copy = (project, issues) => seed.beads(project, issues, { pushedAt: minutesAgo(now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: `example/${project}` });
@@ -54,7 +54,7 @@ try {
     beadsIssue({ id: 'ml-t4', title: 'Dash', parent: 'ml-f1', labels: ['sprint:sprint-5'], ...stamp }),
   ]);
   copy('sprite-studio', [beadsIssue({ id: 'ss-m1', title: 'Editor', type: 'milestone', status: 'closed', closed: '2026-10-03T10:00:00Z', ...stamp }), closedTask('ss-t1', 'Draw', 'ss-m1')]);
-  for (const [project, prefix] of [['workspace-app', 'ws'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
+  for (const [project, prefix] of [['shadowdark', 'sd'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
   // A project with roadmaps: the Roadmap tab lists them (ws-im1.3.2).
   copy('roadmapped', [
     beadsIssue({ id: 'rd-r1', title: 'Hub work', type: 'epic', labels: ['roadmap'], ...stamp }),
@@ -311,15 +311,15 @@ try {
   await page.waitForFunction(() => location.hash === '#/~hub/chat');
   assert.match(await page.locator('textarea[aria-label="Message"]').inputValue(), /\(project magic-loops\)/);
 
-  step('project page, sprint: Magic Loops links to its first open milestone; Workspace app and Bunnylink are off with the server\'s sentence; nothing open is off with its note');
+  step('project page, sprint: Magic Loops links to its first open milestone; Discord bots and Bunnylink are off with the server\'s sentence; nothing open is off with its note');
   await goPage(page, '#/~hub/project/magic-loops');
   const sprint = page.locator('a[data-project-action="sprint"]');
   await sprint.waitFor();
   assert.equal(await sprint.getAttribute('href'), '#/~hub/project/magic-loops/roadmap/ml-m1');
   assert.equal(await page.locator('[data-project-note="sprint"]').count(), 0);
-  await goPage(page, '#/~hub/project/workspace-app');
+  await goPage(page, '#/~hub/project/shadowdark');
   await page.locator('[data-project-note="sprint"]').waitFor();
-  assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'Sprints run on the PC. Workspace app has no PC runs.');
+  assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'Sprints run on the PC. Discord bots has no PC runs.');
   assert.equal(await page.locator('[data-project-action="sprint"]').count(), 0, 'No sprint button where none can run.');
   assert.match(await page.locator('[data-project-note="runs-on"]').innerText(), /runs in the cloud/);
   await goPage(page, '#/~hub/project/bunnylink');
@@ -484,7 +484,7 @@ try {
   await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').waitFor();
   assert.equal(await page.locator('[data-filter-sprint]').count(), 0, 'No sprints, no picker, but the chip is there for the finished milestone.');
   assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 1);
-  await goPage(page, '#/~hub/project/workspace-app');
+  await goPage(page, '#/~hub/project/shadowdark');
   await page.locator('[data-pp-roadmap]').waitFor();
   assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 0, 'Nothing finished, no sprint, no roadmap: nothing to hide, no chip.');
   await goPage(page, '#/~hub/project/roadmapped');

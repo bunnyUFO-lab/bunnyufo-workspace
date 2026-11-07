@@ -14,8 +14,8 @@ const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
 
 const fixture = await startHubFixture();
-// Two more copies so the order matters: `aardvark` sorts before Magic Loops alphabetically but is not in the project table; Workspace app is.
-for (const [project, title] of [['aardvark', 'Aardvark milestone'], ['workspace-app', 'App milestone']]) {
+// Two more copies so the order matters: `aardvark` sorts before Magic Loops alphabetically but is not in the project table; Discord bots is.
+for (const [project, title] of [['aardvark', 'Aardvark milestone'], ['shadowdark', 'Bots milestone']]) {
   fixture.seed.beads(project, [beadsIssue({ id: `${project.slice(0, 2)}-m1`, title, type: 'milestone', created: '2026-10-01T10:00:00Z' })], { pushedAt: minutesAgo(fixture.now, 10).toISOString(), host: 'pc.example.test', count: 1, repo: `example/${project}` });
 }
 // A project with roadmaps (ws-im1.3.2), next to Aardvark: Hub work holds two rings and the roadmap Editing, whose one loose task is a pile; one old milestone is outside.
@@ -321,8 +321,8 @@ try {
   const chip = desk.locator('.hub-runs');
   assert.equal(await chip.innerText(), 'Runs on: Gaming PC');
   assert.equal(await chip.getAttribute('title'), 'Work for this project runs on the PC by default.');
-  await go(desk, '#/~hub/map/workspace-app');
-  await desk.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
+  await go(desk, '#/~hub/map/shadowdark');
+  await desk.locator('[data-project-title]', { hasText: 'Discord bots' }).waitFor();
   assert.equal(await chip.innerText(), 'Runs on: cloud');
   assert.equal(await chip.getAttribute('title'), 'This project lives in a GitHub repository, so its work runs in the cloud.');
   await go(desk, '#/~hub/map/nosprint');
@@ -339,8 +339,8 @@ try {
   assert.equal(await phone.locator('.hub-runs').getAttribute('title'), 'Work for this project runs on the PC by default.');
   assert.match(await phone.locator('.hub-runs').getAttribute('aria-label'), /^Runs on: Gaming PC/);
   await noSideways(phone, 'Roadmap at 390');
-  await go(phone, '#/~hub/map/workspace-app');
-  await phone.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
+  await go(phone, '#/~hub/map/shadowdark');
+  await phone.locator('[data-project-title]', { hasText: 'Discord bots' }).waitFor();
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs in cloud');
   await noSideways(phone, 'Roadmap at 390 with the longer chip');
 
@@ -363,8 +363,8 @@ try {
   await phone.locator('.hub-runs').tap();
   await phone.touchscreen.tap(20, 600);
   assert.equal(await rule.count(), 0, 'A tap outside hides it.');
-  await go(phone, '#/~hub/map/workspace-app');
-  await phone.locator('[data-project-title]', { hasText: 'Workspace app' }).waitFor();
+  await go(phone, '#/~hub/map/shadowdark');
+  await phone.locator('[data-project-title]', { hasText: 'Discord bots' }).waitFor();
 
   step('the Wayfinder row: destination, decisions and open questions at desktop width');
   await go(desk, '#/~hub/map/wayfind');
