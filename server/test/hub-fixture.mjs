@@ -11,7 +11,7 @@ import { createService } from '../server.mjs';
 import { addWorkspace } from '../workspaces.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
-import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, minutesAgo, pcStatusJson, agentConfigJson, seedAgentConfig, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
+import { askJson, beadsIssue, checklistJson, cujTwo, eventJson, iso, minutesAgo, pcStatusJson, agentConfigJson, seedAgentConfig, requestJson, seedPcStatus, seeder, teamSheet, plainOptions, threeOptions, workFixture } from '../../site/api/test/hub-fixtures.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const FIXTURE_ASK = `${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-probe-jump-arc-a1b2`;
@@ -39,7 +39,7 @@ const HOGS = [
   { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
 ];
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, oldSessions = false, heartbeat = false, work = false, workSprint = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -203,6 +203,20 @@ A long list.
     const wf = workFixture({ now });
     const later = Array.from({ length: 12 }, (_, index) => beadsIssue({ id: `ws-later-${index + 1}`, title: `Backlog idea ${index + 1}`, status: 'deferred', created: `2026-10-02T10:${String(index).padStart(2, '0')}:00Z` }));
     const issues = [...wf.issues.map(({ project: _project, ...issue }) => issue), ...later];
+    if (workSprint) {
+      // Off by default; needs `work`. Sprint 5 on project `lanes`: an epic that carries the label (its title names the sprint), open, running, new-Done and old-Done tasks
+      // under it, and Sprint 4, finished long ago, with no epic. The old Done task is past Work's 14 days, so only a sprint shows it.
+      const sprint = (idValue, title, extra = {}) => beadsIssue({ id: idValue, title, ...extra });
+      const long = minutesAgo(now, 60 * 24 * 60).toISOString();
+      issues.push(
+        sprint('sp-epic', 'Sprint 5: Hermes planning from the phone', { type: 'epic', labels: ['roadmap', 'sprint:sprint-5'], created: '2026-10-05T09:00:00Z' }),
+        sprint('sp-t1', 'Plan from the phone', { parent: 'sp-epic', labels: ['sprint:sprint-5', 'area:feel'], created: '2026-10-05T10:00:00Z' }),
+        sprint('sp-t2', 'Write the project card', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'in_progress', created: '2026-10-05T11:00:00Z' }),
+        sprint('sp-t3', 'Old finished sprint task', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'closed', closed: minutesAgo(now, 60 * 24 * 30).toISOString(), created: '2026-10-05T12:00:00Z' }),
+        sprint('sp-t4', 'New finished sprint task', { parent: 'sp-epic', labels: ['sprint:sprint-5'], status: 'closed', closed: iso(minutesAgo(now, 20)), created: '2026-10-05T13:00:00Z' }),
+        sprint('sp-o1', 'Sprint four work', { labels: ['sprint:sprint-4'], status: 'closed', closed: long, created: '2026-09-01T10:00:00Z' }),
+      );
+    }
     if (workSearch) {
       // Off by default; needs `work`. Text for the Work search: a rare word only in a description, a feature, a Wayfinder question with a label, and a bead closed long ago (no card on the board).
       issues.push(

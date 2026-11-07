@@ -850,9 +850,9 @@ try {
     const rect = selector => document.querySelector(selector).getBoundingClientRect();
     const bar = rect('.hub-map-controls');
     const sizes = [...document.querySelectorAll('.hub-map-controls button')].filter(item => item.offsetParent).map(item => Math.round(item.getBoundingClientRect().height));
-    return { chipsBottom: rect('.pp-switch').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, wayTop: document.querySelector('.hub-wayfinder')?.getBoundingClientRect().top ?? null, width: innerWidth, sizes };
+    return { chipsBottom: rect(document.querySelector('.pp-sprint') ? '.pp-sprint' : '.pp-switch').bottom, barTop: bar.top, barBottom: bar.bottom, barRight: bar.right, boxTop: rect('.hub-map-box').top, wayTop: document.querySelector('.hub-wayfinder')?.getBoundingClientRect().top ?? null, width: innerWidth, sizes };
   });
-  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 20, `The control bar is directly under the project's List and Map switch (${place.chipsBottom} to ${place.barTop}).`);
+  assert.ok(place.barTop >= place.chipsBottom - 1 && place.barTop - place.chipsBottom < 24, `The control bar is directly under the project's List and Map switch, or under the sprint row when the project has sprints (${place.chipsBottom} to ${place.barTop}).`);
   assert.ok(place.barBottom <= place.boxTop + 1, `and above the map, which it does not cover (${place.barBottom} vs ${place.boxTop}).`);
   if (place.wayTop !== null) assert.ok(place.barBottom <= place.wayTop + 1, `and above the Destination row (${place.barBottom} vs ${place.wayTop}).`);
   assert.ok(place.barRight <= place.width, 'It stays inside the page: a wide bar wraps.');

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceCard } from './types'
 import { useWorkspace } from './lib/workspace'
-import { parseHash, parseChatId, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
+import { parseHash, parseChatId, hubHash, libraryHash, navScreen, scopeOf, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
 import { ROUTE_EVENT, back, consumeOverlayClose, go, hasOverlay, screenSerial, swap } from './lib/entries'
 import { canonicalAddress } from './lib/redirects'
 import { useOrder } from './lib/order'
@@ -506,7 +506,7 @@ export default function App() {
       </div>
     )}
     <div className="app-layout" data-entity={view.id}>
-      {desktop && <Rail lit={lit} needsYou={needsYou} />}
+      {desktop && <Rail lit={lit} needsYou={needsYou} scope={scopeOf(view.hub)} />}
 
       {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
       {searchOpen && desktop && <Search desktop onClose={() => back(hubHash('today'))} />}
@@ -523,7 +523,7 @@ export default function App() {
           />
         ) : body}
       </main>
-      {!desktop && host.hub && showsTabs(route) && !keyboard && <Tabs lit={lit} needsYou={needsYou} />}
+      {!desktop && host.hub && showsTabs(route) && !keyboard && <Tabs lit={lit} needsYou={needsYou} scope={scopeOf(view.hub)} />}
     </div>
     </TodayContext.Provider>
     </LibraryContext.Provider>

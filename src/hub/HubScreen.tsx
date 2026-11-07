@@ -52,7 +52,7 @@ export default function HubScreen({ route }: { route: HubRoute }) {
       {route.screen === 'checklist' && (route.id ? <ChecklistView key={route.id} id={route.id} /> : <Needs filter="steps" />)}
       {route.screen === 'review' && (route.id ? <ReviewView key={route.id.split('/')[0]} route={route.id} /> : <Needs filter="pr" />)}
       {route.screen === 'request' && (route.id ? <ApprovalView key={route.id} id={route.id} /> : <Needs filter="approvals" />)}
-      {route.screen === 'work' && <WorkTabs tab="board"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} /></WorkTabs>}
+      {route.screen === 'work' && <WorkTabs tab="board"><Board project={parseWorkId(route.id).project} focus={parseWorkId(route.id).bead} sprint={route.sprint} /></WorkTabs>}
       {(route.screen === 'team' || route.screen === 'agent') && <Team routeId={route.screen === 'team' ? route.id : undefined} agentId={route.screen === 'agent' ? route.id : undefined} />}
       {route.screen === 'agent-edit' && (route.id ? <AgentEdit key={route.id} id={route.id} /> : <Team />)}
       {route.screen === 'activity' && <WorkTabs tab="activity"><Activity filter={route.id} /></WorkTabs>}

@@ -1,6 +1,6 @@
 // Work's six lanes, with no I/O: Beads issues, requests and Hermes runs become cards in
 // backlog, ready, running, blocked, review or done. Pure; the route loads the inputs.
-import { eventsByBeadOf, issueSigns, milestoneIssuesOf } from './hub-map.mjs';
+import { eventsByBeadOf, issueSigns, milestoneIssuesOf, sprintTitlesOf } from './hub-map.mjs';
 import { plainText, summaryOf } from './hub-map-notes.mjs';
 import { beadOfBranch, pcSummary } from './hub-pc.mjs';
 
@@ -180,26 +180,65 @@ export const unaskedOf = cards => cards.filter(card => card.nothingAsked || card
  * @param needs       [{ bead, kind, id }]: every other Needs you item that names a bead
  * @param status      the PC status or null
  */
-export function buildWork(input) {
-  const { lanes, counts, now } = buildLanes(input);
-  lanes.backlog = lanes.backlog.slice(0, BACKLOG_KEEP);
-  lanes.done = lanes.done.slice(0, DONE_KEEP);
-  return { lanes, counts, totals: { ...counts }, at: now.toISOString() };
+export function buildWork(input, { sprint } = {}) {
+  const { lanes, counts, now, sprints } = buildLanes(input, sprint);
+  // One sprint is shown whole: no age limit on Done and no cut on Backlog or Done.
+  if (!sprint) {
+    lanes.backlog = lanes.backlog.slice(0, BACKLOG_KEEP);
+    lanes.done = lanes.done.slice(0, DONE_KEEP);
+  }
+  return { lanes, counts, totals: { ...counts }, sprints, at: now.toISOString() };
+}
+
+/**
+ * Every sprint (`sprint:<name>` label) over the bead cards, before the age limit and the cut: `done` of `total` (groups are not cards, as on the board).
+ * Open sprints first, then the newest first by the date of their oldest task. `title` is the group issue that names it, when there is one.
+ */
+function sprintsOf(issues, cards) {
+  const createdOf = new Map(issues.map(issue => [issue.id, issue.created_at ?? '']));
+  const titles = sprintTitlesOf(issues);
+  const rows = new Map();
+  for (const card of cards) {
+    if (card.source !== 'beads') continue;
+    for (const label of card.labels ?? []) {
+      if (!label.startsWith('sprint:')) continue;
+      const name = label.slice(7);
+      const row = rows.get(name) ?? { name, done: 0, total: 0, oldest: '' };
+      row.total += 1;
+      if (card.lane === 'done') row.done += 1;
+      const created = createdOf.get(card.id) ?? '';
+      if (!row.oldest || (created && created < row.oldest)) row.oldest = created || row.oldest;
+      rows.set(name, row);
+    }
+  }
+  const open = row => row.done < row.total;
+  return [...rows.values()]
+    .sort((a, b) => Number(open(b)) - Number(open(a)) || (a.oldest < b.oldest ? 1 : a.oldest > b.oldest ? -1 : a.name < b.name ? -1 : 1))
+    .map(({ name, done, total }) => ({ name, ...(titles.has(name) ? { title: titles.get(name) } : {}), done, total }));
 }
 
 /** Every lane, uncut and newest first. `buildWork` cuts Backlog and Done; `workPage` reads the rest from the same lanes. */
-function buildLanes({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], checklists = [], needs = [], status = null, now = new Date() }) {
-  const all = [...beadCards({ issues, events, asks, checklists, needs, status, now }), ...requestCards({ requests, events }), ...runCards(hermesRuns)];
+function buildLanes({ issues = [], requests = [], hermesRuns = [], events = [], asks = [], checklists = [], needs = [], status = null, now = new Date() }, sprint) {
+  const beads = beadCards({ issues, events, asks, checklists, needs, status, now });
+  const sprints = sprintsOf(issues, beads);
+  let all = [...beads, ...requestCards({ requests, events }), ...runCards(hermesRuns)];
+  if (sprint) {
+    // A sprint's board: its cards, and the requests made for one of them. Hermes runs name no bead.
+    const label = `sprint:${sprint}`;
+    const inSprint = new Set(beads.filter(card => (card.labels ?? []).includes(label)).map(card => card.id));
+    const byRequest = new Map(requests.map(request => [`request:${request.id}`, request.bead]));
+    all = all.filter(card => (card.source === 'beads' ? inSprint.has(card.id) : card.source === 'request' && inSprint.has(byRequest.get(card.key))));
+  }
   const lanes = Object.fromEntries(LANES.map(lane => [lane, []]));
   const counts = Object.fromEntries(LANES.map(lane => [lane, 0]));
   const floor = now.getTime() - DONE_DAYS * DAY;
   for (const card of all) {
-    if (card.lane === 'done' && stamp(card.updatedAt) < floor) continue;
+    if (!sprint && card.lane === 'done' && stamp(card.updatedAt) < floor) continue;
     lanes[card.lane].push(card);
     counts[card.lane] += 1;
   }
   for (const lane of LANES) lanes[lane].sort(newest);
-  return { lanes, counts, now };
+  return { lanes, counts, now, sprints };
 }
 
 export const PAGE_LANES = ['backlog', 'done'];

@@ -295,7 +295,7 @@ try {
     const page = await open({ width, height });
     await go(page);
     await openSheet(page);
-    await page.locator('.wk-filter-sheet .cb-chev').tap();
+    await page.locator('.wk-filter-sheet .cb:has([data-filter-label]) .cb-chev').tap();
     await page.locator('.cb-list').waitFor();
     const result = await page.evaluate(() => {
       const list = document.querySelector('.cb-list').getBoundingClientRect();
