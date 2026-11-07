@@ -1,5 +1,5 @@
 // Run after npm run build. The app's picture viewer on a card (Markdown cards, image tabs and HTML cards that load
-// _shared/report.js): Edit, Ask in chat and Copy image,
+// _shared/report.js): Edit, Ask in chat, New job and Copy image,
 // on the site stand-in of card-sandbox-ui.mjs (the app host and a content host, the site API over fake S3, a Hub with a fake Hermes).
 // Every action needs a press; Ask in chat leaves an unsent draft and posts nothing until Send; Edit adds a tab and never touches
 // the original; Copy puts a PNG on the clipboard (JPEG and SVG are converted) and says so when it cannot. Set BUW_SHOTS=<folder>
@@ -9,7 +9,9 @@ import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSiteApi } from '../../site/api/server.mjs';
@@ -18,6 +20,7 @@ import { createHub } from '../../site/api/hub.mjs';
 import { startFakeS3 } from '../../site/api/test/fake-s3.mjs';
 import { startFakeHermes } from '../../site/api/test/fake-hermes.mjs';
 import { solidPng } from '../../site/api/test/png.mjs';
+import { requestJson, seeder } from '../../site/api/test/hub-fixtures.mjs';
 import { listenOnGoodPort } from '../listen.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -47,6 +50,8 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40" view
 const seed = (key, body, type) => fake.seed(key, body, type);
 seed('sections/one/workspace.json', JSON.stringify({ name: 'One', entities: [alpha, gamma] }), 'application/json');
 seed('state.json', '{"version":1,"cards":{}}', 'application/json');
+// The section is a known project once a request names it, so New job picks it.
+seeder(fake).request({ ...requestJson({ id: `${today.replace(/-/g, '')}-one-earlier-job-a1b2`, now: new Date() }), project: 'one', text: 'An earlier job' });
 seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
 seed('sections/one/alpha/index.md', '# Alpha notes\n\nA fake note.\n\n![Photo](photo.png)\n\n![Vector](vec.svg)\n\n![Shot](shot.jpg)\n', 'text/markdown');
 seed('sections/one/alpha/photo.png', PNG, 'image/png');
@@ -161,18 +166,18 @@ try {
 
   const page = await open({ width: 1280, height: 800 });
 
-  step('PC: the viewer on a Markdown card shows Edit, Ask in chat and Copy image under the picture, with no scrolling');
+  step('PC: the viewer on a Markdown card shows Edit, Ask in chat, New job and Copy image under the picture, with no scrolling');
   await openViewer(page, 'Photo');
   const dialog = page.locator('dialog.buw-lightbox');
   const actions = dialog.locator('[data-lightbox-actions] button');
-  assert.deepEqual(await actions.allInnerTexts(), ['✎ Edit', 'Ask in chat', 'Copy image']);
+  assert.deepEqual(await actions.allInnerTexts(), ['✎ Edit', 'Ask in chat', 'New job', 'Copy image']);
   const inside = async (locator, what) => {
     const box = await locator.boundingBox();
     const view = page.viewportSize();
     assert.ok(box && box.y >= 0 && box.y + box.height <= view.height && box.x >= 0 && box.x + box.width <= view.width, `${what} is inside the window: ${JSON.stringify(box)}`);
     return box;
   };
-  for (let n = 0; n < 3; n += 1) await inside(actions.nth(n), `action ${n}`);
+  for (let n = 0; n < 4; n += 1) await inside(actions.nth(n), `action ${n}`);
   assert.equal(await dialog.evaluate(node => node.scrollHeight <= node.clientHeight), true, 'The viewer does not scroll.');
   assert.equal(await dialog.locator('.buw-lightbox-caption').innerText(), 'Photo');
   await shot(page, 'viewer-markdown-desktop');
@@ -297,11 +302,11 @@ try {
   const sheet = phone.locator('dialog.buw-lightbox[open]');
   await sheet.waitFor();
   const buttons = sheet.locator('[data-lightbox-actions] button');
-  assert.equal(await buttons.count(), 3);
+  assert.equal(await buttons.count(), 4);
   const boxes = [];
-  for (let n = 0; n < 3; n += 1) boxes.push(await buttons.nth(n).boundingBox());
+  for (let n = 0; n < 4; n += 1) boxes.push(await buttons.nth(n).boundingBox());
   for (const box of boxes) { assert.ok(box.height >= 44, `at least 44 px high: ${box.height}`); assert.ok(box.y + box.height <= 700 && box.x >= 0 && box.x + box.width <= 375, 'inside the window'); }
-  assert.ok(Math.abs(boxes[0].width - boxes[1].width) < 1.5 && Math.abs(boxes[1].width - boxes[2].width) < 1.5, 'equal columns');
+  assert.ok(Math.abs(boxes[0].width - boxes[1].width) < 1.5 && Math.abs(boxes[1].width - boxes[2].width) < 1.5 && Math.abs(boxes[2].width - boxes[3].width) < 1.5, 'equal columns');
   assert.equal(await sheet.evaluate(node => node.scrollHeight <= node.clientHeight), true, 'The sheet does not scroll.');
   const top = await sheet.locator('.buw-lightbox-caption').boundingBox();
   const close = await sheet.locator('.buw-lightbox-close').boundingBox();
@@ -326,8 +331,8 @@ try {
   assert.equal(await frameOf(html).locator('dialog.buw-lightbox').count(), 0, 'The page did not open its own.');
   assert.equal(await html.locator('dialog.buw-lightbox .buw-lightbox-caption').innerText(), 'photo.png', 'The caption is the file name, not the picture alt text.');
   const htmlActions = html.locator('dialog.buw-lightbox [data-lightbox-actions] button');
-  assert.deepEqual(await htmlActions.allInnerTexts(), ['✎ Edit', 'Ask in chat', 'Copy image']);
-  for (let n = 0; n < 3; n += 1) { const box = await htmlActions.nth(n).boundingBox(); assert.ok(box.y + box.height <= 800, 'inside the window'); }
+  assert.deepEqual(await htmlActions.allInnerTexts(), ['✎ Edit', 'Ask in chat', 'New job', 'Copy image']);
+  for (let n = 0; n < 4; n += 1) { const box = await htmlActions.nth(n).boundingBox(); assert.ok(box.y + box.height <= 800, 'inside the window'); }
   const captionIs = async text => { await html.waitForFunction(expected => document.querySelector('dialog.buw-lightbox .buw-lightbox-caption')?.textContent === expected, text); };
   await html.locator('dialog.buw-lightbox [data-lightbox-next]').click();
   await captionIs('vec.svg');
@@ -354,8 +359,8 @@ try {
   const htmlPhone = await open({ width: 375, height: 700 });
   await openHtml(htmlPhone, 0, 'a');
   const phoneButtons = htmlPhone.locator('dialog.buw-lightbox [data-lightbox-actions] button');
-  assert.equal(await phoneButtons.count(), 3);
-  for (let n = 0; n < 3; n += 1) { const box = await phoneButtons.nth(n).boundingBox(); assert.ok(box.height >= 44 && box.y + box.height <= 700, `phone action ${n}: ${JSON.stringify(box)}`); }
+  assert.equal(await phoneButtons.count(), 4);
+  for (let n = 0; n < 4; n += 1) { const box = await phoneButtons.nth(n).boundingBox(); assert.ok(box.height >= 44 && box.y + box.height <= 700, `phone action ${n}: ${JSON.stringify(box)}`); }
   assert.equal(await htmlPhone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true);
   await shot(htmlPhone, 'viewer-html-phone');
 
@@ -429,7 +434,84 @@ try {
   assert.deepEqual(inbox(), inboxBefore, 'The fake S3 inbox is unchanged: no chat, no job.');
   await hostile.close();
 
-  console.log('Image actions passed: the viewer offers Edit, Ask in chat and Copy image on Markdown and HTML cards, each waits for a press, and a hostile page can only open the viewer on its own pictures.');
+  step('New job: the form opens with the picture, its card and an empty text box; no job is posted until the button');
+  log.length = 0;
+  const jobPage = await open({ width: 1280, height: 800 });
+  const openJob = async () => {
+    await openViewer(jobPage, 'Photo'); await armed(jobPage);
+    await jobPage.locator('dialog.buw-lightbox [data-action=job]').click();
+    await jobPage.locator('[data-spawn-sheet] [data-spawn-reference]').waitFor();
+  };
+  assert.deepEqual(await (async () => { await openViewer(jobPage, 'Photo'); return jobPage.locator('dialog.buw-lightbox [data-lightbox-actions] button').allInnerTexts(); })(), ['✎ Edit', 'Ask in chat', 'New job', 'Copy image']);
+  await jobPage.keyboard.press('Escape');
+  await viewers(jobPage).waitFor({ state: 'detached' });
+  await openJob();
+  assert.equal(await jobPage.locator('[data-spawn-text]').inputValue(), '', 'No card text is put into the job text.');
+  assert.match(await jobPage.locator('[data-spawn-reference-from]').innerText(), /^From card Alpha card \(photo\.png\)\./);
+  await jobPage.waitForFunction(() => document.querySelector('[data-spawn-reference-thumb]')?.naturalWidth > 0);
+  await jobPage.waitForFunction(() => document.querySelector('[data-spawn-project] , input[data-spawn-project]')?.value !== '');
+  await shot(jobPage, 'new-job-reference');
+  await settle(400);
+  assert.deepEqual(posts(/\/api\/hub\/requests/), [], 'Nothing was posted yet.');
+
+  step('New job: Remove takes the picture off, and the job then goes without a reference');
+  await jobPage.locator('[data-spawn-reference-remove]').click();
+  assert.equal(await jobPage.locator('[data-spawn-reference]').count(), 0);
+  await jobPage.keyboard.press('Escape');
+  await jobPage.locator('[data-spawn-sheet]').waitFor({ state: 'detached' });
+
+  step('New job: Chat with in the sheet takes the picture to a new chat tray, and posts nothing');
+  await jobPage.goto(`${appOrigin}/one#/alpha/0`);
+  await openJob();
+  await jobPage.locator('[data-spawn-chat]').click();
+  await jobPage.locator('[data-spawn-text]').fill('Is the shadow right?');
+  await jobPage.locator('[data-spawn-go]').click();
+  await jobPage.locator('[data-tray] img').first().waitFor();
+  assert.equal(await jobPage.locator('[data-tray] img').count(), 1);
+  assert.equal(await jobPage.locator('textarea[aria-label="Message"]').inputValue(), 'Is the shadow right?');
+  assert.deepEqual(posts(/\/api\/hub\/(chat|requests)/), [], 'Still nothing posted.');
+
+  step('New job: Approve files the picture with the job, and the approval, the page and the signed brief carry it');
+  await jobPage.goto(`${appOrigin}/one#/alpha/0`);
+  await openJob();
+  await jobPage.locator('[data-preset="research"]').click();
+  await jobPage.locator('[data-spawn-text]').fill('Compare this take with the last one');
+  await jobPage.locator('[data-spawn-route="hermes"]').waitFor();
+  await jobPage.waitForFunction(() => !document.querySelector('[data-spawn-go]')?.disabled);
+  await jobPage.locator('[data-spawn-go]').click();
+  await jobPage.locator('[data-spawn-toast]').waitFor();
+  const made = posts(/\/api\/hub\/requests$/);
+  assert.equal(made.length, 1, 'One job was posted, by the button.');
+  const sent = JSON.parse(made[0].body);
+  assert.deepEqual(Object.keys(sent.reference).sort(), ['data', 'source', 'type']);
+  assert.deepEqual(sent.reference.source, { section: 'one', card: 'alpha', file: 'photo.png', title: 'Alpha card' });
+  assert.equal(sent.project, 'one');
+  const requestKeys = [...fake.objects.keys()].filter(key => /sections\/inbox\/requests\/[^/]+\/reference\.png$/.test(key));
+  assert.equal(requestKeys.length, 1);
+  const jobId = requestKeys[0].split('/').at(-2);
+  const block = fake.json(`sections/inbox/requests/${jobId}/request.json`).reference;
+  assert.equal(block.sha256, sha(fake.objects.get(requestKeys[0]).body));
+  assert.deepEqual(block.source, { section: 'one', card: 'alpha', file: 'photo.png', title: 'Alpha card' });
+  assert.match(fake.json(`sections/inbox/requests/${jobId}/approved.json`).run.brief, new RegExp(`Reference picture: the owner attached one\\. Get it with \`cards request reference ${jobId} --out <dir>\``));
+  await jobPage.goto(`${appOrigin}/one#/~hub/request/${jobId}`);
+  const refNote = jobPage.locator('[data-reference]');
+  await refNote.waitFor();
+  await refNote.locator("img").waitFor();
+  assert.match(await refNote.locator("[data-reference-from]").innerText(), /From card Alpha card \(photo\.png\)/);
+  await shot(jobPage, 'job-reference-page');
+
+  step('cards request reference writes the same bytes, and refuses when the picture has changed');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'buw-ref-'));
+  const cli = (...args) => new Promise(resolve => execFile(process.execPath, [path.join(root, 'scripts/cards.mjs'), ...args, '--via', 's3'], {
+    env: { ...process.env, AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test', BUW_S3_BUCKET: fake.bucket, BUW_S3_ENDPOINT: fake.endpoint, BUW_S3_REGION: 'us-east-1', BUW_CARDS_PASSWORD: '', BUW_CARDS_VIA: '', HOME: dir, USERPROFILE: dir },
+  }, (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr })));
+  const got = await cli('request', 'reference', jobId, '--out', dir);
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(sha(await readFile(path.join(dir, 'reference.png'))), block.sha256);
+  fake.seed(requestKeys[0], solidPng(40, 30, 0x11), 'image/png');
+  assert.notEqual((await cli('request', 'reference', jobId, '--out', path.join(dir, 'again'))).code, 0, 'A changed picture is refused.');
+
+  console.log('Image actions passed: the viewer offers Edit, Ask in chat, New job and Copy image on Markdown and HTML cards, each waits for a press, and a hostile page can only open the viewer on its own pictures.');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
