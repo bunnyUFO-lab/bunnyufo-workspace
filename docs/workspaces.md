@@ -993,6 +993,8 @@ The rule: a page can open the viewer on its own card's pictures, and only a pers
   something just now (`navigator.userActivation`; a script's `img.click()` does not count); no viewer is open, none closed in
   the last second, and at most 10 opens a minute per frame; and `src` is a picture in this card's own folder
   (`src/lib/card-images.mjs`: http or https, no user info, no `.`, `..`, empty or encoded-slash parts).
+  The browser keeps a press "active" for about five seconds, and opening a card counts as one, so a page that asks within
+  that time can open the viewer on one of its own pictures. It cannot start anything: that always takes a press in the viewer.
 - The viewer opens the app-origin address the app built, never the string in the message. Its caption is the file name, and the
   workspace and card come from the app, never from the page.
 - The viewer is in the app's document, so a page cannot reach or press it. Its actions ignore presses for 500 ms after it opens.
