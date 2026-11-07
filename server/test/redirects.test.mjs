@@ -95,3 +95,28 @@ test('a rewrite adds no loop: the answer is itself a fixed point', () => {
     assert.equal(at(hashOnly), null, `${hash} -> ${first}`);
   }
 });
+
+test('a query on a Hub address stays, on every result', () => {
+  assert.equal(at('#/~hub/work?project=alpha'), null);
+  assert.equal(at('#/~hub/work?project=alpha&sprint=s5'), null);
+  assert.equal(at('#/~hub/work/alpha/ws-1?sprint=s5'), null);
+  assert.equal(at('#/~hub/map?project=alpha'), null);
+  assert.equal(at('#/~hub/map?sprint=s5'), '#/~hub/project?sprint=s5');
+  assert.equal(at('#/~hub/board?project=alpha&sprint=s5'), '#/~hub/work?project=alpha&sprint=s5');
+  assert.equal(at('#/~hub/roadmap/alpha?sprint=s5'), '#/~hub/map/alpha?sprint=s5');
+  assert.equal(at('#/~hub/inbox?sprint=s5'), '#/~hub/needs?sprint=s5');
+  assert.equal(at('#/~hub/nowhere?sprint=s5'), '#/~hub/today?sprint=s5');
+});
+
+test('the old project tab names are rewritten with the query kept', () => {
+  assert.equal(at('#/~hub/project/alpha/running?sprint=s5'), '#/~hub/project/alpha/work?sprint=s5');
+  assert.equal(at('#/~hub/project/alpha/needs?sprint=s5'), '#/~hub/project/alpha/work?sprint=s5');
+  assert.equal(at('#/~hub/project/alpha/library?sprint=s5'), '#/~hub/project/alpha/cards?sprint=s5');
+  assert.equal(at('#/~hub/project/alpha/work?sprint=s5'), null);
+});
+
+test('a query before a sheet tail: the tail is kept with the sheet open and dropped without', () => {
+  assert.equal(at('#/~hub/work?project=alpha/~o', { overlayOpen: true }), null);
+  assert.equal(at('#/~hub/work?project=alpha/~o'), '#/~hub/work?project=alpha');
+  assert.equal(at('#/~hub/board?sprint=s5/~o', { overlayOpen: true }), '#/~hub/work?sprint=s5/~o');
+});

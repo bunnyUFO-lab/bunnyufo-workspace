@@ -69,6 +69,27 @@ window.__result = (async () => {
 })();
 `, 'text/javascript');
 seed('sections/one/alpha/evil.html', '<!doctype html><html><head><meta charset="utf-8"><title>Evil</title></head><body><p>evil</p><script src="evil.js"></script></body></html>', 'text/html; charset=utf-8');
+// Data sections hold stored text the signed-in app reads through the Hub, never as files under /w/.
+seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
+seed('sections/inbox/chat/20261106-abc123.jsonl', '{"role":"user","text":"fake chat text"}\n', 'application/x-ndjson');
+seed('sections/inbox/chat/state.json', '{"chats":{"20261106-abc123":{"title":"fake chat title"}}}', 'application/json');
+seed('sections/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), 'image/jpeg');
+seed('sections/inbox/checklists/x/shot-note-20261106T101112123Z-ab12.png', Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'image/png');
+seed('sections/one/alpha/data-read.js', `
+window.__result = (async () => {
+  const read = async url => fetch(url, { credentials: 'include' }).then(async r => ({ status: r.status, text: await r.text() }), () => ({ status: 'blocked', text: '' }));
+  return {
+    state: await read('/w/inbox/chat/state.json'),
+    transcript: await read('/w/inbox/chat/20261106-abc123.jsonl'),
+    fromApp: await read(${JSON.stringify(appOrigin)} + '/w/inbox/chat/20261106-abc123.jsonl'),
+    askPicture: await read('/w/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg'),
+    notePicture: await read('/w/inbox/checklists/x/shot-note-20261106T101112123Z-ab12.png'),
+    picturesFromApp: await read(${JSON.stringify(appOrigin)} + '/w/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg'),
+    sibling: await read('data.json'),
+  };
+})();
+`, 'text/javascript');
+seed('sections/one/alpha/data-read.html', '<!doctype html><html><head><meta charset="utf-8"><title>Data</title></head><body><script src="data-read.js"></script></body></html>', 'text/html; charset=utf-8');
 seed('sections/one/alpha/nest.html', `<!doctype html><html><head><meta charset="utf-8"><title>Nest</title></head><body><iframe id="inner" src="${appOrigin}/w/one/alpha/evil.html"></iframe></body></html>`, 'text/html; charset=utf-8');
 // The card forms: one saves ratings, one saves a Markdown answer, both through the bridge and nothing else.
 seed('sections/one/_shared/card-data.js', await readFile(path.join(root, 'workspace/_shared/card-data.js')), 'text/javascript');
@@ -244,6 +265,18 @@ try {
   const innerResult = await inner.evaluate(() => window.__result).catch(() => null);
   if (innerResult) assert.deepEqual(innerResult.storage, null, 'The inner page cannot read the app storage.');
   assert.deepEqual(fake.json('state.json').cards, {}, 'The inner page wrote no pin.');
+
+  step('a data section is not served to a card page on the content host');
+  await tab.goto(`${contentOrigin}/w/one/alpha/data-read.html`);
+  const dataRead = await tab.evaluate(() => window.__result);
+  assert.equal(dataRead.state.status, 404);
+  assert.equal(dataRead.transcript.status, 404);
+  assert.equal(dataRead.fromApp.status, 'blocked');
+  assert.equal(dataRead.askPicture.status, 404, 'An answer picture is not a file under /w/.');
+  assert.equal(dataRead.notePicture.status, 404, 'A note picture is not a file under /w/.');
+  assert.equal(dataRead.picturesFromApp.status, 'blocked');
+  assert.equal(dataRead.sibling.status, 200, 'Its own sibling file still loads.');
+  assert.ok(!JSON.stringify([dataRead.state, dataRead.transcript, dataRead.fromApp]).includes('fake chat'), 'No stored text reached the page.');
 
   const NO_BRIDGE = 'Open this card inside the Workspace, signed in, to save it.';
   const appFrame = async (index, ready) => {

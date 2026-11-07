@@ -106,6 +106,30 @@ export function rowsOf(model: ProgressMap, root: string = FULL): RoadmapRow[] {
   return rows
 }
 
+/** A row as drawn: `names` are the milestones listed under it. */
+export type VisibleRow = RoadmapRow & { names: ReturnType<typeof milestoneDots> }
+
+/**
+ * The rows to draw, with the milestones to list under each. A row that is not done lists its milestones by name; a finished row lists none
+ * (it keeps its dots). With `hideDone` on, a finished row goes unless something inside it is open (a roadmap below it that is not done), and a
+ * finished milestone leaves the names. `rows` are in `rowsOf` order, so a row's inside is the deeper rows right after it.
+ */
+export function visibleRows(rows: RoadmapRow[], hideDone: boolean): VisibleRow[] {
+  const open = (row: RoadmapRow) => row.state !== 'done' || row.dots.some(dot => dot.state !== 'done')
+  const insideOpen = (index: number) => {
+    for (let at = index + 1; at < rows.length && rows[at].depth > rows[index].depth; at++) if (open(rows[at])) return true
+    return false
+  }
+  const out: VisibleRow[] = []
+  rows.forEach((row, index) => {
+    const finished = row.state === 'done'
+    if (hideDone && finished && !insideOpen(index)) return
+    const names = finished ? [] : hideDone ? row.dots.filter(dot => dot.state !== 'done') : row.dots
+    out.push({ ...row, names })
+  })
+  return out
+}
+
 /** Where "This branch" goes from the full list: the branch last in, else the one the current milestone is in, else the first roadmap. */
 export function branchTarget(model: ProgressMap, saved: SavedBranch | null): string {
   if (isBranch(model, saved?.branch)) return saved?.branch as string

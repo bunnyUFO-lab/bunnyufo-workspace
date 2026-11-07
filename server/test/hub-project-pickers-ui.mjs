@@ -34,7 +34,7 @@ const noSideways = async (page, what) => {
 
 /** Where each picker lives: its address, the section that holds it, and how to tell `maple` was chosen. */
 const PICKERS = [
-  { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work/maple') },
+  { name: 'Work', hash: '#/~hub/work', scope: '.work', after: page => page.waitForFunction(() => location.hash === '#/~hub/work?project=maple') },
   { name: 'Activity', hash: '#/~hub/activity', scope: '.hub-top', after: page => page.waitForFunction(() => document.querySelector('.hub-top [role="combobox"]').dataset.value === 'maple') },
   { name: 'Sketch', hash: `#/~hub/sketch/${DRAFT}`, scope: '[aria-label="Send to agent"]', after: page => page.waitForFunction(() => document.querySelector('[aria-label="Send to agent"] [role="combobox"]').dataset.value === 'maple') },
 ];

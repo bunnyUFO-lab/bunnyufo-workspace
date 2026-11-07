@@ -2011,7 +2011,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             reply({ projects: loaded.map(row => projectSummary({ project: row.id, meta: row.meta, issues: applyMarks(row.issues, marks, row.id), now: at })), at: at.toISOString() });
           } else if (route === '/hub/work') {
             const lane = query.get('lane');
-            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at))); } else {
+            const sprint = query.get('sprint');
+            if (sprint !== null && !/^[\w.:-]{1,80}$/.test(sprint)) throw fail('That is not a sprint name.', 400);
+            if (lane === null) { reply(buildWork(await loadWorkInputs(query.get('project'), at), sprint ? { sprint } : {})); } else {
               // The rest of a lane the board cut: Backlog and Done only, from an offset the client already holds.
               const offset = Number(query.get('offset') ?? 0);
               if (!PAGE_LANES.includes(lane)) throw fail('Only the Backlog and Done lanes have more.', 400);
