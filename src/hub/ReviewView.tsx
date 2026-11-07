@@ -9,7 +9,7 @@ import { autoNext, goNext, useQueueOrder } from './useGoNext'
 import SettledBar, { useSettledHere } from './SettledBar'
 import { linkSummary } from './summaryLinks'
 import { ReviewActions } from './ItemRow'
-import Md from './Md'
+import Md, { CodeBlock } from './Md'
 import RefreshNote from './RefreshNote'
 import { useHubData } from './useHub'
 import GetHelp from './GetHelp'
@@ -155,7 +155,7 @@ export default function ReviewView({ route }: { route: string }) {
   const otherUrl = detail.url && !urlIsPr ? detail.url : undefined
   const folder = file && file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
   // An event from before reviews carried links and results: one note instead of four empty sections.
-  const legacy = !detail.prs?.length && !detail.cardDir && !detail.cardFiles?.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length
+  const legacy = !detail.prs?.length && !detail.cardDir && !detail.cardFiles?.length && !detail.screenshots?.length && !detail.deployUrl && !verdicts.length && !detail.closing
   const cardLink = detail.card && <a className="hub-btn" href={detail.card} target="_blank" rel="noopener noreferrer">Open the card</a>
   const sprintCard = inferred && <a className="hub-btn" href={`/${encodeURIComponent(inferred.section)}${entityHash(inferred.card.id)}`} target="_blank" rel="noopener noreferrer" data-sprint-card>Sprint card: {inferred.card.title}</a>
   const found = inferred || foundPrs
@@ -191,7 +191,7 @@ export default function ReviewView({ route }: { route: string }) {
               {!showFiles && (cardLink || sprintCard) && <p>{cardLink}{sprintCard}</p>}
             </section>
           )}
-          <section className="hub-panel" data-section="prs" aria-label="Pull requests">
+          {(prs.length > 0 || !detail.closing) && <section className="hub-panel" data-section="prs" aria-label="Pull requests">
             <h3>Pull requests</h3>
             {prs.length === 0 && <p className="hub-muted">No pull request link came with this item.</p>}
             {foundPrs && <p className="hub-muted" data-found>Found in the summary.</p>}
@@ -201,7 +201,16 @@ export default function ReviewView({ route }: { route: string }) {
             <div className="hub-review-links">
               {prs.map(url => <a className="hub-btn" key={url} href={url} target="_blank" rel="noopener noreferrer">{prLabel(url)}</a>)}
             </div>
-          </section>
+          </section>}
+          {detail.closing && !detail.done && <section className="hub-panel hub-closing" data-section="closing" aria-label="Closing session">
+            <h3>Start the closing session</h3>
+            <p className="hub-muted">Paste this into a new session in the project's repository.</p>
+            <CodeBlock exact><code>{detail.closing.prompt}</code></CodeBlock>
+            {detail.closing.left.length > 0 && <>
+              <h3>Not done</h3>
+              <ul data-closing-left>{detail.closing.left.map(row => <li key={row.seq}>{row.bead} ({row.state}): {row.title}</li>)}</ul>
+            </>}
+          </section>}
           <details className="hub-review-details" data-details open={detailsOpen || !!file} onToggle={event => setDetailsOpen(event.currentTarget.open)}>
             <summary>Details</summary>
             {(detail.fullTitle || detail.ownerSummary) && (
