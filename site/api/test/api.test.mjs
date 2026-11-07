@@ -309,7 +309,7 @@ test('a new section is the template and an empty card list with its name, on the
   } finally { await close(); }
 });
 
-test('a hidden section is listed with hidden: true, a normal one carries no such key, and a new one holds only its card list', async () => {
+test('a hidden section is listed with hidden: true, a normal one carries no such key, a new one holds only its card list, and it is not served as files', async () => {
   const { request, raw, fake, close } = await fixture();
   try {
     fake.seed('sections/hid/workspace.json', '{"name":"Hid","hidden":true,"entities":[]}\n', 'application/json');
@@ -322,7 +322,49 @@ test('a hidden section is listed with hidden: true, a normal one carries no such
     assert.deepEqual(fake.json('sections/field-data/workspace.json'), { name: 'Field Data', hidden: true, entities: [] });
     assert.equal(fake.text('sections/field-data/_config.yml'), null, 'No template files.');
     assert.equal(fake.text('sections/field-data/_shared/report.css'), null);
-    assert.equal((await raw('/w/field-data/workspace.json')).status, 200, 'Still served.');
+    assert.equal((await raw('/w/field-data/workspace.json')).status, 404, 'Data sections are not served as files.');
+  } finally { await close(); }
+});
+
+test('a data section is not served under /w/', async () => {
+  const { raw, fake, close } = await fixture({ contentOrigin: 'http://cards.example.localhost' });
+  try {
+    const seed = (key, text) => fake.seed(key, text, key.endsWith('.jsonl') ? 'application/x-ndjson' : 'application/json');
+    seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n');
+    seed('sections/inbox/chat/20261106-abc123.jsonl', '{"role":"user","text":"fake text"}\n');
+    seed('sections/inbox/chat/state.json', '{"chats":{"20261106-abc123":{"title":"fake"}}}');
+    seed('sections/inbox/presence.json', '{"fake":true}');
+    seed('sections/inbox/asks/a1/ask.json', '{"fake":true}');
+    seed('sections/inbox-dev/workspace.json', '{"name":"Inbox dev","hidden":true,"entities":[]}\n');
+    seed('sections/inbox-dev/presence.json', '{"fake":true}');
+    seed('sections/other-data/workspace.json', '{"name":"Other","hidden":true,"entities":[]}\n');
+    seed('sections/other-data/notes.json', '{"fake":true}');
+    seed('sections/one/card-responses/alpha/doc.json', '{"fake":true}');
+    const paths = [
+      '/w/inbox/chat/20261106-abc123.jsonl', '/w/inbox/chat/state.json', '/w/inbox/presence.json', '/w/inbox/asks/a1/ask.json',
+      '/w/inbox/workspace.json', '/w/inbox-dev/presence.json', '/w/other-data/notes.json', '/w/one/card-responses/alpha/doc.json',
+      '/w/inbox%2Fchat/20261106-abc123.jsonl', '/w/one/..%2Finbox%2Fchat%2Fstate.json', '/w/one/card-responses%2Falpha%2Fdoc.json',
+    ];
+    const dataKeys = key => /^sections\/(inbox|inbox-dev|other-data)\/|card-responses/.test(key);
+    const before = fake.log.length;
+    for (const base of ['', '/api']) {
+      for (const host of [undefined, 'cards.example.localhost']) {
+        for (const route of paths) {
+          for (const init of [{}, { method: 'HEAD' }, { headers: { 'If-None-Match': '"x-t1"' } }]) {
+            const headers = { ...(init.headers ?? {}), ...(host ? { Host: host } : {}) };
+            const answer = await raw(`${base}${route}`, { ...init, headers });
+            assert.equal(answer.status, 404, `${init.method ?? 'GET'} ${base}${route} on ${host ?? 'app host'}`);
+            assert.ok(!(await answer.text()).includes('fake'), 'No stored text comes back.');
+          }
+        }
+      }
+    }
+    // A hidden section's workspace.json is read by the section list (findSection), never as a /w/ file.
+    const served = fake.log.slice(before).filter(entry => entry.method !== 'HEAD' && dataKeys(entry.key) && !entry.key.endsWith('/workspace.json'));
+    assert.deepEqual(served, [], 'The bucket is not asked for those files.');
+    const card = await raw('/w/one/alpha/index.html');
+    assert.equal(card.status, 200);
+    assert.ok(card.headers.get('etag'));
   } finally { await close(); }
 });
 

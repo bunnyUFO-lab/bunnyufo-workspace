@@ -196,7 +196,7 @@ s3://<bucket>/
 ```
 
 A section whose `workspace.json` carries `"hidden": true` holds data, not cards (the agents' `inbox`):
-`/sites.json` lists it with `hidden: true` and `/w/<id>/…` serves it, but the switcher and the
+`/sites.json` lists it with `hidden: true`. `/w/<id>/…` does not serve it, and the switcher and the
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
 
@@ -212,7 +212,9 @@ it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and 
 - `/sites.json` lists the sections the bucket holds, so a new section is in the switcher as soon
   as its `workspace.json` is uploaded. Nothing on the server has to be edited.
 - `/w/<id>/<file>` streams the object with its ETag and content type. Only keys under
-  `sections/` are reachable this way; `state.json` and anything else in the bucket are not.
+  `sections/` are reachable this way; `state.json` and anything else in the bucket are not. Nor are the
+  inbox (`inbox`, `inbox-dev`), hidden sections or a section's `card-responses/`: they answer 404, and the signed-in
+  app reads them through the Hub.
 - `/api/card-state`, `/api/workspace/status`, `/api/workspace/pin`, `/api/workspace/pins` and
   `/api/workspace/tags` read and write `state.json`. `/api/sections` starts a section: the
   `workspace/` template plus an empty card list carrying the name, put into the bucket.
@@ -975,7 +977,7 @@ through a window another page holds: the site sends `Cross-Origin-Opener-Policy:
 `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` with it (Caddyfile, and the
 stand-in in `server/test/card-sandbox-ui.mjs`, which tries all three attacks: framing the app, opening it in
 a popup, and keeping a popup open while the owner moves to another card). The app also answers the bridge only
-when it is a top-level window with no opener. Keep these headers on any proxy in front of the app. When the app cannot save (signed out, or the local
+when it is a top-level window with no opener. Keep these headers on any proxy in front of the app. The inbox, hidden sections and saved card answers are not served as files under `/w/`. When the app cannot save (signed out, or the local
 app), every op answers 401 and the page falls to local mode at once.
 
 Opened in its own tab, a card has no app to ask: `store.mode` is `'local'`, input stays in the
