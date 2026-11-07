@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
+import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from 'react'
 import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatListAnswer, ChatMarks, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
@@ -26,7 +26,8 @@ import './chatRuns.css'
 import './chatChoice.css'
 import { openSpawn } from './spawnStore'
 import { takeHelpDraft } from './flash'
-import { onChatStart, peekChatStart, takeChatStart } from './chatStart'
+import { onChatStart, peekChatStart, takeChatStart, type ChatStart } from './chatStart'
+import { cardLinkOf } from './cardLink'
 import { setFocus } from './needsFocus'
 import Who from './ChatWho'
 import ChatList, { ChatSetAside, RenameSheet } from './ChatList'
@@ -185,13 +186,31 @@ function HelpBanner({ about, text, pictures }: { about: { kind: HelpKind; id: st
   )
 }
 
+const ADDRESS = /https?:\/\/[^\s<>"']+/g
+
+/** The text with every address of a card on this site made a link, so a line that says where a picture came from can be followed. Other text stays plain. */
+function linkCards(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let at = 0
+  for (const match of text.matchAll(ADDRESS)) {
+    const start = match.index ?? 0
+    const found = cardLinkOf(match[0], window.location.href)
+    if (!found) continue
+    if (start > at) out.push(text.slice(at, start))
+    out.push(<a key={start} href={found.href} target="_blank" rel="noopener noreferrer" data-card-link>{match[0]}</a>)
+    at = start + match[0].length
+  }
+  if (at < text.length) out.push(text.slice(at))
+  return out
+}
+
 /** The owner's own words as typed, with any fenced block shown as code (and its Copy button) instead of its backticks. */
 function OwnerText({ text }: { text: string }) {
   return (
     <div className="hub-md">
       {splitFences(text).map((part, index) => part.kind === 'code'
         ? <CodeBlock key={index}><code className={part.lang ? `language-${part.lang}` : undefined}>{part.code}</code></CodeBlock>
-        : <p key={index} className="hub-note-text">{part.text}</p>)}
+        : <p key={index} className="hub-note-text">{linkCards(part.text)}</p>)}
     </div>
   )
 }
@@ -886,10 +905,13 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   useEffect(() => { takeQueued(); return onAsk(takeQueued) }, [takeQueued])
 
   // The start is used once: drop it, and put the cursor in the composer when it came with a draft.
+  const filed = useRef<ChatStart | null>(null)
   useEffect(() => {
     takeChatStart()
     if (start) input.current?.focus()
-  }, [start])
+    // The pictures go into the tray once: StrictMode runs this effect twice for one start.
+    if (start?.files?.length && filed.current !== start) { filed.current = start; void addFiles(start.files) }
+  }, [start]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send() }

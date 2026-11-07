@@ -134,3 +134,5 @@ html[data-workspace-theme=light] :is(.voice-settings select,.voice-compose butto
 html[data-workspace-theme=light] :is(.voice-panel header,.voice-settings,.voice-compose,.voice-tabs,.buw-exchange,.activity-item){border-color:var(--hairline)}
 html[data-workspace-theme=light] .voice-tabs>button.selected{color:var(--pink);border-color:var(--pink)}
 html[data-workspace-theme=light] .voice-caption-toggle{color:var(--pink)!important;background:#fff;border-color:var(--hairline-strong)}
+html[data-workspace-theme=light] .buw-lightbox .buw-lightbox-actions{border-color:var(--hairline-strong)}
+html[data-workspace-theme=light] .buw-lightbox .buw-lightbox-actions button,html[data-workspace-theme=light] .buw-lightbox .buw-lightbox-toolbar>button{background:#f5f6f9;border-color:var(--hairline-strong);color:var(--text)}

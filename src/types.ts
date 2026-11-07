@@ -18,6 +18,10 @@ export interface WorkspaceStep {
    * card bridge to such a page, so it cannot read or rewrite the owner's other tabs.
    */
   agentTab?: boolean
+  /** Set when this tab is a drawing made over a picture of the card: the picture's path, who last saved it and when (YYYY-MM-DD). */
+  from?: string
+  by?: string
+  at?: string
 }
 
 export interface WorkspaceEntity {

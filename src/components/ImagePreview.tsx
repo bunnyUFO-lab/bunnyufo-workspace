@@ -2,26 +2,94 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import '../styles/report.css'
 import { downloadImage } from '../lib/download'
-import { annotatable, AnnotateContext } from '../lib/annotate'
+import { annotatable, AnnotateContext, cardPicture } from '../lib/annotate'
+import { askDraft, copyImage, CopyError, fetchCardImage, toPictureFile, UNSUPPORTED } from '../lib/cardImage'
+import { host } from '../lib/host'
+import { startChat } from '../hub/chatStart'
+import { hubHash } from '../lib/route'
 
-export default function ImagePreview({ url, title, onClose, plain = false }: { url: string; title: string; onClose: () => void; plain?: boolean }) {
+/** A press in the first moments after the viewer opens is ignored: a page that opens the viewer under a person's double click gets nothing. */
+const ARM_MS = 500
+
+/** Other pictures of the same page, for Previous and Next. */
+export interface Gallery { items: { url: string; title: string }[]; index: number; onIndex: (index: number) => void }
+
+export default function ImagePreview({ url, title, onClose, plain = false, gallery }: { url: string; title: string; onClose: () => void; plain?: boolean; gallery?: Gallery }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [actual, setActual] = useState(false)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  // What the note under the picture says, and whether an action is running, belong to one picture: stepping to another starts clean.
+  const [state, setState] = useState({ url, error: '', failedCopy: false, busy: false })
+  const here = state.url === url ? state : { url, error: '', failedCopy: false, busy: false }
+  const { error, failedCopy, busy } = here
+  const patch = (change: Partial<typeof here>) => setState({ ...here, ...change })
   const picture = useRef<HTMLImageElement>(null)
+  const openedAt = useRef(0)
   const context = useContext(AnnotateContext)
+  const own = cardPicture(context, url)
   const path = plain ? null : annotatable(context, url)
-  const annotate = () => {
+  // Every open, and every step to another picture, starts the arming time again.
+  useEffect(() => { openedAt.current = Date.now() }, [url])
+  const armed = () => Date.now() - openedAt.current >= ARM_MS
+  const edit = () => {
     const image = picture.current
-    if (!context || !path || !image) return
-    setBusy(true); setError('')
-    context.annotate(path, image.naturalWidth, image.naturalHeight).catch(problem => { setError(problem.message); setBusy(false) })
+    if (!armed() || !context?.annotate || !path || !image) return
+    patch({ busy: true, error: '' })
+    context.annotate(path, image.naturalWidth, image.naturalHeight).then(() => dialog.current?.close(), problem => patch({ error: problem.message, busy: false }))
   }
+  const copy = () => {
+    if (!armed()) return
+    patch({ error: '', failedCopy: false })
+    copyImage(url).then(() => patch({ error: 'Image copied' }), problem => patch({ error: problem instanceof CopyError ? problem.message : UNSUPPORTED, failedCopy: true }))
+  }
+  const ask = async () => {
+    if (!armed() || !context || !own) return
+    patch({ busy: true, error: '' })
+    try {
+      const file = await toPictureFile(await fetchCardImage(url), own.split('/').pop() || 'picture')
+      // An unsent draft: the picture goes in the tray and the line in the composer. Nothing is posted until the person presses Send.
+      startChat({ persona: 'hermes', draft: askDraft(context.card.title, own, window.location.origin, context.card.workspace, context.card.id), files: [file] })
+      window.location.hash = hubHash('chat')
+      dialog.current?.close()
+    } catch (problem) {
+      patch({ error: problem instanceof Error ? problem.message : 'The picture could not be read.', busy: false })
+    }
+  }
+  const go = (step: number) => { if (gallery) gallery.onIndex((gallery.index + step + gallery.items.length) % gallery.items.length) }
   useEffect(() => { const current = dialog.current; current?.showModal(); return () => current?.close() }, [])
-  // StrictMode closes and reopens the dialog during its effect check. Ignore a
-  // queued close event if the dialog has already reopened.
-  return createPortal(<dialog ref={dialog} className="buw-lightbox" aria-label="Image preview" onClose={event => { if (!event.currentTarget.open) onClose() }}><div className="buw-lightbox-toolbar"><span className="buw-lightbox-caption">{title}</span><button onClick={() => setActual(value => !value)}>{actual ? 'Fit' : '100%'}</button><a href={url} target="_blank" rel="noreferrer">Open original</a>{path && <button onClick={annotate} disabled={busy}>✎ Annotate</button>}<button onClick={() => void downloadImage(url).catch(error => setError(error.message))}>Download</button><button onClick={() => dialog.current?.close()}>Close</button></div><div className={`buw-lightbox-stage${actual ? ' actual' : ''}`}><img ref={picture} src={url} alt={title} onClick={() => setActual(value => !value)} onError={() => setError('This image could not be loaded.')} /></div><p className="buw-lightbox-note" role="status">{error || 'Esc to close'}</p></dialog>, document.body)
+  useEffect(() => {
+    if (!gallery || gallery.items.length < 2) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      if (event.key === 'ArrowLeft') { event.preventDefault(); go(-1) } else if (event.key === 'ArrowRight') { event.preventDefault(); go(1) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+  // An action that cannot work here is left out, not greyed.
+  const canEdit = !!path && !!context?.annotate
+  const canAsk = !!own && host.chat
+  const many = !!gallery && gallery.items.length > 1
+  // StrictMode closes and reopens the dialog during its effect check. Ignore a queued close event if the dialog has already reopened.
+  return createPortal(<dialog ref={dialog} className="buw-lightbox" aria-label="Image preview" onClose={event => { if (!event.currentTarget.open) onClose() }}>
+    <div className="buw-lightbox-toolbar">
+      <span className="buw-lightbox-caption">{title}</span>
+      <span className="buw-lightbox-tools">
+        {many && <button onClick={() => go(-1)} data-lightbox-prev>Previous</button>}
+        {many && <button onClick={() => go(1)} data-lightbox-next>Next</button>}
+        <button onClick={() => setActual(value => !value)}>{actual ? 'Fit' : '100%'}</button>
+        <a href={url} target="_blank" rel="noreferrer">Open original</a>
+        <button onClick={() => void downloadImage(url).catch(problem => patch({ error: problem.message }))}>Download</button>
+      </span>
+      <button className="buw-lightbox-close" onClick={() => dialog.current?.close()}>Close</button>
+    </div>
+    <div className={`buw-lightbox-stage${actual ? ' actual' : ''}`}><img ref={picture} src={url} alt={title} onClick={() => setActual(value => !value)} onError={() => patch({ error: 'This image could not be loaded.' })} /></div>
+    {own && <div className="buw-lightbox-actions" data-lightbox-actions>
+      {canEdit && <button onClick={edit} disabled={busy} data-action="edit">✎ Edit</button>}
+      {canAsk && <button onClick={() => void ask()} disabled={busy} data-action="ask">Ask in chat</button>}
+      <button onClick={copy} data-action="copy">Copy image</button>
+    </div>}
+    <p className="buw-lightbox-note" role="status">{error || 'Esc to close'}{failedCopy && <> <button type="button" className="buw-lightbox-note-download" onClick={() => void downloadImage(url).catch(problem => patch({ error: problem.message }))}>Download</button></>}</p>
+  </dialog>, document.body)
 }
 
 /** `plain`: no ✎ on the picture itself, for a page that already has its own Annotate button. */
@@ -35,7 +103,7 @@ export function ZoomImage({ src, alt = '', plain = false }: { src?: string; alt?
   if (!src) return <span>{alt}</span>
   const annotate = () => {
     const image = picture.current
-    if (!context || !path || !image) return
+    if (!context?.annotate || !path || !image) return
     setBusy(true); setError('')
     context.annotate(path, image.naturalWidth, image.naturalHeight).catch(problem => { setError(problem.message); setBusy(false) })
   }

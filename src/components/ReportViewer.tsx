@@ -17,31 +17,41 @@ import type { Annotate } from '../lib/annotate'
  * The card a page belongs to, when it can be edited through the card routes. `agentTab`: an agent added this tab to a card that is not
  * its own, so the page gets no card bridge and cannot read or rewrite the owner's other tabs.
  */
-export interface EditableCard { workspace: string; id: string; path: string; agentTab?: boolean }
+export interface EditableCard {
+  workspace: string; id: string; path: string; agentTab?: boolean
+  /** The card's title, for the line that tells a chat where a picture came from. */
+  title?: string
+  /** For a drawing made over a picture: the picture, who last saved it, and when. */
+  from?: string; by?: string; at?: string
+}
 
 interface ViewerProps { url: string; title: string; relativePath: string; card?: EditableCard; stepIndex?: number; onStep?: (index: number) => void }
 
 /** A card's page. On a card that can be written to, every picture on it can be drawn over (✎ Annotate). */
 export default function ReportViewer(props: ViewerProps) {
   const { url, card, stepIndex = 0, onStep } = props
-  const workspace = card?.workspace, id = card?.id, file = card?.path
+  const workspace = card?.workspace, id = card?.id, file = card?.path, heading = card?.title ?? ''
   const steppable = !!onStep
   const open = useRef(onStep)
   useEffect(() => { open.current = onStep })
   const annotation = useMemo<Annotate | null>(() => {
-    if (!workspace || !id || !file || !host.cards || !steppable) return null
+    if (!workspace || !id || !file) return null
     // The card folder is the page's address without the page's own path (which may sit in a sub-folder).
     const parts = new URL(url.split(/[?#]/)[0], window.location.href).href.split('/')
     const folderUrl = `${parts.slice(0, parts.length - file.split('/').length).join('/')}/`
     return {
       folderUrl,
-      annotate: async (image, width, height) => {
-        const made = await startAnnotation(workspace, id, image, stepIndex, width, height)
-        openForEditing(workspace, id, made.path)
-        open.current?.(made.step)
-      },
+      card: { workspace, id, title: heading },
+      // Drawing over a picture needs the card routes and a page that can switch tabs.
+      ...(host.cards && steppable ? {
+        annotate: async (image: string, width: number, height: number) => {
+          const made = await startAnnotation(workspace, id, image, stepIndex, width, height)
+          openForEditing(workspace, id, made.path)
+          open.current?.(made.step)
+        },
+      } : {}),
     }
-  }, [url, workspace, id, file, stepIndex, steppable])
+  }, [url, workspace, id, file, heading, stepIndex, steppable])
   return <AnnotateContext.Provider value={annotation}><ReportPage {...props} /></AnnotateContext.Provider>
 }
 
@@ -128,7 +138,7 @@ function ReportPage({ url, title, relativePath, card }: ViewerProps) {
       onSave={async (text, revision) => { const saved = await saveSection(card.workspace, card.id, card.path, text, revision ?? null); return { text: saved.text, revision: saved.etag ?? undefined } }} />
     : <div className="report-loading">Opening document…</div>
   if (markdown) return file ? host.saves ? <MarkdownDocument file={file} keys startEditing={startEditing} /> : <div className="markdown-reader"><MarkdownView text={file.text || ''} baseUrl={url} /></div> : <div className="report-loading">Opening document…</div>
-  if (image) return <div className="report-image"><nav><span>{title}</span><a href={url} target="_blank" rel="noreferrer">Open original</a>{annotateTarget && context && <button type="button" className="report-annotate" onClick={() => void sizeOf(url).then(size => context.annotate(annotateTarget, size.width, size.height)).catch(problem => setError(problem.message))}>✎ Annotate</button>}<a href={url} onClick={event => { event.preventDefault(); void downloadImage(url).catch(error => setError(error.message)) }}>Download</a></nav><ZoomImage src={url} alt={title} plain /></div>
+  if (image) return <div className="report-image"><nav><span>{title}</span><a href={url} target="_blank" rel="noreferrer">Open original</a>{annotateTarget && context?.annotate && <button type="button" className="report-annotate" onClick={() => void sizeOf(url).then(size => context.annotate?.(annotateTarget, size.width, size.height)).catch(problem => setError(problem.message))}>✎ Annotate</button>}<a href={url} onClick={event => { event.preventDefault(); void downloadImage(url).catch(error => setError(error.message)) }}>Download</a></nav><ZoomImage src={url} alt={title} plain /></div>
   const ready = available && loaded
   const fullPath = /^(?:[a-zA-Z]:)?[\\/]/.test(relativePath) ? relativePath : `${serviceState().repo}/${relativePath}`
   if (canEdit && editing) return <div className="report-document"><HtmlEditor path={fullPath} url={url} title={title} onClose={() => setEditing(false)} onSaved={() => setSaves(n => n + 1)} /></div>

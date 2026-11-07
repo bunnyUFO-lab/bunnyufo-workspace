@@ -471,7 +471,7 @@ export default function App() {
             /></Suspense>
           ) : entity && reportUrl ? (
             <Suspense fallback={fallback}><ReportViewer key={reportUrl} url={reportUrl} title={step?.name ?? entity.title} relativePath={cardFile(entity, step?.path ?? '')}
-              card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path, ...(step.agentTab ? { agentTab: true } : {}) } : undefined}
+              card={step?.path && !entity.workspace.builtin ? { workspace: entity.workspace.id, id: entity.id, path: step.path, title: entity.title, ...(step.agentTab ? { agentTab: true } : {}), ...(step.from ? { from: step.from } : {}), ...(step.by ? { by: step.by } : {}), ...(step.at ? { at: step.at } : {}) } : undefined}
               stepIndex={stepIndex} onStep={index => selectStep(entity.id, index)} /></Suspense>
           ) : null}
           </ReportBoundary>
