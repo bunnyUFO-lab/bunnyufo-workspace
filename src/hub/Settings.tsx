@@ -37,14 +37,14 @@ function NextItemSetting() {
  * Settings: the theme, the workspaces, the keyboard shortcuts (the Ctrl+H sheet reads the same list) and the commands to install skills on a PC.
  * Every host shows it, with or without a Hub. Away, the PC with its Wake and the next-item setting need a Hub. What Hermes has installed is on Team.
  */
-export default function Settings() {
+export default function Settings({ onOpenProject }: { onOpenProject: (id: string) => void }) {
   return (
     <div className="hub-settings" data-settings>
       {host.hub && <Section title="Away"><div className="settings-card" data-settings-away><AwayToggle /></div></Section>}
       {host.hub && <Section title="Gaming PC"><div className="settings-card" data-settings-pc><PcSection /></div></Section>}
       {host.hub && <Section title="Next item"><div className="settings-card" data-settings-next><NextItemSetting /></div></Section>}
       <Section title="Appearance"><div className="settings-card"><ThemePicker /></div></Section>
-      {(host.workspaces || host.files) && <Section title="Workspace"><div className="settings-card"><WorkspaceSettings /></div></Section>}
+      {(host.workspaces || host.files || host.write || host.create) && <Section title="Workspace"><div className="settings-card"><WorkspaceSettings onOpenProject={onOpenProject} /></div></Section>}
       <Section title="Keyboard shortcuts">
         <div className="settings-card" data-settings-shortcuts>
           {SHORTCUT_GROUPS.map(group => (

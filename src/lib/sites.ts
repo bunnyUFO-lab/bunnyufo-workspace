@@ -12,7 +12,7 @@
 export interface Site {
   /** Short id, and the first path segment: "magic-loops". */
   id: string
-  /** Shown in the switcher: "Magic Loops". */
+  /** Shown in the project filter: "Magic Loops". */
   name: string
   /** Where this workspace's files are served, without a trailing slash: "/w/magic-loops-workspace". */
   base: string
@@ -25,9 +25,9 @@ export interface Site {
   sha?: string
   /** When the section's card list was last uploaded. */
   publishedAt?: string
-  /** Holds data, not cards (the inbox): served, but never listed in the switcher or picked as the default. */
+  /** Holds data, not cards (the inbox): served, but never listed in the filter or picked as the default. */
   hidden?: boolean
-  /** Put away by hand: left out of the switcher, the chips and the lists, but its files and cards stay. */
+  /** Put away by hand: left out of the filter, the chips and the lists, but its files and cards stay. */
   archived?: boolean
 }
 
@@ -74,7 +74,7 @@ export function sites(): Promise<Sites> {
 export let contentBase = '/workspace'
 export let activeSite: Site | null = null
 export let allSites: Site[] = []
-/** Workspaces put away by hand, for the switcher's "Archived" list. */
+/** Workspaces put away by hand, for Settings' Archived list. */
 export let archivedSites: Site[] = []
 /** Set when the address names a workspace this site does not serve; the app shows that instead of cards. */
 export let unknownSiteId: string | null = null
@@ -90,7 +90,7 @@ export async function resolveSite() {
   return active
 }
 
-/** The address of a workspace on this site, for the switcher's links. */
+/** The address of a workspace on this site, for the unknown-section page's links. */
 export const siteHref = (site: Site) => `/${site.id}`
 
 /**
