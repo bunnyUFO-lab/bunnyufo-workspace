@@ -30,7 +30,7 @@ CI must not slow development. These defaults match the `bunnyufo:dev-sprint` ski
 - **Full suite:** only at the end of a sprint, after a risky widespread refactor, or when the owner asks, with `gh workflow run ci.yml --ref <branch>`, not locally. The workflow's nightly run is still on, but nothing should wait for it.
 - **Review:** one per feature. Use Opus only for access, signing or owner data. Re-review only a real blocker's fix.
 - **Browser QA:** one pass when the feature is done. Prove later fixes with a test, with no new QA round.
-
+- **User guide:** when a change people use lands in Workspace or Hermes, update the card `workspace-app/quick-reference` once it is merged and live, and publish it. Describe only what is live, and check it against the code.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
