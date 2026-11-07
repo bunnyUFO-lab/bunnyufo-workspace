@@ -486,7 +486,7 @@ list: each command a brief needs must already be in the project's PC allow list,
 `blocked-command`. The target
 comes from the first matching rule: (1) project `bunnylink` is `at-pc`; (2) the preset or request needs
 something only the PC has: `pc`; (3) research: `hermes`; (4) the project's `runsOn` in
-`project-defaults.mjs` is `pc`: `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
+`project-defaults.mjs` is `pc` (Magic Loops, Sprite Studio and Workspace app): `pc`; (5) a repo is known: `cloud`, else `pc`. A result outside the preset's
 targets becomes its first target, and `cloud` without a cloud routine for the repo becomes `pc`.
 
 Signed files (`approved.json`, `stop.json`) carry `signature`: base64 Ed25519 over the canonical JSON of the rest
@@ -1012,16 +1012,36 @@ covered.
 
 ### PC status
 
-The Gaming PC's report script writes a status file about once a minute to `inbox/pc/status-<YYYYMMDDTHHMMSSZ>.json` (create-only, at most 64 KB, `v: 1`; `pc` is one of the Hub's folders). The file holds the host slug, whether someone is using the machine, the GPU band, ComfyUI and Unity, and the open Claude Code sessions (name, status, folder, repo, project, branch, links). `sessions` is `null` when the PC could not list them. `runs` is always `[]` for now.
+The Gaming PC's report script writes a status file about once a minute to `inbox/pc/status-<YYYYMMDDTHHMMSSZ>.json` (create-only, at most 64 KB, `v: 1`; `pc` is one of the Hub's folders). The file holds the host slug, whether someone is using the machine, the GPU band, ComfyUI and Unity, and the open Claude Code sessions (name, status, folder, repo, project, branch, links). `sessions` is `null` when the PC could not list them. `runs` is always `[]` for now. It also holds `runner` (ws-3o5), added by the report script from the runner's own config: `{ projects, launch, busy, full, pausedUntil? }`, that is the project ids the runner serves, whether launching is on, the projects with a run going, `concurrent` or `day` when that cap is reached, and when a usage pause ends. Only ids, booleans and one time, never a folder; the site drops any id that is not a project id. A report without it (an old reporter) is read as "the Hub knows nothing about the runner".
 
 | Route | Does |
 |---|---|
+| `GET /api/hub/pc/start?project=<id>` | `{ pcWait }`: whether the PC can start a job of this project (see "Jobs the PC cannot start"), or `null`. Spawn and the approval page ask it before they promise a start; a bad project id is 400 |
 | `GET /api/hub/pc` | `{ pc, status }`: the summary (`state` is `on`, or `asleep-or-off` when the file is over 15 minutes old; `ageSeconds`, `inUse`, `keepAwake`, `gpu`, `comfy`, `unity`, busy and idle session counts) and the cleaned file. Both are `null` when there is no valid file |
 | `GET /api/hub/today` | Also carries `working` (the Working now list) and `pc` (the summary or `null`). `counts.running` is the number of `working` and `needs-you` items; `running` is still the event-derived list, for old clients |
 
 The site reads the newest file in this hour and the one before (the day prefixes only when both are empty). The listing on Today and Work may be up to 15 seconds old (see the listing cache); `/hub/pc` reads live. A file that fails `validStatus` (wrong version, bad host or time, over 30 sessions) counts as no file; inside a valid one, folders and repos are cut to their last path segment, links must be real session links, and unknown fields are dropped.
 
 Working now (`site/api/hub-pc.mjs`) has one item per session with a fresh status: `busy` is `working`, `idle` is `idle`, and a session with an open `blocked` event is `needs-you`. A running session from a `session-started` event on another host is added. Events from the PC's own host are dropped while its status is fresh. With no fresh status it is the event-derived list, as before. A session whose plugin posts a heartbeat (a `session-items` event with no `touched`, at most every 10 minutes while the session works) counts as having given word: it keeps an event-derived row Working past the two quiet hours instead of "No word since". A heartbeat never resolves a blocked session and is not listed in Activity. The Beads id comes from the branch name and the project's prefix in `site/api/project-defaults.mjs`.
+
+### Jobs the PC cannot start
+
+The runner on the PC only takes jobs of the projects in its `runs-config.json`, and only while launching is on. The Hub reads that from the PC report (`runner`, above) and judges every approved PC job in `site/api/hub-pc-wait.mjs`. A cause with no end in sight is a **block**; a queue that ends soon is a **wait**. Blocks, checked in this order:
+
+| Cause | When | The words | Fix shown |
+|---|---|---|---|
+| `pc-silent` | the newest status is over 15 minutes old, or none is recent but this host has had a PC reporter | "The PC is not answering": it is probably asleep or off ("This PC hasn't reported lately" past 7 days) | Retry wakes the PC, only when a wake is set up |
+| `not-on-runner` | the project is not in `runner.projects` | "The PC does not run <project> yet" | the command `install.ps1 -AddRepo <path> -Yes`, run from the runner's checkout, or the cloud |
+| `launch-off` | `runner.launch` is false | "Starting jobs is off on the PC" | the command `install.ps1 -Runs -Launch on` |
+| `login-expired` | `runner.pausedReason` is `login-expired` | "The PC needs you to sign in again" | `claude auth login`, then `node $HOME\.config\pc-dispatch\dispatch.mjs resume` (PowerShell, from any folder) |
+| `cap` | a pause or a full cap with no known end, a daily cap, or an end more than 4 hours away | "The PC is full for now" or "paused for a while" | none; the text says when it starts |
+
+**Waits** are never alerts. They show as a line on the job page: the owner is at the PC and the job opens windows (`approved.run.opensWindows`; the runner's `windows` rule); the project already has a run going (checked before the cap, so it holds when the runner allows one run at a time); `cap` and `usage-limit` that end within 4 hours (the time is in the line; a full concurrent cap ends when the running job's start plus its limit passes); `open-run` (the owner is in a resumed session at the PC); `add-repo` (an install is running). `pausedReason` is an enum (`usage-limit`, `login-expired`, `open-run`, `add-repo`); any other value is dropped.
+
+The status the verdict reads is the newest one in the last two days, else the newest in the last 7 days (by the day folders). With none in 7 days the verdict is `pc-silent` if the host has ever had a status, and unknown (no claim) if it never has. A fresh status without a `runner` block is also unknown.
+
+- **At approval.** `POST /requests/:id/approve` for the PC adds `pcWait` and, for a blocked job, `waiting` with one sentence. A PC that was just woken by the approval is not called silent. Spawn's note, the approval page's "Starts" line and the Approve toast say it instead of "within a few minutes". The job page (`GET /requests/:id`, `pcWait`) shows the 2 or 3 sentences, the step and the command in a copyable block, or the wait line.
+- **After 10 minutes.** An approved PC request with no `taken.json` for 10 minutes and a cause above is one **Needs you item** (`kind: 'pc-stuck'`, type "Job not started", under Sessions): a plain title, 2 or 3 sentences, the step with its copyable command, and the buttons that fit. Retry wakes the PC and shows only for `pc-silent` when a wake is set up. "Run it in the cloud" is `move-to-cloud` and shows only when the job could run there; for a stuck job it is open before the 6 hours (the route asks the same verdict again). Cancel is the signed stop. It is not stored: it is worked out from the files each time, so there is one per job, it never repeats, and it is gone when the job is taken, stopped, moved, or the cause goes away.
 
 ### Work
 
@@ -1053,7 +1073,7 @@ The Repo field of a code or docs job is a picker: the project's own repo first (
 
 ### The Approval item
 
-A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.tsx`, a case in `NeedsItem.tsx`), and `#/~hub/request/<id>` opens the same item on its own page: this is the link a `#needs-you` ping carries. It shows the preset and project, who asked, and for a request that an agent or a run wrote the line "Written by <name>, not by you. Read it before approving." It also shows the text, where it runs and why (with a machine choice), its side effects, the time limit and when it starts. Approve (`POST /requests/:id/approve { target }`, or `again` for an expired one), Edit (Spawn on the request; its Approve calls `again` with the new text), and Decline (an optional reason) all hand the next item to the list (`Approved · next: …`). A request for the PC (`at-pc`) has Copy prompt and Mark done instead of Approve. A request signed by policy reads "Signed by policy". A request in any other state shows its state and outcome; the job page below fills it.
+A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.tsx`, a case in `NeedsItem.tsx`), and `#/~hub/request/<id>` opens the same item on its own page: this is the link a `#needs-you` ping carries. It shows the preset and project, who asked, and for a request that an agent or a run wrote the line "Written by <name>, not by you. Read it before approving." It also shows the text, where it runs and why (with a machine choice), its side effects, the time limit and when it starts. Approve (`POST /requests/:id/approve { target }`, or `again` for an expired one), Edit (Spawn on the request; its Approve calls `again` with the new text), and Decline (an optional reason) all hand the next item to the list (`Approved · next: …`). A request for the PC (`at-pc`) has Copy prompt and Mark done instead of Approve. A request signed by policy reads "Signed by policy". For the PC, the Starts line says when the Hub knows the PC cannot start it (see "Jobs the PC cannot start"). A request in any other state shows its state and outcome; the job page below fills it.
 
 ### The job page
 
@@ -1091,6 +1111,20 @@ An avatar choice is the owner's. The site writes it as a create-only file, `inbo
 ### Agent config exports (card API rule)
 
 The Hermes host publishes a redacted copy of its profile settings as create-only files, `inbox/agent-config/export-<YYYYMMDDTHHMMSSZ>.json`, so the Hub can show an agent's model settings and prompts. The card API accepts these only from a token named `hermes-config` (rights `write=inbox`), only with `If-None-Match: *` and never through an upload URL; that token may write nothing else in the inbox, no other limited token may write under `agent-config/`, and a limited deleter cannot remove them. A file the token creates is stored with the object metadata `writer: hermes-config`, set by the handler alone (a caller's `x-amz-meta-*` headers are never forwarded). The passphrase can still write there, but its files carry no mark, so the Hub ignores them. Adding the token to `BUW_CARD_TOKENS` needs the card API deployed with this rule first.
+
+### Schedules (Team's third tab, view only)
+
+`#/~hub/team/schedules` lists everything that runs on a schedule, on one page (ws-eh2). A job's page is `#/~hub/team/schedules/hermes/<name>`: beside the list from 900 px, a page of its own on a phone. Team's tabs are Agents, Skills and plugins and Schedules; Search finds "Schedules", and an agent's page links "All schedules" under its jobs. Nothing on the page changes a job.
+
+| Route | Does |
+|---|---|
+| `GET /api/hub/schedules` | `{ sources, note, at }`. `sources` is `[{ id, label, state, as_of, items, text?, host?, timezone?, profileModels? }]` in page order: `hermes-jobs`, `hermes-timers`, `site-timers`, `pc-tasks`, `github`. `state` is `live`, `old` (the export is past the freshness rule: 7 hours) or `not-reporting`. 401 without a signed-in user when the site requires one: prompts are not for anonymous reads, and Team is otherwise open to guests. There is no write route |
+
+**Which copy of a job is real.** The Hermes host's scheduler runs the jobs in its own job file. The page shows an export of that file, at most about 15 minutes old, and says so: "These are the jobs the Hermes host runs now. The setup script in the homelab repo only adds a job that is missing, so changing it does not change a job that already exists." That script is a starter list.
+
+**The export's job fields** (`cleanJob` in `site/api/hub-agent-config.mjs`; the allow-list applies again on the site). Beyond `name`, `schedule`, `enabled` and `prompt`: `scheduleKind`, `state`, `model`, `provider`, `postsTo` and `failuresTo` (`{ platform, label }` or null: a label, never a raw channel id), `script` (a name only), `nextRunAt`, `lastRunAt`, `lastStatus`, `lastError` and `lastDeliveryError` (secrets replaced, cut at 200 characters), `failureStreak`, `runsDone`, `promptSha256` and `promptBytes` (of the whole prompt, before any cut), `promptCut`, `promptRedacted`, `rev`. A field the exporter did not send is absent, and the page says "Not reported", so an older exporter never shows a wrong value. The prompt cap is 8 KB. A profile also carries `timezone` (the zone its cron text runs in) and the export `hostLabel` and `hostTimers` (`{ name, description, schedule, enabled, lastResult }`, no run times). Lists the host does not report yet read "Not reporting yet. This list arrives with a later update."
+
+**The prompt alert.** In the sweep beside the profile-change events (Today, Inbox and Work loads, the details and schedules routes; at most every 30 seconds) the Hub compares each job's `promptSha256` in the newest fresh export with its own baseline, `inbox/agent-config/job-prompts-seen.json` = `{ v: 1, at, jobs: { '<profile>/<job>': '<sha256>' } }`. Only the Hub writes it (no token but the Hermes host's writes under `agent-config/`, and that one only exports and results). The first run stores the baseline and says nothing. A changed hash with no signed job change behind it writes one `alert` event, "The prompt of `<job>` changed on the Hermes host, not from Schedules. Check it.", which lands on Today's alerts and links to the job's page (the event carries `job` and `jobHash`, never prompt text). A new job and a missing job get a similar alert. Then the baseline moves, so it is told once. At most 8 alerts a sweep; a failure is logged and never fails a request.
 
 ### Profile changes (a signed change the Hermes host applies)
 

@@ -50,11 +50,13 @@ import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, check
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
+import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
 import { createdIds, deliverablesOf, jobsList } from './job-deliverables.mjs';
 import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { pcStartVerdict, pcWaitOf } from './hub-pc-wait.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { createWake } from './pc-wake.mjs';
@@ -341,7 +343,58 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
-  const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
+  /** When the PC's running jobs must end: taken time plus their limit. A full concurrent cap lifts then, at the latest. */
+  const pcEndsAt = rows => rows
+    .filter(row => row.run?.runner === 'pc' && ['running', 'taken'].includes(row.state) && row.run.minutes && Number.isFinite(Date.parse(row.run.at)))
+    .map(row => new Date(Date.parse(row.run.at) + row.run.minutes * 60000).toISOString());
+  /**
+   * Whether the PC can start an approved job, from its status (ws-3o5): `{ state: 'blocked' | 'stuck' | 'wait', ... }` or null. Approve,
+   * Spawn (`/hub/pc/start`), the job page and the move-to-cloud route use it; the lists below carry the same verdict on each row.
+   */
+  async function pcVerdict({ project, approvedAt = null, opensWindows = false, at }) {
+    const { status, silent } = await loadVerdictStatus(at);
+    let verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows });
+    if (status?.runner?.full === 'concurrent') verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows, endsAt: pcEndsAt(await requestFiles.loadRequests(at).catch(() => [])) });
+    return withWake(pcWaitOf(verdict), at);
+  }
+  /** Retry (wake the PC) is offered only when a wake is set up. */
+  const withWake = (wait, at) => (wait?.canWake && !wake.available ? { ...wait, canWake: undefined } : wait);
+  /**
+   * The status the verdict reads. The newest one in the last two days is `loadPcStatus`; past that, up to 7 days back by the day folders
+   * (`pc/status-<day>T`). With none in 7 days, `silent` says whether this host has had a PC reporter at all: if so the PC "has not reported
+   * lately", if never the Hub makes no claim.
+   */
+  async function loadVerdictStatus(at) {
+    const near = await loadPcStatus(at).catch(() => null);
+    if (near) return { status: near, silent: false };
+    const { prefixes } = await bucket.list(key('pc/status-'), { delimiter: 'T' }).catch(() => ({ prefixes: [] }));
+    const days = prefixes.map(prefix => /status-(\d{8})T$/.exec(prefix)?.[1]).filter(Boolean).sort();
+    if (!days.length) return { status: null, silent: false };
+    const newest = days.at(-1);
+    if (newest >= markStamp(new Date(at.getTime() - 7 * DAY)).slice(0, 8)) {
+      const { objects } = await bucket.list(key(`pc/status-${newest}`)).catch(() => ({ objects: [] }));
+      const names = objects.map(object => object.key.slice(folder('pc').length)).filter(name => /^status-\d{8}T\d{6,9}Z\.json$/.test(name)).sort();
+      for (const name of names.slice(-3).reverse()) {
+        const got = await fresh(`pc/${name}`);
+        const status = got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+        if (status) return { status, silent: false };
+      }
+    }
+    return { status: null, silent: true };
+  }
+  /** Each approved PC job in the list gets its `pcWait` (one status read for all of them); `pcJob` is only the input and is dropped. */
+  async function withPcWait(rows, at) {
+    if (!rows.some(row => row.pcJob)) return rows;
+    const { status, silent } = await loadVerdictStatus(at);
+    const endsAt = pcEndsAt(rows);
+    return rows.map(row => {
+      if (!row.pcJob) return row;
+      const { pcJob, ...rest } = row;
+      const wait = withWake(pcWaitOf(pcStartVerdict({ project: row.project, status, silent, at, approvedAt: pcJob.approvedAt, opensWindows: pcJob.opensWindows, endsAt })), at);
+      return wait ? { ...rest, pcWait: { ...wait, ...(wait.state === 'stuck' && pcJob.cloudOk ? { cloudOk: true } : {}) } } : rest;
+    });
+  }
+  const loadRequests = async at => withPcWait(policy.annotate(await requestFiles.loadRequests(at)), at);
   // /hub/map is polled and only needs the list for run state on the sheet: keep it ~30 s. Creating or posting to a request clears it.
   const MAP_REQUESTS_MS = Number(env.HUB_MAP_REQUESTS_MS ?? 30_000);   // 0 turns it off (tests that write the bucket directly)
   let mapRequests = null;   // { made, value }
@@ -577,10 +630,47 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
   }
 
+  /**
+   * The owner hears when a job's prompt changes with no signed change behind it (ws-eh2): an agent may edit a job on the Hermes host, and an
+   * Ask is not the only way in. The newest fresh export's `promptSha256` of each job is compared with a baseline the Hub alone writes,
+   * `agent-config/job-prompts-seen.json` (no limited token can write under agent-config/ but the Hermes host's, and that one only exports
+   * and results). The first run stores the baseline and says nothing. A change writes one `alert` event (a job's page is its link) and then moves
+   * the baseline, so it is told once. Same sweeps and throttle as noteChangeResults; it never fails a request and no prompt text reaches an event.
+   */
+  let noteJobs = { last: 0, running: false };
+  async function noteJobPrompts(at) {
+    if (noteJobs.running || (at.getTime() >= noteJobs.last && at.getTime() - noteJobs.last < 30_000)) return;
+    noteJobs = { last: at.getTime(), running: true };
+    try {
+      const exported = await loadAgentConfig(at);
+      if (!exported || exportFreshness(exported, at) !== 'fresh') return;
+      const got = await fresh(SEEN_FILE);
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported });
+      if (!changed) return;
+      if (alerts.length) {
+        const { events } = await loadEvents(at);
+        for (const alert of alerts) {
+          if (events.some(event => event.kind === 'alert' && event.job === alert.job && event.jobHash === alert.hash)) continue;
+          await putHubEvent({ ts: at.toISOString(), kind: 'alert', job: alert.job, jobHash: alert.hash, title: alert.title, host: 'hub', source: 'hub', by: 'hub' }, at);
+        }
+      }
+      try {
+        await bucket.put(key(SEEN_FILE), seenText(jobs, at), { contentType: 'application/json', ...(got ? { ifMatch: got.etag } : { ifNoneMatch: '*' }) });
+      } catch (error) {
+        if (error.status !== 412) throw error;   // another sweep moved the baseline first
+      }
+    } catch (error) {
+      log(`[hub] job prompt check was not written: ${String(error.message).slice(0, 120)}`);
+    } finally {
+      noteJobs.running = false;
+    }
+  }
+
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
   const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
   // The Away switch (presence.json): the owner's, read by hub-hooks on the PC.
   const presence = createPresence({ bucket, key, fail, log: line => log(scrub(line, 200)) });
+  requestFiles.hooks.pcVerdict = pcVerdict;
   requestFiles.hooks.wakeOnApprove = async ({ by, at }) => wake.onApproval({ status: await loadPcStatus(at).catch(() => null), by, at });
 
   /** Hermes `/health` (no key, 1.5 s), cached for 60 s. `null` when HERMES_URL is not set. */
@@ -1855,7 +1945,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); });
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); void noteJobPrompts(at); });
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen, status] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at), loadPcStatus(at)]);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
@@ -1865,6 +1955,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             // A Hermes approval carries no project of its own; its request does, as on /hub/inbox. Without it the Today project filter would drop it.
             reply({ ...today, needsYou: fillProjects(today.needsYou, requests), counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
+          } else if (route === '/hub/pc/start') {
+            // Can the PC start a job of this project? Spawn and the approval page ask before they promise a start.
+            const project = query.get('project') ?? '';
+            if (!validProject(project)) throw fail('Give a project id.', 400);
+            reply({ pcWait: await pcVerdict({ project, opensWindows: query.get('opensWindows') === '1', at }) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
             reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });
@@ -1910,7 +2005,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // Cached like the lists (15 s): only finished states reach it, so the running job's own state above stays live.
             const deliverables = await listCache.cachedReads(() => requestDeliverables(detail, at)).catch(error => { log(scrub(`[hub] deliverables of ${detail.request.id}: ${error.message}`, 200)); return null; });
             const preset = detail.request.preset ? presetOf(detail.request.preset) : null;
-            reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
+            const pcWait = detail.state === 'approved' && detail.approved?.target === 'pc'
+              ? await pcVerdict({ project: detail.request.project, approvedAt: detail.approved.at, opensWindows: detail.approved.run?.opensWindows === true, at }).catch(() => null)
+              : null;
+            reply({ ...detail, ...(pcWait ? { pcWait } : {}), ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
           } else if (route.startsWith('/hub/presets')) {
             reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {
@@ -2004,6 +2102,12 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // One read of the newest export, joined with the agent list. Nothing from the Hermes host is called. Same sign-in rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the skills.', 401);
             reply(teamSkills({ exported: await loadAgentConfig(at).catch(() => null), agents: await allAgents(), at }));
+          } else if (route === '/hub/schedules') {
+            // Prompts and the host's state are not for an anonymous read: Team is open to guests, this page is not.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the schedules.', 401);
+            const exported = await loadAgentConfig(at).catch(() => null);
+            void noteJobPrompts(at);
+            reply(schedulesView({ exported, status: null, hostFile: null, at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);

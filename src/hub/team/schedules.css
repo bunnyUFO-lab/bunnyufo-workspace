@@ -1,0 +1,16 @@
+/* Schedules, Team's third half. Only the shared tokens; the rows and tags are Skills' and the agent page's. */
+.sc-pane { gap: 8px; }
+.sc-source { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sc-source .ui-list { border-radius: 14px; overflow: hidden; }
+.sc-from { margin: 0; }
+.sc-job code, .sc-timer code { font: 500 12px var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+.sc-job .ui-row-body small, .sc-timer .ui-row-body small { overflow-wrap: anywhere; }
+.sc-job .tk-tags { justify-content: flex-end; max-width: 45%; }
+.ad-tag.sc-fail { color: var(--st-failed); border-color: color-mix(in srgb, var(--st-failed) 45%, transparent); }
+.sc-job.sc-bad { box-shadow: inset 3px 0 0 var(--st-failed); }
+.sc-line { display: block; }
+.sc-back { align-self: flex-start; margin-bottom: 4px; }
+.sc-prompt { max-height: 50vh; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); }
+.tk-page .ad-section { max-width: 760px; }
+.tk-page .ad-list dd code { font: 500 12.5px var(--mono); overflow-wrap: anywhere; }
+@media (min-width: 900px) { .sc-back { display: none; } }

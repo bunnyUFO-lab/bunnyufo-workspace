@@ -8,12 +8,18 @@ import { clearHub } from './hubCache.mjs'
 import type { SpawnTarget } from './hubSpawn'
 import { holdReload } from './reloadGate'
 
-export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'review' | 'blocked' | 'session'
+export type ItemKind = 'ask' | 'checklist' | 'request' | 'approval' | 'hermes-approval' | 'run-question' | 'pc-stuck' | 'review' | 'blocked' | 'session'
 export interface Item {
   kind: ItemKind
   /** A Hermes approval row: the command Hermes asks to run, its reason, the answers it takes, and when it denies by itself. */
   /** A run-question row: what Hermes asked. */
   question?: string
+  /** A pc-stuck row (an approved PC job that did not start): its job's title, the cause, 2 or 3 sentences, the step with its command to copy, and which buttons fit. */
+  job?: string
+  cause?: string
+  step?: string
+  canWake?: boolean
+  cloudOk?: boolean
   command?: string
   description?: string
   choices?: string[]
@@ -97,6 +103,8 @@ export interface HubEvent {
   review?: string
   /** An alert made from a request (`source: 'request'`): the request's id. */
   request?: string
+  /** An alert about a scheduled job of the Hermes host (ws-eh2): the job's name, which is also its page. */
+  job?: string
   /** A cloud alert whose request can fire again (`POST /hub/requests/:id/fire`). */
   retry?: boolean
   /** An alert in Today's panel: the key Dismiss sends (`POST /hub/alerts/dismiss`). */
