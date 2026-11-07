@@ -6,12 +6,15 @@ import MarkdownDocument, { MarkdownView } from './MarkdownDocument'
 import { ZoomImage } from './ImagePreview'
 import { downloadImage } from '../lib/download'
 import ReportFrame from './ReportFrame'
+import ImagePreview from './ImagePreview'
+import { resolveFrameImage } from '../lib/card-images.mjs'
 import HtmlEditor from './HtmlEditor'
 import DrawingSection from './DrawingSection'
 import { annotate as startAnnotation, openForEditing, readSection, saveSection, takeEditing } from '../lib/cards'
 import { annotatable, AnnotateContext } from '../lib/annotate'
 import { bridgeFor } from '../lib/bridgeFor'
 import type { Annotate } from '../lib/annotate'
+import type { ImageOpen } from './ReportFrame'
 
 /**
  * The card a page belongs to, when it can be edited through the card routes. `agentTab`: an agent added this tab to a card that is not
@@ -75,8 +78,16 @@ const sizeOf = (src: string) => new Promise<{ width: number; height: number }>((
   picture.src = src
 })
 
+/** The picture's file name, the only caption a page's picture gets: page text never names it. */
+const fileName = (url: string) => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || 'Image' } catch { return 'Image' } }
+
 function ReportPage({ url, title, relativePath, card }: ViewerProps) {
   const context = useContext(AnnotateContext)
+  // A picture the card's page asked the app to show (lib/card-images.mjs): the app's own viewer, on an address the app built.
+  const [picture, setPicture] = useState<{ urls: string[]; index: number } | null>(null)
+  const shownNow = useRef(false)
+  const closedAt = useRef(0)
+  useEffect(() => { shownNow.current = !!picture }, [picture])
   const annotateTarget = annotatable(context, url)
   const markdown = /\.md$/i.test(relativePath)
   const drawing = /\.excalidraw$/i.test(relativePath)
@@ -143,11 +154,20 @@ function ReportPage({ url, title, relativePath, card }: ViewerProps) {
   const fullPath = /^(?:[a-zA-Z]:)?[\\/]/.test(relativePath) ? relativePath : `${serviceState().repo}/${relativePath}`
   if (canEdit && editing) return <div className="report-document"><HtmlEditor path={fullPath} url={url} title={title} onClose={() => setEditing(false)} onSaved={() => setSaves(n => n + 1)} /></div>
   const framed = frameUrl(url)
+  const imageOpen: ImageOpen | undefined = context ? {
+    resolve: src => resolveFrameImage(src, frameUrl(context.folderUrl), context.folderUrl),
+    open: ({ url: address, urls }) => { shownNow.current = true; setPicture({ urls, index: Math.max(0, urls.indexOf(address)) }) },
+    isOpen: () => shownNow.current,
+    closedAt: () => closedAt.current,
+  } : undefined
   const shown = saves ? `${framed}${framed.includes('?') ? '&' : '?'}buw-saved=${saves}` : framed
   return <div className="report-document" aria-busy={!ready}>
     {canEdit && ready && <button type="button" className="report-edit" onClick={() => setEditing(true)} title="Edit the text on this page ( Ctrl+E )">✎ Edit</button>}
     {/* A new element per address: changing `src` in place would add an entry to the browser's joint history (lib/entries). */}
-    <ReportFrame key={shown} url={shown} title={title} bridge={bridgeFor(card)} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
+    <ReportFrame key={shown} url={shown} title={title} bridge={bridgeFor(card)} onImage={imageOpen} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
     {!ready && <div className="report-loading" role="status">Opening report…</div>}
+    {picture && <ImagePreview url={picture.urls[picture.index]} title={fileName(picture.urls[picture.index])}
+      gallery={picture.urls.length > 1 ? { items: picture.urls.map(item => ({ url: item, title: fileName(item) })), index: picture.index, onIndex: index => setPicture({ urls: picture.urls, index }) } : undefined}
+      onClose={() => { closedAt.current = Date.now(); setPicture(null) }} />}
   </div>
 }

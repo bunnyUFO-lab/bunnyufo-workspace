@@ -2,13 +2,25 @@ import { useCallback, useEffect, useRef, useState, type IframeHTMLAttributes } f
 import { useWorkspaceTheme } from '../lib/workspace-theme'
 import { reportThemeCSS } from '../../server/report-theme.mjs'
 import { attachCardBridge } from '../lib/card-bridge.mjs'
+import { attachImageOpen } from '../lib/card-images.mjs'
 import { host } from '../lib/host'
 import { api } from '../local/client'
 
 /** The card a framed page belongs to: the one card the page may save for, through the app. */
-type Props = Omit<IframeHTMLAttributes<HTMLIFrameElement>, 'src' | 'onLoad'> & { url: string; onLoad?: () => void; bridge?: { workspace: string; id: string } }
+type Props = Omit<IframeHTMLAttributes<HTMLIFrameElement>, 'src' | 'onLoad'> & { url: string; onLoad?: () => void; bridge?: { workspace: string; id: string }; onImage?: ImageOpen }
 
-function ThemedFrame({ url, onLoad, bridge, ...props }: Props) {
+/**
+ * How a card page may reach the app's picture viewer (lib/card-images.mjs): it asks to open one of the card's own files and
+ * nothing else. `resolve` turns the page's address into the app's address of a file of this card, or null.
+ */
+export interface ImageOpen {
+  resolve: (src: string) => string | null
+  open: (picture: { url: string; urls: string[] }) => void
+  isOpen: () => boolean
+  closedAt: () => number
+}
+
+function ThemedFrame({ url, onLoad, bridge, onImage, ...props }: Props) {
   const { resolved } = useWorkspaceTheme()
   const frame = useRef<HTMLIFrameElement>(null)
   // A targeted postMessage to a frame that has not loaded yet is still about:blank, and warns.
@@ -48,6 +60,21 @@ function ThemedFrame({ url, onLoad, bridge, ...props }: Props) {
     if (!element || !workspace || !id) return
     return attachCardBridge(element, { workspace, id }, { origin: new URL(src).origin, enabled: () => host.cards && !host.saves && window.top === window && !window.opener, call: api })
   }, [workspace, id, src])
+  // The page can ask the app to open its picture viewer. Read through a ref, so the listener is attached once per frame.
+  const image = useRef(onImage)
+  useEffect(() => { image.current = onImage })
+  const wantsImages = !!onImage
+  useEffect(() => {
+    const element = frame.current
+    if (!element || !wantsImages) return
+    return attachImageOpen(element, {
+      origin: new URL(src).origin,
+      resolve: address => image.current?.resolve(address) ?? null,
+      open: picture => image.current?.open(picture),
+      isOpen: () => image.current?.isOpen() ?? true,
+      closedAt: () => image.current?.closedAt() ?? 0,
+    })
+  }, [wantsImages, src])
   return <iframe {...props} ref={frame} src={src} onLoad={() => { loaded.current = true; applyTheme(); onLoad?.() }} />
 }
 
