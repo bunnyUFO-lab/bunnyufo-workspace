@@ -47,6 +47,9 @@ try {
   await page.locator('[data-pending]').waitFor({ state: 'detached' });   // the reply is saved and shown as a line
   await page.evaluate(() => { location.hash = '#/~hub/chat'; });
   await page.locator('[data-chat-list] [data-conversation]', { hasText: 'Plan the forest level' }).waitFor();
+  // The list first paints from its last answer (the one that said Replying) and drops the mark when the fresh answer lands, so the mark is
+  // waited on, not counted at once. It must go: a mark that stayed would time out here.
+  await page.waitForFunction(() => !document.querySelector('[data-chat-list] [data-conversation-running]'));
   assert.equal(await page.locator('[data-conversation-running]').count(), 0, 'The mark goes when the reply is saved.');
   console.log('ok');
 } finally {
