@@ -40,20 +40,24 @@ export function canonicalAddress(input: RedirectInput): string | null {
     return first && !hash ? result(TODAY) : result(LIBRARY)
   }
 
-  const match = /^#\/?~hub(?:\/([^/?#]*))?(?:\/(.*))?$/.exec(hash)
+  // The query (`?project=`, `?sprint=`) is split off before the table and put back on every result.
+  const cut = hash.indexOf('?')
+  const query = cut < 0 ? '' : hash.slice(cut)
+  const bare = cut < 0 ? hash : hash.slice(0, cut)
+  const match = /^#\/?~hub(?:\/([^/?#]*))?(?:\/(.*))?$/.exec(bare)
   if (match) {
     const raw = match[1] ?? ''
     const rest = match[2] ?? ''
     const screen = Object.prototype.hasOwnProperty.call(HUB_ALIASES, raw) ? HUB_ALIASES[raw] : raw
-    if (!SCREENS.includes(screen)) return result(TODAY)
+    if (!SCREENS.includes(screen)) return result(`${TODAY}${query}`)
     const tailPath = rest ? `/${rest}` : ''
-    if (screen === 'map' && !rest) return result('#/~hub/project')
+    if (screen === 'map' && !rest && !new URLSearchParams(query).get('project')?.trim()) return result(`#/~hub/project${query}`)
     if (screen === 'project') {
       const [id, tab, ...more] = rest.split('/')
-      if (id && (tab === 'running' || tab === 'needs')) return result(`#/~hub/project/${id}/work${more.length ? `/${more.join('/')}` : ''}`)
-      if (id && tab === 'library') return result(`#/~hub/project/${id}/cards${more.length ? `/${more.join('/')}` : ''}`)
+      if (id && (tab === 'running' || tab === 'needs')) return result(`#/~hub/project/${id}/work${more.length ? `/${more.join('/')}` : ''}${query}`)
+      if (id && tab === 'library') return result(`#/~hub/project/${id}/cards${more.length ? `/${more.join('/')}` : ''}${query}`)
     }
-    const next = `#/~hub/${screen}${tailPath}`
+    const next = `#/~hub/${screen}${tailPath}${query}`
     return next !== hash || dropped ? result(next) : null
   }
 

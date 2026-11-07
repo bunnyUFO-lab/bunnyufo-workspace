@@ -83,7 +83,7 @@ export default function ProjectsScreen({ route }: { route: HubRoute }) {
   return (
     <Split
       list={<ProjectsList current={open} />}
-      detail={open ? <ProjectPage key={open} route={wanted ? route.id : undefined} project={open} view={route.screen === 'map' ? 'map' : 'list'} /> : undefined}
+      detail={open ? <ProjectPage key={open} route={wanted ? route.id : undefined} project={open} view={route.screen === 'map' ? 'map' : 'list'} sprint={route.sprint} /> : undefined}
       empty="Pick a project from the list."
     />
   )

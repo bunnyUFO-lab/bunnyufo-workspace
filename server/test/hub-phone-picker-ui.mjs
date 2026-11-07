@@ -94,7 +94,7 @@ try {
     await page.goto(`${fixture.url}#/~hub/work`);
     let select = await ready(page, '.work');
     await select.selectOption('lanes');
-    await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
+    await page.waitForFunction(() => location.hash === '#/~hub/work?project=lanes');
     await none(page, 'Work after a pick');
 
     await page.context().close();
@@ -105,7 +105,7 @@ try {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await page.goto(`${fixture.url}#/~hub/work`);
     await (await ready(page, '.work')).selectOption('lanes');
-    await page.waitForFunction(() => location.hash === '#/~hub/work/lanes');
+    await page.waitForFunction(() => location.hash === '#/~hub/work?project=lanes');
     assert.equal(await stored(page, 'buw.hub.project'), 'lanes');
     await page.reload();
     await expect(await ready(page, '.work')).toHaveValue('lanes');
@@ -122,7 +122,7 @@ try {
     select = await ready(page, '.work');
     assert.equal(await select.locator('option').first().getAttribute('value'), 'all');
     await select.selectOption('all');
-    await page.waitForFunction(() => location.hash === '#/~hub/work/all');
+    await page.waitForFunction(() => location.hash === '#/~hub/work?project=all');
 
     await page.context().close();
   }

@@ -10,6 +10,10 @@ export type HubScreen = (typeof HUB_SCREENS)[number]
 export interface HubRoute {
   screen: HubScreen
   id?: string
+  /** `?sprint=<name>`: the sprint (a Beads label `sprint:<name>`) the screen narrows to, where it can. */
+  sprint?: string
+  /** `?project=<id>`: on Work, Projects and Map with no id in the path it is also the route id. */
+  project?: string
 }
 
 export interface Route {
@@ -28,18 +32,35 @@ export const HUB_ALIASES: Record<string, HubScreen> = { inbox: 'needs', board: '
 const isAlias = (raw: string) => Object.prototype.hasOwnProperty.call(HUB_ALIASES, raw)
 const hubScreenOf = (raw: string) => (isAlias(raw) ? HUB_ALIASES[raw] : raw)
 
+/** A query value of the address: trimmed, at most 80 characters, empty is none. */
+const queryValue = (params: URLSearchParams, name: string): string | undefined => params.get(name)?.replace(/(?:\/~o)+$/, '').trim().slice(0, 80) || undefined
+
 export function parseHash(): Route {
-  const full = window.location.hash.replace(/^#\/?/, '')
+  return parseHashString(window.location.hash)
+}
+
+/** `parseHash` for a given `location.hash`: pure, so a node test covers it. */
+export function parseHashString(hash: string): Route {
+  const full = hash.replace(/^#\/?/, '')
   const raw = withoutOverlay(`/${full}`).slice(1)
   const overlay = raw !== full
   const open = <T extends Route>(route: T): T => (overlay ? { ...route, overlay: true } : route)
   if (!raw) return open({ id: null, step: -1 })
-  if (raw === '~hub' || raw.startsWith('~hub/')) {
-    const [, first, ...rest] = raw.split('/')
+  if (raw === '~hub' || raw.startsWith('~hub/') || raw.startsWith('~hub?')) {
+    // A query that names neither `project` nor `sprint` is not ours: it stays in the id, as before (an address with some other `?` in it is unchanged).
+    const found = raw.indexOf('?')
+    const ours = found >= 0 && /(?:^|&)(?:project|sprint)=/.test(raw.slice(found + 1))
+    const cut = ours ? found : -1
+    const path = cut < 0 ? raw : raw.slice(0, cut)
+    const params = new URLSearchParams(cut < 0 ? '' : raw.slice(cut + 1))
+    const sprint = queryValue(params, 'sprint')
+    const project = queryValue(params, 'project')
+    const [, first, ...rest] = path.split('/')
     const screen = hubScreenOf(first)
     const known = (HUB_SCREENS as readonly string[]).includes(screen) ? screen as HubScreen : 'today'
-    const id = known === screen ? safeDecode(rest.join('/')) : ''
-    return open({ id: null, step: -1, hub: { screen: known, ...(id ? { id } : {}) } })
+    let id = known === screen ? safeDecode(rest.join('/')) : ''
+    if (!id && project && (known === 'work' || known === 'project' || known === 'map')) id = project
+    return open({ id: null, step: -1, hub: { screen: known, ...(id ? { id } : {}), ...(sprint ? { sprint } : {}), ...(project ? { project } : {}) } })
   }
   const [id, stepRaw] = raw.split('/')
   const step = Number(stepRaw)
@@ -47,6 +68,36 @@ export function parseHash(): Route {
     id: decodeURIComponent(id),
     step: Number.isInteger(step) && step >= 0 ? step : -1,
   })
+}
+
+export interface Scope { project?: string; sprint?: string }
+
+/** The hash with `?project=` and `?sprint=` appended, for the parts of `scope` that are set. A hash that has a query already gets `&`. */
+export function withScope(hash: string, scope: Scope): string {
+  const params = new URLSearchParams()
+  if (scope.project) params.set('project', scope.project)
+  if (scope.sprint) params.set('sprint', scope.sprint)
+  const query = params.toString()
+  if (!query) return hash
+  // A sheet's tail (`/~o`) ends the whole address, so the query goes before it.
+  const base = withoutOverlay(hash)
+  return `${base}${base.includes('?') ? '&' : '?'}${query}${hash.slice(base.length)}`
+}
+
+/** The project and sprint of a Hub route: the project is the one the screen shows (a path id wins over `?project=`). */
+export function scopeOf(hub: HubRoute | undefined): Scope {
+  if (!hub) return {}
+  const fromPath = hub.screen === 'work' ? parseWorkId(hub.id).project : hub.screen === 'project' ? parseProjectId(hub.id).project : hub.screen === 'map' ? hub.id?.split('/')[0] : undefined
+  const project = fromPath || hub.project
+  return { ...(project ? { project } : {}), ...(hub.sprint ? { sprint: hub.sprint } : {}) }
+}
+
+/** The scope of the address now. */
+export const currentScope = (): Scope => scopeOf(parseHash().hub)
+
+/** `#/~hub/work?project=<board>[&sprint=<s>]`, or `#/~hub/work` for none: the Work board, optionally narrowed to a sprint. */
+export function workBoardHash(board?: string, sprint?: string): string {
+  return withScope('#/~hub/work', { project: board, sprint })
 }
 
 export function entityHash(id: string, step = -1): string {
@@ -59,10 +110,10 @@ export function hubHash(screen: HubScreen, id?: string): string {
 }
 
 /** `#/~hub/project[/<id>[/<tab>]]`: a project's page. No tab is the Roadmap tab; `work` and `cards` are the others. No id is the Projects list. */
-export function projectHash(id?: string, tab?: string): string {
-  if (!id) return '#/~hub/project'
+export function projectHash(id?: string, tab?: string, sprint?: string): string {
+  if (!id) return withScope('#/~hub/project', { sprint })
   const base = `#/~hub/project/${encodeURIComponent(id)}`
-  return tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base
+  return withScope(tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base, { sprint })
 }
 
 /** The project id, the raw tab and, on the Roadmap tab, the node whose details are open, out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the three. */
@@ -74,19 +125,19 @@ export function parseProjectId(id: string | undefined): { project?: string; tab?
 }
 
 /** `#/~hub/project/<id>/roadmap/<node>`: the project's page with that milestone or task's details open over it. */
-export function projectNodeHash(id: string, node: string): string {
-  return `#/~hub/project/${encodeURIComponent(id)}/roadmap/${encodeURIComponent(node)}`
+export function projectNodeHash(id: string, node: string, sprint?: string): string {
+  return withScope(`#/~hub/project/${encodeURIComponent(id)}/roadmap/${encodeURIComponent(node)}`, { sprint })
 }
 
 /** `#/~hub/map/<project>[/<node>]`: the map, and with a node its details panel open. */
-export function mapHash(project: string, node?: string): string {
+export function mapHash(project: string, node?: string, sprint?: string): string {
   const base = `#/~hub/map/${encodeURIComponent(project)}`
-  return node ? `${base}/${encodeURIComponent(node)}` : base
+  return withScope(node ? `${base}/${encodeURIComponent(node)}` : base, { sprint })
 }
 
 /** `#/~hub/work/<board>/<bead>`: the Work board (a project's own, or `all`) with that item's card highlighted and its details sheet open. */
-export function workHash(board: string, bead: string): string {
-  return `#/~hub/work/${encodeURIComponent(board)}/${encodeURIComponent(bead)}`
+export function workHash(board: string, bead: string, sprint?: string): string {
+  return withScope(`#/~hub/work/${encodeURIComponent(board)}/${encodeURIComponent(bead)}`, { sprint })
 }
 
 /** The board (a project id or `all`) and bead out of a Work route id (`<board>[/<bead>]`); a bare board has no bead. */
