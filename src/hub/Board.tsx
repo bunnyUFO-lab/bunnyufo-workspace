@@ -135,7 +135,8 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
   // The answer for another sprint stays on screen until this one lands, so the picker (and its focus) is not unmounted by a pick.
   const [last, setLast] = useState<WorkLanes | null>(null)
   if (read.data && read.data !== last) setLast(read.data)
-  const workData = read.data ?? last
+  // A failed load of a new sprint shows the error and no lanes, not the old sprint's.
+  const workData = read.data ?? (read.error ? null : last)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [picked, setPicked] = useState<WorkLane | null>(null)
   // Read in the initializer: the board re-mounts per project and must not fall back to the default.

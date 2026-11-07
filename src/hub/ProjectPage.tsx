@@ -17,10 +17,10 @@ import NeedsRows from './NeedsRows'
 import PlanInHermes from './PlanInHermes'
 import ProgressMap from './ProgressMap'
 import ProjectRing from './ProjectRing'
-import RoadmapRows from './RoadmapRows'
+import RoadmapRows, { HideDoneChip } from './RoadmapRows'
 import SprintPicker, { sprintCount } from './SprintPicker'
 import { sprintModel, sprintsOf } from './sprintScope.ts'
-import { useHideDone } from './hideDone'
+import { useHideDone, writeHideDone } from './hideDone'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
 import { tallyOf, tallyWords } from './mapCount.ts'
@@ -116,6 +116,9 @@ function RoadmapList({ project, model, onOpen }: { project: string; model: MapMo
     <div className="pj-roadmap" data-pp-roadmap>
       {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
       {milestones.map(row)}
+      {hideDone && milestones.length === 0 && done.length > 0 && (
+        <p className="hub-empty" data-pp-all-done>Everything here is done. <button type="button" className="hub-btn" data-pp-show-done onClick={() => writeHideDone(false)}>Show completed</button></p>
+      )}
       {done.length > 0 && !hideDone && (
         <div className="pj-done" data-pp-finished data-open={doneOpen}>
           <button type="button" className="pj-ms-head pj-done-head" aria-expanded={doneOpen} onClick={() => setDoneOpen(value => !value)} data-pp-done-toggle>
@@ -142,7 +145,7 @@ function RoadmapTab({ project, model, sprint, error, loading, at, onOpen }: { pr
             ? <RoadmapList project={project} model={sprint} onOpen={onOpen} />
             : <p className="hub-empty" data-pp-sprint-empty>No tasks in this sprint. <a className="pp-link" href={projectHash(project)} data-pp-sprint-clear>Show the whole roadmap ›</a></p>)
         : model.roadmaps?.length
-          ? <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} /></div>
+          ? <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} chip={false} /></div>
           : <RoadmapList project={project} model={model} onOpen={onOpen} />}
     </>
   )
@@ -327,6 +330,9 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
   const scoped = sprint && model?.meta ? sprintModel(model, sprint) : undefined
   // Hide completed also leaves finished sprints out of the picker, except the one in the address.
   const sprintsAll = model?.meta ? sprintsOf(model) : []
+  // Hide completed can hide something here: a sprint, a roadmap or a finished milestone.
+  const canHide = !!model?.meta && (sprintsAll.length > 0 || !!model.roadmaps?.length || model.milestones.some(milestone => milestone.state === 'done'))
+  const showRow = tab === 'roadmap' && !!model?.meta && (sprintsAll.length > 0 || !!sprint || (view === 'list' && canHide))
   const sprints = sprintsAll.filter(row => !hideDone || row.done < row.total || row.name === sprint)
   const sprintRow = sprint ? sprints.find(row => row.name === sprint) : undefined
   const done = model?.meta ? tallyOf((scoped ?? model).milestones.flatMap(tasksOfMilestone)) : null
@@ -363,9 +369,10 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
         </div>
       )}
       </div>
-      {tab === 'roadmap' && model?.meta && (sprintsAll.length > 0 || sprint) && (
+      {showRow && (
         <div className="pp-sprint" data-pp-sprint-row>
-          <SprintPicker id="hub-project-sprint" sprints={sprints} value={sprint ?? ''} onChange={pickSprint} className="cb-bar pp-sprint-pick" />
+          {(sprintsAll.length > 0 || sprint) && <SprintPicker id="hub-project-sprint" sprints={sprints} value={sprint ?? ''} onChange={pickSprint} className="cb-bar pp-sprint-pick" />}
+          {view === 'list' && canHide && <HideDoneChip />}
           {sprint && sprintRow && <span className="pp-sprint-count" data-pp-sprint-count>{sprintCount(sprintRow)}</span>}
           {sprint && <a className="pp-link" href={workBoardHash(project, sprint)} data-pp-sprint-board>Open on the board ›</a>}
         </div>

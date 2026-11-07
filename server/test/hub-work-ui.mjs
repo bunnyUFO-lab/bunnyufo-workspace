@@ -353,6 +353,10 @@ try {
   await sp.waitForFunction(() => !document.querySelector('.wk-lanes-wrap[data-stale]') && !document.querySelector('.wk-lane .wk-card'));
   assert.equal(await sp.locator('.wk-lane .wk-card').count(), 0, 'An unknown sprint gives empty lanes.');
   assert.equal(await sp.locator('[data-filter-sprint]').inputValue(), 'nothing-here', 'A sprint the list lacks still shows.');
+  await sp.route('**/api/hub/work?*sprint=boom*', route => route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"No."}' }));
+  await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=boom'; });
+  await sp.locator('[role="alert"], .hub-error').first().waitFor();
+  assert.equal(await sp.locator('.wk-lane .wk-card').count(), 0, 'A failed load of a new sprint shows no lanes of the old one.');
   await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=sprint-5'; });
   await sp.waitForFunction(() => document.querySelector('.wk-lane[data-lane="ready"] .hub-id')?.textContent.trim() === 'sp-t1');
   assert.equal(await sp.locator('[data-lane] .wk-more').count(), 0, 'Lanes do not fold under a sprint.');

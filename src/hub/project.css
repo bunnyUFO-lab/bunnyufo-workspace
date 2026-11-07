@@ -101,3 +101,5 @@
   .pp-sprint .cb.pp-sprint-pick .cb-input { min-height: 44px; }
   .pp-sprint .pp-link { min-height: 44px; }
 }
+.pp-sprint .hub-chip { min-height: 32px; }
+@media (pointer: coarse), (max-width: 639px) { .pp-sprint .hub-chip { min-height: 44px; display: inline-flex; align-items: center; } }

@@ -478,6 +478,31 @@ try {
   await page.locator('[data-filter-sprint]').click();
   assert.deepEqual(await page.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => item.getAttribute('data-value'))), ['', 'sprint-5', 'sprint-4'], 'With it off, every sprint is there.');
 
+  step('project page: Hide completed sits beside the sprint picker, shows when it can hide something, and an all-done list says so with a way back');
+  await page.evaluate(() => localStorage.removeItem('buw.roadmap.hideDone'));
+  await goPage(page, '#/~hub/project/sprite-studio');
+  await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').waitFor();
+  assert.equal(await page.locator('[data-filter-sprint]').count(), 0, 'No sprints, no picker, but the chip is there for the finished milestone.');
+  assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 1);
+  await goPage(page, '#/~hub/project/workspace-app');
+  await page.locator('[data-pp-roadmap]').waitFor();
+  assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 0, 'Nothing finished, no sprint, no roadmap: nothing to hide, no chip.');
+  await goPage(page, '#/~hub/project/roadmapped');
+  await page.locator('[data-pp-roadmap-rows]').waitFor();
+  assert.equal(await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').count(), 1, 'On a project with roadmaps the chip is in the sprint row.');
+  assert.equal(await page.locator('[data-pp-roadmap-rows] [data-roadmap-hide-done]').count(), 0, 'The rows do not draw a second one.');
+  await goPage(page, '#/~hub/project/magic-loops?sprint=sprint-4');
+  await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').click();
+  await page.locator('[data-pp-all-done]').waitFor();
+  assert.match(await page.locator('[data-pp-all-done]').innerText(), /Everything here is done\./);
+  assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 done', 'The selected finished sprint stays in the picker.');
+  await page.locator('[data-pp-show-done]').click();
+  await page.locator('[data-pp-done-toggle]').waitFor();
+  assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'false', 'Show completed turns the setting off.');
+  await page.locator('[data-pp-done-toggle]').click();
+  await page.locator('[data-pp-milestone="ml-m1"]').waitFor();
+  await page.evaluate(() => localStorage.removeItem('buw.roadmap.hideDone'));
+
   step('roadmap rows at 390 px: the names are 44 px and nothing scrolls sideways');
   const rowsPhone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await goPage(rowsPhone, '#/~hub/project/roadmapped');
