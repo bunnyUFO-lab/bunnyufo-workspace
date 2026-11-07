@@ -44,5 +44,11 @@ export function sprintModel(model: ProgressMap, name: string): ProgressMap {
     delete narrowed.roadmap
     return [narrowed]
   })
-  return { ...model, milestones, roadmaps: [], sprints: model.sprints.filter(band => band.name === name) }
+  // A band's parts count the sprint's own tasks in each milestone: the whole milestone's total would not match the list.
+  const own = new Map(milestones.map(milestone => [milestone.id, milestone.features.reduce((sum, feature) => sum + feature.tasks.length, 0)]))
+  const sprints = model.sprints.filter(band => band.name === name).map(band => ({
+    ...band,
+    milestones: band.milestones.filter(item => own.has(item.id)).map(item => ({ id: item.id, count: own.get(item.id) ?? 0, total: own.get(item.id) ?? 0 })),
+  }))
+  return { ...model, milestones, roadmaps: [], sprints }
 }

@@ -391,8 +391,8 @@ try {
   const sprintPage = await open({ width: 1280, height: 900 });
   await goPage(sprintPage, '#/~hub/project/magic-loops?sprint=sprint-5');
   await sprintPage.locator('[data-pp-sprint-row]').waitFor();
-  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 done', 'The group that carries the label names the sprint.');
-  assert.equal((await sprintPage.locator('[data-pp-sprint-count]').innerText()).trim(), '1 of 3 done');
+  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 tasks done', 'The group that carries the label names the sprint.');
+  assert.equal((await sprintPage.locator('[data-pp-sprint-count]').innerText()).trim(), '1 of 3 tasks done');
   assert.equal(await sprintPage.locator('[data-pp-sprint-board]').getAttribute('href'), '#/~hub/work?project=magic-loops&sprint=sprint-5');
   await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
   assert.deepEqual(await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-milestone'))), ['ml-m1'], 'Only the milestone with a task in the sprint.');
@@ -418,7 +418,7 @@ try {
   await sprintPage.locator('[data-roadmap-view="map"]').click();
   await sprintPage.waitForFunction(() => location.hash === '#/~hub/map/magic-loops?sprint=sprint-5');
   await sprintPage.locator('.hub-map-box svg').waitFor();
-  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 done', 'The picker stays on the Map.');
+  assert.equal(await sprintPage.locator('[data-filter-sprint]').inputValue(), 'Movement · 1 of 3 tasks done', 'The picker stays on the Map.');
   await go2(sprintPage, '#/~hub/map/magic-loops/ml-t1?sprint=sprint-5');
   await sprintPage.locator('.hub-map-panel').waitFor();
   assert.match(await sprintPage.locator('.hub-map-panel').innerText(), /Run/, 'A node outside the sprint still opens its details.');
@@ -472,7 +472,7 @@ try {
   await page.locator('[data-filter-sprint]').click();
   assert.deepEqual(await page.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => item.getAttribute('data-value'))), ['', 'sprint-5'], 'Finished sprints leave the picker.');
   await goPage(page, '#/~hub/project/magic-loops?sprint=sprint-4');
-  assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 done', 'The selected sprint stays, even if finished.');
+  assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 tasks done', 'The selected sprint stays, even if finished.');
   await page.evaluate(() => localStorage.removeItem('buw.roadmap.hideDone'));
   await goPage(page, '#/~hub/project/magic-loops?sprint=sprint-5');
   await page.locator('[data-filter-sprint]').click();
@@ -495,7 +495,7 @@ try {
   await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').click();
   await page.locator('[data-pp-all-done]').waitFor();
   assert.match(await page.locator('[data-pp-all-done]').innerText(), /Everything here is done\./);
-  assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 done', 'The selected finished sprint stays in the picker.');
+  assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 tasks done', 'The selected finished sprint stays in the picker.');
   await page.locator('[data-pp-show-done]').click();
   await page.locator('[data-pp-done-toggle]').waitFor();
   assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'false', 'Show completed turns the setting off.');

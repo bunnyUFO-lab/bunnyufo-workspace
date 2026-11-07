@@ -282,7 +282,13 @@ function BoardView({ project: wanted, focus, sprint }: { project?: string; focus
           {filtering && (
             <p className="wk-count" role="status" data-work-count>{matching} of {loaded} on the board shown · <button type="button" className="wk-clear" onClick={clearFilter}>Clear</button></p>
           )}
-          {sprint && (
+          {sprint && read.data && !sprintRow && (
+            <p className="wk-sprint-line" data-work-sprint-unknown={sprint}>
+              No sprint called {sprint} in this project.
+              <a className="pp-link" href={workBoardHash(board)} data-work-sprint-clear>Show the whole board ›</a>
+            </p>
+          )}
+          {sprint && !(read.data && !sprintRow) && (
             <p className="wk-sprint-line" data-work-sprint={sprint}>
               <b>{sprintRow?.title ?? sprintRow?.name ?? sprint}</b>
               {sprintRow && <span>{sprintCount(sprintRow)}</span>}

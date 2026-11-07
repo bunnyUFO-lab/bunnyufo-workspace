@@ -33,7 +33,7 @@ const isAlias = (raw: string) => Object.prototype.hasOwnProperty.call(HUB_ALIASE
 const hubScreenOf = (raw: string) => (isAlias(raw) ? HUB_ALIASES[raw] : raw)
 
 /** A query value of the address: trimmed, at most 80 characters, empty is none. */
-const queryValue = (params: URLSearchParams, name: string): string | undefined => params.get(name)?.trim().slice(0, 80) || undefined
+const queryValue = (params: URLSearchParams, name: string): string | undefined => params.get(name)?.replace(/(?:\/~o)+$/, '').trim().slice(0, 80) || undefined
 
 export function parseHash(): Route {
   return parseHashString(window.location.hash)
@@ -47,7 +47,10 @@ export function parseHashString(hash: string): Route {
   const open = <T extends Route>(route: T): T => (overlay ? { ...route, overlay: true } : route)
   if (!raw) return open({ id: null, step: -1 })
   if (raw === '~hub' || raw.startsWith('~hub/') || raw.startsWith('~hub?')) {
-    const cut = raw.indexOf('?')
+    // A query that names neither `project` nor `sprint` is not ours: it stays in the id, as before (an address with some other `?` in it is unchanged).
+    const found = raw.indexOf('?')
+    const ours = found >= 0 && /(?:^|&)(?:project|sprint)=/.test(raw.slice(found + 1))
+    const cut = ours ? found : -1
     const path = cut < 0 ? raw : raw.slice(0, cut)
     const params = new URLSearchParams(cut < 0 ? '' : raw.slice(cut + 1))
     const sprint = queryValue(params, 'sprint')
@@ -75,7 +78,10 @@ export function withScope(hash: string, scope: Scope): string {
   if (scope.project) params.set('project', scope.project)
   if (scope.sprint) params.set('sprint', scope.sprint)
   const query = params.toString()
-  return query ? `${hash}${hash.includes('?') ? '&' : '?'}${query}` : hash
+  if (!query) return hash
+  // A sheet's tail (`/~o`) ends the whole address, so the query goes before it.
+  const base = withoutOverlay(hash)
+  return `${base}${base.includes('?') ? '&' : '?'}${query}${hash.slice(base.length)}`
 }
 
 /** The project and sprint of a Hub route: the project is the one the screen shows (a path id wins over `?project=`). */

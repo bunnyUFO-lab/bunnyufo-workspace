@@ -624,6 +624,12 @@ test('sprintsOf counts done of all from the tasks: open sprints first, then the 
   assert.deepEqual(sprintsOf({ milestones: [], sprints: [] }), []);
 });
 
+test('sprintModel counts a band by the sprint own tasks, so the map says what the list says', () => {
+  const narrowed = sprintModel(sprintMap(), 'a');
+  assert.deepEqual(narrowed.sprints[0].milestones, [{ id: 'm1', count: 2, total: 2 }], 'The band said 2 of 3 (the whole milestone) before.');
+  assert.deepEqual(sprintModel(sprintMap(), 'b').sprints[0].milestones, [{ id: 'm1', count: 1, total: 1 }, { id: 'm2', count: 1, total: 1 }]);
+});
+
 test('sprintModel keeps the milestones, features and tasks of one sprint and drops the roadmaps', () => {
   const full = sprintMap();
   const narrowed = sprintModel(full, 'a');

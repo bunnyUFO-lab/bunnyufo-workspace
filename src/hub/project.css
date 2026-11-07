@@ -91,7 +91,8 @@
 }
 
 /* The sprint row under the Roadmap's tabs: the picker, how far the sprint is, and a way to its board. */
-.pp-sprint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; }
+.pp-sprint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 16px 12px; }
+@media (min-width: 900px) { .pp-sprint { margin-inline: 24px; } }
 .pp-sprint .cb.pp-sprint-pick { flex: 0 1 320px; width: 320px; max-width: 100%; }
 .pp-sprint .cb.pp-sprint-pick .cb-input { min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
 .pp-sprint-count { font-size: 13px; color: var(--t2); }

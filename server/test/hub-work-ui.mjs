@@ -335,13 +335,13 @@ try {
   assert.equal(await sp.locator('.wk-card[data-card="bead:ws-ready"]').count(), 0);
   const line = (await sp.locator('[data-work-sprint]').innerText()).replace(/\s+/g, ' ');
   assert.match(line, /Sprint 5: Hermes planning from the phone/);
-  assert.match(line, /2 of 4 done/);
+  assert.match(line, /2 of 4 tasks done/);
   assert.equal(await sp.locator('[data-work-sprint-project]').getAttribute('href'), '#/~hub/project/lanes?sprint=sprint-5');
-  assert.match(await sp.locator('[data-filter-sprint]').inputValue(), /^Sprint 5: Hermes planning from the phone · 2 of 4 done$/);
+  assert.match(await sp.locator('[data-filter-sprint]').inputValue(), /^Sprint 5: Hermes planning from the phone · 2 of 4 tasks done$/);
   const before = await sp.evaluate(() => history.length);
   await sp.locator('[data-filter-sprint]').click();
   const sprintOptions = await sp.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => [item.getAttribute('data-value'), item.textContent.trim()]));
-  assert.deepEqual(sprintOptions, [['', 'All sprints'], ['sprint-5', 'Sprint 5: Hermes planning from the phone · 2 of 4 done'], ['sprint-4', 'sprint-4 · 1 of 1 done']]);
+  assert.deepEqual(sprintOptions, [['', 'All sprints'], ['sprint-5', 'Sprint 5: Hermes planning from the phone · 2 of 4 tasks done'], ['sprint-4', 'sprint-4 · 1 of 1 tasks done']]);
   await sp.locator('.cb-list [role="option"][data-value="sprint-4"]').click();
   await sp.waitForFunction(() => location.hash === '#/~hub/work?project=lanes&sprint=sprint-4');
   await sp.waitForFunction(() => document.querySelector('.wk-lane[data-lane="done"] .hub-id')?.textContent.trim() === 'sp-o1');
@@ -349,9 +349,11 @@ try {
   assert.equal(await sp.evaluate(() => document.activeElement?.hasAttribute('data-filter-sprint')), true, 'The picker keeps the focus.');
   assert.equal(await sp.locator('[data-lane-more]').count(), 0);
   await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=nothing-here'; });
-  await sp.waitForFunction(() => document.querySelector('[data-work-sprint="nothing-here"]'));
+  await sp.waitForFunction(() => document.querySelector('[data-work-sprint-unknown="nothing-here"]'));
   await sp.waitForFunction(() => !document.querySelector('.wk-lanes-wrap[data-stale]') && !document.querySelector('.wk-lane .wk-card'));
   assert.equal(await sp.locator('.wk-lane .wk-card').count(), 0, 'An unknown sprint gives empty lanes.');
+  assert.match((await sp.locator('[data-work-sprint-unknown]').innerText()).replace(/\s+/g, ' '), /^No sprint called nothing-here in this project\./);
+  assert.equal(await sp.locator('[data-work-sprint-clear]').getAttribute('href'), '#/~hub/work?project=lanes', 'The note has a way to clear it.');
   assert.equal(await sp.locator('[data-filter-sprint]').inputValue(), 'nothing-here', 'A sprint the list lacks still shows.');
   await sp.route('**/api/hub/work?*sprint=boom*', route => route.fulfill({ status: 403, contentType: 'application/json', body: '{"error":"No."}' }));
   await sp.evaluate(() => { location.hash = '#/~hub/work?project=lanes&sprint=boom'; });
@@ -386,6 +388,49 @@ try {
   await spPhone.locator('[data-work-clear-all]').click();
   await spPhone.waitForFunction(() => location.hash === '#/~hub/work?project=lanes');
   await spPhone.locator('[data-work-sprint]').waitFor({ state: 'detached' });
+
+  step('a sheet tail never reaches the sprint value: opening Filters on a phone asks /work for the sprint alone, and nothing answers 400');
+  const tailPage = await open({ width: 390, height: 844 });
+  const workCalls = [];
+  tailPage.on('request', request => { if (request.url().includes('/api/hub/work')) workCalls.push(request.url()); });
+  tailPage.on('response', response => { if (response.url().includes('/api/hub/work') && response.status() >= 400) workCalls.push(`BAD ${response.status()} ${response.url()}`); });
+  await tailPage.goto(`${sprinted.url}#/~hub/work?project=lanes&sprint=sprint-5`);
+  await tailPage.locator('[data-work-sprint]').waitFor();
+  await tailPage.locator('[data-work-filters]').click();
+  await tailPage.locator('[data-work-filter-sheet]').waitFor();
+  assert.match(await tailPage.evaluate(() => location.hash), /sprint=sprint-5\/~o$/, 'The sheet tail comes after the query.');
+  await tailPage.waitForTimeout(800);
+  assert.ok(workCalls.length > 0);
+  assert.deepEqual(workCalls.filter(url => url.includes('~o') || url.startsWith('BAD') || !url.includes('sprint=sprint-5')), [], 'Every /work call carries the plain sprint name, and none fails.');
+  assert.equal(await tailPage.locator('[data-filter-sprint]').inputValue(), 'Sprint 5: Hermes planning from the phone · 2 of 4 tasks done');
+
+  step('Running, Delivered and Activity keep the scope in the address and start their project selector on ?project=');
+  await go(sp, '#/~hub/work?project=lanes&sprint=sprint-5');
+  await sp.locator('[data-work-tab="activity"]').click();
+  await sp.locator('[data-activity-filter="ci"]').click();
+  await sp.waitForFunction(() => location.hash === '#/~hub/activity/ci?project=lanes&sprint=sprint-5');
+  assert.match(await sp.locator('#hub-activity-project').inputValue(), /lanes/i, 'Activity follows ?project=.');
+  await sp.locator('[data-work-tab="running"]').click();
+  await sp.waitForFunction(() => location.hash === '#/~hub/jobs/running?project=lanes&sprint=sprint-5');
+  assert.match(await sp.locator('#hub-jobs-project').inputValue(), /lanes/i, 'Running follows ?project=.');
+  await sp.locator('[data-work-tab="delivered"]').click();
+  await sp.waitForFunction(() => location.hash === '#/~hub/jobs/finished?project=lanes&sprint=sprint-5');
+
+  step('project page: the three tabs sit side by side at 1280 and 800, with and without a sprint; at 390 the sprint row has the page margin');
+  for (const width of [1280, 800]) {
+    const wide = await open({ width, height: 800 });
+    for (const query of ['', '?sprint=sprint-5']) {
+      await wide.goto(`${sprinted.url}#/~hub/project/lanes${query}`);
+      await wide.locator('[data-project-tab]').first().waitFor();
+      const boxes = await wide.locator('[data-project-tab]').evaluateAll(list => list.map(item => { const box = item.getBoundingClientRect(); return [box.left, box.right]; }));
+      for (let i = 1; i < boxes.length; i++) assert.ok(boxes[i][0] >= boxes[i - 1][1], `${width}px ${query}: tab ${i} starts after tab ${i - 1} ends.`);
+    }
+  }
+  const margin = await open({ width: 390, height: 844 });
+  await margin.goto(`${sprinted.url}#/~hub/project/lanes?sprint=sprint-5`);
+  await margin.locator('[data-pp-sprint-row]').waitFor();
+  const edges = await margin.locator('[data-pp-sprint-row] .cb').evaluate(item => { const box = item.getBoundingClientRect(); return [box.left, innerWidth - box.right]; });
+  assert.ok(edges[0] >= 16 && edges[1] >= 16, `The sprint picker keeps the page margin (${edges}).`);
 
   console.log('hub-work-ui: passed');
 } finally {

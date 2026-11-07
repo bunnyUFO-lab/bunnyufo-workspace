@@ -54,6 +54,17 @@ test('withScope and workBoardHash', () => {
   assert.equal(hub(workBoardHash('alpha', 's5')).sprint, 's5');
 });
 
+test('a sheet tail never reaches the sprint value, and withScope puts the query before it', () => {
+  const route = parseHashString('#/~hub/work?project=alpha&sprint=sprint-5/~o');
+  assert.equal(route.hub.sprint, 'sprint-5');
+  assert.equal(parseHashString('#/~hub/work?sprint=sprint-5/~o/~o').hub.sprint, 'sprint-5');
+  assert.equal(parseHashString('#/~hub/work/alpha/ws-1?sprint=s5/~o').hub.sprint, 's5');
+  assert.equal(withScope('#/~hub/work/~o', { sprint: 's5' }), '#/~hub/work?sprint=s5/~o');
+  assert.equal(withScope('#/~hub/work?project=a/~o', { sprint: 's5' }), '#/~hub/work?project=a&sprint=s5/~o');
+  assert.equal(withScope('#/~hub/work/~o/~o', {}), '#/~hub/work/~o/~o');
+  assert.equal(parseHashString(withScope('#/~hub/work/~o', { sprint: 's5' })).hub.sprint, 's5');
+});
+
 test('the helpers keep a sprint when given one', () => {
   assert.equal(projectHash('alpha', 'work', 's5'), '#/~hub/project/alpha/work?sprint=s5');
   assert.equal(projectHash('alpha'), '#/~hub/project/alpha');
