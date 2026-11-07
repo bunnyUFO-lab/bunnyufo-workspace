@@ -258,7 +258,34 @@ export interface ScheduleJob {
   promptCut?: boolean
   promptRedacted?: number
   rev?: string
+  /** Set only for a signed-in viewer when the host can apply a job change (ws-eh2 G). */
+  editable?: boolean
+  /** The prompt can be edited here: it is whole, neither cut nor redacted in the export. */
+  promptEditable?: boolean
+  /** The job's newest change from this page, while it waits and for a day after it ended. */
+  change?: JobChange
 }
+
+/** What a signed job change did to the job: the words of the result come from the Hub (`reason`). The prompt text is never sent, only that it moved. */
+export interface JobChange {
+  id: string
+  op: 'edit' | 'pause' | 'resume' | 'remove' | 'add'
+  job: string
+  state: ChangeState
+  at: string
+  by: string
+  from: { schedule: string; provider: string | null; model: string | null } | null
+  to: { schedule?: string; provider?: string | null; model?: string | null; promptChanged?: boolean } | null
+  resultAt?: string
+  runningAt?: string
+  code?: string
+  reason?: string
+  /** The newest confirmed change that still runs: one press puts the changed fields back. */
+  canUndo?: boolean
+}
+
+/** What the owner's press on a job answers (201): signed, waiting for the host. `nextRunAt` is the next run before the change, for "Next run moved". */
+export interface JobChangeAnswer { change: string; state: 'waiting'; op: JobChange['op']; job: string; from: unknown; to: unknown; nextRunAt: string | null }
 
 /** One timer of the Hermes host or of the site host. The Hermes host's export carries no run times; the site host's file does. */
 export interface ScheduleTimer { name: string; description: string; schedule: string; enabled: boolean; lastResult: string; nextRun?: string; lastRun?: string }
@@ -295,6 +322,8 @@ export interface ScheduleSource<T = ScheduleJob | ScheduleTimer | PcTask | Githu
   note?: string
   /** The PC's tasks: how many non-OS tasks it has in all, which can be more than the rows. */
   total?: number
+  /** The Hermes jobs list: whether the host can apply a job change, and (signed in only) the models and places a job may use. */
+  edits?: { available: boolean; models?: ModelRef[]; targets?: { id: string; label: string }[] }
   items: T[]
 }
 

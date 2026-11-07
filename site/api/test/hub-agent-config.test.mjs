@@ -296,7 +296,7 @@ test('validResult accepts the fixed codes and nothing else; ok goes with applied
   const lacking = resultDoc();
   delete lacking.rolledBack;
   assert.equal(validResult(lacking), null);
-  assert.deepEqual(Object.keys(CHANGE_CODES), ['ok', 'bad-signature', 'bad-shape', 'expired', 'stale', 'unknown-model', 'missing-key', 'no-codex-login', 'config-write', 'config-check', 'restart', 'health', 'interrupted', 'rollback-failed']);
+  assert.deepEqual(Object.keys(CHANGE_CODES), ['ok', 'bad-signature', 'bad-shape', 'expired', 'stale', 'unknown-model', 'missing-key', 'no-codex-login', 'config-write', 'config-check', 'restart', 'health', 'interrupted', 'rollback-failed', 'unknown-job', 'job-refused', 'job-check']);
 });
 
 test('changeState: waiting, late, failed, applied and live, and a result for another change counts for nothing', () => {

@@ -5,6 +5,7 @@
 // their own data (`hub-other-schedules.mjs` reads that) and say "not reporting" while it is missing. Nothing on this page
 // is a name from the owner's machines: every label and name comes from data, so this file holds none. View only: nothing here changes a job.
 import { exportFreshness, PROFILES } from './hub-agent-config.mjs';
+import { jobChangeView, promptEditable, promptProblem } from './hub-job-change.mjs';
 
 /** Which copy of a job is real. Shown at the top of the page. */
 export const COPY_NOTE = 'These are the jobs the Hermes host runs now. The setup script in the homelab repo only adds a job that is missing, so changing it does not change a job that already exists.';
@@ -51,17 +52,18 @@ function pcSources(status, at) {
  *   The Hermes sources also carry `host` (the host's own label) and, for jobs, `timezone` (the zone the cron text runs in) and `profileModels` (the model a job follows when it pins none).
  * - a job item is the exporter's job with its `profile`; fields the exporter did not send are absent, not blank.
  */
-export function schedulesView({ exported, status = null, hostFile = null, at }) {
+export function schedulesView({ exported, status = null, hostFile = null, at, changes = [], signedIn = false }) {
   const state = exported ? (exportFreshness(exported, at) === 'fresh' ? 'live' : 'old') : 'not-reporting';
   const host = exported?.hostLabel ?? 'Hermes host';
   const profiles = exported ? PROFILES.filter(name => Array.isArray(exported.profiles[name]?.cron)) : [];
-  const jobs = profiles.flatMap(profile => exported.profiles[profile].cron.map(job => ({ ...job, profile })));
+  const edits = exported ? editsOf({ exported, state, signedIn }) : null;
+  const jobs = profiles.flatMap(profile => exported.profiles[profile].cron.map(job => ({ ...job, profile, ...(profile === 'briefs' ? jobEditing({ job, exported, edits, changes, at }) : {}) })));
   const timezone = profiles.map(profile => exported.profiles[profile].timezone).find(Boolean);
   // The model each profile follows, for a job that pins none.
   const profileModels = Object.fromEntries(profiles.map(profile => [profile, exported.profiles[profile].model?.default]).filter(([, model]) => model));
 
   const hermesJobs = exported
-    ? { id: 'hermes-jobs', label: 'Hermes jobs', state, as_of: exported.exportedAt, host, items: jobs, ...(timezone ? { timezone } : {}), profileModels, ...(jobs.length ? {} : { text: 'The export lists no scheduled job.' }) }
+    ? { id: 'hermes-jobs', label: 'Hermes jobs', state, as_of: exported.exportedAt, host, items: jobs, ...(timezone ? { timezone } : {}), profileModels, ...(edits ? { edits: { available: edits.available, ...(edits.editable ? { models: edits.models, targets: edits.targets } : {}) } } : {}), ...(jobs.length ? {} : { text: 'The export lists no scheduled job.' }) }
     : { id: 'hermes-jobs', label: 'Hermes jobs', state, as_of: null, host, items: [], text: NO_EXPORT };
   const hasTimers = !!exported && Array.isArray(exported.hostTimers);
   const hermesTimers = hasTimers
@@ -71,6 +73,41 @@ export function schedulesView({ exported, status = null, hostFile = null, at }) 
     sources: [hermesJobs, hermesTimers, siteTimers(hostFile, at), ...pcSources(status, at)],
     note: COPY_NOTE,
     at: at.toISOString(),
+  };
+}
+
+// --- job edits (ws-eh2 G) ---
+
+/** What the page says while the host cannot apply a job change (the export has no `jobEdits: true`). */
+export const EDITS_NOT_YET = 'Editing jobs is not available yet. The Hermes host needs an update first.';
+
+/**
+ * Whether jobs can be edited from the page: the host says so (`jobEdits: true` on the briefs block), the viewer is signed in and the export is fresh.
+ * `targets` (the raw places a new job may post to) leave only here, in a reply to a signed-in viewer.
+ */
+function editsOf({ exported, state, signedIn }) {
+  const block = exported.profiles.briefs;
+  const available = block?.jobEdits === true;
+  const editable = available && signedIn && state === 'live';
+  return { available, editable, models: block?.modelOptions ?? [], targets: editable ? block?.deliverOptions ?? [] : [] };
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/** A job's own edit fields: `editable`, whether its prompt may be edited, its newest recent change (`change`) and whether that change has a way back. */
+function jobEditing({ job, exported, edits, changes, at }) {
+  const mine = changes.filter(item => item.change.job === job.name);
+  const newest = mine[0];
+  const recent = newest && at.getTime() - Date.parse(newest.result?.at ?? newest.change.expires) < DAY_MS;
+  const view = recent ? jobChangeView({ ...newest, exported, at }) : null;
+  const editable = !!edits?.editable && !!job.rev;
+  let canUndo = false;
+  if (view && editable && newest.result?.outcome === 'applied' && newest.result.code === 'ok' && view.state === 'live' && ['edit', 'pause', 'resume'].includes(newest.change.op)) {
+    canUndo = !('prompt' in (newest.change.to ?? {})) || promptProblem(newest.change.from.prompt) === '';
+  }
+  return {
+    ...(editable ? { editable: true, promptEditable: promptEditable(job) && !!job.promptSha256 } : {}),
+    ...(view ? { change: { ...view, ...(canUndo ? { canUndo: true } : {}) } } : {}),
   };
 }
 

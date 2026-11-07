@@ -1,0 +1,32 @@
+{
+  "note": "Made once with a throwaway key; the private key was discarded. The Hermes host verifies canonical(rest) against signature with the public key (scripts/assistant/config-export/job_change.py and apply_change.py in the homelab repo keep a copy of this file). The prompt holds a newline, a tab and a non-ASCII letter, and the from block holds nulls, on purpose.",
+  "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAbcSnnDgDs6YU2ko/FM0icwxQgQdGqtVNtKKJHg1VFFk=\n-----END PUBLIC KEY-----\n",
+  "canonical": "{\"ask\":\"20261106-job-briefs-ab12\",\"at\":\"2026-11-06T10:00:00.000Z\",\"by\":\"owner-é\",\"change\":\"20261106-job-briefs-ab12\",\"expires\":\"2026-11-06T11:10:00.000Z\",\"from\":{\"model\":null,\"prompt\":\"Weekly example.\\nLine two.\",\"provider\":null,\"schedule\":\"0 8 * * 1\"},\"fromRev\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"job\":\"brief-example-job\",\"kind\":\"job-change\",\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAA\",\"op\":\"edit\",\"profile\":\"briefs\",\"to\":{\"model\":\"claude-sonnet-5-5\",\"prompt\":\"Weekly example, Zoë's version.\\n\\tIndented line two.\\nLine three.\",\"provider\":\"anthropic\",\"schedule\":\"0 9 * * 2\"},\"v\":1}",
+  "approved": {
+    "v": 1,
+    "kind": "job-change",
+    "change": "20261106-job-briefs-ab12",
+    "ask": "20261106-job-briefs-ab12",
+    "profile": "briefs",
+    "op": "edit",
+    "job": "brief-example-job",
+    "fromRev": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "from": {
+      "schedule": "0 8 * * 1",
+      "prompt": "Weekly example.\nLine two.",
+      "provider": null,
+      "model": null
+    },
+    "to": {
+      "schedule": "0 9 * * 2",
+      "prompt": "Weekly example, Zoë's version.\n\tIndented line two.\nLine three.",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5"
+    },
+    "expires": "2026-11-06T11:10:00.000Z",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+    "at": "2026-11-06T10:00:00.000Z",
+    "by": "owner-é",
+    "signature": "vuUInDc952MfbarrzTqx+uZ2zZmNcW+9uryOv4BvWgu4LNunWn7VBv1daURj3OCxeVRmhTBXrNjCECQHBtWDAw=="
+  }
+}

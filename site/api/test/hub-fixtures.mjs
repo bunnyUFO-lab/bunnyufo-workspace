@@ -245,6 +245,9 @@ export function teamSheet(agent, { stamp = '20261029T100000Z', rand = 'ab12', wi
 
 const hex = char => char.repeat(64);
 
+/** The places a new job may post to, as the exporter's `deliverOptions` (made-up ids: nothing here is a real channel). */
+export const JOB_TARGETS = [{ id: 'discord:100000000000000001', label: '#fixture-digest' }, { id: 'discord:100000000000000002', label: '#fixture-trends' }];
+
 /**
  * Four jobs as the exporter of ws-eh2 writes them (made-up names, labels and prompts): a daily one, a weekly one with a script, one that
  * failed last time, and one that is paused and pins a model. Times are around `now` so the page's words (next, last) stay stable.
@@ -324,7 +327,7 @@ export function hostSchedulesJson({ now = new Date(), minutesOld = 6 } = {}) {
  * A v1 settings export as the Hermes host's exporter writes it (made-up values; the "secret" is a fake key made of repeated letters).
  * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`. `modelOptions` is `{ main, briefs }`, the lists the host would publish (ws-im1.4.2); left out, the export has none, as an older exporter's.
  */
-export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {}, modelOptions = null, schedules = false } = {}) {
+export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {}, modelOptions = null, schedules = false, jobEdits = false } = {}) {
   const profile = name => ({
     model: { provider: 'openai-codex', default: name === 'main' ? 'gpt-6-sol' : 'claude-haiku-5-5' },
     fallbacks: name === 'main'
@@ -339,6 +342,8 @@ export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, cha
     ...(modelOptions?.[name] ? { modelOptions: modelOptions[name] } : {}),
     ...(schedules ? { timezone: 'America/Chicago' } : {}),
     ...(schedules && name === 'briefs' ? { cron: scheduleJobs(now) } : {}),
+    // The host can apply a signed job change (ws-eh2 G), and says where a new job may post: made-up targets, never a real channel id.
+    ...(jobEdits && name === 'briefs' ? { jobEdits: true, deliverOptions: JOB_TARGETS } : {}),
     ...extraProfile,
   });
   return {
