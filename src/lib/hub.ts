@@ -188,7 +188,7 @@ export interface MoveOffer { kind: 'move-to-cloud'; request: string; project?: s
 export interface AskOption { id: string; label: string; image?: string }
 export type DecisionVerdict = 'approve' | 'change' | 'skip'
 export interface AskDecision { id: string; text: string; detail?: string }
-export interface AskAnswer { at: string; by: string; via?: string; help?: HelpAttached; choice?: string; note?: string; drawing?: { excalidraw: string; png: string }; decisions?: Record<string, { verdict: DecisionVerdict; note?: string }> }
+export interface AskAnswer { at: string; by: string; via?: string; help?: HelpAttached; choice?: string; note?: string; pictures?: string[]; drawing?: { excalidraw: string; png: string }; decisions?: Record<string, { verdict: DecisionVerdict; note?: string }> }
 export type AskState = 'open' | 'snoozed' | 'answered' | 'picked-up' | 'cancelled' | 'expired'
 export interface Ask {
   id: string
@@ -201,6 +201,8 @@ export interface Ask {
   context?: string
   options?: AskOption[]
   allowNote: boolean
+  /** Pictures the owner saved for an answer that is not sent yet (the Hub lists them from the Ask's folder). */
+  pendingPictures?: string[]
   requirePasskey?: boolean
   /** The Ask's sub-type as written; `subtype` is what the Hub reads from it (or guesses, when `kindInferred`). */
   kind?: 'approval' | 'verify' | 'design' | 'decision'
@@ -291,7 +293,10 @@ export interface Checklist {
   build?: string
   platform?: string
   lookFor?: string
-  submit?: { help?: HelpAttached; at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
+  /** Every step's picture files, oldest first, and the pictures saved for the note. */
+  evidenceFiles?: Record<string, string[]>
+  notePictures?: string[]
+  submit?: { help?: HelpAttached; pictures?: string[]; at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
   pickup?: { at: string; host: string; session?: string }
   /** Where the submission went, from files an agent wrote (the server checked every field). Only a submitted checklist has it. */
   delivery?: AskDelivery

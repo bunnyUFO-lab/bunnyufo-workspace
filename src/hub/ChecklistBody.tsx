@@ -13,6 +13,8 @@ import { usePlaytestReport } from './playtest'
 import { StepHelp } from './GetHelp'
 import { useAttachHelp } from './useAttachHelp'
 import { KEEPALIVE_LIMIT, bodyBytes, heldDraft, hold } from './heldSend'
+import { PictureButton, PictureTray } from './PictureTray'
+import { usePictures } from './pictures'
 
 const SIGN_IN = 'Sign in to tick items.'
 const finePointer = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -62,6 +64,20 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
   const firstGuide = useRef<string | null | undefined>(undefined)
 
   const detail = answer && (!loadedAt || answer.time > loadedAt.getTime()) ? answer.detail : data
+  // Pictures for the note are saved when picked (the submission names the ones kept), so Undo keeps working and a reload keeps the tray.
+  const filesUrl = `/checklists/${encodeURIComponent(data.id)}/files`
+  const notePictures = usePictures({
+    max: 4, noun: 'A note', stored: detail.notePictures, pathOf: name => `checklists/${data.id}/${name}`,
+    store: async picture => {
+      try {
+        return (await hubPost<{ file: string }>(filesUrl, { for: 'note', image: { type: picture.type, data: await toBase64(picture.blob) } }, undefined, true)).file
+      } catch (failure) {
+        if (failure instanceof HubError && failure.status === 409) reload()
+        throw failure
+      }
+    },
+    discard: async name => { await hubPost(`${filesUrl}/${encodeURIComponent(name)}/delete`, {}, undefined, true) },
+  })
   const items: ChecklistItem[] = Array.isArray(detail.items) ? detail.items : []
   const isDone = (item: ChecklistItem) => pending[item.id]?.done ?? item.done
   const doneCount = items.filter(isDone).length
@@ -183,9 +199,10 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
     if (!host.write) { setSignIn(true); return }
     if (!live || submitting) return
     if (playtest && !report.ready) return
+    if (!notePictures.ready) return
     if (!playtest && openCount > 0 && warnedAt !== openCount) { setWarnedAt(openCount); return }
     setProblem(null)
-    const body = { ...(note.trim() ? { note: note.trim() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) }
+    const body = { ...(note.trim() ? { note: note.trim() } : {}), ...(notePictures.files().length ? { pictures: notePictures.files() } : {}), ...(playtest ? report.payload() : {}), ...(attachHelp.help ? { help: attachHelp.help } : {}) }
     const url = `/checklists/${encodeURIComponent(detail.id)}/submit`
     // A report that is too big to ride a keepalive request goes at once, as it always did.
     if (bodyBytes(body) > KEEPALIVE_LIMIT) {
@@ -300,12 +317,16 @@ export default function ChecklistBody({ data, loadedAt, reload, onSubmitted }: {
           <label className="hub-field">Note to the agent (optional)
             <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={2000} disabled={submitting} />
           </label>
+          <div className="hub-pic-row" data-note-pictures>
+            <div className="hub-pic-line"><PictureButton pictures={notePictures} disabled={submitting} label="Attach pictures to the note" /><span className="hub-muted">Add a picture</span></div>
+            <PictureTray pictures={notePictures} />
+          </div>
           {attachHelp.element}
           {warning && <p className="hub-cl-warn" role="alert" data-warning>{openCount} {plural(openCount, 'item is', 'items are')} still open. Submit anyway?</p>}
           {problem && <p className="hub-error" role="alert">{problem}</p>}
           <div className="hub-actions">
             <button
-              type="button" className="hub-btn pri hub-cl-send" data-submit disabled={submitting || Object.keys(pending).length > 0 || (playtest && !report.ready)}
+              type="button" className="hub-btn pri hub-cl-send" data-submit disabled={submitting || Object.keys(pending).length > 0 || (playtest && !report.ready) || !notePictures.ready}
               aria-disabled={host.write ? undefined : true} onClick={() => void submit()}
             >{playtest ? 'Send report' : warning ? `Submit with ${openCount} open` : 'Submit'}</button>
           </div>

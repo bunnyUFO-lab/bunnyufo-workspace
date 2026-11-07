@@ -35,6 +35,11 @@ function AnswerSummary({ ask, answer }: { ask: Ask; answer: AskAnswer }) {
       {answer.choice && <p><b>{option ? `${option.id} · ${text(option.label)}` : text(answer.choice)}</b></p>}
       {typeof answer.note === 'string' && answer.note && <p className="hub-note-text">{answer.note}</p>}
       <HelpAttachedNote chat={answer.help?.chat} />
+      {Array.isArray(answer.pictures) && answer.pictures.length > 0 && (
+        <div className="hub-tray" data-answer-pictures>
+          {answer.pictures.map((name, index) => <span className="hub-tray-item" key={name}><HubImage path={`asks/${ask.id}/${name}`} alt={`Picture ${index + 1} sent with the answer`} open /></span>)}
+        </div>
+      )}
       {answer.drawing && <HubImage className="hub-drawing" path={`asks/${ask.id}/${answer.drawing.png}`} alt="The drawing sent with the answer" />}
     </section>
   )
