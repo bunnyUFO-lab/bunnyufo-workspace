@@ -136,12 +136,12 @@ export const seenText = (jobs, at) => `${JSON.stringify({ v: 1, at: at.toISOStri
 /**
  * What a sweep does with the newest fresh export.
  * - `seen`: `validSeen(...)` or null (first run: store the baseline, no alert).
- * - `signed`: hashes of prompts the Hub itself signed, which are not news. `removed`: names of `briefs` jobs the Hub signed a removal for, which are not "gone".
+ * - `signed`: hashes of prompts the Hub itself signed, which are not news. `removed`: `Map(name -> result time)` of `briefs` jobs the Hub removed (`signedRemovedJobs`), which are not "gone" unless the baseline (`seenAt`) is newer than the result. `seenAt`: when the baseline was last written.
  * → `{ jobs, alerts, changed }`: the baseline to keep, the alerts to write (`{ job, profile, hash, kind, title }`), and whether the baseline differs from `seen`.
  * A profile whose block has no job list is left alone, and so is a job without a hash: an older exporter must not read as "everything is gone".
  * The words are fixed; the only text taken from the host is the job's name, and never any of its prompt.
  */
-export function jobPromptChanges({ seen, exported, signed = new Set(), removed = new Set() }) {
+export function jobPromptChanges({ seen, seenAt = '', exported, signed = new Set(), removed = new Map() }) {
   const jobs = { ...(seen ?? {}) };
   const alerts = [];
   const listed = exported ? PROFILES.filter(name => Array.isArray(exported.profiles[name]?.cron)) : [];
@@ -166,7 +166,9 @@ export function jobPromptChanges({ seen, exported, signed = new Set(), removed =
       const profile = name.slice(0, name.indexOf('/'));
       if (!listed.includes(profile) || now.has(name)) continue;
       const job = name.slice(name.indexOf('/') + 1);
-      if (profile === 'briefs' && removed.has(job)) { delete jobs[name]; continue; }   // the owner's own removal is not news
+      // The owner's own removal is not news, when the host's result for it came after the baseline that last held the job. A removal from before that baseline
+      // is an old one: the job was added back since, and its removal now is not the owner's.
+      if (profile === 'briefs' && removed.has(job) && Date.parse(removed.get(job)) > Date.parse(seenAt)) { delete jobs[name]; continue; }
       alerts.push({ job, profile, hash: 'gone', kind: 'gone', title: `The job ${job} is gone from the Hermes host, not removed from Schedules. Check it.` });
       delete jobs[name];
     }

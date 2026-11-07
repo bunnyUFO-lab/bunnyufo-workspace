@@ -591,3 +591,44 @@ test('the words of a failed change: could not be confirmed says it may have gone
   assert.equal(failTitle(edited, 'stale'), 'The change to brief-x did not go through: The job changed on the host since you opened this. The job is as it was.');
   assert.equal(failTitle(change({ job: 'brief-x', to: { prompt: 'x' } }), 'job-refused'), 'The change to brief-x did not go through: Hermes refused this prompt. The job is as it was.');
 });
+
+// --- recheck: a removal counts only when the host said it applied, and only after the baseline that last held the job ---
+
+const settle = async f => { await f.call('GET', '/hub/schedules'); await new Promise(resolve => setTimeout(resolve, 150)); f.clock.time += 31_000; };
+const goneAlerts = f => eventsOf(f).filter(event => event.kind === 'alert' && event.job && /gone from/.test(event.title)).map(event => event.job);
+const without = name => cron => { const at = cron.findIndex(job => job.name === name); if (at >= 0) cron.splice(at, 1); };
+
+test('a removal with no result yet hides nothing: a job that vanishes by hand meanwhile still alerts', async () => {
+  const f = await fixture();
+  try {
+    putExport(f);
+    await settle(f);
+    const trends = await jobOf(f, 'brief-trends-watch');
+    assert.equal((await press(f, { op: 'remove', job: trends.name, base: trends.rev })).status, 201);
+    f.clock.time += 31_000;
+    putExport(f, { minutes: 0, mutate: without('brief-trends-watch') });   // gone, and the host has not answered the signed removal
+    await settle(f);
+    assert.deepEqual(goneAlerts(f), ['brief-trends-watch']);
+  } finally { await f.close(); }
+});
+
+test('an old removal does not hide a later one by hand: remove from Schedules, add back by hand, remove by hand', async () => {
+  const f = await fixture();
+  try {
+    putExport(f);
+    await settle(f);
+    const trends = await jobOf(f, 'brief-trends-watch');
+    const removed = await press(f, { op: 'remove', job: trends.name, base: trends.rev });
+    f.clock.time += 31_000;
+    hostResult(f, removed.body.change, 'applied', 'ok');
+    f.clock.time += 5_000;
+    putExport(f, { minutes: 0, mutate: without('brief-trends-watch') });
+    await settle(f);
+    assert.deepEqual(goneAlerts(f), [], 'the owner\'s own removal says nothing');
+    putExport(f, { minutes: 0 });   // added back by hand: the sweep stores it
+    await settle(f);
+    putExport(f, { minutes: 0, mutate: without('brief-trends-watch') });   // removed by hand
+    await settle(f);
+    assert.deepEqual(goneAlerts(f), ['brief-trends-watch'], 'the old signed removal does not silence it');
+  } finally { await f.close(); }
+});

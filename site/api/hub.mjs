@@ -706,7 +706,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const got = await fresh(SEEN_FILE);
       // The prompts the Hub itself signed are not news (a change from the Schedules page, or a way back to the earlier prompt).
       const signedChanges = await loadJobChanges(at);
-      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported, signed: signedPromptHashes(signedChanges), removed: signedRemovedJobs(signedChanges) });
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), seenAt: typeof got?.value?.at === 'string' ? got.value.at : '', exported, signed: signedPromptHashes(signedChanges), removed: signedRemovedJobs(signedChanges) });
       if (!changed) return;
       if (alerts.length) {
         const { events } = await loadEvents(at);

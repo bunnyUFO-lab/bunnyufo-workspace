@@ -158,10 +158,19 @@ export const JOB_OPEN_MS = 20 * 60 * 1000;
 /** One rule for the server's press check and the page's form: open while `waiting`, or `applied` for under 20 minutes after the host's result. */
 export const changeOpen = ({ state, result = null, at }) => state === 'waiting' || (state === 'applied' && !!result && at.getTime() - Date.parse(result.at) < JOB_OPEN_MS);
 
-/** Names of jobs the Hub signed a removal for (not a failed one, except the two codes that may have gone through): the prompt alert does not call them gone. */
-export const signedRemovedJobs = changes => new Set(changes
-  .filter(item => item.change.op === 'remove' && (!item.result || item.result.outcome === 'applied' || item.result.code === 'job-check' || item.result.code === 'expired'))
-  .map(item => item.change.job));
+/**
+ * The jobs the Hub removed, as `Map(name -> time of the host's newest `ok` result for a removal)`. Only a removal with a result saying it applied counts: one
+ * with no result yet, or a failed one, says nothing about a job that is gone. The prompt alert also compares this time with its baseline (see `jobPromptChanges`),
+ * so an old removal cannot hide a later removal by hand.
+ */
+export function signedRemovedJobs(changes) {
+  const out = new Map();
+  for (const item of changes) {
+    if (item.change.op !== 'remove' || item.result?.outcome !== 'applied' || item.result.code !== 'ok') continue;
+    if (!out.has(item.change.job) || item.result.at > out.get(item.change.job)) out.set(item.change.job, item.result.at);
+  }
+  return out;
+}
 
 /**
  * Where a signed job change stands. `live` wins over `failed` and `late`: when an export made at or after the result (or, with none, after
