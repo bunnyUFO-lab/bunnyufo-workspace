@@ -40,6 +40,12 @@ const MIME = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.xml': 'application/xml', '.zip': 'application/zip',
 };
 export const contentTypeOf = file => MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+const GENERIC_TYPES = new Set(['application/octet-stream', 'binary/octet-stream']);
+/** The type a file is served or stored with: what it was given, unless that says nothing. */
+export const typeOf = (given, file) => {
+  const bare = String(given ?? '').split(';')[0].trim().toLowerCase();
+  return bare && !GENERIC_TYPES.has(bare) ? given : contentTypeOf(file);
+};
 
 /** Parse "s3://bucket/some/prefix" into { bucket, prefix } (prefix without a trailing slash). */
 export function parseS3Url(value) {
