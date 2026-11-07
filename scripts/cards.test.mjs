@@ -1299,6 +1299,55 @@ test('request create for the cloud needs a repo: refused without one, filed with
   } finally { await close(); }
 });
 
+for (const via of ['api', 's3']) {
+  test(`request reference (${via}): saves the picture the owner attached after checking its hash; none is exit 3; a changed picture is refused and saves nothing`, async () => {
+    const { fake, cli, dir, close } = await setup();
+    try {
+      const picture = Buffer.concat([PNG_BYTES, Buffer.from('reference picture bytes')]);
+      const id = '20261106-probe-compare-takes-a1b2';
+      const block = { file: 'reference.png', sha256: createHash('sha256').update(picture).digest('hex'), width: 40, height: 30, source: { section: 'one', card: 'alpha', file: 'photo.png', title: 'Alpha card' } };
+      fake.seed(`sections/inbox/requests/${id}/request.json`, JSON.stringify({ id, project: 'probe', text: 'Compare', preset: 'research', reference: block }), 'application/json');
+      fake.seed(`sections/inbox/requests/${id}/reference.png`, picture, 'image/png');
+      const out = path.join(dir, 'out');
+      const saved = await cli(via, 'request', 'reference', id, '--out', out);
+      assert.equal(saved.code, 0, saved.stderr);
+      assert.equal(saved.stdout.trim(), path.join(out, 'reference.png'));
+      assert.deepEqual(await readFile(path.join(out, 'reference.png')), picture);
+
+      const none = '20261106-probe-no-picture-c3d4';
+      fake.seed(`sections/inbox/requests/${none}/request.json`, JSON.stringify({ id: none, project: 'probe', text: 'Compare', preset: 'research' }), 'application/json');
+      const nothing = await cli(via, 'request', 'reference', none, '--out', path.join(dir, 'none'));
+      assert.equal(nothing.code, 3);
+      assert.match(nothing.stderr, /no reference picture/);
+
+      const changed = '20261106-probe-changed-e5f6';
+      fake.seed(`sections/inbox/requests/${changed}/request.json`, JSON.stringify({ id: changed, project: 'probe', text: 'Compare', preset: 'research', reference: block }), 'application/json');
+      fake.seed(`sections/inbox/requests/${changed}/reference.png`, Buffer.concat([PNG_BYTES, Buffer.from('another picture')]), 'image/png');
+      const refused = await cli(via, 'request', 'reference', changed, '--out', path.join(dir, 'changed'));
+      assert.notEqual(refused.code, 0);
+      assert.match(refused.stderr, /does not match the hash/);
+      assert.deepEqual(await readdir(dir).then(names => names.filter(name => name === 'changed')), [], 'Nothing was saved.');
+
+      const odd = '20261106-probe-odd-name-0a1b';
+      fake.seed(`sections/inbox/requests/${odd}/request.json`, JSON.stringify({ id: odd, project: 'probe', text: 'Compare', preset: 'research', reference: { ...block, file: '../../x.png' } }), 'application/json');
+      const bad = await cli(via, 'request', 'reference', odd, '--out', path.join(dir, 'odd'));
+      assert.notEqual(bad.code, 0);
+      assert.match(bad.stderr, /not one this tool will read/);
+    } finally { await close(); }
+  });
+}
+
+test('request create files no reference, whatever the flags say', async () => {
+  const { fake, cli, keys, close } = await setup();
+  try {
+    cli.env = { BUW_REQUEST_ID: '' };
+    const made = await cli('api', 'request', 'create', '--project', 'probe', '--text', 'Compare these', '--preset', 'research', '--reference', 'reference.png');
+    assert.equal(made.code, 0, made.stderr);
+    const [key] = keys('requests/').filter(name => name.endsWith('request.json'));
+    assert.equal(fake.json(key).reference, undefined);
+  } finally { await close(); }
+});
+
 test('the avatar subject pattern in cards.mjs equals SUBJECT_RE in site/api/presets.mjs', async () => {
   const source = await readFile(path.join(repo, 'site/card-api/cards.mjs'), 'utf8');
   const presets = await import(pathToFileURL(path.join(repo, 'site/api/presets.mjs')).href);
