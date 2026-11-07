@@ -294,7 +294,9 @@ What a Library write must do:
 - an `If-Match` edit of an existing `.html` tab marks that step `agentTab: true` (the record says `markedAgentTab`), so the viewer gives it no card bridge; a posted step never brings back a tab in `removedTabs`
 
 The entry route keeps its shape, but the server builds the entry. A **new card** may set `id, title, description, type, category,
-created, updated, folder, steps, defaultStep, status` only (422 names any other field); `status` is `active`; a step is
+created, updated, folder, steps, defaultStep, status, purpose` only (422 names any other field); `status` is `active`;
+`purpose` is `report` or `reference` (anything else, including `""` and `null`, is a 422 on every path; leave it out when unsure and the card stays in the list;
+a `report` goes to the Archive 7 days after its last change). The owner's choice from a row's menu beats it, and a later full write without the field keeps the stored one; a step is
 `{ name, path, viewer? }` with the `path` of a file already in the folder (no `url` step). For an **existing card** everything
 posted is ignored except steps with a new `path`, which are appended with `agentTab: true` (set by the server). The answer
 names the ignored fields (`ignored`), or `{ unchanged: true }` when nothing was added. The list is written with the `If-Match` it

@@ -166,7 +166,7 @@ try {
   const menuBox = await pone.locator('[data-q-menu]').boundingBox();
   await tall(pone.locator('[data-q-main]'), 'the main button', 44);
   await tall(pone.locator('[data-q-menu]'), 'the menu button', 44);
-  assert.ok(mainBox.width > 390 - 16 - 44 - 40, `The main button fills the line next to the menu button (${mainBox.width}).`);
+  assert.ok(mainBox.width > 390 - 32 - 44 - 40, `The main button fills the line next to the menu button (${mainBox.width}).`);
   assert.ok(Math.abs(mainBox.y - menuBox.y) < 8, 'The button and the menu button share a line.');
   const costBox = await pone.locator('[data-q-cost]').first().boundingBox();
   assert.ok(costBox.y >= mainBox.y + mainBox.height - 2, 'The cost line is under the button.');

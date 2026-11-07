@@ -4,6 +4,7 @@
 // one that ended in a question read right on the request's page.
 import { chromium } from '@playwright/test';
 import { ms } from './ui-timeouts.mjs';
+import { approveStored } from './approve-stored.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { openLog } from './run-log.mjs';
@@ -50,8 +51,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const page = await open({ width: 1280, height: 900 });
   await page.goto(`${live.url}#/~hub/needs`);
-  await page.locator(`[data-need="approval-${ids.live}"] [data-approval-approve]`).click();
-  await page.locator('[data-next-note]').waitFor();
+  await approveStored(page, `[data-need="approval-${ids.live}"] [data-approval-approve]`);
   await page.goto(`${live.url}#/~hub/needs/requests`);
   await page.locator(`[data-request-open="${ids.live}"]`).click();
   const drawer = page.locator('[data-run-view]');
@@ -110,8 +110,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const stopper = await open({ width: 1280, height: 900 });
   await stopper.goto(`${held.url}#/~hub/needs`);
-  await stopper.locator(`[data-need="approval-${ids.hold}"] [data-approval-approve]`).click();
-  await stopper.locator('[data-next-note]').waitFor();
+  await approveStored(stopper, `[data-need="approval-${ids.hold}"] [data-approval-approve]`);
   // The first events connection drops before any data: the page opens it again and shows the text once.
   let eventCalls = 0;
   await stopper.route('**/api/hub/requests/*/events', async route => {
@@ -137,8 +136,7 @@ try {
   const board = await open({ width: 1280, height: 900 });
   await board.addInitScript(() => { window.__wrote = 0; window.addEventListener('buw:hub-wrote', () => { window.__wrote += 1; }); });
   await board.goto(`${held.url}#/~hub/needs`);
-  await board.locator(`[data-need="approval-${ids.work}"] [data-approval-approve]`).click();
-  await board.locator('[data-next-note]').waitFor();
+  await approveStored(board, `[data-need="approval-${ids.work}"] [data-approval-approve]`);
   await board.goto(`${held.url}#/~hub/work/magic-loops`);
   const card = board.locator(`[data-card="request:${ids.work}"]`);
   await board.locator('.wk-lane').first().waitFor();
@@ -166,8 +164,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 100));
   const waiter = await open({ width: 1280, height: 900 });
   await waiter.goto(`${slow.url}#/~hub/needs`);
-  await waiter.locator(`[data-need="approval-${ids.slow}"] [data-approval-approve]`).click();
-  await waiter.locator('[data-next-note]').waitFor();
+  await approveStored(waiter, `[data-need="approval-${ids.slow}"] [data-approval-approve]`);
   await waiter.goto(`${slow.url}#/~hub/needs/requests`);
   await waiter.locator(`[data-request-open="${ids.slow}"]`).click();
   const running = waiter.locator('[data-run-view] [data-run-tool="running"]');

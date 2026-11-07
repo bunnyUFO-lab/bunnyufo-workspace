@@ -17,6 +17,7 @@ import SettledBar, { useSettledHere } from './SettledBar'
 import { useHubData } from './useHub'
 import './runs.css'
 import { PageProjectChip } from './ProjectChip'
+import { usePcStart } from './usePcStart'
 
 /** The parts of `GET /hub/requests/:id` this view reads. */
 export interface RequestDetail {
@@ -86,6 +87,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
   const proposed = (request.target ?? route?.target ?? preset.targets[0]) as SpawnTarget
   const target: SpawnTarget = choice || (state === 'expired' ? detail.approved?.target : undefined) || proposed
   const atPc = target === 'at-pc'
+  const pcStart = usePcStart(request.project, target === 'pc')
   const machine = MACHINE[target]
   const why = choice ? 'you chose it' : route && route.target === target ? route.why : request.target === target ? 'proposed with the request' : ''
   const expired = state === 'expired'
@@ -156,7 +158,7 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
         </dd></div>
         <div><dt>Side effects</dt><dd data-approval-effect>{sideEffect(preset, request.repo)}</dd></div>
         <div><dt>Time limit</dt><dd>Up to {detail.approved?.limits?.minutes ?? preset.minutes} minutes</dd></div>
-        <div><dt>Starts</dt><dd data-approval-starts>{STARTS[target]}</dd></div>
+        <div><dt>Starts</dt><dd data-approval-starts data-approval-blocked={pcStart?.state === 'blocked' ? pcStart.cause : undefined}>{target === 'pc' && pcStart?.state === 'blocked' && pcStart.short ? pcStart.short : STARTS[target]}</dd></div>
       </dl>
       {expired && <p className="hub-muted" data-approval-expired>The approval ran out{detail.approved?.expires ? ` ${ago(detail.approved.expires)}` : ''}. Approve it again to start it.</p>}
       {error && <p className="hub-error" role="alert" data-approval-error>{error}</p>}

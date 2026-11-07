@@ -56,7 +56,7 @@ try {
     await page.context().close();
   }
 
-  step('Each tab is one history step, and Back follows; the Map switch adds none');
+  step('Each tab is one history step, and Back follows');
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     await ready(page, 'roadmap');
@@ -72,10 +72,18 @@ try {
     await page.goBack();
     await page.waitForFunction(() => /^#\/~hub\/project\/probe(\/roadmap)?$/.test(location.hash));
     await expect(page.locator('[data-project-tab="roadmap"]')).toHaveClass(/\bon\b/);
+    assert.equal(await page.locator('[data-roadmap-switch]').count(), 0, 'A phone has no Map, so no List and Map switch.');
+    await page.context().close();
+  }
+
+  step('At 1280 px the List and Map switch adds no history entry');
+  {
+    const page = await open({ width: 1280, height: 800 });
+    await ready(page, 'roadmap');
     const before = await page.evaluate(() => history.length);
-    await page.locator('[data-roadmap-view="map"]').tap();
+    await page.locator('[data-roadmap-view="map"]').click();
     await page.waitForFunction(() => location.hash.startsWith('#/~hub/map/probe'));
-    await page.locator('[data-roadmap-view="list"]').tap();
+    await page.locator('[data-roadmap-view="list"]').click();
     await page.waitForFunction(() => location.hash === '#/~hub/project/probe');
     assert.equal(await page.evaluate(() => history.length), before, 'List and Map add no entry.');
     await page.context().close();

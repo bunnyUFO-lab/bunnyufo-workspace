@@ -4,7 +4,7 @@ import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl 
 import type { Deliverable } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
-import { hubHash, mapHash } from '../lib/route'
+import { hubHash, projectNodeHash } from '../lib/route'
 import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
@@ -15,6 +15,8 @@ import { applyRunEvent, elapsedLabel } from './runLines'
 import { streamRun } from './runStream'
 import { useHubData } from './useHub'
 import { usePcWake } from './usePcWake'
+import type { PcWait } from '../lib/hubPc'
+import { PcFix } from './PcStuckView'
 import { requestStateWord } from './working'
 import WakeButton from './WakeButton'
 import './runs.css'
@@ -36,6 +38,8 @@ interface RunDetail extends RequestDetail {
   deliverables?: Deliverable[]
   /** The preset's agent, as the job list shows it. */
   agent?: string
+  /** Whether the PC can start an approved PC job, from the PC's report; absent when the Hub has nothing to say. */
+  pcWait?: PcWait
   /** Where an approved cloud request stands, from the site API's fire queue. */
   cloud?: CloudState
   fires?: CloudFire[]
@@ -190,7 +194,7 @@ function DeliverableCard({ item }: { item: Deliverable }) {
       <div className="rd-dl" data-run-deliverable="task" data-task-id={item.id}>
         <b>{item.title ?? item.id}</b>
         <span className="hub-muted">Task · <span className="hub-id" data-run-task-id>{item.id}</span></span>
-        <div className="rd-links"><a className="hub-btn pri" href={mapHash(item.project, item.id)} data-run-task>Open</a></div>
+        <div className="rd-links"><a className="hub-btn pri" href={projectNodeHash(item.project, item.id)} data-run-task>Open</a></div>
       </div>
     )
   }
@@ -406,7 +410,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
           </p>
         )}
       </div>}
-      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={mapHash(request.project, request.bead)}>{request.bead}</a></p>}
+      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={projectNodeHash(request.project, request.bead)}>{request.bead}</a></p>}
     </>
   )
   return (
@@ -423,7 +427,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
       {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
       {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}
-      {state === 'approved' && target === 'pc' && <PcStart />}
+      {state === 'approved' && target === 'pc' && <PcStart wait={detail.pcWait} />}
       {cloudShown && (
         <div className="rd-cloud" data-run-cloud={cloud?.status} data-cloud-reason={cloud?.reason}>
           <p>{cloudShown.text}{dry && <span className="hub-muted" data-run-dry> (dev: nothing was sent)</span>}</p>
@@ -489,12 +493,19 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
   )
 }
 
-/** An approved PC request starts at the watcher's next tick, within a few minutes; when the PC reads as asleep or off, it can be woken from here. */
-function PcStart() {
+/**
+ * An approved PC request starts at the watcher's next tick, within a few minutes, unless the Hub knows better from the PC's report: then it
+ * says why it will not start (with the command to fix it), or what it is waiting for. When the PC reads as asleep or off, it can be woken from here.
+ */
+function PcStart({ wait }: { wait?: PcWait }) {
   const wake = usePcWake()
+  const blocked = wait?.state === 'blocked' || wait?.state === 'stuck'
   return (
     <div className="rd-pc" data-run-pc-start>
-      <p>Starts on the PC within a few minutes.</p>
+      {blocked && <p data-run-pc-blocked={wait.cause}>{wait.text}</p>}
+      {blocked && <PcFix wait={wait} />}
+      {wait?.state === 'wait' && <p data-run-pc-wait={wait.kind}>{wait.text}</p>}
+      {!blocked && wait?.state !== 'wait' && <p>Starts on the PC within a few minutes.</p>}
       <WakeButton wake={wake} />
     </div>
   )

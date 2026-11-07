@@ -466,6 +466,7 @@ export function requestItem(request, state, taken, extra = {}) {
     ...(target ? { target } : {}),
     ...(cloud ? { cloud: { status: cloud.status, ...(cloud.reason ? { reason: cloud.reason } : {}), ...(cloud.next ? { next: cloud.next } : {}) } } : {}),
     ...(request.origin ? { origin: request.origin } : {}),
+    ...(extra.pcJob ? { pcJob: extra.pcJob } : {}),
     ...(extra.offer ? { offer: extra.offer, ...(approved?.at ? { approvedAt: approved.at } : {}), ...(request.repo ? { repo: request.repo } : {}) } : {}),
     ...(state === 'done' && nothingToDo(result) ? { nothing: true } : {}),
     ...(state === 'failed' && result?.reason === 'approval-refused' ? { reason: 'approval-refused' } : {}),
@@ -693,6 +694,21 @@ export function dismissedAlerts(events) {
   return out;
 }
 
+/**
+ * The Needs you item of an approved PC job that cannot start. `item.pcWait` is the verdict (hub-pc-wait.mjs `pcWaitOf`): a plain title,
+ * 2 or 3 sentences, one step with a command to copy, and which buttons make sense (`canWake` Retry, `cloudOk` the cloud, always Cancel).
+ */
+export function stuckItem(item) {
+  const wait = item.pcWait;
+  return {
+    kind: 'pc-stuck', id: item.id, project: item.project, title: wait.title, at: item.pcJob?.approvedAt ?? item.at, state: 'stuck',
+    job: item.title, cause: wait.cause, summary: wait.text,
+    ...(wait.step ? { step: wait.step } : {}), ...(wait.command ? { command: wait.command } : {}),
+    ...(wait.canWake ? { canWake: true } : {}), ...(wait.cloudOk ? { cloudOk: true } : {}),
+    ...(item.bead ? { bead: item.bead } : {}),
+  };
+}
+
 /** Today's screen from the derived pieces. `events` is the whole window, newest first. */
 export function buildToday({ asks, checklists = [], requests = [], hermesApprovals = [], events, now, alerts: extraAlerts = [], cloud = null, dismissed = new Set(), repoProjects = {} }) {
   const { reviews, blocked, running } = deriveEventItems(events, repoProjects);
@@ -702,7 +718,10 @@ export function buildToday({ asks, checklists = [], requests = [], hermesApprova
   // A request that waits for the owner's approval is Needs you; one that failed, was lost or expired is an alert.
   const approvals = requests.filter(item => item.kind === 'approval' || item.kind === 'run-question').sort(newest);
   const hermes = [...hermesApprovals].sort(newest);
-  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...hermes];
+  // An approved PC job that has waited 10 minutes with no taken.json for a cause the Hub knows: one item per job, derived from the
+  // files each time, so it is there once and gone the moment the job is taken, stopped or moved (ws-3o5).
+  const stuck = requests.filter(item => item.pcWait?.state === 'stuck').map(stuckItem).sort(newest);
+  const needsYou = [...openAsks, ...openChecklists, ...reviews, ...blocked, ...approvals, ...stuck, ...hermes];
   const since = now.getTime() - DAY;
   // The dismiss and restore marks are bookkeeping, not news.
   // A PR event can be posted twice (the live post and the reconcile, or a hand backfill): one row per kind and PR, the newest.
@@ -767,6 +786,7 @@ export function needsKindOf(item) {
     case 'approval': return 'approval';
     case 'hermes-approval': return 'approval';
     case 'run-question': return 'question';
+    case 'pc-stuck': return 'unstick';
     case 'ask': return item.design === true ? 'design' : 'question';
     default: return 'question';
   }
@@ -856,6 +876,10 @@ export function describeItem(item, now) {
   const who = (item.kind === 'ask' || item.kind === 'checklist' ? [item.tool, item.host] : [item.host]).filter(Boolean).join(' · ');
   const minutes = Math.max(0, Math.floor((now.getTime() - new Date(item.at).getTime()) / 60000));
   const base = { kind, who, age: Number.isFinite(minutes) ? minutes : 0 };
+  if (item.kind === 'pc-stuck') {
+    const next = { 'not-on-runner': 'Add the project on the PC, or run the job in the cloud', 'launch-off': 'Turn starting on at the PC', 'pc-silent': 'Wake the PC, or run the job in the cloud', cap: 'Wait, or cancel the job' }[item.cause] ?? 'Cancel the job';
+    return { ...base, what: 'An approved job that has not started', state: 'Not picked up by the PC after 10 minutes', next, blocker: 'The PC' };
+  }
   if (item.kind === 'run-question') return { ...base, what: 'Hermes asks a question', state: 'The run paused for your answer', next: 'Answer and run again, or close it', blocker: 'Your answer' };
   // A request made the old way is listed under the requests filter and reads as before; only a proposal to approve is an approval.
   switch (kind === 'approval' && item.kind === 'request' ? 'question' : kind) {

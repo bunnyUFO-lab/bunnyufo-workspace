@@ -18,9 +18,10 @@
 // whole to the server, so it travels with the deploy.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { renameOver } from './safe-rename.mjs';
+import { applyCardState, PURPOSES } from './card-liveness.mjs';
 import path from 'node:path';
 
-/** @typedef {{ pinned?: boolean, pinOrder?: number, status?: 'active'|'archived', restoredAt?: string, tags?: string[], emoji?: string }} CardState */
+/** @typedef {{ pinned?: boolean, pinOrder?: number, status?: 'active'|'archived', restoredAt?: string, tags?: string[], emoji?: string, purpose?: 'report'|'reference' }} CardState */
 
 /** A card icon chosen in the app: one short emoji (a flag or a family is several code points). */
 export const validEmoji = value => typeof value === 'string' && [...value.trim()].length <= 12 && !/[<>"'&]/.test(value);
@@ -28,28 +29,7 @@ export const validEmoji = value => typeof value === 'string' && [...value.trim()
 const today = () => new Date().toISOString().slice(0, 10);
 export const cardKey = (workspace, id) => `${workspace || ''}/${id}`;
 
-/**
- * Overlay one card's stored state onto the entity the workspace published.
- *
- * The file is the default and the store is the override, so a card that an agent shipped
- * `pinned: true` stays pinned until someone says otherwise here — and everything written into
- * workspace.json before this existed keeps working untouched.
- */
-export function applyCardState(entity, state) {
-  if (!state) return entity;
-  const merged = { ...entity };
-  if (state.pinned === true) merged.pinned = true;
-  if (state.pinned === false) { delete merged.pinned; delete merged.pinOrder; }
-  if (state.pinned !== false && typeof state.pinOrder === 'number') merged.pinOrder = state.pinOrder;
-  if (state.status) merged.status = state.status;
-  if (Array.isArray(state.tags)) merged.tags = state.tags.filter(tag => typeof tag === 'string');
-  // A chosen icon wins over the card's own image and its category's emoji.
-  if (typeof state.emoji === 'string' && state.emoji) merged.emoji = state.emoji;
-  // Restoring a card counts as a touch: without a fresh date the 7-day rule would put it straight
-  // back in the archive. It never moves the date backwards, so a later real edit still wins.
-  if (state.restoredAt && (!merged.updated || state.restoredAt > merged.updated)) merged.updated = state.restoredAt;
-  return merged;
-}
+export { applyCardState };
 
 const parseCards = parsed => (parsed && typeof parsed.cards === 'object' && parsed.cards ? parsed.cards : {});
 
@@ -113,6 +93,11 @@ function methods({ load, write }) {
     setEmoji(workspace, id, emoji) {
       const value = typeof emoji === 'string' ? emoji.trim() : '';
       return write(cardKey(workspace, id), { emoji: value || undefined });
+    },
+
+    /** What the owner says the card is: `report` or `reference`. The other choice replaces it, so there is no clearing value. */
+    setPurpose(workspace, id, purpose) {
+      return write(cardKey(workspace, id), { purpose: PURPOSES.includes(purpose) ? purpose : undefined });
     },
 
     /** The whole pinned list in one go: a reorder moves several cards, across workspaces. */

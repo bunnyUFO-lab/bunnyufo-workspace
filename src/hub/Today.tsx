@@ -5,6 +5,7 @@ import { HUB_WROTE, clock, hubPost } from '../lib/hub'
 import type { WorkingItem } from '../lib/hubPc'
 import { host } from '../lib/host'
 import { hubHash } from '../lib/route'
+import { jobHash } from './team/schedulesModel'
 import UnaskedPanel from './UnaskedPanel'
 import WorkingNow from './WorkingNow'
 import WakeButton from './WakeButton'
@@ -78,7 +79,7 @@ function AlertsPanel({ alerts, count, index }: { alerts: HubEvent[]; count: numb
       {alerts.length ? alerts.slice(0, 5).map(event => (
         <div key={event.key ?? event.file} className="alert-row" data-alert>
           <span className="alert-icon"><Icon paths={ICON_ALERT} /></span>
-          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} data-alert-run={event.request} data-run-open={event.request}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
+          <span className="nrow-text"><b>{event.request ? <a href={hubHash('request', event.request)} data-alert-run={event.request} data-run-open={event.request}>{event.title}</a> : event.job ? <a href={jobHash(event.job)} data-alert-job={event.job}>{event.title}</a> : event.title}</b><small>{[event.summary, event.project].filter(Boolean).join(' · ') || event.kind.replace(/-/g, ' ')}</small></span>
           {host.write && event.retry && event.request && <AlertRetry request={event.request} />}
           {host.write && event.key && <button type="button" className="hub-btn alert-dismiss" disabled={busy} onClick={() => void send('dismiss', [event.key as string])} aria-label={`Dismiss: ${event.title}`} data-alert-dismiss>Dismiss</button>}
         </div>

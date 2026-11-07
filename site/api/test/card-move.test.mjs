@@ -35,14 +35,14 @@ async function bucketWorld() {
   const fake = await startFakeS3();
   const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, credentials: fake.credentials, region: 'us-east-1' });
   const seedList = (id, name, entities) => fake.seed(`sections/${id}/workspace.json`, `${JSON.stringify({ name, entities }, null, 2)}\n`, 'application/json');
-  seedList('one', 'Assistant', [entity('deck'), entity('other')]);
+  seedList('one', 'Assistant', [entity('deck', { purpose: 'report' }), entity('other')]);
   seedList('two', 'Game Ideas', []);
   fake.seed('sections/one/2026-10-29_deck/index.md', '# Deck\n', 'text/markdown');
   fake.seed('sections/one/2026-10-29_deck/page.html', '<h1>deck</h1>', 'text/html');
   fake.seed('sections/one/2026-10-29_deck/img/a.png', Buffer.from([1, 2, 3]), 'image/png');
   fake.seed('sections/one/card-responses/deck/notes.json', '{"items":{}}', 'application/json');
   fake.seed('sections/one/2026-10-29_other/index.md', '# Other\n', 'text/markdown');
-  fake.seed('state.json', JSON.stringify({ version: 1, cards: { 'one/deck': { pinned: true, tags: ['x'] }, 'one/other': { pinned: true } } }), 'application/json');
+  fake.seed('state.json', JSON.stringify({ version: 1, cards: { 'one/deck': { pinned: true, tags: ['x'], purpose: 'reference' }, 'one/other': { pinned: true } } }), 'application/json');
   const writerOf = id => cardWriter(bucketStore(bucket, `sections/${id}`), { section: id, now });
   const state = createBucketCardStore(bucket, { ttl: 0 });
   const list = id => fake.json(`sections/${id}/workspace.json`);
@@ -66,7 +66,8 @@ test('on the bucket a move copies the files and viewer data, adds the card, reti
     assert.deepEqual(w.list('one').entities.map(item => item.id), ['other']);
     assert.deepEqual(w.list('one').retired.deck, { kind: 'moved', to: 'two', folder: '2026-10-29_deck', at: '2026-10-30' });
     const cards = w.fake.json('state.json').cards;
-    assert.deepEqual(cards['two/deck'], { pinned: true, tags: ['x'] });
+    assert.deepEqual(cards['two/deck'], { pinned: true, tags: ['x'], purpose: 'reference' }, 'the owner’s purpose moves with the card');
+    assert.equal(moved.purpose, 'report', 'and so does the entry’s');
     assert.equal(cards['one/deck'], undefined);
     assert.ok(cards['one/other'], 'Other cards keep their state.');
     assert.ok(!w.fake.log.some(entry => entry.method === 'DELETE'), 'Nothing was deleted.');

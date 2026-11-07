@@ -11,7 +11,9 @@ import SpriteSheet from './team/SpriteSheet'
 import NewPersona from './team/NewPersona'
 import Floor from './team/Floor'
 import SkillsTab from './team/SkillsTab'
+import SchedulesTab from './team/SchedulesTab'
 import { isSkillsRoute, skillOf } from './team/skillsModel'
+import { isSchedulesRoute, scheduleOf } from './team/schedulesModel'
 import { VIEW_KEY, viewOf, type TeamViewMode } from './team/floorModel'
 import { choiceOf, rosterCounts, STATUS_DOT, STATUS_LABEL, type AnySprite } from './team/teamModel'
 import { List, Split } from '../ui/Layout'
@@ -22,6 +24,8 @@ import AgentDetails from './AgentDetails'
 import { useHubData } from './useHub'
 
 interface Toast { text: string; undo?: () => void }
+
+type TeamTab = 'agents' | 'skills' | 'schedules'
 
 /** One agent as a row: its sprite, name, role and state. A link to its page, which opens beside the list from 900 px. */
 function AgentRow({ agent, now, on }: { agent: TeamAgent; now: number; on: boolean }) {
@@ -40,8 +44,8 @@ function AgentRow({ agent, now, on }: { agent: TeamAgent; now: number; on: boole
 }
 
 /**
- * The Team screen. Two halves, each its own address: Agents (`#/~hub/team`, an agent's page at `#/~hub/agent/<id>`) and Skills and
- * plugins (`#/~hub/team/skills[/<skill>]`). Agents is a list with the agent's page beside it from 900 px, or the Floor (the pixel
+ * The Team screen. Three halves, each its own address: Agents (`#/~hub/team`, an agent's page at `#/~hub/agent/<id>`), Skills and
+ * plugins (`#/~hub/team/skills[/<skill>]`) and Schedules (`#/~hub/team/schedules[/hermes/<job>]`). Agents is a list with the agent's page beside it from 900 px, or the Floor (the pixel
  * office) on its own; the choice is remembered in this browser. Nothing here switches a skill.
  */
 export default function Team({ routeId, agentId }: { routeId?: string; agentId?: string }) {
@@ -94,9 +98,10 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
     return true
   }, [save, say])
 
-  const skills = isSkillsRoute(routeId)
+  const tab: TeamTab = isSkillsRoute(routeId) ? 'skills' : isSchedulesRoute(routeId) ? 'schedules' : 'agents'
+  const agents = tab === 'agents'
   const counts = data ? rosterCounts(data.agents) : null
-  // The heading, the two halves as links (one step each), and on Agents the list or floor choice and the buttons.
+  // The heading, the three halves as links (one step each), and on Agents the list or floor choice and the buttons.
   const heading = (
     <div className="team-top">
       <div className="hub-top team-head">
@@ -109,10 +114,11 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
         )}
       </div>
       <nav className="ui-seg ui-seg-tabs" role="tablist" aria-label="Team" data-team-tabs>
-        <a role="tab" href={hubHash('team')} className={skills ? undefined : 'on'} aria-selected={!skills} data-team-tab="agents">Agents</a>
-        <a role="tab" href={hubHash('team', 'skills')} className={skills ? 'on' : undefined} aria-selected={skills} data-team-tab="skills">Skills and plugins</a>
+        <a role="tab" href={hubHash('team')} className={tab === 'agents' ? 'on' : undefined} aria-selected={tab === 'agents'} data-team-tab="agents">Agents</a>
+        <a role="tab" href={hubHash('team', 'skills')} className={tab === 'skills' ? 'on' : undefined} aria-selected={tab === 'skills'} data-team-tab="skills">Skills and plugins</a>
+        <a role="tab" href={hubHash('team', 'schedules')} className={tab === 'schedules' ? 'on' : undefined} aria-selected={tab === 'schedules'} data-team-tab="schedules">Schedules</a>
       </nav>
-      {!skills && (
+      {agents && (
         <div className="team-tools">
           {host.write && <button type="button" className="hub-btn team-new" ref={newOpener} onClick={() => setNewOpen(true)} data-new-persona>New persona</button>}
           <button type="button" className="hub-btn team-write" onClick={() => document.getElementById('cw-setting-title')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })} data-team-write-setting>Where agents can write</button>
@@ -127,8 +133,10 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
   )
 
   let body: ReactNode
-  if (skills) {
+  if (tab === 'skills') {
     body = <SkillsTab id={skillOf(routeId)} head={heading} desktop={desktop} />
+  } else if (tab === 'schedules') {
+    body = <SchedulesTab page={scheduleOf(routeId)} head={heading} desktop={desktop} />
   } else if (!data) {
     body = <div className="team-pane">{heading}<p className="hub-empty">{error ?? (loading ? 'Loading…' : '')}</p></div>
   } else if (view === 'floor' && !agentId) {
@@ -168,7 +176,7 @@ export default function Team({ routeId, agentId }: { routeId?: string; agentId?:
 
   const sheetAgent = data?.agents.find(agent => agent.id === sheetFor) ?? null
   return (
-    <div className="team" data-team-half={skills ? 'skills' : 'agents'}>
+    <div className="team" data-team-half={tab}>
       {body}
       {sheetAgent && (
         <SpriteSheet
