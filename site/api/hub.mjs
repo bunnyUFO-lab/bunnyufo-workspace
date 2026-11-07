@@ -370,7 +370,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   // Sprints on the PC (hub-sprints.mjs): the owner starts a chain of runs on a milestone; a sweep signs each next item when the one before it is done.
   const sprints = createSprints({
     requests: requestFiles, listFolders, cached, putCreateOnly, signingKey: on ? signingKey : null, fail, now, log, repoOf: project => projectRepo(project),
-    writeEvent: (event, at) => putHubEvent(event, at), sweepMs: Number(env.HUB_SPRINT_SWEEP_MS ?? 60_000),
+    notify, sweepMs: Number(env.HUB_SPRINT_SWEEP_MS ?? 60_000),
     // What eligibility is built from: the same data as the map, read fresh (a start is rare and must not judge from a 30-second-old list).
     loadInputs: async (project, at) => {
       const [{ meta, issues }, window, asks, checklists, marks, requests] = await Promise.all([loadBeads(project), loadEvents(at), loadAsks(at), loadChecklists(at), loadMarks(project), loadRequests(at)]);
@@ -1370,7 +1370,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const { events } = await loadEvents(at);
     const detail = reviewDetail(events, id, await repoProjects());
     if (!detail) throw missing();
-    if (!detail.card) {
+    if (detail.sprintEnd) { const closing = await sprints.closing(detail.sprintEnd).catch(() => null); if (closing) detail.closing = closing; delete detail.sprintEnd; }
+    if (!detail.card && !detail.closing) {
       const inferred = await inferCard(detail).catch(() => null);
       if (inferred) detail.inferred = inferred;
     }
