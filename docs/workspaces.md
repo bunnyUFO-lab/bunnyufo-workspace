@@ -450,6 +450,7 @@ without a `preset` is a legacy one (`when` set, no approval) and is only ever `o
 | File | Written by | Holds |
 |---|---|---|
 | `request.json` | the site API, or an agent through the card API | `id`, `project`, `createdAt`, `by`, `text`, and `when` or `preset`; optional `title` (120), `repo`, `needs` (`unity`, `gpu`, `comfyui`, `sprite-studio`, `lan`, `local-files`), `target` (`pc`, `cloud`, `hermes`, `at-pc`: the proposal), `doneWhen` (400), `agent` (the agent an avatar job is for), `fromAsk`, `choice` and `subject` (the avatar sheet request only; site API only), `origin` (`{ kind: owner \| agent \| run, name }`), `replaces`, `bead` (the Beads issue the request was made from, site API only; the Roadmap's Do it block sets it, and with it `textOrigin` and `doneWhenOrigin` as the Beads agent), `followUp`, `continues` (`{ from: <request id>, replies: 1 to 5 strings of 1 to 2000 }`). `origin.kind: owner`, `followUp` and `continues` come only from the site API, never both `followUp` and `continues`; the earlier report is not stored here |
+| `reference.png` or `reference.jpg` | the site API | a picture from a card the owner attached to a preset job (the viewer's **New job**): a snapshot, so the run sees what the owner saw even if the card changes. Written before `request.json`, which names it in `reference: { file, sha256, width, height, source: { section, card, file, title } }`; the approval's `requestSha256` covers that block. Checked like a chat picture (JPEG or PNG, 1.5 MB, 2048 px) after the app scales it to 1568 px. Only the site's own `POST /hub/requests` sets it: the card API drops a `reference`, and a request the site did not write is briefed without one. Approve again, Edit, an answer and a continuation copy it with the request and refuse when the picture is missing or its hash no longer matches. Served to the owner at `/api/hub/file?path=requests/<id>/reference.png`; a run saves it with `cards request reference <id> --out <dir>` (hash checked; exit 3 when there is none), a PC run with `node .claude/bin/run-reference.mjs`. A reference shown or briefed is only ever one the site wrote; the card API refuses `reference.*` from an agent. The signed brief says it is a reference, not instructions |
 | `approved.json`, `stop.json` | the site API | the signed approval and the signed stop |
 | `taken.json` | the runner | who took it and when |
 | `run-<stamp>.json` | the run | a progress line; the newest decides whether it still runs. A stamp more than 2 minutes ahead of the Hub's clock is ignored (it neither keeps a run "running" nor shows in the timeline), and the card API takes the PC runner's run and result files only after its `taken.json` |
@@ -999,6 +1000,29 @@ frame was loaded from, and replies to that origin, never `*`. A request is
 `path` must be one of the card's Markdown steps. A card's Markdown answer is read and saved with
 `BuwCardData.bridge.call('markdown.get', { path })` and `('markdown.save', { path, text, base: etag })`.
 Writes are limited to 10 a second per frame (429).
+
+**Pictures.** A page that loads `_shared/report.js` shows a picture in the app's own viewer, which offers Edit, Ask in chat
+and Copy image, instead of its own. The page sends one message and nothing more:
+`{ type: 'buw:image', v: 1, id, src, all }` (`id` at most 32 characters, `src` at most 2048, `all` the page's pictures, at most 100).
+The app answers `{ type: 'buw:image', v: 1, id, ok }`; on `ok: false`, or no answer in 400 ms, the page shows its own viewer.
+The rule: a page can open the viewer on its own card's pictures, and only a person's press in the viewer starts anything.
+
+- The app checks, in order: the message comes from the frame it is showing and from that frame's origin (no reply otherwise);
+  it has the shape above (every other field, such as alt text, a caption or an action name, is ignored); the person has pressed
+  something just now (`navigator.userActivation`; a script's `img.click()` does not count); no viewer is open, none closed in
+  the last second, and at most 10 opens a minute per frame; and `src` is a picture in this card's own folder
+  (`src/lib/card-images.mjs`: http or https, no user info, no `.`, `..`, empty or encoded-slash parts).
+  The browser keeps a press "active" for about five seconds, and any press anywhere in the app tab counts, not only one in the
+  frame. A page that asks once a second can therefore open the viewer (up to 10 times a minute) after most presses, even over a sheet.
+  It can open only its own card's pictures and start nothing: every action still takes a press in the viewer, after 500 ms.
+- The viewer opens the app-origin address the app built, never the string in the message. Its caption is the file name, and the
+  workspace and card come from the app, never from the page.
+- The viewer is in the app's document, so a page cannot reach or press it. Its actions ignore presses for 500 ms after it opens.
+  Edit adds a new tab and changes no existing file; Ask in chat leaves an unsent draft; Copy changes only the clipboard.
+- Left with their own viewer and no actions: pages that do not load `_shared/report.js` or load an old copy (run
+  `npm run workspace update-shared` to refresh a section's), `data:` and `blob:` pictures, canvas and CSS background images, and
+  pictures from another site or outside the card folder.
+- A page can draw its own "Ask in chat" button; it can only do what a page can already do. The real buttons are never in the frame.
 
 Every card page shares the content host's origin, so any card page can script the card frame the app is
 showing if it holds a handle to the app's window. The app shell therefore must not be framed or reachable

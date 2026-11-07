@@ -6,42 +6,55 @@ import MarkdownDocument, { MarkdownView } from './MarkdownDocument'
 import { ZoomImage } from './ImagePreview'
 import { downloadImage } from '../lib/download'
 import ReportFrame from './ReportFrame'
+import ImagePreview from './ImagePreview'
+import { resolveFrameImage } from '../lib/card-images.mjs'
 import HtmlEditor from './HtmlEditor'
 import DrawingSection from './DrawingSection'
 import { annotate as startAnnotation, openForEditing, readSection, saveSection, takeEditing } from '../lib/cards'
 import { annotatable, AnnotateContext } from '../lib/annotate'
 import { bridgeFor } from '../lib/bridgeFor'
 import type { Annotate } from '../lib/annotate'
+import type { ImageOpen } from './ReportFrame'
 
 /**
  * The card a page belongs to, when it can be edited through the card routes. `agentTab`: an agent added this tab to a card that is not
  * its own, so the page gets no card bridge and cannot read or rewrite the owner's other tabs.
  */
-export interface EditableCard { workspace: string; id: string; path: string; agentTab?: boolean }
+export interface EditableCard {
+  workspace: string; id: string; path: string; agentTab?: boolean
+  /** The card's title, for the line that tells a chat where a picture came from. */
+  title?: string
+  /** For a drawing made over a picture: the picture, who last saved it, and when. */
+  from?: string; by?: string; at?: string
+}
 
 interface ViewerProps { url: string; title: string; relativePath: string; card?: EditableCard; stepIndex?: number; onStep?: (index: number) => void }
 
 /** A card's page. On a card that can be written to, every picture on it can be drawn over (✎ Annotate). */
 export default function ReportViewer(props: ViewerProps) {
   const { url, card, stepIndex = 0, onStep } = props
-  const workspace = card?.workspace, id = card?.id, file = card?.path
+  const workspace = card?.workspace, id = card?.id, file = card?.path, heading = card?.title ?? ''
   const steppable = !!onStep
   const open = useRef(onStep)
   useEffect(() => { open.current = onStep })
   const annotation = useMemo<Annotate | null>(() => {
-    if (!workspace || !id || !file || !host.cards || !steppable) return null
+    if (!workspace || !id || !file) return null
     // The card folder is the page's address without the page's own path (which may sit in a sub-folder).
     const parts = new URL(url.split(/[?#]/)[0], window.location.href).href.split('/')
     const folderUrl = `${parts.slice(0, parts.length - file.split('/').length).join('/')}/`
     return {
       folderUrl,
-      annotate: async (image, width, height) => {
-        const made = await startAnnotation(workspace, id, image, stepIndex, width, height)
-        openForEditing(workspace, id, made.path)
-        open.current?.(made.step)
-      },
+      card: { workspace, id, title: heading },
+      // Drawing over a picture needs the card routes and a page that can switch tabs.
+      ...(host.cards && steppable ? {
+        annotate: async (image: string, width: number, height: number) => {
+          const made = await startAnnotation(workspace, id, image, stepIndex, width, height)
+          openForEditing(workspace, id, made.path)
+          open.current?.(made.step)
+        },
+      } : {}),
     }
-  }, [url, workspace, id, file, stepIndex, steppable])
+  }, [url, workspace, id, file, heading, stepIndex, steppable])
   return <AnnotateContext.Provider value={annotation}><ReportPage {...props} /></AnnotateContext.Provider>
 }
 
@@ -65,8 +78,16 @@ const sizeOf = (src: string) => new Promise<{ width: number; height: number }>((
   picture.src = src
 })
 
+/** The picture's file name, the only caption a page's picture gets: page text never names it. */
+const fileName = (url: string) => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || 'Image' } catch { return 'Image' } }
+
 function ReportPage({ url, title, relativePath, card }: ViewerProps) {
   const context = useContext(AnnotateContext)
+  // A picture the card's page asked the app to show (lib/card-images.mjs): the app's own viewer, on an address the app built.
+  const [picture, setPicture] = useState<{ urls: string[]; index: number } | null>(null)
+  const shownNow = useRef(false)
+  const closedAt = useRef(0)
+  useEffect(() => { shownNow.current = !!picture }, [picture])
   const annotateTarget = annotatable(context, url)
   const markdown = /\.md$/i.test(relativePath)
   const drawing = /\.excalidraw$/i.test(relativePath)
@@ -128,16 +149,25 @@ function ReportPage({ url, title, relativePath, card }: ViewerProps) {
       onSave={async (text, revision) => { const saved = await saveSection(card.workspace, card.id, card.path, text, revision ?? null); return { text: saved.text, revision: saved.etag ?? undefined } }} />
     : <div className="report-loading">Opening document…</div>
   if (markdown) return file ? host.saves ? <MarkdownDocument file={file} keys startEditing={startEditing} /> : <div className="markdown-reader"><MarkdownView text={file.text || ''} baseUrl={url} /></div> : <div className="report-loading">Opening document…</div>
-  if (image) return <div className="report-image"><nav><span>{title}</span><a href={url} target="_blank" rel="noreferrer">Open original</a>{annotateTarget && context && <button type="button" className="report-annotate" onClick={() => void sizeOf(url).then(size => context.annotate(annotateTarget, size.width, size.height)).catch(problem => setError(problem.message))}>✎ Annotate</button>}<a href={url} onClick={event => { event.preventDefault(); void downloadImage(url).catch(error => setError(error.message)) }}>Download</a></nav><ZoomImage src={url} alt={title} plain /></div>
+  if (image) return <div className="report-image"><nav><span>{title}</span><a href={url} target="_blank" rel="noreferrer">Open original</a>{annotateTarget && context?.annotate && <button type="button" className="report-annotate" onClick={() => void sizeOf(url).then(size => context.annotate?.(annotateTarget, size.width, size.height)).catch(problem => setError(problem.message))}>✎ Annotate</button>}<a href={url} onClick={event => { event.preventDefault(); void downloadImage(url).catch(error => setError(error.message)) }}>Download</a></nav><ZoomImage src={url} alt={title} plain /></div>
   const ready = available && loaded
   const fullPath = /^(?:[a-zA-Z]:)?[\\/]/.test(relativePath) ? relativePath : `${serviceState().repo}/${relativePath}`
   if (canEdit && editing) return <div className="report-document"><HtmlEditor path={fullPath} url={url} title={title} onClose={() => setEditing(false)} onSaved={() => setSaves(n => n + 1)} /></div>
   const framed = frameUrl(url)
+  const imageOpen: ImageOpen | undefined = context ? {
+    resolve: src => resolveFrameImage(src, frameUrl(context.folderUrl), context.folderUrl),
+    open: ({ url: address, urls }) => { shownNow.current = true; setPicture({ urls, index: Math.max(0, urls.indexOf(address)) }) },
+    isOpen: () => shownNow.current,
+    closedAt: () => closedAt.current,
+  } : undefined
   const shown = saves ? `${framed}${framed.includes('?') ? '&' : '?'}buw-saved=${saves}` : framed
   return <div className="report-document" aria-busy={!ready}>
     {canEdit && ready && <button type="button" className="report-edit" onClick={() => setEditing(true)} title="Edit the text on this page ( Ctrl+E )">✎ Edit</button>}
     {/* A new element per address: changing `src` in place would add an entry to the browser's joint history (lib/entries). */}
-    <ReportFrame key={shown} url={shown} title={title} bridge={bridgeFor(card)} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
+    <ReportFrame key={shown} url={shown} title={title} bridge={bridgeFor(card)} onImage={imageOpen} className={`report-frame${ready ? ' loaded' : ''}`} sandbox={new URL(framed, window.location.href).origin !== window.location.origin ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads' : undefined} onLoad={reveal} onError={() => setError('This page could not be loaded.')} />
     {!ready && <div className="report-loading" role="status">Opening report…</div>}
+    {picture && <ImagePreview url={picture.urls[picture.index]} title={fileName(picture.urls[picture.index])}
+      gallery={picture.urls.length > 1 ? { items: picture.urls.map(item => ({ url: item, title: fileName(item) })), index: picture.index, onIndex: index => setPicture({ urls: picture.urls, index }) } : undefined}
+      onClose={() => { closedAt.current = Date.now(); setPicture(null) }} />}
   </div>
 }
