@@ -196,11 +196,27 @@ try {
       assert.equal(await filterText(page), 'Section Two');
       assert.ok(await page.locator('[data-library] .lib-row', { hasText: 'Other project' }).count() > 0, 'the new row is there');
 
-      step(`${at}: a card id in two sections opens from the project in the filter`);
+      step(`${at}: closing the filter sheet keeps the pick and the address; Back from the sheet is not a screen`);
       await library(page, site.origin, '/one');
-      // The page was loaded on /one, so the site's page-load value still says One. Move the address to Two the way Back would.
-      await page.evaluate(() => { history.replaceState(null, '', '/two#/dup'); dispatchEvent(new PopStateEvent('popstate')); });
+      const closeSheet = async () => { await page.keyboard.press('Escape'); await page.locator('[data-project-list]').waitFor({ state: 'detached' }); };
+      const inSheet = async fn => { await filterOf(page).click(); const sheet = page.locator('[data-project-list]'); await sheet.waitFor(); await fn(sheet); await closeSheet(); };
+      await inSheet(async sheet => { await sheet.locator('[data-pick=""] input').click(); await sheet.locator('[data-pick="two"] input').click(); });
+      assert.equal(await filterText(page), 'Section Two', 'one pick survives the sheet closing');
+      assert.equal(new URL(page.url()).pathname, '/two', 'and so does its address');
+      await inSheet(async sheet => { await sheet.locator('[data-pick="one"] input').click(); });
+      assert.equal(await filterText(page), '2 projects', 'several picks survive');
+      assert.equal(new URL(page.url()).pathname, '/', 'at the address that holds them');
+      await inSheet(async sheet => { await sheet.locator('[data-pick=""] input').click(); });
+      assert.equal(await filterText(page), 'All projects', 'All survives');
+      assert.equal(new URL(page.url()).pathname, '/');
+      assert.equal(new URL(page.url()).hash, '#/~hub/library', 'the sheet left nothing in the address');
+
+      step(`${at}: a card id in two sections opens from the project picked in the real filter sheet`);
+      await library(page, site.origin, '/one');
+      await inSheet(async sheet => { await sheet.locator('[data-pick=""] input').click(); await sheet.locator('[data-pick="two"] input').click(); });
+      await page.locator('[data-library] .lib-row[data-entity="dup"] .lib-row-main').click();
       await page.locator('.buw-markdown h1', { hasText: 'Dup in two' }).waitFor();
+      assert.equal(new URL(page.url()).pathname, '/two');
       if (size.width > 900) assert.equal(await filterText(page), 'Section Two');
 
       step(`${at}: workspaces are in Settings, with no section links; archiving the section in the address stays on Settings`);

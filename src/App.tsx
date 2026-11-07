@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { WorkspaceCard } from './types'
 import { useWorkspace } from './lib/workspace'
 import { parseHash, parseChatId, hubHash, libraryHash, navScreen, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
-import { ROUTE_EVENT, back, go, hasOverlay, screenSerial, swap } from './lib/entries'
+import { ROUTE_EVENT, back, consumeOverlayClose, go, hasOverlay, screenSerial, swap } from './lib/entries'
 import { canonicalAddress } from './lib/redirects'
 import { useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -127,6 +127,8 @@ export default function App() {
   })
   // Where the several picks were, per entry: the entry a Back lands on gets them again (see `picksAt`).
   useEffect(() => { if (picks.length > 1) picksAt.set(screenSerial(), picks) }, [picks])
+  const picksNow = useRef(picks)
+  useEffect(() => { picksNow.current = picks }, [picks])
   const restorePicks = useCallback(() => {
     const kept = picksAt.get(screenSerial())
     if (kept && kept.length > 1) setPicks(now => (now.length > 1 || now.join() === kept.join() ? now : kept))
@@ -160,7 +162,17 @@ export default function App() {
     // Both halves of the address at once. Back fires popstate before hashchange, so updating
     // only the project here leaves one render where the filter has moved but the open card has
     // not — long enough for the effect below to rewrite the entry you just came back to.
-    const onPop = () => { const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); restorePicks(); setRoute(readRoute()) }
+    const onPop = () => {
+      // A Back that only shut a sheet (the project filter's) moved no screen: the pick made in it stands, and the address, put back to
+      // the entry before the sheet, is written again from the pick.
+      if (consumeOverlayClose()) {
+        const now = picksNow.current
+        swap(window.location.hash, projectPath(now.length === 1 ? now[0] : ''))
+        setRoute(readRoute())
+        return
+      }
+      const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); restorePicks(); setRoute(readRoute())
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [setRoute, restorePicks])
