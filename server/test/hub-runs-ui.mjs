@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { openLog } from './run-log.mjs';
 import { minutesAgo } from '../../site/api/test/hub-fixtures.mjs';
+import { markStamp } from '../../site/api/hub-model.mjs';
 
 const step = name => console.log(`- ${name}`);
 const channel = process.env.BUW_TEST_BROWSER || 'msedge';
@@ -184,6 +185,40 @@ try {
   await openLog(waiter.locator('[data-run-view]'), { finished: true });
   await finished.waitFor();
   assert.doesNotMatch(await finished.innerText(), /\d+ s/, 'A finished step shows no time.');
+
+  step('a finished PC job offers the open-run command (and the session id when the Hub has it); other jobs and running ones show nothing');
+  const openRun = await startHubFixture({ signing: true });
+  fixtures.push(openRun);
+  const pcIds = { withId: id('pc-with-session-a7a7'), noId: id('pc-no-session-b7b7'), cloud: id('cloud-done-c7c7'), running: id('pc-running-d7d7') };
+  const sessionId = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+  for (const [name, runner, session, finished] of [['withId', 'pc', sessionId, true], ['noId', 'pc', undefined, true], ['cloud', 'cloud', undefined, true], ['running', 'pc', sessionId, false]]) {
+    openRun.seed.request({ id: pcIds[name], project: 'magic-loops', createdAt: minutesAgo(openRun.now, 90).toISOString(), by: 'owner', text: `Job ${name}`, preset: 'research', target: runner });
+    openRun.seed.put(`requests/${pcIds[name]}/approved.json`, { v: 1, request: pcIds[name], project: 'magic-loops', repo: null, target: runner, limits: { minutes: 30 }, expires: '2099-01-01T00:00:00.000Z', at: minutesAgo(openRun.now, 80).toISOString(), by: 'local', signature: 'x' });
+    openRun.seed.put(`requests/${pcIds[name]}/taken.json`, { runner, host: 'pc-one', at: minutesAgo(openRun.now, 70).toISOString(), ...(session ? { session } : {}) });
+    if (finished) openRun.seed.put(`requests/${pcIds[name]}/result.json`, { v: 1, outcome: 'pr', pr: 'https://github.com/example/repo/pull/2', summary: 'Opened a PR.', by: 'hub', at: minutesAgo(openRun.now, 60).toISOString() });
+    else openRun.seed.put(`requests/${pcIds[name]}/run-${markStamp(minutesAgo(openRun.now, 1))}-r001.json`, { v: 1, state: 'running', lastAction: 'Reading', at: minutesAgo(openRun.now, 1).toISOString() });
+  }
+  await new Promise(resolve => setTimeout(resolve, 100));
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 }]) {
+    const view = await open(viewport);
+    await view.goto(`${openRun.url}#/~hub/request/${pcIds.withId}`);
+    const block = view.locator('[data-run-open]');
+    await block.waitFor();
+    assert.equal((await block.locator('[data-run-open-command]').innerText()).trim(), `node ~/.config/pc-dispatch/dispatch.mjs open-run ${pcIds.withId}`);
+    assert.match(await block.innerText(), /only|not work from another computer/i, 'It says the command works on the PC only.');
+    assert.equal((await block.locator('[data-run-open-session]').innerText()).trim(), sessionId);
+    assert.equal(await block.locator('[data-copy]').count(), 1, 'The command has a Copy button.');
+    const fit = await view.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, inner: innerWidth }));
+    assert.ok(fit.scroll <= fit.inner, `The page does not scroll sideways at ${viewport.width} px.`);
+    await view.goto(`${openRun.url}#/~hub/request/${pcIds.noId}`);
+    await view.locator('[data-run-open] [data-run-open-command]').waitFor();
+    assert.equal(await view.locator('[data-run-open-session]').count(), 0, 'No session id when the Hub has none.');
+    for (const name of ['cloud', 'running']) {
+      await view.goto(`${openRun.url}#/~hub/request/${pcIds[name]}`);
+      await view.locator(`[data-run-view="${pcIds[name]}"] [data-run-state-chip]`).waitFor();
+      assert.equal(await view.locator('[data-run-open]').count(), 0, `A ${name} job shows no command.`);
+    }
+  }
 
   step('a legacy request: taken with a result reads Done, taken and silent reads No word, never Running');
   const legacy = await startHubFixture({ signing: true });
