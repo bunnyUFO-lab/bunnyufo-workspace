@@ -212,7 +212,7 @@ test('a planted reference is neither shown nor briefed: the page and the PC brie
   } finally { await close(); }
 });
 
-test('a request the site wrote keeps its reference on the page, and its at-PC brief names the PC tool', async () => {
+test('a request the site wrote keeps its reference on the page, and its at-PC brief names the cards command', async () => {
   const { post, get, close } = await fixture();
   try {
     const made = await post('/hub/requests', job({ target: 'at-pc' }));
@@ -220,8 +220,8 @@ test('a request the site wrote keeps its reference on the page, and its at-PC br
     const detail = await get(`/hub/requests/${made.body.id}`);
     assert.equal(detail.body.request.reference.file, 'reference.png');
     const brief = (await get(`/hub/presets/brief?request=${made.body.id}`)).body.brief;
-    assert.match(brief, /Get it by running `node \.claude\/bin\/run-reference\.mjs` \(no arguments/);
-    assert.ok(!/cards request reference/.test(brief));
+    assert.ok(brief.includes(`Get it with \`cards request reference ${made.body.id} --out <dir>\``));
+    assert.ok(!/run-reference/.test(brief));
     assert.match(brief, /If that command is missing, it came from `img\/photo\.png`/);
   } finally { await close(); }
 });
