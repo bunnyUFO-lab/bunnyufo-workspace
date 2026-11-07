@@ -573,13 +573,13 @@ test('a file name that is not a plain path is left out of the brief, and a PC ru
     assert.equal(brief.split('\n').length, plain.split('\n').length, 'No line break comes in with the name.');
   }
   assert.match(renderBrief({ preset: 'research', request: request({ reference: block('img/photo-1_a.png') }) }), /it came from `img\/photo-1_a\.png` on card `one\/alpha`/);
-  // The wording follows the target: the PC has its own tool, every other target the cards command; the fallback stays.
-  for (const target of ['pc', 'at-pc']) {
+  // The wording follows the target: a PC run has its own tool, every other target the cards command, including the owner's own at-pc session; the fallback stays.
+  for (const target of ['pc']) {
     const brief = renderBrief({ preset: 'research', request: request({ reference: block('a.png') }), target });
     assert.match(brief, /Get it by running `node \.claude\/bin\/run-reference\.mjs` \(no arguments: it saves the picture to `\.buw\/pictures\/` and prints the path\) and open it\. If that command is missing, it came from `a\.png`/);
     assert.doesNotMatch(brief, /cards request reference/);
   }
-  for (const target of ['hermes', 'cloud', undefined]) {
+  for (const target of ['at-pc', 'hermes', 'cloud', undefined]) {
     assert.match(renderBrief({ preset: 'research', request: request({ reference: block('a.png') }), target }), /Get it with `cards request reference [^`]* --out <dir>` and open it\./);
   }
   assert.equal(renderBrief({ preset: 'research', request: request(), target: 'pc' }), plain, 'No reference: same bytes on every target.');
