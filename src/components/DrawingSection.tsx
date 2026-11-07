@@ -3,6 +3,7 @@ import { host } from '../lib/host'
 import { downloadFile } from '../lib/download'
 import { ZoomImage } from './ImagePreview'
 import type { EditableCard } from './ReportViewer'
+import { copyImage as copyPicture } from '../lib/cardImage'
 
 // Excalidraw is a large lazy chunk that is fetched only when a drawing needs it: to edit, or to
 // show a scene that has no picture yet. Opening a drawing that has its PNG loads none of it.
@@ -13,7 +14,16 @@ const DrawingEditor = lazy(() => {
   return import('./DrawingEditor')
 })
 
-const UNSUPPORTED = 'Copying images isn’t supported here — use Download'
+/** The address of the picture a drawing was made over: `from` is a path inside the card folder, which is the drawing's address minus its own path. */
+const originalUrl = (url: string, own: string, from: string) => {
+  const parts = new URL(url.split(/[?#]/)[0], window.location.href).href.split('/')
+  return `${parts.slice(0, parts.length - own.split('/').length).join('/')}/${from.split('/').map(encodeURIComponent).join('/')}`
+}
+
+const formatDay = (day: string) => {
+  const date = new Date(`${day}T12:00:00`)
+  return Number.isNaN(date.getTime()) ? day : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
 
 /** A drawing section: its picture (the PNG saved beside the scene) with the tools to edit, copy and share it. */
 /** `startEditing`: the section was just made, so it opens in the editor (ReportViewer already took the flag). */
@@ -45,17 +55,7 @@ export default function DrawingSection({ url, title, card, startEditing = false 
     navigator.clipboard?.writeText(window.location.href).then(() => setNote('Link copied'), () => setNote('The link could not be copied.'))
     if (!navigator.clipboard) setNote('The link could not be copied.')
   }
-  // The picture goes in as a promise made inside the click: Safari refuses a clipboard write that waits first.
-  const copyImage = () => {
-    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) { setNote(UNSUPPORTED); return }
-    try {
-      const blob = fetch(picture).then(response => {
-        if (!response.ok) throw new Error('No picture')
-        return response.blob()
-      })
-      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => setNote('Image copied'), () => setNote(UNSUPPORTED))
-    } catch { setNote(UNSUPPORTED) }
-  }
+  const copyImage = () => { copyPicture(picture).then(() => setNote('Image copied'), problem => setNote(problem.message)) }
 
   return <div className="report-image drawing-section">
     <nav>
@@ -66,6 +66,7 @@ export default function DrawingSection({ url, title, card, startEditing = false 
       <a href={state === 'shown' ? picture : url} onClick={event => { event.preventDefault(); void downloadFile(state === 'shown' ? picture : url).catch(problem => setNote(problem.message)) }}>Download</a>
       {note && <small role="status">{note}</small>}
     </nav>
+    {card?.from && <p className="drawing-origin" data-drawing-origin>Drawn over <a href={originalUrl(url, card.path, card.from)} target="_blank" rel="noreferrer">{card.from}</a>{card.by ? ` by ${card.by}` : ''}{card.at ? `, ${formatDay(card.at)}` : ''}. The original is unchanged.</p>}
     {state === 'shown' ? <ZoomImage src={picture} alt={title} plain />
       : state === 'missing' ? <Suspense fallback={<div className="report-loading" role="status">Opening drawing…</div>}><DrawingEditor url={url} title={title} /></Suspense>
         : <div className="report-loading" role="status">Opening drawing…</div>}

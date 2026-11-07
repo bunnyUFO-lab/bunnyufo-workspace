@@ -27,9 +27,9 @@ async function fixture() {
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0 });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const request = (route, data) => fetch(`${origin}/api${route}`, {
+  const request = (route, data, headers = {}) => fetch(`${origin}/api${route}`, {
     method: data === undefined ? 'GET' : 'POST',
-    headers: data === undefined ? {} : { 'Content-Type': 'application/json' },
+    headers: data === undefined ? headers : { 'Content-Type': 'application/json', ...headers },
     body: data === undefined ? undefined : typeof data === 'string' ? data : JSON.stringify(data),
   });
   const close = async () => { server.close(); await fake.close(); };
@@ -126,5 +126,34 @@ test('annotating names a new drawing after the picture, inserts its tab, and lea
     assert.equal(md5(fake.objects.get('sections/one/alpha/take-2b.png').body), before, 'The original picture is byte for byte the same.');
     assert.equal((await request('/cards/annotate', { workspace: 'one', id: 'alpha', image: '../x.png' })).status, 400);
     assert.equal((await request('/cards/annotate', { workspace: 'one', id: 'alpha', image: 'nothing.png' })).status, 404);
+  } finally { await close(); }
+});
+
+test('an annotation records the picture, who made it (from the sign-in, never the body) and when; saving it updates that', async () => {
+  const { fake, request, original, close } = await fixture();
+  try {
+    const before = md5(fake.objects.get('sections/one/alpha/take-2b.png').body);
+    const made = await (await request('/cards/annotate', { workspace: 'one', id: 'alpha', image: 'take-2b.png', after: 0, by: 'forged', at: '1999-01-01', from: 'index.md' }, { 'Remote-User': 'sam' })).json();
+    const step = made.card.steps[1];
+    assert.equal(step.path, 'take-2b.annotated.excalidraw');
+    assert.equal(step.from, 'take-2b.png');
+    assert.equal(step.by, 'sam');
+    assert.match(step.at, /^\d{4}-\d{2}-\d{2}$/);
+    assert.notEqual(step.at, '1999-01-01');
+
+    const opened = await (await request(`/cards/drawing?workspace=one&id=alpha&path=${made.path}`)).json();
+    const saved = await request('/cards/drawing', { workspace: 'one', id: 'alpha', path: made.path, scene: scene(), png: png(10, 10).toString('base64'), base: opened.etag, by: 'forged' }, { 'Remote-User': 'robin' });
+    assert.equal(saved.status, 200);
+    const list = JSON.parse(fake.text('sections/one/workspace.json'));
+    const stored = list.entities[0].steps.find(item => item.path === made.path);
+    assert.equal(stored.by, 'robin');
+    assert.equal(stored.from, 'take-2b.png');
+    assert.equal(md5(fake.objects.get('sections/one/alpha/take-2b.png').body), before, 'The original picture is byte for byte the same.');
+
+    // With no user (the local app) the step names nobody; a forged `by` in the body is still ignored.
+    const second = await (await request('/cards/annotate', { workspace: 'one', id: 'alpha', image: 'take-2b.png', after: 0, by: 'forged' })).json();
+    assert.equal(second.path, 'take-2b.annotated-2.excalidraw');
+    assert.equal('by' in second.card.steps.find(item => item.path === second.path), false);
+    assert.ok(original);
   } finally { await close(); }
 });
