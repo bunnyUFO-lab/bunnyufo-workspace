@@ -210,6 +210,13 @@ export const markStamp = date => date.toISOString().replace(/[-:.]/g, '');
 /** Picture files in a checklist's folder: a step's evidence, and a playtest issue's screenshot. JPEG and PNG only. */
 export const EVIDENCE_RE = /^evidence-(\d{2})-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
 export const SHOT_RE = /^shot-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
+/** A picture the owner attached to an answer, and one attached to a checklist's note. The names are owner-only: the card API refuses an agent writing or deleting them (handler.mjs), so none may be renamed outside these patterns. */
+export const ANSWER_PICTURE_RE = /^answer\.pic-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
+export const NOTE_SHOT_RE = /^shot-note-(\d{8}T\d{9}Z)-([a-z0-9]{4})\.(png|jpg)$/;
+export const ANSWER_PICTURES_MAX = 4;
+export const NOTE_PICTURES_MAX = 4;
+/** Whether an Ask takes pictures with its answer: it has a note or a drawing, and nothing in the Hub acts on the answer itself (a rerun, an edit of an agent, an avatar, a change list). */
+export const takesPictures = ask => !!ask && (ask.allowNote === true || ask.allowDrawing === true) && !ask.rerun && !ask.agentEdit && !ask.avatar && !ask.changes;
 export const EVIDENCE_PER_STEP = 5;
 export const SHOTS_PER_CHECKLIST = 30;
 
@@ -903,7 +910,7 @@ export function checkHelp(help) {
 export function checkAnswer(ask, data) {
   checkHelp(data?.help);
   const fail = message => Object.assign(new Error(message), { status: 400 });
-  const { choice, note, drawing, decisions } = data ?? {};
+  const { choice, note, drawing, decisions, pictures } = data ?? {};
   const asked = validDecisions(ask);
   if (decisions !== undefined && decisions !== null) {
     if (!asked) throw fail('This Ask has no decisions.');
@@ -931,10 +938,16 @@ export function checkAnswer(ask, data) {
   if (drawing !== undefined && drawing !== null) {
     if (!ask.allowDrawing) throw fail('This Ask takes no drawing.');
   }
+  let picked = [];
+  if (pictures !== undefined && pictures !== null) {
+    if (!Array.isArray(pictures) || pictures.length > ANSWER_PICTURES_MAX || pictures.some(name => typeof name !== 'string' || !ANSWER_PICTURE_RE.test(name)) || new Set(pictures).size !== pictures.length) throw fail(`Pictures are a list of at most ${ANSWER_PICTURES_MAX} picture names.`);
+    if (pictures.length && !takesPictures(ask)) throw fail('This Ask takes no pictures.');
+    picked = pictures;
+  }
   const has = value => value !== undefined && value !== null && value !== '';
   // An Ask with options is answered with one of them, even when it also has decisions: the lead should not have to guess.
   if (Array.isArray(ask.options) && ask.options.length && !has(choice)) throw fail('Pick one of the options.');
-  if (!has(choice) && !has(note) && !has(drawing) && !asked) throw fail('Choose an option, write a note or draw something.');
+  if (!has(choice) && !has(note) && !has(drawing) && !picked.length && !asked) throw fail('Choose an option, write a note or draw something.');
 }
 
 /**

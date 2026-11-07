@@ -11,6 +11,7 @@ import { VERDICTS, imageName, optionList, text, useAskAnswer } from './askAnswer
 import HubImage from './HubImage'
 import Md from './Md'
 import { useAttachHelp } from './useAttachHelp'
+import { PictureButton, PictureTray } from './PictureTray'
 import './questions.css'
 
 const DrawingEditor = lazy(() => import('../components/DrawingEditor'))
@@ -29,7 +30,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   const live0 = ask.state === 'open' || ask.state === 'snoozed'
   const attachHelp = useAttachHelp('ask', ask.id, live0)
   const answer = useAskAnswer(ask, { reload, onSettled, onTaken, handoff: view, help: attachHelp.help })
-  const { choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts } = answer
+  const { choice, setChoice, note, setNote, busy, problem, notice, confirming, setConfirming, bigConfirm, setBigConfirm, drawing, setDrawing, editing, setEditing, sizes, setSizes, io, kind, decisions, verdicts, pictures, pictureable } = answer
   const options = optionList(ask)
   const sheetCheck = isSheetCheck(ask)
   const live = ask.state === 'open' || ask.state === 'snoozed'
@@ -40,8 +41,14 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
   const pick = kind === 'pick'
   const noteField = ask.allowNote && writable && (
     <label className="hub-field">{kind ? 'Summary note (optional)' : 'Note to the agent (optional)'}
-      <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={4000} />
+      <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={4000} onPaste={pictureable ? pictures.onPaste : undefined} />
     </label>
+  )
+  const pictureRow = noteField && pictureable && (
+    <div className="hub-pic-row" data-ask-pictures>
+      <div className="hub-pic-line"><PictureButton pictures={pictures} label="Attach pictures to the answer" /><span className="hub-muted">Add a picture</span></div>
+      <PictureTray pictures={pictures} />
+    </div>
   )
   const picture = image && (
     <div className="dr-pic" data-design-image>
@@ -102,6 +109,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
           <div className="dr-side">
             {decisionRows}
             {noteField}
+            {pictureRow}
           </div>
         </div>
       )}
@@ -135,7 +143,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
         </div>
       )}
       {!host.write && live && <p className="hub-muted" data-readonly-note>You can read this Ask here. To answer it, open it on the signed-in site.</p>}
-      {!(picture || decisionRows) && noteField}
+      {!(picture || decisionRows) && <>{noteField}{pictureRow}</>}
       {canDraw && !hasImages && !image && !drawing && (
         <p><button type="button" className="hub-btn" onClick={() => setEditing({ optionId: null, w: 1024, h: 768 })}>Draw instead</button></p>
       )}

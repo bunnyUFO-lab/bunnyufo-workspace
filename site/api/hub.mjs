@@ -17,7 +17,7 @@ import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, NOTE_SHOT_RE, ANSWER_PICTURE_RE, ANSWER_PICTURES_MAX, NOTE_PICTURES_MAX, takesPictures, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
@@ -788,8 +788,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const agentEditBlocked = canAnswer(state.state) ? await agentEditFlow.blockedReason(ask, at).catch(() => null) : null;
     const sub = askSubtype(ask);
     const beadTitle = await decidesTitle(ask);
+    // Pictures the owner saved for an answer that is not sent yet: from the fresh listing, never from a cache.
+    const pendingPictures = canAnswer(state.state) && takesPictures(ask) ? [...names].filter(name => ANSWER_PICTURE_RE.test(name)).sort() : [];
     return {
       ...ask, ...state,
+      ...(pendingPictures.length ? { pendingPictures } : {}),
       ...(rev ? { rev } : {}),
       ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
@@ -812,6 +815,17 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     return { checklist: { ...checklist, id }, names };
   }
 
+  /** Every step's picture files, oldest first: { "03": ["evidence-03-…jpg", …] }. `evidence` keeps only the newest of each step. */
+  const evidenceFiles = names => {
+    const found = {};
+    for (const name of [...names].sort()) {
+      const match = EVIDENCE_RE.exec(name);
+      if (match) (found[match[1]] ??= []).push(name);
+    }
+    return found;
+  };
+  const notePictureNames = names => [...names].filter(name => NOTE_SHOT_RE.test(name)).sort();
+
   async function checklistDetail(id, at = now()) {
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
@@ -826,6 +840,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       ...(sub ? { subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}) } : {}),
       evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
       shots: pictures.shots,
+      evidenceFiles: evidenceFiles(names),
+      ...(notePictureNames(names).length ? { notePictures: notePictureNames(names) } : {}),
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
       ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
@@ -861,14 +877,17 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    */
   async function putChecklistFile(id, data, at) {
     const target = data.for;
-    if (target !== 'issue' && !(typeof target === 'string' && /^\d{2}$/.test(target))) throw fail('Send "for" as a step number like "03", or "issue".');
+    if (target !== 'issue' && target !== 'note' && !(typeof target === 'string' && /^\d{2}$/.test(target))) throw fail('Send "for" as a step number like "03", "issue" or "note".');
     const picture = checkOneImage(data.image, fail);
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
     if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
     const pictures = checklistEvidence(names);
     let prefix;
-    if (target === 'issue') {
+    if (target === 'note') {
+      if (notePictureNames(names).length >= NOTE_PICTURES_MAX) throw fail(`A note takes at most ${NOTE_PICTURES_MAX} pictures.`, 409);
+      prefix = 'shot-note';
+    } else if (target === 'issue') {
       if (pictures.shots.length >= SHOTS_PER_CHECKLIST) throw fail(`A checklist has at most ${SHOTS_PER_CHECKLIST} screenshots.`, 409);
       prefix = 'shot';
     } else {
@@ -888,6 +907,53 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
   }
 
+  /** The picture name `prefix-<stamp>-<rand4>.<ext>` written create-only in a folder, a new name on a clash, three tries. */
+  async function putPicture(folder, prefix, picture, at) {
+    for (let attempt = 0; ; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      const file = `${prefix}-${markStamp(at)}-${randomId(4)}.${picture.ext}`;
+      try {
+        await putCreateOnly(`${folder}/${file}`, picture.buffer, picture.type, clash);
+        return { status: 201, body: { file, at: at.toISOString() } };
+      } catch (error) {
+        if (error !== clash || attempt >= 2) throw error;
+      }
+    }
+  }
+
+  /** One picture for an Ask's answer, in the chat shape `{ image: { type, data } }`. Stored in the Ask's folder as `answer.pic-…`; the answer names the ones kept. */
+  async function putAskFile(id, data, at) {
+    const picture = checkOneImage(data?.image, fail);
+    const { ask, names } = await askFolder(id);
+    const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
+    const { state } = askState(names, ask, at, snooze);
+    if (!canAnswer(state)) throw fail(state === 'answered' ? 'This Ask is already answered.' : `This Ask is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    if (!takesPictures(ask)) throw fail('This Ask takes no pictures.', 409);
+    if ([...names].filter(name => ANSWER_PICTURE_RE.test(name)).length >= ANSWER_PICTURES_MAX) throw fail(`An answer takes at most ${ANSWER_PICTURES_MAX} pictures.`, 409);
+    return putPicture(`asks/${id}`, 'answer.pic', picture, at);
+  }
+
+  /** Take back a picture saved for an Ask that is still waiting. */
+  async function deleteAskFile(id, file, at) {
+    if (!ANSWER_PICTURE_RE.test(file)) throw fail('That is not a picture of an answer.', 400);
+    const { ask, names } = await askFolder(id);
+    const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
+    const { state } = askState(names, ask, at, snooze);
+    if (!canAnswer(state)) throw fail('This Ask is already answered.', 409);
+    await bucket.del(key(`asks/${id}/${file}`));
+    return { status: 200, body: { removed: file } };
+  }
+
+  /** Take back a step's picture, an issue's screenshot or a note's picture from a checklist that is still open. */
+  async function deleteChecklistFile(id, file) {
+    if (!(EVIDENCE_RE.test(file) || SHOT_RE.test(file) || NOTE_SHOT_RE.test(file))) throw fail('That is not a picture of this checklist.', 400);
+    const { names } = await checklistFolder(id);
+    const state = checklistState(names);
+    if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    await bucket.del(key(`checklists/${id}/${file}`));
+    return { status: 200, body: { removed: file } };
+  }
+
   /** Send the list back: submit.json create-only, then the `checklist-submitted` event. A lost event is logged and does not undo the submit. */
   async function submitChecklist(id, data, user, at) {
     const { checklist, names } = await checklistFolder(id);
@@ -903,10 +969,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     if (!playtest && ['rating', 'verdict', 'issues'].some(name => data[name] !== undefined)) throw fail('Only a playtest takes a rating.');
     const report = playtest ? checkPlaytestSubmit(checklist, data, names) : null;
     const help = await helpFor(data.help, 'checklist', id);
+    const pictures = data.pictures === undefined || data.pictures === null ? [] : data.pictures;
+    if (!Array.isArray(pictures) || pictures.length > NOTE_PICTURES_MAX || new Set(pictures).size !== pictures.length || pictures.some(name => typeof name !== 'string' || !NOTE_SHOT_RE.test(name))) throw fail(`Pictures are a list of at most ${NOTE_PICTURES_MAX} picture names.`);
+    for (const name of pictures) if (!names.has(name)) throw fail('A picture is gone. Remove it or add it again.', 400);
     const submit = {
       at: at.toISOString(), by: user || 'local',
       ...(typeof note === 'string' && note.trim() ? { note: note.trim() } : {}),
       done: ids.filter(item => marks.get(item)?.done), open: ids.filter(item => !marks.get(item)?.done),
+      ...(pictures.length ? { pictures: [...pictures] } : {}),
       ...(report ?? {}),
       ...(help ? { help } : {}),
     };
@@ -917,6 +987,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       throw fail('This checklist is already submitted.', 409, { submit: await existing() });
     }
     cache.delete(key(`checklists/${id}/submit.json`));
+    // A note picture the submission does not name was taken out in another tab: it never reaches an agent.
+    for (const name of notePictureNames(names)) if (!pictures.includes(name)) await bucket.del(key(`checklists/${id}/${name}`)).catch(() => {});
     const event = {
       ts: at.toISOString(), kind: 'checklist-submitted', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user || 'local',
       title: `Submitted: ${clip(checklist.title, 80)}`, summary: report ? `Rating ${report.rating}/5 · ${PLAYTEST_VERDICTS[report.verdict]} · ${report.issues.length} ${report.issues.length === 1 ? 'issue' : 'issues'}` : `${doneCount} of ${total} done`,
@@ -1120,6 +1192,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       applied = readAsk(parsed, id);
     }
     const help = await helpFor(data.help, 'ask', id);
+    // Every named picture must still be in the folder: one removed in another tab is a 400 and nothing is written.
+    const pictures = Array.isArray(data.pictures) ? data.pictures : [];
+    for (const name of pictures) if (!names.has(name)) throw fail('A picture is gone. Remove it or add it again.', 400);
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const answer = { at: at.toISOString(), by: user || 'local' };
     if (data.choice) answer.choice = data.choice;
@@ -1136,7 +1211,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       answer.drawing = { excalidraw: 'answer.excalidraw', png: 'answer.png' };
     }
     if (help) answer.help = help;
+    if (pictures.length) answer.pictures = [...pictures];
     await writeAnswer(id, answer);
+    // What was taken out in another tab never reaches an agent: any picture the answer does not name is deleted (best effort).
+    for (const name of names) if (ANSWER_PICTURE_RE.test(name) && !pictures.includes(name)) await bucket.del(key(`asks/${id}/${name}`)).catch(() => {});
     if (ask.changes) applyPoke.poke();
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
@@ -1592,7 +1670,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       listedSheet = id && AGENTS.some(agent => agent.id === segments[1]) ? await sheets.find(segments[1], id) : null;
       if (!listedSheet) throw fail('That file is not served.', 400);
     }
-    const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? ''));
+    const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? '') || NOTE_SHOT_RE.test(segments[2] ?? ''));
     if (segments.length !== 3 || !(picture || listedSheet || ['asks', 'requests', 'drawings'].includes(segments[0]))) throw fail('That file is not served.', 400);
     let object;
     try {
@@ -1687,7 +1765,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const bodyLimit = (method, route) => {
     if (method !== 'POST') return 0;
     if (/^\/hub\/asks\/[^/]+\/answer$/.test(route) || route === '/hub/requests' || route.startsWith('/hub/drawings')) return LIMITS.big;
-    if (/^\/hub\/checklists\/[^/]+\/files$/.test(route)) return LIMITS.big;
+    if (/^\/hub\/checklists\/[^/]+\/files$/.test(route) || /^\/hub\/asks\/[^/]+\/files$/.test(route)) return LIMITS.big;
     if (route === '/hub/chat') return LIMITS.chat;
     return LIMITS.small;
   };
@@ -2041,6 +2119,16 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           if (match[2] === 'answer') send(await answerAsk(id, raw, user, at));
           else if (match[2] === 'snooze') send(await snoozeAsk(id, raw, user, at));
           else send(await cancelAsk(id, user, at));
+        } else if ((match = /^\/hub\/asks\/([^/]+)\/files$/.exec(route))) {
+          const id = decodeURIComponent(match[1]);
+          if (!validId(id)) throw fail('No such Ask.', 404);
+          send(await putAskFile(id, raw, at));
+        } else if ((match = /^\/hub\/asks\/([^/]+)\/files\/([^/]+)\/delete$/.exec(route))) {
+          const id = decodeURIComponent(match[1]);
+          if (!validId(id)) throw fail('No such Ask.', 404);
+          send(await deleteAskFile(id, decodeURIComponent(match[2]), at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/files\/([^/]+)\/delete$/.exec(route))) {
+          send(await deleteChecklistFile(decodeURIComponent(match[1]), decodeURIComponent(match[2])));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/items\/(\d{2})$/.exec(route))) {
           send(await markChecklistItem(decodeURIComponent(match[1]), match[2], raw, user, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/files$/.exec(route))) {
