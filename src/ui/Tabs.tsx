@@ -1,7 +1,7 @@
 import type { MouseEvent } from 'react'
 import { host } from '../lib/host'
 import { tabEntries } from '../lib/hubNav'
-import { parseHash, type NavId } from '../lib/route'
+import { parseHash, type NavId, type Scope } from '../lib/route'
 import { carryStateOnce, go, stepsBackTo } from '../lib/entries'
 import Icon from './Icon'
 
@@ -23,10 +23,10 @@ function leaveCard(event: MouseEvent<HTMLAnchorElement>, hash: string) {
 }
 
 /** The phone's bottom tabs: Today, Chat, Library, Projects, Search. Each is 44 px or more; the Needs count sits on Today. */
-export default function Tabs({ lit, needsYou }: { lit: NavId | null; needsYou: number }) {
+export default function Tabs({ lit, needsYou, scope }: { lit: NavId | null; needsYou: number; scope?: Scope }) {
   return (
     <nav className="ui-tabs" aria-label="Main" data-tabs>
-      {tabEntries(host).map(entry => (
+      {tabEntries(host, scope).map(entry => (
         <a key={entry.nav} href={entry.hash} className={`ui-tab${lit === entry.nav ? ' on' : ''}`} aria-current={lit === entry.nav ? 'page' : undefined} data-nav={entry.nav}
           onClick={entry.nav === 'library' ? event => leaveCard(event, entry.hash) : undefined}>
           <Icon name={entry.nav} size={23} />

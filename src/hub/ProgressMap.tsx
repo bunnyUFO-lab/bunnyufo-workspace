@@ -3,6 +3,7 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
 import type { MapWayfinder, ProgressMap as MapModel, TaskState } from '../lib/hub'
 import { copyAge } from '../lib/hub'
 import { mapHash } from '../lib/route'
+import { useScope } from '../lib/useScope'
 import { swap } from '../lib/entries'
 import { layoutMap, type FeatureNode, type Label, type MapNode, type MilestoneNode, type TaskNode } from './mapLayout'
 import MapSigns from './MapSigns'
@@ -155,6 +156,7 @@ function WayfinderHeader({ project, repoName, wayfinder, plan }: { project: stri
 
 /** `panelModel`, `closeTo` and `noMatch` are for a branch (ws-im1.3.2): the panel reads the whole project, closing it stays in the branch, and an empty search offers the full map. */
 function MapView({ model: fullModel, project, nodeId, header, panelModel, closeTo, noMatch }: { model: MapModel; project: string; nodeId?: string; header?: ReactNode; panelModel?: MapModel; closeTo?: string; noMatch?: ReactNode }) {
+  const { sprint } = useScope()
   const [filter, setFilter] = useState<MapFilter>(savedFilter)
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState(savedQuery)
@@ -384,13 +386,13 @@ function MapView({ model: fullModel, project, nodeId, header, panelModel, closeT
 
   const openPanel = useCallback((id: string) => {
     if (id === shownId) return
-    if (shownId) { swap(mapHash(project, id)); return }
+    if (shownId) { swap(mapHash(project, id, sprint)); return }
     pushed.current = true
-    window.location.assign(mapHash(project, id))
-  }, [project, shownId])
+    window.location.assign(mapHash(project, id, sprint))
+  }, [project, shownId, sprint])
   const closePanel = useCallback(() => {
-    if (pushed.current) { pushed.current = false; window.history.back() } else swap(mapHash(project, closeTo))
-  }, [project, closeTo])
+    if (pushed.current) { pushed.current = false; window.history.back() } else swap(mapHash(project, closeTo, sprint))
+  }, [project, closeTo, sprint])
 
   // Opening or closing a node keeps that node where it is on screen; the rest of the map moves around it.
   const toggle = useCallback((node: MilestoneNode | FeatureNode) => {

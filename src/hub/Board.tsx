@@ -10,7 +10,7 @@ import { useIsPhone } from '../lib/chrome'
 import SearchField from './SearchField'
 import { host } from '../lib/host'
 import { find } from './mapState'
-import { hubHash, mapHash, workHash } from '../lib/route'
+import { hubHash, mapHash, withScope, workHash } from '../lib/route'
 import { swap } from '../lib/entries'
 import { useOverflowEdges } from '../lib/useOverflowEdges'
 import { SIGN_GLYPH, SIGN_LABEL } from './signs'
@@ -115,7 +115,7 @@ function SheetWaiting({ error, onClose }: { error: string | null; onClose: () =>
 }
 
 /** Work's Board tab: `project` is a project id, `all` for every project, or absent for the default one. */
-export default function Board(props: { project?: string; focus?: string }) {
+export default function Board(props: { project?: string; focus?: string; sprint?: string }) {
   // The board's own state (lane, folds, scroll) restarts with the board it shows, never with the item a sheet is open on:
   // the bare `work` address and the default board's own address are the same board.
   // The key falls back to the early guess, so it does not change when the list confirms it (a remount would fetch twice).
@@ -123,7 +123,7 @@ export default function Board(props: { project?: string; focus?: string }) {
   return <BoardView key={props.project === 'all' ? 'all' : project ?? early ?? ''} {...props} />
 }
 
-function BoardView({ project: wanted, focus }: { project?: string; focus?: string }) {
+function BoardView({ project: wanted, focus, sprint }: { project?: string; focus?: string; sprint?: string }) {
   const all = wanted === 'all'
   const { list, project: chosen, early, loading: listing, error: listError } = useProject(all ? undefined : wanted)
   const project = all ? undefined : chosen
@@ -197,7 +197,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   const unknown = !!(focus && data && !focusLane && (!sheetOf || (sheetMap.model && !sheetFound)))
   const pushed = useRef(false)
   const lastFocus = useRef<string | null>(null)
-  const boardHash = hubHash('work', board)
+  const boardHash = withScope(hubHash('work', board), { sprint })
   const openFromCard = useCallback((event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     if (focus) { event.preventDefault(); swap(href); return }
@@ -208,8 +208,8 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
   }, [boardHash])
   const openRelated = useCallback((id: string) => {
     if (sheetOf) setCarried({ id, project: sheetOf })
-    swap(workHash(board, id))
-  }, [board, sheetOf, setCarried])
+    swap(workHash(board, id, sprint))
+  }, [board, sheetOf, setCarried, sprint])
   // Whatever closes the sheet (the button, Escape, Back), focus goes back to the card that opened it.
   useEffect(() => {
     if (focus) { lastFocus.current = focus; return }
@@ -273,7 +273,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
           {hasQuery && text.error && !text.data && <p className="hub-muted" data-search-note>Searching titles and ids only: the text did not load.</p>}
         </>
       )}
-      {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}<ProjectLink id={project} label="Project" /></div>}
+      {project && !phone && <div className="work-spawn">{host.write && <button type="button" className="hub-btn pri" data-spawn-open onClick={() => openSpawn({ project })}>New job</button>}<ProjectLink id={project} label="Project" sprint={sprint} /></div>}
       {project && !host.write && <p className="hub-muted">Sign in to ask an agent to do something.</p>}
       {all && <p className="hub-muted">Pick a project to ask an agent to do something.</p>}
       {!data && !work.error && (listing || work.loading) && !listError && <p className="hub-empty">Loading…</p>}
@@ -300,7 +300,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
               return (
                 <section key={lane} className="wk-lane" data-lane={lane} aria-label={label}>
                   <h3>{label} <span>{laneCount(lane)}</span></h3>
-                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} onSheet={openFromCard} q={filter.q} row={rowOf.get(`${card.project}/${card.id}`)} />)}
+                  {shown.map(card => <Card key={card.key} card={card} href={card.source === 'beads' ? workHash(board, card.id, sprint) : card.href} showProject={all} projectName={nameOf(card.project)} focused={card.key === focusKey} onSheet={openFromCard} q={filter.q} row={rowOf.get(`${card.project}/${card.id}`)} />)}
                   {!cards.length && <p className="hub-empty">{filtering ? 'No match' : 'Nothing here.'}</p>}
                   {collapsible && (
                     <button type="button" className="hub-btn wk-more" onClick={() => setExpanded(value => ({ ...value, [lane]: !value[lane] }))}>
@@ -323,7 +323,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
               <h3>Also found, not on the board <span>{also.length}</span></h3>
               <p className="hub-muted">Matches with no card on this board.</p>
               {also.slice(0, ALSO_MAX).map(row => (
-                <a key={`${row.project}/${row.id}`} className="wk-also-row" href={workHash(board, row.id)} data-also={row.id} onClick={() => { if (all) setCarried({ id: row.id, project: row.project }) }}>
+                <a key={`${row.project}/${row.id}`} className="wk-also-row" href={workHash(board, row.id, sprint)} data-also={row.id} onClick={() => { if (all) setCarried({ id: row.id, project: row.project }) }}>
                   <span className="wk-title"><Marked text={row.title} q={filter.q} /></span>
                   <span className="wk-meta"><span className="hub-id"><Marked text={row.id} q={filter.q} /></span><span>{row.status === 'closed' ? 'closed' : 'open'}</span>{all && <span className="wk-project">{nameOf(row.project)}</span>}</span>
                 </a>
@@ -351,7 +351,7 @@ function BoardView({ project: wanted, focus }: { project?: string; focus?: strin
       {focus && !unknown && (
         <div className="wk-sheet">
           {sheetMap.model && sheetFound
-            ? <MapPanel model={sheetMap.model} nodeId={focus} onClose={closeSheet} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(sheetMap.model.project, focus)} data-show-on-roadmap>Show on roadmap</a></p>} />
+            ? <MapPanel model={sheetMap.model} nodeId={focus} onClose={closeSheet} onOpen={openRelated} headerExtra={<p className="hub-map-panel-roadmap"><a href={mapHash(sheetMap.model.project, focus, sprint)} data-show-on-roadmap>Show on roadmap</a></p>} />
             : <SheetWaiting error={sheetMap.model ? 'The roadmap does not have this item.' : sheetMap.error} onClose={closeSheet} />}
         </div>
       )}

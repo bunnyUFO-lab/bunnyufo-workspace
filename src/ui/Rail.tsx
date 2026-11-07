@@ -1,14 +1,14 @@
 import { host } from '../lib/host'
 import { navEntries } from '../lib/hubNav'
-import type { NavId } from '../lib/route'
+import type { NavId, Scope } from '../lib/route'
 import BrandLogo from '../components/BrandLogo'
 import Icon from './Icon'
 
 const mac = () => /Mac|iPhone|iPad/.test(navigator.platform)
 
 /** The desktop's left rail (900 px and up): the mockup's order. The Needs count sits on Today. */
-export default function Rail({ lit, needsYou }: { lit: NavId | null; needsYou: number }) {
-  const entries = navEntries(host)
+export default function Rail({ lit, needsYou, scope }: { lit: NavId | null; needsYou: number; scope?: Scope }) {
+  const entries = navEntries(host, scope)
   const item = (entry: (typeof entries)[number]) => (
     <a key={entry.nav} href={entry.hash} className={`ui-navitem${lit === entry.nav ? ' on' : ''}`} aria-current={lit === entry.nav ? 'page' : undefined} data-nav={entry.nav}>
       <Icon name={entry.nav} size={20} />

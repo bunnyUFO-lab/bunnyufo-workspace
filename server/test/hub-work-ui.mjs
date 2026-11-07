@@ -286,6 +286,46 @@ try {
   await lanePage.waitForFunction(id => location.hash === `#/~hub/request/${id}`, seedFiles.proposed);
   await lanePage.locator('[data-approval-body]').waitFor();
 
+  step('sprint in the address: both forms give the same board, and the sprint survives Work tabs, a sheet, the rail and the project page');
+  const sprinted = await startHubFixture({ work: true, workSprint: true });
+  fixtures.push(sprinted);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const sp = await open({ width: 1920, height: 1080 });
+  const hashOf = () => sp.evaluate(() => location.hash);
+  await sp.goto(`${sprinted.url}#/~hub/work/lanes`);
+  await sp.locator('.wk-lane').first().waitFor();
+  const pathForm = await idsOf(sp, 'ready');
+  await go(sp, '#/~hub/work?project=lanes');
+  await sp.waitForFunction(() => document.querySelectorAll('.wk-lane').length === 6);
+  assert.deepEqual(await idsOf(sp, 'ready'), pathForm, 'The two address forms give the same board.');
+  await go(sp, '#/~hub/work?project=lanes&sprint=sprint-5');
+  await sp.locator('.wk-lane').first().waitFor();
+  assert.equal(await sp.locator('[data-rail] [data-nav="today"]').getAttribute('href'), '#/~hub/today?project=lanes&sprint=sprint-5', 'Today keeps the scope.');
+  assert.equal(await sp.locator('[data-rail] [data-nav="work"]').getAttribute('href'), '#/~hub/work?project=lanes&sprint=sprint-5');
+  assert.equal(await sp.locator('[data-rail] [data-nav="project"]').getAttribute('href'), '#/~hub/project?sprint=sprint-5');
+  assert.equal(await sp.locator('[data-rail] [data-nav="team"]').getAttribute('href'), '#/~hub/team', 'Team ignores the scope.');
+  await sp.locator('[data-work-tab="activity"]').click();
+  await sp.locator('[data-work-tabs]').waitFor();
+  assert.equal(await hashOf(), '#/~hub/activity?project=lanes&sprint=sprint-5', 'Activity keeps the scope in the address.');
+  await sp.locator('[data-work-tab="board"]').click();
+  await sp.locator('.wk-lane').first().waitFor();
+  assert.equal(await hashOf(), '#/~hub/work?project=lanes&sprint=sprint-5');
+  await sp.locator('[data-card="bead:ws-ready"]').click();
+  await sp.locator('#hub-map-panel').waitFor();
+  assert.equal(await hashOf(), '#/~hub/work/lanes/ws-ready?sprint=sprint-5', 'A sheet on the board keeps the sprint.');
+  await sp.locator('.hub-map-panel-close').click();
+  await sp.waitForFunction(() => !document.querySelector('#hub-map-panel'));
+  assert.match(await hashOf(), /sprint=sprint-5/, 'Closing the sheet keeps the sprint.');
+  await go(sp, '#/~hub/project/lanes?sprint=sprint-5');
+  await sp.locator('[data-project-tabs]').waitFor();
+  assert.equal(await sp.locator('[data-project-tab="work"]').getAttribute('href'), '#/~hub/project/lanes/work?sprint=sprint-5');
+  await sp.locator('[data-roadmap-view="map"]').click();
+  await sp.waitForFunction(() => location.hash.startsWith('#/~hub/map/lanes'));
+  assert.match(await hashOf(), /sprint=sprint-5/, 'The Map keeps the sprint.');
+  await sp.locator('[data-roadmap-view="list"]').click();
+  await sp.waitForFunction(() => location.hash.startsWith('#/~hub/project/lanes'));
+  assert.match(await hashOf(), /sprint=sprint-5/, 'The List keeps the sprint.');
+
   console.log('hub-work-ui: passed');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
