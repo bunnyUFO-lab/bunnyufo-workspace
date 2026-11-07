@@ -83,7 +83,7 @@
 button.ui-fold-head { cursor: pointer; }
 button.ui-fold-head:hover { background: var(--s2); }
 button.ui-fold-head:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.ui-fold-head .ui-row-body b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.ui-fold-head .ui-row-body b { display: block; color: var(--t1); font-weight: 600; overflow-wrap: anywhere; }
 .ui-fold-head .ui-row-body small { display: block; color: var(--t3); margin-top: 2px; }
 .ui-fold-chev { flex: none; display: inline-flex; color: var(--t3); transition: transform 0.15s; }
 .ui-fold[data-open="true"] > .ui-fold-h .ui-fold-chev { transform: rotate(90deg); }
