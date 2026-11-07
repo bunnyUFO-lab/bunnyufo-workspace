@@ -7,7 +7,7 @@ import type { SpawnTarget } from '../lib/hubSpawn'
 import { hubHash, projectNodeHash } from '../lib/route'
 import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
-import Md from './Md'
+import Md, { CodeBlock } from './Md'
 import { setFocus } from './needsFocus'
 import RunReply from './RunReply'
 import type { LiveLine } from './runLines'
@@ -112,6 +112,26 @@ const LIVE_STATES = new Set(['approved', 'taken', 'running', 'stopping'])
 const RUN_WORD: Record<string, string> = { started: 'Started', working: 'Working', 'turn-ended': 'Turn ended', 'usage-limit': 'Usage limit' }
 
 const usageLine = (usage?: Record<string, unknown>) => Object.entries(usage ?? {}).filter(([, value]) => typeof value === 'number').slice(0, 4).map(([name, value]) => `${name.replace(/_/g, ' ')} ${(value as number).toLocaleString()}`).join(' · ')
+
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** What goes in the shell: a request id of letters, digits, dots, dashes and underscores only. */
+const SAFE_ID_RE = /^[\w.-]{1,120}$/
+
+/**
+ * A finished run on the Gaming PC can be carried on in a terminal there: the command takes the request's id, and the PC looks up
+ * the session and the folder itself, so no path is shown. The session id is shown only when the Hub has one (the PC gives it when
+ * it takes the request).
+ */
+function OpenAtPc({ id, session }: { id: string; session?: string }) {
+  return (
+    <div className="rd-openrun" data-run-open>
+      <h4 className="rd-h">Continue it at the PC</h4>
+      <p className="hub-muted">Paste this in a terminal on the PC that ran the job. It will not work from another computer, or while that project has a run going.</p>
+      <CodeBlock exact><code data-run-open-command>{`node $HOME/.config/pc-dispatch/dispatch.mjs open-run ${id}`}</code></CodeBlock>
+      {session && <p className="hub-muted">Session <span className="hub-id" data-run-open-session>{session}</span></p>}
+    </div>
+  )
+}
 
 /** The link to the card a run wrote: a site link as it is, `section/folder` as the card of that folder. */
 function cardLink(card: string, resolved?: string): string | undefined {
@@ -460,6 +480,9 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
         </>
       )}
 
+      {taken?.runner === 'pc' && FINISHED.has(state) && SAFE_ID_RE.test(request.id) && (
+        <OpenAtPc id={request.id} session={SESSION_ID_RE.test(taken.session ?? '') ? taken.session : undefined} />
+      )}
       <RunReply id={id} state={state} target={target} approved={!!approved} hasRun={hasRun} continuedTo={detail.continued?.to} onGone={onGone} onSent={reload} />
       {delivered && didSomething && (
         <details className="rd-did" data-run-did>

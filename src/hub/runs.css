@@ -156,3 +156,13 @@
 .rd-did { margin-top: 12px; }
 .rd-did > summary { cursor: pointer; min-height: var(--tap); display: flex; align-items: center; color: var(--t2); font-size: 14px; font-weight: 550; }
 .rd-did[open] > .rd-live { margin-top: 4px; }
+
+.rd-openrun { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rd-openrun p { margin: 0; overflow-wrap: anywhere; }
+.rd-openrun .hub-code { margin: 0; }
+.rd-openrun .hub-code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .rd-openrun .hub-code { flex-direction: column; align-items: stretch; }
+  .rd-openrun .hub-code pre { flex: none; }
+  .rd-openrun .hub-copy { order: -1; max-width: none; width: 100%; }
+}
