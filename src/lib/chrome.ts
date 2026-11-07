@@ -35,3 +35,7 @@ const keyboardUp = () => { const view = window.visualViewport; return !!view && 
 
 /** Whether the on-screen keyboard is showing now, for what should step aside for it (the tab bar). */
 export function useKeyboardUp() { return useSyncExternalStore(subscribeKeyboard, keyboardUp) }
+
+/** Where a Map can be drawn and used: from 900 px wide and 500 px tall. A phone held on its side (932 x 430) has no room for one. */
+export const MAP_ROOM = '(min-width: 900px) and (min-height: 500px)'
+export const useHasMapRoom = () => useMedia(MAP_ROOM)

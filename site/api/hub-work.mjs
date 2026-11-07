@@ -108,7 +108,7 @@ function beadCards({ issues, events, asks, checklists, needs, status, now }) {
       ...(markedUnasked ? { markedUnasked: true, mark: { verdict: issue._mark.verdict, at: issue._mark.at } } : {}),
       ...(live.has(issue.id) && !closed ? { live: live.get(issue.id) } : {}),
       updatedAt: (closed ? issue.closed_at : null) ?? issue.updated_at ?? issue.created_at ?? '',
-      href: `#/~hub/map/${encodeURIComponent(project)}/${encodeURIComponent(issue.id)}`,
+      href: `#/~hub/project/${encodeURIComponent(project)}/roadmap/${encodeURIComponent(issue.id)}`,
     });
   }
   return cards;

@@ -97,7 +97,9 @@ const open = async (viewport, options = {}) => {
   return page;
 };
 const sheet = async (page, node, project = PROJECT) => {
-  await page.goto(`${fixture.url}#/~hub/map/${project}/${node}`);
+  // A phone has no Map, so its sheet is opened at the project address; a desktop keeps the map address, as coverage of the sheet over the Map.
+  const narrow = page.viewportSize().width < 900;
+  await page.goto(`${fixture.url}${narrow ? `#/~hub/project/${project}/roadmap/${node}` : `#/~hub/map/${project}/${node}`}`);
   const panel = page.locator('.hub-map-panel');
   await panel.waitFor();
   await page.waitForFunction(id => document.querySelector('.hub-map-panel-heading')?.textContent?.includes(id), node);
@@ -508,17 +510,19 @@ try {
     await listenOnGoodPort(stub, '127.0.0.1');
     try {
       const guest = await open(viewport, options);
-      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-t`);
+      // A phone has no Map, so it opens the sheet at the project address.
+      const at = node => `http://127.0.0.1:${stub.address().port}/one#/~hub/${viewport.width < 900 ? 'project/rodev/roadmap' : 'map/rodev'}/${node}`;
+      await guest.goto(at('ro-t'));
       const panel = guest.locator('.hub-map-panel');
       await panel.waitFor();
       await panel.locator('[data-readonly-note]', { hasText: 'Sign in to mark this.' }).waitFor();
       assert.equal(await panel.locator('[data-mark-done]').count(), 0);
       assert.equal(await panel.locator('[data-bead-work]').count(), 0, 'A read-only host has no Do it block.');
-      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-m`);
+      await guest.goto(at('ro-m'));
       await panel.locator('h4', { hasText: 'Sprint' }).first().waitFor();
       await guest.waitForTimeout(ms(500));
       assert.equal(await panel.locator('[data-sprint], [data-sprint-start], [data-sprint-chip]').count(), 0, 'A read-only host has no way to start a sprint.');
-      await guest.goto(`http://127.0.0.1:${stub.address().port}/one#/~hub/map/rodev/ro-marked`);
+      await guest.goto(at('ro-marked'));
       await panel.locator('[data-mark-pending]').waitFor();
       assert.equal(await panel.locator('button').filter({ hasText: /Undo|Mark done|No longer needed/ }).count(), 0, 'A marked task has no buttons on a read-only copy.');
       await panel.locator('[data-readonly-note]', { hasText: 'Sign in to undo this.' }).waitFor();

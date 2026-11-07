@@ -19,7 +19,7 @@ export function sprintsOf(model: Pick<ProgressMap, 'milestones' | 'sprints'>): S
 }
 
 /** A group's state from its children's, as the server rolls it. */
-function roll(states: TaskState[]): TaskState {
+export function roll(states: TaskState[]): TaskState {
   if (!states.length) return 'later'
   if (states.every(state => state === 'done')) return 'done'
   if (states.includes('you')) return 'you'

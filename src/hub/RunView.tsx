@@ -4,7 +4,7 @@ import { HUB_WROTE, HubError, ago, clock, fileUrl, hubPost, safeUrl, sessionUrl 
 import type { Deliverable } from '../lib/hub'
 import { MACHINE } from '../lib/hubSpawn'
 import type { SpawnTarget } from '../lib/hubSpawn'
-import { hubHash, mapHash } from '../lib/route'
+import { hubHash, projectNodeHash } from '../lib/route'
 import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
@@ -190,7 +190,7 @@ function DeliverableCard({ item }: { item: Deliverable }) {
       <div className="rd-dl" data-run-deliverable="task" data-task-id={item.id}>
         <b>{item.title ?? item.id}</b>
         <span className="hub-muted">Task · <span className="hub-id" data-run-task-id>{item.id}</span></span>
-        <div className="rd-links"><a className="hub-btn pri" href={mapHash(item.project, item.id)} data-run-task>Open</a></div>
+        <div className="rd-links"><a className="hub-btn pri" href={projectNodeHash(item.project, item.id)} data-run-task>Open</a></div>
       </div>
     )
   }
@@ -406,7 +406,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
           </p>
         )}
       </div>}
-      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={mapHash(request.project, request.bead)}>{request.bead}</a></p>}
+      {request.bead && <p className="hub-muted rd-from" data-run-from-task>From task <a href={projectNodeHash(request.project, request.bead)}>{request.bead}</a></p>}
     </>
   )
   return (

@@ -78,18 +78,12 @@ const axisIs = async (page, axis, what) => {
   assert.equal(await axisOf(page), axis, what);
   await page.waitForTimeout(300);
 };
-/** The part of the box the panel leaves free: the panel is at the right on a wide screen and a sheet below on a phone. */
+/** Where a selected node is centred: the middle of the box below the hint. The details window is centred over the dimmed screen and takes no room. */
 const freeCentre = page => page.evaluate(() => {
   const box = document.querySelector('.hub-map-box').getBoundingClientRect();
-  const panel = document.getElementById('hub-map-panel')?.getBoundingClientRect();
-  if (!panel || !panel.width) return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-  // Like the app: a part narrower or lower than 60 px is no room at all, and the node is centred in the box below the hint (a tall sheet under the control bar can leave less).
   const hint = document.querySelector('.hub-map-top')?.getBoundingClientRect();
   const lift = hint && hint.height ? Math.max(0, hint.bottom - box.top + 8) : 0;
-  const whole = { x: box.left + box.width / 2, y: box.top + lift + (box.height - lift) / 2 };
-  if (panel.width < innerWidth * 0.8) { const w = Math.min(Math.max(panel.left - box.left, 0), box.width); return w < 60 ? whole : { x: box.left + w / 2, y: box.top + box.height / 2 }; }
-  const h = Math.min(Math.max(panel.top - box.top, 0), box.height);
-  return h < 60 ? whole : { x: box.left + box.width / 2, y: box.top + h / 2 };
+  return { x: box.left + box.width / 2, y: box.top + lift + (box.height - lift) / 2 };
 });
 
 /** `svg.outerHTML` of the Roadmap of the fixture's magic-loops with Expand all and Sprints on at 1920x1080, SHA-256: the horizontal drawing as of ws-1kw (every ring says what it counts in words, with a done arc; an open milestone's count after its title, the chevron scaled by CSS; one-line labels, higher levels leave the spine further left, the toggle at the branch's elbow). */
@@ -139,16 +133,10 @@ const wayfinder = async (page, what) => {
   return rows;
 };
 
-/** On a phone the rarely used buttons are in one overflow button. */
-const more = async (page, name) => {
-  await page.locator('.hub-map-controls [data-row-menu]').tap();
-  await page.getByRole('menuitem', { name, exact: true }).tap();
-};
-
 try {
 {
-  step('a phone held upright reads top to bottom: the box is vertical and "now" is below the first milestone');
-  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  step('a tall window (900 x 1300) reads top to bottom: the box is vertical and "now" is below the first milestone');
+  const phone = await open({ width: 900, height: 1300 });
   await showMap(phone);
   assert.equal(await axisOf(phone), 'y', 'The box is vertical.');
   const [first, now] = await Promise.all([centreOf(phone.locator('[data-node="ml-m1"] > circle').first()), centreOf(phone.locator('.hub-map-now'))]);
@@ -165,45 +153,16 @@ try {
   await inside('upright, collapsed');
   await nowClear(phone, 'upright, collapsed');
 
-  step('a pinch on Milestone 2 opens it and keeps it between the fingers');
-  await phone.locator('button:has-text("Fit")').tap();
-  await phone.waitForTimeout(200);
-  const pinchStart = (await viewOf(phone))[2];
-  const m2Dot = phone.locator('[data-node="ml-m2"] > circle').first();
-  const mid = await centreOf(m2Dot);
-  const cdp = await phone.context().newCDPSession(phone);
-  const fingers = gap => [{ x: mid.x, y: mid.y - gap, id: 0 }, { x: mid.x, y: mid.y + gap, id: 1 }];
-  const gap = 20 * (1.8 / pinchStart);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(20) });
-  for (let at = 1; at <= 12; at += 1) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(20 + (at / 12) * (gap - 20)) });
-    await phone.waitForTimeout(30);
-  }
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await phone.waitForTimeout(400);
-  assert.ok((await viewOf(phone))[2] >= 1.6, `The pinch reached the opening scale (${pinchStart} to ${(await viewOf(phone))[2]}).`);
-  assert.equal(await phone.locator('[data-kind="f"]').count(), 1, 'Wall-jump is drawn.');
-  const end = await centreOf(m2Dot);
-  assert.ok(Math.hypot(end.x - mid.x, end.y - mid.y) <= 6, `Milestone 2 stayed within 6 px (${mid.x},${mid.y} to ${end.x},${end.y}).`);
-  assert.equal(await axisOf(phone), 'y', 'Zooming does not change the axis.');
-
   step('Expand all: still no sideways scroll, and no text past the box');
-  assert.equal(await phone.locator('.hub-map-controls button:has-text("Expand all")').count(), 0, 'On a phone Expand all is in the overflow button.');
-  await more(phone, 'Expand all');
+  await phone.locator('.hub-map-controls button:has-text("Expand all")').click();
   await phone.waitForTimeout(500);
   await noSideways(phone, 'Roadmap upright, expanded');
   await inside('upright, expanded');
   await nowClear(phone, 'upright, expanded');
-  step('ws-744: every chevron is a 44 px target on touch with a name, an open milestone keeps its count, and the map clears the control bar');
-  const chevrons = await phone.evaluate(() => [...document.querySelectorAll('[data-toggle]')].map(element => {
-    const rect = element.querySelector('.hub-map-chev-hit').getBoundingClientRect();
-    return { id: element.dataset.toggle, w: rect.width, h: rect.height, label: element.getAttribute('aria-label') };
-  }));
+  step('ws-744: every chevron has a name, and an open milestone keeps its count');
+  const chevrons = await phone.evaluate(() => [...document.querySelectorAll('[data-toggle]')].map(element => ({ id: element.dataset.toggle, label: element.getAttribute('aria-label') })));
   assert.ok(chevrons.length >= 4, 'Expanded, the milestones and features have chevrons.');
-  for (const chevron of chevrons) {
-    assert.ok(chevron.w >= 43.5 && chevron.h >= 43.5, `${chevron.id}: the touch target is at least 44 px (${chevron.w} x ${chevron.h}).`);
-    assert.match(chevron.label ?? '', /^(Open|Close) \S/, `${chevron.id}: the chevron has a name.`);
-  }
+  for (const chevron of chevrons) assert.match(chevron.label ?? '', /^(Open|Close) \S/, `${chevron.id}: the chevron has a name.`);
   assert.match(await phone.locator('[data-node="ml-m2"] .hub-map-count').last().textContent(), /^\d+ of \d+ done/, 'The open milestone still says what it counts: done of total.');
   const lowest = await phone.evaluate(() => {
     const bar = document.querySelector('.hub-map-controls').getBoundingClientRect().bottom;
@@ -211,19 +170,19 @@ try {
   });
   assert.ok(lowest.top >= lowest.bar - 1, `After Expand all the first label (${lowest.top}) is below the control bar (${lowest.bar}).`);
   assert.ok(await phone.locator('[data-kind="t"]').count() >= 9, 'Every task is drawn.');
-  await more(phone, 'Show sprints');
+  await phone.locator('.hub-map-controls button:has-text("Sprints")').click();
   await phone.waitForTimeout(500);
   assert.equal(await phone.locator('[data-band="sprint-3"]').count(), 1, 'The sprint bar is drawn.');
   await noSideways(phone, 'Roadmap upright, expanded, with sprints');
   await inside('upright, expanded, with sprints');
 
-  step('turning the phone to landscape goes left to right, and the selected node stays centred in what the panel leaves free');
-  const turn = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  step('turning the window to landscape goes left to right, and the selected node stays centred in what the hint leaves');
+  const turn = await open({ width: 900, height: 1300 });
   await showMap(turn, '#/~hub/map/magic-loops/ml-m2');
   await turn.locator('.hub-map-panel').waitFor();
   await turn.waitForTimeout(500);
   assert.equal(await axisOf(turn), 'y');
-  await turn.setViewportSize({ width: 844, height: 390 });
+  await turn.setViewportSize({ width: 1300, height: 900 });
   await axisIs(turn, 'x', 'Landscape is horizontal.');
   await turn.waitForTimeout(400);
   assert.equal(await turn.locator('.hub-map-panel').count(), 1, 'The panel is still open.');
@@ -237,7 +196,7 @@ try {
     landed = await centreOf(turn.locator('[data-node="ml-m2"] > circle').first());
   }
   assert.ok(Math.hypot(landed.x - free.x, landed.y - free.y) <= 12, `Milestone 2 is centred (${landed.x},${landed.y} vs ${free.x},${free.y}).`);
-  await turn.setViewportSize({ width: 390, height: 844 });
+  await turn.setViewportSize({ width: 900, height: 1300 });
   await axisIs(turn, 'y', 'Back upright it is vertical again.');
   assert.equal(await turn.locator('[data-node="ml-m2"].selected').count(), 1, 'Still selected.');
   const back = await centreOf(turn.locator('[data-node="ml-m2"] > circle').first());
@@ -246,9 +205,9 @@ try {
   assert.equal(await turn.locator('.hub-map-panel').count(), 1, 'With the panel open.');
 
   step('with nothing selected, a switch centres "now"');
-  const bare = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+  const bare = await open({ width: 900, height: 1300 });
   await showMap(bare);
-  await bare.setViewportSize({ width: 844, height: 390 });
+  await bare.setViewportSize({ width: 1300, height: 900 });
   await axisIs(bare, 'x', 'Landscape is horizontal.');
   const box = await bare.locator('.hub-map-box').boundingBox();
   const nowAt = await centreOf(bare.locator('.hub-map-now'));
@@ -276,7 +235,7 @@ try {
   await between(wide, 'from horizontal');
   await wide.waitForTimeout(300);
   assert.equal(await axisOf(wide), 'x', 'A near-square window stays horizontal.');
-  await wide.setViewportSize({ width: 600, height: 1200 });
+  await wide.setViewportSize({ width: 900, height: 1400 });
   await axisIs(wide, 'y', 'A tall window is vertical.');
   const ratio = await between(wide, 'from vertical');
   await wide.waitForTimeout(300);
@@ -329,10 +288,10 @@ try {
   await desk.locator('[data-project-title]', { hasText: 'Nosprint' }).waitFor();
   assert.equal(await desk.locator('.hub-runs').count(), 0, 'A project outside the table has no chip.');
 
-  step('at phone width: short text, one line, nothing sideways');
+  step('at phone width (the list, since a phone has no Map): short text, one line, nothing sideways');
   const phone = await open({ width: 390, height: 888 }, { hasTouch: true, isMobile: true });
   await phone.goto(`${fixture.url}#/~hub/map/magic-loops`);
-  await phone.locator('.hub-map-wrap').waitFor();
+  await phone.locator('[data-pp-roadmap]').waitFor();
   const shown = () => phone.locator('[data-project-title]').innerText();
   assert.equal(await shown(), 'Magic Loops');
   assert.equal(await phone.locator('.hub-runs').innerText(), 'Runs on PC');
@@ -382,37 +341,25 @@ try {
   await desk.locator('.hub-map-wrap').waitFor();
   assert.equal(await desk.locator('.hub-wayfinder').count(), 0, 'A project without a map issue has no row.');
 
-  step('the Wayfinder row at phone width: one line, collapsed, the map keeps the rest');
+  step('the Wayfinder row at phone width, on the list: one line, collapsed, nothing sideways');
   await go(phone, '#/~hub/map/wayfind');
-  const rows = await wayfinder(phone, 'Phone');
-  const row = () => rows.boundingBox();
+  const rows = phone.locator('.hub-wayfinder');
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 1, 'The Wayfinder row is mounted once.');
   assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'false');
   assert.equal(await phone.locator('.hub-wayfinder-list').count(), 0);
-  const collapsed = await row();
+  const collapsed = await rows.boundingBox();
   assert.ok(collapsed.height < 62, `The collapsed row is one line (a 44 px tap target) (${collapsed.height}).`);
-  const fits = async what => {
-    const view = await phone.evaluate(() => ({ box: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, bar: document.querySelector('.hub').getBoundingClientRect().bottom }));
-    assert.ok(Math.abs(view.box - (view.bar - 8)) <= 10, `${what}: the map box still reaches the bottom (${view.box} vs ${view.bar}).`);
-  };
-  await fits('collapsed');
   await noSideways(phone, 'Wayfinder row at 390 collapsed');
   await phone.locator('.hub-wayfinder-toggle').click();
   assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 4);
-  await fits('expanded');
+  assert.match(await phone.locator('.hub-wayfinder-list a').first().getAttribute('href'), /^#\/~hub\/project\/wayfind\/roadmap\//, 'A question opens its details from the list.');
   await noSideways(phone, 'Wayfinder row at 390 expanded');
-  // Read the axis once the box has stopped changing size (two animation frames in a row with the same rect), not at a guess.
-  await phone.waitForFunction(() => new Promise(resolve => {
-    const rect = () => { const r = document.querySelector('.hub-map-box').getBoundingClientRect(); return `${r.width}x${r.height}`; };
-    const first = rect();
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve(rect() === first)));
-  }));
-  const axis = await phone.locator('.hub-map-box').getAttribute('data-axis');
-  if (axis !== null) assert.equal(axis, 'y', 'The row does not change the axis.');
-  assert.equal(await phone.locator('.hub-map-search').isVisible(), false, 'The search row gives its height to the open Wayfinder list.');
 
   step('the destination itself is the toggle: tap to read it all, tap again to clamp it');
-  await showMap(phone, '#/~hub/map/wayfind');
-  await wayfinder(phone, 'Phone');
+  await go(phone, '#/~hub/map/wayfind');
+  await phone.locator('button.hub-wayfinder-text').waitFor();
+  await phone.locator('.hub-wayfinder-toggle').click();
   const text = phone.locator('button.hub-wayfinder-text');
   const dest = phone.locator('.hub-wayfinder-dest');
   const clipped = () => dest.evaluate(node => ({ clipped: node.scrollWidth > node.clientWidth, height: node.getBoundingClientRect().height }));
@@ -426,7 +373,6 @@ try {
   assert.equal(await text.getAttribute('aria-expanded'), 'true');
   assert.ok(!after.clipped && after.height > before.height, 'It wraps in full.');
   assert.equal(await phone.locator('.hub-wayfinder-list a').count(), 4, 'The questions show with it.');
-  await fits('destination expanded');
   await noSideways(phone, 'destination expanded at 390');
   await text.tap();
   assert.ok((await clipped()).clipped, 'It is clamped again.');
@@ -434,15 +380,14 @@ try {
   await phone.locator('.hub-wayfinder-toggle').tap();
   assert.equal(await text.getAttribute('aria-expanded'), 'true', 'The questions button toggles the same state.');
   assert.equal(await phone.locator('.hub-wayfinder-toggle').getAttribute('aria-expanded'), 'true');
-  assert.equal(await phone.locator('.hub-map-box').getAttribute('data-axis'), 'y');
 
   step('with no open questions the destination is still a button that expands');
   fixture.seed.beads('calm', [
     beadsIssue({ id: 'ca-map', title: 'Calm map', type: 'epic', labels: ['wayfinder:map'], created: '2026-10-01T09:00:00Z', updated: '2026-10-20T10:00:00Z', description: '## Destination\n\nA destination long enough to be cut short on a phone, so that the only way to read all of it is to tap the text itself.' }),
     beadsIssue({ id: 'ca-d1', title: 'Decision one', parent: 'ca-map', status: 'closed', closed: '2026-10-10T10:00:00Z', labels: ['wayfinder:decision'], created: '2026-10-02T10:00:00Z' }),
   ], { pushedAt: minutesAgo(fixture.now, 8).toISOString(), host: 'pc.example.test', count: 2, repo: 'example/calm' });
-  await showMap(phone, '#/~hub/map/calm');
-  await wayfinder(phone, 'Phone, no questions');
+  await go(phone, '#/~hub/map/calm');
+  await phone.locator('button.hub-wayfinder-text').waitFor();
   assert.equal(await phone.locator('.hub-wayfinder-toggle').count(), 0, 'There is no Open questions button.');
   const calm = await clipped();
   assert.ok(calm.clipped);
@@ -467,7 +412,7 @@ try {
   });
   fixture.seed.beads('sprint2', issues, { pushedAt: minutesAgo(fixture.now, 10).toISOString(), host: 'pc.example.test', count: issues.length, repo: 'example/sprint2' });
   const close = (a, b, what) => assert.ok(Math.hypot(a.x - b.x, a.y - b.y) <= 2, `${what}: ${a.x},${a.y} to ${b.x},${b.y}`);
-  for (const [label, viewport, options] of [['desktop', { width: 1280, height: 800 }, {}], ['phone', { width: 390, height: 844 }, { hasTouch: true, isMobile: true }]]) {
+  for (const [label, viewport, options] of [['desktop', { width: 1280, height: 800 }, {}], ['tall', { width: 900, height: 1300 }, {}]]) {
     const page = await open(viewport, options);
     await showMap(page, '#/~hub/map/sprint2');
     const toggle = id => page.locator(`[data-toggle="${id}"]`);
@@ -608,34 +553,17 @@ try {
   await stuck.locator('[data-roadmap-row="aw-rm1"]').click();
   await settle(stuck, '.hub-map-box svg');
 
-  step('roadmaps, phone: the box stays vertical at rest, after Full to branch and with a sheet; every control is 44 px');
-  const phone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
-  await phone.goto(`${fixture.url}#/~hub/map/${RW}`);
-  await settle(phone, '.rm-full');
-  const sized = async what => {
-    const sizes = await phone.evaluate(() => ({ bar: document.querySelector('.hub-map-branchbar').getBoundingClientRect().height, toggles: [...document.querySelectorAll('.rm-toggle a')].map(item => item.getBoundingClientRect().height), rows: [...document.querySelectorAll('[data-roadmap-row]')].map(item => item.getBoundingClientRect().height) }));
-    assert.ok(sizes.bar >= 44 && sizes.toggles.every(height => height >= 44) && sizes.rows.every(height => height >= 44), `${what}: bar, toggle and rows are at least 44 px (${JSON.stringify(sizes)}).`);
-  };
-  await sized('full map');
-  await noSideways(phone, 'full map at 390');
-  await phone.locator('[data-roadmap-row="aw-rm1"]').tap();
-  await settle(phone, '.hub-map-box svg');
-  await axisIs(phone, 'y', 'The box is vertical after Full map to a branch.');
-  await sized('branch');
-  await noSideways(phone, 'branch at 390');
-  const fill = await phone.evaluate(() => ({ bottom: document.querySelector('.hub-map-box').getBoundingClientRect().bottom, tabs: document.querySelector('[data-tabs]')?.getBoundingClientRect().top ?? innerHeight }));
-  assert.ok(Math.abs(fill.bottom - (fill.tabs - 8)) <= 10, `The box fills down to the tab bar (${fill.bottom} vs ${fill.tabs}).`);
-  await phone.locator('[data-node="aw-f1"] > circle').first().tap({ force: true });
-  const sheet = phone.locator('.hub-map-panel');
-  await sheet.waitFor();
-  await phone.waitForTimeout(400);
-  await axisIs(phone, 'y', 'The box stays vertical with a sheet open.');
-  const sheetBox = await sheet.boundingBox();
-  const boxTop = (await phone.locator('.hub-map-box').boundingBox()).y;
-  assert.ok(sheetBox.y - boxTop >= 100, `An open sheet leaves the map at least 100 px above it (${sheetBox.y - boxTop}).`);
-  await noSideways(phone, 'branch with the sheet');
+  step('roadmaps, a tall window: the box stays vertical at rest and after Full to branch');
+  {
+    const tall = await open({ width: 900, height: 1300 });
+    await tall.goto(`${fixture.url}#/~hub/map/${RW}`);
+    await settle(tall, '.rm-full');
+    await tall.locator('[data-roadmap-row="aw-rm1"]').click();
+    await settle(tall, '.hub-map-box svg');
+    await axisIs(tall, 'y', 'The box is vertical after Full map to a branch.');
+    await noSideways(tall, 'branch in a tall window');
+  }
 }
-
 
   console.log('hub-map-ui: passed');
 } finally {

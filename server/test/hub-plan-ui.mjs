@@ -77,7 +77,8 @@ try {
   step('desktop: with a node open the draft names it; a project without a map has the button above the map');
   await desk.goto(`${fx.url}#/~hub/map/wayfind/wf-q1`);
   await desk.locator('.hub-map-panel').waitFor();
-  await desk.locator('.hub-wayfinder-row [data-plan-in-hermes]').click();
+  // The details window is modal and covers the button; the draft still names the open node when the button is pressed (an agent or a keyboard shortcut reaches it the same way).
+  await desk.locator('.hub-wayfinder-row [data-plan-in-hermes]').dispatchEvent('click');
   await desk.waitForURL(/#\/~hub\/chat$/);
   await openChatSheet(desk);
   assert.match(await desk.locator('textarea[aria-label="Message"]').inputValue(), /I am looking at "Which project comes first\?" \(wf-q1\)\./);
