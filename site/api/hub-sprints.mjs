@@ -303,7 +303,7 @@ export function closingPrompt(sprint, end) {
     '',
     `Project: ${oneLine(sprint.project, 80)}`,
     `Repository: ${oneLine(sprint.repo, 120)}`,
-    `Milestone: ${oneLine(sprint.milestone, 80)}`,
+    ...(BEAD_ID.test(String(sprint.milestone)) ? [`Milestone: ${oneLine(sprint.milestone, 80)}`] : []),
     `How it ended: ${oneLine(endWords(end.reason, ''), 120)}`,
     '',
   ];
@@ -334,6 +334,7 @@ export function closingPrompt(sprint, end) {
     '',
     '<<<DATA',
     `Milestone title: ${oneLine(sprint.title, 120)}`,
+    ...(BEAD_ID.test(String(sprint.milestone)) ? [] : [`Milestone id: ${oneLine(sprint.milestone, 80)}`]),
     ...(left.length ? ['Not done:', ...left.map(row => `- Item ${Number(row.seq) || 0}, ${oneLine(row.bead, 40)} (${oneLine(row.state, 20)}): ${oneLine(titleOf(row.seq), 200)}`)] : []),
     ...(reason ? [`Reason from the run: ${reason}`] : []),
     'DATA>>>',
@@ -347,9 +348,9 @@ export function closingEvent(sprint, end) {
   return {
     ts: end.at, kind: 'ready-for-review', project: sprint.project,
     title: `Sprint on ${oneLine(sprint.title, 80)}: ${end.prs} of ${end.items} PRs open. ${words}`,
-    ownerTitle: links.length ? `Close the sprint: ${oneLine(sprint.title, 45)}` : `Sprint stopped: ${oneLine(sprint.title, 50)}`,
+    ownerTitle: links.length ? `Close the sprint: ${oneLine(sprint.title, 45)}` : `Sprint ${end.reason === 'finished' ? 'finished' : 'stopped'}: ${oneLine(sprint.title, 50)}`,
     ownerSummary: `${words}. ${plural(links.length, 'pull request')} open, ${plural((end.left ?? []).length, 'item')} not done.`,
-    ask: links.length ? 'Copy the prompt and start the closing session' : 'Nothing to merge. See why it stopped, then Mark done',
+    ask: links.length ? 'Copy the prompt and start the closing session' : end.reason === 'finished' ? 'Nothing to merge. Mark done' : 'Nothing to merge. See why it stopped, then Mark done',
     ...(links.length ? { prs: links } : {}),
     sprintEnd: sprint.head, host: 'hub', source: 'hub', by: 'hub',
   };
