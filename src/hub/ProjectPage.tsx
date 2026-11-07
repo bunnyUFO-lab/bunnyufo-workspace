@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
-import type { HubProject, JobsView, MapMilestone, MapTask, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
+import type { HubProject, JobsView, ProgressMap as MapModel, ProjectCards, SprintPreview, Today as TodayData } from '../lib/hub'
 import { ago } from '../lib/hub'
 import { host } from '../lib/host'
 import { needsHref } from '../lib/needsView.mjs'
 import { useScope } from '../lib/useScope'
 import { hubHash, mapHash, parseProjectId, projectHash, projectNodeHash, workBoardHash } from '../lib/route'
 import { swap } from '../lib/entries'
-import Icon from '../ui/Icon'
+import { useHasMapRoom } from '../lib/chrome'
 import { Button } from '../ui/Controls'
 import MapPanel from './MapPanel'
 import { CardWriteRows } from './CardWrites'
@@ -16,16 +16,17 @@ import { JobItem } from './Jobs'
 import NeedsRows from './NeedsRows'
 import PlanInHermes from './PlanInHermes'
 import ProgressMap from './ProgressMap'
-import ProjectRing from './ProjectRing'
-import RoadmapRows, { HideDoneChip } from './RoadmapRows'
+import { HideDoneChip } from './RoadmapRows'
+import RoadmapAccordion from './RoadmapAccordion'
+import WayfinderHeader from './WayfinderHeader'
 import SprintPicker, { sprintCount } from './SprintPicker'
 import { sprintModel, sprintsOf } from './sprintScope.ts'
-import { useHideDone, writeHideDone } from './hideDone'
+import { useHideDone } from './hideDone'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
-import { tallyOf, tallyWords } from './mapCount.ts'
-import { STATE_LABEL, find } from './mapState'
-import { PROJECT_TABS, TASK_PAGE, currentMilestone, orderedTasks, roadmapList, tabCounts, tabOf, tasksOfMilestone } from './projectPage.ts'
+import { tallyOf } from './mapCount.ts'
+import { find } from './mapState'
+import { PROJECT_TABS, currentMilestone, tabCounts, tabOf, tasksOfMilestone } from './projectPage.ts'
 import type { ProjectTab } from './projectPage.ts'
 import { openSpawn } from './spawnStore'
 import { legacyRunning } from './Today'
@@ -43,110 +44,26 @@ const TAB_LABEL: Record<ProjectTab, string> = { roadmap: 'Roadmap', work: 'Work'
 
 type OpenNode = (event: MouseEvent<HTMLAnchorElement>, href: string) => void
 
-const STATE_DOT: Record<string, string> = { done: 'done', doing: 'working', you: 'needs', next: '', later: '' }
-
-/** One task of an open milestone: its state as a dot, its title and what it is doing. The whole row opens the task's details. */
-function TaskRow({ project, task, onOpen }: { project: string; task: MapTask; onOpen: OpenNode }) {
-  const { sprint } = useScope()
-  const href = projectNodeHash(project, task.id, sprint)
-  return (
-    <a role="listitem" className="ui-row pj-task" href={href} onClick={event => onOpen(event, href)} data-pp-task={task.id} data-pp-node={task.id} data-state={task.state}>
-      <span className={`pj-dot ${STATE_DOT[task.state] ?? ''}`} aria-hidden="true" />
-      <span className="ui-row-body">
-        <b>{task.title}</b>
-        <small>{task.id} · {task.state === 'later' && task.status === 'deferred' ? 'later' : STATE_LABEL[task.state]}</small>
-      </span>
-    </a>
-  )
-}
-
-/** A milestone on the list: a ring, its title and state, and when open its tasks, 20 at a time, the open ones first. */
-function MilestoneRow({ project, milestone, current, open, shown, onToggle, onMore, onOpen }: {
-  project: string; milestone: MapMilestone; current: boolean; open: boolean; shown: number
-  onToggle: () => void; onMore: () => void; onOpen: OpenNode
+/** The Roadmap tab: the Wayfinder header (destination and open questions) when the project has one, then the accordion. */
+function RoadmapTab({ project, name, model, sprint, sprintName, target, mapRoom, error, loading, fetchedAt, onOpen }: {
+  project: string; name: string; model: MapModel | null; /** The sprint's own map, when one is on. */ sprint?: MapModel; sprintName?: string
+  /** The bead or roadmap an `at` address names. */ target?: string; mapRoom: boolean; error: string | null; loading: boolean; fetchedAt: Date | null; onOpen: OpenNode
 }) {
-  const { sprint } = useScope()
-  const tasks = open ? orderedTasks(milestone) : []
-  const tally = tallyOf(tasksOfMilestone(milestone))
-  const word = current ? 'Now' : milestone.state === 'done' ? 'Done' : 'Later'
-  return (
-    <div className={`pj-ms${open ? ' open' : ''}`} data-pp-milestone={milestone.id} data-state={milestone.state} data-open={open}>
-      <button type="button" className="pj-ms-head" aria-expanded={open} onClick={onToggle} data-pp-toggle={milestone.id}>
-        <ProjectRing tally={tally} />
-        <span className="ui-row-body"><b>{milestone.title}</b><small data-pp-count>{word} · {tallyWords(tally)}</small></span>
-        <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
-      </button>
-      {open && (
-        <div className="ui-list pj-tasks" role="list" aria-label={`Tasks in ${milestone.title}`}>
-          <a role="listitem" className="ui-row pj-task pj-details" href={projectNodeHash(project, milestone.id, sprint)} onClick={event => onOpen(event, projectNodeHash(project, milestone.id, sprint))} data-pp-details={milestone.id} data-pp-node={milestone.id}>
-            <span className="ui-row-body"><b>Milestone details</b><small>Sprint, questions and what it holds</small></span>
-            <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
-          </a>
-          {tasks.length === 0 && <p className="hub-empty">No tasks yet.</p>}
-          {tasks.slice(0, shown).map(task => <TaskRow key={task.id} project={project} task={task} onOpen={onOpen} />)}
-          {tasks.length > shown && (
-            <button type="button" className="ui-row pj-more" role="listitem" onClick={onMore} data-pp-more={milestone.id}>
-              <span className="ui-row-body"><b>Show more</b><small>{tasks.length - shown} more</small></span>
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The Roadmap as a list. Only the milestone in hand starts open; the finished ones fold into one "Done" row. */
-function RoadmapList({ project, model, onOpen }: { project: string; model: MapModel; onOpen: OpenNode }) {
-  const { current, open: milestones, done } = roadmapList(model)
-  const [opened, setOpened] = useState<Record<string, boolean>>({})
-  const [shown, setShown] = useState<Record<string, number>>({})
-  const [doneOpen, setDoneOpen] = useState(false)
-  const hideDone = useHideDone()
-  const isOpen = (id: string) => opened[id] ?? id === current
-  const row = (milestone: MapMilestone) => (
-    <MilestoneRow
-      key={milestone.id} project={project} milestone={milestone} current={milestone.id === current}
-      open={isOpen(milestone.id)} shown={shown[milestone.id] ?? TASK_PAGE}
-      onToggle={() => setOpened(prev => ({ ...prev, [milestone.id]: !(prev[milestone.id] ?? milestone.id === current) }))}
-      onMore={() => setShown(prev => ({ ...prev, [milestone.id]: (prev[milestone.id] ?? TASK_PAGE) + TASK_PAGE }))}
-      onOpen={onOpen}
-    />
-  )
-  return (
-    <div className="pj-roadmap" data-pp-roadmap>
-      {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
-      {milestones.map(row)}
-      {hideDone && milestones.length === 0 && done.length > 0 && (
-        <p className="hub-empty" data-pp-all-done>Everything here is done. <button type="button" className="hub-btn" data-pp-show-done onClick={() => writeHideDone(false)}>Show completed</button></p>
-      )}
-      {done.length > 0 && !hideDone && (
-        <div className="pj-done" data-pp-finished data-open={doneOpen}>
-          <button type="button" className="pj-ms-head pj-done-head" aria-expanded={doneOpen} onClick={() => setDoneOpen(value => !value)} data-pp-done-toggle>
-            <span className="ui-row-body"><b>Done ({done.length})</b></span>
-            <span className="pj-chev" aria-hidden="true"><Icon name="chev" size={18} /></span>
-          </button>
-          {doneOpen && done.map(row)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The Roadmap list: one row per milestone, from the same read as the map. A project with roadmaps lists them, nested, as it did. */
-function RoadmapTab({ project, model, sprint, error, loading, at, onOpen }: { project: string; model: MapModel | null; /** The sprint's own map, when one is on. */ sprint?: MapModel; error: string | null; loading: boolean; at: Date | null; onOpen: OpenNode }) {
   if (!model) return error ? <RefreshNote error={error} hasData={false} at={null} /> : loading ? <p className="hub-empty">Loading…</p> : null
+  const way = model.wayfinder
   return (
     <>
-      <RefreshNote error={error} hasData at={at} />
+      <RefreshNote error={error} hasData at={fetchedAt} />
       {!model.meta
         ? <p className="hub-empty">No Beads copy yet. It appears after the next agent session in this repo.</p>
-        : sprint
-          ? (sprint.milestones.length
-            ? <RoadmapList project={project} model={sprint} onOpen={onOpen} />
-            : <p className="hub-empty" data-pp-sprint-empty>No tasks in this sprint. <a className="pp-link" href={projectHash(project)} data-pp-sprint-clear>Show the whole roadmap ›</a></p>)
-        : model.roadmaps?.length
-          ? <div data-pp-roadmap-rows><RoadmapRows project={project} model={model} search={false} chip={false} /></div>
-          : <RoadmapList project={project} model={model} onOpen={onOpen} />}
+        : sprint && !sprint.milestones.length
+          ? <p className="hub-empty" data-pp-sprint-empty>No tasks in this sprint. <a className="pp-link" href={projectHash(project)} data-pp-sprint-clear>Show the whole roadmap ›</a></p>
+          : (
+            <>
+              {way && <WayfinderHeader project={project} repoName={name} wayfinder={way} nodeHref={id => projectNodeHash(project, id, sprintName)} />}
+              <RoadmapAccordion key={`${project}|${sprintName ?? ''}`} project={project} model={model} scoped={sprint} sprint={sprintName} at={target} mapRoom={mapRoom} onOpen={onOpen} />
+            </>
+          )}
     </>
   )
 }
@@ -279,11 +196,17 @@ function NowBlock({ project, model, runsOn, onOpen }: { project: string; model: 
  * tabs (Roadmap, Work, Cards). The Roadmap is a list with a Map one tap away, and the switch between them swaps the address, adding no history
  * entry. A milestone or task opens its details over the list (the Roadmap's panel, as a Work card does), so closing returns to the list.
  */
-export default function ProjectPage({ project: wanted, route, view, sprint }: { project: string; route?: string; view: 'list' | 'map'; /** `?sprint=`: the Roadmap narrows to it. */ sprint?: string }) {
-  const { tab: rawTab, node: listNode } = parseProjectId(route)
-  const mapNode = view === 'map' ? route?.split('/').slice(1).join('/') || undefined : undefined
-  const tab = view === 'map' ? 'roadmap' : tabOf(rawTab)
+export default function ProjectPage({ project: wanted, route, view: viewProp, sprint }: { project: string; route?: string; view: 'list' | 'map'; /** `?sprint=`: the Roadmap narrows to it. */ sprint?: string }) {
+  const { tab: rawTab, node: listNode, at: listAt } = parseProjectId(route)
+  // Width decides what is drawn, and the address never changes: a map address with no room for a Map (a phone, a tablet upright) is the list,
+  // with the row the address names open and marked and no sheet over it.
+  const mapRoom = useHasMapRoom()
+  const view = viewProp === 'map' && mapRoom ? 'map' : 'list'
+  const mapParam = viewProp === 'map' ? route?.split('/').slice(1).join('/') || undefined : undefined
+  const mapNode = view === 'map' ? mapParam : undefined
+  const tab = viewProp === 'map' ? 'roadmap' : tabOf(rawTab)
   const node = view === 'map' ? mapNode : listNode
+  const target = viewProp === 'map' && view === 'list' ? mapParam : listAt
   const all = useHubData<{ projects: HubProject[] }>('/projects')
   const known = !all.data || all.data.projects.some(item => item.id === wanted)
   const project = all.data && known ? wanted : undefined
@@ -331,7 +254,7 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
   // Hide completed also leaves finished sprints out of the picker, except the one in the address.
   const sprintsAll = model?.meta ? sprintsOf(model) : []
   // Hide completed can hide something here: a sprint, a roadmap or a finished milestone.
-  const canHide = !!model?.meta && (sprintsAll.length > 0 || !!model.roadmaps?.length || model.milestones.some(milestone => milestone.state === 'done'))
+  const canHide = !!model?.meta && (sprintsAll.length > 0 || !!model.roadmaps?.length || model.milestones.some(milestone => milestone.state === 'done' || tasksOfMilestone(milestone).some(task => task.state === 'done')))
   const showRow = tab === 'roadmap' && !!model?.meta && (sprintsAll.length > 0 || !!sprint || (view === 'list' && canHide))
   const sprints = sprintsAll.filter(row => !hideDone || row.done < row.total || row.name === sprint)
   const sprintRow = sprint ? sprints.find(row => row.name === sprint) : undefined
@@ -362,7 +285,7 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
           </a>
         ))}
       </nav>
-      {tab === 'roadmap' && (
+      {tab === 'roadmap' && mapRoom && (
         <div className="ui-seg pp-switch" role="group" aria-label="Roadmap view" data-roadmap-switch>
           <button type="button" className={view === 'list' ? 'on' : undefined} aria-pressed={view === 'list'} onClick={() => switchTo('list')} data-roadmap-view="list">List</button>
           <button type="button" className={view === 'map' ? 'on' : undefined} aria-pressed={view === 'map'} onClick={() => switchTo('map')} data-roadmap-view="map">Map</button>
@@ -385,7 +308,7 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
           <div className="pp-body" data-tab={tab}>
             <div className="pp-main" role="tabpanel" aria-label={TAB_LABEL[tab]}>
               {tab === 'roadmap' && <NowBlock project={project} model={scoped ?? model} runsOn={item?.runsOn} onOpen={openNode} />}
-              {tab === 'roadmap' && <RoadmapTab project={project} model={model} sprint={scoped} error={error} loading={loading} at={modelAt} onOpen={openNode} />}
+              {tab === 'roadmap' && <RoadmapTab project={project} name={name} model={model} sprint={scoped} sprintName={sprint} target={target} mapRoom={mapRoom} error={error} loading={loading} fetchedAt={modelAt} onOpen={openNode} />}
               {tab === 'work' && <WorkTab project={project} name={name} today={today} sprint={sprint ? { name: sprint, label: sprintRow?.title ?? sprint } : undefined} />}
               {tab === 'cards' && <CardsTab project={project} />}
             </div>

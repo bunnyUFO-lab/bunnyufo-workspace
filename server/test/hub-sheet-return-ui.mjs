@@ -110,7 +110,7 @@ try {
     await backOnList(page, 'swapped sheet');
     await leaveThePage(page);
 
-    step(`${label}: Show on map goes to the map, Back returns to the sheet, X returns to the list; the Map switch goes to the map`);
+    step(`${label}: Show on map goes to the map (the list with the row marked on a phone), Back returns to the sheet, X returns to the list; the Map switch goes to the map on a desktop`);
     await toList(page, fixture.url);
     await press(page.locator('[data-pp-details]').first());
     await panelOf(page).locator('h3').waitFor();
@@ -123,8 +123,11 @@ try {
     assert.equal(await hashOf(page), sheetUrl(milestone));
     await press(page.getByRole('button', { name: 'Close details' }));
     await backOnList(page, 'after the map');
-    await press(page.locator('[data-roadmap-view="map"]'));
-    await page.waitForFunction(() => location.hash === '#/~hub/map/lanes');
+    if (phone) assert.equal(await page.locator('[data-roadmap-switch]').count(), 0, 'A phone has no Map switch.');
+    else {
+      await press(page.locator('[data-roadmap-view="map"]'));
+      await page.waitForFunction(() => location.hash === '#/~hub/map/lanes');
+    }
 
     step(`${label}: an unknown node shows the list, no sheet and no error`);
     await page.goto(`${fixture.url}#/~hub/today`);

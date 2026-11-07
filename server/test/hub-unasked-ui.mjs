@@ -60,7 +60,7 @@ try {
     assert.equal(await panel.locator('[data-unasked-row="ua-one"] [data-unasked-why]').innerText(), 'Register the example domain at the registrar.', 'One line of why.');
     assert.equal(await panel.locator('[data-unasked-row="ua-two"] [data-unasked-why]').count(), 0, 'No line when the bead says nothing.');
     assert.deepEqual(await panel.locator('[data-unasked-row] a').allInnerTexts(), ['Pay the invoice', 'Register the domain']);
-    assert.equal(await panel.locator('[data-unasked-row="ua-one"] a').getAttribute('href'), `#/~hub/map/${PROJECT}/ua-one`, "The row uses the item's own href.");
+    assert.equal(await panel.locator('[data-unasked-row="ua-one"] a').getAttribute('href'), `#/~hub/project/${PROJECT}/roadmap/ua-one`, "The row uses the item's own href.");
     await page.waitForFunction(() => document.querySelector('[data-unasked-row="ua-one"] small')?.textContent === 'Unaskdev · ua-one');
     assert.equal(await panel.locator('[data-unasked-row="ua-one"] small').innerText(), 'Unaskdev · ua-one', 'The row names the project, not its id.');
     for (const row of ['ua-one', 'ua-two']) {
@@ -70,7 +70,7 @@ try {
     await noSideways(page, `${label} Today`);
     await panel.locator('[data-unasked-row="ua-one"] a').click();
     await page.locator('.hub-map-panel').waitFor();
-    assert.match(page.url(), new RegExp(`#/~hub/map/${PROJECT}/ua-one$`), 'The link opens the item.');
+    assert.match(page.url(), new RegExp(`#/~hub/project/${PROJECT}/roadmap/ua-one$`), 'The link opens the item.');
     await page.goto(`${fixture.url}#/~hub/today`);
     await panel.waitFor();
 

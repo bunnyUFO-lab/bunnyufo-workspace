@@ -282,6 +282,8 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
   }
   const blockers = issue => blockersOf.get(issue.id) ?? [];
   const children = issue => childrenOf.get(issue.id) ?? [];
+  // A group is an epic or a feature with something under it. A feature with no children is one piece of work, so it is a task (an empty epic is still not).
+  const isGroup = issue => isGroupType(issue) && !(issue.issue_type === 'feature' && children(issue).length === 0);
 
   const milestoneIssues = milestoneIssuesOf(issues, parentOf);
   const milestoneIds = new Set(milestoneIssues.map(issue => issue.id));
@@ -381,7 +383,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     const out = [];
     for (const child of orderSiblings(children(issue), blockers)) {
       if (milestoneIds.has(child.id) || placed.has(child.id)) continue;
-      if (isGroupType(child)) out.push(...collect(child));
+      if (isGroup(child)) out.push(...collect(child));
       else { out.push(child); placed.add(child.id); out.push(...collect(child)); }
     }
     return out;
@@ -416,7 +418,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     for (const child of orderSiblings(children(milestone), blockers)) {
       if (milestoneIds.has(child.id)) continue;
       placed.add(child.id);
-      if (isGroupType(child)) features.push(makeFeature(child.id, child.title ?? child.id, collect(child)));
+      if (isGroup(child)) features.push(makeFeature(child.id, child.title ?? child.id, collect(child)));
       else { loose.push(child); loose.push(...collect(child)); }
     }
     if (loose.length) features.push(makeFeature(`${milestone.id}~other`, `${milestone.title ?? milestone.id} · other tasks`, loose));
@@ -435,7 +437,7 @@ export function buildMap({ project, meta = null, issues = [], events = [], asks 
     if (placed.has(issue.id) || milestoneIds.has(issue.id)) continue;
     const parent = parentOf.get(issue.id);
     if (parent && !placed.has(parent) && unplaced.some(other => other.id === parent)) continue;   // shown with its parent
-    if (isGroupType(issue)) {
+    if (isGroup(issue)) {
       const kept = milestoneOf(issue);
       if (kept.features.length) milestones.push(kept);
     } else {

@@ -146,7 +146,8 @@ try {
     await titled(page, 'Ready to start').waitFor();
     await page.locator('[data-show-on-roadmap]').click();
     await page.waitForFunction(() => location.hash === '#/~hub/map/lanes/ws-ready');
-    await panelOf(page).waitFor();
+    // A phone has no Map: the same address is the list with the row marked and no sheet over it.
+    if (phone) { await page.locator('[data-roadmap-at]').waitFor(); assert.equal(await panelOf(page).count(), 0); } else await panelOf(page).waitFor();
 
     step(`${label}: an item the board lacks but the map has opens its sheet, and a task inside it opens in Work`);
     await page.goto(`${fixture.url}#/~hub/work/lanes/ws-grp`);

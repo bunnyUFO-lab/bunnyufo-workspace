@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import type { Item } from '../lib/hub'
 import { appUrl as safeApp, sessionUrl } from '../lib/hub'
 import type { WorkingItem, WorkingLinks } from '../lib/hubPc'
-import { hubHash, mapHash, projectHash, workHash } from '../lib/route'
+import { hubHash, projectHash, projectNodeHash, workHash } from '../lib/route'
 import type { ReactNode } from 'react'
 import { AgentSprite } from './team/AgentSprite'
 import { defaultSprite } from './team/sprites'
@@ -62,7 +62,7 @@ function Row({ item, blocked, now }: { item: WorkingItem; blocked: Item[]; now: 
         <b>{title}</b>
         <small>
           {what.map((part, index) => <span key={index}>{index > 0 ? ' · ' : ''}{part}</span>)}
-          {item.bead && !item.links?.beads?.length && <>{what.length ? ' · ' : ''}{item.project ? <a className="wn-bead" href={mapHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
+          {item.bead && !item.links?.beads?.length && <>{what.length ? ' · ' : ''}{item.project ? <a className="wn-bead" href={projectNodeHash(item.project, item.bead)}>{item.bead}</a> : <span className="wn-bead">{item.bead}</span>}</>}
         </small>
         {item.links && <Links links={item.links} />}
       </span>
