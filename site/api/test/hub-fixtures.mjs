@@ -243,11 +243,52 @@ export function teamSheet(agent, { stamp = '20261029T100000Z', rand = 'ab12', wi
   return { id, png, json, files: { [`${id}.png`]: png, [`${id}.json`]: json } };
 }
 
+const hex = char => char.repeat(64);
+
+/**
+ * Four jobs as the exporter of ws-eh2 writes them (made-up names, labels and prompts): a daily one, a weekly one with a script, one that
+ * failed last time, and one that is paused and pins a model. Times are around `now` so the page's words (next, last) stay stable.
+ */
+export function scheduleJobs(now = new Date()) {
+  const at = (hours) => iso(new Date(now.getTime() + hours * 3600_000));
+  return [
+    {
+      name: 'brief-morning-digest', schedule: '0 8 * * *', scheduleKind: 'cron', enabled: true, state: 'scheduled',
+      prompt: 'Write the morning digest.\nKeep it to five lines.\n', postsTo: { platform: 'discord', label: '#fixture-digest' }, failuresTo: { platform: 'discord', label: '#fixture-alerts' },
+      nextRunAt: at(14), lastRunAt: at(-10), lastStatus: 'ok', failureStreak: 0, runsDone: 41, promptSha256: hex('a'), promptBytes: 46, rev: hex('1'),
+    },
+    {
+      name: 'brief-weekly-report', schedule: '0 9 * * 1', scheduleKind: 'cron', enabled: true, state: 'scheduled', script: 'collect-week.sh',
+      prompt: 'Summarise the week from the collected numbers.', postsTo: { platform: 'discord', label: '#fixture-digest' }, failuresTo: null,
+      nextRunAt: at(60), lastRunAt: at(-108), lastStatus: 'ok', failureStreak: 0, runsDone: 12, promptSha256: hex('b'), promptBytes: 46, rev: hex('2'),
+    },
+    {
+      name: 'brief-trends-watch', schedule: '30 6,18 * * 1-5', scheduleKind: 'cron', enabled: true, state: 'scheduled',
+      prompt: 'Look for new trends in the fixture feed.', postsTo: { platform: 'discord', label: '#fixture-trends' }, failuresTo: { platform: 'discord', label: '#fixture-alerts' },
+      nextRunAt: at(5), lastRunAt: at(-7), lastStatus: 'error', lastError: 'The fixture feed did not answer in time.', lastDeliveryError: 'Channel was archived.', failureStreak: 3, runsDone: 88,
+      promptSha256: hex('c'), promptBytes: 40, rev: hex('3'),
+    },
+    {
+      name: 'brief-spend-summary', schedule: '15 10 1 * *', scheduleKind: 'cron', enabled: false, state: 'paused', model: 'claude-sonnet-5-5', provider: 'anthropic',
+      prompt: 'Add up the month.', postsTo: { platform: 'discord', label: '#fixture-digest' }, failuresTo: null,
+      nextRunAt: at(300), runsDone: 0, promptSha256: hex('d'), promptBytes: 17, rev: hex('4'),
+    },
+  ];
+}
+
+/** Two timers of the Hermes host, as the exporter writes them (no run times). */
+export function scheduleTimers() {
+  return [
+    { name: 'fixture-export', description: 'Publishes the settings export.', schedule: 'every 30 s', enabled: true, lastResult: 'success' },
+    { name: 'fixture-history', description: 'Saves the settings to history.', schedule: 'daily at 03:00', enabled: true, lastResult: 'success' },
+  ];
+}
+
 /**
  * A v1 settings export as the Hermes host's exporter writes it (made-up values; the "secret" is a fake key made of repeated letters).
  * `exportedMinutesAgo` sets `exportedAt`; `changedMinutesAgo` sets `changedAt`. `modelOptions` is `{ main, briefs }`, the lists the host would publish (ws-im1.4.2); left out, the export has none, as an older exporter's.
  */
-export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {}, modelOptions = null } = {}) {
+export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, changedMinutesAgo = 2 * 24 * 60, soulText, extraProfile = {}, modelOptions = null, schedules = false } = {}) {
   const profile = name => ({
     model: { provider: 'openai-codex', default: name === 'main' ? 'gpt-6-sol' : 'claude-haiku-5-5' },
     fallbacks: name === 'main'
@@ -260,12 +301,15 @@ export function agentConfigJson({ now = new Date(), exportedMinutesAgo = 12, cha
     soul: { text: soulText ?? `## Role\nYou are ${name === 'main' ? 'Hermes' : 'Briefs'}, the owner's assistant.\nAlways answer in plain words.\n`, sha256: 'a'.repeat(64), bytes: 120, truncated: false, redacted: 0 },
     cron: name === 'briefs' ? [{ name: 'Daily brief', schedule: '0 8 * * *', enabled: true, prompt: 'Write the daily projects brief.' }] : [],
     ...(modelOptions?.[name] ? { modelOptions: modelOptions[name] } : {}),
+    ...(schedules ? { timezone: 'America/Chicago' } : {}),
+    ...(schedules && name === 'briefs' ? { cron: scheduleJobs(now) } : {}),
     ...extraProfile,
   });
   return {
     v: 1, exportedAt: iso(minutesAgo(now, exportedMinutesAgo)), changedAt: iso(minutesAgo(now, changedMinutesAgo)),
     profiles: { main: profile('main'), briefs: profile('briefs') },
     ownerSkills: ['simplify-text', 'spend-digest'],
+    ...(schedules ? { hostLabel: 'Hermes host', hostTimers: scheduleTimers() } : {}),
   };
 }
 

@@ -97,6 +97,8 @@ export interface HubEvent {
   review?: string
   /** An alert made from a request (`source: 'request'`): the request's id. */
   request?: string
+  /** An alert about a scheduled job of the Hermes host (ws-eh2): the job's name, which is also its page. */
+  job?: string
   /** A cloud alert whose request can fire again (`POST /hub/requests/:id/fire`). */
   retry?: boolean
   /** An alert in Today's panel: the key Dismiss sends (`POST /hub/alerts/dismiss`). */

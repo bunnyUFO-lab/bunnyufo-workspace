@@ -225,3 +225,58 @@ export interface TeamPlugin {
   description: string
   profiles: { profile: 'main' | 'briefs'; status: 'enabled' | 'disabled' | 'not enabled' }[]
 }
+
+/** Where a job posts, or where its failures go: the platform and a label the host chose. */
+export interface JobTarget { platform: string; label: string }
+
+/**
+ * One scheduled job of the Hermes host (GET /api/hub/schedules, site/api/hub-agent-config.mjs). Every field after `prompt` is absent when the
+ * host's exporter did not send it: the page says "not reported", it never guesses.
+ */
+export interface ScheduleJob {
+  name: string
+  profile: string
+  schedule: string
+  enabled: boolean
+  prompt: string
+  scheduleKind?: string
+  state?: string
+  model?: string
+  provider?: string
+  postsTo?: JobTarget | null
+  failuresTo?: JobTarget | null
+  script?: string
+  nextRunAt?: string
+  lastRunAt?: string
+  lastStatus?: string
+  lastError?: string
+  lastDeliveryError?: string
+  failureStreak?: number
+  runsDone?: number
+  promptSha256?: string
+  promptBytes?: number
+  promptCut?: boolean
+  promptRedacted?: number
+  rev?: string
+}
+
+/** One timer of the Hermes host. The export carries no run times for these. */
+export interface ScheduleTimer { name: string; description: string; schedule: string; enabled: boolean; lastResult: string }
+
+/** `live` is a fresh export, `old` one past the freshness rule, `not-reporting` a list nobody has sent. */
+export type ScheduleState = 'live' | 'old' | 'not-reporting'
+
+export interface ScheduleSource<T = ScheduleJob | ScheduleTimer> {
+  id: 'hermes-jobs' | 'hermes-timers' | 'site-timers' | 'pc-tasks' | 'github'
+  label: string
+  state: ScheduleState
+  as_of: string | null
+  host?: string
+  timezone?: string
+  /** The model each profile follows, for a job that pins none. */
+  profileModels?: Record<string, string>
+  text?: string
+  items: T[]
+}
+
+export interface SchedulesView { sources: ScheduleSource[]; note: string; at: string }

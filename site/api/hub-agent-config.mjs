@@ -18,13 +18,15 @@ export const WRITER = 'hermes-config';
 
 export const PROFILES = ['main', 'briefs'];
 export const SOUL_MAX_BYTES = 32 * 1024;
-export const CRON_PROMPT_MAX_BYTES = 4 * 1024;
+export const CRON_PROMPT_MAX_BYTES = 8 * 1024;
 const MAX_FALLBACKS = 10;
 const MAX_MODEL_OPTIONS = 20;
 const MAX_TOOLSETS = 50;
 const MAX_AUTOLOAD = 50;
 const MAX_INSTALLED = 100;
 const MAX_CRON = 20;
+const MAX_HOST_TIMERS = 30;
+const ERROR_MAX = 200;
 const MAX_PLATFORMS = 20;
 const MAX_OWNER_SKILLS = 100;
 const MAX_PLUGINS = 100;
@@ -101,16 +103,64 @@ function cleanSoul(raw) {
   };
 }
 
+const sha = value => (typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : '');
+
+/** Where a job posts: `{ platform, label }` from the exporter, or null (absent, odd, or no label). A raw channel id never gets here: only the label. */
+function cleanTarget(raw) {
+  if (!isObject(raw)) return null;
+  const platform = id(raw.platform);
+  const label = shortText(raw.label, 60);
+  return platform && label && label !== REDACTED ? { platform, label } : null;
+}
+
+/**
+ * One scheduled job of a profile. The first four keys are what every exporter has sent; the rest come from the exporter of ws-eh2 and are
+ * kept only when sent, so an older export reads as "not reported" on the page, never as a wrong value. Ids go through `cleanId`, times
+ * through `isoOf`, free text through `redactSecrets` and a cut. The prompt is cut at CRON_PROMPT_MAX_BYTES; `promptCut` and
+ * `promptRedacted` say so, since a cut or redacted prompt is not the real one.
+ */
 function cleanJob(raw) {
   if (!isObject(raw) || typeof raw.name !== 'string' || typeof raw.schedule !== 'string') return null;
   const name = redactSecrets(raw.name.trim().slice(0, 120));
   const schedule = redactSecrets(raw.schedule.trim().slice(0, 120));
   const prompt = redactSecrets(typeof raw.prompt === 'string' ? raw.prompt : '');
   if (!name.text) return null;
-  return {
+  const cutPrompt = cutBytes(prompt.text, CRON_PROMPT_MAX_BYTES);
+  const job = {
     name: name.text, schedule: schedule.text, enabled: raw.enabled === true,
-    prompt: cutBytes(prompt.text, CRON_PROMPT_MAX_BYTES).text,
+    prompt: cutPrompt.text,
   };
+  const valid = value => Number.isInteger(value) && value >= 0 && value <= 1e9;
+  const set = (key, value) => { if (value !== '' && value !== null && value !== undefined) job[key] = value; };
+  set('scheduleKind', id(raw.scheduleKind));
+  set('state', id(raw.state));
+  set('model', id(raw.model));
+  set('provider', id(raw.provider));
+  if (Object.hasOwn(raw, 'postsTo')) job.postsTo = cleanTarget(raw.postsTo);
+  if (Object.hasOwn(raw, 'failuresTo')) job.failuresTo = cleanTarget(raw.failuresTo);
+  set('script', id(raw.script));
+  set('nextRunAt', isoOf(raw.nextRunAt));
+  set('lastRunAt', isoOf(raw.lastRunAt));
+  set('lastStatus', id(raw.lastStatus));
+  set('lastError', shortText(raw.lastError, ERROR_MAX));
+  set('lastDeliveryError', shortText(raw.lastDeliveryError, ERROR_MAX));
+  if (valid(raw.failureStreak)) job.failureStreak = raw.failureStreak;
+  if (valid(raw.runsDone)) job.runsDone = raw.runsDone;
+  set('promptSha256', sha(raw.promptSha256));
+  if (valid(raw.promptBytes)) job.promptBytes = raw.promptBytes;
+  if (raw.promptCut === true || cutPrompt.cut) job.promptCut = true;
+  const redacted = count(raw.promptRedacted) + prompt.count;
+  if (redacted) job.promptRedacted = redacted;
+  set('rev', sha(raw.rev));
+  return job;
+}
+
+/** One timer of the Hermes host: what it is for, when it runs and how its last run ended. No run times: the exporter leaves them out on purpose. */
+function cleanTimer(raw) {
+  if (!isObject(raw)) return null;
+  const name = shortText(raw.name, 80);
+  if (!name || name === REDACTED) return null;
+  return { name, description: shortText(raw.description, 160), schedule: shortText(raw.schedule, 80), enabled: raw.enabled === true, lastResult: shortText(raw.lastResult, 40) };
 }
 
 /** A short free-text field (a plugin's name, version or description): redacted, then cut. */
@@ -168,6 +218,8 @@ function cleanProfile(raw) {
   const soul = cleanSoul(raw.soul);
   if (soul) out.soul = soul;
   if (Array.isArray(raw.cron)) out.cron = raw.cron.map(cleanJob).filter(Boolean).slice(0, MAX_CRON);
+  // The zone the profile's cron text runs in (ws-eh2): an id such as `America/Chicago`; absent from an older exporter.
+  if (id(raw.timezone)) out.timezone = raw.timezone;
   return out;
 }
 
@@ -187,7 +239,13 @@ export function validExport(raw) {
       if (block) profiles[name] = block;
     }
   }
-  return { v: 1, exportedAt, ...(changedAt ? { changedAt } : {}), profiles, ownerSkills: ids(raw.ownerSkills, MAX_OWNER_SKILLS) };
+  // The host's own timers and its label (ws-eh2), kept only when sent. The label is data, so this code names no host.
+  const hostLabel = shortText(raw.hostLabel, 40);
+  const hostTimers = Array.isArray(raw.hostTimers) ? raw.hostTimers.map(cleanTimer).filter(Boolean).slice(0, MAX_HOST_TIMERS) : null;
+  return {
+    v: 1, exportedAt, ...(changedAt ? { changedAt } : {}), profiles, ownerSkills: ids(raw.ownerSkills, MAX_OWNER_SKILLS),
+    ...(hostLabel && hostLabel !== REDACTED ? { hostLabel } : {}), ...(hostTimers ? { hostTimers } : {}),
+  };
 }
 
 // --- profile changes (ws-im1.4.2) ---

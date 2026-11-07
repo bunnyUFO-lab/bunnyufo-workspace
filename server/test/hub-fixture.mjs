@@ -177,7 +177,9 @@ A long list.
     const soulText = ['## Role', 'You are the owner\'s assistant.', 'Always answer in plain words.', 'Key for tests: sk-ant-api03-FAKEFAKEFAKEFAKE1234567890', ''].join('\n');
     const model = (provider, name) => ({ provider, model: name });
     const modelOptions = { main: [model('openai-codex', 'gpt-6-sol'), model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')], briefs: [model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')] };
-    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: agentConfig === 'stale' ? 9 * 60 : 12, soulText, modelOptions }));
+    // 'schedules' and 'schedules-stale' add the fields of ws-eh2: four made-up jobs with every setting, two host timers and a timezone.
+    const old = agentConfig === 'stale' || agentConfig === 'schedules-stale';
+    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: old ? 9 * 60 : 12, soulText, modelOptions, schedules: String(agentConfig).startsWith('schedules') }));
   }
 
   if (oldSessions) {
