@@ -1,3 +1,25 @@
 /* Keep the shared source in the CSS pipeline. public/workspace also serves it
    as plain CSS, which cannot be imported directly as a browser ES module. */
 @import '../../workspace/_shared/report.css';
+
+/* The app's picture viewer: the actions under the stage, and the phone layout. */
+.buw-lightbox .buw-lightbox-tools{display:contents}
+.buw-lightbox .buw-lightbox-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;flex-shrink:0;padding:10px 16px;border-top:1px solid #ffffff15}
+.buw-lightbox .buw-lightbox-actions button{border:1px solid #ffffff2a;border-radius:8px;padding:9px 16px;min-height:38px;background:#ffffff0c;color:#eee5f0;cursor:pointer;font:600 13px var(--buw-font)}
+.buw-lightbox .buw-lightbox-actions button:disabled{opacity:.6;cursor:progress}
+.buw-lightbox .buw-lightbox-toolbar>button{border:1px solid #ffffff1a;border-radius:7px;padding:7px 11px;background:#ffffff06;color:#eee5f0;cursor:pointer;font:500 12px var(--buw-font)}
+.buw-lightbox .buw-lightbox-note-download{border:1px solid currentColor;border-radius:6px;padding:2px 8px;background:none;color:inherit;cursor:pointer;font:600 12px var(--buw-font)}
+.drawing-origin{margin:6px 16px 0;font-size:12.5px;opacity:.8}
+@media (max-width:640px){
+  dialog.buw-lightbox{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;border:0}
+  .buw-lightbox .buw-lightbox-toolbar{padding:8px 12px;gap:6px 8px}
+  .buw-lightbox .buw-lightbox-caption{order:1;flex:1 1 0}
+  .buw-lightbox .buw-lightbox-toolbar>.buw-lightbox-close{order:2}
+  .buw-lightbox .buw-lightbox-tools{order:3;display:flex;flex:1 0 100%;gap:6px;flex-wrap:wrap}
+  .buw-lightbox .buw-lightbox-tools>*{flex:1 1 0;min-height:36px}
+  .buw-lightbox .buw-lightbox-stage{padding:8px}
+  .buw-lightbox .buw-lightbox-actions{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+  .buw-lightbox .buw-lightbox-actions button{min-height:44px;padding:6px 4px}
+}
+.buw-lightbox .buw-lightbox-count{flex-shrink:0;color:#aba0b5;font:12px var(--buw-font)}
+@media (max-width:640px){.buw-lightbox .buw-lightbox-count{order:1}}

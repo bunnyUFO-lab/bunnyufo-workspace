@@ -715,7 +715,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
      * the one guarded by `base`, as in saveMarkdown, and goes first, so a lost race never leaves a
      * new picture beside an old scene.
      */
-    async saveDrawing({ id, path: file, scene, png, base }) {
+    async saveDrawing({ id, path: file, scene, png, base, by }) {
       const { sceneText, pngBuffer: picture } = checkDrawing({ scene, png });
       const got = await store.read('workspace.json');
       if (!got) throw fail('This workspace has no card list (workspace.json).', 404);
@@ -738,7 +738,16 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
       } catch {
         throw fail('The drawing was saved but its picture was not; save again.', 502);
       }
-      await editList(async list => { cardIn(list, id).updated = today(now()); }).catch(() => {});
+      await editList(async list => {
+        const card = cardIn(list, id);
+        card.updated = today(now());
+        // Who last saved a drawing made over a picture, from the sign-in of this request and never from its body.
+        const step = card.steps.find(item => item?.path === file);
+        if (step?.from) {
+          step.at = today(now());
+          if (by) step.by = by; else delete step.by;
+        }
+      }).catch(() => {});
       return { etag: written.etag, png: pictured.etag };
     },
 
@@ -746,7 +755,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
      * Start a drawing over a picture of the card. The picture is referenced by name, not copied, so
      * the scene stays small and the original is never touched. The new tab sits after `after`.
      */
-    async annotate({ id, image, after, width, height }) {
+    async annotate({ id, image, after, width, height, by }) {
       const source = inside(image, /\.(png|jpe?g|webp|gif|svg)$/i, 'Only a picture of this card can be annotated.');
       const w = dimension(width) ?? 1024;
       const h = dimension(height) ?? 768;
@@ -780,7 +789,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
           }
         }
         const at = Number.isInteger(after) ? Math.min(Math.max(after + 1, 0), card.steps.length) : card.steps.length;
-        card.steps.splice(at, 0, { name: `${label} (annotated)`, path: file });
+        card.steps.splice(at, 0, { name: `${label} (annotated)`, path: file, from: source, ...(by ? { by } : {}), at: today(now()) });
         card.updated = today(now());
         return { card, step: at, path: file };
       });
@@ -793,7 +802,7 @@ export function cardWriter(store, { now = () => new Date(), retries = 4, section
  * for the workspace a request names, or throws 404. Returns the answer, or undefined for a path
  * that is not one of these.
  */
-export async function cardRoute({ method, route, query, data, writerFor, state, moves }) {
+export async function cardRoute({ method, route, query, data, writerFor, state, moves, user = null }) {
   if (!route.startsWith('/cards')) return undefined;
   if (method === 'GET' && route === '/cards/move/progress') {
     // Read-only, for the progress bar of a long move; names the source workspace and card.
@@ -834,8 +843,8 @@ export async function cardRoute({ method, route, query, data, writerFor, state, 
   if (route === '/cards/restore') return { status: 200, body: await writer.restoreCard(data) };
   if (route === '/cards/section/rename') return { status: 200, body: { card: await writer.renameSection(data) } };
   if (route === '/cards/markdown') return { status: 200, body: await writer.saveMarkdown(data) };
-  if (route === '/cards/drawing') return { status: 200, body: await writer.saveDrawing(data) };
+  if (route === '/cards/drawing') return { status: 200, body: await writer.saveDrawing({ ...data, by: user || undefined }) };
   if (route === '/cards/responses') return { status: 200, body: await writer.saveResponses(data) };
-  if (route === '/cards/annotate') return { status: 201, body: await writer.annotate(data) };
+  if (route === '/cards/annotate') return { status: 201, body: await writer.annotate({ ...data, by: user || undefined }) };
   return undefined;
 }

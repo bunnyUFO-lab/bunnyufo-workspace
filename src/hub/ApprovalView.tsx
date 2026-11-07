@@ -17,13 +17,15 @@ import SettledBar, { useSettledHere } from './SettledBar'
 import { useHubData } from './useHub'
 import './runs.css'
 import { PageProjectChip } from './ProjectChip'
+import ReferenceNote from './ReferenceNote'
+import type { JobReference } from './ReferenceNote'
 import { usePcStart } from './usePcStart'
 
 /** The parts of `GET /hub/requests/:id` this view reads. */
 export interface RequestDetail {
   request: {
     id: string; project: string; text: string; title?: string; preset?: string; repo?: string; target?: string
-    doneWhen?: string; agent?: string; bead?: string; model?: string; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
+    doneWhen?: string; agent?: string; bead?: string; model?: string; reference?: JobReference; by?: string; replaces?: string; continues?: { from: string; replies: string[] }; createdAt: string; origin?: { kind: 'owner' | 'agent' | 'run'; name?: string }
   }
   state: string
   /** The repo Approve signs a request that has none of its own with: its project's tracked repo. Absent when there is none. */
@@ -232,6 +234,7 @@ export function ApprovalBody({ id, onSettled, page = false }: { id: string; onSe
           {request.by && <span className="hub-muted">asked by {request.by}, {ago(request.createdAt)}</span>}
         </div>
         <p className="ap-text" data-approval-text>{request.text}</p>
+        {request.reference && <ReferenceNote id={request.id} reference={request.reference} />}
         {request.doneWhen && <p className="hub-muted">Done when: {request.doneWhen}</p>}
         {request.model && <p className="hub-muted" data-approval-model>Model: {modelLabel(request.model)}</p>}
         {!actionable && page && <RunView id={id} page onGone={next => { window.location.hash = hubHash('request', next) }} />}
