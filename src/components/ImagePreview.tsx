@@ -75,6 +75,7 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
   return createPortal(<dialog ref={dialog} className="buw-lightbox" aria-label="Image preview" onClose={event => { if (!event.currentTarget.open) onClose() }}>
     <div className="buw-lightbox-toolbar">
       <span className="buw-lightbox-caption">{title}</span>
+      {many && gallery && <span className="buw-lightbox-count" data-lightbox-count>{gallery.index + 1} / {gallery.items.length}</span>}
       <span className="buw-lightbox-tools">
         {many && <button onClick={() => go(-1)} data-lightbox-prev>Previous</button>}
         {many && <button onClick={() => go(1)} data-lightbox-next>Next</button>}
