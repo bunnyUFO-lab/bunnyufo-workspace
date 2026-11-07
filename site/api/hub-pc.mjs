@@ -4,6 +4,7 @@
 // The file is written by the PC's report script (`inbox/pc/status-<stamp>.json`, create-only, at
 // most 64 KB). It is an agent's file, so `validStatus` cleans every field and refuses what it
 // cannot trust.
+import { cleanPcSchedules } from './hub-other-schedules.mjs';
 import { STALE_GRACE_MS, blockedAppUrl, blockedSessionUrl, deriveEventItems, staleSince, validProject } from './hub-model.mjs';
 
 export { STALE_GRACE_MS };
@@ -133,6 +134,7 @@ export function validStatus(raw) {
   const gpuUtil = raw.gpu && typeof raw.gpu === 'object' ? num(raw.gpu.util, 0, 100) : null;
   const comfy = raw.comfy && typeof raw.comfy === 'object' ? raw.comfy : null;
   const unity = raw.unity && typeof raw.unity === 'object' ? raw.unity : null;
+  const schedules = cleanPcSchedules(raw.schedules);
   const runner = cleanRunner(raw.runner);
   return {
     v: 1,
@@ -156,8 +158,19 @@ export function validStatus(raw) {
     } : null,
     ...(runner ? { runner } : {}),
     sessions,
+    ...(schedules ? { schedules } : {}),
     runs: [],
   };
+}
+
+/**
+ * The status as `/hub/pc` sends it, which any guest can read: everything but `schedules` (the PC's task names and folders, which of them are the repo's, the
+ * repos and workflows). Those go only to the signed-in `/hub/schedules`. A key added to `validStatus` later is sent unless it is named here, so a private one is dropped here too.
+ */
+export function publicStatus(status) {
+  if (!status) return status;
+  const { schedules: _private, ...rest } = status;
+  return rest;
 }
 
 const ageOf = (status, at) => Math.max(0, Math.floor((at.getTime() - new Date(status.at).getTime()) / 1000));

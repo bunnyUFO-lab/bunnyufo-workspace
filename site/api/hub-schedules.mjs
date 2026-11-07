@@ -1,8 +1,8 @@
 // One page of everything that runs on a schedule (ws-eh2). Pure: no S3, no clock of its own. `hub.mjs` finds the newest settings export
 // of the Hermes host and calls in.
 //
-// Only the Hermes host reports yet. Its jobs and timers come from the export it already publishes; the other lists (the site host's
-// timers, the PC's tasks, GitHub's schedules) are named here and say "not reporting" until their own data arrives. Nothing on this page
+// The Hermes host's jobs and timers come from the export it publishes; the site host's timers, the PC's tasks and GitHub's schedules come from
+// their own data (`hub-other-schedules.mjs` reads that) and say "not reporting" while it is missing. Nothing on this page
 // is a name from the owner's machines: every label and name comes from data, so this file holds none. View only: nothing here changes a job.
 import { exportFreshness, PROFILES } from './hub-agent-config.mjs';
 
@@ -14,23 +14,44 @@ export const NOT_REPORTING = 'Not reporting yet. This list arrives with a later 
 export const NO_TIMERS = 'The Hermes host does not list its timers yet.';
 export const NO_EXPORT = 'The Hermes host has not published its settings yet.';
 
-const LATER = [
-  { id: 'site-timers', label: 'Site host timers' },
-  { id: 'pc-tasks', label: 'PC tasks' },
-  { id: 'github', label: 'GitHub Actions' },
-];
+/** The PC refreshes its task list about hourly and the site host writes about every 15 minutes: a list this much older than that is marked old. */
+export const PC_LIST_FRESH_MS = 3 * 60 * 60 * 1000;
+export const HOST_FILE_FRESH_MS = 60 * 60 * 1000;
+export const GITHUB_NOTE = "GitHub's list comes through the PC, so it is as old as the PC's last report.";
+
+const lateEmpty = (id, label, text = NOT_REPORTING) => ({ id, label, state: 'not-reporting', as_of: null, items: [], text });
+/** A list from another source: `live` while its time is recent, `old` past `freshMs`. */
+const listed = (at, asOf, freshMs) => (at.getTime() - new Date(asOf).getTime() > freshMs ? 'old' : 'live');
+
+/** The site host's timers: from its file, or the empty state. */
+function siteTimers(hostFile, at) {
+  if (!hostFile) return lateEmpty('site-timers', 'Site host timers');
+  const { exportedAt, hostLabel, timers } = hostFile;
+  return { id: 'site-timers', label: 'Site host timers', state: listed(at, exportedAt, HOST_FILE_FRESH_MS), as_of: exportedAt, host: hostLabel, items: timers, ...(timers.length ? {} : { text: 'The host lists no timer.' }) };
+}
+
+/** The PC's tasks and GitHub's schedules: two halves of the `schedules` field of the newest PC status. `total` is all the PC's non-OS tasks. */
+function pcSources(status, at) {
+  const part = status?.schedules;
+  const tasks = part?.tasks
+    ? { id: 'pc-tasks', label: 'PC tasks', state: listed(at, part.tasks.at, PC_LIST_FRESH_MS), as_of: part.tasks.at, host: 'PC', total: part.tasks.total, items: part.tasks.rows, ...(part.tasks.rows.length ? {} : { text: 'The PC lists no task.' }) }
+    : lateEmpty('pc-tasks', 'PC tasks');
+  const github = part?.github
+    ? { id: 'github', label: 'GitHub Actions', state: listed(at, part.github.at, PC_LIST_FRESH_MS), as_of: part.github.at, host: 'PC', note: GITHUB_NOTE, items: part.github.rows, ...(part.github.rows.length ? {} : { text: 'The PC lists no GitHub schedule.' }) }
+    : { ...lateEmpty('github', 'GitHub Actions'), note: GITHUB_NOTE };
+  return [tasks, github];
+}
 
 /**
  * `{ sources, note, at }`
- * - `exported`: `validExport(...)` or null; `status` (the PC's status file) and `hostFile` (the site host's timer file) are for the lists that
- *   come later and are not read yet; `at`: a Date.
+ * - `exported`: `validExport(...)` or null; `status`: `validStatus(...)` (the PC's) or null; `hostFile`: `cleanHostSchedules(...)` or null; `at`: a Date.
+ *   A missing status, file or key is an empty list that says so, never an error.
  * - `sources`: `[{ id, label, state, as_of, items, text? }]`, in page order. `state` is `live`, `old` (the export is past the freshness rule of
- *   `exportFreshness`) or `not-reporting`. `as_of` is the ISO time the data is from, or null. `text` says why a list is empty.
+ *   `exportFreshness`) or `not-reporting`. `as_of` is the ISO time the data is from, or null. `text` says why a list is empty; `note` is a line that belongs under the heading.
  *   The Hermes sources also carry `host` (the host's own label) and, for jobs, `timezone` (the zone the cron text runs in) and `profileModels` (the model a job follows when it pins none).
  * - a job item is the exporter's job with its `profile`; fields the exporter did not send are absent, not blank.
  */
 export function schedulesView({ exported, status = null, hostFile = null, at }) {
-  void status; void hostFile;
   const state = exported ? (exportFreshness(exported, at) === 'fresh' ? 'live' : 'old') : 'not-reporting';
   const host = exported?.hostLabel ?? 'Hermes host';
   const profiles = exported ? PROFILES.filter(name => Array.isArray(exported.profiles[name]?.cron)) : [];
@@ -47,7 +68,7 @@ export function schedulesView({ exported, status = null, hostFile = null, at }) 
     ? { id: 'hermes-timers', label: 'Hermes host timers', state, as_of: exported.exportedAt, host, items: exported.hostTimers, ...(exported.hostTimers.length ? {} : { text: 'The export lists no timer.' }) }
     : { id: 'hermes-timers', label: 'Hermes host timers', state: 'not-reporting', as_of: null, host, items: [], text: exported ? NO_TIMERS : NO_EXPORT };
   return {
-    sources: [hermesJobs, hermesTimers, ...LATER.map(source => ({ ...source, state: 'not-reporting', as_of: null, items: [], text: NOT_REPORTING }))],
+    sources: [hermesJobs, hermesTimers, siteTimers(hostFile, at), ...pcSources(status, at)],
     note: COPY_NOTE,
     at: at.toISOString(),
   };

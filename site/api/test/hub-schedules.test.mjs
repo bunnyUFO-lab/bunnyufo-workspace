@@ -252,7 +252,7 @@ test('a stale export is never a baseline, and a failing write never fails the re
 // --- public code ---
 
 test('the files of this feature name nothing of the owner\'s machines', () => {
-  const files = ['site/api/hub-schedules.mjs', 'site/api/hub-agent-config.mjs', 'src/hub/team/SchedulesTab.tsx', 'src/hub/team/schedulesModel.ts', 'src/hub/team/schedules.css', 'site/api/test/hub-fixtures.mjs'];
+  const files = ['site/api/hub-schedules.mjs', 'site/api/hub-agent-config.mjs', 'src/hub/team/SchedulesTab.tsx', 'src/hub/team/schedulesModel.ts', 'src/hub/team/schedules.css', 'site/api/hub-other-schedules.mjs', 'site/api/test/hub-fixtures.mjs'];
   for (const file of files) {
     const text = readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8');
     for (const word of ['CT ' + '10', 'jobs' + '.json', 'briefs' + '-jobs', '192' + '.168', 'bunnyufo' + '.net']) assert.ok(!text.includes(word), `${file} names ${word}`);

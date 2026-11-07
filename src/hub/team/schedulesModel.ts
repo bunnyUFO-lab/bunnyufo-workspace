@@ -1,5 +1,5 @@
 // Pure words and addresses for the Schedules half of Team. No React, so Node can test it.
-import type { JobTarget, ScheduleJob, ScheduleSource, ScheduleState } from '../../lib/hubTeam'
+import type { GithubSchedule, JobTarget, PcTask, ScheduleJob, ScheduleSource, ScheduleState } from '../../lib/hubTeam'
 
 export const GUEST_LINE = 'Schedules need sign-in.'
 export const NOT_REPORTED = 'Not reported'
@@ -195,3 +195,39 @@ export function promptNotes(job: Pick<ScheduleJob, 'promptCut' | 'promptRedacted
 }
 
 export const STATE_WORDS: Record<ScheduleState, string> = { live: 'Live', old: 'Old', 'not-reporting': 'Not reporting' }
+
+// --- the PC's tasks, GitHub's schedules and the site host's timers ---
+
+const TASK_STATE: Record<PcTask['state'], string> = { ready: 'Ready', running: 'Running', disabled: 'Off', queued: 'Queued', unknown: 'Unknown' }
+export const taskStateWords = (state: PcTask['state']): { label: string; on: boolean } => ({ label: TASK_STATE[state] ?? 'Unknown', on: state === 'ready' || state === 'running' || state === 'queued' })
+
+/** A run's result in the words of the page. The PC and the host write their own ("ok", "error 0x1", "exit-code"); a word not known is shown as it is. */
+export function plainResult(text: string | undefined): { label: string; failed: boolean } {
+  const word = (text ?? '').trim()
+  if (!word) return { label: '', failed: false }
+  const lower = word.toLowerCase()
+  if (lower === 'ok' || GOOD.has(lower)) return { label: 'Worked', failed: false }
+  if (/^(error|failed|failure|exit-code|timeout|signal|core-dump|watchdog)/.test(lower) || BAD.has(lower)) return { label: `Failed (${word})`, failed: true }
+  return { label: word.charAt(0).toUpperCase() + word.slice(1), failed: false }
+}
+
+/** The PC's tasks split into the repo's own and the rest, which the page folds. */
+export function splitTasks(tasks: PcTask[]): { ours: PcTask[]; others: PcTask[] } {
+  return { ours: tasks.filter(task => task.ours), others: tasks.filter(task => !task.ours) }
+}
+export const othersTitle = (n: number) => `Other programs' tasks (${n})`
+/** "Showing 60 of 212 tasks" when the PC sent fewer than it has; empty otherwise. */
+export const tasksCut = (shown: number, total: number | undefined) => (total !== undefined && total > shown ? `Showing ${shown} of ${total} tasks.` : '')
+
+/** The words under a row that has a next and a last run: "Next Mon 9 Nov 08:00", "Last 3 hours ago: worked". */
+export function runLines(row: { nextRun?: string; lastRun?: string; lastResult?: string }, now = Date.now(), on = true, viewerZone?: string): string[] {
+  const out: string[] = []
+  if (row.nextRun && on) out.push(`Next ${clock(row.nextRun, viewerZone)}`)
+  const result = plainResult(row.lastResult)
+  if (row.lastRun) out.push(`Last ${agoWords(row.lastRun, now)}${result.label ? `: ${result.label}` : ''}`)
+  else if (result.label) out.push(`Last result: ${result.label}`)
+  return out
+}
+
+/** A workflow's cron line in words, in UTC (GitHub runs them in UTC); empty when the line is not a plain shape. */
+export const workflowCadence = (item: Pick<GithubSchedule, 'cron'>): string => cadenceWords(item.cron, 'UTC')

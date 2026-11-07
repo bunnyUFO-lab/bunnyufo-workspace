@@ -90,6 +90,9 @@ function isoOf(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
+/** A run time that names its zone; '' without one, which the page shows as "Not reported" (a bare time would be read in the server's zone). */
+const zonedIso = value => (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(typeof value === 'string' ? value.trim() : '') ? isoOf(value) : '');
+
 function cleanSoul(raw) {
   if (!isObject(raw) || typeof raw.text !== 'string') return null;
   const redacted = redactSecrets(raw.text);
@@ -139,8 +142,8 @@ function cleanJob(raw) {
   if (Object.hasOwn(raw, 'postsTo')) job.postsTo = cleanTarget(raw.postsTo);
   if (Object.hasOwn(raw, 'failuresTo')) job.failuresTo = cleanTarget(raw.failuresTo);
   set('script', id(raw.script));
-  set('nextRunAt', isoOf(raw.nextRunAt));
-  set('lastRunAt', isoOf(raw.lastRunAt));
+  set('nextRunAt', zonedIso(raw.nextRunAt));
+  set('lastRunAt', zonedIso(raw.lastRunAt));
   set('lastStatus', id(raw.lastStatus));
   set('lastError', shortText(raw.lastError, ERROR_MAX));
   set('lastDeliveryError', shortText(raw.lastDeliveryError, ERROR_MAX));
