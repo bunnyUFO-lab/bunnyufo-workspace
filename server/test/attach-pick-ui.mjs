@@ -25,13 +25,18 @@ try {
     }
   };
 
-  step('a checklist step: its camera button has no capture');
-  await page.goto(`${fixture.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
-  await check('checklist step', page.locator('[data-item] [data-attach-input]'));
-
-  step('the Chat: the attach button has no capture');
-  await page.goto(`${fixture.url}#/~hub/chat/new`);
-  await check('chat', page.locator('.hub-compose [data-attach-input]'));
+  // Every picker, at the phone's width and at a desktop's.
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    step(`${width} px: a checklist step, its note, an Ask's note and the Chat have no capture`);
+    await page.goto(`${fixture.url}#/~hub/checklist/${FIXTURE_CHECKLIST}`);
+    await check('checklist step', page.locator('[data-item] [data-attach-input]'));
+    await check('checklist note', page.locator('[data-note-pictures] [data-attach-input]'));
+    await page.goto(`${fixture.url}#/~hub/needs`);
+    await check('ask note', page.locator('[data-ask-pictures] [data-attach-input]'));
+    await page.goto(`${fixture.url}#/~hub/chat/new`);
+    await check('chat', page.locator('.hub-compose [data-attach-input]'));
+  }
   console.log('ok');
 } finally {
   await browser.close();

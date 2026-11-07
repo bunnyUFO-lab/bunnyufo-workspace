@@ -165,6 +165,9 @@ function ApprovalActions({ detail, preset, onSettled }: { detail: RequestDetail;
           <input value={reason} onChange={event => setReason(event.target.value)} maxLength={400} autoComplete="off" data-approval-reason />
         </label>
       )}
+      {host.write && declining && (
+        <p className="hub-muted" data-approval-no-pictures>A declined request has no run to read a picture.</p>
+      )}
       {brief && <pre className="ni-mono" data-approval-brief>{brief}</pre>}
       <div className="ni-a ap-actions" data-approval-actions>
         {!host.write && <span className="hub-muted" data-readonly-note>Sign in to approve this.</span>}

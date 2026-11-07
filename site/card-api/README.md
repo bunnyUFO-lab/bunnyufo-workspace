@@ -144,11 +144,11 @@ npm run cards -- beads show --project <p> [--open] [--json]   # read-only: the p
 npm run cards -- plan apply <ask id> [--dry-run] [--journal <file>]   # run the approved rows of an answered plan with bd; the journal makes a rerun skip rows done
 npm run cards -- mark apply --project <p> [--json]   # the PC applies the owner's marks in Beads (writes no mark and no applied note); apply pending --project <p> --json lists what waits
 npm run cards -- ask list [--project <p>] [--answered | --open] [--all]
-npm run cards -- ask get <id>
+npm run cards -- ask get <id> [--into <dir>]   # downloads the pictures the owner attached (and a drawing) and prints each file's full path; see below
 npm run cards -- ask pickup <id>      # also: ask cancel <id>; exit 3 if someone already did
 npm run cards -- checklist create --project <p> (--file checklist.json | --title <t> --item <text>...) [--bead <b>] [--card <url>] [--playtest --build <https url> [--platform <p>] [--look-for <t>]]   # prints the id; pings #needs-you
 npm run cards -- checklist list [--project <p>] [--open | --submitted] [--all]   # id, state, done/total, project, title
-npm run cards -- checklist get <id> [--json]
+npm run cards -- checklist get <id> [--json] [--into <dir>]   # a submitted list: every picture is downloaded and printed the same way
 npm run cards -- checklist wait <id> [--timeout <min, 30, max 240>] [--every <s, 20, min 5>]   # 0 on submit, 3 on cancel, 4 on timeout
 npm run cards -- checklist pickup <id>   # exit 2 when not submitted, 3 when already picked up; also: checklist cancel <id> (3 when cancelled or submitted)
 npm run cards -- request list [--project <p>] [--open]

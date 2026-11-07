@@ -44,7 +44,7 @@ export default function AskBody({ ask, reload, onSettled, onTaken, view = false 
       <textarea value={note} onChange={event => setNote(event.target.value)} rows={3} maxLength={4000} onPaste={pictureable ? pictures.onPaste : undefined} />
     </label>
   )
-  const pictureRow = noteField && pictureable && (
+  const pictureRow = writable && pictureable && (
     <div className="hub-pic-row" data-ask-pictures>
       <div className="hub-pic-line"><PictureButton pictures={pictures} label="Attach pictures to the answer" /><span className="hub-muted">Add a picture</span></div>
       <PictureTray pictures={pictures} />

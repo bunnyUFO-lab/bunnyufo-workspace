@@ -13,7 +13,7 @@ export function PictureButton({ pictures, multiple = true, disabled = false, rea
   return (
     <>
       <input ref={picker} type="file" accept={PICTURE_TYPES} multiple={multiple} hidden data-attach-input onChange={event => { void pictures.add(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-      <button type="button" className="hub-attach" aria-label={label} title={reason ?? label} disabled={disabled || !!reason} data-attach onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
+      <button type="button" className="hub-attach" aria-label={label} title={reason ?? label} disabled={disabled || !!reason} data-pic-button onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
     </>
   )
 }
