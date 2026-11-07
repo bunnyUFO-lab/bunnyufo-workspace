@@ -12,7 +12,7 @@ import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/r
 import { buildMap } from '../hub-map.mjs';
 import { sprintModel, sprintsOf } from '../../../src/hub/sprintScope.ts';
 import { beadsIssue } from './hub-fixtures.mjs';
-import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
+import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf, visibleRows } from '../../../src/hub/mapBranch.ts';
 
 const box = { w: 390, h: 300 };
 const near = (a, b, message) => assert.ok(Math.abs(a - b) < 1e-6, `${message ?? ''} ${a} != ${b}`);
@@ -637,4 +637,33 @@ test('sprintModel keeps the milestones, features and tasks of one sprint and dro
   const finished = sprintModel(full, 'c');
   assert.deepEqual(finished.milestones.map(milestone => [milestone.id, milestone.state]), [['m2', 'done']], 'A milestone with only done sprint tasks reads as done.');
   assert.deepEqual(sprintModel(full, 'nothing').milestones, []);
+});
+
+// visibleRows: the milestones listed under a row, and Hide completed.
+const vDot = (id, state) => ({ id, title: id.toUpperCase(), state });
+const vRow = (id, depth, state, dots) => ({ id, title: id, state, depth, dots, done: dots.filter(dot => dot.state === 'done').length, inside: 0 });
+const vRows = () => [
+  vRow('r1', 0, 'done', [vDot('a', 'done')]),
+  vRow('r2', 1, 'doing', [vDot('b', 'done'), vDot('c', 'next')]),
+  vRow('r3', 0, 'done', [vDot('x', 'done')]),
+  vRow('r4', 0, 'later', [vDot('y', 'later')]),
+];
+
+test('visibleRows lists the milestones of a row that is not done; a finished row keeps its dots and lists no names', () => {
+  const shown = visibleRows(vRows(), false);
+  assert.deepEqual(shown.map(row => row.id), ['r1', 'r2', 'r3', 'r4']);
+  assert.deepEqual(shown.map(row => row.names.map(dot => dot.id)), [[], ['b', 'c'], [], ['y']]);
+  assert.equal(shown[0].dots.length, 1, 'The dots stay.');
+  assert.equal(shown[1].names[0].title, 'B', 'The names are the dots\' titles.');
+});
+
+test('visibleRows with Hide completed drops finished rows unless something inside is open, and finished milestones from the names', () => {
+  const shown = visibleRows(vRows(), true);
+  assert.deepEqual(shown.map(row => row.id), ['r1', 'r2', 'r4'], 'r1 is done but r2 inside it is not; r3 goes.');
+  assert.deepEqual(shown.map(row => row.names.map(dot => dot.id)), [[], ['c'], ['y']]);
+  assert.deepEqual(visibleRows([vRow('r3', 0, 'done', [vDot('x', 'done')])], true), []);
+  assert.deepEqual(visibleRows([], true), []);
+  const inputs = vRows();
+  visibleRows(inputs, true);
+  assert.equal(inputs[1].dots.length, 2, 'The rows given are not changed.');
 });

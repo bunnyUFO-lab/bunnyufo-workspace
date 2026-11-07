@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react'
 import type { CSSProperties, KeyboardEvent } from 'react'
 import type { ProgressMap, TaskState } from '../lib/hub'
 import { mapHash, projectHash } from '../lib/route'
-import { FULL, UNFILED_TITLE, branchTarget, childrenOf, crumbs, rowsOf, type Resolved } from './mapBranch.ts'
+import { FULL, UNFILED_TITLE, branchTarget, childrenOf, crumbs, rowsOf, visibleRows, type Resolved } from './mapBranch.ts'
+import { useHideDone, writeHideDone } from './hideDone'
 import { savedBranch } from './branchMemory.ts'
 import { mapMatches, savedQuery, saveQuery } from './mapSearch.ts'
 import { words, type SearchRow } from './beadSearch.ts'
@@ -52,10 +53,17 @@ function Dots({ dots }: { dots: { id: string; state: TaskState }[] }) {
 /** The nested rows under a root, each a whole link into that branch. `highlight` is the branch the viewer came from. */
 export function RoadmapList({ project, model, root = FULL, highlight }: { project: string; model: ProgressMap; root?: string; highlight?: string }) {
   const rows = useMemo(() => rowsOf(model, root), [model, root])
+  const hideDone = useHideDone()
+  const shown = useMemo(() => visibleRows(rows, hideDone), [rows, hideDone])
   if (!rows.length) return <p className="hub-empty" data-roadmap-empty>No roadmaps here yet.</p>
   return (
+    <>
+    <div className="rm-options">
+      <button type="button" className={`hub-chip${hideDone ? ' on' : ''}`} aria-pressed={hideDone} data-roadmap-hide-done onClick={() => writeHideDone(!hideDone)}>Hide completed</button>
+    </div>
+    {shown.length === 0 && <p className="hub-empty" data-roadmap-all-done>Everything here is done.</p>}
     <ul className="rm-rows" data-roadmap-rows>
-      {rows.map(row => (
+      {shown.map(row => (
         <li key={row.id} style={{ '--depth': Math.min(row.depth, 3) } as CSSProperties}>
           <a className={`rm-row${row.id === highlight ? ' from' : ''}${row.state === 'done' ? ' closed' : ''}`} href={mapHash(project, row.id)} data-roadmap-row={row.id} data-depth={row.depth}>
             <span className="rm-row-head">
@@ -65,9 +73,22 @@ export function RoadmapList({ project, model, root = FULL, highlight }: { projec
             </span>
             <Dots dots={row.dots} />
           </a>
+          {row.names.length > 0 && (
+            <ul className="rm-ms" data-roadmap-milestones={row.id}>
+              {row.names.map(dot => (
+                <li key={dot.id}>
+                  <a className={`rm-ms-link${dot.state === 'done' ? ' closed' : ''}`} href={mapHash(project, dot.id)} data-roadmap-milestone={dot.id} data-state={dot.state}>
+                    <i aria-hidden="true" data-state={dot.state} style={{ '--dot': STATE_COLOR[dot.state] } as CSSProperties} />
+                    <span>{dot.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </li>
       ))}
     </ul>
+    </>
   )
 }
 

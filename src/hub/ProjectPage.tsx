@@ -20,6 +20,7 @@ import ProjectRing from './ProjectRing'
 import RoadmapRows from './RoadmapRows'
 import SprintPicker, { sprintCount } from './SprintPicker'
 import { sprintModel, sprintsOf } from './sprintScope.ts'
+import { useHideDone } from './hideDone'
 import RunsOnChip, { RUNS_ON } from './RunsOnChip'
 import WorkingNow from './WorkingNow'
 import { tallyOf, tallyWords } from './mapCount.ts'
@@ -100,6 +101,7 @@ function RoadmapList({ project, model, onOpen }: { project: string; model: MapMo
   const [opened, setOpened] = useState<Record<string, boolean>>({})
   const [shown, setShown] = useState<Record<string, number>>({})
   const [doneOpen, setDoneOpen] = useState(false)
+  const hideDone = useHideDone()
   const isOpen = (id: string) => opened[id] ?? id === current
   const row = (milestone: MapMilestone) => (
     <MilestoneRow
@@ -114,7 +116,7 @@ function RoadmapList({ project, model, onOpen }: { project: string; model: MapMo
     <div className="pj-roadmap" data-pp-roadmap>
       {model.milestones.length === 0 && <p className="hub-empty">No milestones yet.</p>}
       {milestones.map(row)}
-      {done.length > 0 && (
+      {done.length > 0 && !hideDone && (
         <div className="pj-done" data-pp-finished data-open={doneOpen}>
           <button type="button" className="pj-ms-head pj-done-head" aria-expanded={doneOpen} onClick={() => setDoneOpen(value => !value)} data-pp-done-toggle>
             <span className="ui-row-body"><b>Done ({done.length})</b></span>
@@ -283,6 +285,7 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
   const known = !all.data || all.data.projects.some(item => item.id === wanted)
   const project = all.data && known ? wanted : undefined
   const today = useTodayScreen().data
+  const hideDone = useHideDone()
   // The model is asked for as soon as the address names the project, but not shown until the list says the project exists: the server answers 200 for any valid id.
   const { data: model, error, loading, at: modelAt } = useHeldHubData<MapModel>(known ? `/map/${enc(wanted)}` : null, !!project)
   // The details of a milestone or task: the Roadmap's panel over the list. Close returns to the list, one step back when this page pushed
@@ -322,7 +325,9 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
   const counts = today ? tabCounts(today, project) : null
   // With a sprint on, the Roadmap, Now and the header's count read the sprint's own map; the sheet and `find` keep the whole one.
   const scoped = sprint && model?.meta ? sprintModel(model, sprint) : undefined
-  const sprints = model?.meta ? sprintsOf(model) : []
+  // Hide completed also leaves finished sprints out of the picker, except the one in the address.
+  const sprintsAll = model?.meta ? sprintsOf(model) : []
+  const sprints = sprintsAll.filter(row => !hideDone || row.done < row.total || row.name === sprint)
   const sprintRow = sprint ? sprints.find(row => row.name === sprint) : undefined
   const done = model?.meta ? tallyOf((scoped ?? model).milestones.flatMap(tasksOfMilestone)) : null
   const mapShown = view === 'map'
@@ -358,7 +363,7 @@ export default function ProjectPage({ project: wanted, route, view, sprint }: { 
         </div>
       )}
       </div>
-      {tab === 'roadmap' && model?.meta && (
+      {tab === 'roadmap' && model?.meta && (sprintsAll.length > 0 || sprint) && (
         <div className="pp-sprint" data-pp-sprint-row>
           <SprintPicker id="hub-project-sprint" sprints={sprints} value={sprint ?? ''} onChange={pickSprint} className="cb-bar pp-sprint-pick" />
           {sprint && sprintRow && <span className="pp-sprint-count" data-pp-sprint-count>{sprintCount(sprintRow)}</span>}
