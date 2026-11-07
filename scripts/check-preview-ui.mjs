@@ -237,7 +237,7 @@ try {
   // waitFor, not count: resolveSite fetches sites.json before the app mounts, so the header
   // is not on the page yet when the navigation settles.
   await multi.goto(new URL('/second', url).href);
-  await multi.getByRole('button', { name: /^Workspace: Second Workspace\./ }).first().waitFor();
+  await multi.locator('[data-project-filter]', { hasText: 'Second Workspace' }).waitFor();
   // A section served from the bucket has no repository behind it, so there is no source link to
   // offer — and none is, rather than one that would 404.
   await multi.locator('.lib-row').first().click();
@@ -245,7 +245,7 @@ try {
   assert.equal(await multi.getByRole('link', { name: 'Open this page in the repository' }).count(), 0, 'no repo, no source link');
 
   await multi.goto(new URL('/first', url).href);
-  await multi.getByRole('button', { name: /^Workspace: First Workspace\./ }).first().waitFor();
+  await multi.locator('[data-project-filter]', { hasText: 'First Workspace' }).waitFor();
 
   // Opening a pin from another project rewrites the address to that project. It used to keep
   // the one in the bar — /first#/third-only — so the link you copied opened the wrong page.

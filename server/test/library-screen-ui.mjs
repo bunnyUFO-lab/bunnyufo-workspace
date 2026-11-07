@@ -127,13 +127,9 @@ try {
   await sheet.waitFor({ state: 'detached' });
   assert.match(await hashOf(phone), /#\/~hub\/library$/, 'Back closed the sheet and stayed');
 
-  step('phone: workspace sections are in the top bar, as a sheet');
-  await phone.getByRole('button', { name: /^Workspace:/ }).tap();
-  const menu = phone.getByRole('menu', { name: 'Workspaces' });
-  await menu.waitFor();
-  await menu.getByRole('menuitem', { name: /New workspace/ }).waitFor();
-  await phone.goBack();
-  await menu.waitFor({ state: 'detached' });
+  step('phone: the top bar has no workspace selector; the project filter is the one');
+  assert.equal(await phone.getByRole('button', { name: /^Workspace:/ }).count(), 0, 'no Workspace: button');
+  assert.equal(await phone.locator('.workspace-switcher').count(), 0);
 
   step('phone: the Trash shows a deleted card, and Restore works');
   await zebra.locator('[data-row-menu]').tap();

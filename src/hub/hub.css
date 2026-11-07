@@ -588,3 +588,13 @@ button.hub-cl-text { cursor: pointer; }
 /* The bar that says what became of an answer reads as a sentence, not a shouted label. */
 .hub .settled-bar h3 { font-size: 1rem; letter-spacing: 0; text-transform: none; color: var(--text-bright); }
 .hub-legend-close { flex: 1 0 100%; min-height: 44px; justify-content: center; }
+
+/* A picture that did not save: the tile keeps a Retry beside its ×. */
+.hub-tray-item.failed img, .hub-tray-item.failed .hub-image-missing { opacity: 0.45; }
+.hub-tray-retry { position: absolute; left: 0; right: 0; bottom: 0; min-height: 28px; padding: 0 4px; font-size: 0.75rem; }
+@media (pointer: coarse) { .hub-tray-retry { min-height: 44px; bottom: -44px; } .hub-tray-item.failed { margin-bottom: 44px; } }
+
+/* The picture button and tray under a note on an inbox item. */
+.hub-pic-row { margin: 8px 0 4px; }
+.hub-pic-line { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+.hub-pic-row .hub-tray { margin: 10px 0 0; }

@@ -1,20 +1,19 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent, DragEvent, KeyboardEvent } from 'react'
+import type { KeyboardEvent } from 'react'
 import type { ChatApproval, ChatDelegate, ChatHeld, ChatJob, ChatLine, ChatListAnswer, ChatMarks, ChatModel, ChatPersona, ChatQueued, ChatQueueView, ChatTool, HelpPreview, Item } from '../lib/hub'
 import { HubError, clock, hubGet, hubPost, remember } from '../lib/hub'
 import { host } from '../lib/host'
-import { hasFiles, pictureFiles } from '../lib/pastePictures.mjs'
 import { hubHash, parseChatId, parseHelpId, reviewHash } from '../lib/route'
 import { ROUTE_EVENT, afterPop, back, direction, entryBelowSerial, entrySerial, overlayDepth, skipGone, swap } from '../lib/entries'
 import { useIsDesktop } from '../lib/chrome'
 import type { HelpKind } from '../lib/route'
-import { Icon } from '../local/Icons'
 import { holdReload } from '../lib/reloadGate'
 import { elapsedLabel } from './runLines'
 import { StreamCut, plainText, streamChat, streamLive } from './chatStream'
 import type { ChatHandlers } from './chatStream'
-import { MAX_IMAGES, PICTURE_TYPES, prepareImage, toBase64 } from './chatImages'
-import type { Prepared } from './chatImages'
+import { MAX_IMAGES, toBase64 } from './chatImages'
+import { PictureButton, PictureTray } from './PictureTray'
+import { usePictures } from './pictures'
 import HubImage from './HubImage'
 import JobsCard from './ChatJobs'
 import { LIVE_JOB } from './jobStates'
@@ -272,8 +271,6 @@ let carried: { id: string; lines: Shown[]; model: string; persona: string } | nu
 
 const carry = (id: string, lines: Shown[], model: string, persona: string) => { carried = { id, lines, model, persona } }
 
-const isPicture = (file: File) => file.type.startsWith('image/')
-
 /** A reply whose stream broke: what to show if it never gets saved. */
 interface CutTurn { text: string; sentAt: string; fallback: Shown[]; previews: string[]; model: string; persona: string }
 
@@ -305,10 +302,6 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const pauseText = choice.pause ? pauseNote(nameOf(models, choice.pause.model), choice.pause, pauseWhen, choice.using ? nameOf(models, choice.using) : undefined) : null
   const [pending, setPending] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => (help ? takeHelpDraft() : start?.draft ?? ''))
-  const [images, setImages] = useState<Prepared[]>([])
-  const [preparing, setPreparing] = useState(0)
-  const [trayNote, setTrayNote] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [tools, setTools] = useState<ChatTool[]>([])
@@ -345,7 +338,6 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const run = useRef<string | null>(null)
   const stopWanted = useRef(false)
   const input = useRef<HTMLTextAreaElement>(null)
-  const picker = useRef<HTMLInputElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const conversation = useRef<string | undefined>(help ? undefined : id)
   const [shownId, setShownId] = useState<string | undefined>(help ? undefined : id)
@@ -379,7 +371,6 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   }, [jobsLive, reloadJobs])
   const urls = useRef(new Set<string>())
   const left = useRef(false)   // the screen was left: a late event of its stream must not move the address
-  const slots = useRef(MAX_IMAGES)
   const speaks = typeof window !== 'undefined' && 'speechSynthesis' in window
 
   // The conversation in the address is the one on screen.
@@ -441,6 +432,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   // page returns to the front, because a phone stops timers in the background.
   const waitingQueue = queued.length > 0 && !held   // the Hub is about to deliver them: look soon, so a phone that wakes sees the rows move
   const busy = streaming || recovering || queued.length > 0 || local.length > 0   // a message sent now waits its turn, behind a held row too: it joins the hold
+  const pictures = usePictures({ max: MAX_IMAGES, noun: 'A message', locked: busy ? 'Wait for the reply before adding pictures.' : null })
   const watching = recovering || (!streaming && (hasRunningDelegate(messages) || queued.length > 0))
   const reloadList = list.reload
   useEffect(() => onChatMarks((name, state) => { if (name === conversation.current) setMarks(state) }), [])
@@ -519,60 +511,6 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
 
   const release = (list: string[]) => list.forEach(url => { URL.revokeObjectURL(url); urls.current.delete(url) })
 
-
-  const addFiles = async (files: File[]) => {
-    if (busy) { setTrayNote('Wait for the reply before adding pictures.'); return }
-    const pictures = files.filter(isPicture)
-    const note: string[] = []
-    if (pictures.length < files.length) note.push('Only pictures can be attached.')
-    const room = slots.current
-    if (pictures.length > room) note.push(`A message takes at most ${MAX_IMAGES} pictures.`)
-    const take = pictures.slice(0, Math.max(0, room))
-    slots.current -= take.length
-    setTrayNote(note.join(' ') || null)
-    if (!take.length) return
-    setPreparing(count => count + take.length)
-    for (const file of take) {
-      try {
-        const made = await prepareImage(file)
-        urls.current.add(made.url)
-        setImages(current => [...current, made])
-      } catch (failure) {
-        slots.current += 1
-        setTrayNote(failure instanceof Error ? failure.message : "This picture can't be opened here. Try a JPEG or PNG.")
-      }
-      setPreparing(count => count - 1)
-    }
-  }
-
-  const remove = (picture: Prepared) => {
-    release([picture.url])
-    slots.current += 1
-    setImages(current => current.filter(item => item.id !== picture.id))
-    setTrayNote(null)
-  }
-
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = pictureFiles(event.clipboardData)
-    if (!files.length) return
-    if (!event.clipboardData.getData('text/plain')) event.preventDefault()
-    void addFiles(files)
-  }
-
-  const onDrag = (event: DragEvent) => {
-    if (!hasFiles(event.dataTransfer)) return
-    event.preventDefault()
-    setDragging(true)
-  }
-  const onDragLeave = (event: DragEvent<HTMLElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false)
-  }
-  const onDrop = (event: DragEvent) => {
-    if (!hasFiles(event.dataTransfer)) return
-    event.preventDefault()
-    setDragging(false)
-    void addFiles(Array.from(event.dataTransfer.files))
-  }
 
   /**
    * Puts a message in the queue of this conversation: it goes when the reply ends. The row shows at once and the Hub's answer replaces it.
@@ -828,21 +766,21 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
 
   const send = async (asked?: string) => {
     const text = (asked ?? draft).trim()
-    const sending = asked === undefined ? images : []
-    if ((!text && !sending.length) || preparing) return
+    const sending = asked === undefined ? pictures.local() : []
+    if ((!text && !sending.length) || pictures.preparing) return
     // A reply is running here, or messages are waiting for it: this one waits too. Pictures cannot wait, so they stay in the tray.
     if (busy) {
-      if (sending.length) { setTrayNote('Pictures cannot wait in the queue. Send them when the reply is done, or remove them.'); return }
+      if (sending.length) { pictures.setNote('Pictures cannot wait in the queue. Send them when the reply is done, or remove them.'); return }
       if (!text) return
       await queueMessage(text)   // before the chat has a name the row waits for it
       return
     }
     if (speaks) window.speechSynthesis.cancel()
     setError(null)
-    setTrayNote(null)
+    pictures.setNote(null)
     setStopping(false)
     setStreaming(true)
-    if (asked === undefined) { setDraft(''); setImages([]); slots.current = MAX_IMAGES }
+    if (asked === undefined) { setDraft(''); pictures.clear(true) }
     setTools([]); setThinking('')
     setDelegates([])
     setApproval(null)
@@ -851,6 +789,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
     const askedModel = model   // model: what this turn asks for
     const askedPersona = persona   // persona: only a new chat names one; the server keeps it after that
     const previews = sending.map(item => item.url)
+    previews.forEach(url => urls.current.add(url))
     const optimistic: Shown = { role: 'user', text, at: new Date().toISOString(), ...(previews.length ? { previews } : {}) }
     setMessages([...before, optimistic])
     run.current = null
@@ -868,7 +807,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         // This page thought the chat was idle, but a reply is running (another device, or the queue's own turn): the message waits its turn.
         if (failure instanceof HubError && failure.status === 409 && conversation.current && !sending.length) { void queueMessage(text, `l${Math.random().toString(36).slice(2, 8)}`); return }   // a key: the sent text already left the box, so this must not clear what was typed since
         setStopping(false)
-        if (asked === undefined) { giveBack(text); setImages(sending); slots.current = MAX_IMAGES - sending.length } else giveBack()
+        if (asked === undefined) { giveBack(text); pictures.restore(sending) } else giveBack()
         setError(failure instanceof HubError || failure instanceof Error ? failure.message : 'The message was not sent.')
       },
     })
@@ -907,7 +846,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const banner = stored
     ? <HelpBanner about={stored.about ?? null} text={stored.text} pictures={(stored.images ?? []).map(image => ({ url: `/api/hub/chat/${encodeURIComponent(shownId ?? '')}/images/${encodeURIComponent(image.file)}` }))} />
     : help && (gone ? <HelpBanner about={null} pictures={[]} /> : preview.data ? <HelpBanner about={preview.data.about} text={preview.data.text} pictures={preview.data.pictures.map(picture => ({ path: picture.path }))} /> : null)
-  const canSend = (!!draft.trim() || images.length > 0) && preparing === 0
+  const canSend = (!!draft.trim() || pictures.items.length > 0) && pictures.preparing === 0
   // The header: what this chat is called, who it talks to, and its own menu. A chat the Hub has no file for yet has no menu.
   const row = list.data?.conversations.find(entry => entry.id === shownId)
   const firstUser = messages.find(line => line.role === 'user')
@@ -919,7 +858,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
   const chatRef = shownId && !help ? { id: shownId, title, pinned: marks?.pinned ?? row?.pinned ?? null, archived: marks?.archived ?? null, trashed: marks?.trashed ?? null, unread: marks?.unread ?? false } : null
   const leave = () => back(hubHash('chat'))
   return (
-    <section className={`hub-chat-main hub-chat-pane main${dragging ? ' hub-drop' : ''}`} data-chat-thread={shownId ?? ''} onDragEnter={onDrag} onDragOver={onDrag} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <section className={`hub-chat-main hub-chat-pane main${pictures.dragging ? ' hub-drop' : ''}`} data-chat-thread={shownId ?? ''} {...pictures.dropProps}>
         <div className="hub-chat-head">
           <IconButton icon="back" label="Back" className="hub-chat-back" data-back="" onClick={leave} />
           <button type="button" className="hub-chat-titlebtn" aria-haspopup="dialog" data-chat-options onClick={() => setOptions(true)}>
@@ -1019,24 +958,12 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
         {entry && degraded && !expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unsaved>The Hub has not saved these lines yet. They are kept here, and this keeps trying.</p>}
         {entry && expired(entry) && <p className="hub-muted hub-chat-note" role="status" data-chat-unconfirmed>The Hub never confirmed this reply and may have restarted. <button type="button" className="hub-btn" data-entry-dismiss onClick={() => dismissKey(entry.key)}>Dismiss</button></p>}
         {error && <p className="hub-error" role="alert">{error}</p>}
-        {!trashed && (images.length > 0 || preparing > 0 || trayNote) && (
-          <div className="hub-tray" data-tray>
-            {images.map((picture, index) => (
-              <div className="hub-tray-item" key={picture.id}>
-                <img src={picture.url} alt={`Picture ${index + 1}`} />
-                <button type="button" className="hub-tray-remove" aria-label={`Remove picture ${index + 1}`} onClick={() => remove(picture)}><span aria-hidden="true">×</span></button>
-              </div>
-            ))}
-            {preparing > 0 && <span className="hub-muted hub-tray-note" role="status">Preparing {preparing === 1 ? 'a picture' : `${preparing} pictures`}…</span>}
-            {trayNote && <span className="hub-tray-note hub-tray-warn" role="status">{trayNote}</span>}
-          </div>
-        )}
+        <PictureTray pictures={pictures} show={!trashed} />
         {!trashed && <div className="hub-compose">
-          <input ref={picker} type="file" accept={PICTURE_TYPES} multiple hidden data-attach-input onChange={event => { void addFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-          <button type="button" className="hub-attach" aria-label="Attach pictures" title="Attach pictures" disabled={busy} onClick={() => picker.current?.click()}><Icon name="attach" size={20} /></button>
+          <PictureButton pictures={pictures} disabled={busy} />
           <textarea
             ref={input} value={draft} rows={2} maxLength={8000} placeholder="Message" aria-label="Message"
-            onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={onPaste}
+            onChange={event => setDraft(event.target.value)} onKeyDown={onKey} onPaste={pictures.onPaste}
           />
           {streaming && <button type="button" className="hub-btn" disabled={stopping} data-chat-stop onClick={stop}>Stop</button>}
           {/* A press on Send keeps the focus in the field: a tap that blurred it closed the phone's keyboard, the page moved, and the click missed. */}

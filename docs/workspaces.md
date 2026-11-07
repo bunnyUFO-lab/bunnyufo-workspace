@@ -189,14 +189,14 @@ One private S3 bucket holds every section:
 
 ```
 s3://<bucket>/
-  sections/<id>/workspace.json      the card list; its "name" is what the switcher shows
+  sections/<id>/workspace.json      the card list; its "name" is what the project filter shows
   sections/<id>/<card folder>/…     the card files, exactly as in the workspace folder
   sections/<id>/_shared/…           report styles and scripts (reports load ../_shared/)
   state.json                        pinned, archived, tags and the pinned order, for every section
 ```
 
 A section whose `workspace.json` carries `"hidden": true` holds data, not cards (the agents' `inbox`):
-`/sites.json` lists it with `hidden: true`. `/w/<id>/…` does not serve it, and the switcher and the
+`/sites.json` lists it with `hidden: true`. `/w/<id>/…` does not serve it, and the project filter and the
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
 
@@ -209,7 +209,7 @@ dot or space) and says `left on the site: <key> is not a safe path here`; it nev
 A small service (`site/api`, container `buw-site-api`, port 8099) is the only thing that reads
 it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and `/api/*` to it:
 
-- `/sites.json` lists the sections the bucket holds, so a new section is in the switcher as soon
+- `/sites.json` lists the sections the bucket holds, so a new section is in the project filter as soon
   as its `workspace.json` is uploaded. Nothing on the server has to be edited.
 - `/w/<id>/<file>` streams the object with its ETag and content type. Only keys under
   `sections/` are reachable this way; `state.json` and anything else in the bucket are not. Nor are the
@@ -377,10 +377,12 @@ user (`Remote-User`), like every other write.
 |---|---|
 | `GET /api/hub/today`, `/inbox?filter=&project=`, `/events?since=&project=`, `/projects` | What needs the owner, what runs, what happened (a seven-day window of events) |
 | `GET /api/hub/asks/:id`; `POST …/answer`, `…/snooze`, `…/cancel` | An Ask and its state; answering writes `answer.json` once (a second answer is a 409 carrying the first); an answered Ask also carries `delivery`: where the answer went, from `delivered.json` and up to 3 `watch-*.json` (see below) |
-| `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder |
+| `POST /api/hub/asks/:id/files`; `POST …/files/:file/delete` | `{ image: { type, data } }`: one picture for the answer, in the chat shape and with the chat limits. Stored create-only as `asks/<id>/answer.pic-<stamp>-<rand4>.<jpg\|png>`; at most 4 an Ask; 409 unless the Ask is open or snoozed and takes pictures (a note or a drawing, and none of `rerun`, `agentEdit`, `avatar`, `changes`). The delete takes back one that is not sent. The answer names the kept ones as `pictures: [names]` (a name that is gone is a 400 and nothing is written), and every `answer.pic-*` it does not name is deleted. The Ask detail carries `pendingPictures` while it waits |
+| `GET /api/hub/checklists/:id` | A checklist: the list as the agent wrote it plus `state`, `done`, `total`, each item's `done` and `at`, `submit`, `pickup`, `cancel` and the `files` in its folder; also `evidenceFiles` (`{ "03": [names] }`, every picture of each step) and `notePictures` |
 | `POST /api/hub/checklists/:id/items/:item` | `{ done: boolean }`: tick or untick one item. Writes one create-only `tick-` or `untick-` file; nothing when the item already is as asked; 409 unless the list is `open`. Answers with the fresh detail |
-| `POST /api/hub/checklists/:id/files` | `{ for: "03" \| "issue", image: { type: 'image/jpeg' \| 'image/png', data: <base64> } }`: one picture for a step (evidence) or a playtest issue (screenshot), in the chat picture shape and with the chat limits: at most 1.5 MB decoded, 1 to 2048 px a side, the bytes checked against the type (WebP and GIF are 415), EXIF and GPS stripped. Writes one create-only `evidence-<step>-<stamp>-<rand4>.<jpg\|png>` or `shot-<stamp>-<rand4>.<jpg\|png>` in the list's own folder. 201 `{ file, at }`; 404 for a step the list does not have; 409 unless the list is `open`, beyond 5 pictures for a step or 30 screenshots; the body limit is 8 MB. The detail carries `evidence` (`{ "03": { file, at } }`, the newest per step) and `shots` |
-| `POST /api/hub/checklists/:id/submit` | `{ note? }`: send the list back. Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
+| `POST /api/hub/checklists/:id/files` | `{ for: "03" \| "issue" \| "note", image: { type: 'image/jpeg' \| 'image/png', data: <base64> } }`: one picture for a step (evidence) or a playtest issue (screenshot), in the chat picture shape and with the chat limits: at most 1.5 MB decoded, 1 to 2048 px a side, the bytes checked against the type (WebP and GIF are 415), EXIF and GPS stripped. Writes one create-only `evidence-<step>-<stamp>-<rand4>.<jpg\|png>` `shot-<stamp>-<rand4>.<jpg\|png>`, or for the note `shot-note-<stamp>-<rand4>.<jpg\|png>` (at most 4) in the list's own folder. 201 `{ file, at }`; 404 for a step the list does not have; 409 unless the list is `open`, beyond 5 pictures for a step or 30 screenshots; the body limit is 8 MB. The detail carries `evidence` (`{ "03": { file, at } }`, the newest per step) and `shots` |
+| `POST /api/hub/checklists/:id/files/:file/delete` | Take back a picture of a list that is still `open` (a name matching `evidence-`, `shot-` or `shot-note-`) |
+| `POST /api/hub/checklists/:id/submit` | `{ note?, pictures? }`: send the list back; `pictures` names the note's pictures that are kept (the rest are deleted). Writes `submit.json` create-only (with the done and open item ids) and then a `checklist-submitted` event; 409 for a cancelled list, and for a second submit (the 409 carries the first `submit`) |
 | `POST /api/hub/reviews/:id/done` | Hide a review in Needs you: writes a `review-done` event that names the `ready-for-review` event's file (`:id`); a second call writes nothing |
 | `GET /api/hub/reviews/:id` | One review's detail, from its `ready-for-review` event in the last seven days (404 otherwise): title, summary, checked links, `closing` (a sprint-end item: the prompt and what is not done), card files, screenshots in before/after pairs, verdicts, and whether it is `done` |
 | `POST /api/hub/requests` | A request to an agent: `{ project, text, when, drawing? }`, or from Spawn `{ project, text, preset, title?, repo?, needs?, target?, doneWhen?, agent?, replaces?, drawing? }`: needs a signed-in user, stores `origin: { kind: owner }` (a body `origin` or `followUp` is ignored) and the routed `target`, and answers `{ id, target, why }` (see Requests) |
@@ -660,8 +662,9 @@ written create-only; nothing is ever overwritten or deleted. `<id>` has the Ask 
 |---|---|---|
 | `checklist.json` | agent | The list (title, `context?`, `card?`, `bead?`, `from`, `items`: `{ id: "01"…"50", text, group?, guide?, link? }`). Written once. Limits: 1 to 50 items; text 200, group 80, guide and context 4000 characters; links are `http(s)`; 256 KB |
 | `tick-<item>-<stamp>-<rand4>.json`, `untick-…` | Hub only | The owner ticked or unticked item `<item>` at `<stamp>` (UTC with milliseconds, `20261027T143012123Z`, the Hub's clock). Body `{ item, done, at, by }` |
-| `submit.json` | Hub only | `{ at, by, note?, done: [ids], open: [ids] }` |
+| `submit.json` | Hub only | `{ at, by, note?, pictures?: [names], done: [ids], open: [ids] }` |
 | `evidence-<step>-<stamp>-<rand4>.jpg\|png`, `shot-<stamp>-<rand4>.jpg\|png` | Hub only | The owner's picture for step `<step>`, or for a playtest issue. The newest evidence file per step is the one shown; the card API refuses an agent writing or deleting them, and `cards checklist get <id> --into <dir>` downloads them. Served by `/api/hub/file?path=checklists/<id>/<file>` (only these names) |
+| `shot-note-<stamp>-<rand4>.jpg\|png` | Hub only | A picture the owner attached to the note; `submit.json` names the kept ones. Same rules as the other pictures |
 | `pickup.json` | agent | The agent read the submission and acted on it (`{ at, host, session? }`) |
 | `cancel.json` | agent | The agent withdrew the list (`{ at, by }`) |
 
@@ -870,11 +873,11 @@ Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxK
 
 ## Making a new workspace
 
-In the local app, open the switcher under the logo and choose **＋ New workspace…**. It makes
+In the local app, open **Settings** and use **New workspace** under Workspaces. It makes
 a folder beside the open workspace with the template files and an empty card list, registers
 it, and gives it the bucket and site of its neighbours with its own id in place of theirs, so
-`npm run publish` puts it on the site. **Add existing folder…** registers a folder you already
-have.
+`npm run publish` puts it on the site. **Add and open** registers a folder you already
+have. Either one is switched to and shown in the Library's project filter.
 
 By hand:
 
@@ -883,21 +886,22 @@ By hand:
    `.gitignore`. Leave the sample cards behind.
 2. **Start an empty card list:** a `workspace.json` with
    `{ "name": "<Name>", "entities": [] }`. The optional `name` is what the published site's
-   switcher shows; without it the site falls back to the id in title case.
+   project filter shows; without it the site falls back to the id in title case.
 3. **Register it:**
    `npm run workspace add <folder> --name "<Name>" --bucket s3://<bucket>/sections/<id> --site https://<your-site>/<id> --use`.
    The app cannot work out `--site` on its own; without it a workspace can look unpublished
    while its site is fine.
 4. **Check it:** `npm run publish`, then open the site and confirm the workspace is in the
-   switcher.
+   Library's project filter.
 
-Or start it from the site's switcher on any device (**＋ New workspace…**), then
+Or start it from Settings on the site, on any device (**＋ New workspace…**), then
 `npm run workspace add` the folder locally and `npm run publish -- --pull` to bring it down.
 
 ## Making cards by hand
 
 On the published site and in the local app, **＋ New card** on the board makes a card: a title,
-an optional description, and the workspace it goes in. It starts with one Markdown section and
+an optional description, and the project it goes in. The form always shows that project: the one in the
+filter, or chips to pick from when the filter shows all or several (the button stays off until one is on). It starts with one Markdown section and
 opens in the editor. On a card, **＋** after the tabs adds another Markdown section, and the pencil
 beside the title changes the title and description. Every Markdown section has Edit and Save
 (Ctrl+E, Ctrl+S).
@@ -1079,6 +1083,8 @@ A proposed request is a Needs you item of kind Approval (`src/hub/ApprovalView.t
 `src/hub/WorkTabs.tsx` draws Work's four tabs as links, so each tap is one step of history: Running (`#/~hub/jobs/running`), Delivered (`jobs/finished`), Board (`work`) and Activity (`activity`). The bare `#/~hub/jobs` opens Running when anything runs, else Delivered. `src/hub/Jobs.tsx` holds the first two: a project picker and one row per job (dot, title, `Researcher · Hermes · 12 min ago`, pills) that opens the job's page. An Activity filter and a Board lane are chips and add no step.
 
 `#/~hub/request/<id>` is the job's page, for every state; there is no drawer. A plain link goes to it from a Today row, an alert, a Board card, the Spawn toast and a Work row. `src/hub/RunView.tsx` draws it. A finished job (a result in `done`, `failed`, `stopped` or `asking`) leads with the summary (`What it found`) and `What it delivered`: one row per deliverable with a button that opens it (`Open`; a PR opens in a new tab). A task a change list created shows as a task row with its id, whether or not a title is known. Then the reply box. The timeline, live lines, usage and `report.md` sit in a closed `<details data-run-did>` called `Live log`: a test that reads those opens it first (`server/test/run-log.mjs`). A job still going shows its timeline and an open `Live log` (`data-run-livelog`) that follows `GET /api/hub/requests/:id/events` while the page is open (`runStream.ts`): the answer text accumulates, a tool line shows `preview` and turns done or failed, and a Hermes approval shows its command with a link to answer it in Needs you. On `state` it reads the request again; leaving the page closes the stream. Stop (signed) shows while a run can be stopped and asks first (`Stop this job?`, then `Yes, stop it` or `Keep going`); Approve again for expired, failed and lost requests. A retry on quota says "Codex quota reached; retried on Anthropic."; the `asking` state shows the question and an Answer link. A visitor who cannot write sees the page without Stop, Approve again or Retry.
+
+A finished job that ran on the PC (`taken.runner` is `pc`; state `done`, `failed`, `stopped` or `asking`) adds **Continue it at the PC** above the reply box: a copyable `node $HOME/.config/pc-dispatch/dispatch.mjs open-run <request id>` and a line saying it works only in a terminal on that PC and not while the project has a run going. The command carries the request id and nothing else; the PC looks up the session and the folder itself. The session id is shown beside it when the Hub has one: `taken.session`, which the PC sends when it takes the request (`cards request take --session`). A cloud, Hermes or at-PC job, and a PC job still running, show nothing.
 
 ### Team
 
