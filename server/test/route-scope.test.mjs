@@ -1,7 +1,7 @@
 // The project and sprint in the address (src/lib/route.ts, hubNav.ts): pure, so no browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseHashString, withScope, scopeOf, workBoardHash, projectHash, mapHash, workHash, projectNodeHash } from '../../src/lib/route.ts';
+import { parseHashString, withScope, scopeOf, workBoardHash, projectHash, mapHash, workHash, projectNodeHash, projectAtHash, workAtHash, parseProjectId, parseWorkId } from '../../src/lib/route.ts';
 import { navEntries, tabEntries } from '../../src/lib/hubNav.ts';
 
 const hub = hash => parseHashString(hash).hub;
@@ -96,4 +96,19 @@ test('the rail and the tabs carry the scope to Today, Projects (sprint only) and
   assert.equal(of(tabs, 'today'), '#/~hub/today?project=alpha&sprint=s5');
   assert.equal(of(tabs, 'chat'), '#/~hub/chat');
   assert.equal(of(navEntries(caps), 'work'), '#/~hub/work');
+});
+
+test('the at addresses keep ?sprint= and parse back; a bead called at is still a bead', () => {
+  const project = projectAtHash('alpha', 'a-1', 's5');
+  assert.equal(project, '#/~hub/project/alpha/at/a-1?sprint=s5');
+  const route = hub(project);
+  assert.equal(route.sprint, 's5');
+  assert.deepEqual(parseProjectId(route.id), { project: 'alpha', tab: 'at', at: 'a-1' });
+  assert.equal(parseProjectId('alpha/roadmap/a-1').at, undefined);
+  const board = workAtHash('alpha', 'a-1', 's5');
+  assert.equal(board, '#/~hub/work/alpha/at/a-1?sprint=s5');
+  assert.deepEqual(parseWorkId(hub(board).id), { project: 'alpha', at: 'a-1' });
+  assert.deepEqual(parseWorkId('alpha/at'), { project: 'alpha', bead: 'at' });
+  assert.deepEqual(parseWorkId('alpha/a-1'), { project: 'alpha', bead: 'a-1' });
+  assert.equal(workAtHash('all', 'x'), '#/~hub/work/all/at/x');
 });

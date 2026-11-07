@@ -18,6 +18,26 @@ export interface PcSession {
 /** A process the reporter found busy or orphaned (`reported`) or ended itself (`stopped`). `cmd` is already masked and shortened on the PC. */
 export interface PcHog { name: string; cmd: string; cores: number; minutes: number; orphan: boolean; ramMB?: number; action: 'reported' | 'stopped' }
 
+/**
+ * Whether the PC can start an approved job (site/api/hub-pc-wait.mjs `pcWaitOf`). `blocked`: the Hub knows it cannot start now;
+ * `stuck`: it has waited 10 minutes for that reason (a Needs you item); `wait`: the runner will take it, just not yet (a line on the job page).
+ */
+export interface PcWait {
+  state: 'blocked' | 'stuck' | 'wait'
+  cause?: 'not-on-runner' | 'launch-off' | 'pc-silent' | 'cap'
+  kind?: 'away' | 'busy'
+  title?: string
+  /** One sentence for a toast or a line. */
+  short?: string
+  /** Two or three sentences. */
+  text: string
+  step?: string
+  command?: string
+  canWake?: boolean
+  until?: string
+  cloudOk?: boolean
+}
+
 export interface PcStatus {
   v: 1
   host: string

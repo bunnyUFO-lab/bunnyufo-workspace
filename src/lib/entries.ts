@@ -58,10 +58,15 @@ const overlays: { onClose: () => void }[] = []
 /** A sheet is open in memory (a `/~o` tail with none behind it is a leftover, and is dropped: lib/redirects). */
 export const hasOverlay = () => overlays.length > 0
 
+let closedOverlay = false
+/** True once, right after a Back that shut a sheet: the entry it landed on is the screen's own, so the screen's state is still right and only its address is old. */
+export const consumeOverlayClose = (): boolean => { const was = closedOverlay; closedOverlay = false; return was }
+
 function onHashChange() {
   stamp()
   // Back, with a sheet open, shuts the sheet and stays on the screen beneath.
   const depth = overlayDepth(window.location.hash)
+  if (overlays.length > depth) closedOverlay = true
   while (overlays.length > depth) overlays.pop()?.onClose()
 }
 
@@ -211,7 +216,7 @@ export function useOverlayEntry(open: boolean, onClose: () => void) {
       const at = overlays.indexOf(token)
       if (at < 0) return // Back already took the entry.
       overlays.splice(at, 1)
-      if (overlayDepth(window.location.hash) > overlays.length) window.history.back()
+      if (overlayDepth(window.location.hash) > overlays.length) { closedOverlay = true; window.history.back() }
     }
   }, [open])
 }

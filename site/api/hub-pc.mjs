@@ -4,6 +4,7 @@
 // The file is written by the PC's report script (`inbox/pc/status-<stamp>.json`, create-only, at
 // most 64 KB). It is an agent's file, so `validStatus` cleans every field and refuses what it
 // cannot trust.
+import { cleanPcSchedules } from './hub-other-schedules.mjs';
 import { STALE_GRACE_MS, blockedAppUrl, blockedSessionUrl, deriveEventItems, staleSince, validProject } from './hub-model.mjs';
 
 export { STALE_GRACE_MS };
@@ -66,6 +67,29 @@ export function cleanHogs(raw) {
   return out;
 }
 
+/** Why the runner is paused: an enum, anything else is dropped. */
+export const PAUSE_REASONS = ['usage-limit', 'login-expired', 'open-run', 'add-repo'];
+const RUNNER_ID_RE = /^[a-z0-9-]{1,40}$/;
+
+/**
+ * The PC runner block: `{ projects, launch, busy, full, pausedUntil? }` (project ids, two booleans' worth of state, the name of a full cap
+ * and one time), or undefined when the report has none (an old reporter) or it is not an object. Ids that do not look like project ids
+ * are dropped, so a path or a sentence in it never reaches a page. Only ids and states: the Hub names what it knows, nothing more.
+ */
+export function cleanRunner(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const ids = list => (Array.isArray(list) ? [...new Set(list.filter(id => typeof id === 'string' && RUNNER_ID_RE.test(id)))].sort().slice(0, 30) : []);
+  const until = isoOf(raw.pausedUntil);
+  return {
+    projects: ids(raw.projects),
+    launch: raw.launch === true,
+    busy: ids(raw.busy),
+    full: raw.full === 'concurrent' || raw.full === 'day' ? raw.full : null,
+    ...(until ? { pausedUntil: until } : {}),
+    ...(until && PAUSE_REASONS.includes(raw.pausedReason) ? { pausedReason: raw.pausedReason } : {}),
+  };
+}
+
 const bandOf = util => (util >= 50 ? 'heavy' : util >= 10 ? 'busy' : 'idle');
 
 function cleanSession(raw) {
@@ -110,6 +134,8 @@ export function validStatus(raw) {
   const gpuUtil = raw.gpu && typeof raw.gpu === 'object' ? num(raw.gpu.util, 0, 100) : null;
   const comfy = raw.comfy && typeof raw.comfy === 'object' ? raw.comfy : null;
   const unity = raw.unity && typeof raw.unity === 'object' ? raw.unity : null;
+  const schedules = cleanPcSchedules(raw.schedules);
+  const runner = cleanRunner(raw.runner);
   return {
     v: 1,
     host: raw.host,
@@ -130,9 +156,21 @@ export function validStatus(raw) {
       open: unity.open === true,
       projects: (Array.isArray(unity.projects) ? unity.projects : []).slice(0, 10).map(name => lastSegment(name, 80)).filter(Boolean),
     } : null,
+    ...(runner ? { runner } : {}),
     sessions,
+    ...(schedules ? { schedules } : {}),
     runs: [],
   };
+}
+
+/**
+ * The status as `/hub/pc` sends it, which any guest can read: everything but `schedules` (the PC's task names and folders, which of them are the repo's, the
+ * repos and workflows). Those go only to the signed-in `/hub/schedules`. A key added to `validStatus` later is sent unless it is named here, so a private one is dropped here too.
+ */
+export function publicStatus(status) {
+  if (!status) return status;
+  const { schedules: _private, ...rest } = status;
+  return rest;
 }
 
 const ageOf = (status, at) => Math.max(0, Math.floor((at.getTime() - new Date(status.at).getTime()) / 1000));

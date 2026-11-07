@@ -44,23 +44,29 @@
 .pj-now-block small { color: var(--t3); }
 .pj-now-block b { display: block; font-weight: 600; }
 .pj-now-block .ui-btn { flex: none; text-decoration: none; }
-.pj-ms { margin-bottom: 8px; border-radius: 14px; background: var(--s1); overflow: hidden; }
-.pj-ms-head { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 8px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.pj-ms-head:hover { background: var(--s2); }
-.pj-ms-head .ui-row-body b { display: block; font-weight: 600; }
-.pj-ms-head .ui-row-body small { display: block; color: var(--t3); margin-top: 2px; }
-.pj-ms.open > .pj-ms-head .pj-chev, .pj-done[data-open="true"] > .pj-ms-head .pj-chev { transform: rotate(90deg); }
-.pj-tasks { border-radius: 0; box-shadow: inset 0 1px 0 var(--line); }
+.pj-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.pj-search { flex: 1 1 260px; min-width: 0; }
+.pj-fold-all { display: flex; gap: 8px; }
+@media (pointer: coarse), (max-width: 640px) { .pj-fold-all .hub-btn { min-height: 44px; } }
+.pj-found { margin: 0 0 8px; }
+/* Each roadmap and milestone is a Fold (ui/Layout); the nesting look comes from team.css's `.ui-fold .ui-fold`. */
+.pj-roadmap > .ui-fold { margin-bottom: 8px; }
+.pj-roadmap .ui-fold .ui-list { display: block; background: none; border-radius: 0; box-shadow: inset 0 1px 0 var(--line); }
+.pj-roadmap .ui-fold .ui-list > .ui-row { box-shadow: none; }
+.pj-roadmap .ui-fold .ui-fold-body > .ui-fold:last-child { margin-bottom: 0; }
+.pj-map-link { margin: 0; padding: 4px 14px; }
 .pj-task { min-height: 56px; }
 .pj-task b { font-weight: 500; }
+.pj-task.dim { opacity: 0.6; }
 .pj-more { color: var(--accent); }
+.pj-signs { flex: none; display: inline-flex; gap: 4px; font-size: 0.8rem; }
 .pj-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--st-idle); }
 .pj-dot.done { background: var(--st-done); }
 .pj-dot.working { background: var(--st-working); }
 .pj-dot.needs { background: var(--st-needs); }
-.pj-done { margin-top: 12px; }
-.pj-done-head { min-height: 52px; border-radius: 14px; background: var(--s1); }
-.pj-done > .pj-ms { margin-top: 8px; }
+/* The row an address pointed at: a plain style that stays until the address changes. */
+.pj-roadmap .pj-task[data-roadmap-at] { background: var(--s3); box-shadow: inset 3px 0 0 var(--accent); }
+.pj-roadmap .ui-fold[data-roadmap-at] > .ui-fold-h > .ui-fold-head { background: var(--s3); box-shadow: inset 3px 0 0 var(--accent); }
 
 .pp-cards { list-style: none; margin: 0; padding: 0; }
 .pp-cards li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 4px 0; }
@@ -78,16 +84,6 @@
   .pp-nav .pp-switch { flex: none; width: 200px; margin: 8px 0; }
   .pp-sub, .pp-actions { flex-basis: auto; }
   .pp-actions { margin-left: auto; }
-  /* A milestone or task opened over the page: room for the side panel from 900 px (as .work[data-sheet]); below that it is the bottom sheet. */
-  .pp[data-sheet] { padding-right: 436px; }
-  /* The map's own panel (hub.css) covers the right of the screen; the Destination row and its Plan in Hermes button keep clear of it. The map itself stays full width, as it centres a node in what the panel leaves. */
-  .pp[data-map-node] .hub-wayfinder, .pp[data-map-node] .hub-plan-row { margin-right: 396px; }
-  .pp[data-map-node] .hub-wayfinder-row { flex-wrap: wrap; }
-}
-
-/* The open Wayfinder list takes the height on a phone (else the map box turns wider than tall and flips its axis): the project's name row steps aside while it is open, as the search row does. Likewise for a project with roadmaps: the bar's first crumb already names the project. */
-@media (max-width: 640px) {
-  .pp[data-view="map"]:has(.hub-wayfinder[data-open="true"]) .pp-head, .pp[data-view="map"]:has(.hub-map-branchbar) .pp-head { display: none; }
 }
 
 /* The sprint row under the Roadmap's tabs: the picker, how far the sprint is, and a way to its board. */

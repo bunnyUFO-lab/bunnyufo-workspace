@@ -36,7 +36,7 @@ test('each Beads cell lands in its lane; groups and milestones are left out', ()
   assert.equal(card(work, 'bead:ws-owner').why, 'needs you · nothing asked yet');
   assert.equal(card(work, 'bead:ws-owner').nothingAsked, true);
   assert.deepEqual(card(work, 'bead:ws-pr').signs, ['pr']);
-  assert.equal(card(work, 'bead:ws-pr').href, '#/~hub/map/ws/ws-pr');
+  assert.equal(card(work, 'bead:ws-pr').href, '#/~hub/project/ws/roadmap/ws-pr');
   assert.equal(work.counts.blocked, 4);
   assert.equal(work.lanes.blocked.length, 4);
 });

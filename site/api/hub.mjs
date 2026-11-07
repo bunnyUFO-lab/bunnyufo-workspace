@@ -13,11 +13,13 @@
 // write through this process clears; everything else, writes and sweeps included, lists live.
 import { createApplyPoke } from './hub-apply-poke.mjs';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import nodePath from 'node:path';
 import { Readable, pipeline } from 'node:stream';
 import { S3Error, contentTypeOf } from './s3.mjs';
 import { checkDrawing } from './card-writes.mjs';
 import {
-  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
+  askRev, cleanAsk, deliveryOf, DELIVERY_WATCHERS, checkPlaytestSubmit, PLAYTEST_VERDICTS, CHECKLIST_LIMITS, checkChecklist, DAY, discordEligible, checklistItem, checklistEvidence, checklistProgress, EVIDENCE_PER_STEP, EVIDENCE_RE, SHOT_RE, NOTE_SHOT_RE, ANSWER_PICTURE_RE, ANSWER_PICTURES_MAX, NOTE_PICTURES_MAX, takesPictures, SHOTS_PER_CHECKLIST, checklistState, markStamp, askItem, askState, buildInbox, fillProjects, inProject, projectCounts, buildToday, describeItem, inboxCounts, subCounts, inboxFilter, needsKindOf, askSubtype, stepsSubtype, canAnswer, checkAnswer, CARD_DIR_RE, fileLabel, findSprintCard, summaryFilePaths, trackedRepo, monthPrefixes, newDrawingId,
   ALERT_KEY_RE, ALERT_MARKS, dismissedAlerts, checkHelp, deriveEventItems, randomId, REVIEW_FILE_RE, reviewDetail, reviewDone, titleCase, validDrawingId, validId, validProject, windowDays, WINDOW_DAYS,
 } from './hub-model.mjs';
 import { FEEDBACK_HOME, FEEDBACK_ID_RE, FEEDBACK_KINDS, checkNotUseful, feedbackIdOf, notUsefulRecord, reasonTextOf, recordPath } from './hub-feedback.mjs';
@@ -50,11 +52,14 @@ import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, check
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
+import { cleanHostSchedules, HOST_SCHEDULES_FILE, HOST_SCHEDULES_MAX_BYTES } from './hub-other-schedules.mjs';
+import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
 import { createdIds, deliverablesOf, jobsList } from './job-deliverables.mjs';
-import { isActive, pcSummary, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { isActive, pcSummary, publicStatus, STATUS_MAX_BYTES, validStatus, workingNow } from './hub-pc.mjs';
+import { pcStartVerdict, pcWaitOf } from './hub-pc-wait.mjs';
 import { nothingToDo } from './nothing-to-do.mjs';
 import { withRunEvents } from './hub-run-events.mjs';
 import { createWake } from './pc-wake.mjs';
@@ -341,7 +346,58 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   });
   const rerunFlow = createRerun({ requests: requestFiles, readAsk: async id => (await askFolder(id)).ask, writerOf: async id => (await bucket.head(key(`asks/${id}/ask.json`)).catch(() => null))?.metadata?.writer ?? null, log });
 
-  const loadRequests = async at => policy.annotate(await requestFiles.loadRequests(at));
+  /** When the PC's running jobs must end: taken time plus their limit. A full concurrent cap lifts then, at the latest. */
+  const pcEndsAt = rows => rows
+    .filter(row => row.run?.runner === 'pc' && ['running', 'taken'].includes(row.state) && row.run.minutes && Number.isFinite(Date.parse(row.run.at)))
+    .map(row => new Date(Date.parse(row.run.at) + row.run.minutes * 60000).toISOString());
+  /**
+   * Whether the PC can start an approved job, from its status (ws-3o5): `{ state: 'blocked' | 'stuck' | 'wait', ... }` or null. Approve,
+   * Spawn (`/hub/pc/start`), the job page and the move-to-cloud route use it; the lists below carry the same verdict on each row.
+   */
+  async function pcVerdict({ project, approvedAt = null, opensWindows = false, at }) {
+    const { status, silent } = await loadVerdictStatus(at);
+    let verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows });
+    if (status?.runner?.full === 'concurrent') verdict = pcStartVerdict({ project, status, silent, at, approvedAt, opensWindows, endsAt: pcEndsAt(await requestFiles.loadRequests(at).catch(() => [])) });
+    return withWake(pcWaitOf(verdict), at);
+  }
+  /** Retry (wake the PC) is offered only when a wake is set up. */
+  const withWake = (wait, at) => (wait?.canWake && !wake.available ? { ...wait, canWake: undefined } : wait);
+  /**
+   * The status the verdict reads. The newest one in the last two days is `loadPcStatus`; past that, up to 7 days back by the day folders
+   * (`pc/status-<day>T`). With none in 7 days, `silent` says whether this host has had a PC reporter at all: if so the PC "has not reported
+   * lately", if never the Hub makes no claim.
+   */
+  async function loadVerdictStatus(at) {
+    const near = await loadPcStatus(at).catch(() => null);
+    if (near) return { status: near, silent: false };
+    const { prefixes } = await bucket.list(key('pc/status-'), { delimiter: 'T' }).catch(() => ({ prefixes: [] }));
+    const days = prefixes.map(prefix => /status-(\d{8})T$/.exec(prefix)?.[1]).filter(Boolean).sort();
+    if (!days.length) return { status: null, silent: false };
+    const newest = days.at(-1);
+    if (newest >= markStamp(new Date(at.getTime() - 7 * DAY)).slice(0, 8)) {
+      const { objects } = await bucket.list(key(`pc/status-${newest}`)).catch(() => ({ objects: [] }));
+      const names = objects.map(object => object.key.slice(folder('pc').length)).filter(name => /^status-\d{8}T\d{6,9}Z\.json$/.test(name)).sort();
+      for (const name of names.slice(-3).reverse()) {
+        const got = await fresh(`pc/${name}`);
+        const status = got && got.text.length <= STATUS_MAX_BYTES ? validStatus(got.value) : null;
+        if (status) return { status, silent: false };
+      }
+    }
+    return { status: null, silent: true };
+  }
+  /** Each approved PC job in the list gets its `pcWait` (one status read for all of them); `pcJob` is only the input and is dropped. */
+  async function withPcWait(rows, at) {
+    if (!rows.some(row => row.pcJob)) return rows;
+    const { status, silent } = await loadVerdictStatus(at);
+    const endsAt = pcEndsAt(rows);
+    return rows.map(row => {
+      if (!row.pcJob) return row;
+      const { pcJob, ...rest } = row;
+      const wait = withWake(pcWaitOf(pcStartVerdict({ project: row.project, status, silent, at, approvedAt: pcJob.approvedAt, opensWindows: pcJob.opensWindows, endsAt })), at);
+      return wait ? { ...rest, pcWait: { ...wait, ...(wait.state === 'stuck' && pcJob.cloudOk ? { cloudOk: true } : {}) } } : rest;
+    });
+  }
+  const loadRequests = async at => withPcWait(policy.annotate(await requestFiles.loadRequests(at)), at);
   // /hub/map is polled and only needs the list for run state on the sheet: keep it ~30 s. Creating or posting to a request clears it.
   const MAP_REQUESTS_MS = Number(env.HUB_MAP_REQUESTS_MS ?? 30_000);   // 0 turns it off (tests that write the bucket directly)
   let mapRequests = null;   // { made, value }
@@ -415,6 +471,22 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       marks.get(name).push(entry);
     }
     return marks;
+  }
+
+  /**
+   * The site host's timer file, which sits in the folder of the API's env file (no setting of its own), or null: no env file, no such file, too big,
+   * or not a file this version reads. The dev stack has none, and the page then says "not reporting". Read on each request; it is a few KB.
+   */
+  async function loadHostSchedules() {
+    const envFile = String(env.BUW_ENV_FILE ?? '').trim();
+    if (!envFile) return null;
+    try {
+      const file = nodePath.join(nodePath.dirname(envFile), HOST_SCHEDULES_FILE);
+      if ((await stat(file)).size > HOST_SCHEDULES_MAX_BYTES) return null;
+      return cleanHostSchedules(await readFile(file, 'utf8'));
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -577,10 +649,47 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
   }
 
+  /**
+   * The owner hears when a job's prompt changes with no signed change behind it (ws-eh2): an agent may edit a job on the Hermes host, and an
+   * Ask is not the only way in. The newest fresh export's `promptSha256` of each job is compared with a baseline the Hub alone writes,
+   * `agent-config/job-prompts-seen.json` (no limited token can write under agent-config/ but the Hermes host's, and that one only exports
+   * and results). The first run stores the baseline and says nothing. A change writes one `alert` event (a job's page is its link) and then moves
+   * the baseline, so it is told once. Same sweeps and throttle as noteChangeResults; it never fails a request and no prompt text reaches an event.
+   */
+  let noteJobs = { last: 0, running: false };
+  async function noteJobPrompts(at) {
+    if (noteJobs.running || (at.getTime() >= noteJobs.last && at.getTime() - noteJobs.last < 30_000)) return;
+    noteJobs = { last: at.getTime(), running: true };
+    try {
+      const exported = await loadAgentConfig(at);
+      if (!exported || exportFreshness(exported, at) !== 'fresh') return;
+      const got = await fresh(SEEN_FILE);
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported });
+      if (!changed) return;
+      if (alerts.length) {
+        const { events } = await loadEvents(at);
+        for (const alert of alerts) {
+          if (events.some(event => event.kind === 'alert' && event.job === alert.job && event.jobHash === alert.hash)) continue;
+          await putHubEvent({ ts: at.toISOString(), kind: 'alert', job: alert.job, jobHash: alert.hash, title: alert.title, host: 'hub', source: 'hub', by: 'hub' }, at);
+        }
+      }
+      try {
+        await bucket.put(key(SEEN_FILE), seenText(jobs, at), { contentType: 'application/json', ...(got ? { ifMatch: got.etag } : { ifNoneMatch: '*' }) });
+      } catch (error) {
+        if (error.status !== 412) throw error;   // another sweep moved the baseline first
+      }
+    } catch (error) {
+      log(`[hub] job prompt check was not written: ${String(error.message).slice(0, 120)}`);
+    } finally {
+      noteJobs.running = false;
+    }
+  }
+
   // "Wake the PC": HUB_WAKE_URL unset turns it off. Approve of a PC request wakes it too when HUB_WAKE_ON_APPROVE=1 (hub-pc, pc-wake).
   const wake = createWake({ env, fetchImpl, bucket, key, fail, log: line => log(scrub(line, 200)) });
   // The Away switch (presence.json): the owner's, read by hub-hooks on the PC.
   const presence = createPresence({ bucket, key, fail, log: line => log(scrub(line, 200)) });
+  requestFiles.hooks.pcVerdict = pcVerdict;
   requestFiles.hooks.wakeOnApprove = async ({ by, at }) => wake.onApproval({ status: await loadPcStatus(at).catch(() => null), by, at });
 
   /** Hermes `/health` (no key, 1.5 s), cached for 60 s. `null` when HERMES_URL is not set. */
@@ -788,8 +897,11 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     const agentEditBlocked = canAnswer(state.state) ? await agentEditFlow.blockedReason(ask, at).catch(() => null) : null;
     const sub = askSubtype(ask);
     const beadTitle = await decidesTitle(ask);
+    // Pictures the owner saved for an answer that is not sent yet: from the fresh listing, never from a cache.
+    const pendingPictures = canAnswer(state.state) && takesPictures(ask) ? [...names].filter(name => ANSWER_PICTURE_RE.test(name)).sort() : [];
     return {
       ...ask, ...state,
+      ...(pendingPictures.length ? { pendingPictures } : {}),
       ...(rev ? { rev } : {}),
       ...(beadTitle ? { beadTitle } : {}),
       subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}),
@@ -812,6 +924,17 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     return { checklist: { ...checklist, id }, names };
   }
 
+  /** Every step's picture files, oldest first: { "03": ["evidence-03-…jpg", …] }. `evidence` keeps only the newest of each step. */
+  const evidenceFiles = names => {
+    const found = {};
+    for (const name of [...names].sort()) {
+      const match = EVIDENCE_RE.exec(name);
+      if (match) (found[match[1]] ??= []).push(name);
+    }
+    return found;
+  };
+  const notePictureNames = names => [...names].filter(name => NOTE_SHOT_RE.test(name)).sort();
+
   async function checklistDetail(id, at = now()) {
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
@@ -826,6 +949,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       ...(sub ? { subtype: sub.subtype, ...(sub.inferred ? { kindInferred: true } : {}) } : {}),
       evidence: Object.fromEntries([...pictures.evidence].map(([item, { file, at }]) => [item, { file, at }])),
       shots: pictures.shots,
+      evidenceFiles: evidenceFiles(names),
+      ...(notePictureNames(names).length ? { notePictures: notePictureNames(names) } : {}),
       items: checklist.items.map(item => ({ ...item, done: !!marks.get(item.id)?.done, ...(marks.get(item.id) ? { at: marks.get(item.id).at } : {}) })),
       ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
       ...(delivery ? { delivery } : {}),
@@ -861,14 +986,17 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    */
   async function putChecklistFile(id, data, at) {
     const target = data.for;
-    if (target !== 'issue' && !(typeof target === 'string' && /^\d{2}$/.test(target))) throw fail('Send "for" as a step number like "03", or "issue".');
+    if (target !== 'issue' && target !== 'note' && !(typeof target === 'string' && /^\d{2}$/.test(target))) throw fail('Send "for" as a step number like "03", "issue" or "note".');
     const picture = checkOneImage(data.image, fail);
     const { checklist, names } = await checklistFolder(id);
     const state = checklistState(names);
     if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
     const pictures = checklistEvidence(names);
     let prefix;
-    if (target === 'issue') {
+    if (target === 'note') {
+      if (notePictureNames(names).length >= NOTE_PICTURES_MAX) throw fail(`A note takes at most ${NOTE_PICTURES_MAX} pictures.`, 409);
+      prefix = 'shot-note';
+    } else if (target === 'issue') {
       if (pictures.shots.length >= SHOTS_PER_CHECKLIST) throw fail(`A checklist has at most ${SHOTS_PER_CHECKLIST} screenshots.`, 409);
       prefix = 'shot';
     } else {
@@ -888,6 +1016,53 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     }
   }
 
+  /** The picture name `prefix-<stamp>-<rand4>.<ext>` written create-only in a folder, a new name on a clash, three tries. */
+  async function putPicture(folder, prefix, picture, at) {
+    for (let attempt = 0; ; attempt += 1) {
+      const clash = fail('Could not find a free name; try again.', 409);
+      const file = `${prefix}-${markStamp(at)}-${randomId(4)}.${picture.ext}`;
+      try {
+        await putCreateOnly(`${folder}/${file}`, picture.buffer, picture.type, clash);
+        return { status: 201, body: { file, at: at.toISOString() } };
+      } catch (error) {
+        if (error !== clash || attempt >= 2) throw error;
+      }
+    }
+  }
+
+  /** One picture for an Ask's answer, in the chat shape `{ image: { type, data } }`. Stored in the Ask's folder as `answer.pic-…`; the answer names the ones kept. */
+  async function putAskFile(id, data, at) {
+    const picture = checkOneImage(data?.image, fail);
+    const { ask, names } = await askFolder(id);
+    const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
+    const { state } = askState(names, ask, at, snooze);
+    if (!canAnswer(state)) throw fail(state === 'answered' ? 'This Ask is already answered.' : `This Ask is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    if (!takesPictures(ask)) throw fail('This Ask takes no pictures.', 409);
+    if ([...names].filter(name => ANSWER_PICTURE_RE.test(name)).length >= ANSWER_PICTURES_MAX) throw fail(`An answer takes at most ${ANSWER_PICTURES_MAX} pictures.`, 409);
+    return putPicture(`asks/${id}`, 'answer.pic', picture, at);
+  }
+
+  /** Take back a picture saved for an Ask that is still waiting. */
+  async function deleteAskFile(id, file, at) {
+    if (!ANSWER_PICTURE_RE.test(file)) throw fail('That is not a picture of an answer.', 400);
+    const { ask, names } = await askFolder(id);
+    const snooze = names.has('snooze.json') ? (await fresh(`asks/${id}/snooze.json`))?.value : null;
+    const { state } = askState(names, ask, at, snooze);
+    if (!canAnswer(state)) throw fail('This Ask is already answered.', 409);
+    await bucket.del(key(`asks/${id}/${file}`));
+    return { status: 200, body: { removed: file } };
+  }
+
+  /** Take back a step's picture, an issue's screenshot or a note's picture from a checklist that is still open. */
+  async function deleteChecklistFile(id, file) {
+    if (!(EVIDENCE_RE.test(file) || SHOT_RE.test(file) || NOTE_SHOT_RE.test(file))) throw fail('That is not a picture of this checklist.', 400);
+    const { names } = await checklistFolder(id);
+    const state = checklistState(names);
+    if (state !== 'open') throw fail(`This checklist is ${state.replace('-', ' ')}, so it can no longer be changed.`, 409);
+    await bucket.del(key(`checklists/${id}/${file}`));
+    return { status: 200, body: { removed: file } };
+  }
+
   /** Send the list back: submit.json create-only, then the `checklist-submitted` event. A lost event is logged and does not undo the submit. */
   async function submitChecklist(id, data, user, at) {
     const { checklist, names } = await checklistFolder(id);
@@ -903,10 +1078,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
     if (!playtest && ['rating', 'verdict', 'issues'].some(name => data[name] !== undefined)) throw fail('Only a playtest takes a rating.');
     const report = playtest ? checkPlaytestSubmit(checklist, data, names) : null;
     const help = await helpFor(data.help, 'checklist', id);
+    const pictures = data.pictures === undefined || data.pictures === null ? [] : data.pictures;
+    if (!Array.isArray(pictures) || pictures.length > NOTE_PICTURES_MAX || new Set(pictures).size !== pictures.length || pictures.some(name => typeof name !== 'string' || !NOTE_SHOT_RE.test(name))) throw fail(`Pictures are a list of at most ${NOTE_PICTURES_MAX} picture names.`);
+    for (const name of pictures) if (!names.has(name)) throw fail('A picture is gone. Remove it or add it again.', 400);
     const submit = {
       at: at.toISOString(), by: user || 'local',
       ...(typeof note === 'string' && note.trim() ? { note: note.trim() } : {}),
       done: ids.filter(item => marks.get(item)?.done), open: ids.filter(item => !marks.get(item)?.done),
+      ...(pictures.length ? { pictures: [...pictures] } : {}),
       ...(report ?? {}),
       ...(help ? { help } : {}),
     };
@@ -917,6 +1096,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       throw fail('This checklist is already submitted.', 409, { submit: await existing() });
     }
     cache.delete(key(`checklists/${id}/submit.json`));
+    // A note picture the submission does not name was taken out in another tab: it never reaches an agent.
+    for (const name of notePictureNames(names)) if (!pictures.includes(name)) await bucket.del(key(`checklists/${id}/${name}`)).catch(() => {});
     const event = {
       ts: at.toISOString(), kind: 'checklist-submitted', project: checklist.project, checklist: id, host: 'hub', source: 'hub', by: user || 'local',
       title: `Submitted: ${clip(checklist.title, 80)}`, summary: report ? `Rating ${report.rating}/5 · ${PLAYTEST_VERDICTS[report.verdict]} · ${report.issues.length} ${report.issues.length === 1 ? 'issue' : 'issues'}` : `${doneCount} of ${total} done`,
@@ -1120,6 +1301,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       applied = readAsk(parsed, id);
     }
     const help = await helpFor(data.help, 'ask', id);
+    // Every named picture must still be in the folder: one removed in another tab is a 400 and nothing is written.
+    const pictures = Array.isArray(data.pictures) ? data.pictures : [];
+    for (const name of pictures) if (!names.has(name)) throw fail('A picture is gone. Remove it or add it again.', 400);
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
     const answer = { at: at.toISOString(), by: user || 'local' };
     if (data.choice) answer.choice = data.choice;
@@ -1136,7 +1320,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       answer.drawing = { excalidraw: 'answer.excalidraw', png: 'answer.png' };
     }
     if (help) answer.help = help;
+    if (pictures.length) answer.pictures = [...pictures];
     await writeAnswer(id, answer);
+    // What was taken out in another tab never reaches an agent: any picture the answer does not name is deleted (best effort).
+    for (const name of names) if (ANSWER_PICTURE_RE.test(name) && !pictures.includes(name)) await bucket.del(key(`asks/${id}/${name}`)).catch(() => {});
     if (ask.changes) applyPoke.poke();
     // The answer stands whatever happens next. An avatar Ask may start the sheet run or choose the sheet.
     const avatar = await avatarFlow.afterAnswer({ ask, answer, user, at });
@@ -1593,7 +1780,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       listedSheet = id && AGENTS.some(agent => agent.id === segments[1]) ? await sheets.find(segments[1], id) : null;
       if (!listedSheet) throw fail('That file is not served.', 400);
     }
-    const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? ''));
+    const picture = segments[0] === 'checklists' && validId(segments[1]) && (EVIDENCE_RE.test(segments[2] ?? '') || SHOT_RE.test(segments[2] ?? '') || NOTE_SHOT_RE.test(segments[2] ?? ''));
     if (segments.length !== 3 || !(picture || listedSheet || ['asks', 'requests', 'drawings'].includes(segments[0]))) throw fail('That file is not served.', 400);
     let object;
     try {
@@ -1688,7 +1875,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const bodyLimit = (method, route) => {
     if (method !== 'POST') return 0;
     if (/^\/hub\/asks\/[^/]+\/answer$/.test(route) || route === '/hub/requests' || route.startsWith('/hub/drawings')) return LIMITS.big;
-    if (/^\/hub\/checklists\/[^/]+\/files$/.test(route)) return LIMITS.big;
+    if (/^\/hub\/checklists\/[^/]+\/files$/.test(route) || /^\/hub\/asks\/[^/]+\/files$/.test(route)) return LIMITS.big;
     if (route === '/hub/chat') return LIMITS.chat;
     return LIMITS.small;
   };
@@ -1855,7 +2042,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); });
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); void noteJobPrompts(at); });
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen, status] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at), loadPcStatus(at)]);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
@@ -1865,9 +2052,14 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // Running is what is at work: the PC's sessions when its status is fresh, else the event-derived list, and every taken request that has not finished. `running` stays for old clients.
             // A Hermes approval carries no project of its own; its request does, as on /hub/inbox. Without it the Today project filter would drop it.
             reply({ ...today, needsYou: fillProjects(today.needsYou, requests), counts: { ...today.counts, running: working.filter(isActive).length }, working, pc: status ? pcSummary(status, at) : null, wake: await wake.view(status, at) });
+          } else if (route === '/hub/pc/start') {
+            // Can the PC start a job of this project? Spawn and the approval page ask before they promise a start.
+            const project = query.get('project') ?? '';
+            if (!validProject(project)) throw fail('Give a project id.', 400);
+            reply({ pcWait: await pcVerdict({ project, opensWindows: query.get('opensWindows') === '1', at }) });
           } else if (route === '/hub/pc') {
             const status = await loadPcStatus(at);
-            reply({ pc: status ? pcSummary(status, at) : null, status, wake: await wake.view(status, at) });
+            reply({ pc: status ? pcSummary(status, at) : null, status: publicStatus(status), wake: await wake.view(status, at) });
           } else if (route === '/hub/presence') {
             reply(await presence.view(at));
           } else if (route === '/hub/inbox') {
@@ -1910,7 +2102,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // Cached like the lists (15 s): only finished states reach it, so the running job's own state above stays live.
             const deliverables = await listCache.cachedReads(() => requestDeliverables(detail, at)).catch(error => { log(scrub(`[hub] deliverables of ${detail.request.id}: ${error.message}`, 200)); return null; });
             const preset = detail.request.preset ? presetOf(detail.request.preset) : null;
-            reply({ ...detail, ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
+            const pcWait = detail.state === 'approved' && detail.approved?.target === 'pc'
+              ? await pcVerdict({ project: detail.request.project, approvedAt: detail.approved.at, opensWindows: detail.approved.run?.opensWindows === true, at }).catch(() => null)
+              : null;
+            reply({ ...detail, ...(pcWait ? { pcWait } : {}), ...(cardHref ? { cardHref } : {}), ...(nothingToDo(detail.result) ? { nothing: true } : {}), ...(deliverables ? { deliverables } : {}), ...(preset ? { agent: preset.agent } : {}) });
           } else if (route.startsWith('/hub/presets')) {
             reply(await requestFiles.presets(route, query, at));
           } else if (route === '/hub/events') {
@@ -2004,6 +2199,13 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // One read of the newest export, joined with the agent list. Nothing from the Hermes host is called. Same sign-in rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the skills.', 401);
             reply(teamSkills({ exported: await loadAgentConfig(at).catch(() => null), agents: await allAgents(), at }));
+          } else if (route === '/hub/schedules') {
+            // Prompts and the host's state are not for an anonymous read: Team is open to guests, this page is not.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the schedules.', 401);
+            const exported = await loadAgentConfig(at).catch(() => null);
+            void noteJobPrompts(at);
+            const [status, hostFile] = await Promise.all([loadPcStatus(at).catch(() => null), loadHostSchedules()]);
+            reply(schedulesView({ exported, status, hostFile, at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);
@@ -2044,6 +2246,16 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           if (match[2] === 'answer') send(await answerAsk(id, raw, user, at));
           else if (match[2] === 'snooze') send(await snoozeAsk(id, raw, user, at));
           else send(await cancelAsk(id, user, at));
+        } else if ((match = /^\/hub\/asks\/([^/]+)\/files$/.exec(route))) {
+          const id = decodeURIComponent(match[1]);
+          if (!validId(id)) throw fail('No such Ask.', 404);
+          send(await putAskFile(id, raw, at));
+        } else if ((match = /^\/hub\/asks\/([^/]+)\/files\/([^/]+)\/delete$/.exec(route))) {
+          const id = decodeURIComponent(match[1]);
+          if (!validId(id)) throw fail('No such Ask.', 404);
+          send(await deleteAskFile(id, decodeURIComponent(match[2]), at));
+        } else if ((match = /^\/hub\/checklists\/([^/]+)\/files\/([^/]+)\/delete$/.exec(route))) {
+          send(await deleteChecklistFile(decodeURIComponent(match[1]), decodeURIComponent(match[2])));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/items\/(\d{2})$/.exec(route))) {
           send(await markChecklistItem(decodeURIComponent(match[1]), match[2], raw, user, at));
         } else if ((match = /^\/hub\/checklists\/([^/]+)\/files$/.exec(route))) {

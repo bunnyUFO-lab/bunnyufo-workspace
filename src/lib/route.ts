@@ -116,17 +116,23 @@ export function projectHash(id?: string, tab?: string, sprint?: string): string 
   return withScope(tab && tab !== 'roadmap' ? `${base}/${encodeURIComponent(tab)}` : base, { sprint })
 }
 
-/** The project id, the raw tab and, on the Roadmap tab, the node whose details are open, out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the three. */
-export function parseProjectId(id: string | undefined): { project?: string; tab?: string; node?: string } {
+/** The project id, the raw tab and, on the Roadmap tab, the node whose details are open (`roadmap/<node>`) or only shown on its row (`at/<node>`), out of a project route id (`[<id>[/<tab>[/<node>]]]`); `tabOf` (projectPage.ts) turns the tab into one of the three. */
+export function parseProjectId(id: string | undefined): { project?: string; tab?: string; node?: string; at?: string } {
   if (!id) return {}
   const [project, tab, ...rest] = id.split('/')
   const node = tab === 'roadmap' ? rest.join('/') : ''
-  return { ...(project ? { project } : {}), ...(tab ? { tab } : {}), ...(node ? { node } : {}) }
+  const at = tab === 'at' ? rest.join('/') : ''
+  return { ...(project ? { project } : {}), ...(tab ? { tab } : {}), ...(node ? { node } : {}), ...(at ? { at } : {}) }
 }
 
 /** `#/~hub/project/<id>/roadmap/<node>`: the project's page with that milestone or task's details open over it. */
 export function projectNodeHash(id: string, node: string, sprint?: string): string {
   return withScope(`#/~hub/project/${encodeURIComponent(id)}/roadmap/${encodeURIComponent(node)}`, { sprint })
+}
+
+/** `#/~hub/project/<id>/at/<node>`: the Roadmap list with that row open and marked, and no details open over it. */
+export function projectAtHash(id: string, node: string, sprint?: string): string {
+  return withScope(`#/~hub/project/${encodeURIComponent(id)}/at/${encodeURIComponent(node)}`, { sprint })
 }
 
 /** `#/~hub/map/<project>[/<node>]`: the map, and with a node its details panel open. */
@@ -140,10 +146,16 @@ export function workHash(board: string, bead: string, sprint?: string): string {
   return withScope(`#/~hub/work/${encodeURIComponent(board)}/${encodeURIComponent(bead)}`, { sprint })
 }
 
-/** The board (a project id or `all`) and bead out of a Work route id (`<board>[/<bead>]`); a bare board has no bead. */
-export function parseWorkId(id: string | undefined): { project?: string; bead?: string } {
+/** `#/~hub/work/<board>/at/<bead>`: the Work board with that bead's card marked in its lane, and no details open over it. */
+export function workAtHash(board: string, bead: string, sprint?: string): string {
+  return withScope(`#/~hub/work/${encodeURIComponent(board)}/at/${encodeURIComponent(bead)}`, { sprint })
+}
+
+/** The board (a project id or `all`), the bead whose details are open and the bead only marked (`<board>/at/<bead>`) out of a Work route id; a bare board has neither. A bead called `at` is still a bead. */
+export function parseWorkId(id: string | undefined): { project?: string; bead?: string; at?: string } {
   if (!id) return {}
   const [project, ...rest] = id.split('/')
+  if (rest[0] === 'at' && rest.length > 1) return { project: project || undefined, at: rest.slice(1).join('/') }
   const bead = rest.join('/')
   return { project: project || undefined, ...(bead ? { bead } : {}) }
 }

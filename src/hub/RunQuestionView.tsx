@@ -5,6 +5,11 @@ import { host } from '../lib/host'
 import type { SettleExtra, SettleVerb } from './NeedsItem'
 import { authHeaders } from '../local/client'
 import Md from './Md'
+import { PictureButton } from './PictureTray'
+import { usePictures } from './pictures'
+
+/** A Hermes run reads text only, so a picture cannot reach it. */
+const RUN_PICTURES_OFF = 'A Hermes run reads text only, so a picture can\'t reach it. Describe it in words.'
 
 /**
  * A Hermes run that ended by asking the owner something. The question, what the run wrote before it (collapsed, read
@@ -13,6 +18,7 @@ import Md from './Md'
  */
 export default function RunQuestionView({ item, onSettled }: { item: Item; onSettled: (verb: SettleVerb, extra?: SettleExtra) => void }) {
   const [text, setText] = useState('')
+  const pictures = usePictures({ max: 0, noun: 'An answer', locked: RUN_PICTURES_OFF })
   const [busy, setBusy] = useState<'answer' | 'close' | null>(null)
   const [error, setError] = useState('')
   const [report, setReport] = useState<string | null>(null)
@@ -61,6 +67,7 @@ export default function RunQuestionView({ item, onSettled }: { item: Item; onSet
           <span className="hub-muted" style={{ display: 'block', marginBottom: 4 }}>Your answer</span>
           <textarea style={{ display: 'block', width: '100%', boxSizing: 'border-box', font: 'inherit', padding: 8 }} value={text} maxLength={2000} rows={3} onChange={event => setText(event.target.value)} data-run-answer />
         </label>
+        <div className="hub-pic-line" data-run-pictures-off><PictureButton pictures={pictures} reason={RUN_PICTURES_OFF} /><span className="hub-muted">{RUN_PICTURES_OFF}</span></div>
       </div>
       <div className="ni-a">
         <button type="button" className="hub-btn pri" disabled={busy !== null || !text.trim()} onClick={() => send('answer')} data-run-send>Answer and run again</button>
