@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { WorkspaceCard } from './types'
 import { useWorkspace } from './lib/workspace'
 import { parseHash, parseChatId, hubHash, libraryHash, navScreen, scopeOf, showsTabs, entityHash, resolveStep, type HubScreen, type Route } from './lib/route'
-import { ROUTE_EVENT, back, go, hasOverlay, screenSerial, swap } from './lib/entries'
+import { ROUTE_EVENT, back, consumeOverlayClose, go, hasOverlay, screenSerial, swap } from './lib/entries'
 import { canonicalAddress } from './lib/redirects'
 import { useOrder } from './lib/order'
 import { useCanWrite } from './lib/writes'
@@ -127,6 +127,8 @@ export default function App() {
   })
   // Where the several picks were, per entry: the entry a Back lands on gets them again (see `picksAt`).
   useEffect(() => { if (picks.length > 1) picksAt.set(screenSerial(), picks) }, [picks])
+  const picksNow = useRef(picks)
+  useEffect(() => { picksNow.current = picks }, [picks])
   const restorePicks = useCallback(() => {
     const kept = picksAt.get(screenSerial())
     if (kept && kept.length > 1) setPicks(now => (now.length > 1 || now.join() === kept.join() ? now : kept))
@@ -160,7 +162,17 @@ export default function App() {
     // Both halves of the address at once. Back fires popstate before hashchange, so updating
     // only the project here leaves one render where the filter has moved but the open card has
     // not — long enough for the effect below to rewrite the entry you just came back to.
-    const onPop = () => { const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); restorePicks(); setRoute(readRoute()) }
+    const onPop = () => {
+      // A Back that only shut a sheet (the project filter's) moved no screen: the pick made in it stands, and the address, put back to
+      // the entry before the sheet, is written again from the pick.
+      if (consumeOverlayClose()) {
+        const now = picksNow.current
+        swap(window.location.hash, projectPath(now.length === 1 ? now[0] : ''))
+        setRoute(readRoute())
+        return
+      }
+      const one = pathId(); setPicks(now => (one ? [one] : now.length > 1 ? now : [])); restorePicks(); setRoute(readRoute())
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [setRoute, restorePicks])
@@ -178,12 +190,12 @@ export default function App() {
   // The one project in view, for the things that follow the address: '' for none or several.
   const project = projects.length === 1 ? projects[0] : ''
 
-  // Card ids are unique inside a workspace, not across them: the active workspace wins a tie.
+  // Card ids are unique inside a workspace, not across them: the project in view wins a tie, then the active workspace.
   const open = cards.filter(e => e.id === view.id)
   // A Hub run names its card by folder (`assistant/<folder>`), and a move keeps the folder: when no card has
   // that id, open the one whose folder matches.
   const byFolder = open.length || !view.id ? [] : cards.filter(e => e.folder === view.id)
-  const entity = open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
+  const entity = open.find(e => e.workspace.id === project) ?? open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
   // Beside a card the list starts folded below 1400 px; on the Library it is the screen, and folds only when asked.
   const listFolded = entity ? (menuPref ?? !wide) : menuPref === true
   // A link to a card that was deleted: say where it is, with a way back.
@@ -451,7 +463,7 @@ export default function App() {
             </ReportBoundary>
           ) : showSettings ? (
             <ReportBoundary key="settings" onHome={goHome} title="Settings could not be shown.">
-              <Suspense fallback={fallback}><Settings /></Suspense>
+              <Suspense fallback={fallback}><Settings onOpenProject={pickProject} /></Suspense>
             </ReportBoundary>
           ) : (
           <ReportBoundary key={liveUrl || reportUrl || 'home'} onHome={goHome}>
