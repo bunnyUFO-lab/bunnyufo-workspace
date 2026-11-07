@@ -110,7 +110,7 @@ test('configuration: unset URL → chat false and 503; a failing Hermes → 502 
   } finally { await off.close(); }
   const broken = await fixture({ hermes: { fail: true } });
   try {
-    assert.equal((await (await broken.call('GET', '/capabilities')).json()).chat, true);
+    assert.equal((await (await broken.call('GET', '/capabilities', undefined, { 'Remote-User': 'owner' })).json()).chat, true);
     const answer = await chat(broken.call, { text: 'hi' });
     assert.equal(answer.status, 502);
     assert.match(answer.body.error, /Hermes did not answer \(500\)/);
