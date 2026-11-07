@@ -294,22 +294,23 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
 .hub-map-chev:hover .hub-map-chev-ring, .hub-map-chev:focus-visible .hub-map-chev-ring { stroke: var(--pink); stroke-width: 2.5; }
 .hub-map-chev-glyph { fill: var(--text-bright); pointer-events: none; }
 
-/* The details of a map node: a side panel on a desktop, a bottom sheet over the tab bar on a phone. */
-.hub-map-scrim { display: none; }
+/* The details of a task: a window centred over the dimmed screen from 900 px, a bottom sheet below (TaskWindow draws it in <body>; the wrapper has no box of its own). */
+.hub-portal { display: contents; }
+.hub-map-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.45); }
 .hub-map-grab { display: none; }
 .hub-map-panel {
-  position: fixed; inset: var(--topbar-h, 56px) var(--hub-rail, 0px) 0 auto; margin: 0; width: min(380px, 40vw); height: auto; max-height: none;
-  box-sizing: border-box; overflow-y: auto; padding: 14px 16px 20px; color: var(--text);
-  background: var(--surface-solid); border: 0; border-left: 1px solid var(--hairline-strong); box-shadow: var(--shadow-2); z-index: 40;
+  position: fixed; inset: 0; margin: auto; width: min(680px, calc(100vw - 48px)); height: fit-content; max-height: calc(100dvh - 48px);
+  box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; color: var(--text);
+  background: var(--surface-solid); border: 1px solid var(--hairline-strong); border-radius: 16px; box-shadow: var(--shadow-2); z-index: 60;
 }
-/* The local app's tool rail is 48 px wide at the right; the panel sits beside it. */
-@media (min-width: 641px) { :root:has(.files-container) { --hub-rail: 48px; } }
 .hub-map-panel:not([open]) { display: none; }
 .hub-map-panel h3 { color: var(--text-bright); margin: 0; font-size: 1rem; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; outline: none; }
 .hub-map-panel h4 { margin: 16px 0 6px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
 .hub-map-panel h5 { margin: 10px 0 4px; font-size: 0.82rem; overflow-wrap: anywhere; }
 .hub-map-panel p { margin: 0 0 6px; font-size: 0.85rem; }
-.hub-map-panel-head { display: flex; align-items: flex-start; gap: 8px; }
+.hub-map-panel-head { display: flex; align-items: flex-start; gap: 8px; padding: 14px 0 4px; }
+/* The head stays in reach while a long body scrolls under it, where the window is tall enough to scroll. */
+@media (min-height: 600px) { .hub-map-panel-head { position: sticky; top: 0; z-index: 1; background: var(--surface-solid); } }
 .hub-map-panel-heading { flex: 1; min-width: 0; font-size: 0.8rem; }
 .hub-map-panel-close { flex: none; width: 40px; height: 40px; margin: -6px -8px 0 0; border: 0; border-radius: 50%; background: none; color: var(--text); font-size: 1.5rem; line-height: 1; cursor: pointer; }
 .hub-map-panel-close:hover { background: var(--surface-2); }
@@ -339,13 +340,13 @@ select.hub-project-select:disabled, select.needs-filter-select:disabled { opacit
 .hub-map-panel-reason { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .hub-map-panel-reason input { flex: 1 1 100%; box-sizing: border-box; min-width: 0; padding: 0 10px; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); }
 .hub-map-panel [data-prs] .hub-btn, .hub-map-panel-cards a { display: inline-flex; align-items: center; min-height: 44px; }
-@media (max-width: 640px) {
-  .hub-map-scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.45); }
+@media (max-width: 899px) {
   .hub-map-panel {
-    inset: auto 0 0 0; width: auto; /* The map keeps about 100 px above the sheet: the control bar (two rows when it wraps), chips and Destination row take about 345 px with the project header, tabs and switch above them. */ max-height: min(75dvh, calc(100dvh - 490px)); z-index: 60; padding-bottom: calc(20px + env(safe-area-inset-bottom));
-    border-left: 0; border-top: 1px solid var(--hairline-strong); border-radius: 16px 16px 0 0;
+    inset: auto 0 0 0; width: auto; height: auto; max-height: 75dvh; padding-bottom: calc(20px + env(safe-area-inset-bottom)); padding-inline: 16px;
+    border-width: 1px 0 0; border-radius: 16px 16px 0 0;
   }
-  .hub-map-grab { display: block; width: 40px; height: 4px; margin: -6px auto 10px; border-radius: 2px; background: var(--hairline-strong); }
+  .hub-map-grab { display: block; width: 40px; height: 4px; margin: 8px auto 0; border-radius: 2px; background: var(--hairline-strong); }
+  .hub-map-panel-head { padding-top: 8px; }
 }
 .hub-actions.start { justify-content: flex-start; }
 .hub-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.72rem; color: var(--text-dim); }
@@ -587,3 +588,13 @@ button.hub-cl-text { cursor: pointer; }
 /* The bar that says what became of an answer reads as a sentence, not a shouted label. */
 .hub .settled-bar h3 { font-size: 1rem; letter-spacing: 0; text-transform: none; color: var(--text-bright); }
 .hub-legend-close { flex: 1 0 100%; min-height: 44px; justify-content: center; }
+
+/* A picture that did not save: the tile keeps a Retry beside its ×. */
+.hub-tray-item.failed img, .hub-tray-item.failed .hub-image-missing { opacity: 0.45; }
+.hub-tray-retry { position: absolute; left: 0; right: 0; bottom: 0; min-height: 28px; padding: 0 4px; font-size: 0.75rem; }
+@media (pointer: coarse) { .hub-tray-retry { min-height: 44px; bottom: -44px; } .hub-tray-item.failed { margin-bottom: 44px; } }
+
+/* The picture button and tray under a note on an inbox item. */
+.hub-pic-row { margin: 8px 0 4px; }
+.hub-pic-line { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+.hub-pic-row .hub-tray { margin: 10px 0 0; }

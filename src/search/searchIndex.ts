@@ -79,7 +79,7 @@ export function itemHash(item: Pick<ItemSource, 'kind' | 'id'>): string {
   return hubHash('needs', 'sessions')
 }
 
-const ITEM_KIND: Record<string, string> = { ask: 'Question', checklist: 'Steps', review: 'Review', approval: 'Job to approve', request: 'Job to approve', 'hermes-approval': 'Approval', 'run-question': 'Question', blocked: 'Blocked', session: 'Session' }
+const ITEM_KIND: Record<string, string> = { ask: 'Question', checklist: 'Steps', review: 'Review', approval: 'Job to approve', request: 'Job to approve', 'hermes-approval': 'Approval', 'run-question': 'Question', 'pc-stuck': 'Job not started', blocked: 'Blocked', session: 'Session' }
 const JOB_STATE = (state: string) => (state === 'running' || state === 'taken' || state === 'approved' || state === 'stopping' ? 'Running' : state === 'failed' || state === 'lost' ? 'Failed' : state === 'proposed' || state === 'asking' ? 'Waiting for you' : 'Delivered')
 
 /** The words of a query, lower case. */
@@ -101,6 +101,7 @@ export function screenRows(caps: Caps): Hit[] {
     ['library', 'Library', 'library', hubHash('library'), true],
     ['team', 'Team', 'team', hubHash('team'), caps.hub],
     ['skills', 'Skills and plugins', 'skill', `${hubHash('team')}/skills`, caps.hub],
+    ['schedules', 'Schedules', 'job', `${hubHash('team')}/schedules`, caps.hub],
     ['sketch', 'Sketch', 'sketch', hubHash('sketch'), caps.hub && caps.write],
     ['settings', 'Settings', 'settings', hubHash('settings'), true],
     // The install commands live in Settings, under their own heading.

@@ -4,7 +4,7 @@
 export const PROJECT_DEFAULTS = [
   { id: 'magic-loops', name: 'Magic Loops', order: 1, prefix: 'ml', runsOn: 'pc' },
   { id: 'sprite-studio', name: 'Sprite Studio', order: 2, prefix: 'ss', runsOn: 'pc' },
-  { id: 'workspace-app', name: 'Workspace app', order: 3, prefix: 'ws', runsOn: 'cloud' },
+  { id: 'workspace-app', name: 'Workspace app', order: 3, prefix: 'ws', runsOn: 'pc' },
   { id: 'bunnylink', name: 'Bunnylink', order: 4, prefix: 'bl', runsOn: 'at-pc' },
   { id: 'shadowdark', name: 'Discord bots', order: 5, prefix: 'sd', runsOn: 'cloud' },
 ];

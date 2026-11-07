@@ -151,7 +151,7 @@ try {
     assert.match(await href('ask'), /#\/~hub\/ask\//);
     assert.match(await href('checklist'), /#\/~hub\/checklist\//);
     assert.equal(await href('job'), `#/~hub/request/${J.child}`);
-    assert.equal(await href('task'), '#/~hub/map/probe/pr-1a2');
+    assert.equal(await href('task'), '#/~hub/project/probe/roadmap/pr-1a2');
 
     step(`${label}: a task the job made or touched shows its id`);
     const task = result.locator('[data-run-deliverable="task"]');

@@ -15,6 +15,7 @@ export function needsKind(item: Item): NeedsKind {
     case 'approval': return 'approval'
     case 'hermes-approval': return 'approval'
     case 'run-question': return 'question'
+    case 'pc-stuck': return 'unstick'
     case 'ask': return item.design === true ? 'design' : 'question'
     default: return 'question' // a session never reaches Needs you
   }
@@ -87,6 +88,7 @@ export function typeBadge(item: Item): Badge {
   switch (item.kind) {
     case 'hermes-approval': type = 'hermes-approval'; label = 'Hermes approval'; break
     case 'run-question': type = 'hermes-asks'; label = 'Hermes asks'; break
+    case 'pc-stuck': type = 'unstick'; label = 'Job not started'; break
     case 'approval': case 'request': type = 'approval-request'; label = 'Approval request'; break
     default: type = kind as BadgeType; label = itemLabel(item)
   }

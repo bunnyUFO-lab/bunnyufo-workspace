@@ -225,3 +225,77 @@ export interface TeamPlugin {
   description: string
   profiles: { profile: 'main' | 'briefs'; status: 'enabled' | 'disabled' | 'not enabled' }[]
 }
+
+/** Where a job posts, or where its failures go: the platform and a label the host chose. */
+export interface JobTarget { platform: string; label: string }
+
+/**
+ * One scheduled job of the Hermes host (GET /api/hub/schedules, site/api/hub-agent-config.mjs). Every field after `prompt` is absent when the
+ * host's exporter did not send it: the page says "not reported", it never guesses.
+ */
+export interface ScheduleJob {
+  name: string
+  profile: string
+  schedule: string
+  enabled: boolean
+  prompt: string
+  scheduleKind?: string
+  state?: string
+  model?: string
+  provider?: string
+  postsTo?: JobTarget | null
+  failuresTo?: JobTarget | null
+  script?: string
+  nextRunAt?: string
+  lastRunAt?: string
+  lastStatus?: string
+  lastError?: string
+  lastDeliveryError?: string
+  failureStreak?: number
+  runsDone?: number
+  promptSha256?: string
+  promptBytes?: number
+  promptCut?: boolean
+  promptRedacted?: number
+  rev?: string
+}
+
+/** One timer of the Hermes host or of the site host. The Hermes host's export carries no run times; the site host's file does. */
+export interface ScheduleTimer { name: string; description: string; schedule: string; enabled: boolean; lastResult: string; nextRun?: string; lastRun?: string }
+
+/** One Windows task of the PC (a non-OS task; `ours` is set for the ones the repo names). `schedule` and `lastResult` are the PC's own words. */
+export interface PcTask {
+  name: string
+  folder: string
+  state: 'ready' | 'running' | 'disabled' | 'queued' | 'unknown'
+  schedule: string
+  nextRun?: string
+  lastRun?: string
+  lastResult: string
+  ours?: boolean
+}
+
+/** One cron line of a GitHub workflow, read through the PC. Times are UTC. */
+export interface GithubSchedule { repo: string; workflow: string; cron: string; state: 'active' | 'disabled' | 'unknown'; lastRun?: string; lastConclusion?: string }
+
+/** `live` is a fresh export, `old` one past the freshness rule, `not-reporting` a list nobody has sent. */
+export type ScheduleState = 'live' | 'old' | 'not-reporting'
+
+export interface ScheduleSource<T = ScheduleJob | ScheduleTimer | PcTask | GithubSchedule> {
+  id: 'hermes-jobs' | 'hermes-timers' | 'site-timers' | 'pc-tasks' | 'github'
+  label: string
+  state: ScheduleState
+  as_of: string | null
+  host?: string
+  timezone?: string
+  /** The model each profile follows, for a job that pins none. */
+  profileModels?: Record<string, string>
+  text?: string
+  /** A line that belongs under the heading (GitHub's list comes through the PC). */
+  note?: string
+  /** The PC's tasks: how many non-OS tasks it has in all, which can be more than the rows. */
+  total?: number
+  items: T[]
+}
+
+export interface SchedulesView { sources: ScheduleSource[]; note: string; at: string }

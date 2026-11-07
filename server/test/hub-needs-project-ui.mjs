@@ -40,7 +40,7 @@ try {
   const approval = id('bunnylink', 'look-at-the-gate', 'e5e5');
   seed.request({ id: approval, project: 'bunnylink', createdAt: minutesAgo(now, 70).toISOString(), by: 'owner', text: 'Look at the gate script', preset: 'code-task', repo: 'example/bunnylink', target: 'at-pc', origin: { kind: 'owner', name: 'owner' } });
   // The project page: Magic Loops has a finished milestone and an open one (two done, one doing, one next); Sprite Studio only a finished one;
-  // Workspace app and Bunnylink have an open one but no PC runs. Magic Loops alone has a Library section.
+  // Discord bots and Bunnylink have an open one but no PC runs. Magic Loops alone has a Library section.
   const stamp = { created: '2026-10-01T10:00:00Z' };
   const closedTask = (taskId, title, parent) => beadsIssue({ id: taskId, title, parent, status: 'closed', closed: '2026-10-05T10:00:00Z', ...stamp });
   const copy = (project, issues) => seed.beads(project, issues, { pushedAt: minutesAgo(now, 5).toISOString(), host: 'pc.example.test', count: issues.length, repo: `example/${project}` });
@@ -54,7 +54,7 @@ try {
     beadsIssue({ id: 'ml-t4', title: 'Dash', parent: 'ml-f1', labels: ['sprint:sprint-5'], ...stamp }),
   ]);
   copy('sprite-studio', [beadsIssue({ id: 'ss-m1', title: 'Editor', type: 'milestone', status: 'closed', closed: '2026-10-03T10:00:00Z', ...stamp }), closedTask('ss-t1', 'Draw', 'ss-m1')]);
-  for (const [project, prefix] of [['workspace-app', 'ws'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
+  for (const [project, prefix] of [['shadowdark', 'sd'], ['bunnylink', 'bl']]) copy(project, [beadsIssue({ id: `${prefix}-m1`, title: 'First milestone', type: 'milestone', ...stamp }), beadsIssue({ id: `${prefix}-t1`, title: 'Open task', parent: `${prefix}-m1`, ...stamp })]);
   // A project with roadmaps: the Roadmap tab lists them (ws-im1.3.2).
   copy('roadmapped', [
     beadsIssue({ id: 'rd-r1', title: 'Hub work', type: 'epic', labels: ['roadmap'], ...stamp }),
@@ -218,15 +218,19 @@ try {
   assert.equal(await page.locator('[data-rail] [data-nav="project"]').getAttribute('aria-current'), 'page', 'Projects is lit on the rail.');
   assert.deepEqual((await page.locator('[data-rail] [data-nav]').evaluateAll(list => list.map(item => item.getAttribute('data-nav')))).filter(name => name === 'project' || name === 'chat'), ['chat', 'project'], 'Chat, then Projects, as in the mockup; the Roadmap has no entry of its own.');
 
-  step('project page, Roadmap list: the current milestone open with the map counts; finished ones fold into Done; a task opens over the page, and Back returns; Map and List add no entry');
+  step('project page, Roadmap accordion: the current milestone open with the map counts; the finished one is a closed row; a task opens over the page, and Back returns; Map and List add no entry');
   const rows = page.locator('[data-pp-roadmap] [data-pp-milestone]');
-  assert.equal(await rows.count(), 1);
-  assert.match(await rows.first().locator('[data-pp-count]').innerText(), /^Now · 2 of 4 done/);
-  assert.equal(await rows.first().locator('.pp-ring text').innerHTML(), '2/4');
-  assert.deepEqual(await rows.first().locator('[data-pp-task]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-task'))), ['ml-t3', 'ml-t4', 'ml-t1', 'ml-t2']);
-  assert.equal((await page.locator('[data-pp-done-toggle]').innerText()).trim(), 'Done (1)');
-  assert.equal(await page.locator('[data-pp-finished][data-open="true"]').count(), 0);
-  await rows.first().locator('[data-pp-task="ml-t3"]').click();
+  assert.equal(await rows.count(), 2, 'The open milestone, then the finished one.');
+  const current = page.locator('[data-pp-milestone][data-open="true"]');
+  assert.equal(await current.count(), 1);
+  assert.match(await current.locator('[data-pp-count]').innerText(), /^Now · .*2 of 4 done/);
+  assert.equal(await current.locator('.pp-ring text').innerHTML(), '2/4');
+  assert.deepEqual(await current.locator('[data-pp-task]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-task'))), ['ml-t3', 'ml-t4', 'ml-t1', 'ml-t2']);
+  const finished = page.locator('[data-pp-milestone][data-open="false"]');
+  assert.equal(await finished.count(), 1, 'The finished milestone is one closed line.');
+  assert.equal(await finished.locator('[data-pp-task]').count(), 0, 'A closed row draws no tasks.');
+  assert.equal(await page.locator('[data-pp-done-toggle], [data-pp-finished]').count(), 0, 'There is no Done fold any more.');
+  await current.locator('[data-pp-task="ml-t3"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/project/magic-loops/roadmap/ml-t3');
   await page.locator('.hub-map-panel').waitFor();
   await page.goBack();
@@ -241,18 +245,19 @@ try {
   await page.locator('[data-pp-roadmap]').waitFor();
   assert.equal(await page.evaluate(() => history.length), depth, 'Map and List added no entry.');
 
-  step('project page, Roadmap tab with roadmaps (RoadmapRows): nested rows instead of the flat list; a row opens that roadmap\'s map, and Back returns');
+  step('project page, Roadmap tab with roadmaps: nested folds instead of the flat list; a roadmap opens, offers its map, and the link opens that roadmap map; Back returns');
   await goPage(page, '#/~hub/project/roadmapped');
-  await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').first().waitFor();
-  assert.deepEqual(await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').evaluateAll(list => list.map(row => [row.dataset.roadmapRow, row.dataset.depth])), [['rd-r1', '0'], ['rd-r2', '1'], ['rd-r3', '0']]);
-  assert.equal(await page.locator('[data-pp-roadmap]').count(), 0, 'The flat milestone list is not shown.');
-  assert.equal(await page.locator('[data-roadmap-row="rd-r1"] .rm-row-count').innerText(), '0 of 1 done');
-  await page.locator('[data-roadmap-row="rd-r1"]').click();
+  await page.locator('[data-pp-roadmap] [data-roadmap-row]').first().waitFor();
+  assert.deepEqual(await page.locator('[data-pp-roadmap] [data-roadmap-row]').evaluateAll(list => list.map(row => [row.dataset.roadmapRow, row.dataset.depth])), [['rd-r1', '0'], ['rd-r2', '1'], ['rd-r3', '0']]);
+  assert.match(await page.locator('[data-roadmap-row="rd-r1"] > .ui-fold-h').innerText(), /next up · 1 of 3 done/);
+  const head = page.locator('[data-roadmap-row="rd-r1"] > .ui-fold-h button');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await page.locator('[data-roadmap-map="rd-r1"]').click();
   await page.waitForFunction(() => location.hash === '#/~hub/map/roadmapped/rd-r1');
   await page.locator('.hub-map-box svg').waitFor();
   assert.equal(await page.locator('[data-roadmap-toggle="branch"]').getAttribute('aria-current'), 'page');
   await page.goBack();
-  await page.locator('[data-pp-roadmap-rows]').waitFor();
+  await page.locator('[data-pp-roadmap]').waitFor();
   await goPage(page, '#/~hub/project/magic-loops');
 
   step('project page: the Roadmap tab has no Running panel any more; what runs is on the Work tab');
@@ -311,15 +316,15 @@ try {
   await page.waitForFunction(() => location.hash === '#/~hub/chat');
   assert.match(await page.locator('textarea[aria-label="Message"]').inputValue(), /\(project magic-loops\)/);
 
-  step('project page, sprint: Magic Loops links to its first open milestone; Workspace app and Bunnylink are off with the server\'s sentence; nothing open is off with its note');
+  step('project page, sprint: Magic Loops links to its first open milestone; Discord bots and Bunnylink are off with the server\'s sentence; nothing open is off with its note');
   await goPage(page, '#/~hub/project/magic-loops');
   const sprint = page.locator('a[data-project-action="sprint"]');
   await sprint.waitFor();
   assert.equal(await sprint.getAttribute('href'), '#/~hub/project/magic-loops/roadmap/ml-m1');
   assert.equal(await page.locator('[data-project-note="sprint"]').count(), 0);
-  await goPage(page, '#/~hub/project/workspace-app');
+  await goPage(page, '#/~hub/project/shadowdark');
   await page.locator('[data-project-note="sprint"]').waitFor();
-  assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'Sprints run on the PC. Workspace app has no PC runs.');
+  assert.equal(await page.locator('[data-project-note="sprint"]').innerText(), 'Sprints run on the PC. Discord bots has no PC runs.');
   assert.equal(await page.locator('[data-project-action="sprint"]').count(), 0, 'No sprint button where none can run.');
   assert.match(await page.locator('[data-project-note="runs-on"]').innerText(), /runs in the cloud/);
   await goPage(page, '#/~hub/project/bunnylink');
@@ -397,7 +402,7 @@ try {
   await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
   assert.deepEqual(await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-milestone'))), ['ml-m1'], 'Only the milestone with a task in the sprint.');
   assert.deepEqual(await sprintPage.locator('[data-pp-roadmap] [data-pp-task]').evaluateAll(list => list.map(item => item.getAttribute('data-pp-task'))), ['ml-t3', 'ml-t4', 'ml-t2']);
-  assert.equal(await sprintPage.locator('[data-pp-done-toggle]').count(), 0, 'The finished Prototype milestone is not in the sprint.');
+  assert.equal(await sprintPage.locator('[data-pp-milestone][data-state="done"]').count(), 0, 'The finished Prototype milestone is not in the sprint.');
   assert.equal((await sprintPage.locator('[data-project-done]').innerText()).trim(), '1 of 3 tasks done.', 'The header counts the sprint.');
   const sprintDepth = await sprintPage.evaluate(() => history.length);
   await sprintPage.locator('[data-filter-sprint]').click();
@@ -434,7 +439,7 @@ try {
   await sprintPage.waitForFunction(() => location.hash === '#/~hub/project/magic-loops');
   await go2(sprintPage, '#/~hub/project/roadmapped?sprint=sprint-6');
   await sprintPage.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
-  assert.equal(await sprintPage.locator('[data-pp-roadmap-rows]').count(), 0, 'A sprint uses the milestone list even for a project with roadmaps.');
+  assert.equal(await sprintPage.locator('[data-roadmap-row]').count(), 0, 'A sprint uses the flat milestone list even for a project with roadmaps.');
 
   step('project page with a sprint at 390 px: the row fits and the picker is 44 px');
   const sprintPhone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
@@ -443,31 +448,31 @@ try {
   assert.deepEqual(await small(sprintPhone, '[data-filter-sprint], [data-pp-sprint-board]'), [], 'The picker and the board link are 44 px.');
   assert.equal(await sprintPhone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true, 'No sideways scroll.');
 
-  step('roadmap rows: milestones listed by name under a row that is not done (sibling links), Hide completed (off by default, remembered)');
+  step('roadmap accordion: a roadmap holds its milestones as folds, a finished roadmap is one closed line, Hide completed (off by default, remembered)');
   const hideKey = () => page.evaluate(() => localStorage.getItem('buw.roadmap.hideDone'));
+  const openRow = async (view, id) => {
+    const head = view.locator(`[data-roadmap-row="${id}"] > .ui-fold-h button`);
+    if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  };
   await goPage(page, '#/~hub/project/roadmapped');
-  await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').first().waitFor();
+  await page.locator('[data-pp-roadmap] [data-roadmap-row]').first().waitFor();
   assert.equal(await hideKey(), null);
   assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'false', 'Hide completed is off by default.');
-  assert.deepEqual(await page.locator('[data-roadmap-milestones="rd-r1"] [data-roadmap-milestone]').evaluateAll(list => list.map(item => [item.dataset.roadmapMilestone, item.textContent.trim(), item.getAttribute('href')])), [['rd-f1', 'First ring', '#/~hub/map/roadmapped/rd-f1']]);
-  assert.equal(await page.locator('[data-roadmap-row] [data-roadmap-milestone]').count(), 0, 'The names are siblings of the row link, never inside it.');
-  assert.equal(await page.locator('[data-roadmap-milestones="rd-r3"]').count(), 0, 'A finished row lists no names.');
-  assert.equal(await page.locator('[data-roadmap-row="rd-r3"] .rm-dots i').count(), 1, 'A finished row keeps its dots.');
-  assert.ok((await page.locator('[data-roadmap-milestone="rd-f1"]').evaluate(node => node.getBoundingClientRect().height)) > 0);
-  await page.locator('[data-roadmap-milestone="rd-f1"]').click();
-  await page.waitForFunction(() => location.hash === '#/~hub/map/roadmapped/rd-f1');
-  await page.goBack();
-  await page.locator('[data-pp-roadmap-rows]').waitFor();
+  await openRow(page, 'rd-r1');
+  assert.deepEqual(await page.locator('[data-roadmap-row="rd-r1"] > .ui-fold-body > .ui-fold[data-pp-milestone]').evaluateAll(list => list.map(item => item.dataset.ppMilestone)), ['rd-f1']);
+  assert.match(await page.locator('[data-pp-milestone="rd-f1"] > .ui-fold-h').innerText(), /First ring/);
+  assert.equal(await page.locator('[data-roadmap-row="rd-r3"]').getAttribute('data-open'), 'false', 'A finished roadmap is one closed line.');
+  assert.equal(await page.locator('[data-roadmap-row="rd-r3"] [data-pp-milestone]').count(), 0);
   await page.locator('[data-roadmap-hide-done]').click();
   assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'true');
   assert.equal(await hideKey(), '1');
-  assert.deepEqual(await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').evaluateAll(list => list.map(row => row.dataset.roadmapRow)), ['rd-r1', 'rd-r2'], 'The finished roadmap is hidden.');
+  assert.deepEqual(await page.locator('[data-pp-roadmap] [data-roadmap-row]').evaluateAll(list => list.map(row => row.dataset.roadmapRow)), ['rd-r1', 'rd-r2'], 'The finished roadmap is hidden.');
   await page.reload();
-  await page.locator('[data-pp-roadmap-rows] [data-roadmap-row]').first().waitFor();
+  await page.locator('[data-pp-roadmap] [data-roadmap-row]').first().waitFor();
   assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'true', 'The setting is remembered.');
   await goPage(page, '#/~hub/project/magic-loops');
   await page.locator('[data-pp-roadmap] [data-pp-milestone]').first().waitFor();
-  assert.equal(await page.locator('[data-pp-done-toggle]').count(), 0, 'Hide completed hides the Done fold.');
+  assert.equal(await page.locator('[data-pp-milestone][data-state="done"]').count(), 0, 'Hide completed hides the finished milestone.');
   await goPage(page, '#/~hub/project/magic-loops?sprint=sprint-5');
   await page.locator('[data-filter-sprint]').click();
   assert.deepEqual(await page.locator('.cb-list [role="option"]').evaluateAll(list => list.map(item => item.getAttribute('data-value'))), ['', 'sprint-5'], 'Finished sprints leave the picker.');
@@ -484,30 +489,28 @@ try {
   await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').waitFor();
   assert.equal(await page.locator('[data-filter-sprint]').count(), 0, 'No sprints, no picker, but the chip is there for the finished milestone.');
   assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 1);
-  await goPage(page, '#/~hub/project/workspace-app');
+  await goPage(page, '#/~hub/project/shadowdark');
   await page.locator('[data-pp-roadmap]').waitFor();
   assert.equal(await page.locator('[data-roadmap-hide-done]').count(), 0, 'Nothing finished, no sprint, no roadmap: nothing to hide, no chip.');
   await goPage(page, '#/~hub/project/roadmapped');
-  await page.locator('[data-pp-roadmap-rows]').waitFor();
+  await page.locator('[data-pp-roadmap]').waitFor();
   assert.equal(await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').count(), 1, 'On a project with roadmaps the chip is in the sprint row.');
-  assert.equal(await page.locator('[data-pp-roadmap-rows] [data-roadmap-hide-done]').count(), 0, 'The rows do not draw a second one.');
+  assert.equal(await page.locator('[data-pp-roadmap] [data-roadmap-hide-done]').count(), 0, 'The accordion does not draw a second one.');
   await goPage(page, '#/~hub/project/magic-loops?sprint=sprint-4');
   await page.locator('[data-pp-sprint-row] [data-roadmap-hide-done]').click();
   await page.locator('[data-pp-all-done]').waitFor();
   assert.match(await page.locator('[data-pp-all-done]').innerText(), /Everything here is done\./);
   assert.equal(await page.locator('[data-filter-sprint]').inputValue(), 'sprint-4 · 1 of 1 tasks done', 'The selected finished sprint stays in the picker.');
   await page.locator('[data-pp-show-done]').click();
-  await page.locator('[data-pp-done-toggle]').waitFor();
+  await page.locator('[data-pp-milestone]').first().waitFor();
   assert.equal(await page.locator('[data-roadmap-hide-done]').getAttribute('aria-pressed'), 'false', 'Show completed turns the setting off.');
-  await page.locator('[data-pp-done-toggle]').click();
-  await page.locator('[data-pp-milestone="ml-m1"]').waitFor();
   await page.evaluate(() => localStorage.removeItem('buw.roadmap.hideDone'));
 
-  step('roadmap rows at 390 px: the names are 44 px and nothing scrolls sideways');
+  step('roadmap accordion at 390 px: the heads are 44 px and nothing scrolls sideways');
   const rowsPhone = await open({ width: 390, height: 844 }, { hasTouch: true, isMobile: true });
   await goPage(rowsPhone, '#/~hub/project/roadmapped');
-  await rowsPhone.locator('[data-roadmap-milestone]').first().waitFor();
-  assert.deepEqual(await small(rowsPhone, '[data-roadmap-milestone], [data-roadmap-hide-done], [data-roadmap-row]'), [], 'Every control is 44 px.');
+  await rowsPhone.locator('[data-roadmap-row]').first().waitFor();
+  assert.deepEqual(await small(rowsPhone, '[data-roadmap-hide-done], [data-roadmap-expand], [data-roadmap-collapse], .ui-fold-head'), [], 'Every control is 44 px.');
   assert.equal(await rowsPhone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true, 'No sideways scroll.');
 
   console.log('hub-needs-project-ui: passed');

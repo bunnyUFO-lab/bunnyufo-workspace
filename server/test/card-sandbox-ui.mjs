@@ -73,6 +73,8 @@ seed('sections/one/alpha/evil.html', '<!doctype html><html><head><meta charset="
 seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
 seed('sections/inbox/chat/20261106-abc123.jsonl', '{"role":"user","text":"fake chat text"}\n', 'application/x-ndjson');
 seed('sections/inbox/chat/state.json', '{"chats":{"20261106-abc123":{"title":"fake chat title"}}}', 'application/json');
+seed('sections/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), 'image/jpeg');
+seed('sections/inbox/checklists/x/shot-note-20261106T101112123Z-ab12.png', Buffer.from([0x89, 0x50, 0x4e, 0x47]), 'image/png');
 seed('sections/one/alpha/data-read.js', `
 window.__result = (async () => {
   const read = async url => fetch(url, { credentials: 'include' }).then(async r => ({ status: r.status, text: await r.text() }), () => ({ status: 'blocked', text: '' }));
@@ -80,6 +82,9 @@ window.__result = (async () => {
     state: await read('/w/inbox/chat/state.json'),
     transcript: await read('/w/inbox/chat/20261106-abc123.jsonl'),
     fromApp: await read(${JSON.stringify(appOrigin)} + '/w/inbox/chat/20261106-abc123.jsonl'),
+    askPicture: await read('/w/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg'),
+    notePicture: await read('/w/inbox/checklists/x/shot-note-20261106T101112123Z-ab12.png'),
+    picturesFromApp: await read(${JSON.stringify(appOrigin)} + '/w/inbox/asks/x/answer.pic-20261106T101112123Z-ab12.jpg'),
     sibling: await read('data.json'),
   };
 })();
@@ -267,6 +272,9 @@ try {
   assert.equal(dataRead.state.status, 404);
   assert.equal(dataRead.transcript.status, 404);
   assert.equal(dataRead.fromApp.status, 'blocked');
+  assert.equal(dataRead.askPicture.status, 404, 'An answer picture is not a file under /w/.');
+  assert.equal(dataRead.notePicture.status, 404, 'A note picture is not a file under /w/.');
+  assert.equal(dataRead.picturesFromApp.status, 'blocked');
   assert.equal(dataRead.sibling.status, 200, 'Its own sibling file still loads.');
   assert.ok(!JSON.stringify([dataRead.state, dataRead.transcript, dataRead.fromApp]).includes('fake chat'), 'No stored text reached the page.');
 

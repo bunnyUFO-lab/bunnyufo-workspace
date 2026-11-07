@@ -227,6 +227,7 @@ export default function AgentDetails({ id, live, onSprite, opener }: { id: strin
       {body.jobs.length > 0 && (
         <section className="ad-section" aria-labelledby="ad-jobs" data-details-jobs>
           <h3 id="ad-jobs">Scheduled jobs</h3>
+          <a className="team-details-link" href={hubHash('team', 'schedules')} data-all-schedules>All schedules</a>
           <ul className="ad-jobs">
             {body.jobs.map(job => (
               <li key={`${job.name}/${job.schedule}`} data-job={job.name}>

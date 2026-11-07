@@ -99,12 +99,15 @@
 //        project than this repository's (its CLAUDE.md "Beads project:"), or was picked up already (--again). Stops at the first failure and lists the rows left.
 //        Afterwards: bd export -o .beads/issues.jsonl, commit it, then cards ask pickup <id>.
 //   cards ask list [--project <p>] [--answered | --open] [--all]     id, state, project, question
-//   cards ask get <id>                                                ask.json, answer.json, pickup.json, cancel.json; for a design
-//        review also one line per decision ("d1 approve", "d2 change: Bottom-left")
+//   cards ask get <id> [--into <dir>]                                 ask.json, answer.json, pickup.json, cancel.json; for a design
+//        review also one line per decision ("d1 approve", "d2 change: Bottom-left"). When the owner attached pictures (or drew), they are downloaded
+//        with no extra flag and each file's full path is printed ("saved: <path>").
+//   Pictures: they go into --into <dir> when given, else <git root>/.buw/pictures/<kind>-<id>/ (that folder is added to the checkout's
+//        info/exclude first, so it can never be committed), else the system temp folder. Open each file with your image reader.
 //   cards ask pickup <id> | cards ask cancel <id>                     exit 3 when someone else already did
 //   cards ask wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>] [--json]
 //        exit 0 once answered (prints what get prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or when the
-//        Ask expired; a snoozed Ask keeps waiting
+//        Ask expired; a snoozed Ask keeps waiting. Pictures are downloaded as for get (--json adds "saved")
 //   cards checklist create --project <p> (--file checklist.json | --title <t> --item <text> [--command <cmd> [--shell bash|powershell|cmd]]...) [--bead <b>] [--card <url>]
 //        [--kind verify|setup|investigate|develop] [--playtest --build <https url> [--platform web|windows|mac|linux|android|ios] [--look-for <text>]]
 //        --kind (or "kind" in checklist.json) says what the steps are for, so the Hub badges and filters them: verify (a live check, a
@@ -124,8 +127,9 @@
 //        command in --command with --shell and keep the text to where and why. --prose-ok skips the check (text that only looks like a command).
 //   cards checklist list [--project <p>] [--open | --submitted] [--all]    id, state, done/total, project, title
 //   cards checklist get <id> [--json] [--into <dir>]                        progress, the items (an item's command on the line under it), submit.json (for a playtest also its
-//        build, rating, verdict and issues in plain lines); --into downloads the
-//        owner's pictures (evidence-<step>-….png|jpg per step, shot-….png|jpg per playtest issue) and prints their paths
+//        build, rating, verdict and issues in plain lines). Once submitted, the owner's pictures (evidence-<step>-….png|jpg for every step,
+//        shot-….png|jpg per playtest issue, shot-note-….png|jpg for the note) are downloaded as above and their paths printed; --into <dir> picks the folder
+//        (and downloads them before the list is submitted too)
 //   cards checklist wait <id> [--timeout <minutes, 30, max 240>] [--every <seconds, 20, min 5>]
 //        exit 0 on submit (prints what get prints), 3 on cancel, 4 on timeout
 //   cards checklist pickup <id>     exit 2 when not submitted, 3 when already picked up
@@ -1475,7 +1479,71 @@ async function askList(flags) {
   }
 }
 
-async function askGet(id) {
+const ANSWER_PICTURE_NAME = /^answer\.pic-\d{8}T\d{9}Z-[a-z0-9]{4}\.(?:png|jpg)$/;
+
+/** The picture files an answer names: only well-formed names. A named file that is not there is reported when it is fetched. */
+function answerPictureNames(answer) {
+  const named = Array.isArray(answer?.pictures) ? answer.pictures.filter(name => typeof name === 'string' && ANSWER_PICTURE_NAME.test(name)) : [];
+  if (answer?.drawing && answer.drawing.png === 'answer.png') named.push('answer.png');
+  return [...new Set(named)];
+}
+
+/** Where downloaded pictures go: --into, else inside the checkout under .buw/pictures (kept out of git first), else the temp folder. */
+async function picturesDir(kind, id, flags) {
+  if (typeof flags?.into === 'string' && flags.into) { await mkdir(flags.into, { recursive: true }); return path.resolve(flags.into); }
+  const run = args => { const out = spawnSync('git', args, { encoding: 'utf8', timeout: 10000 }); return out.status === 0 ? out.stdout.trim() : ''; };
+  const top = run(['rev-parse', '--show-toplevel']);
+  const exclude = top ? run(['rev-parse', '--git-path', 'info/exclude']) : '';
+  if (top && exclude) {
+    try {
+      const file = path.resolve(exclude);
+      let text = '';
+      try { text = await readFile(file, 'utf8'); } catch { /* no file yet */ }
+      if (!text.split(/\r?\n/).some(line => line.trim() === '.buw/pictures/')) {
+        await mkdir(path.dirname(file), { recursive: true });
+        await appendFile(file, `${text && !text.endsWith('\n') ? '\n' : ''}.buw/pictures/\n`);
+      }
+      const dir = path.join(top, '.buw', 'pictures', `${kind}-${id}`);
+      await mkdir(dir, { recursive: true });
+      return path.resolve(dir);
+    } catch { /* falls to the temp folder: never write into a checkout without the exclude */ }
+  }
+  const dir = path.join(os.tmpdir(), 'cards-pictures', `${kind}-${id}`);
+  await mkdir(dir, { recursive: true });
+  return path.resolve(dir);
+}
+
+/** Download an item's pictures and return the full paths. A file already there is kept. A failed one prints a line and does not fail the command: the answer did arrive. */
+async function savePictures(kind, folder, id, names, flags) {
+  if (!names.length) return [];
+  const dir = await picturesDir(kind, id, flags);
+  const saved = [];
+  for (const name of names) {
+    const target = path.join(dir, name);
+    try {
+      let present = false;
+      try { present = (await readFile(target)).length > 0; } catch { /* not there yet */ }
+      if (!present) {
+        const bytes = await readInboxBytes(inboxPath(folder, id, name));
+        if (!bytes) throw new Error('not found');
+        await writeFile(target, bytes);
+      }
+      saved.push(target);
+    } catch (error) {
+      console.log(`picture not saved: ${name} (${error.message}). Try: cards ${kind} get ${id}`);
+    }
+  }
+  return saved;
+}
+
+/** What `get` prints under the answer once the pictures are down. */
+function printSaved(saved, count) {
+  if (!count) return;
+  console.log(`== pictures\nThe owner attached ${count} picture${count === 1 ? '' : 's'}. Open each file:`);
+  for (const file of saved) console.log(`saved: ${file}`);
+}
+
+async function askGet(id, flags = {}) {
   id = idSafe(id);
   const names = (await listInbox(`asks/${id}/`)).map(file => file.split('/').slice(2).join('/'));
   if (!names.length) throw new Error(`No ask ${id}.`);
@@ -1498,6 +1566,9 @@ async function askGet(id) {
   }
   const others = names.filter(name => !shown.includes(name));
   if (others.length) console.log(`== other files\n${others.join('\n')}`);
+  const answered = names.includes('answer.json') ? await readJson(inboxPath('asks', id, 'answer.json')) : null;
+  const named = answerPictureNames(answered);
+  printSaved(await savePictures('ask', 'asks', id, named, flags), named.length);
 }
 
 /** Wait for the owner's answer. Exit 0 once answered (prints what `get` prints, or { ask, answer } with --json), 3 on cancel, 4 on timeout or an expired Ask. */
@@ -1528,8 +1599,10 @@ async function askWait(id, flags) {
       if (view.state === 'answered' || view.state === 'picked up') {
         if (flags.json) {
           const answer = view.names.has('answer.json') ? await readJson(inboxPath('asks', id, 'answer.json')) : null;
-          console.log(JSON.stringify({ ask: view.ask, answer }));
-        } else await askGet(id);
+          const named = answerPictureNames(answer);
+          const saved = named.length ? await savePictures('ask', 'asks', id, named, flags) : null;
+          console.log(JSON.stringify({ ask: view.ask, answer, ...(saved ? { saved } : {}) }));
+        } else await askGet(id, flags);
         return;
       }
       if (view.state === 'expired' || Date.now() >= deadline) {
@@ -1876,7 +1949,7 @@ async function checklistNames(id) {
 }
 
 /** Everything `get` shows: the list, its state, progress and the Hub's and the agent's files. */
-const CHECKLIST_PICTURE_RE = /^(?:evidence-\d{2}|shot)-(?:\d{8}T\d{9}Z)-[a-z0-9]{4}\.(?:png|jpg)$/;
+const CHECKLIST_PICTURE_RE = /^(?:evidence-\d{2}|shot|shot-note)-(?:\d{8}T\d{9}Z)-[a-z0-9]{4}\.(?:png|jpg)$/;
 
 /** The bytes of an inbox file, or null when it is not there. */
 async function readInboxBytes(file) {
@@ -1897,15 +1970,18 @@ async function checklistRead(id) {
   const [submit, pickup, cancel] = await Promise.all([read('submit.json'), read('pickup.json'), read('cancel.json')]);
   // The newest picture per step, and the playtest screenshots, from the file names alone.
   const evidence = {};
+  const every = {};
   const shots = [];
+  const notePictures = [];
   for (const name of [...names].sort()) {
     if (!CHECKLIST_PICTURE_RE.test(name)) continue;
-    if (name.startsWith('shot-')) shots.push(name);
-    else evidence[name.slice(9, 11)] = name;
+    if (name.startsWith('shot-note-')) notePictures.push(name);
+    else if (name.startsWith('shot-')) shots.push(name);
+    else { evidence[name.slice(9, 11)] = name; (every[name.slice(9, 11)] ??= []).push(name); }
   }
-  for (const item of items) if (evidence[item.id]) item.evidence = evidence[item.id];
+  for (const item of items) if (evidence[item.id]) { item.evidence = evidence[item.id]; if (every[item.id].length > 1) item.pictures = every[item.id]; }
   const view = {
-    checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items, ...(shots.length ? { shots } : {}),
+    checklist, state: checklistState(names), done: items.filter(item => item.done).length, total: items.length, items, ...(shots.length ? { shots } : {}), ...(notePictures.length ? { notePictures } : {}),
     ...(submit ? { submit } : {}), ...(pickup ? { pickup } : {}), ...(cancel ? { cancel } : {}),
   };
   // Not part of the printed or JSON view: what `--into` downloads.
@@ -1923,9 +1999,10 @@ function printChecklist(view, asJson) {
   for (const item of items) {
     console.log(`${item.done ? '[x]' : '[ ]'} ${item.id} ${item.text}${item.done && item.at ? `  (${minute(item.at)})` : ''}`);
     if (item.command) console.log(item.command.split('\n').map(line => `     $ ${line}`).join('\n'));
-    if (item.evidence) console.log(`     evidence: ${item.evidence}`);
+    for (const name of item.pictures ?? (item.evidence ? [item.evidence] : [])) console.log(`     evidence: ${name}`);
   }
   for (const shot of view.shots ?? []) console.log(`screenshot: ${shot}`);
+  for (const name of view.notePictures ?? []) console.log(`note picture: ${name}`);
   if (checklist.kind === 'playtest') {
     console.log(`playtest: ${checklist.build} (${checklist.platform ?? 'web'})${checklist.lookFor ? `; look for: ${String(checklist.lookFor).replace(/\s+/g, ' ')}` : ''}`);
     const report = view.submit;
@@ -1992,9 +2069,23 @@ async function checklistList(flags) {
   for (const row of rows) if (row && (!flags.project || row.project === flags.project)) console.log([row.id, row.state, `${row.done}/${row.total}`, row.project, row.title].join('\t'));
 }
 
+/** A submitted list: every picture of it is downloaded and its full paths printed, with no flag. */
+async function checklistFinish(id, view, flags) {
+  const taking = view.state === 'submitted' || view.state === 'picked-up';
+  if (taking && view.pictures.length) {
+    const saved = await savePictures('checklist', 'checklists', id, view.pictures, flags);
+    if (flags.json) view.saved = saved;
+    printChecklist(view, flags.json);
+    if (!flags.json) printSaved(saved, view.pictures.length);
+    return;
+  }
+  printChecklist(view, flags.json);
+}
+
 async function checklistGet(id, flags) {
   id = idSafe(id);
   const view = await checklistRead(id);
+  if (flags.into === undefined) return checklistFinish(id, view, flags);
   if (flags.into !== undefined) {
     if (typeof flags.into !== 'string' || !flags.into) throw new Error('--into is a folder to put the pictures in.');
     await mkdir(flags.into, { recursive: true });
@@ -2033,7 +2124,7 @@ async function checklistWait(id, flags) {
     }
     if (view) {
       if (view.state === 'cancelled') { printChecklist(view, flags.json); throw new Exit(3); }
-      if (view.state === 'submitted' || view.state === 'picked-up') { printChecklist(view, flags.json); return; }
+      if (view.state === 'submitted' || view.state === 'picked-up') { await checklistFinish(id, view, flags); return; }
       if (Date.now() >= deadline) {
         console.log(`${view.checklist.id}\t${view.state}\t${view.done} of ${view.total} done\t${view.checklist.project}\t(timed out after ${minutes} min)`);
         throw new Exit(4);
@@ -3027,7 +3118,7 @@ async function inbox(command, args) {
   if (command === 'pr-sync') return prSync(flags);
   if (command === 'ask' && sub === 'create') return askCreate(flags);
   if (command === 'ask' && sub === 'list') return askList(flags);
-  if (command === 'ask' && sub === 'get' && id) return askGet(id);
+  if (command === 'ask' && sub === 'get' && id) return askGet(id, flags);
   if (command === 'ask' && sub === 'wait' && id) return askWait(id, flags);
   if (command === 'ask' && sub === 'pickup' && id) return claim('asks', idSafe(id), 'pickup.json', pickupBody(flags));
   if (command === 'ask' && sub === 'cancel' && id) return claim('asks', idSafe(id), 'cancel.json', { at: isoNow(), by: hostName() });

@@ -1,5 +1,4 @@
-// Run after npm run build. The other sideways rows on a phone (ws-ubo.2.3, ws-2vh.13): the Work lane chips, the Roadmap's breadcrumb and
-// the Roadmap's toolbar wrap at 640 px or less, and the Needs you filter, which needs three rows at 390 px, is one native select; no control needs a sideways swipe.
+// Run after npm run build. The other sideways rows on a phone (ws-ubo.2.3, ws-2vh.13): the Work lane chips, the Needs filter and the Work lane chips wrap at 640 px or less (the Roadmap's breadcrumb and toolbar have no phone: a phone has no Map), and the Needs you filter, which needs three rows at 390 px, is one native select; no control needs a sideways swipe.
 // Checks, at 390 and 320 px: each row is no wider than it is shown (scrollWidth <= clientWidth), the page does not scroll sideways, the last
 // control of the row is inside the screen and a tap on it works; the Needs filter shows every filter in at most two rows with the counts;
 // a wrapped row leaves the map on screen; 641 px and the desktop keep the one-row look (a scrolling filter with fades, a one-row toolbar);
@@ -108,58 +107,6 @@ try {
     await expect(page.locator(ROWS.work.last)).toHaveAttribute('aria-pressed', 'true');
     assert.deepEqual(await page.locator('.wk-lane').evaluateAll(list => list.filter(node => getComputedStyle(node).display !== 'none').map(node => node.dataset.lane)), ['done']);
 
-    step(`${width} px, Roadmap breadcrumb: the whole path shows, and a tap on the last link opens that roadmap`);
-    await page.goto(`${fixture.url}${ROWS.crumbs.hash}`);
-    await page.locator(ROWS.crumbs.ready).waitFor();
-    const crumb = await page.locator('.rm-crumb').evaluateAll(list => list.map(node => { const b = node.getBoundingClientRect(); return { left: b.left, right: b.right, text: node.textContent }; }));
-    assert.equal(crumb.length, 4, 'The project, the parent, this roadmap and the one inside it.');
-    assert.ok(crumb.every(item => item.left >= 0 && item.right <= width), `Every crumb is inside the screen (${JSON.stringify(crumb)}).`);
-    await fits(page, ROWS.crumbs.row, ROWS.crumbs.last, `Breadcrumb at ${width}`);
-    const bar = await page.locator('.hub-map-branchbar').boundingBox();
-    assert.ok(bar.y + bar.height < 844, `The bar leaves room under it (${bar.y + bar.height}).`);
-    await page.waitForTimeout(300);
-    const box = await page.locator('.hub-map-box').boundingBox();
-    assert.ok(box && box.y < 844 - 100 && box.height > 100, `The wrapped bar leaves the map on screen (${JSON.stringify(box)}).`);
-    await page.locator(ROWS.crumbs.last).tap();
-    await page.waitForFunction(() => location.hash.startsWith('#/~hub/map/longpath/lp-r3'));
-    await expect(page.locator('.rm-crumb.now')).toContainText('Breadcrumbs and toolbars');
-
-    step(`${width} px, Roadmap toolbar: Filter, Open and Key are all reachable by tap`);
-    await page.goto(`${fixture.url}${ROWS.toolbar.hash}`);
-    await page.locator('.hub-map-box svg').waitFor();
-    await fits(page, ROWS.toolbar.row, ROWS.toolbar.last, `Toolbar at ${width}`);
-    const bars = await page.locator('.hub-map-controls button').evaluateAll(list => list.filter(node => node.offsetParent).map(node => { const b = node.getBoundingClientRect(); return { left: b.left, right: b.right, height: Math.round(b.height) }; }));
-    assert.ok(bars.every(item => item.height >= 43.5 && item.left >= 0 && item.right <= width), `Every control is 44 px tall and inside the screen (${JSON.stringify(bars)}).`);
-    const lines = await page.locator('.hub-map-controls button').evaluateAll(list => new Set(list.filter(node => node.offsetParent).map(node => Math.round(node.getBoundingClientRect().top))).size);
-    assert.ok(lines <= 2, `The toolbar takes at most two lines on a phone, not ${lines}.`);
-    for (const name of ['Expand all', 'Collapse', 'Sprints', 'Key']) assert.equal(await page.locator(`.hub-map-controls button:has-text("${name}")`).count(), 0, `${name} is in the overflow button, not on the bar.`);
-    const filterButton = page.locator('.hub-map-controls button:has-text("Filter")');
-    await filterButton.tap();
-    await expect(filterButton).toHaveAttribute('aria-expanded', 'true');
-    await filterButton.tap();
-    await expect(filterButton).toHaveAttribute('aria-expanded', 'false');
-    await page.locator('.hub-map-controls [data-row-menu]').tap();
-    await page.getByRole('menuitem', { name: 'Key', exact: true }).tap();
-    await expect(page.locator('#hub-map-key')).toBeVisible();
-    const chip = page.locator('[data-filter-chip] .hub-filter-chip-text');
-    assert.equal((await chip.innerText()).length > 0, true, 'The Open chip has its label.');
-    const chipBox = await chip.boundingBox();
-    assert.ok(chipBox.x >= 0 && chipBox.x + chipBox.width <= width && chipBox.height >= 43.5, `The filter chip is reachable (${JSON.stringify(chipBox)}).`);
-    await chip.tap();
-    await expect(page.locator('.hub-map-controls button:has-text("Filter")')).toHaveAttribute('aria-expanded', 'true');
-    const mapBox = await page.locator('.hub-map-box').boundingBox();
-    assert.ok(mapBox && mapBox.y < 844 && mapBox.height > 100, `The wrapped toolbar leaves the map on screen (${JSON.stringify(mapBox)}).`);
-    await page.context().close();
-  }
-
-  step('The sideways check can fail: a wide child inside the toolbar is seen');
-  {
-    const page = await open({ width: 390, height: 844 }, PHONE);
-    await page.goto(`${fixture.url}${ROWS.toolbar.hash}`);
-    await page.locator(ROWS.toolbar.ready).waitFor();
-    await page.evaluate(() => { const wide = document.createElement('i'); wide.style.cssText = 'display:block;flex:none;width:1000px;height:1px'; document.querySelector('.hub-map-controls').append(wide); });
-    const measured = await page.locator(ROWS.toolbar.row).evaluate(node => node.scrollWidth > node.clientWidth);
-    assert.ok(measured || (await sideways(page)).length > 0, 'A 1000 px child shows up in the check.');
     await page.context().close();
   }
 
@@ -167,7 +114,7 @@ try {
   {
     const page = await open({ width: 390, height: 844 }, PHONE);
     for (const value of ['dark', 'light']) {
-      for (const key of ['needs', 'work', 'crumbs', 'toolbar']) {
+      for (const key of ['needs', 'work']) {
         await page.goto(`${fixture.url}${ROWS[key].hash}`);
         await page.locator(ROWS[key].ready).waitFor();
         await theme(page, value);
@@ -177,9 +124,9 @@ try {
     await page.context().close();
   }
 
-  step('Above 640 px nothing changes: the Needs filter chips and the toolbar keep their one-row scroll');
+  step('Above 640 px nothing changes: the Needs filter chips keep their one-row scroll, and on a window with a Map the toolbar and the breadcrumb do too');
   {
-    const page = await open({ width: 641, height: 800 });
+    const page = await open({ width: 1280, height: 800 });
     await page.goto(`${fixture.url}${ROWS.needs.hash}`);
     await page.locator('.hub-chips[aria-label="Needs you filter"] [data-filter="answered"]').waitFor();
     assert.equal(await page.locator('select[aria-label="Needs you filter"]').count(), 0, 'No select above 640 px.');
