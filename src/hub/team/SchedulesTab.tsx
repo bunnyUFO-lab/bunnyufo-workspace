@@ -3,6 +3,7 @@ import { hubHash } from '../../lib/route'
 import type { GithubSchedule, PcTask, ScheduleJob, ScheduleSource, ScheduleTimer, SchedulesView } from '../../lib/hubTeam'
 import { Fold, List, Section, Split } from '../../ui/Layout'
 import { useRoute } from './useRoute'
+import { AddJob, JobEdit } from './ScheduleEdit'
 import {
   cadenceWords, clockBoth, GUEST_LINE, jobHash, jobSummary, modelWords, NOT_REPORTED, oldLine, onWords, othersTitle, plainResult, promptNotes, resultWords, runLines, sourceLine, splitTasks, targetWords, taskStateWords, tasksCut, troubled, workflowCadence, zoneName,
 } from './schedulesModel'
@@ -98,7 +99,7 @@ function PcTasks({ source, now }: { source: ScheduleSource; now: number }) {
 }
 
 /** One list: its heading, where it comes from and how old that is, then the rows, or why there are none. */
-function SourceSection({ source, shown, now }: { source: ScheduleSource; shown: string | null; now: number }) {
+function SourceSection({ source, shown, now, refresh }: { source: ScheduleSource; shown: string | null; now: number; refresh: (signal: AbortSignal) => Promise<void> }) {
   const warn = oldLine(source, now)
   const items = source.items
   return (
@@ -118,6 +119,7 @@ function SourceSection({ source, shown, now }: { source: ScheduleSource; shown: 
           </List>
         )}
         {!items.length && source.text && <p className="hub-empty" data-schedule-empty>{source.text}</p>}
+        {source.id === 'hermes-jobs' && <AddJob source={source} refresh={refresh} listed={(items as ScheduleJob[]).map(job => job.name)} />}
       </section>
     </Section>
   )
@@ -126,7 +128,7 @@ function SourceSection({ source, shown, now }: { source: ScheduleSource; shown: 
 const Fact = ({ name, children, data }: { name: string; children: ReactNode; data: string }) => <div data-fact={data}><dt>{name}</dt><dd>{children}</dd></div>
 
 /** One Hermes job, all of it: where it posts, the model, the times, the last result and the whole prompt. Read only. */
-function JobPage({ job, source }: { job: ScheduleJob | null; source: ScheduleSource | undefined }) {
+function JobPage({ job, source, refresh }: { job: ScheduleJob | null; source: ScheduleSource | undefined; refresh: (signal: AbortSignal) => Promise<void> }) {
   const back = <a className="team-details-link sc-back" href={hubHash('team', 'schedules')} data-schedule-back>All schedules</a>
   if (!job || !source) return <div className="team-detail tk-page" data-job-page="">{back}<p className="hub-empty" data-job-gone>This job is not in the Hermes host&apos;s export.</p></div>
   const zone = source.timezone
@@ -148,6 +150,7 @@ function JobPage({ job, source }: { job: ScheduleJob | null; source: ScheduleSou
         </span>
         <p className="team-dim">{words || 'Runs on the schedule below.'}</p>
       </header>
+      <JobEdit job={job} source={source} refresh={refresh} />
       <section className="ad-section" aria-labelledby="sc-when">
         <h3 id="sc-when">When it runs</h3>
         <dl className="ad-list">
@@ -201,14 +204,14 @@ export default function SchedulesTab({ page, head, desktop }: { page: { source: 
       {data && (
         <>
           <p className="ad-note team-dim" data-schedules-copy>{data.note}</p>
-          {data.sources.map(source => <SourceSection key={source.id} source={source} shown={shown} now={now} />)}
+          {data.sources.map(source => <SourceSection key={source.id} source={source} shown={shown} now={now} refresh={load.refresh} />)}
         </>
       )}
     </div>
   )
   const detail = page && !data
     ? <div className="team-detail">{guest ? <p className="hub-empty">{GUEST_LINE}</p> : <p className={load.error ? 'hub-error' : 'hub-empty'}>{load.error ?? 'Loading…'}</p>}</div>
-    : data && shown !== null ? <JobPage job={items.find(job => job.name === shown) ?? null} source={jobs} /> : undefined
+    : data && shown !== null ? <JobPage job={items.find(job => job.name === shown) ?? null} source={jobs} refresh={load.refresh} /> : undefined
   const split = <Split list={list} empty="Pick a job from the list." detail={detail} />
   return desktop ? <div className="tk-shell"><div className="tk-top">{head}</div>{split}</div> : split
 }

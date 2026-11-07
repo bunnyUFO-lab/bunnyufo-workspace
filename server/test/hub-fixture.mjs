@@ -39,7 +39,7 @@ const HOGS = [
   { name: 'node.exe', cmd: 'node -e "while (1) {}"', cores: 1.0, minutes: 4, orphan: false, ramMB: 40, action: 'stopped' },
 ];
 
-export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, otherSchedules = false, oldSessions = false, heartbeat = false, work = false, workSprint = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
+export async function startHubFixture({ hermes = false, hermesOptions = {}, seedData = true, discordAsks = false, checklists = false, commandChecklist = false, busyToday = false, secondSection = false, thirdSection = false, pc = false, agentConfig = false, jobEdits = false, otherSchedules = false, oldSessions = false, heartbeat = false, work = false, workSprint = false, workSide = false, workSearch = false, links = false, signing = false, chatRuns = false, sheets = false, env = {}, fetchImpl } = {}) {
   await mkdir(path.join(root, '.cache'), { recursive: true });
   const base = await mkdtemp(path.join(root, '.cache', 'hub-fixture-'));
   const now = new Date();
@@ -177,9 +177,10 @@ A long list.
     const soulText = ['## Role', 'You are the owner\'s assistant.', 'Always answer in plain words.', 'Key for tests: sk-ant-api03-FAKEFAKEFAKEFAKE1234567890', ''].join('\n');
     const model = (provider, name) => ({ provider, model: name });
     const modelOptions = { main: [model('openai-codex', 'gpt-6-sol'), model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')], briefs: [model('anthropic', 'claude-sonnet-5-5'), model('anthropic', 'claude-haiku-5-5'), model('deepseek', 'deepseek-v4-pro'), model('deepseek', 'deepseek-flash')] };
+    // `jobEdits` (with 'schedules') adds the host's flag for a signed job change and two made-up places to post (ws-eh2 G); pair it with `signing`.
     // 'schedules' and 'schedules-stale' add the fields of ws-eh2: four made-up jobs with every setting, two host timers and a timezone.
     const old = agentConfig === 'stale' || agentConfig === 'schedules-stale';
-    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: old ? 9 * 60 : 12, soulText, modelOptions, schedules: String(agentConfig).startsWith('schedules') }));
+    seedAgentConfig(fake, agentConfigJson({ now, exportedMinutesAgo: old ? 9 * 60 : 12, soulText, modelOptions, schedules: String(agentConfig).startsWith('schedules'), jobEdits }));
   }
 
   if (otherSchedules) {

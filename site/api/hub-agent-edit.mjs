@@ -11,7 +11,8 @@
 // The signed-in owner's press on the Edit page needs no Ask: `applyDirect` and `undo` sign the same file with the same `signChange`. They are called
 // only by the web route that checked the request came through the login proxy from the app's own origin (hub.mjs, `requestProfileChange`). Nothing
 // that an agent holds reaches that route, and an agent's Ask never goes through it: only `afterAnswer` (the owner's Apply) signs for an Ask.
-// `signChange` is internal. Do not export it.
+// `signChange` and `signFile` are internal. Do not export them. `applyJobDirect` and `undoJob` sign a `job-change` (hub-job-change.mjs, the
+// Schedules page) the same way, from a web route of its own that shares the press's guard; an agent's Ask never signs one in this file.
 //
 // The Ask is an agent's file, so `agentEdit` is only a proposal: every claim in it is checked
 // here before anything is written (the shape in agent-edit.mjs, the limits and the secret check again in hub-personas.mjs, the models against the
@@ -21,6 +22,7 @@ import { validateAgentEdit } from './agent-edit.mjs';
 import { effectiveSet, exportFreshness, changeState } from './hub-agent-config.mjs';
 import { day8, randomId } from './hub-model.mjs';
 import { newNonce, sign } from './signing.mjs';
+import { changeOpen, fromOf, JOB_KIND, JOB_NAME_RE, JOB_OPS, JOB_PROFILE, jobChangeState, jobIs, pinOf, promptEditable, promptProblem, sha256Text, TARGET_RE, validSchedule } from './hub-job-change.mjs';
 
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 /**
@@ -105,8 +107,13 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
    * check and `validChange` require it, even for an owner's press, which has no Ask. Nothing on the host learns which flow a change came from.
    */
   async function signChange({ id, edit, from, to, user, at }) {
+    return await signFile(id, { kind: 'profile-change', profile: edit.profile, from, to }, user, at);
+  }
+
+  /** The tail every signed file shares: the common keys, the signature and the create-only store. */
+  async function signFile(id, fields, user, at) {
     const doc = sign({
-      v: 1, kind: 'profile-change', change: id, profile: edit.profile, from, to,
+      v: 1, ...fields, change: id,
       expires: new Date(at.getTime() + CHANGE_VALID_MS).toISOString(), nonce: newNonce(), at: at.toISOString(), by: user, ask: id,
     }, profiles.signingKey);
     await profiles.putApproval(id, doc);
@@ -206,5 +213,152 @@ export function createAgentEdits({ personas, profiles = null, log = () => {} }) 
     }
   }
 
-  return { afterAnswer, blockedReason, applyDirect, undo };
+  // --- job changes (ws-eh2 G) ---
+
+  const TO_KEYS = ['schedule', 'prompt', 'provider', 'model'];
+  const bad = message => problem(message, 400);
+
+  function checkPin(to, options, also) {
+    if (to.provider === null && to.model === null) return;
+    if (typeof to.provider !== 'string' || typeof to.model !== 'string') throw bad('A model is two ids, or both empty to follow the profile.');
+    const offered = [...options, ...also].some(option => option.provider === to.provider && option.model === to.model);
+    if (!offered) throw problem(`${to.provider} · ${to.model} is not a model the Hermes host offers for this profile.`);
+  }
+
+  /**
+   * What a job change would do, or a refusal with words (400 for a body that is wrong, 409 for a state that is). A press and a way back run the same checks:
+   * a signing key; a fresh export; `jobEdits` on the briefs block; the job in that export; `base` equal to its `rev` (the signed `fromRev` is the export's, never the body's);
+   * a real change; nothing of this job still waiting. `from` is read from the export at this moment. `also`: models that need not be in the host's list
+   * (a way back, whose model comes from a signed `from`); the host's own check still decides.
+   */
+  async function checkJob({ op, job, base, to, at, also = [] }) {
+    if (!profiles?.signingKey) throw problem('Changing a job is off: the server has no signing key.');
+    if (!JOB_OPS.includes(op)) throw bad('That is not a job operation.');
+    if (typeof job !== 'string' || !JOB_NAME_RE.test(job)) throw bad('That is not a job name.');
+    const exported = await profiles.exported(at);
+    const block = exported?.profiles[JOB_PROFILE];
+    if (!exported || !block) throw problem('The Hermes host has not published its settings yet.');
+    if (exportFreshness(exported, at) !== 'fresh') throw problem('The last export from the Hermes host is old, so its jobs may have changed. Wait for a new one.');
+    if (block.jobEdits !== true) throw problem('This needs an update on the Hermes host first.');
+    const live = (block.cron ?? []).find(item => item.name === job) ?? null;
+    const options = block.modelOptions ?? [];
+    let fromRev = '';
+    let from = null;
+    let out = null;
+    if (op === 'add') {
+      if (base !== '') throw bad('A new job has no version to compare.');
+      if (live) throw problem('A job with that name exists already.');
+      if (!to || typeof to !== 'object' || Array.isArray(to) || Object.keys(to).sort().join() !== 'model,postsTo,prompt,provider,schedule') throw bad('A new job needs a schedule, prompt, place to post and model.');
+      if (!validSchedule(to.schedule)) throw bad(SCHEDULE_TEXT);
+      const why = promptProblem(to.prompt);
+      if (why) throw bad(why);
+      if (to.prompt.startsWith('-')) throw bad('The prompt cannot start with a dash.');
+      if (typeof to.postsTo !== 'string' || !TARGET_RE.test(to.postsTo) || !(block.deliverOptions ?? []).some(item => item.id === to.postsTo)) throw problem('The Hermes host does not offer that place to post.');
+      checkPin(to, options, also);
+      out = { schedule: to.schedule, prompt: to.prompt, postsTo: to.postsTo, provider: to.provider, model: to.model };
+    } else {
+      if (!live) throw problem('The Hermes host does not list that job any more. Reload.');
+      if (!live.rev) throw problem("The Hermes host did not send this job's version yet.");
+      fromRev = live.rev;
+      if (typeof base !== 'string' || base !== fromRev) throw problem(JOB_STALE_TEXT);
+      from = fromOf(live);
+      if (op === 'edit') {
+        if (!to || typeof to !== 'object' || Array.isArray(to) || !Object.keys(to).length || !Object.keys(to).every(name => TO_KEYS.includes(name))) throw bad('A job edit changes the schedule, prompt or model.');
+        if (('provider' in to) !== ('model' in to)) throw bad('The provider and the model come together.');
+        out = {};
+        if ('schedule' in to) {
+          if (!validSchedule(to.schedule)) throw bad(SCHEDULE_TEXT);
+          if (to.schedule !== live.schedule) out.schedule = to.schedule;
+        }
+        if ('prompt' in to) {
+          const why = promptProblem(to.prompt);
+          if (why) throw bad(why);
+          if (!promptEditable(live)) throw problem('This prompt was cut or had secret-like text replaced in the export, so it cannot be edited here.');
+          if (!live.promptSha256) throw problem("The Hermes host did not send this prompt's hash yet.");
+          if (sha256Text(to.prompt) !== live.promptSha256) out.prompt = to.prompt;
+        }
+        if ('provider' in to) {
+          checkPin(to, options, also);
+          const pin = pinOf(live);
+          if (pin.half) throw problem('This job has a model without a provider, or the other way round, which this page does not change. Fix it on the host first.');
+          if (to.provider !== pin.provider || to.model !== pin.model) Object.assign(out, { provider: to.provider, model: to.model });
+        }
+        if (!Object.keys(out).length) throw problem('That is what the job has already.');
+      } else {
+        if (to !== undefined && to !== null) throw bad('This operation has nothing to change.');
+        const on = live.enabled === true && live.state !== 'paused';
+        if (op === 'pause' && !on) throw problem('The job is paused already.');
+        if (op === 'resume' && on) throw problem('The job is on already.');
+      }
+    }
+    // A change not yet in the export would make the next one a `stale` on the host: wait for the export, up to 20 minutes after the host's result.
+    const open = (await profiles.jobChanges(at)).filter(item => item.change.job === job).find(item => {
+      const state = jobChangeState({ change: item.change, result: item.result, exported, at });
+      return changeOpen({ state, result: item.result, at });
+    });
+    if (open) throw problem(`A change of the job ${job} is still waiting for the Hermes host (${open.change.change}).`);
+    return { op, job, fromRev, from, to: out, live };
+  }
+
+  async function signJob(checked, user, at) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const id = `${day8(at)}-job-${JOB_PROFILE}-${randomId(4)}`;
+      try {
+        await signFile(id, { kind: JOB_KIND, profile: JOB_PROFILE, op: checked.op, job: checked.job, fromRev: checked.fromRev, from: checked.from, to: checked.to }, user, at);
+        return id;
+      } catch (error) {
+        if (error?.conflict !== true) throw error;
+      }
+    }
+    throw problem('Could not pick a free name for the change; try again.');
+  }
+
+  /**
+   * The signed-in owner's press on a job: signs at once, with no Ask. The caller (hub.mjs, the job-change route) has checked the request.
+   * `{ op, job, base, to }`; `base` is the `rev` the page showed ('' for add). `nextRunAt` is what the export said before, for "Next run moved".
+   */
+  async function applyJobDirect({ op, job, base, to, user, at }) {
+    if (!user) throw problem('Sign in to change a job.', 401);
+    return await locked('jobs', async () => {
+      const checked = await checkJob({ op, job, base, to, at });
+      return { change: await signJob(checked, user, at), op, job, from: checked.from, to: checked.to, nextRunAt: checked.live?.nextRunAt ?? null };
+    });
+  }
+
+  /**
+   * The way back of a job: the newest change of that job, one the Hub signed (the loader verified it), with an `ok` result, and still what runs. The values come
+   * from its signed `from`, for the fields it changed only. A removal or a new job has none.
+   */
+  async function undoJob({ changeId, base, user, at }) {
+    if (!user) throw problem('Sign in to change a job.', 401);
+    return await locked('jobs', async () => {
+      const all = await profiles.jobChanges(at);
+      const target = all.find(item => item.change.change === changeId);
+      if (!target) throw problem('That is not a change of a job. Reload.');
+      if (all.find(item => item.change.job === target.change.job).change.change !== changeId) throw problem('Only the newest change of a job can be undone. Reload.');
+      if (target.result?.outcome !== 'applied' || target.result.code !== 'ok') throw problem('That change did not finish, so there is nothing to go back from.');
+      const change = target.change;
+      if (!['edit', 'pause', 'resume'].includes(change.op)) throw problem('A removal or a new job has no way back from here.');
+      const live = (await profiles.exported(at))?.profiles[JOB_PROFILE]?.cron?.find(item => item.name === change.job);
+      if (!jobIs(live, change)) throw problem('That change no longer runs, because the job was changed after it. Edit the job instead.');
+      let op = change.op;
+      let to;
+      if (op === 'pause') op = 'resume';
+      else if (op === 'resume') op = 'pause';
+      else {
+        to = {};
+        if ('schedule' in change.to) to.schedule = change.from.schedule;
+        if ('prompt' in change.to) to.prompt = change.from.prompt;
+        if ('provider' in change.to) Object.assign(to, { provider: change.from.provider, model: change.from.model });
+      }
+      const also = change.from.provider ? [{ provider: change.from.provider, model: change.from.model }] : [];
+      const checked = await checkJob({ op, job: change.job, base, to, at, also });
+      return { change: await signJob(checked, user, at), op, job: change.job, from: checked.from, to: checked.to, nextRunAt: checked.live?.nextRunAt ?? null, undoOf: changeId };
+    });
+  }
+
+  return { afterAnswer, blockedReason, applyDirect, undo, applyJobDirect, undoJob };
 }
+
+const SCHEDULE_TEXT = 'That schedule is not allowed. It needs five fields, one minute and up to four hours, so a job runs at most four times a day.';
+export const JOB_STALE_TEXT = 'The job changed on the host since you opened this. Reload.';

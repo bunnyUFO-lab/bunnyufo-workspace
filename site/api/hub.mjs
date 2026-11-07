@@ -54,6 +54,7 @@ import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
 import { cleanHostSchedules, HOST_SCHEDULES_FILE, HOST_SCHEDULES_MAX_BYTES } from './hub-other-schedules.mjs';
 import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
+import { failTitle, JOB_ID_RE, jobChangeState, signedPromptHashes, signedRemovedJobs, validJobChange } from './hub-job-change.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
@@ -341,6 +342,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       signingKey,
       exported: at => loadAgentConfig(at),
       changes: (profile, at) => loadProfileChanges(profile, at),
+      jobChanges: at => loadJobChanges(at),
       putApproval: (id, doc) => putCreateOnly(`agent-config/changes/${id}/approved.json`, `${JSON.stringify(doc, null, 2)}\n`, 'application/json', Object.assign(new Error('That change was already signed.'), { status: 409, conflict: true })),
     },
   });
@@ -580,25 +582,47 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   }
 
   /** Every signed change of both profiles with its result, newest first (the work of loadProfileChanges, listed once). */
-  async function loadAllChanges(at) {
-    const found = new Map();
-    for (const month of monthPrefixes(at)) {
-      const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
-      for (const object of objects) {
-        const parts = object.key.slice(folder('agent-config').length).split('/');
-        // Exactly changes/<id>/<file>.
-        if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
-        if (!found.has(parts[1])) found.set(parts[1], new Map());
-        found.get(parts[1]).set(parts[2], object.lastModified ? new Date(object.lastModified).toISOString() : '');
+  async function loadAllChanges(at) { return loadSigned(at, false); }
+
+  /** Every signed job change with its result, newest first (`jobs`: the ones of kind `job-change`, whose folder ids are `<day>-job-briefs-<rand4>`). The two kinds never share the 20 newest. */
+  async function loadJobChanges(at) { return loadSigned(at, true); }
+
+  /**
+   * The folders under agent-config/changes of this and last month, `id -> Map(file -> last-modified)`. Both kinds of change are in it, and callers that start
+   * together (the sweep reads both) share one listing while it runs; a listing is never reused once it has finished, so a change just signed is seen at once.
+   */
+  const listing = new Map();
+  function listChangeFolders(at) {
+    const months = monthPrefixes(at);
+    const id = months.join();
+    if (listing.has(id)) return listing.get(id);
+    const run = (async () => {
+      const found = new Map();
+      for (const month of months) {
+        const { objects } = await bucket.list(key(`agent-config/changes/${month}`));
+        for (const object of objects) {
+          const parts = object.key.slice(folder('agent-config').length).split('/');
+          // Exactly changes/<id>/<file>.
+          if (parts.length !== 3 || parts[0] !== 'changes' || !validId(parts[1])) continue;
+          if (!found.has(parts[1])) found.set(parts[1], new Map());
+          found.get(parts[1]).set(parts[2], object.lastModified ? new Date(object.lastModified).toISOString() : '');
+        }
       }
-    }
+      return found;
+    })().finally(() => listing.delete(id));
+    listing.set(id, run);
+    return run;
+  }
+
+  async function loadSigned(at, jobs) {
+    const found = await listChangeFolders(at);
     const out = [];
-    for (const [id, names] of [...found].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
+    for (const [id, names] of [...found].filter(([name]) => JOB_ID_RE.test(name) === jobs).sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 20)) {
       if (!names.has('approved.json')) continue;
       // Only an approval this Hub signed counts: a file anyone else put there (the passphrase writes unmarked) verifies with no key.
       const doc = await cached(`agent-config/changes/${id}/approved.json`);
       if (!signingKey || !verifySigned(doc, createPublicKey(signingKey))) continue;
-      const change = validChange(doc);
+      const change = jobs ? validJobChange(doc) : validChange(doc);
       if (!change || change.change !== id) continue;
       let result = null;
       let landedAt = '';
@@ -619,15 +643,31 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * every 30 s and never twice at once. A change that has an event is skipped (`change` names it). It never fails a request, and its words are
    * fixed: CHANGE_CODES, never text from the host. A race may write one event twice, which is harmless.
    */
+  const JOB_DONE_WORDS = { edit: 'changed', pause: 'paused', resume: 'resumed', remove: 'removed', add: 'added' };
   let noteChanges = { last: 0, running: false };
   async function noteChangeResults(at) {
     if (noteChanges.running || (at.getTime() >= noteChanges.last && at.getTime() - noteChanges.last < 30_000)) return;
     noteChanges = { last: at.getTime(), running: true };
     try {
-      const rows = (await loadAllChanges(at))
-        .filter(item => item.result && at.getTime() - Date.parse(item.landedAt || item.result.at) < 24 * 3600 * 1000);
-      if (!rows.length) return;
+      const recent = item => item.result && at.getTime() - Date.parse(item.landedAt || item.result.at) < 24 * 3600 * 1000;
+      const [all, allJobs] = await Promise.all([loadAllChanges(at), loadJobChanges(at)]);
+      const rows = all.filter(recent);
+      const jobRows = allJobs.filter(recent);
+      if (!rows.length && !jobRows.length) return;
       const { events } = await loadEvents(at);
+      if (jobRows.length) {
+        // A job change: `job-change` when the host confirmed it, or the export already shows it (`live` wins over a failed code, since `job-check` and `expired` can mean it went through).
+        const exported = await loadAgentConfig(at).catch(() => null);
+        for (const { change, result, landedAt } of jobRows) {
+          if (events.some(event => event.change === change.change && (event.kind === 'job-change' || event.kind === 'alert'))) continue;
+          const state = jobChangeState({ change, result, exported, at });
+          if (state === 'failed') {
+            await putHubEvent({ ts: landedAt || result.at, kind: 'alert', change: change.change, job: change.job, title: failTitle(change, result.code), host: 'hub', source: 'hub', by: change.by }, new Date(landedAt || result.at));
+          } else {
+            await putHubEvent({ ts: landedAt || result.at, kind: 'job-change', change: change.change, job: change.job, title: `${change.job}: ${JOB_DONE_WORDS[change.op]}`, host: 'hub', source: 'hub', by: change.by }, new Date(landedAt || result.at));
+          }
+        }
+      }
       for (const { change, result, landedAt } of rows) {
         if (events.some(event => event.change === change.change && (event.kind === 'profile-change' || event.kind === 'alert'))) continue;
         const ts = landedAt || result.at;
@@ -664,7 +704,9 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       const exported = await loadAgentConfig(at);
       if (!exported || exportFreshness(exported, at) !== 'fresh') return;
       const got = await fresh(SEEN_FILE);
-      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported });
+      // The prompts the Hub itself signed are not news (a change from the Schedules page, or a way back to the earlier prompt).
+      const signedChanges = await loadJobChanges(at);
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), seenAt: typeof got?.value?.at === 'string' ? got.value.at : '', exported, signed: signedPromptHashes(signedChanges), removed: signedRemovedJobs(signedChanges) });
       if (!changed) return;
       if (alerts.length) {
         const { events } = await loadEvents(at);
@@ -780,6 +822,54 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
   const originOfAddress = value => { try { return new URL(String(value)).origin; } catch { return ''; } };
 
   /**
+   * The guard every owner's press goes through, the model change and the job change alike, so the two cannot drift. `what` is the noun in its words
+   * ('model', 'job'). A press needs a user (`Remote-User` only: `Authorization` is never read), must not come from the content origin whatever the allowed
+   * list says (an agent's card page is served there and the session cookie reaches it), and `Sec-Fetch-Site`, when the browser sends it, must be same-origin.
+   */
+  function ownerPress(user, headers, contentOrigin, what) {
+    if (!user) throw fail(`Sign in to change a ${what}.`, 401);
+    const origin = String(headers.origin ?? '');
+    const content = originOfAddress(contentOrigin || env.BUW_CONTENT_ORIGIN || '');
+    if (content && originOfAddress(origin) === content) throw fail(`A card page cannot change a ${what}.`, 403);
+    const site = headers['sec-fetch-site'];
+    if (site !== undefined && String(site).toLowerCase() !== 'same-origin') throw fail(`A ${what} is changed from this site's own page.`, 403);
+  }
+
+  /**
+   * The owner's press on a Hermes job (ws-eh2 G), `POST /hub/team/briefs/job-change`: signs at once, no Ask. Strict body, one of
+   *   `{ op, job, base, to }`   `op` is edit, pause, resume, remove or add; `base` the `rev` the page showed ('' for add); `to` as the op needs (none for pause, resume, remove)
+   *   `{ undo: '<change id>', base }`
+   * Any other key is a 400. Behind the same guard as the model press (`ownerPress`); the only caller of `applyJobDirect` and `undoJob`.
+   * Answers 201 `{ change, state: 'waiting', op, job, from, to, nextRunAt }`.
+   */
+  async function requestJobChange(raw, user, at, { headers = {}, contentOrigin = '' } = {}) {
+    ownerPress(user, headers, contentOrigin, 'job');
+    const OUT_OF_DATE = 'This page is out of date. Reload it.';
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.base !== 'string') throw fail(OUT_OF_DATE, 400);
+    const undoing = raw.undo !== undefined;
+    const allowed = undoing ? ['undo', 'base'] : ['op', 'job', 'base', 'to'];
+    const extra = Object.keys(raw).filter(name => !allowed.includes(name));
+    if (extra.length) throw fail(`A job change has no field ${extra.slice(0, 3).join(', ')}.`, 400);
+    let made;
+    if (undoing) {
+      if (!JOB_ID_RE.test(String(raw.undo))) throw fail('That is not a job change id.', 400);
+      made = await agentEditFlow.undoJob({ changeId: raw.undo, base: raw.base, user, at });
+    } else {
+      made = await agentEditFlow.applyJobDirect({ op: raw.op, job: raw.job, base: raw.base, to: raw.to, user, at });
+    }
+    // The record of the press, beside the result event the sweep writes later. A failed write is logged and does not fail the press: the change is signed.
+    try {
+      await putHubEvent({
+        ts: at.toISOString(), kind: 'job-change-sent', change: made.change, job: made.job, title: `Job change sent: ${made.job}`,
+        host: 'hub', source: 'hub', by: user, ...(made.undoOf ? { undoOf: made.undoOf } : {}),
+      }, at);
+    } catch (error) {
+      log(`[hub] the event for ${made.change} was not written: ${String(error.message).slice(0, 120)}`);
+    }
+    return { status: 201, body: { change: made.change, state: 'waiting', op: made.op, job: made.job, from: made.from, to: made.to, nextRunAt: made.nextRunAt } };
+  }
+
+  /**
    * The signed-in owner's press on the Edit page (ws-ubo.4): "Change and restart Hermes <profile>". It signs at once and writes no Ask. Strict body, one of
    *   `{ primary, fallbacks, base }`   a new order, `base` being the order the page showed as current
    *   `{ undo: '<change id>', base }`  back to the order that change replaced
@@ -791,13 +881,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
    * `Remote-User` only: `Authorization` is never read here.
    */
   async function requestProfileChange(agentId, raw, user, at, { headers = {}, contentOrigin = '' } = {}) {
-    if (!user) throw fail('Sign in to change a model.', 401);
-    const origin = String(headers.origin ?? '');
-    const content = originOfAddress(contentOrigin || env.BUW_CONTENT_ORIGIN || '');
-    if (content && originOfAddress(origin) === content) throw fail('A card page cannot change a model.', 403);
-    const site = headers['sec-fetch-site'];
-    if (site !== undefined && String(site).toLowerCase() !== 'same-origin') throw fail('A model is changed from this site\'s own page.', 403);
-    const agent = (await allAgents()).find(item => item.id === agentId);
+    ownerPress(user, headers, contentOrigin, 'model');
+    const agent =(await allAgents()).find(item => item.id === agentId);
     if (!agent) throw fail('No such agent.', 404);
     if (!agent.profile) throw fail('This agent has no Hermes profile to change.', 404);
     if (Object.keys(raw).some(name => name !== 'fallbacks' && VIEW_ONLY.includes(name))) throw fail(VIEW_ONLY_MESSAGE, 403);
@@ -2205,7 +2290,10 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             const exported = await loadAgentConfig(at).catch(() => null);
             void noteJobPrompts(at);
             const [status, hostFile] = await Promise.all([loadPcStatus(at).catch(() => null), loadHostSchedules()]);
-            reply(schedulesView({ exported, status, hostFile, at }));
+            void noteChangeResults(at);
+            // The job changes of the last day, for the page's waiting / running / next-run-moved row and its Go back; a failed read leaves the page without them.
+            const changes = exported ? await loadJobChanges(at).catch(() => []) : [];
+            reply(schedulesView({ exported, status, hostFile, at, changes, signedIn: !!user }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);
@@ -2316,6 +2404,8 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
           if (!user) throw fail('Sign in to edit a persona.', 401);
           if (viewOnlyKey(raw)) throw fail(VIEW_ONLY_MESSAGE, 403);
           send({ status: 200, body: match[2] ? await personaStore.revert(match[1], raw, user, at) : await personaStore.save(match[1], raw, user, at) });
+        } else if (route === '/hub/team/briefs/job-change') {
+          send(await requestJobChange(raw, user, at, { headers: request.headers, contentOrigin }));
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/profile-change$/.exec(route))) {
           send(await requestProfileChange(match[1], raw, user, at, { headers: request.headers, contentOrigin }));
         } else if ((match = /^\/hub\/team\/([a-z0-9-]+)\/avatar$/.exec(route))) {

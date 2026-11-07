@@ -158,6 +158,14 @@ function cleanJob(raw) {
   return job;
 }
 
+const MAX_DELIVER_OPTIONS = 10;
+/** A target a new job may post to: `{ id: 'discord:<digits>', label }`. Anything else is dropped. */
+function cleanDeliverOption(raw) {
+  if (!isObject(raw) || typeof raw.id !== 'string' || !/^discord:[0-9]+(?::[0-9]+)?$/.test(raw.id) || !id(raw.id)) return null;
+  const label = shortText(raw.label, 60);
+  return label && label !== REDACTED ? { id: raw.id, label } : null;
+}
+
 /** One timer of the Hermes host: what it is for, when it runs and how its last run ended. No run times: the exporter leaves them out on purpose. */
 function cleanTimer(raw) {
   if (!isObject(raw)) return null;
@@ -221,6 +229,10 @@ function cleanProfile(raw) {
   const soul = cleanSoul(raw.soul);
   if (soul) out.soul = soul;
   if (Array.isArray(raw.cron)) out.cron = raw.cron.map(cleanJob).filter(Boolean).slice(0, MAX_CRON);
+  // Job edits (ws-eh2 G): the host says it can apply a signed job change, and which targets a new job may post to. Both are kept only when sent.
+  // `deliverOptions` ids are raw channel targets: they reach the schedules route (signed in only) and nothing else (agentDetails drops them).
+  if (raw.jobEdits === true) out.jobEdits = true;
+  if (Array.isArray(raw.deliverOptions)) out.deliverOptions = raw.deliverOptions.map(cleanDeliverOption).filter(Boolean).slice(0, MAX_DELIVER_OPTIONS);
   // The zone the profile's cron text runs in (ws-eh2): an id such as `America/Chicago`; absent from an older exporter.
   if (id(raw.timezone)) out.timezone = raw.timezone;
   return out;
@@ -271,6 +283,10 @@ export const CHANGE_CODES = {
   health: 'The gateway did not stay up after the restart',
   interrupted: 'The host stopped in the middle of the change',
   'rollback-failed': 'The host could not put the old settings back',
+  // Only a signed job change (hub-job-change.mjs) gets these three.
+  'unknown-job': 'The host has no job of that name',
+  'job-refused': 'Hermes refused the change',
+  'job-check': 'The host could not confirm the change',
 };
 export const CHANGE_WINDOW_MS = 24 * 3600 * 1000;
 export const CHANGE_MAX_FALLBACKS = 4;
@@ -411,7 +427,7 @@ export function agentDetails({ agent, exported = null, at, persona = null, prese
   let settings = null;
   const prompts = [];
   if (block) {
-    const { soul, cron, ...rest } = block;
+    const { soul, cron, deliverOptions: _targets, ...rest } = block;
     settings = rest;
     if (soul) {
       const notes = [];

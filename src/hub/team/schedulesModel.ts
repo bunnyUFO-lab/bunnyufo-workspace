@@ -150,12 +150,12 @@ export function jobSummary(job: ScheduleJob, zone: string | undefined, now = Dat
   return out
 }
 
-/** A time as the viewer reads it, in their zone: "Mon 9 Nov 08:00". */
-export function clock(iso: string, zone?: string): string {
+/** A time as the viewer reads it, in their zone: "Mon 9 Nov 08:00" ("Monday 9 Nov 08:00" with `long`). */
+export function clock(iso: string, zone?: string, long = false): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
   try {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: zone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date)
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: zone, weekday: long ? 'long' : 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date)
     const get = (type: string) => parts.find(part => part.type === type)?.value ?? ''
     return `${get('weekday')} ${get('day')} ${get('month')} ${get('hour')}:${get('minute')}`
   } catch {

@@ -1,0 +1,23 @@
+/* Editing a Hermes job (ws-eh2 G). The fields are the agent page's (.ae-*); only what is new here. */
+.se-edit { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.se-form { display: flex; flex-direction: column; min-width: 0; padding-top: 6px; }
+.se-seg, .se-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.se-seg .hub-btn, .se-days .hub-btn { min-height: 44px; }
+.se-days .hub-btn { min-width: 48px; padding-inline: 8px; }
+.se-time { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.se-time > span { font-size: 11.5px; color: var(--t3); }
+.se-time input { min-height: 44px; padding: 8px 10px; border: 1px solid var(--line2); border-radius: 10px; background: var(--ground); color: var(--t1); font: inherit; max-width: 12rem; box-sizing: border-box; }
+.se-actions .hub-btn { flex: 1 1 140px; }
+.se-change { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--ground); min-width: 0; }
+.se-change p { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.se-change .hub-btn { min-height: 44px; }
+.se-bad { border-color: color-mix(in srgb, var(--st-failed) 55%, transparent); }
+.se-done { border-color: color-mix(in srgb, var(--st-done, #3fa35f) 50%, transparent); }
+.se-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.se-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; min-width: 0; }
+.se-pair > b { grid-column: 1 / -1; }
+.se-pair > span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; font: 500 12.5px var(--mono); }
+.se-pair small { font: 11.5px var(--sans, inherit); color: var(--t3); }
+.se-diff { max-height: 30vh; overflow: auto; }
+.se-add { color: var(--st-done, #3fa35f); }
+.se-del { color: var(--st-failed); }
