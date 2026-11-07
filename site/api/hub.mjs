@@ -50,6 +50,7 @@ import { AGENTS, agentOfPersona, agentStatuses, AVATAR_FILE_RE, buildTeam, check
 import { createSheets, SHEET_PNG_RE, sheetSprite } from './hub-sheets.mjs';
 import { CHAT_MODELS } from './chat-models.mjs';
 import { teamSkills } from './hub-team-skills.mjs';
+import { jobPromptChanges, schedulesView, SEEN_FILE, seenText, validSeen } from './hub-schedules.mjs';
 import { agentDetails, CHANGE_CODES, cleanId, exportFreshness, EXPORT_MAX_BYTES, FUTURE_SKEW_SECONDS, redactSecrets, validChange, validExport, validResult, WRITER as CONFIG_WRITER } from './hub-agent-config.mjs';
 import { presetOf } from './presets.mjs';
 import { jobRow, verifyJob } from './chat-jobs.mjs';
@@ -626,6 +627,42 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
       log(`[hub] profile change events were not written: ${String(error.message).slice(0, 120)}`);
     } finally {
       noteChanges.running = false;
+    }
+  }
+
+  /**
+   * The owner hears when a job's prompt changes with no signed change behind it (ws-eh2): an agent may edit a job on the Hermes host, and an
+   * Ask is not the only way in. The newest fresh export's `promptSha256` of each job is compared with a baseline the Hub alone writes,
+   * `agent-config/job-prompts-seen.json` (no limited token can write under agent-config/ but the Hermes host's, and that one only exports
+   * and results). The first run stores the baseline and says nothing. A change writes one `alert` event (a job's page is its link) and then moves
+   * the baseline, so it is told once. Same sweeps and throttle as noteChangeResults; it never fails a request and no prompt text reaches an event.
+   */
+  let noteJobs = { last: 0, running: false };
+  async function noteJobPrompts(at) {
+    if (noteJobs.running || (at.getTime() >= noteJobs.last && at.getTime() - noteJobs.last < 30_000)) return;
+    noteJobs = { last: at.getTime(), running: true };
+    try {
+      const exported = await loadAgentConfig(at);
+      if (!exported || exportFreshness(exported, at) !== 'fresh') return;
+      const got = await fresh(SEEN_FILE);
+      const { jobs, alerts, changed } = jobPromptChanges({ seen: validSeen(got?.value), exported });
+      if (!changed) return;
+      if (alerts.length) {
+        const { events } = await loadEvents(at);
+        for (const alert of alerts) {
+          if (events.some(event => event.kind === 'alert' && event.job === alert.job && event.jobHash === alert.hash)) continue;
+          await putHubEvent({ ts: at.toISOString(), kind: 'alert', job: alert.job, jobHash: alert.hash, title: alert.title, host: 'hub', source: 'hub', by: 'hub' }, at);
+        }
+      }
+      try {
+        await bucket.put(key(SEEN_FILE), seenText(jobs, at), { contentType: 'application/json', ...(got ? { ifMatch: got.etag } : { ifNoneMatch: '*' }) });
+      } catch (error) {
+        if (error.status !== 412) throw error;   // another sweep moved the baseline first
+      }
+    } catch (error) {
+      log(`[hub] job prompt check was not written: ${String(error.message).slice(0, 120)}`);
+    } finally {
+      noteJobs.running = false;
     }
   }
 
@@ -1908,7 +1945,7 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
         const send = answer => json(response, answer.status, answer.body);
 
         if (method === 'GET') {
-          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); });
+          if (route === '/hub/today' || route === '/hub/inbox' || route === '/hub/work') listCache.liveReads(() => { hermesDispatch.pageLoad(at); policy.pageLoad(at); sprints.pageLoad(at); void noteChangeResults(at); void noteJobPrompts(at); });
           if (route === '/hub/today') {
             const [asks, checklists, requests, window, hermesOpen, status] = await Promise.all([loadAsks(at), loadChecklists(at), loadRequests(at), loadEvents(at), hermesApprovals.loadOpen(at), loadPcStatus(at)]);
             const cloudOn = routines.dryRun || routines.cloudRepos().length > 0;
@@ -2065,6 +2102,12 @@ export function createHub({ bucket: store = null, prefix = 'sections', inbox = '
             // One read of the newest export, joined with the agent list. Nothing from the Hermes host is called. Same sign-in rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the skills.', 401);
             reply(teamSkills({ exported: await loadAgentConfig(at).catch(() => null), agents: await allAgents(), at }));
+          } else if (route === '/hub/schedules') {
+            // Prompts and the host's state are not for an anonymous read: Team is open to guests, this page is not.
+            if (requireRemoteUser && !user) throw fail('Sign in to see the schedules.', 401);
+            const exported = await loadAgentConfig(at).catch(() => null);
+            void noteJobPrompts(at);
+            reply(schedulesView({ exported, status: null, hostFile: null, at }));
           } else if (route === '/hub/team/templates') {
             // The templates carry their prompt text: same rule as the details.
             if (requireRemoteUser && !user) throw fail('Sign in to see the templates.', 401);

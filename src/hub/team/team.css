@@ -150,7 +150,7 @@ a.team-session:hover { background: var(--s2); }
 .tk-shell { height: 100%; display: flex; flex-direction: column; min-width: 0; }
 .tk-shell > .ui-split { flex: 1; min-height: 0; height: auto; }
 .tk-top { flex: none; padding: 16px 24px 8px; border-bottom: 1px solid var(--line); background: var(--ground); min-width: 0; }
-.tk-top .team-top .ui-seg-tabs { width: 336px; max-width: 100%; }
+.tk-top .team-top .ui-seg-tabs { width: 440px; max-width: 100%; }
 .tk-top .tk-tools { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tk-top .tk-tools .ui-seg { flex: none; width: 240px; }
 .tk-top .tk-find { position: static; flex: 1; padding: 0 0 8px; background: none; }

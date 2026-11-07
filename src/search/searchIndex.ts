@@ -101,6 +101,7 @@ export function screenRows(caps: Caps): Hit[] {
     ['library', 'Library', 'library', hubHash('library'), true],
     ['team', 'Team', 'team', hubHash('team'), caps.hub],
     ['skills', 'Skills and plugins', 'skill', `${hubHash('team')}/skills`, caps.hub],
+    ['schedules', 'Schedules', 'job', `${hubHash('team')}/schedules`, caps.hub],
     ['sketch', 'Sketch', 'sketch', hubHash('sketch'), caps.hub && caps.write],
     ['settings', 'Settings', 'settings', hubHash('settings'), true],
     // The install commands live in Settings, under their own heading.
