@@ -3,6 +3,7 @@
 // is marked, the sub-type chip row narrows the list (and composes with the project filter), the item pages carry the
 // badges, the colours meet the contrast rule in the light and the dark theme, and 390 px does not scroll sideways.
 import { chromium } from '@playwright/test';
+import './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture } from './hub-fixture.mjs';
 import { TITLES, seedMixed } from './needs-kinds-seed.mjs';
