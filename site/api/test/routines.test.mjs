@@ -323,7 +323,7 @@ test('no routine for the repo: approve is 400 before anything is signed', async 
 });
 
 test('route() sends a repo-only project to the cloud only when the repo has a routine', async () => {
-  const input = { preset: 'code-task', project: 'workspace-app', repo: 'example/probe' };
+  const input = { preset: 'code-task', project: 'shadowdark', repo: 'example/probe' };
   assert.equal(route({ ...input, cloudRepos: [] }).target, 'pc');
   assert.equal(route({ ...input, cloudRepos: ['example/probe'] }).target, 'cloud');
   const f = await fixture();
@@ -331,7 +331,7 @@ test('route() sends a repo-only project to the cloud only when the repo has a ro
     const has = repo => f.hub.routines.hasRoutine(repo);
     assert.equal(route({ ...input, cloudRepos: has }).target, 'cloud');
     assert.equal(route({ ...input, repo: 'example/other', cloudRepos: has }).target, 'pc');
-    const asked = await f.call('GET', '/hub/presets/route?preset=code-task&project=workspace-app&repo=example/probe');
+    const asked = await f.call('GET', '/hub/presets/route?preset=code-task&project=shadowdark&repo=example/probe');
     assert.equal(asked.body.target, 'cloud');
     const capabilities = f.hub.capabilities({ signedIn: true });
     assert.deepEqual(capabilities.cloudRepos, ['example/probe']);
