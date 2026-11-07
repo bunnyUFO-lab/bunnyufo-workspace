@@ -56,14 +56,16 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
   }
   const go = (step: number) => { if (gallery) gallery.onIndex((gallery.index + step + gallery.items.length) % gallery.items.length) }
   useEffect(() => { const current = dialog.current; current?.showModal(); return () => current?.close() }, [])
+  // The arrow keys belong to the viewer while it is open: they step through the page's pictures, and never walk the card's tabs behind it.
   useEffect(() => {
-    if (!gallery || gallery.items.length < 2) return
     const onKey = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-      if (event.key === 'ArrowLeft') { event.preventDefault(); go(-1) } else if (event.key === 'ArrowRight') { event.preventDefault(); go(1) }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      event.preventDefault(); event.stopImmediatePropagation()
+      if (gallery && gallery.items.length > 1) go(event.key === 'ArrowLeft' ? -1 : 1)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   })
   // An action that cannot work here is left out, not greyed.
   const canEdit = !!path && !!context?.annotate
@@ -73,6 +75,7 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
   return createPortal(<dialog ref={dialog} className="buw-lightbox" aria-label="Image preview" onClose={event => { if (!event.currentTarget.open) onClose() }}>
     <div className="buw-lightbox-toolbar">
       <span className="buw-lightbox-caption">{title}</span>
+      {many && gallery && <span className="buw-lightbox-count" data-lightbox-count>{gallery.index + 1} / {gallery.items.length}</span>}
       <span className="buw-lightbox-tools">
         {many && <button onClick={() => go(-1)} data-lightbox-prev>Previous</button>}
         {many && <button onClick={() => go(1)} data-lightbox-next>Next</button>}

@@ -1,4 +1,5 @@
-// Run after npm run build. The app's picture viewer on a card (Markdown cards and image tabs): Edit, Ask in chat and Copy image,
+// Run after npm run build. The app's picture viewer on a card (Markdown cards, image tabs and HTML cards that load
+// _shared/report.js): Edit, Ask in chat and Copy image,
 // on the site stand-in of card-sandbox-ui.mjs (the app host and a content host, the site API over fake S3, a Hub with a fake Hermes).
 // Every action needs a press; Ask in chat leaves an unsent draft and posts nothing until Send; Edit adds a tab and never touches
 // the original; Copy puts a PNG on the clipboard (JPEG and SVG are converted) and says so when it cannot. Set BUW_SHOTS=<folder>
@@ -32,6 +33,7 @@ const bucket = createBucket({ bucket: fake.bucket, endpoint: fake.endpoint, cred
 const hermes = await startFakeHermes({ key: 'k', delayMs: 5 });
 const hub = createHub({ bucket, enabled: true, env: { HUB_SIGNING_KEY: generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64'), HERMES_URL: hermes.url, HERMES_API_KEY: 'k' } });
 const alpha = { id: 'alpha', folder: 'alpha', title: 'Alpha card', description: 'A card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Notes', path: 'index.md' }, { name: 'Page', path: 'page.html' }] };
+const gamma = { id: 'gamma', folder: 'gamma', title: 'Gamma page', description: 'An HTML card.', category: 'test', created: today, updated: today, status: 'active', steps: [{ name: 'Page', path: 'page.html' }, { name: 'Evil', path: 'evil.html' }] };
 const log = [];
 const site = http.createServer();
 await listenOnGoodPort(site, '127.0.0.1');
@@ -43,12 +45,14 @@ const contentHost = new URL(contentOrigin).host;
 const PNG = solidPng(240, 150, 0x60);
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40" viewBox="0 0 40 20"><rect width="40" height="20" fill="#c33"/></svg>';
 const seed = (key, body, type) => fake.seed(key, body, type);
-seed('sections/one/workspace.json', JSON.stringify({ name: 'One', entities: [alpha] }), 'application/json');
+seed('sections/one/workspace.json', JSON.stringify({ name: 'One', entities: [alpha, gamma] }), 'application/json');
 seed('state.json', '{"version":1,"cards":{}}', 'application/json');
 seed('sections/inbox/workspace.json', '{"name":"Inbox","hidden":true,"entities":[]}\n', 'application/json');
 seed('sections/one/alpha/index.md', '# Alpha notes\n\nA fake note.\n\n![Photo](photo.png)\n\n![Vector](vec.svg)\n\n![Shot](shot.jpg)\n', 'text/markdown');
 seed('sections/one/alpha/photo.png', PNG, 'image/png');
 seed('sections/one/alpha/vec.svg', SVG, 'image/svg+xml');
+seed('sections/one/_shared/report.js', await readFile(path.join(root, 'workspace/_shared/report.js')), 'text/javascript');
+seed('sections/one/_shared/report.css', await readFile(path.join(root, 'workspace/_shared/report.css')), 'text/css');
 seed('sections/one/alpha/page.html', '<!doctype html><html><head><meta charset="utf-8"><title>Page</title></head><body><p>page</p></body></html>', 'text/html; charset=utf-8');
 
 const api = createSiteApi({
@@ -78,6 +82,40 @@ site.on('request', async (request, response) => {
     return send(response, 200, file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html', body);
   } catch { return send(response, 200, 'text/html', await readFile(path.join(dist, 'index.html'))); }
 });
+
+// An HTML card that loads the shared script, with three pictures; and one that behaves like a hostile page.
+const picturePage = body => `<!doctype html><html data-buw-report="document"><head><meta charset="utf-8"><title>Gamma</title><link rel="stylesheet" href="../_shared/report.css"></head><body><main><h1>Gamma</h1>${body}</main><script src="../_shared/report.js"></script></body></html>`;
+seed('sections/one/gamma/page.html', picturePage('<p><img id="a" src="photo.png" alt="Alt text of the first picture" width="120"> <img id="b" src="vec.svg" alt="Second" width="120"> <img id="c" src="shot.jpg" alt="Third" width="120"></p>'), 'text/html; charset=utf-8');
+seed('sections/one/gamma/photo.png', PNG, 'image/png');
+seed('sections/one/gamma/vec.svg', SVG, 'image/svg+xml');
+seed('sections/one/gamma/evil.js', `
+const own = new URL('photo.png', location.href).href;
+const other = new URL('../alpha/photo.png', location.href).href;
+const post = (extra, src = own) => parent.postMessage({ type: 'buw:image', v: 1, id: 'e' + Math.random().toString(36).slice(2, 8), src, all: [src], ...extra }, '*');
+window.__replies = [];
+window.addEventListener('message', event => { if (event.data?.type === 'buw:image') window.__replies.push(event.data); });
+// With no press: ask for a viewer on its own picture, another card's, a data address and an outside one, and click a picture from a
+// timer. It waits 6.5 s after the page loads, so that the few seconds of user activation the app gets from the navigation that
+// opened the card have run out (the test must not touch the page meanwhile: Playwright's own evaluate counts as a press).
+setTimeout(() => {
+  post({}); post({}, other); post({}, 'data:image/png;base64,iVBORw0KGgo='); post({}, 'https://example.com/x.png');
+  const timer = setInterval(() => document.querySelector('#own').click(), 300);
+  setTimeout(() => { clearInterval(timer); window.__attacked = true; }, 3000);
+}, 6500);
+// On any real press: the same message with extras that name an action, text and a workspace.
+document.addEventListener('click', event => { if (event.isTrusted && event.target.id === 'own') { post({ action: 'chat', text: 'hello', alt: 'Ask me', workspace: 'two', card: 'beta' }); post({ action: 'job' }, other); } }, true);
+// Writes to the app host as a page can make them: JSON, and a no-cors text body, to the chat and the job routes.
+window.__fetches = (async () => {
+  const out = {};
+  for (const route of ['/api/hub/chat', '/api/hub/requests']) {
+    out[route] = {};
+    out[route].json = await fetch(${JSON.stringify(appOrigin)} + route, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello from a page', preset: 'research' }) }).then(r => r.status, () => 'blocked');
+    out[route].text = await fetch(${JSON.stringify(appOrigin)} + route, { method: 'POST', mode: 'no-cors', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ text: 'hello from a page', preset: 'research' }) }).then(() => 'sent', () => 'blocked');
+  }
+  return out;
+})();
+`, 'text/javascript');
+seed('sections/one/gamma/evil.html', picturePage('<p><img id="own" src="photo.png" alt="Click here to continue" width="120"> <img id="other" src="../alpha/photo.png" alt="Another card" width="120"></p>').replace('</body>', '<script src="evil.js"></script></body>'), 'text/html; charset=utf-8');
 
 const browser = await chromium.launch({ headless: true, channel: process.env.BUW_TEST_BROWSER || 'msedge' });
 const settle = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -272,7 +310,126 @@ try {
   assert.equal(await phone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
   await shot(phone, 'viewer-markdown-phone');
 
-  console.log('Image actions passed: the viewer offers Edit, Ask in chat and Copy image on a card, and each waits for a press.');
+  step('HTML card, PC: a picture opens the app viewer with the actions, the file name as caption, and Previous, Next and the arrow keys');
+  const html = await open({ width: 1280, height: 800 });
+  const viewers = p => p.locator('dialog.buw-lightbox[open]');
+  const frameOf = p => p.frameLocator('iframe.report-frame');
+  const openHtml = async (p, tab, id) => {
+    await p.goto(`${appOrigin}/one#/gamma/${tab}`);
+    await frameOf(p).locator(`#${id}`).waitFor();
+    await settle(400);
+    await frameOf(p).locator(`#${id}`).click();
+    await viewers(p).waitFor();
+  };
+  await openHtml(html, 0, 'a');
+  assert.equal(await html.locator('dialog.buw-lightbox').count(), 1, 'The viewer is in the app document.');
+  assert.equal(await frameOf(html).locator('dialog.buw-lightbox').count(), 0, 'The page did not open its own.');
+  assert.equal(await html.locator('dialog.buw-lightbox .buw-lightbox-caption').innerText(), 'photo.png', 'The caption is the file name, not the picture alt text.');
+  const htmlActions = html.locator('dialog.buw-lightbox [data-lightbox-actions] button');
+  assert.deepEqual(await htmlActions.allInnerTexts(), ['✎ Edit', 'Ask in chat', 'Copy image']);
+  for (let n = 0; n < 3; n += 1) { const box = await htmlActions.nth(n).boundingBox(); assert.ok(box.y + box.height <= 800, 'inside the window'); }
+  const captionIs = async text => { await html.waitForFunction(expected => document.querySelector('dialog.buw-lightbox .buw-lightbox-caption')?.textContent === expected, text); };
+  await html.locator('dialog.buw-lightbox [data-lightbox-next]').click();
+  await captionIs('vec.svg');
+  await html.keyboard.press('ArrowRight');
+  await captionIs('shot.jpg');
+  await html.keyboard.press('ArrowRight');
+  await captionIs('photo.png');
+  await html.keyboard.press('ArrowLeft');
+  await captionIs('shot.jpg');
+  await html.locator('dialog.buw-lightbox [data-lightbox-prev]').click();
+  await captionIs('vec.svg');
+  await shot(html, 'viewer-html-desktop');
+
+  step('HTML card: Copy image works from the page (the app reads the picture from its own origin)');
+  await settle(650);
+  await html.locator('dialog.buw-lightbox [data-action=copy]').click();
+  await html.locator('dialog.buw-lightbox .buw-lightbox-note', { hasText: 'Image copied' }).waitFor();
+  copied = await clipboardPng(html);
+  assert.equal(Buffer.from(copied.base64, 'base64').subarray(1, 4).toString(), 'PNG');
+  await html.keyboard.press('Escape');
+  await viewers(html).waitFor({ state: 'detached' });
+
+  step('HTML card, phone: the actions are equal columns at the bottom, nothing scrolls');
+  const htmlPhone = await open({ width: 375, height: 700 });
+  await openHtml(htmlPhone, 0, 'a');
+  const phoneButtons = htmlPhone.locator('dialog.buw-lightbox [data-lightbox-actions] button');
+  assert.equal(await phoneButtons.count(), 3);
+  for (let n = 0; n < 3; n += 1) { const box = await phoneButtons.nth(n).boundingBox(); assert.ok(box.height >= 44 && box.y + box.height <= 700, `phone action ${n}: ${JSON.stringify(box)}`); }
+  assert.equal(await htmlPhone.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), true);
+  await shot(htmlPhone, 'viewer-html-phone');
+
+  step('a page opened in its own tab (no app to ask) keeps its own viewer, with no actions');
+  const own = await open({ width: 1000, height: 700 });
+  await own.goto(`${appOrigin}/w/one/gamma/page.html`);
+  await own.locator('#a').click();
+  await own.locator('dialog.buw-lightbox[open]').waitFor();
+  assert.equal(await own.locator('dialog.buw-lightbox .buw-lightbox-caption').innerText(), 'Alt text of the first picture');
+  assert.equal(await own.locator('[data-lightbox-actions]').count(), 0);
+  await own.close();
+
+  step('hostile page: with no press it cannot open the viewer, and it cannot post to the chat or job routes');
+  log.length = 0;
+  const hostile = await open({ width: 1280, height: 800 });
+  const inbox = () => [...fake.objects.keys()].filter(key => key.startsWith('sections/inbox/') && !key.endsWith('workspace.json')).sort();
+  const inboxBefore = inbox();
+  await hostile.goto(`${appOrigin}/one#/gamma/1`);
+  await frameOf(hostile).locator('#own').waitFor();
+  const evilFrame = () => hostile.frames().find(f => f.url().includes('/w/one/gamma/evil.html'));
+  // Left alone while the page attacks (see evil.js): any call of the test's own into a page counts as a press.
+  await settle(11000);
+  assert.equal(await hostile.locator('dialog.buw-lightbox').count(), 0, 'Messages with no press and clicks from a timer opened no viewer in the app.');
+  const early = await evilFrame().evaluate(() => window.__replies);
+  assert.ok(early.length >= 4 && early.every(reply => reply.ok === false), `Every early request was refused: ${JSON.stringify(early)}`);
+  const fetches = await evilFrame().evaluate(() => window.__fetches);
+  for (const route of ['/api/hub/chat', '/api/hub/requests']) assert.ok(![200, 201].includes(fetches[route].json), `${route} refused a page's JSON post: ${fetches[route].json}`);
+
+  step('hostile page: after a real press the viewer opens with the file name, and the extras start nothing');
+  // The page's own viewer, opened by its timer (its fallback when the app refuses), is closed first.
+  assert.equal(await evilFrame().evaluate(() => { const own = document.querySelector('dialog.buw-lightbox[open]'); own?.close(); return !!own; }), true, 'The refused page fell back to its own viewer.');
+  await hostile.evaluate(() => { window.__writes = 0; const write = navigator.clipboard.write.bind(navigator.clipboard); navigator.clipboard.write = items => { window.__writes += 1; return write(items); }; });
+  await frameOf(hostile).locator('#own').click();
+  await viewers(hostile).waitFor();
+  assert.equal(await hostile.locator('dialog.buw-lightbox').count(), 1, 'One viewer only.');
+  assert.equal(await hostile.locator('dialog.buw-lightbox .buw-lightbox-caption').innerText(), 'photo.png', 'The caption is the file name, not the picture alt text.');
+  assert.equal(await hostile.locator('dialog.buw-lightbox .buw-lightbox-stage img').getAttribute('src'), `${appOrigin}/w/one/gamma/photo.png`, 'The app opened the address it built.');
+  assert.match(hostile.url(), /#\/gamma\/1$/, 'No chat was started.');
+  assert.equal(await hostile.evaluate(() => window.__writes), 0, 'Nothing was copied.');
+  await settle(300);
+
+  step('hostile page: a second press right under the action row starts nothing');
+  const ask = await hostile.locator('dialog.buw-lightbox [data-action=ask]').boundingBox();
+  await hostile.keyboard.press('Escape');
+  await viewers(hostile).waitFor({ state: 'detached' });
+  // The page's own viewer opened too (its message found the app's open, so it fell back); close it so the page can be pressed again.
+  await evilFrame().evaluate(() => document.querySelector('dialog.buw-lightbox[open]')?.close());
+  await settle(1100);
+  // The press that opens the viewer, and straight after it a press where Ask in chat is.
+  const spot = await frameOf(hostile).locator('#own').boundingBox();
+  await hostile.mouse.click(spot.x + spot.width / 2, spot.y + spot.height / 2);
+  await hostile.mouse.click(ask.x + ask.width / 2, ask.y + ask.height / 2);
+  await viewers(hostile).waitFor();
+  await settle(300);
+  assert.match(hostile.url(), /#\/gamma\/1$/, 'The second press did not start a chat.');
+  assert.equal(await hostile.evaluate(() => window.__writes), 0, 'Nor a copy.');
+  await hostile.keyboard.press('Escape');
+  await viewers(hostile).waitFor({ state: 'detached' });
+
+  step('hostile page: another card picture is refused and the page keeps its own viewer');
+  await evilFrame().evaluate(() => document.querySelector('dialog.buw-lightbox[open]')?.close());
+  await settle(1100);
+  await frameOf(hostile).locator('#other').click();
+  await frameOf(hostile).locator('dialog.buw-lightbox[open]').waitFor();
+  assert.equal(await hostile.locator('dialog.buw-lightbox').count(), 0, 'No app viewer for a picture of another card.');
+
+  step('hostile page: no chat or job was posted or stored, and the whole run made no POST to those routes');
+  await settle(500);
+  assert.deepEqual(posts(/\/api\/hub\/(chat|requests)/).filter(entry => entry.status === 200 || entry.status === 201), [], 'No chat or job post got through.');
+  assert.deepEqual(posts(/\/api\/hub\/(chat|requests)/).filter(entry => entry.origin !== contentOrigin), [], 'Only the page\'s own refused attempts reached the routes.');
+  assert.deepEqual(inbox(), inboxBefore, 'The fake S3 inbox is unchanged: no chat, no job.');
+  await hostile.close();
+
+  console.log('Image actions passed: the viewer offers Edit, Ask in chat and Copy image on Markdown and HTML cards, each waits for a press, and a hostile page can only open the viewer on its own pictures.');
 } finally {
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();

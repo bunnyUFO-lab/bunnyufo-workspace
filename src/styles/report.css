@@ -21,3 +21,5 @@
   .buw-lightbox .buw-lightbox-actions{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
   .buw-lightbox .buw-lightbox-actions button{min-height:44px;padding:6px 4px}
 }
+.buw-lightbox .buw-lightbox-count{flex-shrink:0;color:#aba0b5;font:12px var(--buw-font)}
+@media (max-width:640px){.buw-lightbox .buw-lightbox-count{order:1}}
