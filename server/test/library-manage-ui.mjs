@@ -315,7 +315,7 @@ try {
   assert.equal((await listOf(alpha)).entities.some(item => item.id === 'brief'), true, 'Restore on the phone brought the card back');
   await phone.close();
 
-  // The published site's switcher: rename and archive a workspace against a stand-in for the site's data service.
+  // The published site's Settings: rename and archive a workspace against a stand-in for the site's data service.
   const siteData = {
     one: { name: 'Section One', entities: [entity('alpha', 'Alpha', 'ideas', ['Overview'])] },
     two: { name: 'Section Two', entities: [{ ...entity('beta', 'Beta', 'ideas', ['Overview']), status: 'archived' }] },
@@ -359,76 +359,46 @@ try {
       sitePage.setDefaultTimeout(ms(10000));
       sitePage.on('pageerror', error => errors.push(error.message));
       await sitePage.goto(`${siteOrigin}/one`);
-      const opener = name => sitePage.getByRole('button', { name: new RegExp(`^Workspace: ${name}`) }).first();
-      // On a phone the switcher sits in the slide-over menu.
-      const reveal = async () => { const box = await opener('Section').boundingBox().catch(() => null); if (box && box.x >= 0 && box.x < size.width) return; const show = sitePage.getByRole('button', { name: 'Show list' }); if (await show.isVisible()) await show.click(); };
-      const pop = async name => { await reveal(); await opener(name).click(); };
-      await pop('Section One');
-      const menu = sitePage.getByRole('menu', { name: 'Workspaces' });
-      await menu.waitFor();
-      // The archived one is listed apart, with Restore, and is not a switch target.
-      assert.equal(await menu.getByText('Old Stuff').count(), 1, 'the archived workspace is listed under Archived');
-      assert.equal(await menu.getByRole('menuitemradio', { name: 'Old Stuff' }).count(), 0, 'and is not a switch target');
+      // Workspaces are managed in Settings, as plain buttons on a full page; the Library has no workspace selector.
+      await sitePage.locator('[data-library] .lib-scroll').waitFor();
+      assert.equal(await sitePage.getByRole('button', { name: /^Workspace:/ }).count(), 0, 'no workspace button on the Library');
+      await sitePage.goto(`${siteOrigin}/one#/~hub/settings`);
+      const list = sitePage.locator('[data-site-workspaces]');
+      await list.waitFor();
+      assert.equal(await list.getByText('Old Stuff').count(), 1, 'the archived workspace is listed under Archived');
+      assert.equal(await list.getByRole('link').count(), 0, 'no section links here: the filter is the one selector');
+      assert.equal(await list.locator('[aria-checked], [aria-current]').count(), 0, 'and no current mark');
       assert.ok(await sitePage.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), `no sideways scroll at ${size.width}`);
 
-      // Escape closes the open workspace menu first and the list second; closing the list forgets both.
-      const group = menu.getByRole('group', { name: 'Manage Section One' });
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await group.waitFor();
-      await sitePage.keyboard.press('Escape');
-      await group.waitFor({ state: 'detached' });
-      assert.equal(await menu.isVisible(), true, 'the first Escape leaves the list open');
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await menu.getByRole('button', { name: 'Rename…' }).click();
-      await menu.getByRole('textbox', { name: 'New name for Section One' }).fill('Half typed');
-      await sitePage.keyboard.press('Escape');
-      await menu.getByRole('textbox', { name: 'New name for Section One' }).waitFor({ state: 'detached' });
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await group.waitFor();
-      await sitePage.keyboard.press('Escape');
-      await sitePage.keyboard.press('Escape');
-      await menu.waitFor({ state: 'detached' });
-      await pop('Section One');
-      assert.equal(await group.count(), 0, 'a reopened list has no open workspace menu');
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await menu.getByRole('button', { name: 'Rename…' }).click();
-      assert.equal(await menu.getByRole('textbox', { name: 'New name for Section One' }).inputValue(), 'Section One', 'and no half-typed name');
-      await menu.getByRole('button', { name: 'Cancel' }).click();
-
       // Rename: Escape cancels and sends nothing, Enter saves, the address stays.
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await menu.getByRole('button', { name: 'Rename…' }).click();
-      const field = menu.getByRole('textbox', { name: 'New name for Section One' });
+      await list.getByRole('button', { name: 'Rename Section One' }).click();
+      const field = list.getByRole('textbox', { name: 'New name for Section One' });
       await field.fill('Throwaway');
       await field.press('Escape');
       assert.equal(await field.count(), 0, 'Escape cancels');
       assert.equal(siteCalls.length, 0, 'and sends nothing');
-      await menu.getByRole('button', { name: 'Manage Section One' }).click();
-      await menu.getByRole('button', { name: 'Rename…' }).click();
+      await list.getByRole('button', { name: 'Rename Section One' }).click();
+      assert.equal(await field.inputValue(), 'Section One', 'a reopened form has no half-typed name');
       await field.fill('Section Uno');
-      await Promise.all([reloaded(sitePage), field.press('Enter')]);
+      await Promise.all([sitePage.waitForNavigation(), field.press('Enter')]);
       assert.deepEqual(siteCalls[0], ['/api/sections/rename', { workspace: 'one', name: 'Section Uno' }]);
       assert.equal(new URL(sitePage.url()).pathname, '/one', 'the address does not change');
-      await reveal();
-      await opener('Section Uno').waitFor();
+      assert.equal(new URL(sitePage.url()).hash, '#/~hub/settings', 'and the person stays on Settings');
+      await list.getByRole('button', { name: 'Rename Section Uno' }).waitFor();
 
       // Archive is refused while a card is active, and says why.
-      await pop('Section Uno');
-      await menu.getByRole('button', { name: 'Manage Section Uno' }).click();
-      await menu.getByRole('button', { name: 'Archive' }).click();
-      await menu.getByRole('alert').waitFor();
-      assert.match(await menu.getByRole('alert').textContent(), /still has 1 active card/);
+      await list.getByRole('button', { name: 'Archive Section Uno' }).click();
+      await list.getByRole('alert').waitFor();
+      assert.match(await list.getByRole('alert').textContent(), /still has 1 active card/);
 
       // Archive the idle one, then restore it from the Archived list.
-      await menu.getByRole('button', { name: 'Manage Section Two' }).click();
-      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Archive' }).click()]);
+      await Promise.all([sitePage.waitForNavigation(), list.getByRole('button', { name: 'Archive Section Two' }).click()]);
       assert.equal(siteData.two.archived, true);
-      await pop('Section Uno');
-      assert.equal(await menu.getByRole('menuitemradio', { name: 'Section Two' }).count(), 0, 'an archived workspace leaves the switcher');
-      await Promise.all([reloaded(sitePage), menu.getByRole('button', { name: 'Restore Section Two' }).click()]);
+      await list.getByRole('button', { name: 'Restore Section Two' }).waitFor();
+      assert.equal(await list.getByRole('button', { name: 'Archive Section Two' }).count(), 0, 'an archived workspace leaves the live list');
+      await Promise.all([sitePage.waitForNavigation(), list.getByRole('button', { name: 'Restore Section Two' }).click()]);
       assert.equal(siteData.two.archived, undefined, 'Restore clears the flag');
-      await pop('Section Uno');
-      await menu.getByRole('menuitemradio', { name: 'Section Two' }).waitFor();
+      await list.getByRole('button', { name: 'Archive Section Two' }).waitFor();
       await sitePage.context().close();
     }
   } finally { siteServer.close(); }

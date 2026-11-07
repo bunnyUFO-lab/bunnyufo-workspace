@@ -189,14 +189,14 @@ One private S3 bucket holds every section:
 
 ```
 s3://<bucket>/
-  sections/<id>/workspace.json      the card list; its "name" is what the switcher shows
+  sections/<id>/workspace.json      the card list; its "name" is what the project filter shows
   sections/<id>/<card folder>/…     the card files, exactly as in the workspace folder
   sections/<id>/_shared/…           report styles and scripts (reports load ../_shared/)
   state.json                        pinned, archived, tags and the pinned order, for every section
 ```
 
 A section whose `workspace.json` carries `"hidden": true` holds data, not cards (the agents' `inbox`):
-`/sites.json` lists it with `hidden: true` and `/w/<id>/…` serves it, but the switcher and the
+`/sites.json` lists it with `hidden: true` and `/w/<id>/…` serves it, but the project filter and the
 unknown-site list never show it. The ids `inbox` and `assistant` are reserved for the card API: no
 local workspace can be registered with them or publish over them.
 
@@ -209,7 +209,7 @@ dot or space) and says `left on the site: <key> is not a safe path here`; it nev
 A small service (`site/api`, container `buw-site-api`, port 8099) is the only thing that reads
 it. Caddy (`site/caddy/Caddyfile`) forwards `/sites.json`, `/w/<id>/<file>` and `/api/*` to it:
 
-- `/sites.json` lists the sections the bucket holds, so a new section is in the switcher as soon
+- `/sites.json` lists the sections the bucket holds, so a new section is in the project filter as soon
   as its `workspace.json` is uploaded. Nothing on the server has to be edited.
 - `/w/<id>/<file>` streams the object with its ETag and content type. Only keys under
   `sections/` are reachable this way; `state.json` and anything else in the bucket are not.
@@ -857,11 +857,11 @@ Everything the Hub writes goes under `sections/inbox/` and nowhere else; `inboxK
 
 ## Making a new workspace
 
-In the local app, open the switcher under the logo and choose **＋ New workspace…**. It makes
+In the local app, open **Settings** and use **New workspace** under Workspaces. It makes
 a folder beside the open workspace with the template files and an empty card list, registers
 it, and gives it the bucket and site of its neighbours with its own id in place of theirs, so
-`npm run publish` puts it on the site. **Add existing folder…** registers a folder you already
-have.
+`npm run publish` puts it on the site. **Add and open** registers a folder you already
+have. Either one is switched to and shown in the Library's project filter.
 
 By hand:
 
@@ -870,21 +870,22 @@ By hand:
    `.gitignore`. Leave the sample cards behind.
 2. **Start an empty card list:** a `workspace.json` with
    `{ "name": "<Name>", "entities": [] }`. The optional `name` is what the published site's
-   switcher shows; without it the site falls back to the id in title case.
+   project filter shows; without it the site falls back to the id in title case.
 3. **Register it:**
    `npm run workspace add <folder> --name "<Name>" --bucket s3://<bucket>/sections/<id> --site https://<your-site>/<id> --use`.
    The app cannot work out `--site` on its own; without it a workspace can look unpublished
    while its site is fine.
 4. **Check it:** `npm run publish`, then open the site and confirm the workspace is in the
-   switcher.
+   Library's project filter.
 
-Or start it from the site's switcher on any device (**＋ New workspace…**), then
+Or start it from Settings on the site, on any device (**＋ New workspace…**), then
 `npm run workspace add` the folder locally and `npm run publish -- --pull` to bring it down.
 
 ## Making cards by hand
 
 On the published site and in the local app, **＋ New card** on the board makes a card: a title,
-an optional description, and the workspace it goes in. It starts with one Markdown section and
+an optional description, and the project it goes in. The form always shows that project: the one in the
+filter, or chips to pick from when the filter shows all or several (the button stays off until one is on). It starts with one Markdown section and
 opens in the editor. On a card, **＋** after the tabs adds another Markdown section, and the pencil
 beside the title changes the title and description. Every Markdown section has Edit and Save
 (Ctrl+E, Ctrl+S).

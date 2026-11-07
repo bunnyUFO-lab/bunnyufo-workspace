@@ -275,3 +275,8 @@
 .tab-org-removed li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); }
 .tab-org-done { margin-top: 14px; }
 @media (max-width: 420px) { .tab-org-step { width: 36px; } .tab-org-remove { padding: 0 10px; } }
+
+.card-new-target { margin: 0; font-size: 0.78rem; color: var(--text-dim); }
+.card-new-target strong { color: var(--text-bright); font-weight: 600; }
+.card-new-note { margin: 0; font-size: 0.78rem; color: var(--text-dim); }
+.card-new-link { padding: 0; border: 0; background: none; color: var(--pink); font: inherit; text-decoration: underline; cursor: pointer; }

@@ -13,7 +13,6 @@ import Icon from '../ui/Icon'
 import { Button, IconButton, Segment } from '../ui/Controls'
 import { Section } from '../ui/Layout'
 import NewCard from '../components/NewCard'
-import WorkspaceSwitcher from '../components/WorkspaceSwitcher'
 import { TrashRows } from '../components/TrashList'
 import LibraryRow, { CategoryHead, type PinMove } from './LibraryRow'
 import { movePin } from './cardActions'
@@ -109,12 +108,12 @@ export default function LibraryScreen({ workspaces, cards, projects, onProjects,
     <div className="lib" data-library>
       <TopBar title="Library" actions={<>
         {host.cards && !newCard && <IconButton icon="plus" label="New card" data-new-card="" onClick={() => setNewCard(true)} />}
-        <WorkspaceSwitcher variant="sheet" />
         {!host.hub && <IconButton icon="search" label="Search" data-nav="search" onClick={() => go(hubHash('search'))} />}
         {!host.hub && <IconButton icon="settings" label="Settings" data-nav="settings" onClick={() => go(hubHash('settings'))} />}
         {onCollapse && <IconButton icon="back" label="Hide menu" title="Hide the list ( [ )" data-hide-list="" onClick={onCollapse} />}
       </>} />
-      {host.cards && newCard && <div className="lib-new"><NewCard workspaces={workspaces} project={projects.length === 1 ? projects[0] : ''} open onOpen={setNewCard} /></div>}
+      {host.cards && newCard && <div className="lib-new"><NewCard workspaces={workspaces} project={projects.length === 1 ? projects[0] : ''} open onOpen={setNewCard}
+        onCreated={id => { if (projects.length && !projects.includes(id)) onProjects([id]) }} /></div>}
       {notice}
 
       <label className="lib-search">

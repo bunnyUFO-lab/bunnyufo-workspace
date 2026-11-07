@@ -1,9 +1,6 @@
 /* The Library screen. Tokens only. Phone first: one column; the list pane is 384 px beside a card (ui.css .ui-pane-list). */
 .lib { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; overflow: clip; }
 .lib .ui-top { padding-right: 4px; }
-.lib .workspace-switcher { min-width: 0; margin-left: auto; }
-.lib .workspace-switcher-button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: var(--tap); padding-top: 0; padding-bottom: 0; }
-.lib .workspace-switcher + .ui-icobtn { margin-left: 0; }
 .lib-new { flex: none; padding: 0 16px 8px; }
 .lib-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 2px 16px 8px; padding: 0 12px; min-height: var(--tap); border-radius: 12px; background: var(--s1); color: var(--t3); border: 1px solid var(--line); }
 .lib-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
@@ -37,7 +34,6 @@
 .lib-icons button { min-height: var(--tap); padding: 0; font-size: 20px; border: 1px solid transparent; border-radius: 8px; background: none; cursor: pointer; }
 .lib-icons button.on { border-color: var(--accent); background: var(--accent-soft); }
 .lib-icon-reset { margin-top: 10px; }
-.ui-sheet .workspace-menu { position: static; width: auto; max-height: none; box-shadow: none; border: 0; background: none; padding: 0; }
 .lib-trash-notice { margin: 0 16px 8px; }
 .lib-trash-notice button { min-height: var(--tap); }
 .ui-sec .lib-rows { margin-bottom: 4px; }

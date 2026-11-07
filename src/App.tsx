@@ -178,12 +178,12 @@ export default function App() {
   // The one project in view, for the things that follow the address: '' for none or several.
   const project = projects.length === 1 ? projects[0] : ''
 
-  // Card ids are unique inside a workspace, not across them: the active workspace wins a tie.
+  // Card ids are unique inside a workspace, not across them: the project in view wins a tie, then the active workspace.
   const open = cards.filter(e => e.id === view.id)
   // A Hub run names its card by folder (`assistant/<folder>`), and a move keeps the folder: when no card has
   // that id, open the one whose folder matches.
   const byFolder = open.length || !view.id ? [] : cards.filter(e => e.folder === view.id)
-  const entity = open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
+  const entity = open.find(e => e.workspace.id === project) ?? open.find(e => e.workspace.active) ?? open[0] ?? byFolder[0] ?? null
   // Beside a card the list starts folded below 1400 px; on the Library it is the screen, and folds only when asked.
   const listFolded = entity ? (menuPref ?? !wide) : menuPref === true
   // A link to a card that was deleted: say where it is, with a way back.
@@ -451,7 +451,7 @@ export default function App() {
             </ReportBoundary>
           ) : showSettings ? (
             <ReportBoundary key="settings" onHome={goHome} title="Settings could not be shown.">
-              <Suspense fallback={fallback}><Settings /></Suspense>
+              <Suspense fallback={fallback}><Settings onOpenProject={pickProject} /></Suspense>
             </ReportBoundary>
           ) : (
           <ReportBoundary key={liveUrl || reportUrl || 'home'} onHome={goHome}>
