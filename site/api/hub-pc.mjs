@@ -164,13 +164,15 @@ export function validStatus(raw) {
 }
 
 /**
- * The status as `/hub/pc` sends it, which any guest can read: everything but `schedules` (the PC's task names and folders, which of them are the repo's, the
- * repos and workflows). Those go only to the signed-in `/hub/schedules`. A key added to `validStatus` later is sent unless it is named here, so a private one is dropped here too.
+ * The fields of the status that `/hub/pc` sends to a signed-in page. A key of `validStatus` that is not listed here is not sent, so a new
+ * field stays out until someone adds it. `schedules` is left out for everyone: it has its own signed route, `/hub/schedules`.
  */
-export function publicStatus(status) {
+export const PAGE_STATUS_FIELDS = ['v', 'host', 'at', 'reason', 'inUse', 'keepAwake', 'gpu', 'memory', 'hogs', 'comfy', 'unity', 'runner', 'sessions', 'runs'];
+
+/** The status as `/hub/pc` sends it: a copy with only the listed fields. */
+export function pageStatus(status) {
   if (!status) return status;
-  const { schedules: _private, ...rest } = status;
-  return rest;
+  return Object.fromEntries(PAGE_STATUS_FIELDS.filter(key => key in status).map(key => [key, status[key]]));
 }
 
 const ageOf = (status, at) => Math.max(0, Math.floor((at.getTime() - new Date(status.at).getTime()) / 1000));
