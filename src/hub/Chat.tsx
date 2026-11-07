@@ -97,7 +97,7 @@ function DelegateCard({ delegate }: { delegate: ChatDelegate }) {
       <button type="button" className={`hub-delegate-goal${open ? ' open' : ''}`} aria-expanded={open} onClick={() => setOpen(value => !value)} data-delegate-goal>{delegate.goal || 'Hermes did not send the goal.'}</button>
       <span className="hub-delegate-state" data-delegate-state>{DELEGATE_LABEL[delegate.state]}{delegate.seconds !== undefined ? ` · ${elapsedLabel(delegate.seconds * 1000)}` : ''}</span>
       {delegate.summary
-        ? <details className="hub-delegate-result" data-delegate-result><summary>Result</summary><Md text={delegate.summary} onSameOrigin={openSameOrigin} copy breaks /></details>
+        ? <details className="hub-delegate-result" data-delegate-result><summary>Result</summary><Md text={delegate.summary} onSameOrigin={openSameOrigin} copy breaks cardButtons /></details>
         : note && <span className="hub-muted hub-delegate-note">{note}</span>}
     </div>
   )
@@ -200,7 +200,7 @@ function Bubble({ line, index, conversation, models, who, agents, jobs, onJobsCh
   return (
     <div className={`hub-bubble ${line.role}`} data-line={index}>
       {line.role === 'assistant' && who && <Who id={who.id} name={who.name} agents={agents} size={22} />}
-      {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} copy breaks /> : line.text && <OwnerText text={line.text} />}
+      {line.role === 'assistant' ? <Md text={line.text} onSameOrigin={openSameOrigin} copy breaks cardButtons /> : line.text && <OwnerText text={line.text} />}
       {urls.length > 0 && (
         <div className="hub-bubble-images" data-bubble-images>
           {urls.map((url, index) => <HubImage key={url} url={url} open className="hub-bubble-image" alt={`Picture ${index + 1}`} />)}
@@ -921,7 +921,7 @@ function ChatView({ id, line: landLine, list, team }: { id?: string; line?: numb
           )))}
           {pending !== null && (
             <div className="hub-bubble assistant pending" data-pending>
-              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted" data-pending-wait>{who?.name ?? 'Hermes'} is working…</span>}
+              {pending ? <Md text={pending} onSameOrigin={openSameOrigin} copy breaks cardButtons /> : thinking ? <p className="hub-muted hub-thinking" data-thinking><span>Thinking: </span>{thinking}</p> : <span className="hub-muted" data-pending-wait>{who?.name ?? 'Hermes'} is working…</span>}
               <ToolLines tools={delegates.length ? tools.filter(tool => tool.name !== DELEGATE_TOOL) : tools} />
               <Delegates items={delegates} />
               {approval && <ApprovalCard approval={approval} onAnswered={() => setApproval(null)} />}

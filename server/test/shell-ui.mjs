@@ -124,6 +124,44 @@ try {
   assert.equal(await desk.locator('[data-tabs]').count(), 0, 'No tab bar on a desktop.');
   assert.equal(await desk.locator('.rail-toggle').count(), 0);
 
+  step('desktop rail: Sketch and Settings follow Team with a normal gap on a tall window, and the order is unchanged');
+  const gapBelowTeam = () => desk.evaluate(() => {
+    const team = document.querySelector('[data-rail] [data-nav="team"]').getBoundingClientRect();
+    const sketch = document.querySelector('[data-rail] [data-nav="sketch"]').getBoundingClientRect();
+    return sketch.top - team.bottom;
+  });
+  for (const height of [1080, 1800]) {
+    await desk.setViewportSize({ width: 1280, height });
+    const gap = await gapBelowTeam();
+    assert.ok(gap >= 0 && gap <= 16, `At 1280 x ${height}, Sketch is ${gap} px below Team.`);
+    assert.deepEqual(await navs(desk, '[data-rail]'), ['search', 'today', 'chat', 'library', 'project', 'work', 'team', 'sketch', 'settings']);
+  }
+  const railGaps = () => desk.locator('[data-rail]').evaluate(rail => [...rail.children].map(child => child.className).filter(Boolean));
+  assert.equal((await railGaps()).filter(name => name === 'ui-railgap').length, 2, 'Three groups, two gaps.');
+
+  step('desktop rail: on a short window the rail scrolls and Settings can still be reached');
+  await desk.setViewportSize({ width: 1280, height: 400 });
+  await desk.locator('[data-rail] [data-nav="settings"]').scrollIntoViewIfNeeded();
+  await desk.locator('[data-rail] [data-nav="settings"]').click();
+  await desk.locator('[data-settings]').waitFor();
+  await desk.setViewportSize({ width: 1280, height: 900 });
+  await desk.goto(`${fixture.url}#/~hub/today`);
+  await desk.locator('.hub[data-screen="today"]').waitFor();
+
+  step('desktop rail: a host with no Hub has one gap, never two in a row');
+  const noHub = await open({ width: 1280, height: 900 });
+  await noHub.route('**/api/capabilities', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), hub: false } });
+  });
+  await noHub.goto(`${fixture.url}#/~hub/library`);
+  await noHub.locator('[data-rail]').waitFor();
+  assert.deepEqual(await navs(noHub, '[data-rail]'), ['search', 'library', 'settings']);
+  const names = await noHub.locator('[data-rail]').evaluate(rail => [...rail.children].map(child => (child.classList.contains('ui-railgap') ? 'gap' : 'item')));
+  assert.equal(names.filter(name => name === 'gap').length, 1);
+  assert.ok(!names.some((name, at) => name === 'gap' && names[at - 1] === 'gap'), `No two gaps in a row (${names.join(' ')}).`);
+  assert.notEqual(names[names.length - 1], 'gap');
+
   step('desktop: the Library is the card list on the left with no Hub links in it; the rail lights Library');
   await openLibrary(desk);
   assert.equal(await desk.locator('[data-library] [data-hub-link], [data-library] [data-hub-group], [data-library] .sidebar-palette').count(), 0);

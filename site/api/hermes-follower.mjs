@@ -61,7 +61,11 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
     }, t.tickMs) : null;
     ticker?.unref?.();
     let failures = 0;
-    let delay = t.backoffMs;
+    // A first miss is tried again at once (a second at most); only repeated misses back off to the slow pace, so one dropped connection
+    // does not leave the run without its events for a minute.
+    const firstDelay = Math.min(t.backoffMs, 1000);
+    let delay = firstDelay;
+    let quick = 0;
     let bufferGone = false;
     try {
       while (!follower.stopped) {
@@ -71,7 +75,8 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
           try {
             for await (const entry of runs.events(runId, { since: follower.lastSeq < 0 ? undefined : follower.lastSeq, signal: follower.abort.signal })) {
               failures = 0;
-              delay = t.backoffMs;
+              delay = firstDelay;
+              quick = 0;
               if (Number.isInteger(entry.seq)) follower.lastSeq = entry.seq;
               publish(follower, entry);
               await onEvent(follower, entry);
@@ -98,7 +103,7 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
           delay = Math.min(delay * 2, t.backoffMaxMs);
           continue;
         }
-        delay = t.backoffMs;
+        delay = firstDelay;
         if (!view) { await onEnd(follower, { unknown: true }); return; }
         if (TERMINAL.has(view.status)) { await onEnd(follower, { run: view }); return; }
         if (reached) { await nap(follower, t.pollMs); continue; } // an end event the status has not caught up with yet
@@ -108,7 +113,8 @@ export function createFollowers({ runs, onEvent = async () => {}, onEnd = async 
           follower.seenControls.add(id);
           await onEvent(follower, { seq: null, event: 'approval.request', data: { ...control, event: 'approval.request' }, polled: true });
         }
-        await nap(follower, bufferGone || failures >= t.failuresBeforePoll ? t.pollMs : t.reopenMs);
+        // The stream ended or dropped with the run still going: open it again soon, then slower while it keeps giving nothing.
+        await nap(follower, bufferGone || failures >= t.failuresBeforePoll ? t.pollMs : Math.min(t.reopenMs, firstDelay * 2 ** quick++));
       }
     } finally {
       if (ticker) clearInterval(ticker);

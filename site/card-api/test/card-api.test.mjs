@@ -160,6 +160,18 @@ test('rights: read=* reads everything and writes, deletes and uploads nothing', 
   }
 });
 
+test('a direct write with a generic type is stored with the type the file name gives; a real type is kept', async () => {
+  const { fake, call } = await setup();
+  try {
+    fake.seed('sections/assistant/workspace.json', '{"name":"Assistant","entities":[]}', 'application/json');
+    const put = (file, type) => call('PUT', `/sections/assistant/files/probes/${file}`, { token: 'tok-hermes', body: Buffer.from('<p>x</p>'), base64: true, headers: { 'content-type': type } });
+    assert.equal((await put('x.html', 'application/octet-stream')).status, 200);
+    assert.equal(fake.objects.get('sections/assistant/probes/x.html').contentType, 'text/html; charset=utf-8');
+    assert.equal((await put('y.png', 'image/png')).status, 200);
+    assert.equal(fake.objects.get('sections/assistant/probes/y.png').contentType, 'image/png');
+  } finally { await fake.close(); }
+});
+
 test('rights: a token that writes inbox writes there only, and cannot delete', async () => {
   const { fake, call } = await setup();
   try {
