@@ -66,6 +66,26 @@ export function cleanHogs(raw) {
   return out;
 }
 
+const RUNNER_ID_RE = /^[a-z0-9-]{1,40}$/;
+
+/**
+ * The PC runner block: `{ projects, launch, busy, full, pausedUntil? }` (project ids, two booleans' worth of state, the name of a full cap
+ * and one time), or undefined when the report has none (an old reporter) or it is not an object. Ids that do not look like project ids
+ * are dropped, so a path or a sentence in it never reaches a page. Only ids and states: the Hub names what it knows, nothing more.
+ */
+export function cleanRunner(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const ids = list => (Array.isArray(list) ? [...new Set(list.filter(id => typeof id === 'string' && RUNNER_ID_RE.test(id)))].sort().slice(0, 30) : []);
+  const until = isoOf(raw.pausedUntil);
+  return {
+    projects: ids(raw.projects),
+    launch: raw.launch === true,
+    busy: ids(raw.busy),
+    full: raw.full === 'concurrent' || raw.full === 'day' ? raw.full : null,
+    ...(until ? { pausedUntil: until } : {}),
+  };
+}
+
 const bandOf = util => (util >= 50 ? 'heavy' : util >= 10 ? 'busy' : 'idle');
 
 function cleanSession(raw) {
@@ -110,6 +130,7 @@ export function validStatus(raw) {
   const gpuUtil = raw.gpu && typeof raw.gpu === 'object' ? num(raw.gpu.util, 0, 100) : null;
   const comfy = raw.comfy && typeof raw.comfy === 'object' ? raw.comfy : null;
   const unity = raw.unity && typeof raw.unity === 'object' ? raw.unity : null;
+  const runner = cleanRunner(raw.runner);
   return {
     v: 1,
     host: raw.host,
@@ -130,6 +151,7 @@ export function validStatus(raw) {
       open: unity.open === true,
       projects: (Array.isArray(unity.projects) ? unity.projects : []).slice(0, 10).map(name => lastSegment(name, 80)).filter(Boolean),
     } : null,
+    ...(runner ? { runner } : {}),
     sessions,
     runs: [],
   };
