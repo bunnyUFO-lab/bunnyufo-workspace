@@ -346,7 +346,7 @@ try {
     await page.keyboard.press('Escape');
     await page.locator('[data-spawn-sheet]').waitFor({ state: 'hidden' });
     // The sheet closes with history.back(), which lands a moment later: changing the address before that would be undone.
-    await page.waitForFunction(() => !//~o$/.test(location.hash));
+    await page.waitForFunction(() => !/\/~o$/.test(location.hash));
     assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-spawn-open')), true, 'The focus returns to Spawn.');
     assert.equal(await page.locator('.work-spawn').count(), 0);
     await page.evaluate(() => { location.hash = '#/~hub/project'; });
