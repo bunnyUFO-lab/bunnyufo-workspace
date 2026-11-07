@@ -52,6 +52,7 @@ export function personaTextOf({ name, role, extra }) {
     '- Write a card only when the owner asks you to write it up. If they do, these are the rules of your jobs:',
     ...rules.split('\n').map(line => `  ${line}`),
     ...(extra ? [`  ${extra}`] : []),
+    '- If the owner asks to move a card: run `cards get <from>/<id> --all --into <new folder>`, then the `cards put` above with `--section <to>` and `--why "copied from <from>, the owner asked"`. You cannot delete, so the original stays: say it is copied, give the new link, and say the owner can use Delete on the original. If the API refuses or a file is too big, nothing moved: say why, and that Move to workspace in the card\'s menu does it.',
     '- A long job fits better as a job: tell the owner they can pick "Start a job instead..." in the Model menu. Never create requests or Asks.',
   ].join('\n');
 }
