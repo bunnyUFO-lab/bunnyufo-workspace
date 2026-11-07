@@ -7,6 +7,7 @@
 // from which files exist (docs/workspaces.md, "Requests"). Every file the server writes for itself is
 // written with `ifNoneMatch: '*'`; a 412 means someone wrote it first and is answered with a 409.
 import { checkDrawing } from './card-writes.mjs';
+import { checkReference, storedReference } from './request-reference.mjs';
 import { chatModelOf, spawnModelsForClient } from './chat-models.mjs';
 import { RULES, SUBJECT_RE, minutesOf, presetOf, presetsForClient, renderBrief, route, runBlock } from './presets.mjs';
 import { createHash, createPublicKey, randomBytes } from 'node:crypto';
@@ -420,15 +421,18 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       if (clean.model) proposal.model = clean.model;
     }
     const checked = data.drawing ? checkDrawing({ scene: data.drawing.scene, png: data.drawing.png }) : null;
+    // A picture from a card, as the job's reference: for a preset job only, checked like a chat picture, stored as a snapshot.
+    if (data.reference !== undefined && data.reference !== null && !preset) throw fail('A reference picture is for a job made from a preset.', 400);
+    const reference = data.reference !== undefined && data.reference !== null ? checkReference(data.reference, fail) : null;
     const { why, ...stored } = proposal;
     // A bead's text was written by an agent, whoever tapped: the server says so, the body cannot (it was stripped above).
     const fromBead = clean.bead ? { bead: clean.bead, textOrigin: BEADS_AUTHOR, ...(stored.doneWhen ? { doneWhenOrigin: BEADS_AUTHOR } : {}) } : {};
-    const made = await writeNew(clean.project, clean.text, at, id => ({ id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }), ...fromBead }), checked);
+    const made = await writeNew(clean.project, clean.text, at, id => ({ id, project: clean.project, createdAt: at.toISOString(), by: user || 'local', text: clean.text, ...(preset ? stored : { when: clean.when }), ...fromBead }), checked, null, reference && { block: reference.block, bytes: reference.picture.buffer, type: reference.picture.type });
     return { status: 201, body: { id: made.id, ...(preset ? { target: made.request.target, why } : {}) } };
   }
 
   /** Write a new request folder under a free id: `build(id)` gives its request.json body; a drawing is stored beside it. */
-  async function writeNew(project, text, at, build, checked = null, fixedId = null) {
+  async function writeNew(project, text, at, build, checked = null, fixedId = null, reference = null) {
     for (let attempt = 0; attempt < (fixedId ? 1 : 3); attempt += 1) {
       const id = fixedId ?? newRequestId(project, text, at);
       const conflict = fail('Could not find a free id; try again.', 409);
@@ -438,6 +442,11 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
           await putCreateOnly(`requests/${id}/request.excalidraw`, checked.sceneText, 'application/json', conflict);
           await putCreateOnly(`requests/${id}/request.png`, checked.pngBuffer, 'image/png', conflict);
           request.drawing = { excalidraw: 'request.excalidraw', png: 'request.png' };
+        }
+        // A reference picture is written before request.json, so a request never names a picture that is not there.
+        if (reference) {
+          await putCreateOnly(`requests/${id}/${reference.block.file}`, reference.bytes, reference.type, conflict);
+          request.reference = reference.block;
         }
         // Who wrote the file is recorded as metadata: every request made here is the site's. Policy approval trusts this, not a field in the body.
         await putCreateOnly(`requests/${id}/request.json`, `${JSON.stringify(request, null, 2)}\n`, 'application/json', conflict, { writer: 'site' });
@@ -480,7 +489,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       const { request } = await loadOne(query.get('request') ?? '', at);
       const preset = presetOf(request.preset);
       if (!preset || request.target !== 'at-pc') throw fail('Only a request you start at the PC has a brief to copy.', 400);
-      return { brief: renderBrief({ preset, request, cardSection: await cardSectionOf(request.project) }) };
+      return { brief: renderBrief({ preset, request: { ...request, reference: storedReference(request.reference) ?? undefined }, cardSection: await cardSectionOf(request.project) }) };
     }
     throw fail('Not found', 404);
   }
@@ -587,6 +596,9 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     const request = checkedRequest(id, stored.buffer);
+    // checkRequest drops a reference, so it is read from the stored bytes, and only when the site wrote them; the brief then names it.
+    const attached = await readReference(id, stored.buffer);
+    if (attached) request.reference = attached.block;
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved.', 400);
     if (state !== 'proposed') throw fail(`That request is ${state}; only a proposed one can be approved.`, 409);
@@ -760,6 +772,22 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
   }
 
   /**
+   * The reference picture of a stored request: `{ block, bytes, type }`, or null when the request has none (or the site did not write it).
+   * A block whose picture is missing or no longer matches its hash is an error: a job never runs, or is copied, without the picture it names.
+   */
+  async function readReference(id, buffer) {
+    let stored;
+    try { stored = JSON.parse(buffer.toString('utf8').replace(/^﻿/, '')); } catch { return null; }
+    if (!stored || typeof stored !== 'object' || stored.reference === undefined || stored.reference === null) return null;
+    if (!await siteWrote(id)) return null;
+    const block = storedReference(stored.reference);
+    if (!block) throw fail('The reference picture of that request is damaged.', 409);
+    const file = await bucket.getBytes(key(`requests/${id}/${block.file}`));
+    if (!file || sha256Hex(file.buffer) !== block.sha256) throw fail('The reference picture of that request is missing or has changed.', 409);
+    return { block, bytes: file.buffer, type: block.file.endsWith('.png') ? 'image/png' : 'image/jpeg' };
+  }
+
+  /**
    * The copy of a request that `replaces` it, written as the owner's: the one place that builds it (Approve again, the cloud move
    * and a rerun). The old request must be in one of `states`. `raw` is the owner's edit (text, title, model, doneWhen);
    * `target` overrides the target; `followUp` and `fromAsk` replace the old ones; `fixedId` is a create-only id.
@@ -772,6 +800,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     if (!stored) throw fail('No such request.', 404);
     // The copy is the owner's, so it keeps only what passes the check the signer makes: no agent-written follow-up.
     const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const carried = await readReference(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset) throw fail('Only a request made from a preset can be approved again.', 400);
     const target = forced ?? raw?.target ?? parts.approved?.target ?? request.target;
@@ -799,7 +828,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     await refuseUnapprovable(clean, preset, target, await resolveRepo(clean, target));
     const made = await writeNew(clean.project, clean.text, at, newId => ({
       id: newId, ...clean, createdAt: at.toISOString(), by: user, origin: { kind: 'owner', name: user }, ...(followUp ? { followUp } : {}),
-    }), null, fixedId);
+    }), null, fixedId, carried);
     return { made, target, state };
   }
 
@@ -852,6 +881,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const carried = await readReference(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset?.targets.includes('hermes')) throw fail('Only a Hermes run can be answered this way.', 400);
     const question = String(parts.result?.question ?? '').slice(0, REQUEST_LIMITS.question);
@@ -866,13 +896,13 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const newId = newRequestId(clean.project, clean.text, at);
     const build = made => ({ id: made, ...clean, createdAt: at.toISOString(), by: user });
     if (!signingKey) {
-      const proposal = await writeNew(clean.project, clean.text, at, build, null, newId);
+      const proposal = await writeNew(clean.project, clean.text, at, build, null, newId, carried);
       return { status: 201, body: { id: proposal.id, state: 'proposed' } };
     }
     // Claim this request before anything else is written: the signed stop is create-only, so of two answers at once only one
     // gets past it (the other is a 409) and only one follow-up run starts.
     await writeStop(id, `answered by ${newId}`, user, at, ['asking']);
-    const made = await writeNew(clean.project, clean.text, at, build, null, newId);
+    const made = await writeNew(clean.project, clean.text, at, build, null, newId, carried);
     try {
       const approval = await approveRequest(made.id, { target: 'hermes', by: user, at });
       return { status: 201, body: { id: made.id, ...approval } };
@@ -904,6 +934,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     const stored = await bucket.getBytes(key(`requests/${id}/request.json`));
     if (!stored) throw fail('No such request.', 404);
     const { id: _id, ...request } = checkedRequest(id, stored.buffer);
+    const attached = await readReference(id, stored.buffer);
     const preset = presetOf(request.preset);
     if (!preset?.targets.includes('hermes')) throw fail('Only a Hermes run can be continued.', 400);
     const { origin: oldOrigin, followUp: _followUp, continues: _continues, replaces: _replaces, ...copy } = request;
@@ -917,7 +948,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
     await refuseUnapprovable(clean, preset, 'hermes');
     const newId = newRequestId(clean.project, clean.text, at);
     // Render the brief now, with the report cut as designed: one that cannot fit 16 KB even with no report would lock the original for good.
-    try { renderBrief({ preset, request: { ...clean, id: newId }, earlier: await readEarlier(id) }); } catch (error) {
+    try { renderBrief({ preset, request: { ...clean, id: newId, ...(attached ? { reference: attached.block } : {}) }, earlier: await readEarlier(id) }); } catch (error) {
       if (error.status === 400) throw fail('That reply is too long to send with the job text; shorten the reply.', 400);
       throw error;
     }
@@ -929,7 +960,7 @@ export function createRequests({ bucket, key, cached, putCreateOnly, listFolders
       if (error.status === 409) throw clash(`Already continued as ${await claimedTo(id)}; reply there.`);
       throw error;
     }
-    const made = await writeNew(clean.project, clean.text, at, madeId => ({ id: madeId, ...clean, createdAt: at.toISOString(), by: user }), null, newId);
+    const made = await writeNew(clean.project, clean.text, at, madeId => ({ id: madeId, ...clean, createdAt: at.toISOString(), by: user }), null, newId, attached);
     try {
       const approval = await approveRequest(made.id, { target: 'hermes', by: user, at });
       return { id: made.id, state: approval.state, ...(approval.waiting ? { waiting: approval.waiting } : {}) };
