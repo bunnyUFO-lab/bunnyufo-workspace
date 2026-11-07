@@ -326,7 +326,7 @@ match. Anything but GET, HEAD and OPTIONS is refused (403) unless the TCP peer i
 the LAN is refused), and `Remote-User` is stripped from every
 request that is not from NPM, so it cannot be forged from the LAN. With `REQUIRE_REMOTE_USER=1` the
 service also answers 401 to a write with no header, and `/api/capabilities` reports the site
-read-only, so a visitor on the LAN sees no controls. Reads stay open. On the LAN,
+read-only and the Hub off, so a visitor on the LAN sees the Library alone with no controls. Library reads (`/sites.json`, `/api/capabilities`, `/api/card-state`, card files under `/w/`) stay open; every `/api/hub/` read needs the header too (401 without it). On the LAN,
 `http://192.0.2.35:4000` is read-only; writes go through the signed-in address (https://workspaces.example.net).
 
 NPM must forward the header before the flag is turned on: in its proxy host, the
@@ -370,8 +370,7 @@ the stack there before asking for review.
 `HUB=1` in the site API's `api.env` turns on the Hub: `/api/hub/…` routes over the `inbox`
 section of the cards bucket (`site/api/hub.mjs`). The local service serves the same routes over
 its own bucket whenever it has one (`HUB=0` turns them off). `/api/capabilities` reports
-`hub` and `chat`. Reads are open wherever the site is; writes need a signed-in
-user (`Remote-User`), like every other write.
+`hub` and `chat`; to a visitor who is not signed in, on a site that requires sign-in, it reports both `false` and omits `policy`, `cloudRepos` and `approve`. With `REQUIRE_REMOTE_USER=1` every Hub route needs a signed-in user (`Remote-User`), read or write: a GET with no user is 401 before any route runs, so a route added later is closed without a list to keep (`/hub/discord/*` keeps its bearer token and is answered before this check). Without the flag, reads are open and writes need the user as before.
 
 | Route | Does |
 |---|---|
@@ -1147,7 +1146,7 @@ The Hermes host publishes a redacted copy of its profile settings as create-only
 
 | Route | Does |
 |---|---|
-| `GET /api/hub/schedules` | `{ sources, note, at }`. `sources` is `[{ id, label, state, as_of, items, text?, note?, total?, host?, timezone?, profileModels? }]` in page order: `hermes-jobs`, `hermes-timers`, `site-timers`, `pc-tasks`, `github`. `state` is `live`, `old` (the export is past the freshness rule: 7 hours) or `not-reporting`. 401 without a signed-in user when the site requires one: prompts are not for anonymous reads, and Team is otherwise open to guests. There is no write route |
+| `GET /api/hub/schedules` | `{ sources, note, at }`. `sources` is `[{ id, label, state, as_of, items, text?, note?, total?, host?, timezone?, profileModels? }]` in page order: `hermes-jobs`, `hermes-timers`, `site-timers`, `pc-tasks`, `github`. `state` is `live`, `old` (the export is past the freshness rule: 7 hours) or `not-reporting`. 401 without a signed-in user when the site requires one: prompts are not for anonymous reads. There is no write route |
 
 **Which copy of a job is real.** The Hermes host's scheduler runs the jobs in its own job file. The page shows an export of that file, at most about 15 minutes old, and says so: "These are the jobs the Hermes host runs now. The setup script in the homelab repo only adds a job that is missing, so changing it does not change a job that already exists." That script is a starter list.
 

@@ -26,7 +26,7 @@ async function fixture({ listCacheMs = 0 } = {}) {
   const server = createSiteApi({ bucket, templateDir: path.join(root, 'none'), stateFile: path.join(root, 'card-state.json'), sectionsTtl: 0, requireRemoteUser: true, hub });
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const get = async route => { const answer = await fetch(`${origin}/api${route}`); return { status: answer.status, body: await answer.json().catch(() => null) }; };
+  const get = async route => { const answer = await fetch(`${origin}/api${route}`, { headers: { 'Remote-User': 'owner' } }); return { status: answer.status, body: await answer.json().catch(() => null) }; };
   const put = seeder(fake, 'sections/inbox-dev');
   const cards = (section, entities) => fake.seed(`sections/${section}/workspace.json`, JSON.stringify({ name: section, entities }), 'application/json');
   /** A Hermes job of `project`, taken `minutes` ago, with the result files given. */

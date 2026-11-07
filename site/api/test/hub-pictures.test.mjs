@@ -31,7 +31,7 @@ async function fixture() {
   await listenOnGoodPort(server, '127.0.0.1');
   const origin = `http://127.0.0.1:${server.address().port}`;
   const call = (method, route, data) => fetch(`${origin}/api${route}`, {
-    method, headers: { ...(method === 'GET' ? {} : { Origin: SITE, 'Remote-User': 'owner' }), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    method, headers: { 'Remote-User': 'owner', ...(method === 'GET' ? {} : { Origin: SITE }), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: data === undefined ? undefined : JSON.stringify(data),
   });
   const get = async route => { const answer = await call('GET', route); return { status: answer.status, body: await answer.json().catch(() => null), response: answer }; };

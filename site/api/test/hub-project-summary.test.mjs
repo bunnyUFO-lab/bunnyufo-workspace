@@ -47,7 +47,7 @@ test('GET /hub/project-summary lists each project with a Beads copy', async () =
     seed.put('beads/magic-loops.meta.json', { pushedAt: iso(NOW) });
     seed.put('beads/bunnylink.jsonl', jsonl([beadsIssue({ id: 'bl-aaaa', type: 'milestone', title: 'Only one' }), beadsIssue({ id: 'bl-bbbb', parent: 'bl-aaaa', status: 'closed', closed: iso(NOW) })]), 'application/x-ndjson');
     seed.put('beads/bunnylink.meta.json', { pushedAt: iso(NOW) });
-    const answer = await fetch(`http://127.0.0.1:${server.address().port}/api/hub/project-summary`);
+    const answer = await fetch(`http://127.0.0.1:${server.address().port}/api/hub/project-summary`, { headers: { 'Remote-User': 'owner' } });
     assert.equal(answer.status, 200);
     const body = await answer.json();
     assert.deepEqual(Object.keys(body), ['projects', 'at']);
