@@ -14,7 +14,6 @@
 .ui-navitem kbd { margin-left: auto; font: 500 11px var(--mono); color: var(--t3); border: 1px solid var(--line2); border-radius: 5px; padding: 2px 5px; }
 .ui-navitem .ui-count { margin-left: auto; }
 .ui-railgap { height: 12px; flex: none; }
-.ui-railfoot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
 .ui-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; background: var(--accent); color: var(--accent-ink); }
 
 /* ── Tabs (phone only) ── */
