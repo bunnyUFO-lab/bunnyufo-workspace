@@ -114,21 +114,50 @@ a.team-session:hover { background: var(--s2); }
 .tk-packs .site-skill-row { flex-wrap: wrap; }
 .tk-packs a { overflow-wrap: anywhere; }
 
-/* Skills and plugins, read by agent: the groups use the width. */
-.tk-tools { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* Skills and plugins. From 900 px the heading, tabs and tools are a band above both panes; on a phone they lead the one pane and the
+   search row sticks. Not a viewport rule around a box whose width does not follow the viewport (the 384 px list pane), which is
+   what overlapped the search. */
+.tk-tools { display: contents; }
 .tk-tools .ui-seg { margin: 0; }
-.tk-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; align-items: start; min-width: 0; }
-.tk-group { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; background: var(--s1); border: 1px solid var(--line); border-radius: 16px; }
-.tk-ghead h3 { margin: 0; font-family: var(--font); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
-.tk-ghead p { margin: 4px 0 0; font-size: 13px; }
-.tk-folder h4 { margin: 4px 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); }
-.tk-folder .ui-list { border-radius: 12px; overflow: hidden; }
-.tk-group .ui-row b { overflow-wrap: anywhere; }
+.tk-find { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; background: var(--ground); }
+.tk-find .sf { flex: 1 1 auto; min-width: 0; }
+.tk-find .ui-btn { flex: none; }
+.tk-found { flex: none; font-size: 13px; color: var(--t2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tk-groups { display: flex; flex-direction: column; gap: 12px; max-width: 1100px; min-width: 0; }
+.tk-bysk { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.tk-card { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; padding: 14px; background: var(--s1); border-radius: 14px; }
+.hub .tk-card-h { display: block; margin: 0; font-family: var(--font); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; text-transform: none; color: var(--t1); overflow-wrap: anywhere; }
+.tk-card .hub-empty { padding: 0; }
+.hub .ui-fold-h { display: block; margin: 0; font-size: inherit; letter-spacing: normal; text-transform: none; color: inherit; }
+.tk-groups > .ui-fold > .ui-fold-h .ui-row-body b { font-size: 18px; letter-spacing: -0.01em; }
+.tk-groups > .ui-fold > .ui-fold-h .ui-row-body small { white-space: normal; }
+.ui-fold .ui-fold { border-radius: 0; background: none; box-shadow: inset 0 1px 0 var(--line); }
+.tk-groups .ui-fold .ui-fold .ui-fold-head, .tk-bysk .ui-fold-head { min-height: 56px; }
+.tk-groups .ui-fold .ui-fold .ui-row-body small, .tk-bysk .ui-fold-head .ui-row-body small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-end { flex: none; display: inline-flex; align-items: center; gap: 8px; }
+.tk-n { font-size: 13px; color: var(--t3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ui-fold .ui-list { border-radius: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); background: none; }
+.ui-fold .ui-list > .ui-row { background: none; box-shadow: inset 0 -1px 0 var(--line); }
+.ui-fold .ui-list > .ui-row:hover { background: var(--s2); }
+.ui-fold .ui-list > .ui-row.on { background: var(--s3); }
+.tk-skill { min-height: var(--tap); padding: 6px 14px; }
+.ui-row.tk-skill b { font-weight: 500; overflow-wrap: anywhere; }
+.tk-tags { flex: 0 1 auto; justify-content: flex-end; }
 .tk-plugin.off { opacity: 0.7; }
 .tk-desc { display: block; overflow-wrap: anywhere; }
+.tk-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.tk-foot p { margin: 0; }
+.tk-shell { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+.tk-shell > .ui-split { flex: 1; min-height: 0; height: auto; }
+.tk-top { flex: none; padding: 16px 24px 8px; border-bottom: 1px solid var(--line); background: var(--ground); min-width: 0; }
+.tk-top .team-top .ui-seg-tabs { width: 336px; max-width: 100%; }
+.tk-top .tk-tools { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk-top .tk-tools .ui-seg { flex: none; width: 240px; }
+.tk-top .tk-find { position: static; flex: 1; padding: 0 0 8px; background: none; }
+.tk-top .tk-tools .ui-seg { margin-bottom: 8px; }
+.tk-top .tk-find .sf { max-width: 520px; }
+.tk-top .tk-find .ui-btn, .tk-top .tk-found { margin-left: auto; }
+.tk-pane { padding-left: 16px; padding-right: 16px; }
 @media (min-width: 900px) {
-  .tk-tools { flex-direction: row; align-items: center; }
-  .tk-tools .ui-seg { width: 280px; flex: none; }
-  .tk-tools .sf { flex: 1; min-width: 0; }
   .tk-pane { padding-left: 24px; padding-right: 24px; }
 }
