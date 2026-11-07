@@ -7,6 +7,7 @@ import { askDraft, copyImage, CopyError, fetchCardImage, toPictureFile, UNSUPPOR
 import { host } from '../lib/host'
 import { startChat } from '../hub/chatStart'
 import { hubHash } from '../lib/route'
+import { openSpawn } from '../hub/spawnStore'
 
 /** A press in the first moments after the viewer opens is ignored: a page that opens the viewer under a person's double click gets nothing. */
 const ARM_MS = 500
@@ -54,6 +55,18 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
       patch({ error: problem instanceof Error ? problem.message : 'The picture could not be read.', busy: false })
     }
   }
+  // A job's form opens with the picture, its source and an empty text box: no card text is copied into it.
+  const newJob = async () => {
+    if (!armed() || !context || !own) return
+    patch({ busy: true, error: '' })
+    try {
+      const file = await toPictureFile(await fetchCardImage(url), own.split('/').pop() || 'picture')
+      openSpawn({ project: context.card.workspace, reference: { file, source: { section: context.card.workspace, card: context.card.id, file: own, title: context.card.title.replace(/\s+/g, ' ').trim().slice(0, 120) || context.card.id } } })
+      dialog.current?.close()
+    } catch (problem) {
+      patch({ error: problem instanceof Error ? problem.message : 'The picture could not be read.', busy: false })
+    }
+  }
   const go = (step: number) => { if (gallery) gallery.onIndex((gallery.index + step + gallery.items.length) % gallery.items.length) }
   useEffect(() => { const current = dialog.current; current?.showModal(); return () => current?.close() }, [])
   // The arrow keys belong to the viewer while it is open: they step through the page's pictures, and never walk the card's tabs behind it.
@@ -70,6 +83,7 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
   // An action that cannot work here is left out, not greyed.
   const canEdit = !!path && !!context?.annotate
   const canAsk = !!own && host.chat
+  const canJob = !!own && host.hub && host.write
   const many = !!gallery && gallery.items.length > 1
   // StrictMode closes and reopens the dialog during its effect check. Ignore a queued close event if the dialog has already reopened.
   return createPortal(<dialog ref={dialog} className="buw-lightbox" aria-label="Image preview" onClose={event => { if (!event.currentTarget.open) onClose() }}>
@@ -89,6 +103,7 @@ export default function ImagePreview({ url, title, onClose, plain = false, galle
     {own && <div className="buw-lightbox-actions" data-lightbox-actions>
       {canEdit && <button onClick={edit} disabled={busy} data-action="edit">✎ Edit</button>}
       {canAsk && <button onClick={() => void ask()} disabled={busy} data-action="ask">Ask in chat</button>}
+      {canJob && <button onClick={() => void newJob()} disabled={busy} data-action="job">New job</button>}
       <button onClick={copy} data-action="copy">Copy image</button>
     </div>}
     <p className="buw-lightbox-note" role="status">{error || 'Esc to close'}{failedCopy && <> <button type="button" className="buw-lightbox-note-download" onClick={() => void downloadImage(url).catch(problem => patch({ error: problem.message }))}>Download</button></>}</p>

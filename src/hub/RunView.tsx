@@ -9,6 +9,7 @@ import { back } from '../lib/entries'
 import type { RequestDetail } from './ApprovalView'
 import Md from './Md'
 import { setFocus } from './needsFocus'
+import ReferenceNote from './ReferenceNote'
 import RunReply from './RunReply'
 import type { LiveLine } from './runLines'
 import { applyRunEvent, elapsedLabel } from './runLines'
@@ -420,6 +421,7 @@ export function RunView({ id, onGone, page = false }: { id: string; onGone?: (id
       </div>
       {!page && <h3 className="rd-title">{request.title ?? request.text.slice(0, 80)}</h3>}
       {!page && <p className="rd-body" data-run-request-text>{request.text}</p>}
+      {!page && request.reference && <ReferenceNote id={request.id} reference={request.reference} />}
       {movedId && <p className="rd-note" data-run-moved>Moved to the cloud → <a href={hubHash('request', movedId)}>{movedId}</a></p>}
       {!movedId && older && movedTo(older.stop?.reason) === id && <p className="rd-note" data-run-moved-from>Moved from the PC · <a href={hubHash('request', older.request.id)}>{older.request.id}</a></p>}
       {target && <p className="hub-muted" data-run-target>{runsOn(target)}{!page && request.doneWhen ? ` · done when: ${request.doneWhen}` : ''}</p>}

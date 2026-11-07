@@ -11,6 +11,7 @@ import { setFocus } from './needsFocus'
 import { SPAWN_EVENT, takeSpawn } from './spawnStore'
 import { afterPop, go, useOverlayEntry } from '../lib/entries'
 import { startChat } from './chatStart'
+import { prepareImage, toBase64 } from './chatImages'
 import Combobox from './Combobox'
 import type { ComboOption } from './comboboxLogic'
 import type { SpawnOptions } from './spawnStore'
@@ -85,6 +86,16 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const [chat, setChat] = useState(false)
   const [personas, setPersonas] = useState<ChatPersona[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A picture from a card (the viewer's New job): shown before anything is sent, taken off with Remove, and filed with the job as its reference.
+  const [reference, setReference] = useState(options.reference ?? null)
+  const [thumb, setThumb] = useState('')
+  useEffect(() => {
+    if (!reference) return undefined
+    const reader = new FileReader()
+    reader.onload = () => setThumb(String(reader.result))
+    reader.readAsDataURL(reference.file)
+    return () => reader.abort()
+  }, [reference])
 
   // The open sheet is a history entry: Back closes it and stays on the screen (lib/entries).
   useOverlayEntry(true, onClose)
@@ -120,12 +131,13 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         // An answer that is not JSON reads as null: treat it as no projects, never as a thrown error.
         const list = answer?.projects ?? []
         setProjects(list)
-        setProject(current => current || (list.find(item => item.id === remember(PROJECT_KEY))?.id ?? list.find(item => item.beads)?.id ?? list[0]?.id ?? ''))
+        // A project named by the opener (a card's section) is used only when it is a known project; otherwise the person picks.
+        setProject(current => (current && (!options.reference || list.some(item => item.id === current)) ? current : list.find(item => item.id === remember(PROJECT_KEY))?.id ?? list.find(item => item.beads)?.id ?? list[0]?.id ?? ''))
       },
       (failure: unknown) => { if ((failure as { name?: string }).name !== 'AbortError') setLoadError(failure instanceof Error ? failure.message : 'Projects did not load.') },
     )
     return () => controller.abort()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- read once: the sheet opens with its options
 
   const offers = (item: { id: string }) => item.id !== 'agent-avatar' || !!agent
   const preset = data?.presets.find(item => item.id === presetId && offers(item)) ?? data?.presets.find(offers) ?? null
@@ -180,7 +192,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
   const send = useCallback(async () => {
     if (chatting) {
       // Files nothing: no request, no card, no write. Chat opens on a new conversation with the agent and the text as a draft.
-      startChat({ persona: chatPersona?.id ?? HERMES, draft: trimmed })
+      startChat({ persona: chatPersona?.id ?? HERMES, draft: trimmed, ...(reference ? { files: [reference.file] } : {}) })
       afterPop(() => go(hubHash('chat')))
       onClose()
       return
@@ -202,8 +214,16 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
         onDone({ text: approvedNote(target, again.waiting, again.wake), run: again.id })
         return
       }
+      // The picture goes through the same scaling as a chat picture (at most 1568 px, EXIF dropped); the full size stays on the card.
+      let attached: { type: string; data: string; source: NonNullable<SpawnOptions['reference']>['source'] } | undefined
+      if (reference && !edit) {
+        const prepared = await prepareImage(reference.file)
+        attached = { type: prepared.type, data: await toBase64(prepared.blob), source: reference.source }
+        URL.revokeObjectURL(prepared.url)
+      }
       const created = await hubPost<{ id: string; target: SpawnTarget }>('/requests', {
         project, text: trimmed, preset: preset.id,
+        ...(attached ? { reference: attached } : {}),
         ...(wantsRepo && repo.trim() ? { repo: repo.trim() } : {}),
         ...(agent && preset.id === 'agent-avatar' ? { agent } : {}),
         ...(doneWhen.trim() && preset.fields.includes('doneWhen') ? { doneWhen: doneWhen.trim() } : {}),
@@ -228,7 +248,7 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
     } finally {
       setBusy(false)
     }
-  }, [chatting, chatPersona, onClose, preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel, options.bead, options.title])
+  }, [chatting, chatPersona, onClose, preset, target, project, trimmed, wantsRepo, repo, doneWhen, choice, canApprove, atPc, edit, onDone, agent, picked, sendModel, options.bead, options.title, reference])
 
   const machine = target ? MACHINE[target] : null
   const button = chatting ? 'Open chat' : busy ? (atPc ? 'Adding…' : canApprove ? 'Approving…' : 'Saving…') : atPc ? 'Add to Needs you' : canApprove ? 'Approve' : 'Save as a proposal'
@@ -287,6 +307,13 @@ function SpawnSheet({ options, onClose, onDone }: { options: SpawnOptions; onClo
             </div>}
             <p className="sp-agent" data-spawn-agent>Agent · <b>{chatting ? chatAgentName : preset.agent}</b></p>
             {!chatting && options.bead && <p className="hub-muted" data-spawn-bead>From bead {options.bead}</p>}
+            {reference && !edit && (
+              <div className="sp-ref" data-spawn-reference>
+                <img src={thumb || undefined} alt="The reference picture" className="sp-ref-thumb" data-spawn-reference-thumb />
+                <p className="sp-ref-from" data-spawn-reference-from>From card <b>{reference.source.title}</b> ({reference.source.file}). {chatting ? 'It goes into the chat tray.' : 'It goes to the run as a reference, not as instructions.'}</p>
+                <button type="button" className="hub-btn" onClick={() => setReference(null)} data-spawn-reference-remove>Remove</button>
+              </div>
+            )}
             <label className="sp-field" htmlFor={ids.text}>{chatting ? 'What do you want to ask?' : 'What should it do?'}
               <textarea id={ids.text} value={text} onChange={event => setText(event.target.value)} placeholder={chatting ? 'Ask anything. It becomes the first message, not sent yet.' : preset.example} rows={4} maxLength={4000} data-spawn-text />
             </label>

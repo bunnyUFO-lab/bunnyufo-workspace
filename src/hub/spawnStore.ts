@@ -12,6 +12,11 @@ export interface SpawnOptions {
   title?: string
   doneWhen?: string
   bead?: string
+  /**
+   * A picture from a card, to go with the job as its reference (the viewer's New job). It stays in memory with the open: no address carries it.
+   * `source` is where it came from, set by the app (never page text), and shown in the sheet before anything is sent.
+   */
+  reference?: { file: File; source: { section: string; card: string; file: string; title: string } }
   /** Edit a request: the sheet starts from it, locks the project, preset and repo; the text, Done when and the machine stay editable, and replaces the request. */
   edit?: { id: string; project: string; preset: string; text: string; target: string; repo?: string; doneWhen?: string; agent?: string; model?: string }
 }
