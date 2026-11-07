@@ -37,6 +37,18 @@ test('a research persona quotes the card-write rules: the section from the chat,
   }
 });
 
+test('a research persona handles "move this card" as a copy: get --all before put, the original stays, Move to workspace named, no --remove', () => {
+  for (const entry of CHAT_PERSONAS.filter(item => item.preset)) {
+    const line = entry.text.split('\n').find(row => row.includes('asks to move a card'));
+    assert.ok(line, `${entry.id} has the move line`);
+    assert.ok(line.includes('--all'), `${entry.id} reads with --all`);
+    assert.ok(line.indexOf('cards get') !== -1 && line.indexOf('cards get') < line.indexOf('cards put'), `${entry.id} gets before it puts`);
+    assert.match(line, /original stays/);
+    assert.match(line, /Move to workspace/);
+    assert.doesNotMatch(entry.text, /--remove/);
+  }
+});
+
 test('the Planner is the one persona that may file an Ask, and only a change list: its own text names --changes and the rules of the list, and never says "Never create requests or Asks"', () => {
   const planner = CHAT_PERSONAS.find(entry => entry.id === 'planner');
   const agent = AGENTS.find(item => item.id === 'planner');

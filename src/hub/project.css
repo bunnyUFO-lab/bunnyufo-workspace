@@ -89,3 +89,18 @@
 @media (max-width: 640px) {
   .pp[data-view="map"]:has(.hub-wayfinder[data-open="true"]) .pp-head, .pp[data-view="map"]:has(.hub-map-branchbar) .pp-head { display: none; }
 }
+
+/* The sprint row under the Roadmap's tabs: the picker, how far the sprint is, and a way to its board. */
+.pp-sprint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 16px 12px; }
+@media (min-width: 900px) { .pp-sprint { margin-inline: 24px; } }
+.pp-sprint .cb.pp-sprint-pick { flex: 0 1 320px; width: 320px; max-width: 100%; }
+.pp-sprint .cb.pp-sprint-pick .cb-input { min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+.pp-sprint-count { font-size: 13px; color: var(--t2); }
+.pp-sprint .pp-link { display: inline-flex; align-items: center; min-height: 32px; }
+@media (pointer: coarse), (max-width: 639px) {
+  .pp-sprint .cb.pp-sprint-pick { flex: 1 1 100%; width: auto; }
+  .pp-sprint .cb.pp-sprint-pick .cb-input { min-height: 44px; }
+  .pp-sprint .pp-link { min-height: 44px; }
+}
+.pp-sprint .hub-chip { min-height: 32px; }
+@media (pointer: coarse), (max-width: 639px) { .pp-sprint .hub-chip { min-height: 44px; display: inline-flex; align-items: center; } }

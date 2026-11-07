@@ -140,6 +140,22 @@ test('a client that goes away mid-reply makes the relay hang up on Hermes within
   } finally { await close(); }
 });
 
+test('a transcript is read through the Hub and is not served under /w/', async () => {
+  const { fake, call, origin, close } = await fixture();
+  try {
+    const id = '20261106-abc123';
+    fake.seed(`sections/inbox/chat/${id}.jsonl`, `${JSON.stringify({ role: 'user', text: 'fake text', at: new Date().toISOString() })}\n`, 'application/x-ndjson');
+    const read = await call('GET', `/hub/chat/${id}`);
+    assert.equal(read.status, 200);
+    assert.match(JSON.stringify(await read.json()), /fake text/);
+    for (const route of [`/w/inbox/chat/${id}.jsonl`, `/api/w/inbox/chat/${id}.jsonl`]) {
+      const answer = await fetch(`${origin}${route}`, { headers: { 'Remote-User': 'owner' } });
+      assert.equal(answer.status, 404, route);
+      assert.ok(!(await answer.text()).includes('fake text'));
+    }
+  } finally { await close(); }
+});
+
 test('the chat routes write only under sections/inbox/chat/', async () => {
   const { fake, call, origin, owner, close } = await fixture();
   try {

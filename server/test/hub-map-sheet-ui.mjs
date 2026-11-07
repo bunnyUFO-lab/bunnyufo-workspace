@@ -11,7 +11,7 @@ import { ms } from './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, checklistJson, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';
-import { itemId } from '../../site/api/hub-sprints.mjs';
+import { closingEventPath, itemId } from '../../site/api/hub-sprints.mjs';
 import { listenOnGoodPort } from '../listen.mjs';
 
 const step = name => console.log(`- ${name}`);
@@ -446,6 +446,28 @@ try {
     assert.equal(fixture.fake.objects.has(`${sprintFolder}sprint-end.json`), true);
     assert.equal(await panel.locator('[data-sprint-start]').count(), 1, 'A new sprint can be started once the last one ended.');
     await noSideways(page, `${label} sprint ended`);
+
+    step(`${label}: the ended sprint has one item in Needs you, and its page has the closing prompt`);
+    const { rel: closingRel, file: closingFile } = closingEventPath(head, fixture.fake.json(`${sprintFolder}sprint-end.json`).at);
+    assert.equal(fixture.fake.objects.has(`sections/inbox/${closingRel}`), true, 'The closing item is filed.');
+
+    await page.goto(`${fixture.url}#/~hub/review/${encodeURIComponent(closingFile)}`);
+    const closing = page.locator('[data-section="closing"]');
+    await closing.waitFor({ timeout: ms(20000) });
+    assert.ok(await closing.isVisible());
+    const promptText = await closing.locator('pre').innerText();
+    assert.match(promptText, /There are no pull requests/);
+    assert.doesNotMatch(promptText, /Retarget every PR/, 'The sprint has no pull request, so no merge step.');
+    const copy = closing.locator('[data-copy]');
+    assert.ok((await copy.boundingBox()).height >= 44, 'Copy is at least 44 px high.');
+    await copy.click();
+    await page.waitForFunction(() => /^(Copied|Press and hold to copy)/.test(document.querySelector('[data-section="closing"] [data-copy]')?.textContent ?? ''));
+    if (viewport.width < 600) {
+      const box = await copy.boundingBox();
+      const pre = await closing.locator('pre').boundingBox();
+      assert.ok(box.y < pre.y, 'On a phone Copy sits above the prompt.');
+    }
+    assert.ok(await page.evaluate(() => document.scrollingElement.scrollWidth <= innerWidth), `${label}: the closing page scrolls sideways.`);
 
     assert.deepEqual(page.errors, [], `${label}: no page errors`);
   }

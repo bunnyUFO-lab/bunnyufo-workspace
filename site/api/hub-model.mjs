@@ -647,6 +647,7 @@ export function deriveEventItems(events, repoProjects = {}) {
         ...reviewExtras(event),
         ...(Array.isArray(event.prs) && prs.length ? { prs } : {}),
         ...(progress.merged > 0 ? { prsMerged: progress.merged } : {}),
+        ...(validId(event.sprintEnd) ? { sprintEnd: event.sprintEnd } : {}),
         ...(project ? { project } : {}),
       }));
     } else if (event.kind === 'blocked') {
@@ -861,6 +862,7 @@ export function describeItem(item, now) {
     case 'pr': {
       const legs = Array.isArray(item.verdicts) ? item.verdicts.map(verdict => `${LEG_NAME[verdict.leg]} ${verdict.result}`).join(' · ') : '';
       // A review with no pull request (an item closed with a decision for the owner) names no pull request and no merge.
+      if (item.sprintEnd) return { ...base, what: 'A sprint to close', state: legs || item.ownerSummary || 'Ended', next: item.ask, blocker: 'Your closing session' };
       const hasPr = reviewPrs(item).length > 0 || (Array.isArray(item.prs) && item.prs.length > 0) || (typeof item.url === 'string' && item.url !== '');
       if (!hasPr) return { ...base, what: 'A finished item for you', state: legs || 'Ready for review', next: item.ask || 'Look it over or mark it done', blocker: 'Your decision' };
       return { ...base, what: 'A pull request ready for you', state: legs || 'Ready for review', next: 'Open it or mark it done', blocker: 'Merging stays yours' };
@@ -1087,6 +1089,7 @@ export function reviewDetail(events, id, repoProjects = {}) {
     ...(url ? { url } : {}), ...(card ? { card } : {}),
     ...(prs.length ? { prs } : {}),
     ...(progress.merged > 0 ? { prsMerged: progress.merged } : {}),
+    ...(validId(event.sprintEnd) ? { sprintEnd: event.sprintEnd } : {}),
     ...(cardDir ? { cardDir } : {}), ...(cardFiles.length ? { cardFiles } : {}),
     ...(shots.length ? { screenshots: screenshotPairs(shots) } : {}),
     ...(deployUrl ? { deployUrl } : {}),

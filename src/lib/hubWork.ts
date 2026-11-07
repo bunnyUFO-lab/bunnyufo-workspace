@@ -25,9 +25,14 @@ export interface WorkCard {
   href: string
 }
 
+/** One sprint (a `sprint:<name>` label) over the bead cards of a board: done of all. */
+export interface WorkSprint { name: string; title?: string; done: number; total: number }
+
 export interface WorkLanes {
   lanes: Record<WorkLane, WorkCard[]>
   /** Real totals: a lane may hold fewer cards than its count (Backlog keeps 50, Done 30). */
   counts: Record<WorkLane, number>
+  /** Every sprint of the board, open ones first, then the newest first. */
+  sprints: WorkSprint[]
   at: string
 }

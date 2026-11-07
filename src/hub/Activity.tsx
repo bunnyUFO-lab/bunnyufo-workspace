@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from 'react'
 import type { HubEvent, HubProject } from '../lib/hub'
-import { hubHash } from '../lib/route'
+import { hubHash, withScope } from '../lib/route'
+import { useScope } from '../lib/useScope'
 import { swap } from '../lib/entries'
 import ItemRow from './ItemRow'
 import ProjectPicker from './ProjectPicker'
@@ -22,7 +23,9 @@ const dayLabel = (iso: string) => new Date(iso).toLocaleDateString([], { weekday
 
 export default function Activity({ filter }: { filter?: string }) {
   const active = FILTERS.find(([key]) => key === filter) ?? FILTERS[0]
-  const [project, setProject] = useState('')
+  // The project selector starts on `?project=` (a tab keeps it); the sprint is kept in the address but not applied here.
+  const scope = useScope()
+  const [project, setProject] = useState(scope.project && scope.project !== 'all' ? scope.project : '')
   const [days, setDays] = useState(1)
   // The window starts at a whole hour of when the screen opened, so polling does not move it.
   const [opened] = useState(() => Math.floor(Date.now() / 3_600_000) * 3_600_000)
@@ -43,7 +46,7 @@ export default function Activity({ filter }: { filter?: string }) {
       </div>
       <div className="hub-chips">
         {FILTERS.map(([key, label]) => (
-          <a key={key} className={`hub-chip${key === active[0] ? ' on' : ''}`} href={hubHash('activity', key)} aria-current={key === active[0] ? 'true' : undefined} data-activity-filter={key} onClick={event => plain(event) && (event.preventDefault(), swap(hubHash('activity', key)))}>{label}</a>
+          <a key={key} className={`hub-chip${key === active[0] ? ' on' : ''}`} href={withScope(hubHash('activity', key), scope)} aria-current={key === active[0] ? 'true' : undefined} data-activity-filter={key} onClick={event => plain(event) && (event.preventDefault(), swap(withScope(hubHash('activity', key), scope)))}>{label}</a>
         ))}
       </div>
       <RefreshNote error={error} hasData={!!data} at={at} />

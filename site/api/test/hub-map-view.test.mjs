@@ -9,7 +9,10 @@ import { FOLD_F, FOLD_M, OPEN_F, OPEN_M, slotAt, stableOf, zoomStep } from '../.
 import { everythingOpen, snapshotModel } from './snapshots/hub-map-layout-model.mjs';
 import { PROJECT_TABS, TASK_PAGE, currentMilestone, listed, orderedTasks, roadmapList, tabCounts, tabOf } from '../../../src/hub/projectPage.ts';
 import { parseProjectId, projectHash, projectNodeHash } from '../../../src/lib/route.ts';
-import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf } from '../../../src/hub/mapBranch.ts';
+import { buildMap } from '../hub-map.mjs';
+import { sprintModel, sprintsOf } from '../../../src/hub/sprintScope.ts';
+import { beadsIssue } from './hub-fixtures.mjs';
+import { FULL, UNFILED, branchModel, branchTarget, childrenOf, crumbs, milestoneDots, parseSaved, resolveBranch, rowsOf, visibleRows } from '../../../src/hub/mapBranch.ts';
 
 const box = { w: 390, h: 300 };
 const near = (a, b, message) => assert.ok(Math.abs(a - b) < 1e-6, `${message ?? ''} ${a} != ${b}`);
@@ -579,4 +582,94 @@ test('"This branch" goes to the branch last in, else the current milestone, else
   assert.equal(branchTarget(quiet, null), 'r1', 'With no current milestone, the first roadmap.');
   assert.deepEqual(parseSaved({ view: 'full', branch: 'r2' }), { view: 'full', branch: 'r2' });
   for (const bad of [null, 5, 'x', {}, { view: 'branch' }, { view: 'side', branch: 'r1' }]) assert.equal(parseSaved(bad), null);
+});
+
+test('the map names each sprint after the group issue that carries its label', () => {
+  const issues = [
+    beadsIssue({ id: 'm-ms', title: 'Milestone', type: 'milestone' }),
+    beadsIssue({ id: 'm-epic', title: 'Sprint 5: the big one', type: 'epic', parent: 'm-ms', labels: ['sprint:s5'], created: '2026-10-05T09:00:00Z' }),
+    beadsIssue({ id: 'm-sub', title: 'A sub group', type: 'feature', parent: 'm-epic', labels: ['sprint:s5'], created: '2026-10-05T08:00:00Z' }),
+    beadsIssue({ id: 'm-t1', title: 'Task one', parent: 'm-sub', labels: ['sprint:s5'] }),
+    beadsIssue({ id: 'm-t2', title: 'Task two', parent: 'm-sub', labels: ['sprint:s4'] }),
+  ];
+  const map = buildMap({ project: 'p', issues, now: new Date('2026-11-03T12:00:00Z') });
+  const by = Object.fromEntries(map.sprints.map(row => [row.name, row]));
+  assert.equal(by.s5.title, 'Sprint 5: the big one', 'The sub group has a parent with the label, so the epic names it.');
+  assert.equal('title' in by.s4, false, 'No group issue carries the label: no title.');
+});
+
+// sprintScope.ts: the sprints of a project and its map narrowed to one.
+const sTask = (id, state, sprints) => ({ id, title: id, state, status: state === 'done' ? 'closed' : 'open', signs: [], deps: [], sprints, prs: [] });
+const sprintMap = () => ({
+  project: 'p', meta: null, ageMinutes: null,
+  milestones: [
+    { id: 'm1', title: 'M1', state: 'doing', roadmap: 'r1', features: [
+      { id: 'f1', title: 'F1', state: 'doing', tasks: [sTask('t1', 'done', ['a']), sTask('t2', 'doing', ['a', 'b']), sTask('t3', 'next', [])] },
+      { id: 'f2', title: 'F2', state: 'later', tasks: [sTask('t4', 'later', [])] },
+    ] },
+    { id: 'm2', title: 'M2', state: 'done', features: [{ id: 'f3', title: 'F3', state: 'done', tasks: [sTask('t5', 'done', ['b']), sTask('t6', 'done', ['c'])] }] },
+    { id: 'm3', title: 'M3', state: 'later', features: [{ id: 'f4', title: 'F4', state: 'later', tasks: [sTask('t7', 'later', [])] }] },
+  ],
+  // The map lists its bands oldest first.
+  sprints: [{ name: 'c', title: 'Sprint C', milestones: [{ id: 'm2', count: 1, total: 2 }] }, { name: 'b', milestones: [{ id: 'm1', count: 1, total: 3 }, { id: 'm2', count: 1, total: 2 }] }, { name: 'a', title: 'Sprint A', milestones: [{ id: 'm1', count: 2, total: 3 }] }],
+  roadmaps: [{ id: 'r1', title: 'R1', state: 'doing' }],
+});
+
+test('sprintsOf counts done of all from the tasks: open sprints first, then the newest, the finished last', () => {
+  assert.deepEqual(sprintsOf(sprintMap()), [
+    { name: 'a', title: 'Sprint A', done: 1, total: 2 },
+    { name: 'b', done: 1, total: 2 },
+    { name: 'c', title: 'Sprint C', done: 1, total: 1 },
+  ]);
+  assert.deepEqual(sprintsOf({ milestones: [], sprints: [] }), []);
+});
+
+test('sprintModel counts a band by the sprint own tasks, so the map says what the list says', () => {
+  const narrowed = sprintModel(sprintMap(), 'a');
+  assert.deepEqual(narrowed.sprints[0].milestones, [{ id: 'm1', count: 2, total: 2 }], 'The band said 2 of 3 (the whole milestone) before.');
+  assert.deepEqual(sprintModel(sprintMap(), 'b').sprints[0].milestones, [{ id: 'm1', count: 1, total: 1 }, { id: 'm2', count: 1, total: 1 }]);
+});
+
+test('sprintModel keeps the milestones, features and tasks of one sprint and drops the roadmaps', () => {
+  const full = sprintMap();
+  const narrowed = sprintModel(full, 'a');
+  assert.deepEqual(narrowed.milestones.map(milestone => milestone.id), ['m1']);
+  assert.deepEqual(narrowed.milestones[0].features.map(feature => [feature.id, feature.tasks.map(task => task.id)]), [['f1', ['t1', 't2']]]);
+  assert.equal(narrowed.milestones[0].state, 'doing');
+  assert.equal('roadmap' in narrowed.milestones[0], false);
+  assert.deepEqual(narrowed.roadmaps, []);
+  assert.deepEqual(narrowed.sprints.map(band => band.name), ['a']);
+  assert.equal(full.milestones[0].features[0].tasks.length, 3, 'The whole map is left as it was.');
+  const finished = sprintModel(full, 'c');
+  assert.deepEqual(finished.milestones.map(milestone => [milestone.id, milestone.state]), [['m2', 'done']], 'A milestone with only done sprint tasks reads as done.');
+  assert.deepEqual(sprintModel(full, 'nothing').milestones, []);
+});
+
+// visibleRows: the milestones listed under a row, and Hide completed.
+const vDot = (id, state) => ({ id, title: id.toUpperCase(), state });
+const vRow = (id, depth, state, dots) => ({ id, title: id, state, depth, dots, done: dots.filter(dot => dot.state === 'done').length, inside: 0 });
+const vRows = () => [
+  vRow('r1', 0, 'done', [vDot('a', 'done')]),
+  vRow('r2', 1, 'doing', [vDot('b', 'done'), vDot('c', 'next')]),
+  vRow('r3', 0, 'done', [vDot('x', 'done')]),
+  vRow('r4', 0, 'later', [vDot('y', 'later')]),
+];
+
+test('visibleRows lists the milestones of a row that is not done; a finished row keeps its dots and lists no names', () => {
+  const shown = visibleRows(vRows(), false);
+  assert.deepEqual(shown.map(row => row.id), ['r1', 'r2', 'r3', 'r4']);
+  assert.deepEqual(shown.map(row => row.names.map(dot => dot.id)), [[], ['b', 'c'], [], ['y']]);
+  assert.equal(shown[0].dots.length, 1, 'The dots stay.');
+  assert.equal(shown[1].names[0].title, 'B', 'The names are the dots\' titles.');
+});
+
+test('visibleRows with Hide completed drops finished rows unless something inside is open, and finished milestones from the names', () => {
+  const shown = visibleRows(vRows(), true);
+  assert.deepEqual(shown.map(row => row.id), ['r1', 'r2', 'r4'], 'r1 is done but r2 inside it is not; r3 goes.');
+  assert.deepEqual(shown.map(row => row.names.map(dot => dot.id)), [[], ['c'], ['y']]);
+  assert.deepEqual(visibleRows([vRow('r3', 0, 'done', [vDot('x', 'done')])], true), []);
+  assert.deepEqual(visibleRows([], true), []);
+  const inputs = vRows();
+  visibleRows(inputs, true);
+  assert.equal(inputs[1].dots.length, 2, 'The rows given are not changed.');
 });

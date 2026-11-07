@@ -80,6 +80,9 @@ function cleanPath(value) {
   return parts.join('/');
 }
 
+/** The inbox, hidden sections and saved card answers hold data: the signed-in app reads them through the Hub, so /w/ never serves them. */
+const isDataPath = (section, clean) => section.hidden === true || /^inbox(-|$)/.test(section.id) || clean.split('/')[0] === 'card-responses';
+
 /**
  * @param bucket      an s3.mjs bucket, or null: without one the service answers read-only, with a reason.
  * @param prefix      where the sections are in the bucket, `sections` unless told otherwise.
@@ -194,7 +197,7 @@ export function createSiteApi({
         name: typeof got.value.name === 'string' && got.value.name.trim() ? got.value.name.trim() : titleCase(id),
         base: `/w/${id}`,
         publishedAt: got.lastModified ? new Date(got.lastModified).toISOString() : undefined,
-        // A hidden section holds data (inbox, events), not cards: it is served, but the UI never lists it.
+        // A hidden section holds data (inbox, events), not cards: it is not served as files and the UI never lists it.
         ...(got.value.hidden === true ? { hidden: true } : {}),
         // An archived workspace is put away, not deleted: its files and cards stay, the lists leave it out.
         ...(got.value.archived === true ? { archived: true } : {}),
@@ -268,7 +271,8 @@ export function createSiteApi({
   async function serve(request, response, id, file, { sandboxed = false } = {}) {
     const clean = cleanPath(file);
     if (!clean) throw Object.assign(new Error('Not found'), { status: 404 });
-    await findSection(id);
+    const section = await findSection(id);
+    if (isDataPath(section, clean)) throw Object.assign(new Error('Not found'), { status: 404 });
     let object;
     try {
       // Only a validator this server issued (with the suffix) may become a 304; an older one gets the full answer.
