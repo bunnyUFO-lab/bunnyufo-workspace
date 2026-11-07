@@ -1090,3 +1090,27 @@ test('a job that fell back to assistant (section turned off) is still trusted wi
     assert.deepEqual([result.outcome, result.card], ['card', 'demo/x'], 'the project stays trusted, as the brief decides');
   } finally { await s.close(); }
 });
+
+test('a connection that fails once is tried again within seconds, not after the slow pace (default timing)', async () => {
+  // Default timing: 60 s between re-opens and after a miss. One failed connect or a stream cut at the start must not hide the run's events for that long.
+  const { createFollowers } = await import('../hermes-follower.mjs');
+  let opened = 0;
+  const runs = {
+    async *events() {
+      opened += 1;
+      if (opened === 1) throw Object.assign(new Error('x'), { code: 'unreachable' });
+      if (opened === 2) return;   // the stream ended with the run still going
+      yield { seq: 0, event: 'message.delta', data: { delta: 'Working. ' } };
+      yield { seq: 1, event: 'run.completed', data: {} };
+    },
+    async get() { return { status: opened >= 3 ? 'completed' : 'running' }; },
+  };
+  const seen = [];
+  const followers = createFollowers({ runs, onEvent: async (_f, entry) => { seen.push(entry.event); }, onEnd: async () => {}, sleep: ms => new Promise(resolve => setTimeout(resolve, ms)) });
+  const follower = followers.follow({ id: 'x' }, 'run-1');
+  const started = Date.now();
+  await follower.done;
+  assert.deepEqual(seen, ['message.delta', 'run.completed']);
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+  assert.equal(opened, 3);
+});
