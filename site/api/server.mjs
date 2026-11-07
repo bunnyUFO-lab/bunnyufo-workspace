@@ -435,7 +435,7 @@ export function createSiteApi({
         } else mayWrite(data.workspace);
         if (route === '/cards/move') mayWrite(data.to);
       }
-      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor, state: cards, moves });
+      const card = await cardRoute({ method: 'POST', route, query: url.searchParams, data, writerFor, state: cards, moves, user: String(request.headers['remote-user'] ?? '').trim() || null });
       if (card) return json(response, card.status, card.body);
 
       // Archiving, pinning and tagging write the state object and answer at once. The card's files
