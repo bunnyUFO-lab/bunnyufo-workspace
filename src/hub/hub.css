@@ -87,6 +87,7 @@
 .hub-md a { color: var(--pink); text-decoration: underline; text-underline-offset: 2px; border-radius: 2px; }
 .hub-md a:hover { text-decoration-thickness: 2px; }
 .hub-md a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hub-md a.hub-card-open { color: var(--t1); text-decoration: none; max-width: 100%; overflow-wrap: anywhere; margin-block: 2px; }
 
 .hub-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
 .hub-option { position: relative; border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg); background: var(--surface-solid); min-width: 0; }

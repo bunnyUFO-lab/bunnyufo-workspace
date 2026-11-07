@@ -25,7 +25,7 @@
 // entry is written with If-Match on the ETag it read, so two writers never drop each other's card.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { contentTypeOf, createBucket } from '../api/s3.mjs';
+import { contentTypeOf, createBucket, typeOf } from '../api/s3.mjs';
 import { validateChanges } from '../api/ask-changes.mjs';
 import { validateAgentEdit } from '../api/agent-edit.mjs';
 import { RESERVED } from '../api/card-purge.mjs';
@@ -810,7 +810,7 @@ export function createCardApi({ bucket, tokens, prefix = 'sections', urlTtl = UR
       let put;
       try {
         put = await bucket.put(key, body, {
-          contentType: first.library ? contentTypeOf(file) : contentType || contentTypeOf(file),
+          contentType: first.library ? contentTypeOf(file) : typeOf(contentType, file),
           ifNoneMatch, ifMatch,
           metadata: first.library ? { writer: caller.name, agent: info.agent, 'write-id': id } : writerMetadata(caller, sectionId, file),
         });

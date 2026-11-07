@@ -26,12 +26,15 @@ import { Readable, pipeline } from 'node:stream';
 import path from 'node:path';
 import { createBucketCardStore, createCardStore, validEmoji } from './card-state.mjs';
 import { bucketStore, cardRoute, cardWriter } from './card-writes.mjs';
-import { contentTypeOf } from './s3.mjs';
+import { typeOf } from './s3.mjs';
 import { isLiveCard } from './card-liveness.mjs';
 
 const STATUSES = ['active', 'archived'];
 const RESERVED = new Set(['_app', '_retired', '_index', 'site', 'api', 'w', 'template', 'sections', 'state', 'today', 'inbox', 'board', 'map', 'chat', 'hub', 'inbox-dev']);
 const SECTIONS_TTL = 15_000;
+/** Added to every /w/ ETag. A browser keeps the type of its cached copy across a 304, so a file once served with the wrong
+ * type stays wrong until its ETag changes. Bump this to make every browser fetch the files again. */
+const TYPE_ETAG_SUFFIX = '-t1';
 
 const json = (response, status, body) => {
   const text = JSON.stringify(body);
@@ -272,19 +275,22 @@ export function createSiteApi({
     if (isDataPath(section, clean)) throw Object.assign(new Error('Not found'), { status: 404 });
     let object;
     try {
-      object = await bucket.get(keyOf(id, clean), { ifNoneMatch: request.headers['if-none-match']?.replace(/^"|"$/g, '') });
+      // Only a validator this server issued (with the suffix) may become a 304; an older one gets the full answer.
+      const sent = request.headers['if-none-match']?.replace(/^"|"$/g, '');
+      const ifNoneMatch = sent?.endsWith(TYPE_ETAG_SUFFIX) ? sent.slice(0, -TYPE_ETAG_SUFFIX.length) : undefined;
+      object = await bucket.get(keyOf(id, clean), { ifNoneMatch });
     } catch (error) {
       if (error.status === 404) throw Object.assign(new Error('Not found'), { status: 404 });
       throw Object.assign(new Error(`The cards bucket did not answer: ${error.message}`), { status: 502 });
     }
     const headers = {
-      'Content-Type': object.contentType || contentTypeOf(clean),
+      'Content-Type': typeOf(object.contentType, clean),
       'Cache-Control': 'no-cache',
       'X-Content-Type-Options': 'nosniff',
       // With a content host, a /w/ file the app host still serves (a frame request an old browser sent without
       // Sec-Fetch-Dest, a cached copy) may not be framed by another origin: that would run it as the app.
       ...(sandboxed ? { 'Content-Security-Policy': CONTENT_CSP } : contentHost ? { 'Content-Security-Policy': "frame-ancestors 'self'" } : {}),
-      ...(object.etag ? { ETag: `"${object.etag}"` } : {}),
+      ...(object.etag ? { ETag: `"${object.etag}${TYPE_ETAG_SUFFIX}"` } : {}),
       ...(object.lastModified ? { 'Last-Modified': object.lastModified } : {}),
     };
     if (object.status === 304) {

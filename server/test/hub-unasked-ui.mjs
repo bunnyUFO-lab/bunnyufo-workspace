@@ -2,6 +2,7 @@
 // Today's "says it needs you" panel (count, rows, marking a row), and the Work board's warning glyph and "Open Ask" link.
 // Desktop (1280x800) and phone (390x844).
 import { chromium } from '@playwright/test';
+import './ui-timeouts.mjs';
 import assert from 'node:assert/strict';
 import { startHubFixture, askId } from './hub-fixture.mjs';
 import { askJson, beadsIssue, minutesAgo, threeOptions } from '../../site/api/test/hub-fixtures.mjs';

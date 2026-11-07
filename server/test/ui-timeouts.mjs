@@ -85,14 +85,63 @@ const watchPage = page => {
     setTimeout(() => { pending = false; reloads += 1; console.log('(steady) a request to the test server timed out; reloading the page'); page.reload().catch(() => {}); }, 500);
   });
 };
+// What a page is still waiting for, kept so a wait that times out can say so: the requests in flight, the address and the text on screen.
+const inFlight = new WeakMap();
+const trackRequests = page => {
+  const open = new Map();
+  inFlight.set(page, open);
+  page.on('request', request => { open.set(request, Date.now()); });
+  const done = request => { open.delete(request); };
+  page.on('requestfinished', done);
+  page.on('requestfailed', done);
+};
+const explained = new WeakSet();
+/** Written once per page, when a wait on it times out and before the test's cleanup closes it. Never throws. */
+async function explainTimeout(page) {
+  if (explained.has(page)) return;
+  explained.add(page);
+  try {
+    const open = [...(inFlight.get(page) ?? [])].map(([request, since]) => `${request.method()} ${request.url().replace(/^(https?:\/\/[^/]+)/, (host) => host.replace(/:\d+$/, ':port')).slice(0, 140)} (${Date.now() - since} ms)`);
+    const text = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '(the page could not be read)');
+    console.log(`(pending) address: ${page.url().replace(/:\d+\//, ':port/').slice(0, 200)}`);
+    console.log(`(pending) ${open.length} request${open.length === 1 ? '' : 's'} in flight${open.length ? ':' : ''}`);
+    for (const line of open.slice(0, 20)) console.log(`(pending)   ${line}`);
+    console.log(`(pending) text on the page: ${String(text).replace(/\s+/g, ' ').trim().slice(0, 1200)}`);
+  } catch { /* the page is gone; the error itself is still thrown */ }
+}
+// Every Playwright call that can time out goes through this: the TimeoutError still reaches the test unchanged.
+const explainOnTimeout = (proto, pageOf) => {
+  for (const name of Object.getOwnPropertyNames(proto)) {
+    const original = proto[name];
+    if (name === 'constructor' || name.startsWith('_') || typeof original !== 'function' || Object.getOwnPropertyDescriptor(proto, name).get) continue;
+    proto[name] = function explaining(...args) {
+      const result = original.apply(this, args);
+      if (!result || typeof result.then !== 'function') return result;
+      return result.catch(async error => {
+        if (error?.name === 'TimeoutError') { const page = pageOf(this); if (page) await explainTimeout(page); }
+        throw error;
+      });
+    };
+  }
+};
 const patchPage = page => {
   watchPage(page);
+  trackRequests(page);
   const proto = Object.getPrototypeOf(page);
   if (patched.has(proto)) return;
   patched.add(proto);
   repeatOnConnectError(proto, 'goto');
   repeatOnConnectError(proto, 'reload');
+  explainOnTimeout(proto, self => self);
+  explainOnTimeout(Object.getPrototypeOf(page.locator('body')), self => self.page());
 };
+
+// The tests never depend on an outside host: the app's stylesheet link to Google Fonts is answered with an empty file, so a slow or
+// stuck font host cannot hold the page's load event (and with it a goto or waitForURL) for a minute.
+const FONT_HOSTS = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//;
+const blockFonts = context => context.route(FONT_HOSTS, route => route.fulfill({
+  status: 200, body: '', contentType: route.request().url().includes('googleapis') ? 'text/css' : 'font/woff2',
+}).catch(() => {})).catch(() => {});
 // The page's own calls to the test server (/api/...) go through Playwright, which makes them again when the connect timed
 // out: reloading the page would throw away what the test had open (a sheet, a typed answer). A stream (event-stream)
 // is left to the browser, since its body cannot be handed over whole. A test's own `page.route` handlers run before this one.
@@ -112,13 +161,14 @@ chromium.launch = async (...args) => {
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (...options) => {
     const context = await newContext(...options);
+    blockFonts(context);
     watchContext(context);
     const newPage = context.newPage.bind(context);
     context.newPage = async (...a) => { const page = await newPage(...a); patchPage(page); return page; };
     return context;
   };
   const browserNewPage = browser.newPage.bind(browser);
-  browser.newPage = async (...a) => { const page = await browserNewPage(...a); patchPage(page); return page; };
+  browser.newPage = async (...a) => { const page = await browserNewPage(...a); blockFonts(page.context()); patchPage(page); return page; };
   return browser;
 };
 
