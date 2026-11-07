@@ -247,13 +247,32 @@ export function checklistEvidence(names) {
   };
 }
 
-/** First match wins: cancel.json → 'cancelled', pickup.json → 'picked-up', submit.json → 'submitted', else 'open'. */
+/**
+ * Which submission round a checklist is in. A list starts in round 1 (submit.json, pickup.json). Reopening it writes the create-only
+ * `reopen-<n>.json`, which starts round n: that round's files are `submit-<n>.json` and `pickup-<n>.json`, and the earlier rounds'
+ * files stay as they were. No reopen file means round 1, so every list written before reopening existed reads as before.
+ */
+export const CHECKLIST_REOPEN_RE = /^reopen-(\d{1,2})\.json$/;
+export const CHECKLIST_MAX_REVISION = 99;
+export function checklistRevision(names) {
+  let revision = 1;
+  for (const name of nameList(names)) {
+    const match = CHECKLIST_REOPEN_RE.exec(name);
+    if (match && Number(match[1]) >= 2 && Number(match[1]) > revision) revision = Number(match[1]);
+  }
+  return revision;
+}
+/** The file of one round: submit.json for round 1, submit-<n>.json after. */
+export const checklistRoundFile = (kind, revision) => (revision > 1 ? `${kind}-${revision}.json` : `${kind}.json`);
+
+/** First match wins: cancel.json → 'cancelled', the round's pickup → 'picked-up', its submit → 'submitted', else 'open' (a reopened list is open again). */
 export function checklistState(names) {
   const list = nameList(names);
+  const revision = checklistRevision(list);
   if (list.includes('cancel.json')) return 'cancelled';
-  if (list.includes('pickup.json')) return 'picked-up';
-  if (list.includes('submit.json')) return 'submitted';
-  return 'open';
+  // A pickup counts only for a round that was submitted: an early pickup file must not shut the owner out of Submit.
+  if (!list.includes(checklistRoundFile('submit', revision))) return 'open';
+  return list.includes(checklistRoundFile('pickup', revision)) ? 'picked-up' : 'submitted';
 }
 
 /**
@@ -330,6 +349,7 @@ export function checklistItem(checklist, names) {
   const { done, total } = checklistProgress(checklist, names);
   return {
     kind: 'checklist', id: checklist.id, project: checklist.project, title: clip(checklist.title), at: checklist.createdAt, state, done, total,
+    ...(checklistRevision(names) > 1 ? { revision: checklistRevision(names) } : {}),
     ...(checklist.kind === 'playtest' ? { playtest: true, platform: PLATFORMS.includes(checklist.platform) ? checklist.platform : 'web' } : {}),
     ...subtypeFields(stepsSubtype(checklist)),
     ...(checklist.bead ? { bead: checklist.bead } : {}),

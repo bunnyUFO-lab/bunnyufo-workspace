@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSiteApi } from '../server.mjs';
 import { createBucket } from '../s3.mjs';
 import { createHub, inboxKey } from '../hub.mjs';
-import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, fillProjects, inProject, projectCounts, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
+import { askRev, askState, checkPlaytestSubmit, cleanAsk, validDecisions, buildInbox, fillProjects, inProject, projectCounts, checklistEvidence, describeItem, inboxCounts, inboxFilter, needsKindOf, checkChecklist, checklistMarks, checklistProgress, checklistState, checklistRevision, discordEligible, isBareClaudeCode } from '../hub-model.mjs';
 import { startFakeS3 } from './fake-s3.mjs';
 import { jpeg, png, solidPng } from './png.mjs';
 import { agentConfigJson, askJson, beadsCopy, beadsIssue, checklistJson, playtestJson, cujTwo, designAskJson, threeDecisions, eventJson, minutesAgo, plainOptions, requestJson, seedAgentConfig, seeder, threeOptions } from './hub-fixtures.mjs';
@@ -959,6 +959,135 @@ test('checklistState: cancel, pickup, submit, then open, from file names alone',
   assert.equal(checklistState(['checklist.json', 'submit.json']), 'submitted');
   assert.equal(checklistState(['checklist.json', 'tick-01-20261027T143012123Z-a1b2.json']), 'open');
   assert.equal(checklistState([]), 'open');
+});
+
+test('checklistState with reopen files: the latest round decides, and the earlier rounds files do not', () => {
+  assert.equal(checklistRevision(['checklist.json', 'submit.json']), 1);
+  assert.equal(checklistRevision(['checklist.json', 'reopen-2.json', 'reopen-3.json', 'reopen-x.json']), 3);
+  assert.equal(checklistRevision(['reopen-1.json', 'reopen-100.json']), 1, 'Round 1 has no reopen file, and three digits are no round.');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'pickup.json', 'reopen-2.json']), 'open', 'Reopened after pickup.');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'pickup.json', 'reopen-2.json', 'submit-2.json']), 'submitted');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'pickup.json', 'reopen-2.json', 'submit-2.json', 'pickup-2.json']), 'picked-up');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'submit-3.json']), 'open', 'A submit of another round does not count.');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'cancel.json']), 'cancelled');
+  assert.equal(checklistState(['checklist.json', 'pickup.json']), 'open', 'A pickup before the submission does not count.');
+  assert.equal(checklistState(['checklist.json', 'submit.json', 'reopen-2.json', 'pickup-2.json']), 'open', 'Nor in a reopened round.');
+});
+
+test('reopen: the owner takes a submitted list back, keeps what was typed and pictured, and the next submit lands beside the first', async () => {
+  const { fake, seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('reopen'), now: at(-60) });
+    seed.checklist(list, [{ item: '01', at: at(-9) }]);
+    const folderKey = name => `sections/inbox/checklists/${list.id}/${name}`;
+    // An open list has nothing to reopen.
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).status, 409);
+    // Pictures: a step picture and a note picture that the submission keeps.
+    const evidence = (await post(`/hub/checklists/${list.id}/files`, { for: '01', image: { type: 'image/png', data: solidPng(8, 8, [10, 200, 10]).toString('base64') } })).body.file;
+    const keptNote = (await post(`/hub/checklists/${list.id}/files`, { for: 'note', image: { type: 'image/png', data: solidPng(8, 8, [200, 10, 10]).toString('base64') } })).body.file;
+    const first = await post(`/hub/checklists/${list.id}/submit`, { note: 'Skipped the DMs.', pictures: [keptNote] });
+    assert.equal(first.status, 201);
+    const firstBody = fake.text(folderKey('submit.json'));
+    // An agent picked it up.
+    seed.put(`checklists/${list.id}/pickup.json`, { at: at(-1).toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'picked-up');
+
+    // Owner-only: no user is a 401 and writes nothing.
+    fake.log.length = 0;
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`, {}, {})).status, 401);
+    assert.deepEqual(putKeys(fake), []);
+
+    const reopened = await post(`/hub/checklists/${list.id}/reopen`);
+    assert.equal(reopened.status, 201);
+    assert.deepEqual({ state: reopened.body.state, revision: reopened.body.revision, pickedUp: reopened.body.reopen.pickedUp }, { state: 'open', revision: 2, pickedUp: true });
+    const written = putKeys(fake);
+    assert.ok(written.includes(folderKey('reopen-2.json')));
+    assert.equal(fake.log.find(entry => entry.key === folderKey('reopen-2.json')).headers['if-none-match'], '*');
+    const event = fake.json(written.find(key => key.includes('/events/')));
+    assert.deepEqual({ kind: event.kind, checklist: event.checklist, revision: event.revision, by: event.by }, { kind: 'checklist-reopened', checklist: list.id, revision: 2, by: 'owner' });
+    assert.equal(fake.text(folderKey('submit.json')), firstBody, 'The earlier submission is untouched.');
+
+    // The list reads open again, with the earlier submission as `previous`, the typed note and the pictures where they were.
+    const detail = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.deepEqual({ state: detail.state, revision: detail.revision, submit: detail.submit, pickup: detail.pickup, delivery: detail.delivery }, { state: 'open', revision: 2, submit: undefined, pickup: undefined, delivery: undefined });
+    assert.equal(detail.previous.note, 'Skipped the DMs.');
+    assert.deepEqual(detail.previous.pictures, [keptNote]);
+    assert.deepEqual(detail.notePictures, [keptNote]);
+    assert.equal(detail.evidence['01'].file, evidence);
+    assert.equal(detail.done, 1);
+    assert.equal((await get('/hub/today')).body.counts.needsYou, 1, 'It waits for the owner again.');
+    assert.equal((await get('/hub/inbox?filter=steps')).body.items.find(item => item.id === list.id).revision, 2);
+
+    // A second reopen of an open list is refused, and ticking works again.
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).status, 409);
+    assert.equal((await post(`/hub/checklists/${list.id}/items/02`, { done: true })).status, 200);
+
+    // Submit again: a new file beside the first, create-only, an event that says "again", and a second submit of the round is a 409.
+    fake.log.length = 0;
+    const second = await post(`/hub/checklists/${list.id}/submit`, { note: 'Did the DMs too.', pictures: [keptNote] });
+    assert.equal(second.status, 201);
+    assert.equal(second.body.revision, 2);
+    assert.equal(fake.log.find(entry => entry.key === folderKey('submit-2.json')).headers['if-none-match'], '*');
+    assert.equal(fake.text(folderKey('submit.json')), firstBody, 'Still untouched.');
+    assert.deepEqual(fake.json(folderKey('submit-2.json')).done, ['01', '02']);
+    const again = fake.json(putKeys(fake).find(key => key.includes('/events/')));
+    assert.deepEqual({ kind: again.kind, revision: again.revision, title: again.title }, { kind: 'checklist-submitted', revision: 2, title: 'Submitted again: Finish the Discord bot setup' });
+    const after = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.deepEqual({ state: after.state, note: after.submit.note, previous: after.previous.note }, { state: 'submitted', note: 'Did the DMs too.', previous: 'Skipped the DMs.' });
+    const third = await post(`/hub/checklists/${list.id}/submit`, { note: 'x' });
+    assert.equal(third.status, 409);
+    assert.equal(third.body.submit.note, 'Did the DMs too.');
+
+    // The agent's pickup of the new round is its own file; the old pickup.json does not stand for it.
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.pickup, undefined);
+    seed.put(`checklists/${list.id}/pickup-2.json`, { at: at().toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'picked-up');
+    // A third round.
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).body.revision, 3);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.previous.note, 'Did the DMs too.');
+  } finally { await close(); }
+});
+
+test('reopen: a cancelled list cannot be reopened, a lost event does not undo it, and what an agent delivered before the reopen is not shown for the new round', async () => {
+  const logged = [];
+  const failEvents = bucket => ({ ...bucket, put: (key, ...rest) => (key.includes('/events/') ? Promise.reject(new Error('disk full')) : bucket.put(key, ...rest)) });
+  const { fake, seed, get, post, close } = await fixture({ hubOptions: { log: line => logged.push(line) }, wrapBucket: failEvents });
+  try {
+    const cancelled = checklistJson({ id: listId('reopen', 'c444'), now: at(-30) });
+    seed.checklist(cancelled); seed.submit(cancelled.id); seed.put(`checklists/${cancelled.id}/cancel.json`, { at: at().toISOString(), by: 'pc' });
+    const refused = await post(`/hub/checklists/${cancelled.id}/reopen`);
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /withdrew/);
+    assert.equal(fake.objects.has(`sections/inbox/checklists/${cancelled.id}/reopen-2.json`), false);
+
+    const list = checklistJson({ id: listId('reopen', 'd555'), now: at(-30) });
+    seed.checklist(list);
+    seed.submit(list.id, { at: at(-20).toISOString() });
+    seed.put(`checklists/${list.id}/delivered.json`, { v: 1, how: 'turn', at: at(-19).toISOString(), session: 'abcd1234-5678', host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.delivery.state, 'delivered');
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).status, 201);
+    assert.ok(logged.some(line => /was reopened but its event was not written/.test(line)));
+    seed.put(`checklists/${list.id}/submit-2.json`, { at: at(5).toISOString(), by: 'owner', done: [], open: [] });
+    const detail = (await get(`/hub/checklists/${list.id}`)).body;
+    assert.equal(detail.state, 'submitted');
+    assert.equal(detail.delivery.state, 'none', 'The old delivered.json is about round 1.');
+  } finally { await close(); }
+});
+
+test('an early pickup file does not shut the owner out: the list stays open and Submit works, in round 1 and in a reopened round', async () => {
+  const { seed, get, post, close } = await fixture();
+  try {
+    const list = checklistJson({ id: listId('early', 'e666'), now: at(-30) });
+    seed.checklist(list);
+    seed.put(`checklists/${list.id}/pickup.json`, { at: at().toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'open');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {})).status, 201);
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'picked-up', 'Once submitted, the pickup stands.');
+    assert.equal((await post(`/hub/checklists/${list.id}/reopen`)).status, 201);
+    seed.put(`checklists/${list.id}/pickup-2.json`, { at: at().toISOString(), host: 'pc.example.test' });
+    assert.equal((await get(`/hub/checklists/${list.id}`)).body.state, 'open');
+    assert.equal((await post(`/hub/checklists/${list.id}/submit`, {})).status, 201, 'Not a 409.');
+  } finally { await close(); }
 });
 
 test('checklistMarks: the last stamp in the name wins, a tie goes to the greater rand4, and the order of the listing does not matter', () => {

@@ -346,6 +346,27 @@ for (const via of ['api', 's3']) {
       assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 3);
       assert.match((await cli(via, 'checklist', 'get', id)).stdout, /\tpicked-up\t[\s\S]*== pickup\.json/);
 
+      // The owner reopens it after the agent picked it up: open again, the replaced submission kept as previous, nothing of round 1 stands for round 2.
+      fake.seed(`${folder(id)}reopen-2.json`, JSON.stringify({ at: '2026-10-27T15:30:00.000Z', by: 'owner', revision: 2, pickedUp: true }), 'application/json');
+      const reopened = await cli(via, 'checklist', 'get', id);
+      assert.match(reopened.stdout, new RegExp(`^${id}\\topen\\t1 of 3 done\\tprobe\\trevision 2\\n`));
+      assert.match(reopened.stdout, /reopened by the owner[^\n]*revision 2[^\n]*An earlier answer was picked up[^\n]*wait for the new submission/);
+      assert.match(reopened.stdout, /== previous submission \(revision 1, replaced\)[\s\S]*"note": "All but DMs\."/);
+      const reopenedJson = JSON.parse((await cli(via, 'checklist', 'get', id, '--json')).stdout);
+      assert.deepEqual({ state: reopenedJson.state, revision: reopenedJson.revision, submit: reopenedJson.submit, pickup: reopenedJson.pickup, previous: reopenedJson.previous.note }, { state: 'open', revision: 2, submit: undefined, pickup: undefined, previous: 'All but DMs.' });
+      assert.match((await cli(via, 'checklist', 'list', '--open')).stdout, new RegExp(`${id}\\topen\\t1/3\\tprobe\\t[^\\t]*\\trevision 2`));
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 2, 'Round 1 pickup.json does not make round 2 picked up, and there is nothing to pick up yet.');
+      assert.equal((await cli(via, 'checklist', 'wait', id, '--timeout', '0.03', '--every', '5')).code, 4, 'wait waits for the new submission.');
+      fake.seed(`${folder(id)}submit-2.json`, JSON.stringify({ at: '2026-10-27T15:40:00.000Z', by: 'owner', note: 'DMs done.', done: ['01', '02'], open: ['03'] }), 'application/json');
+      const again = await cli(via, 'checklist', 'wait', id, '--timeout', '1', '--every', '5');
+      assert.equal(again.code, 0, again.stderr);
+      assert.match(again.stdout, new RegExp(`^${id}\\tsubmitted\\t.*\\trevision 2\\n`));
+      assert.match(again.stdout, /== submit-2\.json[\s\S]*"note": "DMs done\."/);
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 0);
+      assert.equal(fake.json(`${folder(id)}pickup-2.json`).host !== undefined, true);
+      assert.equal(fake.json(`${folder(id)}pickup.json`).host !== undefined, true, 'Round 1 pickup is still there.');
+      assert.equal((await cli(via, 'checklist', 'pickup', id)).code, 3);
+
       const cancelled = await cli(via, 'checklist', 'cancel', shortId);
       assert.equal(cancelled.code, 0, cancelled.stderr);
       assert.deepEqual(Object.keys(fake.json(`${folder(shortId)}cancel.json`)).sort(), ['at', 'by']);
@@ -2607,6 +2628,11 @@ async function markFixture() {
   ask('on-other-3333', 'dr-zz');
   ask('on-h-4444', 'dr-h');
   s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-5555/checklist.json`, JSON.stringify({ project: 'dev-roadmap', bead: 'dr-a', title: 'T', items: [{ id: '01', text: 'x' }] }), 'application/json');
+  // A list the owner reopened is open again (withdrawn); one that is just submitted is not; a pickup with no submission of its round does not stop the withdrawal.
+  for (const [slug, files] of [['6666', ['submit.json', 'reopen-2.json']], ['7777', ['submit.json']], ['8888', ['submit.json', 'reopen-2.json', 'pickup-2.json']]]) {
+    s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-${slug}/checklist.json`, JSON.stringify({ project: 'dev-roadmap', bead: 'dr-a', title: 'T', items: [{ id: '01', text: 'x' }] }), 'application/json');
+    for (const file of files) s.fake.seed(`sections/inbox-dev/checklists/${day}-dev-roadmap-list-${slug}/${file}`, '{}', 'application/json');
+  }
   const calls = async () => (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   const markKeys = () => [...s.fake.objects.keys()].filter(key => key.includes('/bead-marks/')).sort();
   return { ...s, calls, stateFile, markKeys, day };
@@ -2634,6 +2660,7 @@ test('mark apply: the documented bd calls for each verdict, a no-op on a closed 
     assert.deepEqual(markKeys(), before, 'It wrote no verdict and no applied note.');
     const cancelled = key => fake.objects.has(`sections/inbox-dev/${key}/cancel.json`);
     assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-a-1111`), cancelled(`asks/${day}-dev-roadmap-on-f-2222`), cancelled(`checklists/${day}-dev-roadmap-list-5555`)], [true, true, true]);
+    assert.deepEqual([cancelled(`checklists/${day}-dev-roadmap-list-6666`), cancelled(`checklists/${day}-dev-roadmap-list-8888`), cancelled(`checklists/${day}-dev-roadmap-list-7777`)], [true, true, false], 'A reopened list is withdrawn (even with an early pickup-2.json); a merely submitted one is not.');
     assert.deepEqual([cancelled(`asks/${day}-dev-roadmap-on-other-3333`), cancelled(`asks/${day}-dev-roadmap-on-h-4444`)], [false, false], 'An Ask about another bead, and about a bead that failed, stays open.');
     // A second run writes nothing in Beads for what is closed now; the failed one is tried again.
     const seen = (await calls()).length;

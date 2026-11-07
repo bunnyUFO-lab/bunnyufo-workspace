@@ -85,7 +85,7 @@ export interface Item {
 export interface Described { kind: NeedsKind; who: string; age: number; what: string; state: string; next: string; blocker: string }
 
 export type EventKind = 'session-started' | 'session-ended' | 'blocked' | 'ready-for-review' | 'pr-opened' | 'pr-merged' | 'pr-closed'
-  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'run-started' | 'run-finished' | 'profile-change' | 'profile-change-sent' | 'session-items' | 'not-useful'
+  | 'ci-failed' | 'ci-passed' | 'deployed' | 'ask-created' | 'alert' | 'review-done' | 'resumed' | 'checklist-created' | 'checklist-submitted' | 'checklist-reopened' | 'run-started' | 'run-finished' | 'profile-change' | 'profile-change-sent' | 'session-items' | 'not-useful'
 export interface HubEvent {
   ts: string
   kind: EventKind
@@ -298,6 +298,10 @@ export interface Checklist {
   notePictures?: string[]
   submit?: { help?: HelpAttached; pictures?: string[]; at: string; by: string; note?: string; done: string[]; open: string[]; rating?: number; verdict?: PlaytestVerdict; issues?: PlaytestIssue[] }
   pickup?: { at: string; host: string; session?: string }
+  /** After the owner reopened the list: the round it is in (2 or more), when and by whom it was reopened, and the submission that round replaces. `submit` is this round's own. */
+  revision?: number
+  reopen?: { at: string; by: string; revision: number; submittedAt?: string; pickedUp?: boolean }
+  previous?: Checklist['submit']
   /** Where the submission went, from files an agent wrote (the server checked every field). Only a submitted checklist has it. */
   delivery?: AskDelivery
   cancel?: { at: string; by: string }
